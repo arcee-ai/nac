@@ -220,6 +220,8 @@ fn assert_current_schema(conn: &Connection) {
             "delivered_at",
             "cancelled_at",
             "version",
+            "admission_id",
+            "admission_digest",
         ]
     );
     assert_eq!(
@@ -509,7 +511,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 32);
+    assert_eq!(STORE_SCHEMA_VERSION, 34);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -757,6 +759,8 @@ fn v17_store_adds_the_durable_session_inbox() {
             "delivered_at",
             "cancelled_at",
             "version",
+            "admission_id",
+            "admission_digest",
         ]
     );
     assert_eq!(

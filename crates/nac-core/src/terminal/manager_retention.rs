@@ -1,6 +1,20 @@
 use super::*;
 
 impl TerminalManager {
+    /// Low-level byte observation; unlike model pages it performs no text
+    /// conversion. Browser capabilities must bind this to an output artifact
+    /// sanitized at collection, never expose arbitrary model output IDs.
+    pub(super) fn read_output_bytes(
+        &self,
+        output_id: &str,
+        stream: OutputStream,
+        offset: u64,
+        limit: usize,
+    ) -> Result<OutputBytePage> {
+        self.output_registry
+            .page_bytes(output_id, stream, offset, limit)
+    }
+
     pub fn read_output(
         &self,
         output_id: &str,
@@ -43,6 +57,9 @@ impl TerminalManager {
                 ));
             }
         }
+        if let Err(error) = self.drain_native_output().await {
+            cleanup_errors.push(error.to_string());
+        }
         if let Err(error) = self.retry_pending_remote_cleanups().await {
             cleanup_errors.push(error.to_string());
         }
@@ -59,10 +76,16 @@ impl TerminalManager {
     /// Terminates one exact session-owned terminal or recovered remote cleanup
     /// obligation. Successful local termination archives the bounded output
     /// tombstone used by `write_stdin`, so explicit process cleanup never
-    /// destroys already-captured output. The create gate makes concurrent
-    /// termination and retry one idempotent ownership transaction.
+    /// destroys already-captured output. Native ownership serializes cleanup;
+    /// the create gate preserves the established model/remote transaction.
     pub async fn terminate(&self, name: &str) -> Result<()> {
-        let _create = self.create_gate.lock().await;
+        // Native owners serialize their own cleanup. Human handles are never
+        // reused, so unrelated terminals must not queue behind this wait.
+        let _create = if self.owns_user_terminal_name(name) {
+            None
+        } else {
+            Some(self.create_gate.lock().await)
+        };
         if self
             .completed_sessions
             .lock()
@@ -110,7 +133,9 @@ impl TerminalManager {
         // caller has an exact current-instance handle, absence therefore means
         // it is already terminated even if its bounded output tombstone was
         // later evicted. Foreign/pre-restart handles still fail closed below.
-        if name.starts_with(&format!("shell-{}-", self.instance_id)) {
+        if name.starts_with(&format!("shell-{}-", self.instance_id))
+            || self.owns_user_terminal_name(name)
+        {
             return Ok(());
         }
 
@@ -147,9 +172,8 @@ impl TerminalManager {
         }
     }
 
-    /// Kill a session while it remains manager-owned. Holding the map entry
-    /// across every await makes dropping the cleanup future cancellation-safe:
-    /// a later caller can still find the handle and retry backend cleanup.
+    /// Keep cleanup authority manager-owned across cancellation. Native process
+    /// work runs outside the map; removal compares the exact retained owner.
     pub(super) async fn kill_owned_session(
         &self,
         name: &str,
@@ -166,8 +190,74 @@ impl TerminalManager {
         if preserve_if_retained && session.is_retained() {
             return Ok(None);
         }
+        if let Some(owner) = session.native_owner().cloned() {
+            drop(sessions);
+            owner
+                .terminate()
+                .await
+                .context("native terminal cleanup incomplete")?;
+            // Publish a tombstone before removing the live entry so an
+            // idempotent launch/status never observes a gap in ownership.
+            let mut completed = self.completed_sessions.lock().await;
+            let mut sessions = self.sessions.lock().await;
+            let Some(session) = sessions.get_mut(name).filter(|session| {
+                session
+                    .native_owner()
+                    .is_some_and(|current| current.same_owner(&owner))
+            }) else {
+                return Ok(None);
+            };
+            session.refresh_status();
+            if !session.output_complete() {
+                // Close settles process authority promptly. The closed entry
+                // and its lease bundle remain until collector EOF commits the
+                // safe final suffix, then cached status/sweeps can archive it.
+                return Ok(None);
+            }
+            completed.retain(|(id, _)| id != name);
+            completed.push_back((name.to_owned(), CompletedTerminal::from_session(session)));
+            while completed.len() > self.max_sessions {
+                completed.pop_front();
+            }
+            return Ok(sessions.remove(name));
+        }
         session.kill().await?;
         Ok(sessions.remove(name))
+    }
+
+    async fn drain_native_output(&self) -> Result<()> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let pending = {
+                let sessions = self.sessions.lock().await;
+                sessions.iter().find_map(|(name, session)| {
+                    (session.native_owner().is_some() && !session.native_cleanup_pending()).then(
+                        || {
+                            (
+                                name.clone(),
+                                session.collector_state(),
+                                Arc::clone(session.output_notify()),
+                            )
+                        },
+                    )
+                })
+            };
+            let Some((name, state, notify)) = pending else {
+                return Ok(());
+            };
+            let notified = notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if state.complete() {
+                self.kill_owned_session(&name, false).await?;
+                continue;
+            }
+            if tokio::time::timeout_at(deadline, notified).await.is_err() {
+                return Err(anyhow!(
+                    "native terminal '{name}' output drain remains incomplete"
+                ));
+            }
+        }
     }
 
     pub(super) fn register_remote_cleanup(
@@ -328,7 +418,11 @@ impl TerminalManager {
                 continue;
             };
             session.refresh_status();
-            if session.is_alive() || session.has_backend_cleanup() || session.exit_code().is_none()
+            if session.is_alive()
+                || session.has_backend_cleanup()
+                || session.exit_code().is_none()
+                || session.native_cleanup_pending()
+                || (session.is_user_owned() && !session.output_complete())
             {
                 names.push(name);
             } else {
@@ -337,11 +431,7 @@ impl TerminalManager {
         }
         for name in reap {
             if let Some(session) = sessions.remove(&name) {
-                let completed = CompletedTerminal {
-                    output_id: session.output_id().to_string(),
-                    preview_cursor: session.preview_cursor(),
-                    exit_code: session.exit_code(),
-                };
+                let completed = CompletedTerminal::from_session(&session);
                 tombstones.retain(|(session_name, _)| session_name != &name);
                 tombstones.push_back((name, completed));
                 while tombstones.len() > self.max_sessions {
@@ -401,6 +491,11 @@ impl TerminalManager {
             output_id: session.output_id().to_string(),
             preview_cursor: session.preview_cursor(),
             exit_code,
+            user_owned: session.is_user_owned(),
+            cols: session.cols,
+            rows: session.rows,
+            collector_state: session.collector_state(),
+            selection_redactor: session.selection_redactor.clone(),
         };
         let mut tombstones = self.completed_sessions.lock().await;
         tombstones.retain(|(name, _)| name != &session.name);

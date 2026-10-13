@@ -325,6 +325,7 @@ struct SessionManagerInner {
     managed_model: Option<application::managed::ManagedModelProfile>,
     managed_clones: Option<nac_managed::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
+    terminal_observations: application::terminal_observation::TerminalObservationHub,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
     git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
@@ -580,6 +581,8 @@ impl SessionManager {
                 managed_model,
                 managed_clones,
                 active_sessions: RwLock::new(HashMap::new()),
+                terminal_observations:
+                    application::terminal_observation::TerminalObservationHub::default(),
 
                 lifecycle_gates: StdMutex::new(HashMap::new()),
                 workspace_diff_cache: RwLock::new(HashMap::new()),
@@ -892,6 +895,18 @@ impl SessionManager {
 
     pub(crate) fn session_runs(&self) -> application::session_runs::SessionRunApplication<'_> {
         application::session_runs::SessionRunApplication::new(self)
+    }
+
+    pub(crate) fn terminal_selection(
+        &self,
+    ) -> application::terminal_selection::TerminalSelectionApplication<'_> {
+        application::terminal_selection::TerminalSelectionApplication::new(self)
+    }
+
+    pub(crate) fn shell_commands(
+        &self,
+    ) -> application::shell_commands::ShellCommandApplication<'_> {
+        application::shell_commands::ShellCommandApplication::new(self)
     }
 
     pub(crate) fn session_terminals(

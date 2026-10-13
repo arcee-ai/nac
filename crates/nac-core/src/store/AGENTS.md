@@ -46,6 +46,8 @@ workspace revisions, recovery markers, and cross-process coordination.
   remain available while durable write admission is saturated.
 - `transcript.rs`, `thread_events.rs`, `threads.rs`, `worksets.rs` — durable
   execution history.
+- `transcript_selection.rs` — verified selection annotations on existing
+  canonical log wrappers, included-fork copying, and bounded provenance scans.
 - `transcript_append.rs` — identified transcript transactions, run/generation
   fencing and uncertain-commit reconciliation; `transcript_append_tests.rs`
   owns deterministic append fault and concurrency contracts.

@@ -622,6 +622,8 @@ pub struct MessagePageMetadata {
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct MessagesPageResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_selection_attributions: Vec<nac_core::store::TerminalSelectionReference>,
     pub messages: Vec<Message>,
     pub created_at: Vec<Option<String>>,
     pub page: MessagePageMetadata,
@@ -635,6 +637,8 @@ pub struct MessageCycleMetadata {
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct SessionSnapshotResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_selection_attributions: Vec<nac_core::store::TerminalSelectionReference>,
     #[serde(flatten)]
     pub snapshot: SessionFrontendSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -683,6 +687,7 @@ impl From<nac_core::session_service::MessageCycleMetadata> for MessageCycleMetad
 impl From<MessagesPageSnapshot> for MessagesPageResponse {
     fn from(page: MessagesPageSnapshot) -> Self {
         Self {
+            terminal_selection_attributions: page.terminal_selection_attributions,
             messages: page.messages,
             created_at: page.created_at,
             page: page.page.into(),

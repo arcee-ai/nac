@@ -1,3 +1,4 @@
+import { createUserTerminalApi } from "./userTerminalApi.js";
 import { ApiError, type NacClient } from "./nacClient.js";
 import type {
   HealthResponse,
@@ -90,6 +91,7 @@ import type {
   SandboxActivity,
   SandboxAvailability,
   SubmitPromptResponse,
+  ShellCommandRequest,
   SwitchBranchRequest,
   ThreadEventPage,
   ThreadSteeringResponse,
@@ -163,6 +165,15 @@ export function createNacApi(nacClient: NacClient) {
   }
 
   return {
+    ...createUserTerminalApi(nacClient),
+    submitShellCommand: (id: string, body: ShellCommandRequest, signal?: AbortSignal) =>
+      nacClient.submitShellCommand(id, body, signal),
+    getShellCommand: (id: string, requestId: string, signal?: AbortSignal) =>
+      nacClient.getShellCommand(id, requestId, signal),
+    cancelShellCommand: (id: string, requestId: string, signal?: AbortSignal) =>
+      nacClient.cancelShellCommand(id, requestId, signal),
+    getShellOutput: (id: string, requestId: string, offset = 0, signal?: AbortSignal) =>
+      nacClient.getShellOutput(id, requestId, offset, signal),
     health: (signal?: AbortSignal) => request<HealthResponse>("GET", "/health", { signal }),
 
     getStore: (signal?: AbortSignal) => request<StoreInfo>("GET", "/store", { signal }),

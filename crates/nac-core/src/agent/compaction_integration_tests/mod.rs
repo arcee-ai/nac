@@ -131,3 +131,10 @@ mod automatic_flow;
 mod lifecycle;
 mod manual_flow;
 mod projection_durability;
+mod terminal_selection;
+
+mod terminal_selection_budget;
+
+mod terminal_selection_failures;
+
+mod terminal_selection_samples;

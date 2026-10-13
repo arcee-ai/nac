@@ -6731,6 +6731,1054 @@
         }
       }
     },
+    "/sessions/{session_id}/user-commands": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_commands",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShellCommandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Identical request reconciled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShellCommandSnapshot"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Durable command accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShellCommandSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported command",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Busy or conflicting identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Command admission failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-commands/{request_id}": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_user_commands_request_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Durable command outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShellCommandSnapshot"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Command not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Lookup failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-commands/{request_id}/cancel": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_commands_request_id_cancel",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancellation requested or already settled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShellCommandSnapshot"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Command not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Cancellation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-commands/{request_id}/output": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_user_commands_request_id_output",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stream",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of redacted retained output",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShellOutputPage"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Output not retained or not yet settled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Output lookup failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-terminals": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_user_terminals",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live and bounded completed human terminals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserTerminalListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_terminals",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenUserTerminalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Session-owned shell opened or live launch retried",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserTerminalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request/version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Launch rejected by policy, ownership, configuration or capacity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-terminals/{terminal_id}": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_user_terminals_terminal_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "terminal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Process and output completion are distinct",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserTerminalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Terminal unavailable for this owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-terminals/{terminal_id}/input": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_terminals_terminal_id_input",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "terminal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserTerminalInputRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Literal bytes delivered; no key-name or Enter policy parsing"
+          },
+          "400": {
+            "description": "Malformed request/version or input exceeds 16 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Input unavailable, queue full, or accepted delivery unconfirmed; never automatically retry bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-terminals/{terminal_id}/observers": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_terminals_terminal_id_observers",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "terminal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachUserTerminalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Independent observer attached; no shell creation or lifetime change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserTerminalObserverResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request/version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Terminal unavailable for this owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Observer capacity reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-terminals/{terminal_id}/observers/{observer_id}": {
+      "delete": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "delete_sessions_session_id_user_terminals_terminal_id_observers_observer_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "terminal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "observer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Observation detached idempotently; shell and agent remain live"
+          },
+          "400": {
+            "description": "Malformed observer identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-terminals/{terminal_id}/observers/{observer_id}/read": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_terminals_terminal_id_observers_observer_id_read",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "terminal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "observer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullUserTerminalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "One immutable sanitized frame; pending frames replay until renderer acknowledgement. Gaps carry no bytes and require a reset acknowledgement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserTerminalFrameResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed version/acknowledgement/bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Terminal/observer unavailable for this owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Concurrent observer request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-terminals/{terminal_id}/resize": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_terminals_terminal_id_resize",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "terminal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResizeUserTerminalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Geometry applied to the owned PTY"
+          },
+          "400": {
+            "description": "Malformed request/version or geometry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Terminal mutation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-terminals/{terminal_id}/selection-preview": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_terminals_terminal_id_selection_preview",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "terminal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminalSelectionPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Finite source-bound preview; no durable input or model run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TerminalSelectionPreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed version/identity/time or text exceeds bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source/session unavailable for this process owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-terminals/{terminal_id}/selection-submissions": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_terminals_terminal_id_selection_submissions",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "terminal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminalSelectionSubmissionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Durable intent receipt; replay never wakes or re-delivers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TerminalSelectionSubmissionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid version, identity, text or delivery contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source, preview, delivery or immutable identity conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Persistence failure; reconcile the same identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/workspace/branches": {
       "get": {
         "tags": [
@@ -8633,6 +9681,27 @@
             ]
           }
         }
+      },
+      "AttachUserTerminalRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "page_limit"
+        ],
+        "properties": {
+          "page_limit": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 65536,
+            "minimum": 1
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "AuthStatus": {
         "type": "string",
@@ -11736,6 +12805,12 @@
           },
           "page": {
             "$ref": "#/components/schemas/MessagePageMetadata"
+          },
+          "terminal_selection_attributions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TerminalSelectionReference"
+            }
           }
         }
       },
@@ -12005,6 +13080,39 @@
             "description": "Absolute path handed to the OS opener."
           }
         }
+      },
+      "OpenUserTerminalRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "launch_id",
+          "cols",
+          "rows"
+        ],
+        "properties": {
+          "cols": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 500,
+            "minimum": 2
+          },
+          "launch_id": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 1,
+            "minimum": 1
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 300,
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
       },
       "OpenWorkspacePathRequest": {
         "type": "object",
@@ -12460,6 +13568,39 @@
             "description": "Overrides the provider's canonical URL, for a proxy or a custom gateway."
           }
         }
+      },
+      "PullUserTerminalRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "acknowledge_reset",
+          "wait_ms"
+        ],
+        "properties": {
+          "acknowledge_offset": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact decimal byte cursor of the frame the renderer finished processing."
+          },
+          "acknowledge_reset": {
+            "type": "boolean",
+            "description": "A replay gap must be acknowledged only after resetting the renderer."
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "wait_ms": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 1000,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "PutManagedSecretRequest": {
         "type": "object",
@@ -13157,6 +14298,32 @@
             "minimum": 0
           }
         ]
+      },
+      "ResizeUserTerminalRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "cols",
+          "rows"
+        ],
+        "properties": {
+          "cols": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "ResolvedModelConfiguration": {
         "type": "object",
@@ -14051,6 +15218,12 @@
               "$ref": "#/components/schemas/SessionSummarySnapshot"
             }
           },
+          "shell_commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShellCommandSnapshot"
+            }
+          },
           "thread_episodes": {
             "type": "object",
             "additionalProperties": {
@@ -14390,6 +15563,12 @@
                     "$ref": "#/components/schemas/MessagePageMetadata"
                   }
                 ]
+              },
+              "terminal_selection_attributions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TerminalSelectionReference"
+                }
               }
             }
           }
@@ -14530,6 +15709,153 @@
           "visible_message_count": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "ShellCommandRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ShellCommandSnapshot": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "operation_id",
+          "command",
+          "timeout_ms",
+          "state",
+          "accepted_at_epoch_ms",
+          "stdout",
+          "stderr"
+        ],
+        "properties": {
+          "accepted_at_epoch_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "command": {
+            "type": "string",
+            "description": "Credential literals are masked before this projection is persisted."
+          },
+          "diagnostic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "finished_at_epoch_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "output_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ShellCommandState"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "transcript_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ShellCommandState": {
+        "type": "string",
+        "enum": [
+          "accepted",
+          "started",
+          "completed",
+          "timed_out",
+          "cancelled",
+          "rejected",
+          "spawn_failed",
+          "interrupted",
+          "outcome_unknown"
+        ]
+      },
+      "ShellOutputPage": {
+        "type": "object",
+        "required": [
+          "content",
+          "offset",
+          "next_offset",
+          "eof",
+          "overflowed"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "eof": {
+            "type": "boolean"
+          },
+          "next_offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "overflowed": {
+            "type": "boolean"
           }
         }
       },
@@ -14910,6 +16236,413 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "TerminalSelectionAttribution": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "intent_sha256",
+          "source_kind",
+          "admission_id",
+          "capture_id",
+          "source_session_id",
+          "terminal_id",
+          "owner_instance_id"
+        ],
+        "properties": {
+          "admission_id": {
+            "type": "string"
+          },
+          "capture_id": {
+            "type": "string"
+          },
+          "client_capture_time_ms": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "intent_sha256": {
+            "type": "string"
+          },
+          "owner_instance_id": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/TerminalSelectionSourceKind"
+          },
+          "source_session_id": {
+            "type": "string"
+          },
+          "terminal_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TerminalSelectionDelivery": {
+        "type": "string",
+        "enum": [
+          "send",
+          "queue",
+          "steer"
+        ]
+      },
+      "TerminalSelectionIntent": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "source_kind",
+          "admission_id",
+          "capture_id",
+          "source_session_id",
+          "terminal_id",
+          "owner_instance_id",
+          "text",
+          "initial_delivery"
+        ],
+        "properties": {
+          "admission_id": {
+            "type": "string"
+          },
+          "capture_id": {
+            "type": "string"
+          },
+          "client_capture_time_ms": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "initial_delivery": {
+            "$ref": "#/components/schemas/TerminalSelectionDelivery"
+          },
+          "initial_expected_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner_instance_id": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/TerminalSelectionSourceKind"
+          },
+          "source_session_id": {
+            "type": "string"
+          },
+          "terminal_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "TerminalSelectionPreviewRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "capture_id",
+          "selected_text"
+        ],
+        "properties": {
+          "capture_id": {
+            "type": "string",
+            "description": "Client-assigned hyphenated UUID for one frozen selection, not execution authority."
+          },
+          "client_capture_time_ms": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Untrusted optional capture-time claim in exact decimal milliseconds."
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 1,
+            "minimum": 1
+          },
+          "selected_text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "TerminalSelectionPreviewResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "capture_id",
+          "source_kind",
+          "source_session_id",
+          "terminal_id",
+          "owner_instance_id",
+          "previewed_at_ms",
+          "text",
+          "input_utf8_bytes",
+          "input_scalars",
+          "text_utf8_bytes",
+          "text_scalars",
+          "controls_removed",
+          "line_endings_normalized",
+          "max_utf8_bytes",
+          "max_scalars",
+          "truncated"
+        ],
+        "properties": {
+          "capture_id": {
+            "type": "string"
+          },
+          "client_capture_time_ms": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client claim is retained as a claim, never an authoritative capture time."
+          },
+          "controls_removed": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "input_scalars": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "input_utf8_bytes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "line_endings_normalized": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_scalars": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_utf8_bytes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "owner_instance_id": {
+            "type": "string"
+          },
+          "previewed_at_ms": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/TerminalSelectionSourceKind"
+          },
+          "source_session_id": {
+            "type": "string"
+          },
+          "terminal_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "text_scalars": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "text_utf8_bytes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "This endpoint rejects over-limit text; it never silently truncates."
+          },
+          "user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "TerminalSelectionReference": {
+        "type": "object",
+        "required": [
+          "message_index",
+          "attribution"
+        ],
+        "properties": {
+          "attribution": {
+            "$ref": "#/components/schemas/TerminalSelectionAttribution"
+          },
+          "message_index": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Absolute canonical transcript index, including any system head.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "TerminalSelectionSourceKind": {
+        "type": "string",
+        "enum": [
+          "user_supplied_rendered_selection"
+        ]
+      },
+      "TerminalSelectionSubmissionRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "admission_id",
+          "capture_id",
+          "expected_owner_instance_id",
+          "original_selected_text",
+          "expected_selection_text",
+          "delivery"
+        ],
+        "properties": {
+          "admission_id": {
+            "type": "string"
+          },
+          "capture_id": {
+            "type": "string"
+          },
+          "client_capture_time_ms": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/TerminalSelectionDelivery"
+          },
+          "expected_owner_instance_id": {
+            "type": "string"
+          },
+          "expected_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_selection_text": {
+            "type": "string"
+          },
+          "expected_user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "original_selected_text": {
+            "type": "string"
+          },
+          "original_user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "TerminalSelectionSubmissionResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "admission_id",
+          "replayed",
+          "inbox_id",
+          "status",
+          "version",
+          "current_delivery",
+          "accepted_intent"
+        ],
+        "properties": {
+          "accepted_intent": {
+            "$ref": "#/components/schemas/TerminalSelectionIntent"
+          },
+          "admission_id": {
+            "type": "string"
+          },
+          "current_delivery": {
+            "$ref": "#/components/schemas/InboxDelivery"
+          },
+          "current_target_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivered_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inbox_id": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InboxStatus",
+            "description": "Current mutable inbox state, separate from immutable accepted intent."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -15968,6 +17701,186 @@
           },
           "ssh_port": {
             "$ref": "#/components/schemas/RequestField_u16_u16"
+          }
+        }
+      },
+      "UserTerminalFrameResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "observer_id",
+          "terminal",
+          "bytes",
+          "offset",
+          "next_offset",
+          "retained_start",
+          "retained_end",
+          "gap",
+          "caught_up",
+          "requires_ack"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "Sanitized bytes, with no UTF-8 or key-name conversion at delivery."
+          },
+          "caught_up": {
+            "type": "boolean"
+          },
+          "gap": {
+            "type": "boolean"
+          },
+          "next_offset": {
+            "type": "string"
+          },
+          "observer_id": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "string",
+            "description": "Decimal strings preserve exact u64 cursors in JavaScript consumers."
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "requires_ack": {
+            "type": "boolean"
+          },
+          "retained_end": {
+            "type": "string"
+          },
+          "retained_start": {
+            "type": "string"
+          },
+          "terminal": {
+            "$ref": "#/components/schemas/UserTerminalResponse"
+          }
+        }
+      },
+      "UserTerminalInputRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "bytes"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "UserTerminalListResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "terminals"
+        ],
+        "properties": {
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "terminals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserTerminalResponse"
+            }
+          }
+        }
+      },
+      "UserTerminalObserverResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "observer_id",
+          "idle_expiry_ms",
+          "terminal"
+        ],
+        "properties": {
+          "idle_expiry_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "observer_id": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "terminal": {
+            "$ref": "#/components/schemas/UserTerminalResponse"
+          }
+        }
+      },
+      "UserTerminalResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "terminal_id",
+          "cols",
+          "rows",
+          "alive",
+          "output_complete"
+        ],
+        "properties": {
+          "alive": {
+            "type": "boolean"
+          },
+          "cols": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "output_complete": {
+            "type": "boolean"
+          },
+          "output_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "terminal_id": {
+            "type": "string"
           }
         }
       },

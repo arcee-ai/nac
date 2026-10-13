@@ -151,7 +151,24 @@ impl crate::SessionManager {
                 .iter()
                 .all(|service| !service.has_active_operation())
             {
-                break;
+                // Observation and external service clones may outlive HTTP
+                // drain. Settle owned processes explicitly while persistence
+                // is still available for remote cleanup obligations; relying
+                // on Arc drop would leave retained human shells alive here.
+                let mut terminals_settled = true;
+                for service in services {
+                    if service.destroy_terminals().await.is_err() {
+                        terminals_settled = false;
+                        eprintln!("nac: terminal shutdown cleanup remains owned; retrying before store drain");
+                    }
+                }
+                if terminals_settled {
+                    break;
+                }
+                // Failed cleanup stays owned and retryable inside the existing
+                // complete-shutdown watchdog, rather than draining its store.
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                continue;
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }

@@ -1,5 +1,13 @@
 //! Process-tree supervision shared by terminal, worker, and managed Git adapters.
 
+mod native_pty;
+#[cfg(all(
+    any(test, feature = "test-support"),
+    any(target_os = "linux", target_os = "macos")
+))]
+pub use native_pty::NativePtyTestIdentity;
+pub use native_pty::{NativePtyChild, NativePtyOwner, NativePtySnapshot};
+
 #[cfg(target_os = "macos")]
 use std::collections::HashSet;
 #[cfg(unix)]

@@ -143,14 +143,18 @@ for child in $(group_members); do
 done
 rm -f "$pidfile"
 exit "$status"'
-if command -v setsid >/dev/null 2>&1 && setsid -w true >/dev/null 2>&1; then
+# A PTY already has a controlling session. Forking into setsid would lose it;
+# the monitor/foreground path preserves terminal ownership for all PTYs.
+if [ "${3:-}" != pty ] && command -v setsid >/dev/null 2>&1 && setsid -w true >/dev/null 2>&1; then
   exec setsid -w bash -c "$supervisor" nac-supervisor "$1" "$2"
 else
   set -m
   bash -c "$supervisor" nac-supervisor "$1" "$2" &
   supervisor_pid=$!
   if [ "${3:-}" = pty ]; then
-    fg %1 >/dev/null 2>/dev/null
+    # Bash uses stderr for foreground terminal ownership. Redirecting it to
+    # /dev/null silently leaves the supervisor stopped in a background group.
+    fg %1 >/dev/null
   else
     wait "$supervisor_pid" 2>/dev/null
   fi
@@ -221,7 +225,8 @@ if [ "$root_identity_state" = match ]; then
   if [ ! -r "/proc/$pid/stat" ]; then
     process_table=$(ps -eo pid=,ppid= 2>/dev/null || ps -ax -o pid= -o ppid= 2>/dev/null) || exit 1
   fi
-  descendants() {
+  # Recursion must not overwrite its caller's parent/child/stat variables.
+  descendants() (
     parent=$1
     if [ -r "/proc/$pid/stat" ]; then
       for stat in /proc/[0-9]*/stat; do
@@ -240,7 +245,7 @@ if [ "$root_identity_state" = match ]; then
         printf '%s\n' "$child"
       done
     fi
-  }
+  )
   pids=$(descendants "$pid")
   uncertain=0
   verified_descendants=
@@ -983,6 +988,7 @@ impl PodmanSession {
         cmd_str: &str,
         cwd: Option<&Path>,
         envs: &[(String, String)],
+        human: bool,
     ) -> (PtyCommandBuilder, String) {
         let pidfile = make_sandbox_pidfile();
         let pty_args = vec![
@@ -994,7 +1000,13 @@ impl PodmanSession {
             "pty".to_string(),
         ];
         let mut cmd = PtyCommandBuilder::new("podman");
-        cmd.args(self.exec_args("bash", &pty_args, true, true, cwd, envs));
+        let mut args = self.exec_args("bash", &pty_args, true, true, cwd, envs);
+        if human {
+            // Human control bytes reach the program rather than detaching the
+            // owning transport. Model and non-PTY invocation defaults stay intact.
+            args.insert(1, OsString::from("--detach-keys="));
+        }
+        cmd.args(args);
         (cmd, pidfile)
     }
 

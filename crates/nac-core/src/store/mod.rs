@@ -23,9 +23,14 @@ mod schema;
 mod session_forks;
 mod session_goals;
 mod session_inbox;
+mod shell_commands;
+pub(crate) use shell_commands::{
+    accept_shell_command, list_shell_commands, lookup_shell_command, start_shell_command,
+};
 mod ssh_configurations;
 mod steering;
 mod terminal_cleanups;
+mod terminal_selection;
 mod thread_events;
 mod threads;
 mod time;
@@ -75,6 +80,7 @@ pub use session_inbox::*;
 pub use ssh_configurations::*;
 pub use steering::*;
 pub use terminal_cleanups::*;
+pub use terminal_selection::*;
 pub use thread_events::*;
 pub use threads::*;
 pub use traditional_children::*;
@@ -599,3 +605,16 @@ mod tests {
 pub(crate) use blocking_caller::reject_callers_for_test;
 
 pub(crate) use transcript::RunPromptAdmission;
+
+mod transcript_selection;
+pub use transcript_selection::{
+    copy_terminal_selection_attributions, load_terminal_selection_references,
+    TerminalSelectionAttribution, TerminalSelectionReference,
+};
+pub(crate) use transcript_selection::{
+    load_terminal_selection_history_metadata, load_terminal_selection_provenance,
+    TerminalSelectionProvenance,
+};
+
+#[cfg(test)]
+pub(crate) use transcript_selection::seed_selection_provenance_history_for_test;

@@ -10,9 +10,15 @@ impl SessionService {
         // finish; every later admission observes this flag under that lock.
         self.stopping_admission
             .store(true, std::sync::atomic::Ordering::Release);
+        if let Some(context) = &self.user_terminal_context {
+            context.stop_admission().await;
+        }
         self.cancel_goal_retry_wake();
         self.coordinate_local(|service| {
-            let _operation = service.lock_active_operation();
+            let operation = service.lock_active_operation();
+            if let Some(ActiveSessionOperation::HumanShell(command)) = operation.as_ref() {
+                command.cancel_for_shutdown();
+            }
         })
         .await
     }
@@ -41,7 +47,7 @@ impl SessionService {
         Ok(())
     }
 
-    async fn require_direct_primary_behavior_async(&self) -> Result<()> {
+    pub(super) async fn require_direct_primary_behavior_async(&self) -> Result<()> {
         let service = self.clone();
         crate::store::call_legacy_store(&self.metadata.store_path, move || {
             service.require_direct_primary_behavior()
@@ -448,7 +454,7 @@ impl SessionService {
             .await
     }
 
-    async fn start_next_direct_inbox_item_with_lease_async(
+    pub(super) async fn start_next_direct_inbox_item_with_lease_async(
         &self,
         lease: sessions::SessionOperationLease,
     ) -> Result<Option<SessionRunHandle>> {

@@ -28,6 +28,11 @@ function presentationOutput(): Plugin {
         .sort();
       this.emitFile({
         type: "asset",
+        fileName: "licenses/xterm.txt",
+        source: fs.readFileSync(path.join(web, "public/licenses/xterm.txt")),
+      });
+      this.emitFile({
+        type: "asset",
         fileName: "assets.json",
         source:
           JSON.stringify(

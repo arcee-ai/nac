@@ -266,6 +266,27 @@ printf '%s%s' "$base" "$suffix"
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, Option<String>) {
+        self.pty_command(cmd, cwd, envs, false)
+    }
+
+    /// Prepares transparent human input on the selected backend. Admission is
+    /// deliberately separate: unqualified SSH/Podman remain unavailable.
+    pub(crate) fn user_terminal_pty_command(
+        &self,
+        cmd: &str,
+        cwd: Option<&Path>,
+        envs: &[(String, String)],
+    ) -> (PtyCommandBuilder, Option<String>) {
+        self.pty_command(cmd, cwd, envs, true)
+    }
+
+    fn pty_command(
+        &self,
+        cmd: &str,
+        cwd: Option<&Path>,
+        envs: &[(String, String)],
+        human: bool,
+    ) -> (PtyCommandBuilder, Option<String>) {
         let (mut command, pidfile) = match self {
             Self::Local { .. } => {
                 let mut command = PtyCommandBuilder::new("bash");
@@ -280,10 +301,10 @@ printf '%s%s' "$base" "$suffix"
                 (command, None)
             }
             Self::Sandbox(session) => {
-                let (cmd, pidfile) = session.terminal_pty_command(cmd, cwd, envs);
+                let (cmd, pidfile) = session.pty_command(cmd, cwd, envs, human);
                 (cmd, Some(pidfile))
             }
-            Self::Ssh(ssh) => ssh.terminal_pty_command(cmd, cwd, envs),
+            Self::Ssh(ssh) => ssh.terminal_pty_command(cmd, cwd, envs, human),
         };
         remove_native_integration_credentials_from_pty(&mut command);
         (command, pidfile)

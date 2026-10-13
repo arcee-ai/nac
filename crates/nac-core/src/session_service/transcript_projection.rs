@@ -152,7 +152,50 @@ impl SessionService {
         let mut messages = blob_part;
         messages.extend(log_part);
         created_at.resize(messages.len(), None);
+        let raw_start = if start < blob_visible {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| {
+                    snapshot
+                        .messages
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, message)| {
+                            include_system || !matches!(message, Message::System { .. })
+                        })
+                        .nth(start)
+                        .map_or(blob_len, |(index, _)| index)
+                })
+                .unwrap_or(blob_len)
+        } else {
+            blob_len + start.saturating_sub(blob_visible)
+        };
+        let raw_end = if end > blob_visible {
+            blob_len + end - blob_visible
+        } else {
+            let snapshot = self.session_snapshot.lock().await;
+            snapshot
+                .as_ref()
+                .map(|snapshot| {
+                    snapshot
+                        .messages
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, message)| {
+                            include_system || !matches!(message, Message::System { .. })
+                        })
+                        .take(end)
+                        .last()
+                        .map_or(0, |(index, _)| index + 1)
+                })
+                .unwrap_or(0)
+        };
+        let terminal_selection_attributions = self
+            .read_selection_attributions(raw_start as u64, raw_end as u64)
+            .await?;
         Ok(MessagesPageSnapshot {
+            terminal_selection_attributions,
             messages,
             created_at,
             page: MessagePageMetadata {
@@ -162,6 +205,27 @@ impl SessionService {
                 has_older: start > 0,
             },
         })
+    }
+
+    pub(super) async fn read_selection_attributions(
+        &self,
+        start: u64,
+        end: u64,
+    ) -> Result<Vec<crate::store::TerminalSelectionReference>> {
+        let Some(session) = self.metadata.session_id.clone() else {
+            return Ok(Vec::new());
+        };
+        let path = self.metadata.store_path.clone();
+        if let Some(owner) = crate::store::coordinator::owner_for(&path)? {
+            owner
+                .load_terminal_selection_references(session, start, end)
+                .await
+        } else {
+            crate::store::spawn_blocking_store_caller(move || {
+                crate::store::load_terminal_selection_references(&path, &session, start, end)
+            })
+            .await?
+        }
     }
 
     /// Length of the merged store transcript without decoding any of it.
@@ -415,10 +479,14 @@ impl SessionService {
     /// which is why the caller passes the transcript length it already read:
     /// an append landing between the two reads must not shift the alignment.
     /// Blob messages predate the log and report `None`.
-    pub(super) async fn store_backed_transcript_times(
+    pub(super) async fn store_backed_transcript_metadata(
         &self,
-        total: usize,
-    ) -> Result<Vec<Option<String>>> {
+        messages: &[Message],
+    ) -> Result<(
+        Vec<Option<String>>,
+        Vec<crate::store::TerminalSelectionReference>,
+    )> {
+        let total = messages.len();
         let blob_len = {
             let snapshot = self.session_snapshot.lock().await;
             snapshot
@@ -426,16 +494,35 @@ impl SessionService {
                 .map(|snapshot| snapshot.messages.len())
                 .unwrap_or_default()
         }
-        .min(total);
-        let mut times: Vec<Option<String>> = vec![None; blob_len];
-        if total > blob_len {
-            let tail = self
-                .read_log_tail_window_times(blob_len, 0, total - blob_len)
-                .await?;
-            times.extend(tail.into_iter().map(Some));
+        .min(total) as u64;
+        // A blob-only system/non-User prefix has neither row timestamps nor
+        // valid selection evidence. Preserve its established zero-checkout path.
+        if blob_len == total as u64
+            && !messages
+                .iter()
+                .any(|message| matches!(message, Message::User { .. }))
+        {
+            return Ok((vec![None; total], Vec::new()));
         }
-        times.resize(total, None);
-        Ok(times)
+        let Some(session) = self.metadata.session_id.clone() else {
+            return Ok((vec![None; total], Vec::new()));
+        };
+        let path = self.metadata.store_path.clone();
+        if let Some(owner) = crate::store::coordinator::owner_for(&path)? {
+            owner
+                .load_terminal_selection_history_metadata(session, blob_len, total as u64)
+                .await
+        } else {
+            crate::store::spawn_blocking_store_caller(move || {
+                crate::store::load_terminal_selection_history_metadata(
+                    &path,
+                    &session,
+                    blob_len,
+                    total as u64,
+                )
+            })
+            .await?
+        }
     }
 
     /// Advance the incremental transcript scan over newly appended rows.

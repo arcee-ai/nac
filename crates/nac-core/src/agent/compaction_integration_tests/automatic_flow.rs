@@ -340,6 +340,14 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
         },
     ];
     store_agent_snapshot(&store_path, &agent);
+    // Establish verified plain metadata just as real provider preparation does.
+    agent
+        .compaction
+        .as_mut()
+        .unwrap()
+        .refresh_provenance_async(&agent.messages)
+        .await
+        .unwrap();
     let sampled_len = agent.messages.len();
     agent.compaction.as_mut().unwrap().record_ordinary_context(
         &agent.messages.clone(),

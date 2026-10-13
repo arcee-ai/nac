@@ -1,3 +1,4 @@
+import { createUserTerminalApi } from "./userTerminalApi.js";
 import { ApiError } from "./nacClient.js";
 export { ApiError };
 const sessionPath = (id) => `/sessions/${encodeURIComponent(id)}`;
@@ -6,6 +7,11 @@ export function createNacApi(nacClient) {
         return nacClient.transport.request(method, path, { body, headers, signal });
     }
     return {
+        ...createUserTerminalApi(nacClient),
+        submitShellCommand: (id, body, signal) => nacClient.submitShellCommand(id, body, signal),
+        getShellCommand: (id, requestId, signal) => nacClient.getShellCommand(id, requestId, signal),
+        cancelShellCommand: (id, requestId, signal) => nacClient.cancelShellCommand(id, requestId, signal),
+        getShellOutput: (id, requestId, offset = 0, signal) => nacClient.getShellOutput(id, requestId, offset, signal),
         health: (signal) => request("GET", "/health", { signal }),
         getStore: (signal) => request("GET", "/store", { signal }),
         getManagedStatus: (signal) => request("GET", "/managed/status", { signal }),

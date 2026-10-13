@@ -116,3 +116,24 @@ export type McpOAuthStatusResponse = ApiSchema<"McpOAuthStatusResponse">;
 export type AuthenticateMcpOAuthRequest = ApiSchema<"AuthenticateMcpOAuthRequest">;
 export type AuthenticateMcpOAuthResponse = ApiSchema<"AuthenticateMcpOAuthResponse">;
 export type ConfigureMcpOAuthRequest = ApiSchema<"ConfigureMcpOAuthRequest">;
+
+export type OpenUserTerminalRequest = ApiSchema<"OpenUserTerminalRequest">;
+export type UserTerminalResponse = ApiSchema<"UserTerminalResponse">;
+export type UserTerminalListResponse = ApiSchema<"UserTerminalListResponse">;
+export type AttachUserTerminalRequest = ApiSchema<"AttachUserTerminalRequest">;
+export type UserTerminalObserverResponse = ApiSchema<"UserTerminalObserverResponse">;
+export type PullUserTerminalRequest = ApiSchema<"PullUserTerminalRequest">;
+export type UserTerminalFrameResponse = ApiSchema<"UserTerminalFrameResponse">;
+export type UserTerminalInputRequest = ApiSchema<"UserTerminalInputRequest">;
+export type ResizeUserTerminalRequest = ApiSchema<"ResizeUserTerminalRequest">;
+
+export type TerminalSelectionSubmissionRequest = ApiSchema<"TerminalSelectionSubmissionRequest">;
+export type TerminalSelectionSubmissionResponse = ApiSchema<"TerminalSelectionSubmissionResponse">;
+export type TerminalSelectionPreviewRequest = ApiSchema<"TerminalSelectionPreviewRequest">;
+export type TerminalSelectionPreviewResponse = ApiSchema<"TerminalSelectionPreviewResponse">;
+
+export type TerminalSelectionAttribution = ApiSchema<"TerminalSelectionAttribution">;
+export type TerminalSelectionReference = ApiSchema<"TerminalSelectionReference">;
+export type ShellCommandRequest = ApiSchema<"ShellCommandRequest">;
+export type ShellCommandSnapshot = ApiSchema<"ShellCommandSnapshot">;
+export type ShellOutputPage = ApiSchema<"ShellOutputPage">;

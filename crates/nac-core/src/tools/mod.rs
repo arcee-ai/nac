@@ -35,6 +35,7 @@ pub(crate) mod subagent;
 mod terminal_tools;
 pub mod thread;
 mod thread_lifecycle;
+pub(crate) mod user_terminal;
 pub(crate) mod web;
 pub mod workset;
 pub mod write;
@@ -510,3 +511,27 @@ pub(crate) fn test_runtime() -> ToolRuntime {
 
 #[cfg(test)]
 mod host_execution_tests;
+
+/// Native human invocation retains the same registered exec implementation.
+pub(crate) async fn execute_submitted_shell(
+    submission: &crate::session_service::SubmittedShell,
+    runtime: &ToolRuntime,
+    client: &crate::model::ModelClient,
+    context: &kernel::ToolCallContext,
+) -> ToolResult {
+    let registry = match kernel::ToolRegistry::builder()
+        .register(terminal_tools::ExecCommandTool)
+        .finish()
+    {
+        Ok(registry) => registry,
+        Err(error) => return ToolResult::text(error.to_string(), true),
+    };
+    let snapshot = registry.snapshot_where(|_| true);
+    snapshot
+        .invoke_submitted_shell(
+            submission,
+            kernel::ToolServices { runtime, client },
+            context,
+        )
+        .await
+}

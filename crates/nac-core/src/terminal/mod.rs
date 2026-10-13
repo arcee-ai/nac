@@ -1,13 +1,34 @@
+mod collector;
+mod input;
 mod keyparse;
 mod manager;
+mod native_owner;
 mod output;
 mod session;
+pub(crate) use manager::{validate_user_geometry, ResolvedUserTerminalLaunch};
+pub use manager::{
+    TerminalManager, TerminalSelectionError, UserTerminalSelectionPreview,
+    MAX_TERMINAL_SELECTION_SCALARS, MAX_TERMINAL_SELECTION_UTF8_BYTES,
+};
 
-pub use manager::TerminalManager;
+/// Process-local terminal ownership, distinct from output collection completion.
+/// `alive` remains true while native cleanup authority is unresolved; final
+/// exit_code is published only after that ownership has settled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserTerminalStatus {
+    pub id: String,
+    pub cols: u16,
+    pub rows: u16,
+    pub alive: bool,
+    pub exit_code: Option<i32>,
+    pub output_complete: bool,
+    pub output_error: Option<String>,
+}
+
 pub use output::{
-    ArtifactKind, CommandOutputLimits, OutputArtifactLease, OutputPage, OutputRegistry,
-    OutputStream, DEFAULT_COMMAND_OUTPUT_MAX_BYTES, DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES,
-    DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
+    ArtifactKind, CommandOutputLimits, OutputArtifactLease, OutputBytePage, OutputPage,
+    OutputRegistry, OutputStream, DEFAULT_COMMAND_OUTPUT_MAX_BYTES,
+    DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
 };
 
 use serde::{Deserialize, Serialize};

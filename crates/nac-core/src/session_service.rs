@@ -42,7 +42,23 @@ mod manual_compaction;
 mod operation_state;
 mod recovery;
 mod settlement;
+mod shell_command_types;
+mod shell_commands;
+mod shell_output;
+mod shell_settlement;
+mod terminal_selection_admission;
+pub(crate) use shell_command_types::SubmittedShell;
+pub use shell_command_types::{
+    ShellCommandError, ShellCommandRequest, ShellCommandSnapshot, ShellCommandState,
+    DEFAULT_SHELL_TIMEOUT_MS, MAX_SHELL_TIMEOUT_MS,
+};
+pub use shell_output::ShellOutputPage;
 mod transcript_projection;
+mod user_terminals;
+pub use crate::terminal::{
+    OutputBytePage as UserTerminalOutputPage, TerminalSelectionError, UserTerminalSelectionPreview,
+    UserTerminalStatus, MAX_TERMINAL_SELECTION_SCALARS, MAX_TERMINAL_SELECTION_UTF8_BYTES,
+};
 
 use manual_compaction::ActiveCompactionState;
 pub use manual_compaction::{
@@ -174,6 +190,9 @@ pub struct ActiveCompactionSnapshot {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum ActiveSessionOperationSnapshot {
+    HumanShell {
+        command: Box<ShellCommandSnapshot>,
+    },
     Run {
         run: ActiveRunSnapshot,
     },
@@ -208,6 +227,8 @@ pub struct SessionFrontendSnapshot {
     pub active_run: Option<ActiveRunSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_compaction: Option<ActiveCompactionSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shell_commands: Vec<ShellCommandSnapshot>,
     pub sessions: Vec<SessionSummarySnapshot>,
     #[serde(default)]
     pub active_threads: Vec<String>,
@@ -288,6 +309,8 @@ pub struct MessageCycleMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesPageSnapshot {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     pub messages: Vec<Message>,
     /// Transcript-log row times, one per message. `None` where the message
     /// predates the log (the snapshot blob carries no per-message time).
@@ -298,6 +321,8 @@ pub struct MessagesPageSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFrontendSnapshotLoad {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     #[serde(flatten)]
     pub snapshot: SessionFrontendSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -602,6 +627,8 @@ pub struct SessionService {
     /// MCP capability and prompt inventory captured at session construction.
     mcp: Option<Arc<crate::mcp::McpRegistry>>,
     terminal_manager: crate::terminal::TerminalManager,
+    user_terminal_context: Option<Arc<user_terminals::UserTerminalContext>>,
+    shell_runtime: Option<crate::tools::ToolRuntime>,
     permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
     /// A sandbox service owns container-local state even while it has no run
     /// or retained terminal. Keep a shared cross-process resource lease for
@@ -632,6 +659,7 @@ pub struct SessionService {
 }
 
 enum ActiveSessionOperation {
+    HumanShell(shell_commands::ActiveShellCommand),
     Run(ActiveRunState),
     ManualCompaction(ActiveCompactionState),
 }
@@ -645,6 +673,9 @@ struct GoalRetryWake {
 impl ActiveSessionOperation {
     fn snapshot(&self) -> ActiveSessionOperationSnapshot {
         match self {
+            Self::HumanShell(command) => ActiveSessionOperationSnapshot::HumanShell {
+                command: Box::new(command.snapshot.clone()),
+            },
             Self::Run(run) => ActiveSessionOperationSnapshot::Run {
                 run: run.snapshot.clone(),
             },
@@ -981,6 +1012,7 @@ pub struct RevertOutcome {
 }
 
 struct LoadedFrontendMessages {
+    terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     messages: Vec<Message>,
     created_at: Vec<Option<String>>,
     page: Option<MessagePageMetadata>,
@@ -1079,6 +1111,7 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
     MessagesPageSnapshot {
         messages,
         created_at: Vec::new(),
+        terminal_selection_attributions: Vec::new(),
         page: MessagePageMetadata {
             start,
             end,

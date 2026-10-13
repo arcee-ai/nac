@@ -69,6 +69,37 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("DELETE", "/sessions/{session_id}/goal/{goal_id}"),
     ("DELETE", "/sessions/{session_id}/inbox/{item_id}"),
     ("DELETE", "/sessions/{session_id}/terminals/{terminal_id}"),
+    ("POST", "/sessions/{session_id}/user-terminals"),
+    ("GET", "/sessions/{session_id}/user-terminals"),
+    ("GET", "/sessions/{session_id}/user-terminals/{terminal_id}"),
+    (
+        "POST",
+        "/sessions/{session_id}/user-terminals/{terminal_id}/selection-preview",
+    ),
+    (
+        "POST",
+        "/sessions/{session_id}/user-terminals/{terminal_id}/selection-submissions",
+    ),
+    (
+        "POST",
+        "/sessions/{session_id}/user-terminals/{terminal_id}/observers",
+    ),
+    (
+        "POST",
+        "/sessions/{session_id}/user-terminals/{terminal_id}/observers/{observer_id}/read",
+    ),
+    (
+        "DELETE",
+        "/sessions/{session_id}/user-terminals/{terminal_id}/observers/{observer_id}",
+    ),
+    (
+        "POST",
+        "/sessions/{session_id}/user-terminals/{terminal_id}/input",
+    ),
+    (
+        "POST",
+        "/sessions/{session_id}/user-terminals/{terminal_id}/resize",
+    ),
     ("POST", "/sessions/{session_id}/runs/{run_id}/cancel"),
     (
         "DELETE",
@@ -184,6 +215,16 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("POST", "/sessions/{session_id}/fork"),
     ("POST", "/sessions/{session_id}/regenerate"),
     ("POST", "/sessions/{session_id}/revert"),
+    ("POST", "/sessions/{session_id}/user-commands"),
+    ("GET", "/sessions/{session_id}/user-commands/{request_id}"),
+    (
+        "POST",
+        "/sessions/{session_id}/user-commands/{request_id}/cancel",
+    ),
+    (
+        "GET",
+        "/sessions/{session_id}/user-commands/{request_id}/output",
+    ),
     ("POST", "/sessions/{session_id}/runs"),
     ("POST", "/sessions/{session_id}/steering"),
     (
@@ -252,6 +293,8 @@ fn concrete_api_path(path: &str) -> String {
         .replace("{grant_id}", "missing-grant")
         .replace("{thread_name}", "missing-thread")
         .replace("{revision_id}", "1")
+        .replace("{terminal_id}", "missing-terminal")
+        .replace("{observer_id}", "00000000-0000-4000-8000-000000000000")
 }
 
 fn assert_local_refs_resolve(document: &serde_json::Value, value: &serde_json::Value) {

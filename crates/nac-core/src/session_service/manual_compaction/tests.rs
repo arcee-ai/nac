@@ -25,9 +25,9 @@ async fn selected_manual_result_survives_cancelled_completion_wait() {
     *parts.service.lock_active_operation() = Some(ActiveSessionOperation::ManualCompaction(
         ActiveCompactionState {
             snapshot: snapshot.clone(),
-            _operation_lease: Some(
+            _operation_lease: Some(Arc::new(
                 sessions::SessionOperationLease::try_acquire(&path, "session").unwrap(),
-            ),
+            )),
         },
     ));
     let (completion, waiter) = oneshot::channel();
@@ -85,9 +85,9 @@ async fn committed_manual_compaction_drop_returns_success_and_cleans_up() {
     *parts.service.lock_active_operation() = Some(ActiveSessionOperation::ManualCompaction(
         ActiveCompactionState {
             snapshot: snapshot.clone(),
-            _operation_lease: Some(
+            _operation_lease: Some(Arc::new(
                 sessions::SessionOperationLease::try_acquire(&path, "session").unwrap(),
-            ),
+            )),
         },
     ));
     let (completion, waiter) = oneshot::channel();

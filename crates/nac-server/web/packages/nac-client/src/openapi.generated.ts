@@ -135,6 +135,7 @@ export interface components {
       text?: string | null;
       thread_name?: string | null;
     };
+    AttachUserTerminalRequest: { page_limit: number; protocol_version: number };
     AuthenticateMcpOAuthRequest: { additional_scopes?: string[] };
     AuthenticateMcpOAuthResponse: {
       authorization_url: string;
@@ -670,6 +671,7 @@ export interface components {
       created_at: (string | null)[];
       messages: components["schemas"]["Message"][];
       page: components["schemas"]["MessagePageMetadata"];
+      terminal_selection_attributions?: components["schemas"]["TerminalSelectionReference"][];
     };
     ModelConfigFromFileRequest: { path: string };
     ModelConfigurationList: { configurations: components["schemas"]["ModelConfigurationRecord"][] };
@@ -713,6 +715,12 @@ export interface components {
     ModelOrigin: { backend: components["schemas"]["BackendKind"]; model: string };
     ModelSource: "baseline" | "overlay" | "user_override" | "provider_default" | "fallback";
     OpenLocalPathResult: { fell_back_to_parent: boolean; opened: string };
+    OpenUserTerminalRequest: {
+      cols: number;
+      launch_id: string;
+      protocol_version: number;
+      rows: number;
+    };
     OpenWorkspacePathRequest: { path: string };
     OrchestratorSteeringRequest: { instruction: string };
     OrchestratorSteeringResponse: {
@@ -788,6 +796,12 @@ export interface components {
       api_key_env?: string | null;
       backend: components["schemas"]["BackendKind"];
       base_url?: string | null;
+    };
+    PullUserTerminalRequest: {
+      acknowledge_offset?: string | null;
+      acknowledge_reset: boolean;
+      protocol_version: number;
+      wait_ms: number;
     };
     PutManagedSecretRequest: { value: string };
     RawSessionConfig: {
@@ -897,6 +911,7 @@ export interface components {
       timeout_ms?: number | null;
     };
     RequestField_Vec_Vec_String: null | string[];
+    ResizeUserTerminalRequest: { cols: number; protocol_version: number; rows: number };
     ResolvedModelConfiguration: {
       allow_insecure_http: boolean;
       api_key_env: string | null;
@@ -1028,6 +1043,7 @@ export interface components {
       response_timing: components["schemas"]["ResponseTimingSnapshot"];
       run_failure?: null | components["schemas"]["RunFailure"];
       sessions: components["schemas"]["SessionSummarySnapshot"][];
+      shell_commands?: components["schemas"]["ShellCommandSnapshot"][];
       thread_episodes: Record<string, components["schemas"]["EpisodeSnapshot"][]>;
       thread_event_boundary: components["schemas"]["SessionEventBoundary"];
       thread_event_diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
@@ -1086,6 +1102,7 @@ export interface components {
       lineage?: null | components["schemas"]["SessionLineageSnapshot"];
       message_cycle?: null | components["schemas"]["MessageCycleMetadata"];
       message_page?: null | components["schemas"]["MessagePageMetadata"];
+      terminal_selection_attributions?: components["schemas"]["TerminalSelectionReference"][];
     };
     SessionSummarySnapshot: {
       backend: string;
@@ -1111,6 +1128,39 @@ export interface components {
       total_tokens?: number | null;
       updated_at: string;
       visible_message_count: number;
+    };
+    ShellCommandRequest: { command: string; request_id: string; timeout_ms?: number | null };
+    ShellCommandSnapshot: {
+      accepted_at_epoch_ms: number;
+      command: string;
+      diagnostic?: string | null;
+      exit_code?: number | null;
+      finished_at_epoch_ms?: number | null;
+      operation_id: string;
+      output_id?: string | null;
+      request_id: string;
+      state: components["schemas"]["ShellCommandState"];
+      stderr: string;
+      stdout: string;
+      timeout_ms: number;
+      transcript_index?: number | null;
+    };
+    ShellCommandState:
+      | "accepted"
+      | "started"
+      | "completed"
+      | "timed_out"
+      | "cancelled"
+      | "rejected"
+      | "spawn_failed"
+      | "interrupted"
+      | "outcome_unknown";
+    ShellOutputPage: {
+      content: string;
+      eof: boolean;
+      next_offset: number;
+      offset: number;
+      overflowed: boolean;
     };
     SkillCatalogEntry: { compatibility?: string | null; description: string; name: string };
     SlashCommand: "compact" | "goal" | "mcp_prompt";
@@ -1172,6 +1222,90 @@ export interface components {
       submitted_at_epoch_ms: number;
     };
     SwitchBranchRequest: { create?: boolean; name: string };
+    TerminalSelectionAttribution: {
+      admission_id: string;
+      capture_id: string;
+      client_capture_time_ms?: string | null;
+      intent_sha256: string;
+      owner_instance_id: string;
+      protocol_version: number;
+      source_kind: components["schemas"]["TerminalSelectionSourceKind"];
+      source_session_id: string;
+      terminal_id: string;
+    };
+    TerminalSelectionDelivery: "send" | "queue" | "steer";
+    TerminalSelectionIntent: {
+      admission_id: string;
+      capture_id: string;
+      client_capture_time_ms?: string | null;
+      initial_delivery: components["schemas"]["TerminalSelectionDelivery"];
+      initial_expected_run_id?: string | null;
+      owner_instance_id: string;
+      protocol_version: number;
+      source_kind: components["schemas"]["TerminalSelectionSourceKind"];
+      source_session_id: string;
+      terminal_id: string;
+      text: string;
+      user_text?: string | null;
+    };
+    TerminalSelectionPreviewRequest: {
+      capture_id: string;
+      client_capture_time_ms?: string | null;
+      protocol_version: number;
+      selected_text: string;
+      user_text?: string | null;
+    };
+    TerminalSelectionPreviewResponse: {
+      capture_id: string;
+      client_capture_time_ms?: string | null;
+      controls_removed: number;
+      input_scalars: number;
+      input_utf8_bytes: number;
+      line_endings_normalized: number;
+      max_scalars: number;
+      max_utf8_bytes: number;
+      owner_instance_id: string;
+      previewed_at_ms: string;
+      protocol_version: number;
+      source_kind: components["schemas"]["TerminalSelectionSourceKind"];
+      source_session_id: string;
+      terminal_id: string;
+      text: string;
+      text_scalars: number;
+      text_utf8_bytes: number;
+      truncated: boolean;
+      user_text?: string | null;
+    };
+    TerminalSelectionReference: {
+      attribution: components["schemas"]["TerminalSelectionAttribution"];
+      message_index: number;
+    };
+    TerminalSelectionSourceKind: "user_supplied_rendered_selection";
+    TerminalSelectionSubmissionRequest: {
+      admission_id: string;
+      capture_id: string;
+      client_capture_time_ms?: string | null;
+      delivery: components["schemas"]["TerminalSelectionDelivery"];
+      expected_owner_instance_id: string;
+      expected_run_id?: string | null;
+      expected_selection_text: string;
+      expected_user_text?: string | null;
+      original_selected_text: string;
+      original_user_text?: string | null;
+      protocol_version: number;
+    };
+    TerminalSelectionSubmissionResponse: {
+      accepted_intent: components["schemas"]["TerminalSelectionIntent"];
+      admission_id: string;
+      current_delivery: components["schemas"]["InboxDelivery"];
+      current_target_run_id?: string | null;
+      delivered_run_id?: string | null;
+      inbox_id: string;
+      protocol_version: number;
+      replayed: boolean;
+      status: components["schemas"]["InboxStatus"];
+      version: number;
+    };
     TestMcpServerRequest: {
       args?: string[] | null;
       bearer_token_env_var?: string | null;
@@ -1376,6 +1510,40 @@ export interface components {
       ssh_host?: components["schemas"]["RequestField_String_String"];
       ssh_identity_file?: components["schemas"]["RequestField_String_String"];
       ssh_port?: components["schemas"]["RequestField_u16_u16"];
+    };
+    UserTerminalFrameResponse: {
+      bytes: number[];
+      caught_up: boolean;
+      gap: boolean;
+      next_offset: string;
+      observer_id: string;
+      offset: string;
+      protocol_version: number;
+      requires_ack: boolean;
+      retained_end: string;
+      retained_start: string;
+      terminal: components["schemas"]["UserTerminalResponse"];
+    };
+    UserTerminalInputRequest: { bytes: number[]; protocol_version: number };
+    UserTerminalListResponse: {
+      protocol_version: number;
+      terminals: components["schemas"]["UserTerminalResponse"][];
+    };
+    UserTerminalObserverResponse: {
+      idle_expiry_ms: number;
+      observer_id: string;
+      protocol_version: number;
+      terminal: components["schemas"]["UserTerminalResponse"];
+    };
+    UserTerminalResponse: {
+      alive: boolean;
+      cols: number;
+      exit_code?: number | null;
+      output_complete: boolean;
+      output_error?: string | null;
+      protocol_version: number;
+      rows: number;
+      terminal_id: string;
     };
     WorksetItemSnapshot: {
       acceptance: string;

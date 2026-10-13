@@ -806,7 +806,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   harness.provider.enqueue(
     "all97-running-session",
     { token: "ALL97_RUNNING_SESSION" },
-    { kind: "text", text: "release review complete", stream: true },
+    { kind: "text", text: "release review complete", stream: "request" },
     runningGate,
   );
   const runningRequest = request.post(`${harness.baseUrl}/sessions/${directSessionId}/runs`, {
@@ -823,13 +823,36 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
 
   await expect(page.getByText(hybridTitle, { exact: true }).first()).toBeVisible();
-  await page.getByRole("button", { name: `${orchestratorTitle}, Orchestrator` }).click();
-  await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
-  await page.getByRole("button", { name: `${directTitle}, Direct` }).click();
-  await expect(page.getByRole("tab", { name: "Subagents" })).toBeVisible();
-  runningGate.release();
+  try {
+    for (const [title, behavior, id, tab] of [
+      [orchestratorTitle, "Orchestrator", orchestratorSessionId, "Threads"],
+      [directTitle, "Direct", directSessionId, "Subagents"],
+    ] as const) {
+      const button = page.getByRole("button", { name: `${title}, ${behavior}` });
+      // A stable row can still be clipped by its parent's height transition.
+      // Wait for full revelation before click's automatic scroll can move it.
+      await expect
+        .poll(() =>
+          button.evaluate((element) => {
+            const dropdown = element.closest("div[aria-hidden]");
+            return (
+              dropdown?.getAttribute("aria-hidden") === "false" &&
+              dropdown.clientHeight === dropdown.scrollHeight &&
+              dropdown.scrollTop === 0
+            );
+          }),
+        )
+        .toBe(true);
+      await button.click();
+      await expect(page).toHaveURL(new RegExp(`/session/${id}/files$`));
+      await expect(page.getByRole("tab", { name: tab })).toBeVisible();
+    }
+  } finally {
+    runningGate.release();
+  }
   expect((await runningRequest).status()).toBe(202);
   await waitForRunIdle(request, harness, directSessionId!);
+  await expect(page.getByText("release review complete", { exact: true }).last()).toBeVisible();
   harness.provider.assertConsumed();
 });
 

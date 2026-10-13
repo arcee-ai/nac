@@ -342,6 +342,13 @@ fn finish_persisted_fork(
     store::TranscriptLogWriter::new(store_path)
         .and_then(|writer| writer.append_batch(fork_id, start_idx, &prefix[blob_len..]))
         .map_err(|error| report_failure(source_id, "write the forked transcript log", &error))?;
+    store::copy_terminal_selection_attributions(
+        store_path,
+        source_id,
+        fork_id,
+        prefix.len() as u64,
+    )
+    .map_err(|error| report_failure(source_id, "copy terminal evidence attribution", &error))?;
     store::clone_session_conversation_artifacts(
         store_path,
         source_id,

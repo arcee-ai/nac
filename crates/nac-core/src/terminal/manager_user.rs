@@ -1,0 +1,479 @@
+//! Native, session-bound operations for independently retained human terminals.
+//! Authorization belongs to the session service; these handles never enter the
+//! model tool registry or its textual input/preview path.
+
+use super::*;
+
+pub(crate) enum ResolvedUserTerminalLaunch {
+    Existing(super::super::UserTerminalStatus),
+    Fresh(String),
+}
+
+impl TerminalManager {
+    // Fixture observation: prove settlement without triggering archival.
+    #[cfg(test)]
+    pub(crate) async fn user_terminal_settled_without_archive_for_test(&self, name: &str) -> bool {
+        let mut sessions = self.sessions.lock().await;
+        sessions.get_mut(name).is_some_and(|session| {
+            session.refresh_status();
+            session.is_user_owned()
+                && session.output_complete()
+                && session.exit_code().is_some()
+                && !session.native_cleanup_pending()
+        })
+    }
+
+    pub(crate) fn user_terminal_name(&self, launch_id: uuid::Uuid) -> String {
+        format!("user-{}-{launch_id}", self.next_session_name())
+    }
+
+    pub(crate) async fn resolve_user_terminal_open(
+        &self,
+        launch_id: uuid::Uuid,
+    ) -> ResolvedUserTerminalLaunch {
+        let suffix = format!("-{launch_id}");
+        // Existing identity and its status are captured together. An evicted
+        // tombstone can never turn a previously issued name into new work.
+        let mut completed = self.completed_sessions.lock().await;
+        let mut sessions = self.sessions.lock().await;
+        let live = sessions
+            .iter_mut()
+            .find(|(name, session)| session.is_user_owned() && name.ends_with(&suffix))
+            .map(|(name, session)| cached_user_status(name, session));
+        if let Some(status) = live {
+            archive_settled_user(
+                &status.id,
+                &status,
+                &mut sessions,
+                &mut completed,
+                self.max_sessions,
+            );
+            return ResolvedUserTerminalLaunch::Existing(status);
+        }
+        if let Some((name, terminal)) = completed
+            .iter()
+            .find(|(name, session)| session.user_owned && name.ends_with(&suffix))
+        {
+            return ResolvedUserTerminalLaunch::Existing(completed_user_status(name, terminal));
+        }
+        ResolvedUserTerminalLaunch::Fresh(self.user_terminal_name(launch_id))
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn resolve_user_terminal_launch(&self, launch_id: uuid::Uuid) -> String {
+        match self.resolve_user_terminal_open(launch_id).await {
+            ResolvedUserTerminalLaunch::Existing(status) => status.id,
+            ResolvedUserTerminalLaunch::Fresh(name) => name,
+        }
+    }
+
+    pub(crate) fn owns_user_terminal_name(&self, name: &str) -> bool {
+        name.strip_prefix(&format!("user-shell-{}-", self.instance_id))
+            .and_then(|suffix| suffix.split_once('-'))
+            .is_some_and(|(counter, launch)| {
+                counter.parse::<u64>().is_ok() && uuid::Uuid::parse_str(launch).is_ok()
+            })
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "native launch binds geometry, backend, environment and lifetime cancellation"
+    )]
+    pub(crate) async fn create_user_terminal(
+        &self,
+        name: String,
+        command: &str,
+        cwd: PathBuf,
+        cols: u16,
+        rows: u16,
+        backend: &Arc<ExecutionBackend>,
+        environment: nac_contracts::CommandEnvironmentSnapshot,
+        expected_config_version: Option<i64>,
+        cancellation: &ThreadCancellation,
+    ) -> Result<()> {
+        validate_geometry(cols, rows)?;
+        if !self.owns_user_terminal_name(&name) || !self.preserve_retained_on_settlement {
+            return Err(anyhow!(
+                "user terminal requires the current direct-session owner"
+            ));
+        }
+        if !matches!(backend.as_ref(), ExecutionBackend::Local { .. }) {
+            return Err(anyhow!(
+                "user terminal support is currently limited to the Local backend"
+            ));
+        }
+        // Runtime inspection must precede child creation and run outside both
+        // observation map locks and the global create transaction.
+        nac_process::NativePtyOwner::preflight()
+            .context("Native terminal process ownership is unavailable")?;
+        let _create = self.create_gate.lock().await;
+        let live = self
+            .sessions
+            .lock()
+            .await
+            .get(&name)
+            .is_some_and(TerminalSession::is_user_owned);
+        if live
+            || self
+                .completed_sessions
+                .lock()
+                .await
+                .iter()
+                .any(|(id, session)| id == &name && session.user_owned)
+        {
+            return Ok(());
+        }
+        let exited = {
+            let mut sessions = self.sessions.lock().await;
+            sessions
+                .iter_mut()
+                .filter_map(|(id, session)| {
+                    session.refresh_status();
+                    (session.is_user_owned()
+                        && session.output_complete()
+                        && session.exit_code().is_some()
+                        && !session.native_cleanup_pending())
+                    .then(|| id.clone())
+                })
+                .collect::<Vec<_>>()
+        };
+        for id in exited {
+            if let Some(mut session) = self.kill_owned_session(&id, false).await? {
+                self.remember_completed(&mut session).await;
+            }
+        }
+        // User admission never evicts another live command to make room.
+        if self.sessions.lock().await.len() >= self.max_sessions {
+            return Err(anyhow!("terminal session limit reached"));
+        }
+        // Acquire cross-process lifecycle protection before a child can exist.
+        // These shared resource leases are not the agent's workspace write gate.
+        let workspace_activity = self.acquire_workspace_activity_lease()?;
+        let session_resource = self.acquire_session_resource_lease()?;
+        if let Some(expected) = expected_config_version {
+            let (store_path, session_id) = self
+                .session_resource_authority
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+                .ok_or_else(|| {
+                    anyhow!("user terminal session configuration authority is missing")
+                })?;
+            let current = crate::store::spawn_blocking_store_caller(move || {
+                crate::sessions::load_session_config(&store_path, &session_id)
+                    .map(|config| config.config_version)
+            })
+            .await??;
+            if current != expected {
+                return Err(anyhow!(
+                    "session configuration changed before terminal launch; reattach and retry"
+                ));
+            }
+        }
+        let envs = environment
+            .iter()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>();
+        let mut sessions = self.sessions.lock().await;
+        cancellation
+            .run_if_active(|| {
+                let lifetime = super::super::native_owner::NativeLifetime::default();
+                lifetime.retain(workspace_activity, session_resource);
+                let mut session = TerminalSession::spawn_with_output(
+                    name.clone(),
+                    command,
+                    Some(cwd),
+                    cols,
+                    rows,
+                    backend,
+                    self.output_registry.clone(),
+                    &envs,
+                    self.remote_cleanup_persistence(),
+                    Some(environment.stream_redactor()),
+                    Some(lifetime),
+                )?;
+                session.retain(None, None);
+                session.attach_child_telemetry(self.telemetry_correlation());
+                sessions.insert(name, session);
+                Ok::<_, anyhow::Error>(())
+            })
+            .ok_or_else(|| anyhow!("user terminal launch cancelled before spawn"))??;
+        Ok(())
+    }
+
+    pub(crate) async fn user_terminal_status(
+        &self,
+        name: &str,
+    ) -> Result<super::super::UserTerminalStatus> {
+        self.check_user_name(name)?;
+        let mut completed = self.completed_sessions.lock().await;
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = sessions
+            .get_mut(name)
+            .filter(|session| session.is_user_owned())
+        {
+            let status = cached_user_status(name, session);
+            archive_settled_user(
+                name,
+                &status,
+                &mut sessions,
+                &mut completed,
+                self.max_sessions,
+            );
+            return Ok(status);
+        }
+        drop(sessions);
+        let (name, terminal) = completed
+            .iter()
+            .find(|(id, terminal)| id == name && terminal.user_owned)
+            .ok_or_else(|| self.missing_user_error())?;
+        Ok(completed_user_status(name, terminal))
+    }
+
+    pub(crate) async fn user_terminal_statuses(&self) -> Vec<super::super::UserTerminalStatus> {
+        let mut completed = self.completed_sessions.lock().await;
+        let mut sessions = self.sessions.lock().await;
+        let live = sessions
+            .iter_mut()
+            .filter(|(_, session)| session.is_user_owned())
+            .map(|(name, session)| cached_user_status(name, session))
+            .collect::<Vec<_>>();
+        // Complete bounded history transitions before projecting the list.
+        // All inspection is cached; native process work stays in its owner.
+        for status in &live {
+            archive_settled_user(
+                &status.id,
+                status,
+                &mut sessions,
+                &mut completed,
+                self.max_sessions,
+            );
+        }
+        let mut statuses = live
+            .into_iter()
+            .filter(|status| sessions.contains_key(&status.id))
+            .collect::<Vec<_>>();
+        statuses.extend(
+            completed
+                .iter()
+                .filter(|(_, terminal)| terminal.user_owned)
+                .map(|(name, terminal)| completed_user_status(name, terminal)),
+        );
+        statuses.sort_by(|first, second| first.id.cmp(&second.id));
+        statuses
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn user_terminal_names(&self) -> Vec<String> {
+        let mut names = self
+            .sessions
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, session)| session.is_user_owned())
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        names.extend(
+            self.completed_sessions
+                .lock()
+                .await
+                .iter()
+                .filter(|(_, terminal)| terminal.user_owned)
+                .map(|(id, _)| id.clone()),
+        );
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    pub(crate) async fn read_user_output(
+        &self,
+        name: &str,
+        offset: u64,
+        limit: usize,
+    ) -> Result<OutputBytePage> {
+        self.check_user_name(name)?;
+        let sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.get(name).filter(|session| session.is_user_owned()) {
+            return self.read_output_bytes(
+                session.output_id(),
+                OutputStream::Combined,
+                offset,
+                limit,
+            );
+        }
+        drop(sessions);
+        let completed = self.completed_sessions.lock().await;
+        let terminal = completed
+            .iter()
+            .find(|(id, terminal)| id == name && terminal.user_owned)
+            .map(|(_, terminal)| terminal)
+            .ok_or_else(|| self.missing_user_error())?;
+        self.read_output_bytes(&terminal.output_id, OutputStream::Combined, offset, limit)
+    }
+
+    pub(crate) async fn write_user_input(
+        &self,
+        name: &str,
+        bytes: &[u8],
+        cancellation: &ThreadCancellation,
+    ) -> Result<()> {
+        self.check_user_name(name)?;
+        if bytes.len() > 16 * 1024 {
+            return Err(anyhow!("terminal input exceeds 16384 bytes"));
+        }
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .get_mut(name)
+            .filter(|session| session.is_user_owned())
+            .ok_or_else(|| self.missing_user_error())?;
+        session.refresh_status();
+        if !session.accepts_user_input() {
+            return Err(anyhow!("user terminal has exited"));
+        }
+        // Admission, not blocking delivery, is the cancellation boundary.
+        // Literal bytes bypass model key-name parsing and preserve FIFO order.
+        let receipt = session.enqueue_user_input(bytes, cancellation)?;
+        drop(sessions);
+        super::super::input::await_receipt(receipt).await
+    }
+
+    pub(crate) async fn wait_user_output(
+        &self,
+        name: &str,
+        observed_end: u64,
+        wait_ms: u16,
+    ) -> Result<()> {
+        self.check_user_name(name)?;
+        if wait_ms > 1000 {
+            return Err(anyhow!("terminal output wait exceeds 1000 milliseconds"));
+        }
+        let sessions = self.sessions.lock().await;
+        let Some(session) = sessions.get(name).filter(|session| session.is_user_owned()) else {
+            drop(sessions);
+            self.user_terminal_status(name).await?;
+            return Ok(());
+        };
+        let notify = Arc::clone(session.output_notify());
+        let output_id = session.output_id().to_owned();
+        let state = session.collector_state();
+        drop(sessions);
+        let notified = notify.notified();
+        tokio::pin!(notified);
+        // Register before the current-end check; collection may advance or
+        // finish between a caller's empty page and this observation.
+        notified.as_mut().enable();
+        if state.complete() || self.output_registry.stats(&output_id)?.combined_bytes > observed_end
+        {
+            return Ok(());
+        }
+        let _ = tokio::time::timeout(Duration::from_millis(u64::from(wait_ms)), notified).await;
+        Ok(())
+    }
+
+    pub(crate) async fn resize_user_terminal(
+        &self,
+        name: &str,
+        cols: u16,
+        rows: u16,
+        cancellation: &ThreadCancellation,
+    ) -> Result<()> {
+        self.check_user_name(name)?;
+        validate_geometry(cols, rows)?;
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .get_mut(name)
+            .filter(|session| session.is_user_owned())
+            .ok_or_else(|| self.missing_user_error())?;
+        session.refresh_status();
+        if !session.accepts_user_input() {
+            return Err(anyhow!("user terminal has exited"));
+        }
+        cancellation
+            .run_if_active(|| session.resize(cols, rows))
+            .ok_or_else(|| anyhow!("user terminal resize cancelled"))?
+    }
+
+    pub(crate) async fn terminate_user_terminal(&self, name: &str) -> Result<()> {
+        self.check_user_name(name)?;
+        self.terminate(name).await
+    }
+
+    fn check_user_name(&self, name: &str) -> Result<()> {
+        if self.owns_user_terminal_name(name) {
+            Ok(())
+        } else {
+            Err(self.missing_user_error())
+        }
+    }
+
+    fn missing_user_error(&self) -> anyhow::Error {
+        anyhow!("user terminal is unavailable for this session owner; it may have exited or its NAC owner restarted")
+    }
+}
+
+fn cached_user_status(
+    name: &str,
+    session: &mut TerminalSession,
+) -> super::super::UserTerminalStatus {
+    session.refresh_status();
+    super::super::UserTerminalStatus {
+        id: name.to_owned(),
+        cols: session.cols,
+        rows: session.rows,
+        alive: session.is_alive(),
+        exit_code: session.exit_code(),
+        output_complete: session.output_complete(),
+        output_error: session.output_error().map(str::to_owned),
+    }
+}
+
+fn completed_user_status(
+    name: &str,
+    terminal: &CompletedTerminal,
+) -> super::super::UserTerminalStatus {
+    super::super::UserTerminalStatus {
+        id: name.to_owned(),
+        cols: terminal.cols,
+        rows: terminal.rows,
+        alive: false,
+        exit_code: terminal.exit_code,
+        output_complete: terminal.collector_state.complete(),
+        output_error: terminal.collector_state.error().map(str::to_owned),
+    }
+}
+
+fn archive_settled_user(
+    name: &str,
+    status: &super::super::UserTerminalStatus,
+    sessions: &mut HashMap<String, TerminalSession>,
+    completed: &mut VecDeque<(String, CompletedTerminal)>,
+    limit: usize,
+) {
+    let Some(session) = sessions.get(name) else {
+        return;
+    };
+    if !status.output_complete || status.exit_code.is_none() || session.native_cleanup_pending() {
+        return;
+    }
+    let terminal = CompletedTerminal::from_session(session);
+    completed.retain(|(id, _)| id != name);
+    completed.push_back((name.to_owned(), terminal));
+    while completed.len() > limit {
+        completed.pop_front();
+    }
+    sessions.remove(name);
+}
+
+pub(crate) fn validate_geometry(cols: u16, rows: u16) -> Result<()> {
+    if !(2..=500).contains(&cols) || !(1..=300).contains(&rows) {
+        return Err(anyhow!(
+            "terminal geometry must be 2..=500 columns and 1..=300 rows"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "manager_user_tests.rs"]
+mod tests;

@@ -6,6 +6,9 @@ import type {
   SessionEventEnvelope,
   SessionSnapshotResponse,
   SubmitPromptResponse,
+  ShellCommandRequest,
+  ShellCommandSnapshot,
+  ShellOutputPage,
 } from "./types.js";
 
 export const NAC_HTTP_CLIENT_VERSION = 1 as const;
@@ -519,6 +522,71 @@ export class NacClient {
       signal: replayOptions.signal ?? snapshotOptions.signal,
     });
     return { snapshot, baseline, replay };
+  }
+
+  async submitShellCommand(
+    sessionId: string,
+    request: Readonly<ShellCommandRequest>,
+    signal?: AbortSignal,
+  ): Promise<ShellCommandSnapshot> {
+    const frozen = Object.freeze({ ...request });
+    const admission = await this.transport
+      .admit<ShellCommandSnapshot>("POST", `${sessionPath(sessionId)}/user-commands`, {
+        body: frozen,
+        requestId: frozen.request_id,
+        signal,
+      })
+      .catch((error: unknown): CommandAdmission<ShellCommandSnapshot> => {
+        // Human admission can return 5xx after committing its immutable intent.
+        // Treat that response as unconfirmed and use the same one-shot readback
+        // as a lost response. Definite 4xx rejection remains unchanged.
+        if (error instanceof ApiError && error.status >= 500 && error.status < 600)
+          return { status: "uncertain", requestId: frozen.request_id, error };
+        throw error;
+      });
+    if (admission.status === "accepted" && admission.response.request_id === frozen.request_id)
+      return admission.response;
+    if (admission.status === "not-sent")
+      throw new DOMException("Command was not sent", "AbortError");
+    const cause =
+      admission.status === "uncertain"
+        ? admission.error
+        : new Error("Human command response changed request identity");
+    // Canonical command text may be redacted. Request identity, never masked
+    // display text, binds readback to the immutable submitted intent.
+    // A lost admission response triggers one lookup, never another submission.
+    try {
+      return await this.getShellCommand(sessionId, frozen.request_id, signal);
+    } catch {
+      throw new UncertainCommandAdmissionError(frozen.request_id, cause);
+    }
+  }
+
+  async getShellCommand(sessionId: string, requestId: string, signal?: AbortSignal) {
+    const snapshot = await this.transport.request<ShellCommandSnapshot>(
+      "GET",
+      `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}`,
+      { signal },
+    );
+    if (snapshot.request_id !== requestId)
+      throw new Error("Human command lookup changed request identity");
+    return snapshot;
+  }
+
+  cancelShellCommand(sessionId: string, requestId: string, signal?: AbortSignal) {
+    return this.transport.request<ShellCommandSnapshot>(
+      "POST",
+      `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}/cancel`,
+      { signal },
+    );
+  }
+
+  getShellOutput(sessionId: string, requestId: string, offset = 0, signal?: AbortSignal) {
+    return this.transport.request<ShellOutputPage>(
+      "GET",
+      `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}/output?offset=${offset}`,
+      { signal },
+    );
   }
 
   submitPrompt(sessionId: string, prompt: string, signal?: AbortSignal) {

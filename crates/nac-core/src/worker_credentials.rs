@@ -75,6 +75,15 @@ pub(crate) fn managed_exa_api_key() -> Option<String> {
         .and_then(|credentials| credentials.exa_api_key.clone())
 }
 
+/// Output-only patterns from the already captured private snapshot. Never
+/// consult ambient credentials or forward these values into child environments.
+pub(crate) fn captured_managed_native_redactions() -> Vec<String> {
+    MANAGED_NATIVE_CREDENTIALS
+        .get()
+        .map(ManagedWorkerNativeCredentials::exact_redactions)
+        .unwrap_or_default()
+}
+
 impl ManagedWorkerNativeCredentials {
     pub(crate) fn from_process_environment() -> io::Result<Self> {
         if let Some(credentials) = MANAGED_NATIVE_CREDENTIALS.get() {

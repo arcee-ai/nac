@@ -217,6 +217,11 @@ port=$(wait_until_ready)
 # read-only root and mounted HOME; binary presence alone misses setup failures.
 "$container_runtime" exec -i "$container_name" /bin/sh < "$repo_root/scripts/smoke-managed-git-lfs.sh"
 
+# Use the same ready NAC runtime and managed UID for actual human PTY HTTP
+# operations. This does not start another server, call inference, or qualify
+# the external gateway. The existing trap owns final container/volume cleanup.
+"$container_runtime" exec -i "$container_name" python3 - < "$repo_root/scripts/smoke-managed-terminal.py"
+
 index_html=$(curl -fsS --noproxy '*' --connect-timeout 1 --max-time 5 \
     "http://127.0.0.1:$port/")
 asset_path=$(printf '%s' "$index_html" | sed -n 's/.*src="\([^"]*\/assets\/dist\/assets\/index-[^"]*\.js\)".*/\1/p')

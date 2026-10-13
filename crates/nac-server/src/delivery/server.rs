@@ -2,6 +2,7 @@ use super::ui_configuration::{self, UiConfiguration};
 use crate::*;
 use nac_core::commands::{slash_command_definitions, SlashCommandDefinition};
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
+use utoipa_axum::router::UtoipaMethodRouterExt;
 
 pub(crate) fn response_compression_layer() -> CompressionLayer<impl Predicate> {
     CompressionLayer::new()
@@ -241,6 +242,25 @@ fn remains_available_during_maintenance(method: &axum::http::Method, path: &str)
     }
 
     method == axum::http::Method::OPTIONS
+        || ((method == axum::http::Method::GET || method == axum::http::Method::HEAD)
+            && (matches!(parts.as_slice(), ["sessions", _, "user-terminals"])
+                || matches!(parts.as_slice(), ["sessions", _, "user-terminals", _])))
+        || (method == axum::http::Method::POST
+            && (matches!(
+                parts.as_slice(),
+                ["sessions", _, "user-terminals", _, "observers"]
+            ) || matches!(
+                parts.as_slice(),
+                ["sessions", _, "user-terminals", _, "observers", _, "read"]
+            ) || matches!(
+                parts.as_slice(),
+                ["sessions", _, "user-terminals", _, "resize"]
+            )))
+        || (method == axum::http::Method::DELETE
+            && matches!(
+                parts.as_slice(),
+                ["sessions", _, "user-terminals", _, "observers", _]
+            ))
         || (method == axum::http::Method::GET
             && matches!(
                 parts.as_slice(),
@@ -291,6 +311,16 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
         (Method::DELETE, "/sessions/s/inbox/1"),
         (Method::DELETE, "/sessions/s/terminals/t"),
         (Method::POST, "/sessions/s/permissions/request"),
+        (Method::GET, "/sessions/s/user-terminals"),
+        (Method::HEAD, "/sessions/s/user-terminals/t"),
+        (Method::GET, "/sessions/s/user-terminals/t"),
+        (Method::POST, "/sessions/s/user-terminals/t/observers"),
+        (
+            Method::POST,
+            "/sessions/s/user-terminals/t/observers/o/read",
+        ),
+        (Method::DELETE, "/sessions/s/user-terminals/t/observers/o"),
+        (Method::POST, "/sessions/s/user-terminals/t/resize"),
     ] {
         assert!(
             remains_available_during_maintenance(&method, path),
@@ -313,6 +343,14 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
         (Method::DELETE, "/projects/project"),
         (Method::DELETE, "/credentials/key"),
         (Method::POST, "/unrelated/cancel"),
+        (Method::POST, "/sessions/s/user-terminals"),
+        (Method::POST, "/sessions/s/user-terminals/t/input"),
+        (Method::GET, "/sessions/s/user-terminals/t/input"),
+        (
+            Method::POST,
+            "/sessions/s/user-terminals/t/observers/o/read/extra",
+        ),
+        (Method::DELETE, "/sessions/s/user-terminals/t"),
     ] {
         assert!(
             !remains_available_during_maintenance(&method, path),
@@ -817,7 +855,26 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::session_runs::stream_events))
         .routes(routes!(delivery::session_runs::cancel_active_run))
         .routes(routes!(delivery::session_runs::cancel_exact_run))
+        .routes(routes!(delivery::shell_commands::submit_handler))
+        .routes(routes!(delivery::shell_commands::lookup_handler))
+        .routes(routes!(delivery::shell_commands::cancel_handler))
+        .routes(routes!(delivery::shell_commands::output_handler))
         .routes(routes!(delivery::session_terminals::terminate_handler))
+        .routes(routes!(
+            delivery::user_terminals::open,
+            delivery::user_terminals::list
+        ))
+        .routes(routes!(delivery::terminal_selection::preview))
+        .routes(
+            routes!(delivery::terminal_selection_submission::submit)
+                .layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
+        )
+        .routes(routes!(delivery::user_terminals::status))
+        .routes(routes!(delivery::user_terminals::attach))
+        .routes(routes!(delivery::user_terminals::pull))
+        .routes(routes!(delivery::user_terminals::detach))
+        .routes(routes!(delivery::user_terminals::input))
+        .routes(routes!(delivery::user_terminals::resize))
 }
 
 /// Return the exact OpenAPI document assembled for the running HTTP router.

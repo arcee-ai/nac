@@ -309,6 +309,7 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     response_timing: import("../../types/openapi.generated").components["schemas"]["ResponseTimingSnapshot"];
     run_failure?: null | import("../../types/openapi.generated").components["schemas"]["RunFailure"];
     sessions: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
+    shell_commands?: import("../../types/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
     thread_episodes: Record<string, import("../../types/openapi.generated").components["schemas"]["EpisodeSnapshot"][]>;
     thread_event_boundary: import("../../types/openapi.generated").components["schemas"]["SessionEventBoundary"];
     thread_event_diagnostics?: import("../../types/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
@@ -322,6 +323,7 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
     message_cycle?: null | import("../../types/openapi.generated").components["schemas"]["MessageCycleMetadata"];
     message_page?: null | import("../../types/openapi.generated").components["schemas"]["MessagePageMetadata"];
+    terminal_selection_attributions?: import("../../types/openapi.generated").components["schemas"]["TerminalSelectionReference"][];
 }>, Error>;
 export declare function useLoadOlderMessages(id: string): import("@tanstack/react-query").UseMutationResult<boolean, Error, void, unknown>;
 export declare function useThreadEventPages(id: string | null, threadName: string | null): import("@tanstack/react-query").UseInfiniteQueryResult<InfiniteData<{
@@ -358,6 +360,7 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     response_timing: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ResponseTimingSnapshot"];
     run_failure?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["RunFailure"];
     sessions: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
+    shell_commands?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
     thread_episodes: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["EpisodeSnapshot"][]>;
     thread_event_boundary: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionEventBoundary"];
     thread_event_diagnostics?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
@@ -371,6 +374,7 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     lineage?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
     message_cycle?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["MessageCycleMetadata"];
     message_page?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["MessagePageMetadata"];
+    terminal_selection_attributions?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionReference"][];
 }, Error, {
     allow_insecure_http?: import("../../types/openapi.generated").components["schemas"]["RequestField_bool_bool"];
     api_key_env?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];

@@ -119,6 +119,72 @@ persistence baseline is separately held/unavailable; local scripted-provider
 coverage is not evidence that its hosted incident is fixed. Container image
 execution requires container infrastructure and is a separate coverage lane.
 
+## Terminal observation (ALL-141)
+
+`features/terminal/browserRuntime.ts` owns one browser observation activation.
+Its Effect workflow orders renderer acquisition, SDK attachment, initial resize,
+and output observation. A synchronous Scope releases keyboard/binary listeners,
+the ResizeObserver, input pump and renderer before the React bridge acquires a
+replacement activation. Cleanup first aborts the activation, then closes the
+Scope. A dynamic renderer import that finishes after cleanup releases its newly
+acquired renderer without attaching or publishing controls.
+
+Resize effects coalesce pending geometry and release their running marker on
+success, failure or interruption. Resize failure does not stop independent
+retained-output replay. Typed operation failures preserve the original cause for
+the existing connection/input notices; interruption cannot paint a detached view.
+React retains the explicit reconnect, selection, focus and fresh-input controls.
+TanStack retains terminal list/status polling and open/close mutation ownership.
+
+The runtime-free typed SDK remains the sole owner of observer receipts,
+incarnation/cursor validation, parser-before-ACK backpressure, replay/reset and
+bounded literal input. Effect adds no second input queue, transport, retry or
+reconnect loop. Detach releases observation and never terminates a shell or agent.
+Unknown input still requires explicit acknowledgement before fresh typing.
+
+## Terminal selection review (ALL-142)
+
+`features/terminal-selection/reviewWorkflow.ts` owns preview/submission sequencing
+and one scoped request signal per operation. Preview failure stays local; a
+submission settles its originating cache before applying a locally fenced
+receipt. Both accepted and unconfirmed submission outcomes reconcile the origin,
+including after disclosure detach, same-chat activation reset or consumer
+replacement. Abort cannot establish that a dispatched command was not accepted.
+It never authorizes an automatic retry or durable cancellation.
+
+The controller retains private ephemeral originals, editing, immutable reviewed
+submission identity and explicit retry. Request identity and the existing runtime
+activation capability fence local publication; there is no second generation
+counter in Effect. Scope finalization aborts the request, including when replaced,
+cleared or detached. StrictMode cleanup closes request resources synchronously;
+the retain bridge defers only final draft disposal for a replacement retain.
+
+## Human shell command admission (ALL-140)
+
+The composer recognizes an unescaped `!` at byte zero before trimming and sends
+the exact suffix through the runtime-bound client. `features/human-shell/workflow.ts`
+owns the scoped admission claim, typed outcome classification and originating
+cache settlement. The typed client remains the sole owner of one POST and
+same-request-ID readback after uncertain transport; explicit retry keeps that
+identity. Mutation variables contain opaque attempt handles rather than drafts.
+
+Each runtime's composer store owns private immutable pending intents by session.
+An unknown admission survives composer remount. Changing its command first
+requires canonical readback; the bounded owner refuses new capacity rather than
+evicting unknown identities. Runtime disposal releases these transient intents.
+A separate presentation Scope fences late local callbacks without cancelling
+durable execution. Output/cancel queries and polling remain TanStack owners;
+“Ask about this” only fills a draft until the user submits it.
+
+A human command, a user terminal and a model run have distinct authorities and
+lifetimes. Active human commands disable selection Send; explicit Queue remains
+available, while Steer requires an actual run. After command result settlement
+and operation/lease release, the existing inbox owner wakes explicitly pending
+input. Command completion alone never creates a model turn.
+TanStack owns originating-cache invalidation; neither original selections nor
+request variables enter its caches. React renders the canonical review and owns
+the explicit Send, retry, edit and clear controls.
+
 ## Setup and provider workflows (ALL-136)
 
 `features/setup/workflow.ts` owns ordered optional-preset → project → first-chat

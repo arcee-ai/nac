@@ -79,6 +79,12 @@ impl SessionService {
         let skills = run_config.agent.skills();
         let mcp = run_config.agent.mcp_registry();
         let terminal_manager = run_config.agent.terminal_manager();
+        let user_terminal_context = run_config.agent.user_terminal_runtime().map(|runtime| {
+            Arc::new(user_terminals::UserTerminalContext::new(
+                runtime,
+                run_config.client.clone(),
+            ))
+        });
         if let Some(target) = workspace_git.as_ref() {
             terminal_manager.configure_workspace_authority(
                 metadata.store_path.clone(),
@@ -98,6 +104,11 @@ impl SessionService {
         } else {
             TranscriptScanCache::default()
         };
+        let shell_runtime = run_config
+            .agent
+            .shell_execution_context()
+            .ok()
+            .map(|(runtime, _)| runtime);
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
             goal_runtime,
@@ -118,6 +129,8 @@ impl SessionService {
             skills,
             mcp,
             terminal_manager,
+            user_terminal_context,
+            shell_runtime,
             permission_broker,
             sandbox_resource_lease: Arc::new(StdMutex::new(None)),
             has_sandbox,
@@ -312,6 +325,7 @@ impl SessionService {
     /// preserving its bounded retained output tombstone. This is deliberately
     /// an ordinary session operation rather than a maintenance force-clear.
     pub async fn terminate_terminal(&self, terminal_id: &str) -> Result<()> {
+        let _host_admission = self.user_terminal_host_admission(true).await?;
         self.terminal_manager.terminate(terminal_id).await
     }
 

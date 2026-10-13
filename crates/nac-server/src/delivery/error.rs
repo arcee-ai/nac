@@ -36,11 +36,72 @@ impl ApiError {
     }
 }
 
+/// Both selection admission and the human transcript writer can lose a commit
+/// acknowledgement. That semantic identity supersedes the retained SQLite code.
+fn is_commit_uncertain(error: &anyhow::Error) -> bool {
+    use nac_core::store::{TerminalSelectionAdmissionError, TranscriptAppendError};
+    matches!(
+        error.downcast_ref::<TerminalSelectionAdmissionError>(),
+        Some(TerminalSelectionAdmissionError::CommitUncertain)
+    ) || matches!(
+        error.downcast_ref::<TranscriptAppendError>(),
+        Some(TranscriptAppendError::CommitUncertain)
+    )
+}
+
+/// Only known precommit contention permits a conflict response. An uncertain
+/// commit/acknowledgement wrapper takes precedence over any retained SQLite cause.
+fn is_precommit_contention(error: &anyhow::Error) -> bool {
+    use nac_core::store::PersistenceAdmissionError;
+    if is_commit_uncertain(error) {
+        return false;
+    }
+    match error.downcast_ref::<PersistenceAdmissionError>() {
+        Some(
+            PersistenceAdmissionError::Overloaded | PersistenceAdmissionError::CallerOverloaded,
+        ) => true,
+        Some(_) => false,
+        None => nac_core::store::is_sqlite_busy(error),
+    }
+}
+
+impl From<nac_core::session_service::ShellCommandError> for ApiError {
+    fn from(error: nac_core::session_service::ShellCommandError) -> Self {
+        use nac_core::session_service::ShellCommandError;
+        let status = match &error {
+            ShellCommandError::Invalid(_) | ShellCommandError::Unsupported => {
+                StatusCode::BAD_REQUEST
+            }
+            ShellCommandError::Busy | ShellCommandError::Conflict => StatusCode::CONFLICT,
+            ShellCommandError::Store(error) if is_precommit_contention(error) => {
+                StatusCode::CONFLICT
+            }
+            ShellCommandError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self::new(status, error.to_string())
+    }
+}
+
 impl From<JsonRejection> for ApiError {
     fn from(error: JsonRejection) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: format!("invalid JSON request body: {error}"),
+        }
+    }
+}
+
+impl From<application::terminal_observation::TerminalApplicationError> for ApiError {
+    fn from(error: application::terminal_observation::TerminalApplicationError) -> Self {
+        use application::terminal_observation::TerminalApplicationError;
+        match error {
+            TerminalApplicationError::Invalid(message) => Self::bad_request(message.into()),
+            TerminalApplicationError::Unavailable => Self::new(StatusCode::CONFLICT,
+                "terminal or observer is unavailable for this session owner; it may have closed, expired, or its NAC owner restarted".into()),
+            TerminalApplicationError::Busy => Self::new(StatusCode::TOO_MANY_REQUESTS,
+                "terminal observer capacity is full or an observation request is already in flight".into()),
+            TerminalApplicationError::Rejected(message) => Self::new(StatusCode::CONFLICT, message),
+            TerminalApplicationError::Internal(error) => error.into(),
         }
     }
 }
@@ -202,14 +263,53 @@ impl From<RequestConfigurationError> for ApiError {
 
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
-        let message = error.to_string();
-        let status = if let Some(error) = error.downcast_ref::<sessions::SessionConfigUpdateError>()
+        if let Some(command) = error.downcast_ref::<nac_core::session_service::ShellCommandError>()
         {
+            // Context outside the shell wrapper can itself identify an unknown
+            // commit/acknowledgement. Do not turn its retained BUSY into a retry.
+            if is_commit_uncertain(&error)
+                || error
+                    .downcast_ref::<nac_core::store::PersistenceAdmissionError>()
+                    .is_some_and(|cause| {
+                        !matches!(
+                            cause,
+                            nac_core::store::PersistenceAdmissionError::Overloaded
+                                | nac_core::store::PersistenceAdmissionError::CallerOverloaded
+                        )
+                    })
+            {
+                return Self::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+            }
+            let mapped: Self = command.clone().into();
+            return Self::new(mapped.status, error.to_string());
+        }
+
+        let message = error.to_string();
+        // A typed uncertain admission remains a reconciliation failure even when
+        // its retained SQLite cause is BUSY/LOCKED. Only precommit contention is 409.
+        let status = if is_commit_uncertain(&error) {
+            StatusCode::INTERNAL_SERVER_ERROR
+        } else if let Some(error) = error.downcast_ref::<sessions::SessionConfigUpdateError>() {
             match error {
                 sessions::SessionConfigUpdateError::NotFound(_) => StatusCode::NOT_FOUND,
                 sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
                 sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
             }
+        } else if error
+            .downcast_ref::<application::session_terminals::TerminalOwnerMismatch>()
+            .is_some()
+        {
+            StatusCode::CONFLICT
+        } else if error
+            .downcast_ref::<nac_core::store::ManagedWorkAdmissionError>()
+            .is_some_and(|error| {
+                matches!(
+                    error,
+                    nac_core::store::ManagedWorkAdmissionError::Maintenance
+                )
+            })
+        {
+            StatusCode::SERVICE_UNAVAILABLE
         } else if let Some(error) = error.downcast_ref::<SessionSubmitError>() {
             match error {
                 SessionSubmitError::Busy { .. } | SessionSubmitError::ExternalBusy { .. } => {
@@ -303,3 +403,7 @@ impl IntoResponse for ApiError {
             .into_response()
     }
 }
+
+#[cfg(test)]
+#[path = "error_tests.rs"]
+mod tests;

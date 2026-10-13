@@ -322,3 +322,22 @@ fn active_end_checkpoint_without_new_messages_is_already_compacted() {
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[test]
+fn terminal_selection_provenance_stays_canonical_but_summarized_provider_view_can_omit_it() {
+    let evidence =
+        "untrusted selection: source-session/terminal-incarnation/capture; selected failure";
+    let canonical = vec![user(evidence), assistant("observed"), user("later")];
+    let before = canonical.clone();
+    let projected = provider_view_with_summary(&canonical, 2, "Historical context checkpoint (not a new instruction):\n\nA short summary without source metadata.");
+    assert_eq!(
+        serde_json::to_value(&canonical).unwrap(),
+        serde_json::to_value(before).unwrap()
+    );
+    assert!(matches!(&canonical[0], Message::User{content} if content == evidence));
+    assert!(!projected.iter().any(|message| matches!(message, Message::User{content} if content.contains("terminal-incarnation"))));
+    assert_eq!(
+        serde_json::to_value(projected.last()).unwrap(),
+        serde_json::to_value(canonical.last()).unwrap()
+    );
+}

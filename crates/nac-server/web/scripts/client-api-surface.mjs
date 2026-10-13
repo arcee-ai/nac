@@ -1,6 +1,24 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "POST /sessions/{session_id}/user-commands": "api.submitShellCommand",
+  "GET /sessions/{session_id}/user-commands/{request_id}": "api.getShellCommand",
+  "POST /sessions/{session_id}/user-commands/{request_id}/cancel": "api.cancelShellCommand",
+  "GET /sessions/{session_id}/user-commands/{request_id}/output": "api.getShellOutput",
+  "POST /sessions/{session_id}/user-terminals/{terminal_id}/selection-submissions":
+    "api.submitUserTerminalSelection",
+  "POST /sessions/{session_id}/user-terminals/{terminal_id}/selection-preview":
+    "api.previewUserTerminalSelection",
+  "POST /sessions/{session_id}/user-terminals": "api.openUserTerminal",
+  "GET /sessions/{session_id}/user-terminals": "api.listUserTerminals",
+  "GET /sessions/{session_id}/user-terminals/{terminal_id}": "api.getUserTerminal",
+  "POST /sessions/{session_id}/user-terminals/{terminal_id}/observers": "api.attachUserTerminal",
+  "POST /sessions/{session_id}/user-terminals/{terminal_id}/observers/{observer_id}/read":
+    "api.pullUserTerminal",
+  "DELETE /sessions/{session_id}/user-terminals/{terminal_id}/observers/{observer_id}":
+    "api.detachUserTerminal",
+  "POST /sessions/{session_id}/user-terminals/{terminal_id}/input": "api.inputUserTerminal",
+  "POST /sessions/{session_id}/user-terminals/{terminal_id}/resize": "api.resizeUserTerminal",
   "GET /sessions/{session_id}/messages": "api.getMessages",
   "GET /sessions/{session_id}/threads/{thread_name}/events": "api.getThreadEvents",
   "GET /auth": "api.listManagedAuth",

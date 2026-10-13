@@ -167,6 +167,22 @@ pub enum ManagedMaintenanceError {
     Store(anyhow::Error),
 }
 
+/// Deliberate new-work rejection, distinct from a failed admission-store read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedWorkAdmissionError {
+    Maintenance,
+}
+
+impl std::fmt::Display for ManagedWorkAdmissionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Maintenance => formatter.write_str("managed host is in maintenance"),
+        }
+    }
+}
+
+impl std::error::Error for ManagedWorkAdmissionError {}
+
 pub struct ManagedWorkAdmission {
     _lease: crate::sessions::HostAdmissionLease,
 }
@@ -179,7 +195,7 @@ pub fn try_admit_managed_work(path: &Path) -> Result<ManagedWorkAdmission> {
         crate::sessions::HostAdmissionLease::try_acquire(path).map_err(|error| anyhow!(error))?;
     let snapshot = managed_maintenance_snapshot(path)?;
     if snapshot.state == ManagedMaintenanceState::Maintenance {
-        return Err(anyhow!("managed host is in maintenance"));
+        return Err(ManagedWorkAdmissionError::Maintenance.into());
     }
     Ok(ManagedWorkAdmission { _lease: lease })
 }
@@ -201,7 +217,7 @@ pub fn try_admit_managed_work_for_identity(
         crate::sessions::HostAdmissionLease::try_acquire(path).map_err(|error| anyhow!(error))?;
     let snapshot = managed_maintenance_snapshot(path)?;
     if snapshot.state == ManagedMaintenanceState::Maintenance {
-        return Err(anyhow!("managed host is in maintenance"));
+        return Err(ManagedWorkAdmissionError::Maintenance.into());
     }
     validate_accepted_identity(&snapshot, running)?;
     Ok(ManagedWorkAdmission { _lease: lease })

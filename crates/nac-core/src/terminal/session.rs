@@ -1,4 +1,3 @@
-use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -10,7 +9,9 @@ use anyhow::{Context, Result};
 use portable_pty::{NativePtySystem, PtySize, PtySystem};
 use tokio::sync::Notify;
 
-use super::{ArtifactKind, OutputArtifactLease, OutputRegistry, OutputStream};
+use super::collector::{CollectorState, PtyCollector};
+use super::input::PtyInput;
+use super::{ArtifactKind, OutputArtifactLease, OutputRegistry};
 #[cfg(all(unix, not(target_os = "linux")))]
 use crate::process::signal_descendants;
 #[cfg(target_os = "linux")]
@@ -19,17 +20,24 @@ use crate::sandbox::ExecutionBackend;
 
 pub struct TerminalSession {
     pub name: String,
-    writer: Box<dyn Write + Send>,
+    writer: PtyInput,
     output_id: String,
     _output_lease: OutputArtifactLease,
     preview_cursor: u64,
     output_notify: Arc<Notify>,
-    child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
+    native_owner: Option<nac_process::NativePtyOwner>,
+    native_lifetime: Option<super::native_owner::NativeLifetime>,
     #[cfg(target_os = "linux")]
     root_start_time: u64,
     #[cfg(unix)]
     process_group_id: Option<libc::pid_t>,
-    _pty_pair: portable_pty::PtyPair,
+    _model_slave: Option<Box<dyn portable_pty::SlavePty + Send>>,
+    master: Box<dyn portable_pty::MasterPty + Send>,
+    collector_state: CollectorState,
+    user_owned: bool,
+    // Private launch policy, independent of the collector's mutable stream.
+    pub(super) selection_redactor: Option<Arc<nac_contracts::CommandOutputRedactor>>,
     _reader_thread: std::thread::JoinHandle<()>,
     pub created_at: Instant,
     pub last_output_at: Instant,
@@ -64,6 +72,41 @@ impl TerminalSession {
         extra_envs: &[(String, String)],
         cleanup_authority: Option<(PathBuf, String)>,
     ) -> Result<Self> {
+        Self::spawn_with_output(
+            name,
+            command,
+            cwd,
+            cols,
+            rows,
+            backend,
+            output_registry,
+            extra_envs,
+            cleanup_authority,
+            None,
+            None,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "PTY construction keeps output sanitization and execution authority explicit"
+    )]
+    pub(super) fn spawn_with_output(
+        name: String,
+        command: &str,
+        cwd: Option<PathBuf>,
+        cols: u16,
+        rows: u16,
+        backend: &Arc<ExecutionBackend>,
+        output_registry: OutputRegistry,
+        extra_envs: &[(String, String)],
+        cleanup_authority: Option<(PathBuf, String)>,
+        user_output: Option<nac_contracts::CommandOutputRedactor>,
+        native_lifetime: Option<super::native_owner::NativeLifetime>,
+    ) -> Result<Self> {
+        let user_owned = user_output.is_some();
+        let native_local = user_owned && matches!(backend.as_ref(), ExecutionBackend::Local { .. });
+        let selection_redactor = user_output.as_ref().map(|policy| Arc::new(policy.fresh()));
         let pty_system = NativePtySystem::default();
         let pty_pair = pty_system
             .openpty(PtySize {
@@ -76,17 +119,64 @@ impl TerminalSession {
         // Reserve bounded output metadata before the command can exist. If
         // every slot belongs to a live command, fail without spawning a PTY
         // process whose output could not be retained.
-        let output_lease = output_registry.create(ArtifactKind::Pty)?;
+        let output_lease = if user_owned {
+            output_registry.create_user_pty()?
+        } else {
+            output_registry.create(ArtifactKind::Pty)?
+        };
         let output_id = output_lease.output_id().to_string();
 
-        let mut envs = terminal_env_owned();
+        let mut envs = if user_owned {
+            user_terminal_env()
+        } else {
+            terminal_env_owned()
+        };
         envs.extend(extra_envs.iter().cloned());
-        let (cmd, pidfile) = backend.terminal_pty_command(command, cwd.as_deref(), &envs);
+        let (mut cmd, pidfile) = if user_owned {
+            backend.user_terminal_pty_command(command, cwd.as_deref(), &envs)
+        } else {
+            backend.terminal_pty_command(command, cwd.as_deref(), &envs)
+        };
+        if user_owned && !extra_envs.iter().any(|(name, _)| name == "NO_COLOR") {
+            // Presence-based color consumers must not inherit the model/host
+            // NO_COLOR setting; an explicit launch snapshot still wins.
+            cmd.env_remove("NO_COLOR");
+        }
         // resolved_cwd mirrors the default-workdir fallback inside each
         // backend's terminal_pty_command: explicit cwd if provided, otherwise
         // the backend's default terminal directory. Keep these in sync.
         let resolved_cwd = cwd.unwrap_or_else(|| backend.default_terminal_cwd());
         let backend_cleanup = pidfile.map(|pidfile| (Arc::clone(backend), pidfile));
+        // Prepare every fallible PTY I/O handle before a child or durable
+        // cleanup obligation can exist.
+        let reader = pty_pair
+            .master
+            .try_clone_reader()
+            .context("Failed to clone PTY reader")?;
+        let writer = pty_pair
+            .master
+            .take_writer()
+            .context("Failed to take PTY writer")?;
+
+        let writer = PtyInput::new(writer, user_owned)?;
+        let alive = Arc::new(AtomicBool::new(true));
+        let notify = Arc::new(Notify::new());
+        let collector_state = CollectorState::default();
+        let collector = PtyCollector {
+            registry: output_registry,
+            output_id: output_id.clone(),
+            redactor: user_output,
+            alive: Arc::clone(&alive),
+            notify: Arc::clone(&notify),
+            state: collector_state.clone(),
+        };
+        // Thread allocation is fallible and precedes the child. After native
+        // spawn, ownership transfer cannot abandon a child through an I/O error.
+        let reader_thread = std::thread::Builder::new()
+            .name("terminal-output".to_owned())
+            .spawn(move || collector.collect(reader))
+            .context("Failed to start PTY output collector")?;
+
         let durable_cleanup = match (backend_cleanup.as_ref(), cleanup_authority) {
             (Some((_, pidfile)), Some((store_path, session_id))) => {
                 crate::store::record_terminal_remote_cleanup(&store_path, &session_id, pidfile)?;
@@ -110,10 +200,25 @@ impl TerminalSession {
                 return Err(error);
             }
         };
+        let portable_pty::PtyPair { master, slave } = pty_pair;
+        // The child owns its slave descriptors after spawn. Keeping another
+        // slave open in NAC prevents Linux master EOF even after the child
+        // exits, withholding the redactor's safe final suffix and leases.
+        // Preserve the established model PTY lifetime independently.
+        let model_slave = if user_owned {
+            drop(slave);
+            None
+        } else {
+            Some(slave)
+        };
         #[cfg(target_os = "linux")]
         let mut child = child;
         #[cfg(target_os = "linux")]
-        let root_start_time = {
+        let root_start_time = if native_local {
+            // The native owner captures and retains its own platform identity;
+            // the legacy identity is never used for these terminals.
+            0
+        } else {
             let start_time = child
                 .process_id()
                 .and_then(|pid| process_start_time(pid as libc::pid_t));
@@ -129,51 +234,26 @@ impl TerminalSession {
             start_time
         };
         #[cfg(unix)]
-        let process_group_id = child.process_id().and_then(|pid| {
-            let pid = pid as libc::pid_t;
-            // SAFETY: `getpgid` accepts any integer process id; a failed lookup
-            // returns -1 and therefore cannot equal the child id.
-            let group = unsafe { libc::getpgid(pid) };
-            (group == pid).then_some(group)
-        });
+        let process_group_id = (!native_local)
+            .then(|| child.process_id())
+            .flatten()
+            .and_then(|pid| {
+                let pid = pid as libc::pid_t;
+                // SAFETY: `getpgid` accepts any integer process id; a failed lookup
+                // returns -1 and therefore cannot equal the child id.
+                let group = unsafe { libc::getpgid(pid) };
+                (group == pid).then_some(group)
+            });
 
-        let reader = pty_pair
-            .master
-            .try_clone_reader()
-            .context("Failed to clone PTY reader")?;
-        let writer = pty_pair
-            .master
-            .take_writer()
-            .context("Failed to take PTY writer")?;
-
-        let alive = Arc::new(AtomicBool::new(true));
-        let alive_clone = Arc::clone(&alive);
-        let reader_output_id = output_id.clone();
-        let reader_output_registry = output_registry;
-        let notify = Arc::new(Notify::new());
-        let notify_clone = Arc::clone(&notify);
-
-        let reader_thread = std::thread::spawn(move || {
-            let mut reader = reader;
-            let mut buf = [0u8; 4096];
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) | Err(_) => {
-                        alive_clone.store(false, Ordering::SeqCst);
-                        notify_clone.notify_one();
-                        break;
-                    }
-                    Ok(n) => {
-                        let _ = reader_output_registry.append(
-                            &reader_output_id,
-                            OutputStream::Combined,
-                            buf[..n].to_vec(),
-                        );
-                        notify_clone.notify_one();
-                    }
-                }
-            }
-        });
+        // portable-pty's successful native spawn establishes a fresh session
+        // before exec. Transfer the still-unreaped child even on immediate exit.
+        let (child, native_owner, native_lifetime) = if native_local {
+            let lifetime = native_lifetime.unwrap_or_default();
+            let owner = super::native_owner::transfer(child, Arc::clone(&notify), lifetime.clone());
+            (None, Some(owner), Some(lifetime))
+        } else {
+            (Some(child), None, native_lifetime)
+        };
 
         Ok(TerminalSession {
             name,
@@ -183,11 +263,17 @@ impl TerminalSession {
             preview_cursor: 0,
             output_notify: notify,
             child,
+            native_owner,
+            native_lifetime,
             #[cfg(target_os = "linux")]
             root_start_time,
             #[cfg(unix)]
             process_group_id,
-            _pty_pair: pty_pair,
+            _model_slave: model_slave,
+            master,
+            collector_state,
+            user_owned,
+            selection_redactor,
             _reader_thread: reader_thread,
             created_at: Instant::now(),
             last_output_at: Instant::now(),
@@ -206,11 +292,48 @@ impl TerminalSession {
     }
 
     pub fn write(&mut self, data: &[u8]) -> Result<()> {
-        self.writer
-            .write_all(data)
-            .context("Failed to write to PTY")?;
-        self.writer.flush().context("Failed to flush PTY")?;
+        self.writer.write_model(data)?;
         self.last_output_at = Instant::now();
+        Ok(())
+    }
+
+    pub(super) fn enqueue_user_input(
+        &mut self,
+        bytes: &[u8],
+        cancellation: &crate::tools::ThreadCancellation,
+    ) -> Result<tokio::sync::oneshot::Receiver<Result<(), &'static str>>> {
+        let receipt = self.writer.enqueue_user(bytes, cancellation)?;
+        self.last_output_at = Instant::now();
+        Ok(receipt)
+    }
+
+    pub(super) fn is_user_owned(&self) -> bool {
+        self.user_owned
+    }
+
+    pub(super) fn collector_state(&self) -> CollectorState {
+        self.collector_state.clone()
+    }
+
+    pub(super) fn output_complete(&self) -> bool {
+        self.collector_state.complete()
+    }
+
+    pub(super) fn output_error(&self) -> Option<&'static str> {
+        self.collector_state.error()
+    }
+
+    pub(super) fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        self.master
+            .resize(PtySize {
+                cols,
+                rows,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .context("Failed to resize PTY")?;
+        self.cols = cols;
+        self.rows = rows;
         Ok(())
     }
 
@@ -232,10 +355,27 @@ impl TerminalSession {
     }
 
     pub fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::SeqCst)
+        if let Some(owner) = &self.native_owner {
+            let status = owner.snapshot();
+            // Terminal ownership remains live until cleanup settles, even if
+            // the shell root has exited and the collector already reached EOF.
+            status.leader_alive || status.cleanup_pending
+        } else if self.user_owned {
+            // Reader completion/failure is independent of process liveness.
+            // A shell that closes its output can still own descendants.
+            self.exit_code.is_none()
+        } else {
+            self.alive.load(Ordering::SeqCst)
+        }
     }
 
     pub fn refresh_status(&mut self) {
+        if let Some(owner) = &self.native_owner {
+            let status = owner.snapshot();
+            self.exit_code = status.exit_code;
+            self.alive.store(status.leader_alive, Ordering::SeqCst);
+            return;
+        }
         if self.exit_code.is_some() {
             self.alive.store(false, Ordering::SeqCst);
             return;
@@ -251,7 +391,10 @@ impl TerminalSession {
             self.process_group_id = None;
         }
 
-        if let Ok(Some(status)) = self.child.try_wait() {
+        let Some(child) = self.child.as_mut() else {
+            return;
+        };
+        if let Ok(Some(status)) = child.try_wait() {
             self.exit_code = Some(status.exit_code() as i32);
             #[cfg(unix)]
             {
@@ -266,7 +409,12 @@ impl TerminalSession {
 
     #[cfg(unix)]
     fn root_exited_without_reaping(&self) -> bool {
-        let Some(pid) = self.child.process_id().map(|pid| pid as libc::pid_t) else {
+        let Some(pid) = self
+            .child
+            .as_ref()
+            .and_then(|child| child.process_id())
+            .map(|pid| pid as libc::pid_t)
+        else {
             return false;
         };
         // SAFETY: `siginfo_t` is a C output record for which the all-zero byte
@@ -298,8 +446,12 @@ impl TerminalSession {
     ) {
         if !self.retained {
             self.retained = true;
-            self._workspace_activity = workspace_activity;
-            self._session_resource = session_resource;
+            if let Some(lifetime) = &self.native_lifetime {
+                lifetime.retain(workspace_activity, session_resource);
+            } else {
+                self._workspace_activity = workspace_activity;
+                self._session_resource = session_resource;
+            }
         }
     }
 
@@ -311,12 +463,32 @@ impl TerminalSession {
         self.backend_cleanup.is_some()
     }
 
+    pub(super) fn native_owner(&self) -> Option<&nac_process::NativePtyOwner> {
+        self.native_owner.as_ref()
+    }
+
+    pub(super) fn native_cleanup_pending(&self) -> bool {
+        self.native_owner
+            .as_ref()
+            .is_some_and(|owner| owner.snapshot().cleanup_pending)
+    }
+
+    pub(super) fn accepts_user_input(&self) -> bool {
+        self.native_owner.as_ref().map_or_else(
+            || self.is_alive(),
+            nac_process::NativePtyOwner::accepts_input,
+        )
+    }
+
     pub fn idle_duration(&self) -> Duration {
         self.last_output_at.elapsed()
     }
 
     pub fn pid(&self) -> Option<u32> {
-        self.child.process_id()
+        self.native_owner
+            .as_ref()
+            .and_then(nac_process::NativePtyOwner::process_id)
+            .or_else(|| self.child.as_ref().and_then(|child| child.process_id()))
     }
 
     pub(super) fn attach_child_telemetry(&mut self, correlation: crate::telemetry::Correlation) {
@@ -336,6 +508,14 @@ impl TerminalSession {
     }
 
     pub async fn kill(&mut self) -> Result<()> {
+        if let Some(owner) = &self.native_owner {
+            owner
+                .terminate()
+                .await
+                .context("native terminal cleanup incomplete")?;
+            self.refresh_status();
+            return Ok(());
+        }
         self.refresh_status();
         #[cfg(unix)]
         let descendant_result = if self.exit_code.is_none() {
@@ -377,7 +557,7 @@ impl TerminalSession {
 
     #[cfg(target_os = "linux")]
     fn signal_descendants(&self, signal: libc::c_int) -> std::io::Result<()> {
-        if let Some(pid) = self.child.process_id() {
+        if let Some(pid) = self.child.as_ref().and_then(|child| child.process_id()) {
             signal_descendants(pid as libc::pid_t, self.root_start_time, signal)
         } else {
             Ok(())
@@ -386,7 +566,7 @@ impl TerminalSession {
 
     #[cfg(all(unix, not(target_os = "linux")))]
     fn signal_descendants(&self, signal: libc::c_int) -> std::io::Result<()> {
-        if let Some(pid) = self.child.process_id() {
+        if let Some(pid) = self.child.as_ref().and_then(|child| child.process_id()) {
             signal_descendants(pid as libc::pid_t, signal)
         } else {
             Ok(())
@@ -425,8 +605,11 @@ impl TerminalSession {
     fn signal_process_group(&self, _signal: i32) {}
 
     async fn reap_child(&mut self) {
+        let Some(child) = self.child.as_mut() else {
+            return;
+        };
         for _ in 0..10 {
-            match self.child.try_wait() {
+            match child.try_wait() {
                 Ok(Some(status)) => {
                     self.exit_code = Some(status.exit_code() as i32);
                     return;
@@ -435,9 +618,9 @@ impl TerminalSession {
                 Err(_) => break,
             }
         }
-        let _ = self.child.kill();
+        let _ = child.kill();
         for _ in 0..20 {
-            match self.child.try_wait() {
+            match child.try_wait() {
                 Ok(Some(status)) => {
                     self.exit_code = Some(status.exit_code() as i32);
                     return;
@@ -451,7 +634,12 @@ impl TerminalSession {
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        let _ = self.writer.flush();
+        self.writer.flush_model();
+        if self.native_owner.is_some() {
+            // The last owner requests worker cleanup. Its direct child adapter
+            // retains lifetime leases until identity-safe cleanup and reap finish.
+            return;
+        }
         self.refresh_status();
         #[cfg(unix)]
         if self.exit_code.is_none() {
@@ -480,6 +668,19 @@ pub(crate) fn terminal_env() -> &'static [(&'static str, &'static str)] {
     ]
 }
 
+fn user_terminal_env() -> Vec<(String, String)> {
+    [
+        ("TERM", "xterm-256color"),
+        ("COLORTERM", "truecolor"),
+        ("PAGER", "less"),
+        ("GIT_PAGER", "less"),
+        ("GH_PAGER", "less"),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_owned(), value.to_owned()))
+    .collect()
+}
+
 pub(crate) fn terminal_env_owned() -> Vec<(String, String)> {
     terminal_env()
         .iter()
@@ -488,214 +689,5 @@ pub(crate) fn terminal_env_owned() -> Vec<(String, String)> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(target_os = "linux")]
-    fn process_running(pid: u32) -> bool {
-        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
-            return false;
-        };
-        stat.rsplit_once(") ")
-            .and_then(|(_, fields)| fields.split_whitespace().next())
-            != Some("Z")
-    }
-
-    #[cfg(all(unix, not(target_os = "linux")))]
-    fn process_running(pid: u32) -> bool {
-        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-    }
-
-    #[cfg(unix)]
-    fn parse_child_pid(output: &str) -> Option<u32> {
-        output.lines().find_map(|line| {
-            line.split_once("NAC_CHILD:").and_then(|(_, rest)| {
-                rest.chars()
-                    .take_while(|ch| ch.is_ascii_digit())
-                    .collect::<String>()
-                    .parse()
-                    .ok()
-            })
-        })
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn exited_pty_descendant_helper() {
-        if std::env::var_os("NAC_EXITED_PTY_DESCENDANT_HELPER").is_none() {
-            return;
-        }
-        let pid = unsafe { libc::getpid() };
-        let parent = unsafe { libc::getppid() };
-        let group = unsafe { libc::getpgid(parent) };
-        assert!(group > 0);
-        assert_eq!(unsafe { libc::setpgid(0, group) }, 0);
-        unsafe {
-            libc::signal(libc::SIGHUP, libc::SIG_IGN);
-        }
-        println!("NAC_CHILD:{pid}");
-        std::io::stdout().flush().unwrap();
-        unsafe {
-            libc::close(libc::STDIN_FILENO);
-            libc::close(libc::STDOUT_FILENO);
-            libc::close(libc::STDERR_FILENO);
-        }
-        std::thread::sleep(Duration::from_secs(30));
-    }
-
-    #[tokio::test]
-    #[cfg(unix)]
-    async fn kill_removes_background_jobs_from_pty_shell() {
-        let backend = crate::sandbox::execution_backend_from_sandbox(
-            None,
-            &std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
-        );
-        let registry =
-            OutputRegistry::new(crate::terminal::CommandOutputLimits::default()).unwrap();
-        let mut session = TerminalSession::spawn(
-            "test".to_string(),
-            "bash",
-            None,
-            120,
-            40,
-            &backend,
-            registry.clone(),
-            &[],
-            None,
-        )
-        .unwrap();
-        // The PTY uses the account's configured login shell, which may not
-        // support POSIX job syntax (for example, Fish has no `$!`). Run the
-        // process-tree fixture through `sh` so the test is shell-independent.
-        session
-            .write(b"sh -c 'sleep 30 & echo NAC_CHILD:$!; wait'\r")
-            .unwrap();
-
-        let mut cursor = 0;
-        let mut output = String::new();
-        let mut child_pid = None;
-        for _ in 0..40 {
-            let page = registry
-                .page(
-                    session.output_id(),
-                    OutputStream::Combined,
-                    cursor,
-                    32 * 1024,
-                )
-                .unwrap();
-            cursor = page.next_offset;
-            output.push_str(&page.content);
-            child_pid = parse_child_pid(&output);
-            if child_pid.is_some() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        let child_pid = child_pid.unwrap_or_else(|| panic!("child pid not found in: {output:?}"));
-        assert!(
-            process_running(child_pid),
-            "background child exited too early"
-        );
-
-        session.kill().await.unwrap();
-
-        let mut still_running = false;
-        for _ in 0..40 {
-            still_running = process_running(child_pid);
-            if !still_running {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        if still_running {
-            unsafe {
-                libc::kill(child_pid as libc::pid_t, libc::SIGKILL);
-            }
-        }
-        assert!(!still_running, "background child survived PTY cleanup");
-    }
-
-    #[tokio::test]
-    #[cfg(unix)]
-    async fn completed_pty_root_kills_surviving_process_group() {
-        let backend = crate::sandbox::execution_backend_from_sandbox(
-            None,
-            &std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
-        );
-        let registry =
-            OutputRegistry::new(crate::terminal::CommandOutputLimits::default()).unwrap();
-        let executable = std::env::current_exe().unwrap();
-        let executable = format!(
-            "'{}'",
-            executable.display().to_string().replace('\'', "'\"'\"'")
-        );
-        let command = format!(
-            "NAC_EXITED_PTY_DESCENDANT_HELPER=1 {executable} --exact terminal::session::tests::exited_pty_descendant_helper --nocapture & sleep 0.2"
-        );
-        let mut session = TerminalSession::spawn(
-            "exited-root".to_string(),
-            &command,
-            None,
-            120,
-            40,
-            &backend,
-            registry.clone(),
-            &[],
-            None,
-        )
-        .unwrap();
-
-        let mut cursor = 0;
-        let mut output = String::new();
-        let mut child_pid = None;
-        for _ in 0..40 {
-            let page = registry
-                .page(
-                    session.output_id(),
-                    OutputStream::Combined,
-                    cursor,
-                    32 * 1024,
-                )
-                .unwrap();
-            cursor = page.next_offset;
-            output.push_str(&page.content);
-            child_pid = parse_child_pid(&output);
-            if child_pid.is_some() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        let child_pid = child_pid.unwrap_or_else(|| panic!("child pid not found in: {output:?}"));
-        assert!(
-            process_running(child_pid),
-            "background child exited too early"
-        );
-
-        for _ in 0..40 {
-            session.refresh_status();
-            if session.exit_code().is_some() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        assert!(session.exit_code().is_some(), "PTY root did not exit");
-
-        let mut still_running = false;
-        for _ in 0..40 {
-            still_running = process_running(child_pid);
-            if !still_running {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        if still_running {
-            unsafe {
-                libc::kill(child_pid as libc::pid_t, libc::SIGKILL);
-            }
-        }
-        assert!(
-            !still_running,
-            "background child survived exited-root PTY cleanup"
-        );
-    }
-}
+#[path = "session_tests.rs"]
+mod tests;

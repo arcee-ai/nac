@@ -30,6 +30,8 @@ mod compaction_integration_tests;
 #[cfg(test)]
 mod live_tests;
 #[cfg(test)]
+mod terminal_selection_delivery_tests;
+#[cfg(test)]
 mod transcript_log_tests;
 
 #[cfg(test)]
@@ -574,6 +576,25 @@ impl Agent {
         self.tool_runtime.mcp.clone()
     }
 
+    pub(crate) fn user_terminal_runtime(&self) -> Option<ToolRuntime> {
+        self.direct_primary.then(|| {
+            let mut runtime = self.tool_runtime.clone();
+            // Human shell ownership must not observe the model run's cancel token.
+            runtime.command_cancellation = crate::tools::ThreadCancellation::default();
+            runtime
+        })
+    }
+
+    pub(crate) fn shell_execution_context(&self) -> Result<(ToolRuntime, ModelClient)> {
+        anyhow::ensure!(
+            self.direct_primary,
+            "human shell commands require a direct primary"
+        );
+        let mut runtime = self.tool_runtime.clone();
+        runtime.command_cancellation = crate::tools::ThreadCancellation::default();
+        Ok((runtime, self.client.clone()))
+    }
+
     pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
         self.tool_runtime.terminal_manager.clone()
     }
@@ -685,8 +706,22 @@ impl Agent {
                 .as_mut()
                 .is_some_and(|compaction| !compaction.is_passthrough(&self.messages));
             let provider_view = if needs_compaction_view {
-                self.prepare_provider_view(&mut accumulated_usage, &request_tool_defs)
+                match self
+                    .prepare_provider_view(&mut accumulated_usage, &request_tool_defs)
                     .await
+                {
+                    Ok(view) => view,
+                    Err(error) => {
+                        self.last_usage = Some(accumulated_usage.clone());
+                        self.emit(AgentEvent::Error {
+                            thread_name: self.thread_name.clone(),
+                            message: error.to_string(),
+                        })
+                        .await;
+                        self.record_terminal_cleanup_error().await;
+                        return Err(error);
+                    }
+                }
             } else {
                 PreparedProviderView {
                     messages: self.messages.clone(),
@@ -843,10 +878,9 @@ impl Agent {
             }
             self.clear_partial_stream();
             if let Some(compaction) = &mut self.compaction {
-                compaction.record_ordinary_context(
+                compaction.record_committed_assistant_context(
                     &self.messages,
                     ordinary_context_tokens.unwrap_or(0),
-                    self.messages.len(),
                     provider_view.checkpoint_id,
                 );
             }

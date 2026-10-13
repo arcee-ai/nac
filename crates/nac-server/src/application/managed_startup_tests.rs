@@ -178,7 +178,7 @@ impl StartupFixture {
         let journal: String = connection
             .pragma_query_value(None, "journal_mode", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema, 32);
+        assert_eq!(schema, store::schema_version());
         assert_eq!(store::MINIMUM_MIGRATABLE_SCHEMA_VERSION, 0);
         assert_eq!(journal, "wal");
         let session = nac_core::sessions::load_session(&self.path, session_id).unwrap();
@@ -279,7 +279,7 @@ fn v2_and_v3_startup_cas_replays_and_requires_exact_accept_before_serving() {
             assert_eq!(
                 conn.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
                     .unwrap(),
-                32
+                store::schema_version()
             );
             assert_eq!(
                 conn.pragma_query_value::<String, _>(None, "journal_mode", |row| row.get(0))
@@ -423,4 +423,175 @@ fn startup_cas_keeps_legacy_and_standalone_paths_and_future_store_recovery_only(
     conn.pragma_update(None, "user_version", fixture.running.schema_version)
         .unwrap();
     assert_eq!(fixture.retained_state(), before);
+}
+
+// Reconstruct the actual pre-terminal schema footprint and its target metadata;
+// changing user_version alone would not establish a schema32 predecessor.
+fn schema32_predecessor(fixture: &mut StartupFixture) {
+    let connection = rusqlite::Connection::open(&fixture.path).unwrap();
+    connection
+        .execute_batch(
+            "DROP TABLE human_shell_operations;
+        DROP INDEX idx_session_inbox_admission;
+        ALTER TABLE session_inbox DROP COLUMN admission_digest;
+        ALTER TABLE session_inbox DROP COLUMN admission_id;",
+        )
+        .unwrap();
+    fixture.prior.target.schema_version = 32;
+    fixture
+        .config
+        .managed_upgrade_expectation
+        .as_mut()
+        .unwrap()
+        .previous_target = StartupFixture::target(&fixture.prior.target);
+    // These are nonsecret synthetic legacy ledger fixtures, never customer rows.
+    fn legacy_target(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                if fields.contains_key("schema_version") && fields.contains_key("release_id") {
+                    fields.insert("schema_version".into(), 32.into());
+                }
+                for child in fields.values_mut() {
+                    legacy_target(child);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for child in values {
+                    legacy_target(child);
+                }
+            }
+            _ => {}
+        }
+    }
+    for (table, key, columns) in [
+        (
+            "managed_host_maintenance",
+            "singleton",
+            &["target_json", "accepted_identity_json"][..],
+        ),
+        (
+            "managed_control_operations",
+            "operation_id",
+            &["binding_json", "latest_outcome_json"][..],
+        ),
+        (
+            "managed_control_attempts",
+            "jti",
+            &["binding_json", "outcome_json"][..],
+        ),
+    ] {
+        for column in columns {
+            let mut statement = connection
+                .prepare(&format!(
+                    "SELECT CAST({key} AS TEXT), {column} FROM {table} WHERE {column} IS NOT NULL"
+                ))
+                .unwrap();
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            for (id, json) in rows {
+                let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+                legacy_target(&mut value);
+                connection
+                    .execute(
+                        &format!("UPDATE {table} SET {column}=?1 WHERE CAST({key} AS TEXT)=?2"),
+                        rusqlite::params![value.to_string(), id],
+                    )
+                    .unwrap();
+            }
+        }
+    }
+    connection.pragma_update(None, "user_version", 32).unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name='human_shell_operations'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(connection.query_row("SELECT COUNT(*) FROM pragma_table_info('session_inbox') WHERE name IN ('admission_id','admission_digest')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+}
+
+fn raw_retained_records(path: &Path) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    ["sessions", "thread_events", "session_presentations"]
+        .into_iter()
+        .map(|table| {
+            let mut statement = connection
+                .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                .unwrap();
+            let columns = statement.column_count();
+            statement
+                .query_map([], |row| {
+                    (0..columns).map(|column| row.get(column)).collect()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn managed_schema32_to34_startup_preserves_data_and_exact_identity_before_acceptance() {
+    assert_eq!(store::schema_version(), 34);
+    assert_eq!(store::MINIMUM_MIGRATABLE_SCHEMA_VERSION, 0);
+    for version in [
+        nac_managed::MANAGED_CONFIG_VERSION,
+        nac_managed::HOST_KEY_MANAGED_CONFIG_VERSION,
+    ] {
+        for maintenance in [false, true] {
+            let mut fixture = StartupFixture::new(version, maintenance);
+            schema32_predecessor(&mut fixture);
+            let before = raw_retained_records(&fixture.path);
+            let connection = rusqlite::Connection::open(&fixture.path).unwrap();
+            let read_schema = || {
+                connection
+                    .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                    .unwrap()
+            };
+            assert_eq!(read_schema(), 32);
+            // An incorrect original-owner boundary cannot migrate the predecessor.
+            let mut wrong = fixture.config.clone();
+            wrong.managed_upgrade_expectation.as_mut().unwrap().actor = "user:other".into();
+            assert!(managed_startup_plan(&fixture.path, Some(&wrong), &fixture.running).is_err());
+            assert_eq!(read_schema(), 32);
+            assert_eq!(raw_retained_records(&fixture.path), before);
+            let plan = managed_startup_plan(&fixture.path, Some(&fixture.config), &fixture.running)
+                .unwrap();
+            let identity = plan.preflight.accepted_identity.unwrap();
+            assert!(plan.preflight.requires_accept);
+            assert_eq!(identity.managed_host_id, fixture.prior.managed_host_id);
+            assert_eq!(
+                identity.host_incarnation_id,
+                fixture.prior.host_incarnation_id
+            );
+            assert_eq!(identity.target, fixture.running);
+            assert_eq!(read_schema(), 32); // Exact controller CAS precedes migration.
+            store::initialize(&fixture.path).unwrap(); // The ordinary automatic migration owner.
+            assert_eq!(read_schema(), 34);
+            assert_eq!(raw_retained_records(&fixture.path), before);
+            let retained = fixture.retained_data();
+            assert_eq!(retained["schema"], 34);
+            assert_eq!(retained["journal"], "wal");
+            let mut changed = identity.clone();
+            changed.host_incarnation_id = "other-incarnation".into();
+            assert!(!store::accept_managed_forward_start(&fixture.path, &changed).unwrap());
+            assert!(store::accept_managed_forward_start(&fixture.path, &identity).unwrap());
+            assert_eq!(raw_retained_records(&fixture.path), before);
+            assert_eq!(fixture.retained_data(), retained);
+            let reopened =
+                managed_startup_plan(&fixture.path, Some(&fixture.config), &fixture.running)
+                    .unwrap();
+            assert!(!reopened.preflight.requires_accept);
+            assert_eq!(reopened.preflight.accepted_identity, Some(identity));
+        }
+    }
 }
