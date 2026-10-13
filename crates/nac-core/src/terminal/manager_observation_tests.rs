@@ -519,3 +519,101 @@ async fn pipe_collector_eof_flushes_safe_prefix_while_process_remains_running() 
     assert_eq!(output.stdout_preview, "sec");
     manager.remove_all().await.unwrap();
 }
+
+#[tokio::test]
+#[cfg(unix)]
+async fn pipe_collector_eof_flush_failure_preserves_registry_clear_cleanup_contract() {
+    use crate::sandbox::ssh_command::shell_quote;
+    let manager = TerminalManager::for_direct();
+    let directory = std::env::temp_dir().join(format!("nac-eof-clear-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let ready = directory.join("ready");
+    let close = directory.join("close-output");
+    let release = directory.join("release-side-effect");
+    let target = directory.join("late");
+    let program = r#"
+from pathlib import Path
+import os, sys, time
+ready, close, release, target = map(Path, sys.argv[1:])
+os.write(1, b"sec")
+ready.write_text(str(os.getpid()))
+while not close.exists(): time.sleep(0.005)
+os.close(1)
+os.close(2)
+while not release.exists(): time.sleep(0.005)
+target.write_text("late")
+"#;
+    let text = format!(
+        "exec python3 -c {} {} {} {} {}",
+        shell_quote(program),
+        shell_quote(&ready.to_string_lossy()),
+        shell_quote(&close.to_string_lossy()),
+        shell_quote(&release.to_string_lossy()),
+        shell_quote(&target.to_string_lossy()),
+    );
+    let owner = manager.clone();
+    let command = tokio::spawn(async move {
+        owner
+            .exec_one_shot_sanitized(
+                &text,
+                None,
+                80,
+                24,
+                5_000,
+                100,
+                &backend(),
+                None,
+                &[],
+                nac_contracts::CommandEnvironmentSnapshot::from_parts(
+                    Default::default(),
+                    vec!["secret".into()],
+                ),
+            )
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !ready.exists() {
+            sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("producer did not reach output-close barrier");
+    let status = manager.execution_catalog().await.pop().unwrap();
+    assert!(status.alive && !status.output_complete);
+    assert!(
+        manager
+            .read_execution_output(&status.id, 0, 100)
+            .await
+            .unwrap()
+            .bytes
+            .is_empty(),
+        "the secret prefix must remain buffered until confirmed EOF"
+    );
+    // Explicit lifecycle clear invalidates a pinned sink. Ordinary byte-tail
+    // eviction cannot remove the producer's active artifact.
+    manager.remove_all().await.unwrap();
+    std::fs::write(&close, b"close").unwrap();
+    let output = tokio::time::timeout(Duration::from_secs(2), command)
+        .await
+        .expect("failed EOF flush did not finish existing failure cleanup")
+        .unwrap();
+    assert_eq!(output.status, CommandStatus::SpawnError);
+    assert_eq!(output.exit_code, None);
+    assert!(output.stderr_preview.contains("not found or expired"));
+    let pid = std::fs::read_to_string(&ready)
+        .unwrap()
+        .parse::<libc::pid_t>()
+        .unwrap();
+    assert_ne!(
+        unsafe { libc::kill(pid, 0) },
+        0,
+        "invalidated-sink producer survived cleanup"
+    );
+    std::fs::write(&release, b"released").unwrap();
+    sleep(Duration::from_millis(100)).await;
+    assert!(
+        !target.exists(),
+        "cleared producer performed a late side effect"
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}
