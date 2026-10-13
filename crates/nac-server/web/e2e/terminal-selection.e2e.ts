@@ -23,7 +23,7 @@ function octal(text: string) {
 /** Mouse selection on the real xterm grid, using its accessible rendered rows.
  * No renderer object, synthetic capture callback or protocol byte sink is exposed.
  */
-async function selectRenderedLine(page: Page, pane: Locator, cols: number, rows: number) {
+async function selectRenderedLine(page: Page, pane: Locator) {
   const screen = pane.locator(".xterm-screen");
   await expect(screen).toBeVisible();
   // Dismissing a mobile review leaves the underlying panel returning from its
@@ -33,12 +33,14 @@ async function selectRenderedLine(page: Page, pane: Locator, cols: number, rows:
   const content = await lines.allTextContents();
   const row = content.findIndex((line) => line.trimEnd() === evidence);
   expect(row, `rendered output rows: ${JSON.stringify(content)}`).toBeGreaterThanOrEqual(0);
-  const grid = await screen.boundingBox();
-  expect(grid).not.toBeNull();
-  const cell = grid!.width / cols;
-  const y = grid!.y + (row + 0.5) * (grid!.height / rows);
-  const startX = grid!.x + 0.25 * cell;
-  const endX = grid!.x + (evidence.length + 0.25) * cell;
+  // This ASCII fixture row is aligned to the live cell grid by xterm's
+  // accessibility layer. A cached server row count can become stale on resize.
+  const bounds = await lines.nth(row).boundingBox();
+  expect(bounds).not.toBeNull();
+  const cell = bounds!.width / evidence.length;
+  const y = bounds!.y + bounds!.height / 2;
+  const startX = bounds!.x + 0.25 * cell;
+  const endX = bounds!.x + (evidence.length + 0.25) * cell;
   const viewport = page.viewportSize()!;
   expect(
     startX >= 0 && endX < viewport.width && y >= 0 && y < viewport.height,
@@ -107,14 +109,21 @@ for (const mobile of [false, true]) {
     await page.keyboard.press("Enter");
     await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);
     const shell = (await api.listUserTerminals(session)).terminals[0];
-    const geometry = await api.getUserTerminal(session, shell.terminal_id);
-    let dialog = await selectRenderedLine(page, pane, geometry.cols, geometry.rows);
+    let dialog = await selectRenderedLine(page, pane);
     expect(harness.provider.requests).toHaveLength(0);
     expect(await api.listInbox(session)).toHaveLength(0);
     await dialog.getByRole("button", { name: "Dismiss review", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     expect(await api.listInbox(session)).toHaveLength(0);
-    dialog = await selectRenderedLine(page, pane, geometry.cols, geometry.rows);
+    if (mobile) {
+      const beforeResize = await api.getUserTerminal(session, shell.terminal_id);
+      await page.setViewportSize({ width: 390, height: 1000 });
+      await expect
+        .poll(async () => (await api.getUserTerminal(session, shell.terminal_id)).rows)
+        .not.toBe(beforeResize.rows);
+    }
+    dialog = await selectRenderedLine(page, pane);
+    if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     await dialog.getByRole("button", { name: "Edit accompanying text", exact: true }).click();
     await dialog.getByLabel("Accompanying literal text (optional)").fill(accompanyingOriginal);
     await expect(
@@ -330,8 +339,7 @@ test("real selection offers explicit busy queue and exact displayed-run steer wi
   await page.keyboard.press("Enter");
   await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);
   const shell = (await api.listUserTerminals(session)).terminals[0];
-  const geometry = await api.getUserTerminal(session, shell.terminal_id);
-  let dialog = await selectRenderedLine(page, pane, geometry.cols, geometry.rows);
+  let dialog = await selectRenderedLine(page, pane);
   await expect(dialog.getByRole("radio", { name: /Send as a new turn/ })).toBeDisabled();
   await expect(dialog.getByRole("radio", { name: /Queue after/ })).toBeChecked();
   await dialog.getByRole("button", { name: "Queue selection", exact: true }).click();
@@ -343,7 +351,7 @@ test("real selection offers explicit busy queue and exact displayed-run steer wi
   ).toHaveCount(1);
   await expect(pending.getByLabel("Attached terminal output")).toHaveText(evidence);
   expect((await api.listInbox(session))[0].terminal_selection?.text).toBe(evidence);
-  dialog = await selectRenderedLine(page, pane, geometry.cols, geometry.rows);
+  dialog = await selectRenderedLine(page, pane);
   await dialog.getByRole("radio", { name: /Steer the displayed active run/ }).check();
   await dialog.getByRole("button", { name: "Steer selected run", exact: true }).click();
   await expect(dialog).toContainText("Selection admission accepted.");
@@ -399,7 +407,6 @@ test("queued attachment waits for an exact human command outcome and follows its
   await page.keyboard.press("Enter");
   await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);
   const shell = (await api.listUserTerminals(session)).terminals[0];
-  const geometry = await api.getUserTerminal(session, shell.terminal_id);
   const command = await api.submitShellCommand(session, {
     request_id: "selection-command",
     command: `python3 -c "from pathlib import Path; import time; Path('selection-command-started').write_text('ready')\nwhile not Path('selection-command-release').exists(): time.sleep(0.01)\nprint('COMMAND_DONE')"`,
@@ -411,7 +418,7 @@ test("queued attachment waits for an exact human command outcome and follows its
         .catch(() => ""),
     )
     .toBe("ready");
-  const dialog = await selectRenderedLine(page, pane, geometry.cols, geometry.rows);
+  const dialog = await selectRenderedLine(page, pane);
   await expect(dialog.getByRole("radio", { name: /Send as a new turn/ })).toBeDisabled();
   await dialog.getByRole("radio", { name: /Queue after/ }).check();
   harness.provider.enqueue(
