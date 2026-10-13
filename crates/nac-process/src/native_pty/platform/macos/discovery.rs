@@ -73,8 +73,7 @@ impl Discovery {
 
     fn inventory(&self, root: libc::pid_t, mut pids: Vec<libc::pid_t>) -> Vec<libc::pid_t> {
         pids.extend(self.pending.keys().copied());
-        pids.sort_unstable();
-        pids.dedup();
+        sort_and_dedup(&mut pids);
         pids.retain(|pid| *pid > 1 && *pid != root);
         pids
     }
@@ -314,8 +313,50 @@ impl Discovery {
     }
 }
 
+fn sort_and_dedup(pids: &mut Vec<libc::pid_t>) {
+    if pids.len() < 64 {
+        pids.sort_unstable();
+        pids.dedup();
+        return;
+    }
+    let mut low = pids[0];
+    let mut high = low;
+    for &pid in pids.iter() {
+        if pid < low {
+            low = pid;
+        }
+        if pid > high {
+            high = pid;
+        }
+    }
+    let span = (i64::from(high) - i64::from(low) + 1) as usize;
+    // This bounds temporary storage, never the PID/identity support range.
+    // Sparse or wide inventories retain the original comparison-sort path.
+    if span > 1_048_576 || span > pids.len().saturating_mul(256) {
+        pids.sort_unstable();
+        pids.dedup();
+        return;
+    }
+    let mut words = vec![0u64; span.div_ceil(64)];
+    for &pid in pids.iter() {
+        let offset = (i64::from(pid) - i64::from(low)) as usize;
+        words[offset / 64] |= 1u64 << (offset % 64);
+    }
+    pids.clear();
+    let mut index = 0;
+    while index < words.len() {
+        let mut word = words[index];
+        while word != 0 {
+            let offset = index * 64 + word.trailing_zeros() as usize;
+            pids.push((i64::from(low) + offset as i64) as libc::pid_t);
+            word &= word - 1;
+        }
+        index += 1;
+    }
+}
+
 pub(super) fn pids() -> io::Result<Vec<libc::pid_t>> {
-    let mut capacity = 256usize;
+    let mut capacity = 1024usize;
     loop {
         let mut pids = vec![0 as libc::pid_t; capacity];
         // SAFETY: allocated PID buffer exactly matches provided byte capacity.

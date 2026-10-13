@@ -3,6 +3,55 @@ use super::super::Unique;
 use super::*;
 use std::cell::{Cell, RefCell};
 
+#[test]
+fn inventory_preserves_numeric_visitation_order_pending_pids_and_exact_exclusions() {
+    let mut discovery = Discovery::default();
+    discovery.pending.insert(
+        400,
+        Obligation {
+            uniqueid: Some(7),
+            owned: true,
+        },
+    );
+    let mut pids = (2..300).rev().collect::<Vec<_>>();
+    pids.extend([0, 1, -5, 200, 400, 100]);
+    let result = discovery.inventory(100, pids);
+    let expected = (2..300)
+        .filter(|pid| *pid != 100)
+        .chain([400])
+        .collect::<Vec<_>>();
+    assert_eq!(
+        result, expected,
+        "ordering/exclusions cannot change census visitation"
+    );
+    let result = discovery.inventory(100, Vec::new());
+    assert_eq!(
+        result,
+        [400],
+        "an omitted retained obligation must still be inspected"
+    );
+}
+
+#[test]
+fn pid_ordering_matches_comparison_sort_for_dense_sparse_wide_and_duplicate_lists() {
+    let mut cases = vec![Vec::new(), vec![3, 3, 2], (2..1024).rev().collect()];
+    cases.push((0..2048).map(|i| (i * 137 % 4096) - 2048).collect());
+    cases.push((0..256).map(|i| i * 8_000_000).collect());
+    let mut extremes = (2..100).collect::<Vec<_>>();
+    extremes.extend([i32::MIN, i32::MAX, i32::MIN, 0]);
+    cases.push(extremes);
+    for mut actual in cases {
+        let mut expected = actual.clone();
+        expected.sort_unstable();
+        expected.dedup();
+        sort_and_dedup(&mut actual);
+        assert_eq!(
+            actual, expected,
+            "PID ordering must retain the complete exact set"
+        );
+    }
+}
+
 struct Fake {
     sid: Cell<libc::pid_t>,
     unique: Cell<u64>,

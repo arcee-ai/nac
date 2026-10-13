@@ -58,6 +58,11 @@ substitute a TTL or negative PID/SID/PPID hint for the root/identity proof.
 Aligned polling only shortens the existing 50/250 ms sleep. Keep the
 permission-neutral unique-ID/short-BSD/SID inspection sequence and its identity,
 exec-version, birth-parent, PPID and SID bookends intact.
+PID inventories retain exact numeric visitation order and deduplication. A
+bounded bitmap may replace comparison sorting for dense ranges; sparse/wide
+ranges fall back to the original sorter. Its memory budget never limits the
+supported PID range or drops pending obligations. Enumeration remains fresh,
+with dynamic buffer growth and the existing truncation checks.
 Active census releases only conclusively dead exact members after discovering
 children; failed capture retains the original parent capability independently.
 No finite live-member cap may forget ownership. Session census reaches observed
