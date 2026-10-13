@@ -116,22 +116,23 @@ impl SessionService {
         let start = end.saturating_sub(limit);
 
         let blob_end = end.min(blob_visible);
-        let blob_part: Vec<Message> = if start < blob_end {
+        let blob_part: Vec<(u64, Message)> = if start < blob_end {
             let snapshot = self.session_snapshot.lock().await;
             let blob = snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.messages.as_slice())
                 .unwrap_or_default();
             blob.iter()
-                .filter(is_visible)
+                .enumerate()
+                .filter(|(_, message)| include_system || !matches!(message, Message::System { .. }))
                 .skip(start)
                 .take(blob_end - start)
-                .cloned()
+                .map(|(index, message)| (index as u64, message.clone()))
                 .collect()
         } else {
             Vec::new()
         };
-        let (log_part, log_times): (Vec<Message>, Vec<String>) = if end > blob_visible {
+        let (log_part, log_times): (Vec<(u64, Message)>, Vec<String>) = if end > blob_visible {
             let tail_start = start.saturating_sub(blob_visible);
             let count = end - blob_visible - tail_start;
             let (_, rows) = self
@@ -140,61 +141,23 @@ impl SessionService {
             let times = self
                 .read_log_tail_window_times(blob_len, tail_start, count)
                 .await?;
-            (
-                rows.into_iter().map(|(_, message)| message).collect(),
-                times,
-            )
+            (rows, times)
         } else {
             (Vec::new(), Vec::new())
         };
         let mut created_at: Vec<Option<String>> = vec![None; blob_part.len()];
         created_at.extend(log_times.into_iter().map(Some));
-        let mut messages = blob_part;
-        messages.extend(log_part);
+        let (canonical_message_indices, messages): (Vec<u64>, Vec<Message>) =
+            blob_part.into_iter().chain(log_part).unzip();
         created_at.resize(messages.len(), None);
-        let raw_start = if start < blob_visible {
-            let snapshot = self.session_snapshot.lock().await;
-            snapshot
-                .as_ref()
-                .map(|snapshot| {
-                    snapshot
-                        .messages
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, message)| {
-                            include_system || !matches!(message, Message::System { .. })
-                        })
-                        .nth(start)
-                        .map_or(blob_len, |(index, _)| index)
-                })
-                .unwrap_or(blob_len)
-        } else {
-            blob_len + start.saturating_sub(blob_visible)
-        };
-        let raw_end = if end > blob_visible {
-            blob_len + end - blob_visible
-        } else {
-            let snapshot = self.session_snapshot.lock().await;
-            snapshot
-                .as_ref()
-                .map(|snapshot| {
-                    snapshot
-                        .messages
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, message)| {
-                            include_system || !matches!(message, Message::System { .. })
-                        })
-                        .take(end)
-                        .last()
-                        .map_or(0, |(index, _)| index + 1)
-                })
-                .unwrap_or(0)
-        };
-        let terminal_selection_attributions = self
-            .read_selection_attributions(raw_start as u64, raw_end as u64)
-            .await?;
+        let raw_start = canonical_message_indices.first().copied().unwrap_or(0);
+        let raw_end = canonical_message_indices
+            .last()
+            .map_or(0, |index| index + 1);
+        let terminal_selection_attributions =
+            self.read_selection_attributions(raw_start, raw_end).await?;
         Ok(MessagesPageSnapshot {
+            canonical_message_indices,
             terminal_selection_attributions,
             messages,
             created_at,

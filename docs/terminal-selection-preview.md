@@ -110,8 +110,11 @@ The server projects attachment text only after matching typed canonical
 attribution or identified inbox admission metadata against the immutable intent.
 Copied envelopes, ordinary JSON, and legacy messages without this projection
 remain ordinary text. Paging and refresh retain references at absolute canonical
-indices, including the system head; replaced or reverted history discards stale
-references. **Canonical message** exposes the unchanged evidence envelope, and
+indices, including the system head. API pages that omit system rows retain those
+absolute references; their visible page cursor is not a canonical index. The
+transcript owner supplies the exact index mapping for the readable projection.
+Replaced or reverted history discards stale references. **Canonical message**
+exposes the unchanged evidence envelope, and
 **Copy canonical message** copies those exact bytes. Revert and regenerate still
 address the original canonical message and index. The readable card never
 rewrites transcript/provider content or resubmits an admission.

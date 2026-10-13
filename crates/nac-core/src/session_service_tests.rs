@@ -112,6 +112,15 @@ fn legacy_page_messages(messages: &[Message], request: MessagePageRequest) -> Me
     let end = request.before.unwrap_or(total).min(total);
     let start = end.saturating_sub(request.limit.max(1));
     MessagesPageSnapshot {
+        canonical_message_indices: messages
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| {
+                request.include_system || !matches!(message, Message::System { .. })
+            })
+            .map(|(index, _)| index as u64)
+            .collect::<Vec<_>>()[start..end]
+            .to_vec(),
         messages: visible[start..end].to_vec(),
         created_at: Vec::new(),
         terminal_selection_attributions: Vec::new(),
@@ -138,6 +147,14 @@ fn paged_messages_match_legacy_windows_for_mixed_history_and_cursor_bounds() {
                 let expected = legacy_page_messages(&messages, request);
                 let actual = page_messages(&messages, request);
                 assert_eq!(actual.page, expected.page, "request: {request:?}");
+                assert_eq!(
+                    actual.canonical_message_indices, expected.canonical_message_indices,
+                    "request: {request:?}"
+                );
+                assert!(serde_json::to_value(&actual)
+                    .unwrap()
+                    .get("canonical_message_indices")
+                    .is_none());
                 assert_eq!(
                     serde_json::to_value(&actual.messages).unwrap(),
                     serde_json::to_value(&expected.messages).unwrap(),

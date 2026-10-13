@@ -635,16 +635,20 @@ pub struct TerminalSelectionMessageReference {
 pub(crate) fn selection_message_references(
     references: Vec<nac_core::store::TerminalSelectionReference>,
     messages: &[Message],
-    start: u64,
+    canonical_message_indices: &[u64],
 ) -> Vec<TerminalSelectionMessageReference> {
+    // Visible page cursors exclude System rows by default; only the core
+    // transcript owner can provide each returned message's canonical index.
+    let messages_by_index: BTreeMap<_, _> = canonical_message_indices
+        .iter()
+        .copied()
+        .zip(messages)
+        .collect();
     references
         .into_iter()
         .map(|reference| {
-            let evidence = reference
-                .message_index
-                .checked_sub(start)
-                .and_then(|index| usize::try_from(index).ok())
-                .and_then(|index| messages.get(index))
+            let evidence = messages_by_index
+                .get(&reference.message_index)
                 .and_then(|message| reference.attribution.evidence_for_message(message).ok());
             TerminalSelectionMessageReference {
                 message_index: reference.message_index,
@@ -725,7 +729,7 @@ impl From<MessagesPageSnapshot> for MessagesPageResponse {
             terminal_selection_attributions: selection_message_references(
                 page.terminal_selection_attributions,
                 &page.messages,
-                page.page.start as u64,
+                &page.canonical_message_indices,
             ),
             messages: page.messages,
             created_at: page.created_at,

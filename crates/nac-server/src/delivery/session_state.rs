@@ -51,10 +51,7 @@ pub(crate) async fn session_snapshot(
         terminal_selection_attributions: super::contracts::selection_message_references(
             loaded.terminal_selection_attributions,
             &loaded.snapshot.messages,
-            loaded
-                .message_page
-                .as_ref()
-                .map_or(0, |page| page.start as u64),
+            &loaded.canonical_message_indices,
         ),
         snapshot: loaded.snapshot,
         lineage,

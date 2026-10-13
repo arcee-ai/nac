@@ -312,6 +312,10 @@ pub struct MessageCycleMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesPageSnapshot {
+    /// Absolute canonical indices aligned with messages, before System filtering.
+    /// Internal projection metadata; existing serialized page/snapshot shapes stay unchanged.
+    #[serde(skip)]
+    pub canonical_message_indices: Vec<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     pub messages: Vec<Message>,
@@ -324,6 +328,10 @@ pub struct MessagesPageSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFrontendSnapshotLoad {
+    /// Absolute canonical indices aligned with messages, before System filtering.
+    /// Internal projection metadata; existing serialized page/snapshot shapes stay unchanged.
+    #[serde(skip)]
+    pub canonical_message_indices: Vec<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     #[serde(flatten)]
@@ -1015,6 +1023,7 @@ pub struct RevertOutcome {
 }
 
 struct LoadedFrontendMessages {
+    canonical_message_indices: Vec<u64>,
     terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     messages: Vec<Message>,
     created_at: Vec<Option<String>>,
@@ -1104,14 +1113,16 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
     let end = request.before.unwrap_or(total).min(total);
     let limit = request.limit.max(1);
     let start = end.saturating_sub(limit);
-    let messages = messages
+    let (canonical_message_indices, messages) = messages
         .iter()
-        .filter(|message| request.include_system || !matches!(message, Message::System { .. }))
+        .enumerate()
+        .filter(|(_, message)| request.include_system || !matches!(message, Message::System { .. }))
         .skip(start)
         .take(end - start)
-        .cloned()
-        .collect();
+        .map(|(index, message)| (index as u64, message.clone()))
+        .unzip();
     MessagesPageSnapshot {
+        canonical_message_indices,
         messages,
         created_at: Vec::new(),
         terminal_selection_attributions: Vec::new(),

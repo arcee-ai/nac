@@ -326,6 +326,7 @@ impl SessionService {
                 let (created_at, terminal_selection_attributions) =
                     self.store_backed_transcript_metadata(&messages).await?;
                 LoadedFrontendMessages {
+                    canonical_message_indices: (0..messages.len() as u64).collect(),
                     terminal_selection_attributions,
                     messages,
                     created_at,
@@ -337,6 +338,7 @@ impl SessionService {
                 let page = self.page_store_transcript(request).await?;
                 let cycle = self.message_cycle_from_store().await?;
                 LoadedFrontendMessages {
+                    canonical_message_indices: page.canonical_message_indices,
                     terminal_selection_attributions: page.terminal_selection_attributions,
                     messages: page.messages,
                     created_at: page.created_at,
@@ -382,6 +384,7 @@ impl SessionService {
             workspace: blocking.workspace,
         };
         Ok(SessionFrontendSnapshotLoad {
+            canonical_message_indices: loaded_messages.canonical_message_indices,
             terminal_selection_attributions: loaded_messages.terminal_selection_attributions,
             snapshot,
             message_page: loaded_messages.page,
