@@ -25,6 +25,10 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   capabilities. Preserve Origin/Fetch Metadata checks, session/host ownership,
   readiness/configuration, hard/configured Deny, and backend admission. Client
   fields cannot declare trusted origin or human authority.
+- Execution/history/control-status reads resolve existing cached services without
+  attachment, wake or recovery. Pending output frames are immutable receipts, not
+  current input authority. History reopening remains explicitly read-only even
+  for a live handle; controller mutation revalidates the expected revision.
 - Managed routes are adapters over `nac-managed`; ordinary unmanaged startup
   remains valid.
 - The production bundle is embedded from committed assets and must match web

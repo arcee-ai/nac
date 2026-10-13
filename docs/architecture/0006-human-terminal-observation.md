@@ -1,12 +1,13 @@
-# Human terminal execution and observation
+# Session terminal execution, observation and control
 
 ## Decision
 
 A human terminal belongs to the selected direct primary session and its
 construction-time execution backend. Its shell, retained sanitized output and
 resource leases outlive browser observation. Model execution and human input
-use separate capabilities: the model registry cannot launch, preview or type
-into a human terminal. Human launch runs through the existing tool kernel,
+use separate capabilities. Human launch requires service-issued intent; explicit
+current-chat execution reads and revision-fenced input control use the distinct
+contracts below. Human launch runs through the existing tool kernel,
 canonical workspace binding, permission broker and configuration revalidation.
 Approval does not change the selected backend.
 
@@ -49,9 +50,15 @@ authorizes automatically replaying input. Launch authorizes continuing human
 interaction, rather than treating Enter as a per-command permission decision.
 
 Normal attach/reconnect accepts only fresh focused input and sends no automatic
-bytes. Actual accepted-but-unconfirmed delivery freezes input until explicit
-recovery acknowledgement; old bytes are never replayed. This is delivery
-recovery, not agent permission.
+bytes. The browser producer accepts public trusted keyboard, paste, composition
+and pointer events; parser-generated terminal replies have no human intent.
+Actual accepted-but-unconfirmed delivery freezes input until explicit recovery
+acknowledgement; old bytes are never replayed. A bounded, runtime-owned recovery
+cell survives view replacement and reconnect for the exact session/source
+incarnation. It stores uncertainty, never input bytes. Capacity saturation keeps
+new input read-only instead of evicting an unresolved failure. Acknowledging an
+ended source clears the uncertainty fact without granting input. Runtime disposal
+ends the cell's lifetime. This is delivery recovery, not agent permission.
 
 Human artifacts share the session's bounded output budget, but are excluded
 from model text paging and previews at artifact creation. That exclusion
@@ -125,6 +132,70 @@ sessions; rapid descendants that clear their environment and create a new
 session between scans remain an explicit containment limitation. An inherited
 SSH login session never grants this native owned-session authority.
 
+## Existing executions, deliberate reads and history
+
+A session-scoped process registry exposes existing human PTYs, agent PTYs and
+one-shot command pipes with immutable source identity, origin and representation.
+Listing, opening and reconnecting observations do not launch, rerun, retain,
+wake or recover work. Pipes remain log views. Cached process ownership and
+collector completion are distinct: confirmed descriptor EOF can complete output
+while the process remains running; losing the owner marks cleanup pending and
+removes Stop independently of that EOF fact. Native root liveness fences input
+and resize even when cleanup ownership remains unresolved.
+
+The collector applies the source's immutable launch redaction policy before
+retained bytes exist. PTY policy also recognizes the standard LF-to-CRLF terminal
+translation of exact secret values. This is not a promise to reverse arbitrary
+terminal transformations. Observer status is an immutable receipt, never current
+input authority. If output expires while a frame is held, the same unexpired
+observer and current owner may replay only that already-held frame until ACK or
+seat expiry. A new page, observer or replacement owner cannot read expired output.
+
+A model in the current direct primary chat may deliberately list bounded execution
+metadata and read or search bounded sanitized output by execution ID through
+ordinary prepared tool policy. Binding validates the current store, session,
+configuration and selected backend before reading bytes. This adds no automatic
+prompt injection, wake, input authority, retention or recovery. Legacy raw human
+artifact IDs remain excluded from model paging and previews, including after exit
+or pruning. Explicit selection admission remains separate.
+
+Recent execution history separates bounded process-local metadata and retained
+output from durable exact-command outcomes. Evicted metadata, expired output and
+process-local loss after restart are stated honestly; absence cannot prove a
+historical process outcome. Durable command previews remain independent. A shell
+terminal's continuous stream does not invent command boundaries. History reads
+and its UI consume passive availability and do not reconcile command journals.
+Reopening history is explicitly read-only even when its ID still refers to a live
+source; retained state remains factual, while input, resize, Stop and control
+handoff are suppressed.
+
+## Explicit input controller
+
+Only qualified Local direct-primary human PTYs and already-retained agent PTYs
+can share input. Pipes, foreground non-retained agent executions, ended sources
+and lost/replaced handles cannot gain sharing authority. Handoff neither retains
+nor converts an execution, changes its lifetime, nor selects another backend.
+
+One logical controller and monotonically checked decimal revision bind input to
+an exact process incarnation. Explicit give, reclaim and recovery acknowledgement
+compare the expected revision and advance it, including same-controller actions.
+Private service-issued human control intent skips Ask only after deterministic
+Deny and binding checks; granting ongoing human input additionally checks input
+Deny. Giving control to the agent grants no model-policy bypass. Model stdin
+captures its private ticket before ordinary prepared policy, revalidates after
+approval and fences again at physical writer admission. Queued and future stale
+packets are rejected. Human bytes remain literal; model key-token parsing retains
+its established behavior.
+
+Already-active bytes cannot be retracted. The server exposes in-flight or unknown
+delivery honestly and freezes fresh shared input until deliberate acknowledgement
+can succeed. Revision or source replacement discards queued browser bytes without
+replay. Browser activation binds source, live/history mode, current capabilities
+and controller revision, while preserving the runtime-owned uncertainty cell.
+An immutable pending output frame cannot enable input. Untouched revision-one
+human input preserves the initial browser recovery contract; legacy unversioned
+input is rejected after an explicit controller transition.
+
 ## Compatibility and extension
 
 Existing model terminal behavior, preview cursors and public session vocabulary
@@ -180,6 +251,9 @@ supply or rebind this deterministic metadata. Checkpoints, source validation and
 context samples bind the typed attribution. Normal no-selection prompts,
 checkpoint versions and provider projections keep their existing defaults.
 
-This foundation does not supply the renderer selection adapter, local preview
-interaction, or explicit submit/cancel presentation. Renderer/dependency adoption
-and end-to-end selection acceptance remain separate work.
+The browser keeps explicit local capture, preview, submit and cancel under the
+selection feature owner. Frozen attachments show typed canonical attribution;
+copied prefixes and JSON lookalikes cannot manufacture provenance. Filtered
+System rows must retain their original canonical positions when joining evidence,
+including paged and forked history. Neither attachment display nor a retained
+historical source grants current input or live terminal authority.

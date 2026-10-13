@@ -53,11 +53,42 @@ for (const orchestration of [null, "0"] as const) {
         );
         const composer = page.getByRole("combobox", { name: "Message" });
         await composer.fill("POLICY_DIRECT_TOKEN");
-        await page
+        const send = page
           .locator("form")
           .filter({ has: composer })
-          .getByRole("button", { name: "Send", exact: true })
-          .click();
+          .getByRole("button", { name: "Send", exact: true });
+        // Startup projection may hold the local operation briefly. A confirmed
+        // rejection permits a fresh click; an unknown reply never permits retry.
+        let admission: "ready" | "busy" | "accepted" | "unconfirmed" = "ready";
+        await expect
+          .poll(
+            async () => {
+              if (admission === "accepted" || admission === "unconfirmed") return admission;
+              admission = "unconfirmed";
+              const reply = page.waitForResponse(
+                (response) =>
+                  response.url() === `${harness.baseUrl}/sessions/${directId}/runs` &&
+                  response.request().method() === "POST",
+              );
+              await send.click();
+              const response = await reply;
+              expect(response.request().postDataJSON()).toMatchObject({
+                prompt: "POLICY_DIRECT_TOKEN",
+              });
+              if (response.ok()) {
+                admission = "accepted";
+              } else {
+                expect(response.status()).toBe(409);
+                expect(await response.json()).toEqual({
+                  error: "session is busy with a local operation",
+                });
+                admission = "busy";
+              }
+              return admission;
+            },
+            { timeout: 15_000, intervals: [50, 100, 250] },
+          )
+          .toBe("accepted");
         await waitForRunIdle(request, harness, directId);
         await expect(page.getByText("direct policy response")).toBeVisible();
         await page.goto(`${harness.baseUrl}/#/session/${directId}/worksets`);

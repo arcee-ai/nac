@@ -29,6 +29,13 @@ server remains the source of business truth and wire schemas.
   no bytes. Accepted-but-uncertain delivery freezes input until explicit recovery
   acknowledgement and never auto-replays old input. Recovery is delivery state,
   not permission; the server retains denial/authentication/backend gates.
+- Human input uses trusted public keyboard/paste/composition/pointer events;
+  renderer-generated replies are not intent. Bounded runtime-owned uncertainty
+  survives view/controller replacement without storing or replaying bytes. Input
+  activation binds source, mode, current capabilities and controller revision.
+  Historical output preserves factual retention while suppressing all controls.
+  Consume cached session availability for passive terminal/history views; do not
+  trigger recovering session reads merely to render them.
 - Generic providers are for genuinely cross-feature browser state. Do not use
   them as a home for one feature's workflow.
 - `src/app/runtime/` owns one immutable consumer binding, private query cache,

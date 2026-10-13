@@ -17,6 +17,11 @@ and rich results. Individual families own their native operation and tests.
   model registries; no JSON origin/human flag can select that path. Preserve
   hard/configured Deny, canonical binding and post-policy revalidation without
   entering agent approval requests or changing agent-tool authorization.
+- Current-chat execution inventory and bounded read/search use ordinary prepared
+  policy and current store/session/configuration/backend binding. Legacy raw human
+  artifact IDs stay excluded; an inventory input hint grants no authority. Model
+  stdin privately captures its controller ticket before policy and revalidates
+  after approval and at writer admission. Reads never wake, retain or recover.
 - Imported MCP tools may remain dynamic adapters, but `mcp_adapter.rs` must put
   each call through an explicit capability snapshot and permission pipeline.
 - Execution uses the backend and runtime context selected during construction.

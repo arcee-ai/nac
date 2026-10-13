@@ -24,6 +24,10 @@ separate owners.
   opaque command forms must retain their conservative classification.
 - Approval authorizes a prepared invocation on the already-selected backend.
   It never changes Local/SSH/Podman selection and never claims to be a sandbox.
+- Explicit PTY controller transfer is private service-issued human intent, with
+  deterministic control Deny and additional input Deny when granting human input.
+  It grants no model approval bypass. Process-incarnation/controller revision
+  fences must survive approval waits and actual queued writer admission.
 - Persistence of grants belongs to the store adapter; evaluation depends on a
   narrow grant interface rather than transport or UI types.
 

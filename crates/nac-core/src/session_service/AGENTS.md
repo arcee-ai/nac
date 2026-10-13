@@ -25,6 +25,10 @@ durable records; runtime/tool modules own execution internals.
   launch share prepared policy/binding/revalidation but never create agent Ask
   requests, change approval mode, or save grants. Preserve denial, stable launch
   identity, configuration/host leases, native preflight and shutdown fencing.
+- Execution observation, controller status and recent history use current cached
+  ownership plus bounded passive reads. Rendering them must not attach a session,
+  reconcile command journals or recover work. Keep process-local metadata/output
+  availability distinct from durable exact-command outcomes after restart.
 - This layer depends inward on sessions/store/runtime contracts, not HTTP DTOs
   or React needs. Delivery-specific mapping belongs in `nac-server`.
 
