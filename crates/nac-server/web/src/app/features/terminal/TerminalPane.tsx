@@ -230,10 +230,9 @@ function TerminalDisplay({
 }: TerminalPaneProps & { source: ExecutionStatus; historical?: boolean }) {
   const terminalId = source.id;
   const status = { data: source };
-  const binding = source;
   const ownership = useInputOwnership(sessionId, source, historical);
   const element = useRef<HTMLDivElement>(null);
-  const controller = useTerminalController(sessionId, terminalId, element, binding, {
+  const controller = useTerminalController(sessionId, terminalId, element, source, {
     readonly: historical,
     inputControl: ownership.state ?? null,
     inputPaused: ownership.pending,

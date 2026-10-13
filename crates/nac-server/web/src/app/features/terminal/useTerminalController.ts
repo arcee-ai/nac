@@ -48,6 +48,15 @@ export function useTerminalController(
     [missing, unavailable, controller, revision, frozen],
   );
 
+  // Catalog DTOs and geometry change while an observer and its input request
+  // remain active. Capture the latest descriptor only when transport identity
+  // or capabilities require a new binding; polling must not abort that request.
+  const latestSource = useRef(source);
+  useLayoutEffect(() => {
+    latestSource.current = source;
+  }, [source]);
+  const hasSource = source !== undefined;
+
   const latestInput = useRef({ binding: inputBinding, paused: options.inputPaused ?? false });
   useLayoutEffect(() => {
     latestInput.current = { binding: inputBinding, paused: options.inputPaused ?? false };
@@ -63,7 +72,7 @@ export function useTerminalController(
     recovery.current = lease;
     const close = openTerminalObservation({
       api,
-      source,
+      source: latestSource.current,
       readonly: options.readonly,
       inputControl: latestInput.current.binding,
       inputPaused: latestInput.current.paused,
@@ -87,7 +96,23 @@ export function useTerminalController(
       lease.release();
       if (recovery.current === lease) recovery.current = null;
     };
-  }, [runtime, api, sessionId, terminalId, attempt, element, source, options.readonly]);
+  }, [
+    runtime,
+    api,
+    sessionId,
+    terminalId,
+    attempt,
+    element,
+    hasSource,
+    source?.id,
+    source?.origin,
+    source?.representation,
+    source?.backend,
+    source?.retained,
+    source?.input,
+    source?.resize,
+    options.readonly,
+  ]);
 
   return {
     phase,

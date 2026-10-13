@@ -11,6 +11,8 @@ import type {
   ExecutionStatus,
 } from "../../../../packages/nac-client/src/index";
 import { recoveryForRuntime } from "./inputRecovery";
+import { executionKeys } from "./queries";
+import { inputOwnershipKey } from "./useInputOwnership";
 
 const renderer = vi.hoisted(() => ({
   keyboard: undefined as undefined | ((data: string) => void),
@@ -174,19 +176,23 @@ function fixture(
     stopExecution: api.terminateTerminal,
   };
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    defaultOptions: {
+      queries: { retry: false, structuralSharing: false },
+      mutations: { retry: false },
+    },
   });
   clients.push(client);
   const review = vi.fn();
   const runtime = { ...standaloneRuntime, api: executionApi };
-  const view = render(
+  const pane = () => (
     <RuntimeContext.Provider value={runtime}>
       <QueryClientProvider client={client}>
         <TerminalPane sessionId="session" onReviewSelection={review} history={history} />
       </QueryClientProvider>
-    </RuntimeContext.Provider>,
+    </RuntimeContext.Provider>
   );
-  return { ...view, api, client, review, runtime };
+  const view = render(pane());
+  return { ...view, api, client, review, runtime, refresh: () => view.rerender(pane()) };
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -233,6 +239,99 @@ const readOnlySource: ExecutionStatus = {
 };
 
 describe("terminal pane lifetime and explicit user actions", () => {
+  it.each(["equivalent", "geometry"] as const)(
+    "keeps focused in-flight input and the observer across a %s catalog refresh",
+    async (refresh) => {
+      const f = fixture();
+      await screen.findByText("Connected");
+      fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+      const focused = document.activeElement;
+      let written!: () => void;
+      f.api.inputUserTerminal.mockImplementationOnce(async (_session, _id, _body, signal) => {
+        await new Promise<void>((resolve, reject) => {
+          written = resolve;
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      });
+      await act(async () => renderer.keyboard?.("first\r"));
+      expect(f.api.inputUserTerminal).toHaveBeenCalledOnce();
+      const signal = f.api.inputUserTerminal.mock.calls[0][3];
+      const previous = await f.api.listExecutions();
+      const source = { ...previous.executions[0] };
+      if (refresh === "geometry") Object.assign(source, { cols: 41, rows: 15 });
+      await act(async () => {
+        f.client.setQueryData(executionKeys.list("session"), {
+          ...previous,
+          executions: [source],
+        });
+      });
+      f.refresh();
+      expect(renderer.dispose).not.toHaveBeenCalled();
+      expect(f.api.detachUserTerminal).not.toHaveBeenCalled();
+      expect(f.api.attachUserTerminal).toHaveBeenCalledOnce();
+      expect(signal?.aborted).toBe(false);
+      expect(document.activeElement).toBe(focused);
+      expect(
+        screen.queryByRole("button", { name: "Acknowledge failure and enable fresh input" }),
+      ).toBeNull();
+      await act(async () => renderer.keyboard?.("second\r"));
+      expect(f.api.inputUserTerminal).toHaveBeenCalledOnce();
+      await act(async () => written());
+      await waitFor(() => expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(2));
+      expect(f.api.inputUserTerminal.mock.calls.map((call) => call[2].bytes)).toEqual([
+        Array.from(new TextEncoder().encode("first\r")),
+        Array.from(new TextEncoder().encode("second\r")),
+      ]);
+      expect(renderer.options.disableStdin).toBe(false);
+      expect(document.activeElement).toBe(focused);
+    },
+  );
+
+  it("updates controller revision without replacing observation or the focused renderer", async () => {
+    const f = fixture();
+    await screen.findByText("Connected");
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    const focused = document.activeElement;
+    await act(async () => {
+      f.client.setQueryData(inputOwnershipKey("session", "opaque-shell"), {
+        controller: "human",
+        revision: "2",
+        frozen: false,
+        in_flight: false,
+      });
+    });
+    f.refresh();
+    await act(async () => renderer.keyboard?.("fresh\r"));
+    expect(f.api.inputControlledTerminal.mock.calls[0][2].expected_revision).toBe("2");
+    expect(renderer.dispose).not.toHaveBeenCalled();
+    expect(f.api.attachUserTerminal).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(focused);
+  });
+
+  it.each(["backend", "execution"] as const)("rebinds a changed %s identity", async (change) => {
+    const f = fixture();
+    await screen.findByText("Connected");
+    const previous = await f.api.listExecutions();
+    const source = { ...previous.executions[0] };
+    if (change === "backend") source.backend = "ssh";
+    else source.id = "another-owner-shell";
+    await act(async () => {
+      f.client.setQueryData(executionKeys.list("session"), {
+        ...previous,
+        executions: change === "backend" ? [source] : [...previous.executions, source],
+      });
+    });
+    f.refresh();
+    if (change === "execution")
+      fireEvent.change(screen.getByRole("combobox", { name: "Shell" }), {
+        target: { value: source.id },
+      });
+    await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
+    expect(renderer.dispose).toHaveBeenCalledOnce();
+    expect(f.api.detachUserTerminal).toHaveBeenCalledOnce();
+    expect(f.api.attachUserTerminal.mock.calls[1][1]).toBe(source.id);
+  });
+
   it("waits for parsing before ACK, sends literal control input, and detaches without terminating", async () => {
     let parsed: () => void = () => {};
     renderer.write.mockImplementationOnce(
