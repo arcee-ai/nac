@@ -273,6 +273,13 @@ var E = class {
 			body: r,
 			requestId: r.request_id,
 			signal: n
+		}).catch((e) => {
+			if (e instanceof w && e.status >= 500 && e.status < 600) return {
+				status: "uncertain",
+				requestId: r.request_id,
+				error: e
+			};
+			throw e;
 		});
 		if (i.status === "accepted" && i.response.request_id === r.request_id) return i.response;
 		if (i.status === "not-sent") throw new DOMException("Command was not sent", "AbortError");

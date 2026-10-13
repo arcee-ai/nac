@@ -29,7 +29,7 @@ export function useSubmitShellCommand(sessionId: string) {
             api.submitShellCommand(sessionId, request).catch((cause: unknown) => {
               throw new HumanCommandFailure({
                 kind:
-                  cause instanceof ApiError
+                  cause instanceof ApiError && cause.status < 500
                     ? "rejected"
                     : cause instanceof DOMException && cause.name === "AbortError"
                       ? "not-sent"

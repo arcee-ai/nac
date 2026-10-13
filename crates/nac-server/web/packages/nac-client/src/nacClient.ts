@@ -530,15 +530,20 @@ export class NacClient {
     signal?: AbortSignal,
   ): Promise<ShellCommandSnapshot> {
     const frozen = Object.freeze({ ...request });
-    const admission = await this.transport.admit<ShellCommandSnapshot>(
-      "POST",
-      `${sessionPath(sessionId)}/user-commands`,
-      {
+    const admission = await this.transport
+      .admit<ShellCommandSnapshot>("POST", `${sessionPath(sessionId)}/user-commands`, {
         body: frozen,
         requestId: frozen.request_id,
         signal,
-      },
-    );
+      })
+      .catch((error: unknown): CommandAdmission<ShellCommandSnapshot> => {
+        // Human admission can return 5xx after committing its immutable intent.
+        // Treat that response as unconfirmed and use the same one-shot readback
+        // as a lost response. Definite 4xx rejection remains unchanged.
+        if (error instanceof ApiError && error.status >= 500 && error.status < 600)
+          return { status: "uncertain", requestId: frozen.request_id, error };
+        throw error;
+      });
     if (admission.status === "accepted" && admission.response.request_id === frozen.request_id)
       return admission.response;
     if (admission.status === "not-sent")

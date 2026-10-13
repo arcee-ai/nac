@@ -3,7 +3,11 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createNacClient } from "@/app/services/nacClient";
+import {
+  ApiError,
+  createNacClient,
+  UncertainCommandAdmissionError,
+} from "@/app/services/nacClient";
 import { RuntimeContext } from "@/app/runtime/RuntimeContext";
 import { createNativeRuntime, type NativeRuntime } from "@/app/runtime/nativeRuntime";
 import { queryKeys } from "@/app/services/queries/keys";
@@ -96,6 +100,63 @@ describe("consumer-bound shell queries", () => {
     expect(value.stores.composerStore.shellIntents.get("same")).toBeUndefined();
   });
 
+  it("preserves private exact intent after HTTP500 plus failed GET through remount and explicit retry", async () => {
+    const bodies: unknown[] = [];
+    const methods: string[] = [];
+    let acceptedId: string | undefined;
+    let allowReadback = false;
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+      methods.push(init!.method!);
+      if (init!.method === "POST") {
+        const body = JSON.parse(String(init!.body));
+        bodies.push(body);
+        acceptedId ??= body.request_id;
+        if (allowReadback) return accepted(acceptedId!);
+        return Response.json({ error: "commit acknowledgement unavailable" }, { status: 500 });
+      }
+      return Response.json({ error: "readback unavailable" }, { status: 503 });
+    });
+    const value = runtime(fetch);
+    value.queryClient.setDefaultOptions({ mutations: { retry: 3, retryDelay: 0 } });
+    let hook = renderHook(() => useSubmitShellCommand("same"), { wrapper: wrapper(value) });
+    await act(async () => {
+      await expect(
+        hook.result.current.mutateAsync(" private HTTP500 draft\n"),
+      ).rejects.toBeInstanceOf(UncertainCommandAdmissionError);
+    });
+    const retained = value.stores.composerStore.shellIntents.get("same")!;
+    expect(retained.phase).toBe("uncertain");
+    expect(retained.request.command).toBe(" private HTTP500 draft\n");
+    expect(retained.request.request_id).toBe(acceptedId);
+    expect(methods).toEqual(["POST", "GET"]);
+    expect(
+      JSON.stringify(
+        value.queryClient
+          .getMutationCache()
+          .getAll()
+          .map((entry) => entry.state.variables),
+      ),
+    ).not.toContain("private HTTP500 draft");
+    hook.unmount();
+    hook = renderHook(() => useSubmitShellCommand("same"), { wrapper: wrapper(value) });
+    allowReadback = true;
+    await act(async () => {
+      await hook.result.current.mutateAsync(" private HTTP500 draft\n");
+    });
+    expect(methods).toEqual(["POST", "GET", "POST"]);
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(value.stores.composerStore.shellIntents.get("same")).toBeUndefined();
+  });
+  it("defensively retains unknown identity if a supplied human API throws HTTP500 directly", async () => {
+    const value = runtime(vi.fn());
+    const error = new ApiError(500, "POST", "/user-commands", "unknown admission", "id");
+    vi.spyOn(value.api, "submitShellCommand").mockRejectedValue(error);
+    const hook = renderHook(() => useSubmitShellCommand("same"), { wrapper: wrapper(value) });
+    await act(async () => {
+      await expect(hook.result.current.mutateAsync("private draft")).rejects.toBe(error);
+    });
+    expect(value.stores.composerStore.shellIntents.get("same")?.phase).toBe("uncertain");
+  });
   it("settles the original cache after view detach without affecting another immutable binding", async () => {
     let complete!: (response: Response) => void;
     let id!: string;

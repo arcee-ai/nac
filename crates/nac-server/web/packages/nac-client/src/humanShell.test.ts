@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createNacApi } from "./api.js";
-import { createNacClient, UncertainCommandAdmissionError } from "./nacClient.js";
+import { ApiError, createNacClient, UncertainCommandAdmissionError } from "./nacClient.js";
 
 const command = { request_id: "human-request", command: "  printf exact\n", timeout_ms: 37 };
 const result = {
@@ -103,6 +103,61 @@ describe("human command admission", () => {
     expect(await client.submitShellCommand("session", command)).toEqual(result);
     expect(methods).toEqual(["POST", "GET"]);
   });
+  it.each([500, 503])(
+    "reconciles an HTTP %i acknowledgement failure with one canonical GET and no POST replay",
+    async (status) => {
+      const calls: { url: string; init: RequestInit }[] = [];
+      const client = createNacClient({
+        fetch: async (url, init) => {
+          calls.push({ url: String(url), init: init! });
+          return init!.method === "POST"
+            ? Response.json({ error: "commit acknowledgement unavailable" }, { status })
+            : json();
+        },
+      });
+      expect(await client.submitShellCommand("session", command)).toEqual(result);
+      expect(calls.map((call) => call.init.method)).toEqual(["POST", "GET"]);
+      expect(calls[1].url).toBe("/sessions/session/user-commands/human-request");
+      expect(JSON.parse(String(calls[0].init.body))).toEqual(command);
+    },
+  );
+  it("retains the HTTP500 cause and original identity when canonical readback fails", async () => {
+    const methods: string[] = [];
+    const client = createNacClient({
+      fetch: async (_url, init) => {
+        methods.push(init!.method!);
+        return Response.json(
+          { error: "unavailable" },
+          { status: init!.method === "POST" ? 500 : 404 },
+        );
+      },
+    });
+    const error = await client
+      .submitShellCommand("session", command)
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(UncertainCommandAdmissionError);
+    expect((error as UncertainCommandAdmissionError).requestId).toBe(command.request_id);
+    expect((error as UncertainCommandAdmissionError).cause).toBeInstanceOf(ApiError);
+    expect(((error as UncertainCommandAdmissionError).cause as ApiError).status).toBe(500);
+    expect(methods).toEqual(["POST", "GET"]);
+  });
+  it.each([400, 409])(
+    "preserves definite HTTP%i rejection without a canonical GET",
+    async (status) => {
+      const methods: string[] = [];
+      const client = createNacClient({
+        fetch: async (_url, init) => {
+          methods.push(init!.method!);
+          return Response.json({ error: "definite precommit rejection" }, { status });
+        },
+      });
+      await expect(client.submitShellCommand("session", command)).rejects.toMatchObject({
+        name: "ApiError",
+        status,
+      });
+      expect(methods).toEqual(["POST"]);
+    },
+  );
   it("keeps unresolved admission unknown with its durable identity", async () => {
     const methods: string[] = [];
     const client = createNacClient({
