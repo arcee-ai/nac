@@ -138,7 +138,6 @@ describe("terminal pane lifetime and explicit user actions", () => {
     f.api.pullUserTerminal.mockResolvedValueOnce(frame);
     await waitFor(() => expect(renderer.write).toHaveBeenCalledTimes(1));
     expect(f.api.pullUserTerminal).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Enable terminal input" }));
     await act(async () => {
       renderer.keyboard?.("\u0003");
     });
@@ -212,7 +211,6 @@ describe("terminal pane lifetime and explicit user actions", () => {
   it("does not replay uncertain input and requires acknowledgement before fresh typing", async () => {
     const f = fixture();
     await screen.findByText("Connected");
-    fireEvent.click(screen.getByRole("button", { name: "Enable terminal input" }));
     f.api.inputUserTerminal.mockRejectedValueOnce(new Error("reply lost"));
     await act(async () => {
       renderer.keyboard?.("old command\r");
@@ -241,18 +239,28 @@ describe("terminal pane lifetime and explicit user actions", () => {
     });
   });
 
-  it("requires an explicit fresh-input choice when observing an existing shell", async () => {
+  it("accepts fresh input on attach and reconnect without sending automatic bytes", async () => {
     const f = fixture();
     await screen.findByText("Connected");
-    await act(async () => {
-      renderer.keyboard?.("blocked\r");
-    });
+    expect(renderer.options.disableStdin).toBe(false);
+    expect(screen.queryByRole("button", { name: "Enable terminal input" })).toBeNull();
     expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Enable terminal input" }));
     await act(async () => {
       renderer.keyboard?.("fresh\r");
     });
     expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
+    await screen.findByText("Connected");
+    expect(renderer.options.disableStdin).toBe(false);
+    expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      renderer.keyboard?.("new\r");
+    });
+    expect(f.api.inputUserTerminal.mock.calls.map((call) => call[2].bytes)).toEqual([
+      [102, 114, 101, 115, 104, 13],
+      [110, 101, 119, 13],
+    ]);
   });
 
   it("captures selection only on Review and keeps it out of query caches and DOM attributes", async () => {

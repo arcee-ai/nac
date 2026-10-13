@@ -64,13 +64,11 @@ function fixture() {
     terminalId: "terminal",
     host: document.createElement("div"),
     reconnect: false,
-    initialTyping: false,
     previousFailure: { current: false },
     controls: vi.fn(),
     phase: vi.fn(),
     notice: vi.fn(),
     inputFailure: vi.fn(),
-    needsInputEnable: vi.fn(),
   };
   const open = () => {
     const close = openTerminalObservation(ports);
@@ -114,7 +112,7 @@ describe("scoped terminal observation", () => {
     factory.create.mockReset().mockReturnValueOnce(late.promise).mockResolvedValueOnce(f.view);
     function Bridge() {
       const host = useRef<HTMLDivElement | null>(null);
-      useTerminalController("session", "terminal", host, false);
+      useTerminalController("session", "terminal", host);
       return createElement("div", { ref: host });
     }
     const rendered = render(

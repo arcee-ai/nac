@@ -6,7 +6,6 @@ export function useTerminalController(
   sessionId: string,
   terminalId: string,
   element: RefObject<HTMLDivElement | null>,
-  newlyOpened: boolean,
 ) {
   const { api } = useNativeRuntime();
   const current = useRef<TerminalControls | null>(null);
@@ -14,8 +13,6 @@ export function useTerminalController(
   const [phase, setPhase] = useState("Connecting");
   const [notice, setNotice] = useState("");
   const [inputFailure, setInputFailure] = useState(false);
-  const [needsInputEnable, setNeedsInputEnable] = useState(false);
-  const initialTyping = useRef(newlyOpened);
   const previousFailure = useRef(false);
 
   useEffect(() => {
@@ -27,7 +24,6 @@ export function useTerminalController(
       terminalId,
       host,
       reconnect: attempt !== 0,
-      initialTyping: initialTyping.current,
       previousFailure,
       controls: (value) => {
         current.current = value;
@@ -35,7 +31,6 @@ export function useTerminalController(
       phase: setPhase,
       notice: setNotice,
       inputFailure: setInputFailure,
-      needsInputEnable: setNeedsInputEnable,
     });
   }, [api, sessionId, terminalId, attempt, element]);
 
@@ -43,7 +38,6 @@ export function useTerminalController(
     phase,
     notice,
     inputFailure,
-    needsInputEnable,
     reconnect: () => setAttempt((value) => value + 1),
     selection: () => {
       const text = current.current?.adapter.terminal.getSelection() ?? "";
@@ -58,7 +52,6 @@ export function useTerminalController(
       value.adapter.terminal.options.disableStdin = false;
       previousFailure.current = false;
       setInputFailure(false);
-      setNeedsInputEnable(false);
       setNotice("Previous input will not be retried. Only fresh typing will be sent.");
       value.adapter.terminal.focus();
     },

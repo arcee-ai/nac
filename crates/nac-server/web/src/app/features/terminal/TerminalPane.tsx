@@ -32,7 +32,6 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
   const list = useUserTerminals(sessionId);
   const open = useOpenUserTerminal(sessionId);
   const [selected, setSelected] = useState<string | null>(null);
-  const [newlyOpenedId, setNewlyOpenedId] = useState<string | null>(null);
   const launchId = useRef<string | null>(null);
   const terminals = list.data?.terminals ?? [];
   const id = selected ?? terminals[0]?.terminal_id;
@@ -40,7 +39,6 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
     launchId.current ??= crypto.randomUUID();
     open.mutate(launchId.current, {
       onSuccess: (result) => {
-        setNewlyOpenedId(result.terminal_id);
         setSelected(result.terminal_id);
         launchId.current = null;
       },
@@ -57,7 +55,6 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
           aria-label="Shell"
           value={id ?? ""}
           onChange={(event) => {
-            setNewlyOpenedId(null);
             setSelected(event.target.value);
           }}
           className="min-w-0 max-w-full rounded-md border border-muted bg-elevation-level-2 px-2 py-1 text-sm"
@@ -114,7 +111,6 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
           key={id}
           sessionId={sessionId}
           terminalId={id}
-          newlyOpened={newlyOpenedId === id}
           onReviewSelection={onReviewSelection}
         />
       ) : (
@@ -132,12 +128,11 @@ function TerminalDisplay({
   sessionId,
   terminalId,
   onReviewSelection,
-  newlyOpened,
-}: TerminalPaneProps & { terminalId: string; newlyOpened: boolean }) {
+}: TerminalPaneProps & { terminalId: string }) {
   const status = useUserTerminalStatus(sessionId, terminalId);
   const close = useCloseUserTerminal(sessionId, terminalId);
   const element = useRef<HTMLDivElement>(null);
-  const controller = useTerminalController(sessionId, terminalId, element, newlyOpened);
+  const controller = useTerminalController(sessionId, terminalId, element);
   const review = () => {
     const text = controller.selection();
     if (!text || !onReviewSelection) return;
@@ -198,16 +193,14 @@ function TerminalDisplay({
         ) : null}
       </div>
       {controller.notice ? <p role="alert">{controller.notice}</p> : null}
-      {controller.inputFailure || controller.needsInputEnable ? (
+      {controller.inputFailure ? (
         <Button
           size={ButtonSize.Small}
           type="button"
           variant={ButtonVariant.Secondary}
           onClick={controller.acknowledgeInput}
         >
-          {controller.inputFailure
-            ? "Acknowledge failure and enable fresh input"
-            : "Enable terminal input"}
+          Acknowledge failure and enable fresh input
         </Button>
       ) : null}
       {close.isError ? (

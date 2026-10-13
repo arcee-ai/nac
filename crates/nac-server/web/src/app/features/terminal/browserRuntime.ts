@@ -17,13 +17,11 @@ interface TerminalPorts {
   terminalId: string;
   host: HTMLDivElement;
   reconnect: boolean;
-  initialTyping: boolean;
   previousFailure: { current: boolean };
   controls: (value: TerminalControls | null) => void;
   phase: (value: string) => void;
   notice: (value: string) => void;
   inputFailure: (value: boolean) => void;
-  needsInputEnable: (value: boolean) => void;
 }
 class TerminalOperationFailure extends Data.TaggedError("TerminalOperationFailure")<{
   operation: "renderer" | "attach" | "observe" | "resize" | "input";
@@ -167,10 +165,9 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
     if (!active()) return;
     connected = true;
     processAlive = status.alive;
-    const enable =
-      status.alive && ports.initialTyping && !ports.reconnect && !ports.previousFailure.current;
-    view.terminal.options.disableStdin = !enable;
-    ports.needsInputEnable(status.alive && !enable);
+    // Attach observes only. Fresh focused keyboard events carry human intent;
+    // only actual unconfirmed delivery requires a separate acknowledgement.
+    view.terminal.options.disableStdin = !status.alive || ports.previousFailure.current;
     if (ports.previousFailure.current)
       ports.notice(
         "Input delivery was not confirmed. Check the shell before enabling fresh input.",
