@@ -8,6 +8,9 @@ use nac_contracts::{
     WorkerEnvironment,
 };
 
+#[path = "user_terminal_control_tests.rs"]
+mod control;
+
 #[path = "user_terminals_managed_tests.rs"]
 mod managed;
 
@@ -357,6 +360,24 @@ async fn human_launch_does_not_change_agent_exec_or_nonempty_stdin_authority() {
         .await
         .unwrap();
     let context = service.require_user_terminal_context().unwrap();
+    let protected = crate::tools::execute_tool(
+        "write_stdin",
+        serde_json::json!({"session_id": terminal.id, "chars": "default-must-not-run"}),
+        &context.runtime,
+        &context.client,
+    )
+    .await;
+    assert!(protected.is_error);
+    assert!(service.list_permission_requests().unwrap().is_empty());
+    service
+        .transfer_terminal_input_control(
+            &terminal.id,
+            1,
+            crate::terminal::InputController::Agent,
+            false,
+        )
+        .await
+        .unwrap();
     let _interactive = service.event_bus.subscribe_assistant_deltas();
     for (tool, input, action) in [
         (

@@ -263,6 +263,20 @@ async fn accepted_replacement_fences_all_old_terminal_service_operations() {
         .write_user_terminal_input(&terminal.id, b"x")
         .await
         .is_err());
+    assert!(service.terminal_input_control(&terminal.id).await.is_err());
+    assert!(service
+        .transfer_terminal_input_control(
+            &terminal.id,
+            1,
+            crate::terminal::InputController::Agent,
+            false
+        )
+        .await
+        .is_err());
+    assert!(service
+        .write_controlled_terminal_input(&terminal.id, 1, b"stale")
+        .await
+        .is_err());
     assert!(service.list_user_terminals().await.is_err());
     assert!(service.user_terminal_status(&terminal.id).await.is_err());
     assert!(service

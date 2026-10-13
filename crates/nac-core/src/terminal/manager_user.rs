@@ -320,23 +320,10 @@ impl TerminalManager {
         cancellation: &ThreadCancellation,
     ) -> Result<()> {
         self.check_user_name(name)?;
-        if bytes.len() > 16 * 1024 {
-            return Err(anyhow!("terminal input exceeds 16384 bytes"));
-        }
-        let mut sessions = self.sessions.lock().await;
-        let session = sessions
-            .get_mut(name)
-            .filter(|session| session.is_user_owned())
-            .ok_or_else(|| self.missing_user_error())?;
-        session.refresh_status();
-        if !session.accepts_user_input() {
-            return Err(anyhow!("user terminal has exited"));
-        }
-        // Admission, not blocking delivery, is the cancellation boundary.
-        // Literal bytes bypass model key-name parsing and preserve FIFO order.
-        let receipt = session.enqueue_user_input(bytes, cancellation)?;
-        drop(sessions);
-        super::super::input::await_receipt(receipt).await
+        // Legacy input has no revision. It is valid only for untouched initial
+        // human ownership; all shared-input clients must carry an exact fence.
+        self.write_controlled_human_input(name, 1, bytes, cancellation)
+            .await
     }
 
     pub(crate) async fn wait_user_output(

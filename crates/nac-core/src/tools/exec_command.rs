@@ -174,13 +174,26 @@ async fn execute_exec_command_inner(
 
 #[cfg(test)]
 pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolResult {
-    execute_write_stdin_with_cancellation(args, runtime, &runtime.command_cancellation).await
+    let ticket = args
+        .get("chars")
+        .and_then(Value::as_str)
+        .filter(|chars| !chars.is_empty())
+        .and_then(|_| args.get("session_id").and_then(Value::as_str))
+        .and_then(|name| runtime.terminal_manager.prepare_model_input(name).ok());
+    execute_write_stdin_with_cancellation(
+        args,
+        runtime,
+        &runtime.command_cancellation,
+        ticket.as_ref(),
+    )
+    .await
 }
 
 pub(crate) async fn execute_write_stdin_with_cancellation(
     args: &Value,
     runtime: &ToolRuntime,
     cancellation: &ThreadCancellation,
+    ticket: Option<&crate::terminal::InputTicket>,
 ) -> ToolResult {
     let result: Result<_> = async {
         let session_id = require_str(args, "session_id")?;
@@ -197,7 +210,14 @@ pub(crate) async fn execute_write_stdin_with_cancellation(
             .unwrap_or(8_000) as usize;
         let mut output = runtime
             .terminal_manager
-            .write_stdin(&session_id, chars, yield_ms, max_output, Some(cancellation))
+            .write_stdin_prepared(
+                &session_id,
+                chars,
+                yield_ms,
+                max_output,
+                Some(cancellation),
+                ticket,
+            )
             .await?;
         if retain && output.session_name.is_some() {
             runtime

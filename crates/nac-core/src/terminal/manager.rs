@@ -32,6 +32,8 @@ pub use observation::{
 #[path = "manager_model_observation.rs"]
 mod model_observation;
 
+#[path = "manager_control.rs"]
+mod control;
 #[path = "manager_interactive.rs"]
 mod interactive;
 #[path = "manager_one_shot.rs"]

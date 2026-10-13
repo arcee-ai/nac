@@ -190,6 +190,7 @@ impl TerminalManager {
         if preserve_if_retained && session.is_retained() {
             return Ok(None);
         }
+        session.input_control().stop();
         if let Some(owner) = session.native_owner().cloned() {
             drop(sessions);
             owner

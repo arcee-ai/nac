@@ -1,4 +1,9 @@
 mod collector;
+mod controller;
+pub(crate) use controller::InputTicket;
+pub use controller::{
+    InputControlStatus, InputController, InputDeliveryOutcome, InputDeliveryReceipt,
+};
 mod input;
 mod keyparse;
 mod manager;

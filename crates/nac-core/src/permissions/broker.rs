@@ -49,6 +49,10 @@ impl PermissionBroker {
         .await?
     }
 
+    pub(crate) fn session_config_version(&self) -> i64 {
+        self.session_config_version
+    }
+
     pub(crate) fn new(
         store_path: PathBuf,
         session_id: String,

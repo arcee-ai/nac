@@ -1,4 +1,4 @@
-//! A bounded human-input pump keeps a blocked PTY write outside the session
+//! A bounded input pump keeps a blocked PTY write outside the session
 //! map and cancellation gate. Cleanup can still reach the owned child.
 
 use std::io::Write;
@@ -8,17 +8,24 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use tokio::sync::oneshot;
 
+use super::controller::{InputControl, InputController, InputTicket};
 use crate::tools::ThreadCancellation;
 
-type InputReceipt = oneshot::Receiver<Result<(), &'static str>>;
+pub(super) type InputReceipt = oneshot::Receiver<Result<(), InputWriteError>>;
+#[derive(Debug)]
+pub(super) enum InputWriteError {
+    Rejected(&'static str),
+    Unconfirmed(&'static str),
+}
 struct InputPacket {
     bytes: Vec<u8>,
-    receipt: oneshot::Sender<Result<(), &'static str>>,
+    ticket: InputTicket,
+    receipt: oneshot::Sender<Result<(), InputWriteError>>,
 }
 
-pub(super) enum PtyInput {
-    Model(Box<dyn Write + Send>),
-    User(UserInput),
+pub(super) struct PtyInput {
+    input: UserInput,
+    pub(super) control: InputControl,
 }
 
 pub(super) struct UserInput {
@@ -28,24 +35,36 @@ pub(super) struct UserInput {
 
 impl PtyInput {
     pub(super) fn new(writer: Box<dyn Write + Send>, user_owned: bool) -> Result<Self> {
-        if !user_owned {
-            return Ok(Self::Model(writer));
-        }
-        // One active write plus one queued packet, each at most 16 KiB. No
+        let control = InputControl::new(if user_owned {
+            InputController::Human
+        } else {
+            InputController::Agent
+        });
+        let worker_control = control.clone();
+        // One active write plus one queued packet (human packets <=16 KiB). No
         // caller waits for queue capacity or holds the process map during I/O.
         let (sender, receiver) = sync_channel::<InputPacket>(1);
         let worker = std::thread::Builder::new()
-            .name("nac-user-pty-input".into())
+            .name("nac-pty-input".into())
             .spawn(move || {
                 let mut writer = writer;
                 while let Ok(packet) = receiver.recv() {
+                    if worker_control.begin(&packet.ticket).is_err() {
+                        let _ = packet.receipt.send(Err(InputWriteError::Rejected(
+                            "terminal controller changed; queued input was not written",
+                        )));
+                        continue;
+                    }
                     let result = writer
                         .write_all(&packet.bytes)
                         .and_then(|()| writer.flush())
                         .map_err(|_| {
-                            "terminal input failed; bytes may have been partially delivered"
+                            InputWriteError::Unconfirmed(
+                                "terminal input failed; bytes may have been partially delivered",
+                            )
                         });
                     let failed = result.is_err();
+                    worker_control.finish(failed);
                     let _ = packet.receipt.send(result);
                     if failed {
                         break;
@@ -53,29 +72,34 @@ impl PtyInput {
                 }
             })
             .context("Failed to create terminal input worker")?;
-        Ok(Self::User(UserInput {
-            sender,
-            _worker: worker,
-        }))
+        Ok(Self {
+            control,
+            input: UserInput {
+                sender,
+                _worker: worker,
+            },
+        })
     }
 
-    pub(super) fn write_model(&mut self, bytes: &[u8]) -> Result<()> {
-        let Self::Model(writer) = self else {
-            return Err(anyhow!("a human terminal does not accept model input"));
-        };
-        writer.write_all(bytes).context("Failed to write to PTY")?;
-        writer.flush().context("Failed to flush PTY")
-    }
-
+    #[cfg(test)]
     pub(super) fn enqueue_user(
         &self,
         bytes: &[u8],
         cancellation: &ThreadCancellation,
     ) -> Result<InputReceipt> {
-        let Self::User(input) = self else {
-            return Err(anyhow!("terminal is not owned by the human capability"));
-        };
-        if bytes.len() > 16 * 1024 {
+        let ticket = self.control.ticket("", InputController::Human)?;
+        self.enqueue(bytes, ticket, cancellation)
+    }
+
+    pub(super) fn enqueue(
+        &self,
+        bytes: &[u8],
+        ticket: InputTicket,
+        cancellation: &ThreadCancellation,
+    ) -> Result<InputReceipt> {
+        self.control.validate(&ticket)?;
+        let input = &self.input;
+        if ticket.controller == InputController::Human && bytes.len() > 16 * 1024 {
             return Err(anyhow!("terminal input exceeds 16384 bytes"));
         }
         let (sender, receipt) = oneshot::channel();
@@ -83,6 +107,7 @@ impl PtyInput {
             .run_if_active(|| {
                 input.sender.try_send(InputPacket {
                     bytes: bytes.to_vec(),
+                    ticket,
                     receipt: sender,
                 })
             })
@@ -97,22 +122,29 @@ impl PtyInput {
             })?;
         Ok(receipt)
     }
+}
 
-    pub(super) fn flush_model(&mut self) {
-        if let Self::Model(writer) = self {
-            let _ = writer.flush();
+pub(super) async fn await_delivery(receipt: InputReceipt) -> super::InputDeliveryReceipt {
+    use super::{InputDeliveryOutcome as Outcome, InputDeliveryReceipt};
+    let (outcome, error) = match tokio::time::timeout(Duration::from_secs(1), receipt).await {
+        Ok(Ok(Ok(()))) => (Outcome::Written, None),
+        Ok(Ok(Err(InputWriteError::Rejected(error)))) => (Outcome::Rejected, Some(error.into())),
+        Ok(Ok(Err(InputWriteError::Unconfirmed(error)))) => {
+            (Outcome::Unconfirmed, Some(error.into()))
         }
-    }
+        Ok(Err(_)) | Err(_) => (
+            Outcome::Unconfirmed,
+            Some(
+                "terminal input was accepted but delivery is unconfirmed; do not retry these bytes"
+                    .into(),
+            ),
+        ),
+    };
+    InputDeliveryReceipt { outcome, error }
 }
 
 pub(super) async fn await_receipt(receipt: InputReceipt) -> Result<()> {
-    match tokio::time::timeout(Duration::from_secs(1), receipt).await {
-        Ok(Ok(Ok(()))) => Ok(()),
-        Ok(Ok(Err(error))) => Err(anyhow!(error)),
-        Ok(Err(_)) | Err(_) => Err(anyhow!(
-            "terminal input was accepted but delivery is unconfirmed; do not retry these bytes"
-        )),
-    }
+    await_delivery(receipt).await.into_result()
 }
 
 #[cfg(test)]

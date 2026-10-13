@@ -64,6 +64,7 @@ mod transcript_projection;
 mod user_terminals;
 pub use crate::terminal::{
     ExecutionOrigin, ExecutionProcessState, ExecutionRepresentation, ExecutionStatus,
+    InputControlStatus, InputController, InputDeliveryOutcome, InputDeliveryReceipt,
     OutputBytePage as UserTerminalOutputPage, TerminalSelectionError, UserTerminalSelectionPreview,
     UserTerminalStatus, MAX_TERMINAL_SELECTION_SCALARS, MAX_TERMINAL_SELECTION_UTF8_BYTES,
 };

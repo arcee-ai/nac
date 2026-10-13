@@ -243,6 +243,46 @@ impl TerminalManager {
         max_output: usize,
         cancellation: Option<&ThreadCancellation>,
     ) -> Result<TerminalOutput> {
+        let ticket = if input.is_empty() {
+            None
+        } else {
+            let mut sessions = self.sessions.lock().await;
+            if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+                return Err(anyhow!("terminal command cancelled before input"));
+            }
+            let session = sessions
+                .get_mut(name)
+                .ok_or_else(|| self.missing_session_error(name))?;
+            session.refresh_status();
+            if !session.accepts_user_input() {
+                return Err(anyhow!("terminal has exited"));
+            }
+            Some(
+                session
+                    .input_control()
+                    .ticket(session.output_id(), super::super::InputController::Agent)?,
+            )
+        };
+        self.write_stdin_prepared(
+            name,
+            input,
+            yield_ms,
+            max_output,
+            cancellation,
+            ticket.as_ref(),
+        )
+        .await
+    }
+
+    pub(crate) async fn write_stdin_prepared(
+        &self,
+        name: &str,
+        input: &str,
+        yield_ms: u64,
+        max_output: usize,
+        cancellation: Option<&ThreadCancellation>,
+        ticket: Option<&super::super::InputTicket>,
+    ) -> Result<TerminalOutput> {
         let start = Instant::now();
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
             self.settle_run().await?;
@@ -293,38 +333,67 @@ impl TerminalManager {
                 wall_time_ms: start.elapsed().as_millis() as u64,
             });
         }
-        let (output_id, start_cursor, notify) =
-            {
-                let mut sessions = self.sessions.lock().await;
-                let session = sessions
-                    .get_mut(name)
-                    .ok_or_else(|| self.missing_session_error(name))?;
-                if session.is_user_owned() {
-                    return Err(anyhow!(
-                        "user-owned terminal is unavailable to model input or preview"
-                    ));
-                }
-                session.refresh_status();
-                if !session.is_alive() && !bytes.is_empty() {
-                    return Err(anyhow!("terminal session '{name}' has already exited"));
-                }
-                if !bytes.is_empty() {
-                    match cancellation {
-                        Some(cancellation) => cancellation
-                            .run_if_active(|| session.write(&bytes))
-                            .ok_or_else(|| anyhow!("terminal command cancelled before input"))??,
-                        None => session.write(&bytes)?,
-                    }
-                }
-                (
-                    session.output_id().to_string(),
-                    session.preview_cursor(),
-                    Arc::clone(session.output_notify()),
-                )
+        let (output_id, start_cursor, notify, receipt, control, human) = {
+            let mut sessions = self.sessions.lock().await;
+            let session = sessions
+                .get_mut(name)
+                .ok_or_else(|| self.missing_session_error(name))?;
+            if session.is_user_owned() && bytes.is_empty() {
+                return Err(anyhow!(
+                    "human terminal preview requires the bounded output retrieval tool"
+                ));
+            }
+            session.refresh_status();
+            if !session.is_alive() && !bytes.is_empty() {
+                return Err(anyhow!("terminal session '{name}' has already exited"));
+            }
+            let receipt = if !bytes.is_empty() {
+                let ticket = ticket
+                    .ok_or_else(|| anyhow!("prepared terminal input authority is missing"))?
+                    .clone();
+                let default_cancellation = ThreadCancellation::default();
+                Some(session.enqueue_input(
+                    &bytes,
+                    ticket,
+                    cancellation.unwrap_or(&default_cancellation),
+                )?)
+            } else {
+                None
             };
+            (
+                session.output_id().to_string(),
+                session.preview_cursor(),
+                Arc::clone(session.output_notify()),
+                receipt,
+                session.input_control().clone(),
+                session.is_user_owned(),
+            )
+        };
 
-        if !bytes.is_empty() {
+        if let Some(receipt) = receipt {
+            let result = super::super::input::await_receipt(receipt).await;
+            if result
+                .as_ref()
+                .is_err_and(|error| error.to_string().contains("unconfirmed"))
+            {
+                control.freeze();
+            }
+            result?;
             sleep(Duration::from_millis(50)).await;
+        }
+        if human {
+            return Ok(TerminalOutput {
+                session_name: Some(name.into()),
+                retained: true,
+                output_id,
+                start_cursor: 0,
+                end_cursor: 0,
+                content_preview: String::new(),
+                truncated: false,
+                overflowed: false,
+                exit_code: None,
+                wall_time_ms: start.elapsed().as_millis() as u64,
+            });
         }
         let wait_result = self
             .wait_for_pty_output(

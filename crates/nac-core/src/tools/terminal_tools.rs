@@ -110,8 +110,13 @@ pub(super) fn bind_exec_command_resources(
     Ok(())
 }
 
+pub(super) struct WriteStdinInput {
+    args: Value,
+    ticket: std::sync::OnceLock<crate::terminal::InputTicket>,
+}
+
 impl kernel::NativeTool for WriteStdinTool {
-    type Input = Value;
+    type Input = WriteStdinInput;
 
     fn definition(&self) -> ToolDefinition {
         exec_command::write_stdin_definition()
@@ -131,7 +136,10 @@ impl kernel::NativeTool for WriteStdinTool {
 
     fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
         validate_write_stdin(&input)?;
-        Ok(input)
+        Ok(WriteStdinInput {
+            args: input,
+            ticket: std::sync::OnceLock::new(),
+        })
     }
 
     fn permission_resources(
@@ -139,7 +147,49 @@ impl kernel::NativeTool for WriteStdinTool {
         input: &Self::Input,
         services: kernel::ToolServices<'_>,
     ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
-        write_stdin_resources(input, services.runtime)
+        let resources = write_stdin_resources(&input.args, services.runtime)?;
+        // Native hard denials remain prior to process resolution, including
+        // the brokerless worker contract for nonempty interactive input.
+        if resources
+            .iter()
+            .any(|resource| resource.hard_denial.is_some())
+        {
+            return Ok(resources);
+        }
+        if input
+            .args
+            .get("chars")
+            .and_then(Value::as_str)
+            .is_some_and(|chars| !chars.is_empty())
+        {
+            let name = required_string(&input.args, "session_id")?;
+            let ticket = services
+                .runtime
+                .terminal_manager
+                .prepare_model_input(name)
+                .map_err(|error| invalid(error.to_string()))?;
+            input
+                .ticket
+                .set(ticket)
+                .map_err(|_| invalid("terminal input was prepared twice"))?;
+        }
+        Ok(resources)
+    }
+
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        _resources: &[kernel::PermissionResource],
+        services: kernel::ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        if let Some(ticket) = input.ticket.get() {
+            services
+                .runtime
+                .terminal_manager
+                .revalidate_model_input(required_string(&input.args, "session_id")?, ticket)
+                .map_err(|error| invalid(error.to_string()))?;
+        }
+        Ok(())
     }
 
     fn execute<'a>(
@@ -157,10 +207,36 @@ impl kernel::NativeTool for WriteStdinTool {
                     return ToolResult::text("Error: terminal input cancelled before workspace admission", true);
                 }
             };
+            if input.ticket.get().is_some() {
+                let Some(broker) = services.runtime.permission_broker.as_ref() else {
+                    return invalid(
+                        "prepared terminal input requires a direct-session policy owner",
+                    );
+                };
+                let expected = broker.session_config_version();
+                let path = services.runtime.store_path.clone();
+                let Some(id) = services.runtime.session_id.clone() else {
+                    return invalid("terminal input session is missing");
+                };
+                match crate::store::spawn_blocking_store_caller(move || {
+                    crate::sessions::load_session_config(&path, &id)
+                        .map(|config| config.config_version)
+                })
+                .await
+                {
+                    Ok(Ok(current)) if current == expected => {}
+                    _ => {
+                        return invalid(
+                            "session configuration changed; prepared terminal input was not sent",
+                        )
+                    }
+                }
+            }
             exec_command::execute_write_stdin_with_cancellation(
-                &input,
+                &input.args,
                 services.runtime,
                 cancellation,
+                input.ticket.get(),
             )
             .await
         })

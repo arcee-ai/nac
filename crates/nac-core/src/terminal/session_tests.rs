@@ -77,9 +77,18 @@ async fn kill_removes_background_jobs_from_pty_shell() {
     // The PTY uses the account's configured login shell, which may not
     // support POSIX job syntax (for example, Fish has no `$!`). Run the
     // process-tree fixture through `sh` so the test is shell-independent.
-    session
-        .write(b"sh -c 'sleep 30 & echo NAC_CHILD:$!; wait'\r")
+    let ticket = session
+        .input_control()
+        .ticket(session.output_id(), super::super::InputController::Agent)
         .unwrap();
+    let receipt = session
+        .enqueue_input(
+            b"sh -c 'sleep 30 & echo NAC_CHILD:$!; wait'\r",
+            ticket,
+            &crate::tools::ThreadCancellation::default(),
+        )
+        .unwrap();
+    super::super::input::await_receipt(receipt).await.unwrap();
 
     let mut cursor = 0;
     let mut output = String::new();
