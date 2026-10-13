@@ -202,7 +202,7 @@ impl TerminalManager {
                 } else {
                     session.exit_code().is_none()
                 },
-                process_state: if session.native_cleanup_pending() {
+                process_state: if session.observation_cleanup_pending() {
                     ExecutionProcessState::CleanupPending
                 } else if session.exit_code().is_some() {
                     ExecutionProcessState::Settled
@@ -214,7 +214,11 @@ impl TerminalManager {
                 output_error: session.output_error().map(str::to_owned),
                 input: session.is_user_owned() && session.accepts_user_input(),
                 resize: session.is_user_owned() && session.accepts_user_input(),
-                stop: session.is_alive(),
+                stop: if session.is_user_owned() {
+                    session.is_alive()
+                } else {
+                    session.exit_code().is_none() || !session.output_complete()
+                },
                 retained: session.is_retained(),
                 cols: session.cols,
                 rows: session.rows,

@@ -27,6 +27,11 @@ be arriving after process settlement. Cleanup can remain unresolved even after
 collector EOF; the pane reports cleanup pending rather than claiming that the
 execution has settled. Read-only pipes never become interactive PTYs.
 
+A legacy agent PTY can report cleanup pending after its root exits while its
+original owner still holds unreaped process or terminal resources. Viewing
+does not reap or kill that owner. Stop remains available; the final exit code
+appears after explicit owner cleanup.
+
 Output is sanitized under the private environment policy captured when the
 execution launches, before it enters shared bounded retention or live delivery.
 The PTY policy also captures the standard LF-to-CRLF output form of each value.

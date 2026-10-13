@@ -221,10 +221,17 @@ impl TerminalManager {
                 )?;
                 session.attach_child_telemetry(self.telemetry_correlation());
                 let info = self.session_info(&name, &session);
-                sessions.insert(name, session);
+                sessions.insert(name.clone(), session);
                 info
             }
         };
+        if let Some(session) = sessions.get(&name) {
+            super::super::process_observation::start(
+                Arc::downgrade(&self.sessions),
+                name,
+                session.output_id().to_owned(),
+            );
+        }
         Ok(info)
     }
 

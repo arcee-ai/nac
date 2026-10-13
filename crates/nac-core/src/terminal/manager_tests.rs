@@ -1062,16 +1062,37 @@ async fn explicit_cancellation_is_structured_and_stops_late_side_effects() {
 
 #[tokio::test]
 async fn registry_clear_terminates_an_active_one_shot_command() {
+    use crate::sandbox::ssh_command::shell_quote;
+
     let manager = TerminalManager::new();
-    let path = std::env::temp_dir().join(format!(
+    let directory = std::env::temp_dir().join(format!(
         "nac-command-registry-clear-{}",
         uuid::Uuid::new_v4()
     ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("late");
+    let ready = directory.join("ready");
+    let release = directory.join("release-after-clear");
+    let program = r#"
+from pathlib import Path
+from threading import Thread
+import os, sys, time
+ready, release, target = map(Path, sys.argv[1:])
+def after_clear():
+    while not release.exists(): time.sleep(0.005)
+    target.write_text("late")
+Thread(target=after_clear).start()
+ready.write_text(str(os.getpid()))
+while True:
+    sys.stdout.write("x"*65536)
+    sys.stdout.flush()
+"#;
     let command = format!(
-        "python3 -c 'from pathlib import Path; from threading import Timer; import sys; \
-         Timer(1,lambda:Path(r\"{}\").write_text(\"late\")).start(); \
-         exec(\"while True:\\n sys.stdout.write(\\\"x\\\"*65536)\\n sys.stdout.flush()\")'",
-        path.display()
+        "python3 -c {} {} {} {}",
+        shell_quote(program),
+        shell_quote(&ready.to_string_lossy()),
+        shell_quote(&release.to_string_lossy()),
+        shell_quote(&path.to_string_lossy()),
     );
     let task_manager = manager.clone();
     let task_backend = backend();
@@ -1081,18 +1102,36 @@ async fn registry_clear_terminates_an_active_one_shot_command() {
             .await
     });
 
-    sleep(Duration::from_millis(50)).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !ready.exists() {
+            sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("one-shot child never reached its ready boundary");
+    assert!(!path.exists(), "side effect was released before clear");
     manager.remove_all().await.unwrap();
     let output = tokio::time::timeout(Duration::from_secs(2), task)
         .await
         .expect("one-shot command stalled after registry clear")
         .unwrap();
     assert_eq!(output.status, CommandStatus::SpawnError);
-    sleep(Duration::from_millis(1_100)).await;
+    // The child may attempt this write only after completed clear and cleanup.
+    std::fs::write(&release, b"released").unwrap();
+    #[cfg(unix)]
+    {
+        let pid = std::fs::read_to_string(&ready)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "cleared child survived");
+    }
+    sleep(Duration::from_millis(100)).await;
     assert!(
         !path.exists(),
         "registry-cleared command produced a late side effect"
     );
+    let _ = std::fs::remove_dir_all(directory);
 }
 
 #[tokio::test]

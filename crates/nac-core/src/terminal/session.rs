@@ -26,6 +26,8 @@ pub struct TerminalSession {
     preview_cursor: u64,
     output_notify: Arc<Notify>,
     child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
+    root_input_gate: Arc<std::sync::Mutex<()>>,
+    observed_legacy_exit: bool,
     native_owner: Option<nac_process::NativePtyOwner>,
     native_lifetime: Option<super::native_owner::NativeLifetime>,
     #[cfg(target_os = "linux")]
@@ -264,6 +266,7 @@ impl TerminalSession {
         } else {
             (Some(child), None, native_lifetime)
         };
+        let root_input_gate = Arc::new(std::sync::Mutex::new(()));
 
         Ok(TerminalSession {
             name,
@@ -273,6 +276,8 @@ impl TerminalSession {
             preview_cursor: 0,
             output_notify: notify,
             child,
+            root_input_gate,
+            observed_legacy_exit: false,
             native_owner,
             native_lifetime,
             #[cfg(target_os = "linux")]
@@ -388,6 +393,10 @@ impl TerminalSession {
             self.alive.store(status.leader_alive, Ordering::SeqCst);
             return;
         }
+        let root_gate = Arc::clone(&self.root_input_gate);
+        let _root = root_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if self.exit_code.is_some() {
             self.alive.store(false, Ordering::SeqCst);
             return;
@@ -429,22 +438,36 @@ impl TerminalSession {
         else {
             return false;
         };
-        // SAFETY: `siginfo_t` is a C output record for which the all-zero byte
-        // pattern is a valid initialized state before `waitid` fills it.
-        let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
-        // SAFETY: `info` is writable for one `siginfo_t`, `pid` is an integer
-        // child id, and the flag combination requests a non-reaping status read.
-        let result = unsafe {
-            libc::waitid(
-                libc::P_PID,
-                pid as libc::id_t,
-                &mut info,
-                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-            )
-        };
-        // SAFETY: `info` is initialized above and either remains zeroed or was
-        // populated by `waitid`, so reading its pid field is valid.
-        result == 0 && unsafe { info.si_pid() } == pid
+        super::process_observation::root_exited(pid) == Some(true)
+    }
+
+    pub(super) fn cache_process_exit_observation(&mut self) -> bool {
+        if self.native_owner.is_some() || self.exit_code.is_some() || self.observed_legacy_exit {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            let root_gate = Arc::clone(&self.root_input_gate);
+            let _root = match root_gate.try_lock() {
+                Ok(root) => root,
+                Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => return true,
+            };
+            if self.root_exited_without_reaping() {
+                self.observed_legacy_exit = true;
+                self.output_notify.notify_waiters();
+                self.output_notify.notify_one();
+                return false;
+            }
+            true
+        }
+        #[cfg(not(unix))]
+        false
+    }
+
+    pub(super) fn observation_cleanup_pending(&self) -> bool {
+        self.native_cleanup_pending()
+            || (!self.user_owned && self.observed_legacy_exit && self.exit_code.is_none())
     }
 
     pub fn exit_code(&self) -> Option<i32> {
@@ -490,6 +513,9 @@ impl TerminalSession {
     }
 
     pub(super) fn accepts_user_input(&self) -> bool {
+        if !self.user_owned && self.observed_legacy_exit {
+            return false;
+        }
         self.native_owner.as_ref().map_or_else(
             || self.is_alive(),
             nac_process::NativePtyOwner::accepts_input,

@@ -7,6 +7,122 @@ fn backend() -> Arc<ExecutionBackend> {
 }
 
 #[tokio::test]
+#[cfg(unix)]
+async fn retained_agent_natural_exit_is_cached_without_reap_archive_or_preview_reads() {
+    use crate::sandbox::ssh_command::shell_quote;
+    let manager = TerminalManager::for_direct();
+    let id = manager.next_session_name();
+    let release = std::env::temp_dir().join(format!("nac-agent-exit-{}", uuid::Uuid::new_v4()));
+    let command = format!(
+        "while [ ! -e {} ]; do sleep 0.01; done; exit 17",
+        shell_quote(&release.to_string_lossy())
+    );
+    manager
+        .create_with_cancellation(id.clone(), &command, None, 80, 24, &backend(), None)
+        .await
+        .unwrap();
+    manager.retain_with_cancellation(&id, None).await.unwrap();
+    std::fs::write(&release, b"retained").unwrap();
+    let status = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let status = manager.execution_status(&id).await.unwrap();
+            if status.process_state == ExecutionProcessState::CleanupPending {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("natural retained agent exit stayed stale without model polling");
+    assert_eq!(status.process_state, ExecutionProcessState::CleanupPending);
+    assert_eq!(
+        status.exit_code, None,
+        "unreaped ownership withholds settlement"
+    );
+    assert!(status.alive && status.retained && status.stop);
+    assert!(!status.input && !status.resize);
+    assert!(manager.completed_sessions.lock().await.is_empty());
+    {
+        let sessions = manager.sessions.lock().await;
+        let session = sessions.get(&id).unwrap();
+        assert_eq!(session.preview_cursor(), 0);
+        assert!(
+            !session.accepts_user_input(),
+            "pending roots deny fresh input"
+        );
+        assert_eq!(
+            session.exit_code(),
+            None,
+            "viewing must not reap the model owner"
+        );
+    }
+    manager.stop_execution(&id).await.unwrap();
+    let settled = manager.execution_status(&id).await.unwrap();
+    assert_eq!(settled.exit_code, Some(17));
+    assert_eq!(settled.process_state, ExecutionProcessState::Settled);
+    assert!(!settled.alive && !settled.stop);
+    let _ = std::fs::remove_file(release);
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn observing_exited_agent_root_preserves_descendant_and_collector_ownership() {
+    use crate::sandbox::ssh_command::shell_quote;
+    let manager = TerminalManager::for_direct();
+    let path = std::env::temp_dir().join(format!("nac-agent-observe-{}", uuid::Uuid::new_v4()));
+    let release = path.with_extension("release");
+    let child = format!(
+        "trap '' HUP TERM; echo $$ > {}; exec sleep 30",
+        shell_quote(&path.to_string_lossy())
+    );
+    let command = format!(
+        "sh -c {} & while [ ! -s {} ]; do sleep 0.01; done; while [ ! -e {} ]; do sleep 0.01; done; exit 19",
+        shell_quote(&child),
+        shell_quote(&path.to_string_lossy()),
+        shell_quote(&release.to_string_lossy())
+    );
+    let id = manager.next_session_name();
+    manager
+        .create_with_cancellation(id.clone(), &command, None, 80, 24, &backend(), None)
+        .await
+        .unwrap();
+    manager.retain_with_cancellation(&id, None).await.unwrap();
+    std::fs::write(&release, b"retained").unwrap();
+    let status = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let status = manager.execution_status(&id).await.unwrap();
+            if status.process_state == ExecutionProcessState::CleanupPending {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let pid = std::fs::read_to_string(&path)
+        .unwrap()
+        .trim()
+        .parse::<libc::pid_t>()
+        .unwrap();
+    assert_eq!(
+        unsafe { libc::kill(pid, 0) },
+        0,
+        "viewing killed the descendant"
+    );
+    // Platforms can report PTY EOF at leader hangup even while a descendant
+    // still owns descriptors. Collector completion cannot settle that owner.
+    assert!(status.alive && status.stop);
+    assert_eq!(status.exit_code, None);
+    assert!(manager.completed_sessions.lock().await.is_empty());
+    manager.stop_execution(&id).await.unwrap();
+    let settled = manager.execution_status(&id).await.unwrap();
+    assert_eq!(settled.exit_code, Some(19));
+    assert_eq!(settled.process_state, ExecutionProcessState::Settled);
+    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_file(release);
+}
+
+#[tokio::test]
 async fn catalog_observes_existing_human_retained_agent_and_active_pipes_without_mutation() {
     let manager = TerminalManager::for_direct();
     let backend = backend();
