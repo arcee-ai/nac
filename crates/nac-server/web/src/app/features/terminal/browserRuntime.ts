@@ -3,6 +3,9 @@ import {
   UserTerminalConnection,
   UserTerminalInputPump,
   type UserTerminalApi,
+  type ExecutionApi,
+  type ExecutionStatus,
+  createExecutionConnection,
 } from "../../../../packages/nac-client/src/index";
 import { createTerminalRenderer } from "./xtermAdapter";
 import { observeHumanTerminalInput } from "./humanInput";
@@ -14,7 +17,8 @@ export interface TerminalControls {
   restoreFreshInput: () => boolean;
 }
 interface TerminalPorts {
-  api: UserTerminalApi;
+  api: UserTerminalApi & Partial<ExecutionApi>;
+  source?: ExecutionStatus;
   sessionId: string;
   terminalId: string;
   host: HTMLDivElement;
@@ -86,13 +90,23 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
       }),
     );
     const view = adapter;
-    const connection = new UserTerminalConnection(
-      ports.api,
-      ports.sessionId,
-      ports.terminalId,
-      view.renderer,
-      { pageLimit: 32_768 },
-    );
+    const connection =
+      ports.source &&
+      ports.api.attachExecution &&
+      ports.api.pullExecution &&
+      ports.api.detachExecution &&
+      ports.api.stopExecution &&
+      ports.api.listExecutions
+        ? createExecutionConnection(
+            ports.api as UserTerminalApi & ExecutionApi,
+            ports.sessionId,
+            ports.source,
+            view.renderer,
+            { pageLimit: 32_768 },
+          )
+        : new UserTerminalConnection(ports.api, ports.sessionId, ports.terminalId, view.renderer, {
+            pageLimit: 32_768,
+          });
     own(() => {
       // Detach is SDK observer cleanup, never shell/agent cancellation.
       void connection.detach().catch(() => {});
@@ -108,6 +122,7 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
         active() &&
         connected &&
         processAlive &&
+        ports.source?.input !== false &&
         !ports.previousFailure.current &&
         ports.previousFailure.available !== false &&
         !pump.needsAcknowledgement;
@@ -130,9 +145,14 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
     let resizeRunning = false;
     let latestGeometry: { cols: number; rows: number } | null = null;
     const resize = Effect.suspend(() => {
+      if (ports.source && ports.source.origin !== "human" && ports.source.resize === false) {
+        view.terminal.resize(ports.source.cols, ports.source.rows);
+        return Effect.void;
+      }
       const geometry = view.fit();
       if (geometry) latestGeometry = geometry;
-      if (resizeRunning || !connected || !processAlive) return Effect.void;
+      if (resizeRunning || !connected || !processAlive || ports.source?.resize === false)
+        return Effect.void;
       resizeRunning = true;
       return Effect.gen(function* () {
         while (latestGeometry && active() && processAlive) {
@@ -162,6 +182,7 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
       if (
         !active() ||
         !connected ||
+        ports.source?.input === false ||
         view.terminal.options.disableStdin ||
         ports.previousFailure.current ||
         ports.previousFailure.available === false ||

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import type { ExecutionStatus } from "../../../../packages/nac-client/src/index";
 import { openTerminalObservation, type TerminalControls } from "./browserRuntime";
 import { recoveryForRuntime, type TerminalInputRecoveryLease } from "./inputRecovery";
 
@@ -7,6 +8,7 @@ export function useTerminalController(
   sessionId: string,
   terminalId: string,
   element: RefObject<HTMLDivElement | null>,
+  source?: ExecutionStatus,
 ) {
   const runtime = useNativeRuntime();
   const { api } = runtime;
@@ -26,6 +28,7 @@ export function useTerminalController(
     recovery.current = lease;
     const close = openTerminalObservation({
       api,
+      source,
       sessionId,
       terminalId,
       host,
@@ -45,7 +48,7 @@ export function useTerminalController(
       lease.release();
       if (recovery.current === lease) recovery.current = null;
     };
-  }, [runtime, api, sessionId, terminalId, attempt, element]);
+  }, [runtime, api, sessionId, terminalId, attempt, element, source]);
 
   return {
     phase,

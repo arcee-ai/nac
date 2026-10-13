@@ -1,5 +1,5 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-B0aSnxlc.js";
-import { Ar as r, Er as i, Fi as a, Mi as o, Pi as s, Xr as c, cr as l, d as u, i as d, lr as f, sr as p, t as m, u as h } from "./PerfProfiler-bukSUKq6.js";
+import { Ar as r, Er as i, Fi as a, Ii as o, Ni as s, Xr as c, cr as l, d as u, i as d, lr as f, sr as p, t as m, u as h } from "./PerfProfiler-Cr8_K2NC.js";
 import { a as g, i as _, n as v, o as y, s as b } from "./space-separated-tokens-DZK_KzBN.js";
 import { n as x, t as S } from "./lib-BzcGLYKi.js";
 import { a as C, c as w, d as T, f as E, i as D, l as O, m as k, n as A, o as j, p as M, r as N, s as ee, t as P, u as F, v as te, y as I } from "./micromark-factory-space-DFzJv7G6.js";
@@ -6648,7 +6648,7 @@ function ol(e) {
 	})), al.set(e, t)), t;
 }
 function sl(e) {
-	return a(e) ? e : s(e) ? String(e) : Array.isArray(e) ? e.map(sl).join("") : ne(e) ? sl(e.props.children) : "";
+	return o(e) ? e : a(e) ? String(e) : Array.isArray(e) ? e.map(sl).join("") : ne(e) ? sl(e.props.children) : "";
 }
 function cl(e) {
 	if (!ne(e)) return "plaintext";
@@ -6718,7 +6718,7 @@ function fl(e) {
 			children: /* @__PURE__ */ z("table", { ...e })
 		}),
 		style: ({ children: e }) => {
-			let t = a(e) ? e : "";
+			let t = o(e) ? e : "";
 			return t ? /* @__PURE__ */ z("style", {
 				href: `mathjax-${ul(t)}`,
 				precedence: "mathjax",
@@ -6776,11 +6776,11 @@ function hl({ source: e, streaming: t }) {
 	}) : i;
 }
 function gl({ source: e, components: t }) {
-	let n = c(), i = re(ol(n.assets?.mathjaxFontUrl)), o = r(), s = n.assets ? {
+	let n = c(), i = re(ol(n.assets?.mathjaxFontUrl)), a = r(), s = n.assets ? {
 		...t,
 		style: ({ children: e }) => {
-			let t = a(e) ? e : "";
-			return t && n.id !== void 0 ? /* @__PURE__ */ z("style", { children: Bc(t, n.id, o) }) : null;
+			let t = o(e) ? e : "";
+			return t && n.id !== void 0 ? /* @__PURE__ */ z("style", { children: Bc(t, n.id, a) }) : null;
 		}
 	} : t;
 	return /* @__PURE__ */ z(Da, {
@@ -6797,7 +6797,7 @@ var _l = R(function({ source: e }) {
 		streaming: !0
 	});
 }), vl = R(function({ children: e, streaming: t = !1 }) {
-	return o("Markdown"), /* @__PURE__ */ z(m, {
+	return s("Markdown"), /* @__PURE__ */ z(m, {
 		id: "markdown",
 		children: t ? Rc(e).map((e, t) => /* @__PURE__ */ z(_l, { source: e }, t)) : /* @__PURE__ */ z(hl, {
 			source: e,

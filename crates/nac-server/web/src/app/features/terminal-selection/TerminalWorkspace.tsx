@@ -16,7 +16,9 @@ export function TerminalWorkspace({ sessionId }: { sessionId: string }) {
 
 function WorkspaceOwner({ sessionId }: { sessionId: string }) {
   const { controller, state } = useSelectionReview(sessionId);
-  const snapshot = useSessionSnapshot(sessionId);
+  // Availability is advisory cached state. Opening this observer must not
+  // attach a session or reconcile its journal; submission revalidates intent.
+  const snapshot = useSessionSnapshot(sessionId, { enabled: false });
   const running = useNativeRuntime().stores.runtimeStore.useRunning(sessionId);
   const runId = snapshot.data?.active_run?.run_id;
   const commandActive = snapshot.data?.shell_commands?.some(

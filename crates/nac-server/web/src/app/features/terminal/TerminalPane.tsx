@@ -1,12 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import {
-  useCloseUserTerminal,
-  useOpenUserTerminal,
-  useUserTerminalStatus,
-  useUserTerminals,
-} from "./queries";
+import { useOpenUserTerminal, useExecutions, useStopExecution } from "./queries";
+import type { ExecutionStatus } from "../../../../packages/nac-client/src/index";
+import { ExecutionLog } from "./ExecutionLog";
 import { useTerminalController } from "./useTerminalController";
 
 export interface TerminalSelectionCapture {
@@ -16,9 +13,11 @@ export interface TerminalSelectionCapture {
   readonly capturedAtMs: string;
   readonly sourceAlive: boolean;
 }
-interface TerminalPaneProps {
+export interface TerminalPaneProps {
   sessionId: string;
   onReviewSelection?: (capture: Readonly<TerminalSelectionCapture>) => void;
+  /** Composition slot; historical opening observes the same source read-only. */
+  history?: (observe: (source: ExecutionStatus) => void) => ReactNode;
 }
 
 export function TerminalPane(props: TerminalPaneProps) {
@@ -28,17 +27,25 @@ export function TerminalPane(props: TerminalPaneProps) {
   return <TerminalPaneOwner key={`${binding.id}:${props.sessionId}`} {...props} />;
 }
 
-function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) {
-  const list = useUserTerminals(sessionId);
+function TerminalPaneOwner({ sessionId, onReviewSelection, history }: TerminalPaneProps) {
+  const list = useExecutions(sessionId);
   const open = useOpenUserTerminal(sessionId);
   const [selected, setSelected] = useState<string | null>(null);
+  const [historical, setHistorical] = useState<ExecutionStatus | null>(null);
   const launchId = useRef<string | null>(null);
-  const terminals = list.data?.terminals ?? [];
-  const id = selected ?? terminals[0]?.terminal_id;
+  const terminals = list.data?.executions ?? [];
+  const id = selected ?? terminals[0]?.id;
+  const source = historical?.id === id ? historical : terminals.find((item) => item.id === id);
+  const observeHistory = (source: ExecutionStatus) => {
+    setHistorical({ ...source, input: false, resize: false, stop: false, retained: false });
+    setSelected(source.id);
+  };
+  if (selected == null && source) setSelected(source.id);
   const launch = () => {
     launchId.current ??= crypto.randomUUID();
     open.mutate(launchId.current, {
       onSuccess: (result) => {
+        setHistorical(null);
         setSelected(result.terminal_id);
         launchId.current = null;
       },
@@ -55,18 +62,30 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
           aria-label="Shell"
           value={id ?? ""}
           onChange={(event) => {
+            setHistorical(null);
             setSelected(event.target.value);
           }}
           className="min-w-0 max-w-full rounded-md border border-muted bg-elevation-level-2 px-2 py-1 text-sm"
         >
           {!id ? <option value="">No shell</option> : null}
-          {id && !terminals.some((item) => item.terminal_id === id) ? (
+          {id && !terminals.some((item) => item.id === id) ? (
             <option value={id}>Selected shell unavailable</option>
           ) : null}
           {terminals.map((item, index) => (
-            <option key={item.terminal_id} value={item.terminal_id}>
-              Shell {index + 1}
-              {item.alive ? "" : " (exited)"}
+            <option key={item.id} value={item.id}>
+              {item.origin === "human"
+                ? "Human shell"
+                : item.origin === "human_command"
+                  ? "! command"
+                  : item.representation === "pty"
+                    ? "Agent PTY"
+                    : "Agent command"}{" "}
+              {index + 1}
+              {item.process_state === "cleanup_pending"
+                ? " (cleanup pending)"
+                : item.alive
+                  ? " (running)"
+                  : " (settled)"}
             </option>
           ))}
         </select>
@@ -85,7 +104,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
         </Button>
       </div>
       <p className="text-sm text-basic-secondary">
-        This shell uses the agent’s execution environment and can change the same files.
+        Human shells, agent executions and ! commands use the chat’s existing execution environment.
       </p>
       {list.isError ? (
         <p role="alert">
@@ -106,33 +125,109 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
           {open.error.message} Opening was not confirmed; retry uses the same launch identity.
         </p>
       ) : null}
-      {id ? (
-        <TerminalDisplay
-          key={id}
+      {history?.(observeHistory)}
+      {historical ? (
+        <Button
+          type="button"
+          size={ButtonSize.Small}
+          variant={ButtonVariant.Ghost}
+          onClick={() => setHistorical(null)}
+        >
+          Return to live source
+        </Button>
+      ) : null}
+      {source ? (
+        <ExecutionDisplay
+          key={`${source.id}:${historical ? "history" : "live"}`}
           sessionId={sessionId}
-          terminalId={id}
+          source={source}
+          historical={historical != null}
           onReviewSelection={onReviewSelection}
         />
       ) : (
         <p role="status">
-          {list.isPending
-            ? "Loading shells…"
-            : "Open a shell to start typing. Terminal output stays separate from the conversation."}
+          {id
+            ? "Selected execution unavailable."
+            : list.isPending
+              ? "Loading executions…"
+              : "Open a shell to start typing. Terminal output stays separate from the conversation."}
         </p>
       )}
     </section>
   );
 }
 
+function ExecutionDisplay({
+  sessionId,
+  source,
+  onReviewSelection,
+  historical = false,
+}: TerminalPaneProps & { source: ExecutionStatus; historical?: boolean }) {
+  const stop = useStopExecution(sessionId, source.id);
+  return (
+    <>
+      <code aria-label="Execution identity" className="break-all text-xs text-basic-secondary">
+        {source.id}
+      </code>
+      <p className="text-sm text-basic-secondary break-words">
+        {source.origin === "human"
+          ? "Human shell"
+          : source.origin === "human_command"
+            ? "Human ! command"
+            : "Agent execution"}
+        {` · ${source.backend} · ${source.cwd} · ${source.process_state.replaceAll("_", " ")}`}
+        {source.exit_code == null ? "" : ` (${source.exit_code})`}
+        {source.output_complete ? " · collection complete" : " · collecting output"}
+        {historical || source.origin !== "human" ? " · Read-only" : ""}
+      </p>
+      {!historical ? (
+        <div>
+          <Button
+            type="button"
+            size={ButtonSize.Small}
+            variant={ButtonVariant.Ghost}
+            disabled={!source.stop || stop.isPending}
+            onClick={() => stop.mutate()}
+          >
+            {stop.isPending
+              ? "Stopping…"
+              : source.origin === "human"
+                ? "Close shell"
+                : "Stop execution"}
+          </Button>
+        </div>
+      ) : null}
+      {stop.isError ? (
+        <p role="alert">{stop.error.message} Stop was not confirmed; check its status.</p>
+      ) : null}
+      {source.output_error ? <p role="alert">{source.output_error}</p> : null}
+      {source.representation === "log" ? (
+        <ExecutionLog sessionId={sessionId} source={source} />
+      ) : (
+        <TerminalDisplay
+          sessionId={sessionId}
+          source={source}
+          historical={historical}
+          onReviewSelection={
+            !historical && source.origin === "human" ? onReviewSelection : undefined
+          }
+        />
+      )}
+    </>
+  );
+}
+
 function TerminalDisplay({
   sessionId,
-  terminalId,
+  source,
   onReviewSelection,
-}: TerminalPaneProps & { terminalId: string }) {
-  const status = useUserTerminalStatus(sessionId, terminalId);
-  const close = useCloseUserTerminal(sessionId, terminalId);
+  historical = false,
+}: TerminalPaneProps & { source: ExecutionStatus; historical?: boolean }) {
+  const terminalId = source.id;
+  const status = { data: source };
+  const [binding] = useState(() => source);
   const element = useRef<HTMLDivElement>(null);
-  const controller = useTerminalController(sessionId, terminalId, element);
+  const controller = useTerminalController(sessionId, terminalId, element, binding);
   const review = () => {
     const text = controller.selection();
     if (!text || !onReviewSelection) return;
@@ -172,15 +267,6 @@ function TerminalDisplay({
         >
           Reconnect
         </Button>
-        <Button
-          size={ButtonSize.Small}
-          type="button"
-          variant={ButtonVariant.Ghost}
-          disabled={!status.data?.alive || close.isPending}
-          onClick={() => close.mutate()}
-        >
-          {close.isPending ? "Closing…" : "Close shell"}
-        </Button>
         {onReviewSelection ? (
           <Button
             size={ButtonSize.Small}
@@ -193,7 +279,7 @@ function TerminalDisplay({
         ) : null}
       </div>
       {controller.notice ? <p role="alert">{controller.notice}</p> : null}
-      {controller.inputFailure ? (
+      {!historical && source.origin === "human" && controller.inputFailure ? (
         <Button
           size={ButtonSize.Small}
           type="button"
@@ -203,18 +289,11 @@ function TerminalDisplay({
           Acknowledge failure and enable fresh input
         </Button>
       ) : null}
-      {close.isError ? (
-        <p role="alert">{close.error.message} Shell closure was not confirmed; check its status.</p>
-      ) : null}
-      {status.isError ? (
-        <p role="alert">Shell status unavailable; reconnect to refresh observation.</p>
-      ) : null}
-      {status.data?.output_error ? <p role="alert">{status.data.output_error}</p> : null}
       <div
         ref={element}
         role="region"
         aria-label="Interactive terminal"
-        className="flex-1 min-h-32 overflow-hidden"
+        className="flex-1 min-h-32 overflow-auto"
         style={{ background: "#151719" }}
       />
     </>

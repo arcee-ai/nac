@@ -4,9 +4,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeContext } from "@/app/runtime/RuntimeContext";
 import { standaloneRuntime } from "@/app/runtime/nativeRuntime";
-import { TerminalPane } from "./TerminalPane";
+import { TerminalPane, type TerminalPaneProps } from "./TerminalPane";
+import type {
+  UserTerminalFrameResponse,
+  UserTerminalResponse,
+  ExecutionStatus,
+} from "../../../../packages/nac-client/src/index";
 import { recoveryForRuntime } from "./inputRecovery";
-import type { UserTerminalFrameResponse } from "../../../../packages/nac-client/src/index";
 
 const renderer = vi.hoisted(() => ({
   keyboard: undefined as undefined | ((data: string) => void),
@@ -27,6 +31,7 @@ vi.mock("./xtermAdapter", () => ({
       terminal: {
         options: renderer.options,
         textarea,
+        resize: vi.fn(),
         onKey: (callback: (event: { key: string; domEvent: KeyboardEvent }) => void) => {
           renderer.keyboard = (key) =>
             callback({ key, domEvent: { isTrusted: true } as KeyboardEvent });
@@ -69,17 +74,44 @@ function pending(signal?: AbortSignal): Promise<never> {
     else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
 }
-function fixture(status = terminal) {
+function fixture(
+  status: UserTerminalResponse = terminal,
+  sources?: ExecutionStatus[],
+  history?: TerminalPaneProps["history"],
+) {
   const api = {
     ...standaloneRuntime.api,
-    listUserTerminals: vi.fn(async () => ({ protocol_version: 1, terminals: [status] })),
+    listExecutions: vi.fn(async () => ({
+      protocol_version: 1,
+      executions: sources ?? [
+        {
+          id: status.terminal_id,
+          origin: "human" as const,
+          representation: "pty" as const,
+          cwd: "/workspace",
+          backend: "local",
+          request_id: null,
+          alive: status.alive,
+          process_state: status.alive ? ("running" as const) : ("settled" as const),
+          output_error: null,
+          output_complete: status.output_complete,
+          input: status.alive,
+          resize: status.alive,
+          stop: status.alive,
+          retained: true,
+          cols: status.cols,
+          rows: status.rows,
+          exit_code: status.exit_code ?? null,
+        },
+      ],
+    })),
     getUserTerminal: vi.fn(async () => status),
     openUserTerminal: vi.fn(async () => status),
-    attachUserTerminal: vi.fn(async () => ({
+    attachUserTerminal: vi.fn(async (_session: string, id: string) => ({
       protocol_version: 1,
       observer_id: "observer",
       idle_expiry_ms: 30_000,
-      terminal: status,
+      terminal: { ...status, terminal_id: id },
     })),
     pullUserTerminal: vi.fn<typeof standaloneRuntime.api.pullUserTerminal>(
       async (_session, _id, _observer, _body, signal) => pending(signal),
@@ -89,16 +121,27 @@ function fixture(status = terminal) {
     resizeUserTerminal: vi.fn(async () => {}),
     terminateTerminal: vi.fn(async () => {}),
   };
+  const executionApi = {
+    ...api,
+    attachExecution: api.attachUserTerminal,
+    pullExecution: async (...args: Parameters<typeof api.pullUserTerminal>) => ({
+      ...(await api.pullUserTerminal(...args)),
+      execution: (await api.listExecutions()).executions[0],
+      segments: [],
+    }),
+    detachExecution: api.detachUserTerminal,
+    stopExecution: api.terminateTerminal,
+  };
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   clients.push(client);
   const review = vi.fn();
-  const runtime = { ...standaloneRuntime, api };
+  const runtime = { ...standaloneRuntime, api: executionApi };
   const view = render(
     <RuntimeContext.Provider value={runtime}>
       <QueryClientProvider client={client}>
-        <TerminalPane sessionId="session" onReviewSelection={review} />
+        <TerminalPane sessionId="session" onReviewSelection={review} history={history} />
       </QueryClientProvider>
     </RuntimeContext.Provider>,
   );
@@ -127,6 +170,26 @@ afterEach(() => {
   for (const client of clients.splice(0)) client.clear();
   vi.unstubAllGlobals();
 });
+
+const readOnlySource: ExecutionStatus = {
+  id: "opaque-shell",
+  origin: "agent",
+  representation: "pty",
+  cwd: "/workspace",
+  backend: "local",
+  request_id: null,
+  alive: true,
+  process_state: "running",
+  exit_code: null,
+  output_error: null,
+  output_complete: false,
+  input: false,
+  resize: false,
+  stop: true,
+  retained: true,
+  cols: 120,
+  rows: 40,
+};
 
 describe("terminal pane lifetime and explicit user actions", () => {
   it("waits for parsing before ACK, sends literal control input, and detaches without terminating", async () => {
@@ -400,5 +463,105 @@ describe("terminal pane lifetime and explicit user actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry opening same shell" }));
     await waitFor(() => expect(f.api.openUserTerminal).toHaveBeenCalledTimes(2));
     expect(f.api.openUserTerminal.mock.calls[1]).toEqual(first);
+  });
+  it("observes a retained agent PTY without input, process resize, retention or selection authority", async () => {
+    const f = fixture(terminal, [readOnlySource]);
+    await screen.findByText("Connected");
+    expect(screen.getByRole("option", { name: /Agent PTY/ })).toBeTruthy();
+    expect(screen.getByText(/Agent execution.*Read-only/)).toBeTruthy();
+    await act(async () => {
+      renderer.keyboard?.("must not send\r");
+    });
+    expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
+    expect(f.api.resizeUserTerminal).not.toHaveBeenCalled();
+    expect(f.api.openUserTerminal).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Review selected text" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop execution" }));
+    await waitFor(() =>
+      expect(f.api.terminateTerminal).toHaveBeenCalledWith("session", "opaque-shell"),
+    );
+  });
+
+  it("renders active pipe output as an inert bounded log and detaches without stopping it", async () => {
+    const source = {
+      ...readOnlySource,
+      representation: "log" as const,
+      retained: false,
+      cols: 0,
+      rows: 0,
+    };
+    const f = fixture(terminal, [source]);
+    const bytes = Array.from(new TextEncoder().encode("pipe \x1b[2J<b>literal</b>"));
+    f.api.pullUserTerminal.mockResolvedValueOnce({
+      protocol_version: 1,
+      observer_id: "observer",
+      terminal,
+      bytes,
+      offset: "0",
+      next_offset: String(bytes.length),
+      retained_start: "0",
+      retained_end: String(bytes.length),
+      gap: false,
+      caught_up: true,
+      requires_ack: true,
+    });
+    const log = await screen.findByRole("region", { name: "Execution log" });
+    await waitFor(() => expect(log.textContent).toBe("pipe \\x1b[2J<b>literal</b>"));
+    expect(log.querySelector("b")).toBeNull();
+    expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
+    expect(f.api.resizeUserTerminal).not.toHaveBeenCalled();
+    f.unmount();
+    await waitFor(() => expect(f.api.detachUserTerminal).toHaveBeenCalled());
+    expect(f.api.terminateTerminal).not.toHaveBeenCalled();
+  });
+  it("keeps actual input uncertainty when switching away from and back to a source", async () => {
+    const human = { ...readOnlySource, origin: "human" as const, input: true, resize: true };
+    const other = { ...readOnlySource, id: "other-shell" };
+    const f = fixture(terminal, [human, other]);
+    await screen.findByText("Connected");
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    f.api.inputUserTerminal.mockRejectedValueOnce(new Error("reply lost"));
+    await act(async () => {
+      renderer.keyboard?.("uncertain command\r");
+    });
+    await screen.findByRole("button", { name: "Acknowledge failure and enable fresh input" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Shell" }), {
+      target: { value: other.id },
+    });
+    await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByRole("combobox", { name: "Shell" }), {
+      target: { value: human.id },
+    });
+    await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(3));
+    await screen.findByText("Connected");
+    expect(renderer.options.disableStdin).toBe(true);
+    await screen.findByRole("button", { name: "Acknowledge failure and enable fresh input" });
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    await act(async () => {
+      renderer.keyboard?.("fresh typing before acknowledgement\r");
+    });
+    expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(1);
+  });
+  it("opens historical output without inheriting live controls for the same source", async () => {
+    const human = { ...readOnlySource, origin: "human" as const, input: true, resize: true };
+    const f = fixture(terminal, [human], (observe) => (
+      <button onClick={() => observe(human)}>Reopen historical source</button>
+    ));
+    await screen.findByText("Connected");
+    fireEvent.click(screen.getByRole("button", { name: "Reopen historical source" }));
+    await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
+    await screen.findByText("Connected");
+    expect(renderer.options.disableStdin).toBe(true);
+    expect(screen.queryByRole("button", { name: "Close shell" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Review selected text" })).toBeNull();
+    await act(async () => {
+      renderer.keyboard?.("historical input forbidden\r");
+    });
+    expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
+    expect(f.api.terminateTerminal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Return to live source" }));
+    await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(3));
+    await screen.findByText("Connected");
+    expect(renderer.options.disableStdin).toBe(false);
   });
 });

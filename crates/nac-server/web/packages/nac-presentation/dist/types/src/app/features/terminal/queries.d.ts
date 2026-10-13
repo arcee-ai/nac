@@ -27,3 +27,11 @@ export declare function useOpenUserTerminal(sessionId: string): import("@tanstac
     terminal_id: string;
 }, Error, string, unknown>;
 export declare function useCloseUserTerminal(sessionId: string, id: string): import("@tanstack/react-query").UseMutationResult<void, Error, void, unknown>;
+export declare const executionKeys: {
+    list: (sessionId: string) => readonly ["session", string, "executions"];
+};
+export declare function useExecutions(sessionId: string): import("@tanstack/react-query").UseQueryResult<NoInfer<{
+    executions: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ExecutionStatus"][];
+    protocol_version: number;
+}>, Error>;
+export declare function useStopExecution(sessionId: string, id: string): import("@tanstack/react-query").UseMutationResult<void, Error, void, unknown>;

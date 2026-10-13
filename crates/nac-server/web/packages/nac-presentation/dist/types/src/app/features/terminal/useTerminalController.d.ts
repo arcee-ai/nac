@@ -1,5 +1,6 @@
 import { type RefObject } from "react";
-export declare function useTerminalController(sessionId: string, terminalId: string, element: RefObject<HTMLDivElement | null>): {
+import type { ExecutionStatus } from "../../../../packages/nac-client/src/index";
+export declare function useTerminalController(sessionId: string, terminalId: string, element: RefObject<HTMLDivElement | null>, source?: ExecutionStatus): {
     phase: string;
     notice: string;
     inputFailure: boolean;

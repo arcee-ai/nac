@@ -41,7 +41,11 @@ export function useOpenUserTerminal(sessionId: string) {
         rows: 24,
       }),
     retry: false,
-    onSuccess: () => client.invalidateQueries({ queryKey: terminalKeys.list(sessionId) }),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: terminalKeys.list(sessionId) }),
+        client.invalidateQueries({ queryKey: executionKeys.list(sessionId) }),
+      ]),
   });
 }
 
@@ -56,5 +60,27 @@ export function useCloseUserTerminal(sessionId: string, id: string) {
         client.invalidateQueries({ queryKey: terminalKeys.list(sessionId) }),
         client.invalidateQueries({ queryKey: terminalKeys.status(sessionId, id) }),
       ]),
+  });
+}
+
+export const executionKeys = {
+  list: (sessionId: string) => ["session", sessionId, "executions"] as const,
+};
+export function useExecutions(sessionId: string) {
+  const { api } = useNativeRuntime();
+  return useQuery({
+    queryKey: executionKeys.list(sessionId),
+    queryFn: ({ signal }) => api.listExecutions(sessionId, signal),
+    retry: false,
+    refetchInterval: 1000,
+  });
+}
+export function useStopExecution(sessionId: string, id: string) {
+  const { api } = useNativeRuntime();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.stopExecution(sessionId, id),
+    retry: false,
+    onSuccess: () => client.invalidateQueries({ queryKey: executionKeys.list(sessionId) }),
   });
 }

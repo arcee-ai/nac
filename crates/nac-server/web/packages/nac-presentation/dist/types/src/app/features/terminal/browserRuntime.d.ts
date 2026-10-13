@@ -1,4 +1,4 @@
-import { UserTerminalInputPump, type UserTerminalApi } from "../../../../packages/nac-client/src/index";
+import { UserTerminalInputPump, type UserTerminalApi, type ExecutionApi, type ExecutionStatus } from "../../../../packages/nac-client/src/index";
 import { createTerminalRenderer } from "./xtermAdapter";
 type Adapter = Awaited<ReturnType<typeof createTerminalRenderer>>;
 export interface TerminalControls {
@@ -7,7 +7,8 @@ export interface TerminalControls {
     restoreFreshInput: () => boolean;
 }
 interface TerminalPorts {
-    api: UserTerminalApi;
+    api: UserTerminalApi & Partial<ExecutionApi>;
+    source?: ExecutionStatus;
     sessionId: string;
     terminalId: string;
     host: HTMLDivElement;
