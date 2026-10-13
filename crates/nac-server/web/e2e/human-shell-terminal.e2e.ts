@@ -55,21 +55,47 @@ test("user commands, live terminal and explicit queued selection share one sessi
   expect((await api.getPermissions(session)).requests).toHaveLength(0);
   expect((await api.getUserTerminal(session, shell.terminal_id)).alive).toBe(true);
 
-  const geometry = await api.getUserTerminal(session, shell.terminal_id);
-  const rows = await pane.locator(".xterm-accessibility-tree > div").allTextContents();
+  // Exercise a real resize while the user command owns execution admission.
+  const beforeResize = await api.getUserTerminal(session, shell.terminal_id);
+  const viewport = page.viewportSize()!;
+  await page.setViewportSize({ width: viewport.width, height: viewport.height + 300 });
+  await expect
+    .poll(async () => (await api.getUserTerminal(session, shell.terminal_id)).rows)
+    .not.toBe(beforeResize.rows);
+  const screen = pane.locator(".xterm-screen");
+  await expect(screen).toBeVisible();
+  await screen.scrollIntoViewIfNeeded();
+  await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);
+  const lines = pane.locator(".xterm-rows > div");
+  const rows = await lines.allTextContents();
   const row = rows.findIndex((text) => text.trimEnd() === evidence);
   expect(row).toBeGreaterThanOrEqual(0);
-  const grid = await pane.locator(".xterm-screen").boundingBox();
-  expect(grid).not.toBeNull();
-  const cell = grid!.width / geometry.cols;
-  const y = grid!.y + ((row + 0.5) * grid!.height) / geometry.rows;
-  await page.mouse.move(grid!.x + 0.25 * cell, y);
+  // The painted DOM row follows the live viewport; screen-reader rows can lag
+  // a resize. Measure the first ASCII cell instead of cached server geometry.
+  const bounds = await lines.nth(row).boundingBox();
+  const firstSpan = lines.nth(row).locator("span").first();
+  const spanBounds = await firstSpan.boundingBox();
+  const spanText = (await firstSpan.textContent())!;
+  expect(bounds).not.toBeNull();
+  expect(spanBounds).not.toBeNull();
+  expect(spanText.length).toBeGreaterThan(0);
+  const cell = spanBounds!.width / spanText.length;
+  const y = bounds!.y + bounds!.height / 2;
+  const startX = bounds!.x + 0.25 * cell;
+  const endX = bounds!.x + (evidence.length + 0.25) * cell;
+  const currentViewport = page.viewportSize()!;
+  expect(
+    startX >= 0 && endX < currentViewport.width && y >= 0 && y < currentViewport.height,
+    `selection drag must be inside the viewport: ${JSON.stringify({ startX, endX, y })}`,
+  ).toBe(true);
+  await page.mouse.move(startX, y);
   await page.mouse.down();
-  await page.mouse.move(grid!.x + (evidence.length + 0.25) * cell, y, { steps: 10 });
+  await page.mouse.move(endX, y, { steps: 10 });
   await page.mouse.up();
   await pane.getByRole("button", { name: "Review selected text", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Review terminal selection" });
   await expect(dialog.getByLabel("Reviewed selected text")).toHaveText(evidence);
+  await page.setViewportSize(viewport);
   await expect(
     dialog.getByRole("radio", { name: "Send as a new turn (idle chat)" }),
   ).toBeDisabled();
