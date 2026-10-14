@@ -51,6 +51,16 @@ canonical text decoders, including lossless prices, on the same lifetime-bound
 transport. A client without response-decoder support is refused before I/O.
 Public declarations, menu state and diagnostics never authorize an operation.
 
+`createPublicNacCreationApi` is a separate opt-in source port for working-location
+and runtime-metadata reads plus project/session creation. It requires two
+maintained canonical request validators and four original-text response decoders.
+The validators run before the existing transport awaits fresh credentials; the
+scalar body is captured for that request. Creation returns the transport's
+delivery fate and the actual returned identity, including a reused first chat.
+It never retries a command or substitutes a native private body/snapshot. This
+port does not enable the presentation's closed collection commands or issue
+location references, leases, permissions or backend admission.
+
 `subscribeToSessionEventsWithWire` prepares another wire contract on the existing
 ordered stream, reconnect and queue owner. Its required text decoders and cursor
 protocol preserve exact decimal cursors. It requires an injected stream factory,
@@ -58,6 +68,6 @@ strict frame decoding and a finite connection lease. The public snapshot/event
 contract and admitted routes must be qualified before activating that port.
 The existing native stream entry retains its native wire behavior.
 
-The candidate package version is `0.0.0-public-native-v1`; it requires its own
+The candidate package version is `0.0.0-public-native-v1.2`; it requires its own
 source, integrity and full consumer/server qualification. It does not inherit
 the historical ALL-121 artifact's acceptance.

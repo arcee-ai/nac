@@ -86,7 +86,7 @@ try {
   await writeFile(
     path.join(consumer, "runtime.mjs"),
     `import assert from "node:assert/strict";
-import { NAC_HTTP_CLIENT_VERSION, createNacClient, createNacApi, createPublicNacApi, subscribeToSessionEventsWithWire, exactSessionCursorProtocol, NAC_API_SURFACE, UserTerminalConnection, UserTerminalInputPump, NAC_TERMINAL_PROTOCOL_VERSION, createExecutionConnection } from ${JSON.stringify(packageName)};
+import { NAC_HTTP_CLIENT_VERSION, createNacClient, createNacApi, createPublicNacApi, createPublicNacCreationApi, subscribeToSessionEventsWithWire, exactSessionCursorProtocol, NAC_API_SURFACE, UserTerminalConnection, UserTerminalInputPump, NAC_TERMINAL_PROTOCOL_VERSION, createExecutionConnection } from ${JSON.stringify(packageName)};
 
 assert.equal(NAC_HTTP_CLIENT_VERSION, 1);
 assert.equal(NAC_TERMINAL_PROTOCOL_VERSION, 1);
@@ -94,6 +94,7 @@ assert.equal(typeof UserTerminalConnection, "function");
 assert.equal(typeof createExecutionConnection, "function");
 assert.equal(typeof UserTerminalInputPump, "function");
 assert.equal(typeof createPublicNacApi, "function");
+assert.equal(typeof createPublicNacCreationApi, "function");
 assert.equal(typeof subscribeToSessionEventsWithWire, "function");
 assert.equal(exactSessionCursorProtocol.query({epoch: "epoch", sequence: "18446744073709551615"}).after_sequence_id, "18446744073709551615");
 const client = createNacClient({
@@ -136,6 +137,11 @@ assert.deepEqual(context, {
   createNacClient,
   createNacApi,
   createPublicNacApi,
+  createPublicNacCreationApi,
+  type PublicNacCreationSource,
+  type PublicNacCreateSession,
+  type PublicNacCreatedSession,
+  type PublicNacRuntimeMetadata,
   type PublicNacPresentationSource,
   type PublicNacSessionConfig,
   type PublicNacModelCatalog,
@@ -169,6 +175,17 @@ options.publicPresentation = true;
 const publicApi = createPublicNacApi(client, publicSource);
 const publicConfig: Promise<PublicNacSessionConfig> = publicApi.getSessionConfig("session");
 void publicConfig;
+declare const creationSource: PublicNacCreationSource;
+declare const creationBody: PublicNacCreateSession;
+const creationApi = createPublicNacCreationApi(client, creationSource);
+const created: Promise<CommandAdmission<PublicNacCreatedSession>> = creationApi.createSession(creationBody);
+const runtimeMetadata: Promise<PublicNacRuntimeMetadata> = creationApi.getRuntimeMetadata();
+void created; void runtimeMetadata;
+// @ts-expect-error creation ports do not install the six-read presentation contract
+options.publicPresentation = creationSource;
+// @ts-expect-error schema revisions remain exact strings
+const roundedSchema: PublicNacRuntimeMetadata["schema_version"] = 9007199254740993;
+void roundedSchema;
 declare const price: PublicNacModelCatalog["providers"][number]["models"][number]["cost"]["input"];
 const exactPriceText: string = price.value;
 void exactPriceText;
@@ -241,7 +258,7 @@ dispose();
   const lock = JSON.parse(await readFile(path.join(consumer, "package-lock.json"), "utf8"));
   assert.equal(
     lock.packages["node_modules/@arcee-ai/nac-client-all-121"].version,
-    "0.0.0-public-native-v1.1",
+    "0.0.0-public-native-v1.2",
   );
   assert.equal(lock.packages["node_modules/lossless-json"].version, "4.3.0");
   console.log(`verified reproducible ${packageName} artifact ${first.report.integrity}`);

@@ -1,6 +1,6 @@
 {
   "name": "@arcee-ai/nac-client-all-121",
-  "version": "0.0.0-public-native-v1.1",
+  "version": "0.0.0-public-native-v1.2",
   "private": true,
   "description": "Revision-pinned experimental NAC HTTP/SSE client artifact for ALL-121",
   "license": "Apache-2.0",
