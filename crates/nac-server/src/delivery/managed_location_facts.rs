@@ -163,6 +163,9 @@ async fn handle(State(manager): State<SessionManager>, request: Request) -> Resp
     let Some(correlation) = request_id else {
         return refusal("", StatusCode::FORBIDDEN, "refused");
     };
+    if request.uri().query().is_some() {
+        return refusal(&correlation, StatusCode::FORBIDDEN, "refused");
+    }
     if single_header(request.headers(), "content-type") != Some("application/json")
         || single_header(request.headers(), "accept") != Some("application/json")
     {

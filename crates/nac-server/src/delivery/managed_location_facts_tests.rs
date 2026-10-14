@@ -126,6 +126,20 @@ async fn wrong_purpose_current_target_selector_and_shape_are_refused_before_look
     let f = Fixture::new();
     let serving = Serving::new(f.manager.clone()).await;
     let base = request(&f);
+    let (status, _) = exchange(
+        serving.address,
+        Some("d-service"),
+        "POST",
+        &format!("{MANAGED_LOCATION_FACT_PATH}?unbound=true"),
+        &serde_json::to_vec(&base).unwrap(),
+        &headers(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        status, 403,
+        "the fixed private fact purpose has no query surface"
+    );
     let mut bad = base.clone();
     bad["purpose"] = json!("maintenance");
     assert_eq!(serving.send(&bad).await.0, 403);
