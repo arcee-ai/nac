@@ -1,0 +1,18 @@
+{
+  "purpose": "Dedicated synthetic test-only CA and peer fixtures; never an actual operator trust/credential input",
+  "subject_prefix": "NAC FACT TEST ONLY",
+  "generated_by": "OpenSSL3.6.4, private temporary CA signing keys excluded from repository",
+  "lifetime": "3650 days from 2026-10-14",
+  "keys": "Only dedicated synthetic leaf test keys are included; no CA signing keys or real runtime credentials",
+  "files": {
+    "host-key.der": "071fbd1fc555d13f9177413331f8ab85fb62720b285bf0031940cbb3cac943f6",
+    "wrong-peer-key.der": "f4c4757f969d7e7208d5a1591a7952741798dbede8b4077e192fde25e8ed712e",
+    "untrusted.der": "ef0f75eac8d1ade8612682ec50adb4cb2fb6c13a02930628c1fafa2649886d3d",
+    "host.der": "ce41f8b5c741c567914bdc48dcf4ae17e2db16f062db795f2f88523470b96085",
+    "wrong-peer.der": "dc111487c09c6b8b0ac4066cd9b1d0f1d135c02b6798e8511e4e1d8bc0edfa27",
+    "ca.der": "bf1b1290a2a4ee59917c035e68692b99552273934f7ad8fd8c2aaf6c312d2ebf",
+    "d-service.der": "165d6201c5697ad298b8130475b26351df0b729e01733fc189fcbc05d9371da1",
+    "untrusted-key.der": "be4741bb72c6e58c9b7242f2fe48a80c88e0ce83f2d6101c86254939326c0e49",
+    "d-service-key.der": "99454da56a74149174eea7e9655fb94198a1784c8b675a6d19f127953f6dfd3c"
+  }
+}

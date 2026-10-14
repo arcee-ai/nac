@@ -45,6 +45,13 @@ pub use delivery::credentials::{
 };
 pub use delivery::delegation::{StartManagedOrchestratorRequest, StartTraditionalChildRequest};
 pub use delivery::error::ApiError;
+pub use delivery::managed_location_facts::{
+    serve_managed_location_facts, MANAGED_LOCATION_FACT_PATH, MANAGED_LOCATION_FACT_PURPOSE,
+};
+pub use delivery::managed_runtime_tls::{
+    denied_runtime_router, mediated_only_plaintext_router, serve_denied_runtime,
+    RuntimeTlsIdentity, RuntimeTlsListener,
+};
 pub use delivery::managed_secrets::{
     ManagedSecretList, ManagedSecretSummary, PutManagedSecretRequest,
 };

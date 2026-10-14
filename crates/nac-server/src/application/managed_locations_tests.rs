@@ -6,16 +6,16 @@ use std::{
     sync::MutexGuard,
 };
 
-struct Fixture {
-    manager: SessionManager,
-    root: PathBuf,
-    config: nac_managed::ManagedHostConfig,
+pub(crate) struct Fixture {
+    pub(crate) manager: SessionManager,
+    pub(crate) root: PathBuf,
+    pub(crate) config: nac_managed::ManagedHostConfig,
     _model_environment: crate::tests::ScopedModelEnv,
     _environment: MutexGuard<'static, ()>,
 }
 
 impl Fixture {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let environment = crate::tests::SERVER_MODEL_ENV_LOCK.lock().unwrap();
         let root =
             std::env::temp_dir().join(format!("nac_location_facts_{}", uuid::Uuid::new_v4()));
@@ -70,7 +70,7 @@ impl Fixture {
         })
         .unwrap()
     }
-    fn register(&self, name: &str, cwd: PathBuf, ssh_host: Option<String>) {
+    pub(crate) fn register(&self, name: &str, cwd: PathBuf, ssh_host: Option<String>) {
         projects::insert_project(
             &self.root.join("store.db"),
             NewProject {

@@ -1,18 +1,39 @@
 //! Private native filesystem facts. These observations never authorize a human,
 //! issue public references, select a backend, or admit an operation.
+use serde::{Deserialize, Serialize};
 use std::{fs::File, path::PathBuf};
 
 use crate::{filesystem, SessionManager};
 
 /// Bounded native selectors: never a browser path or a public location ID.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ManagedLocationSelector {
     RepositoryRoot,
     RegisteredProject { project_id: String },
 }
 
+impl<'de> Deserialize<'de> for ManagedLocationSelector {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Serde's tagged unit variants ignore leftover fields. An empty struct
+        // variant enforces this private protocol's strict field boundary while
+        // preserving the existing inward unit selector and the same parser.
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Fields {
+            RepositoryRoot {},
+            RegisteredProject { project_id: String },
+        }
+        Ok(match Fields::deserialize(deserializer)? {
+            Fields::RepositoryRoot {} => Self::RepositoryRoot,
+            Fields::RegisteredProject { project_id } => Self::RegisteredProject { project_id },
+        })
+    }
+}
+
 /// Actual configured identity and running binary tuple, not caller expectations.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManagedLocationBinding {
     pub logical_host_id: String,
     pub host_incarnation_id: String,
@@ -27,7 +48,8 @@ pub struct ManagedLocationBinding {
 
 /// Actual opened directory identity. A controller still binds its own PVC UID;
 /// native stat values must never be relabelled as Kubernetes PVC identity.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManagedDirectoryIdentity {
     pub device: u64,
     pub inode: u64,
@@ -36,7 +58,8 @@ pub struct ManagedDirectoryIdentity {
     pub mode: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManagedProjectLocationIdentity {
     pub project_id: String,
     pub presentation_version: i64,
@@ -45,7 +68,8 @@ pub struct ManagedProjectLocationIdentity {
 
 /// Trusted application output for the private issuer adapter only. It contains
 /// native paths; delivery must never project this object into the public UI.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManagedLocationFact {
     pub binding: ManagedLocationBinding,
     pub selector: ManagedLocationSelector,
@@ -53,7 +77,14 @@ pub struct ManagedLocationFact {
     pub canonical_cwd: PathBuf,
     pub repository_identity: ManagedDirectoryIdentity,
     pub directory_identity: ManagedDirectoryIdentity,
+    #[serde(deserialize_with = "required_project")]
     pub project: Option<ManagedProjectLocationIdentity>,
+}
+
+fn required_project<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ManagedProjectLocationIdentity>, D::Error> {
+    Option::deserialize(deserializer)
 }
 
 /// Pinned directories plus a freshly matched observation. This is not a lease
@@ -105,6 +136,33 @@ impl std::fmt::Display for ManagedLocationFactError {
 impl std::error::Error for ManagedLocationFactError {}
 
 impl SessionManager {
+    /// Current configured host and running binary observation, without touching
+    /// the filesystem/store. Private receivers check this before fact lookup.
+    pub fn managed_location_binding(
+        &self,
+    ) -> Result<ManagedLocationBinding, ManagedLocationFactError> {
+        use ManagedLocationFactError as Error;
+        let config = self.managed_host().ok_or(Error::Unmanaged)?;
+        let nonblank = |value: Option<&str>| {
+            value
+                .filter(|value| !value.trim().is_empty())
+                .ok_or(Error::UnboundHost)
+                .map(str::to_owned)
+        };
+        let build = crate::build_identity::current();
+        let target = crate::managed_running_target().map_err(|_| Error::UnboundHost)?;
+        Ok(ManagedLocationBinding {
+            logical_host_id: nonblank(Some(&config.logical_host_id))?,
+            host_incarnation_id: nonblank(config.host_incarnation_id.as_deref())?,
+            configured_owner: nonblank(config.owner.as_deref())?,
+            release_id: target.release_id,
+            product_version: build.product_version.to_owned(),
+            build_id: build.build_id.to_owned(),
+            source_revision: build.source_revision.to_owned(),
+            build_track: build.track.to_owned(),
+            supported_schema_version: nac_core::store::schema_version(),
+        })
+    }
     /// Observe one real managed root/project. No directory listing, public ID,
     /// recovery, process launch, configuration write, or agent approval occurs.
     pub async fn managed_location_fact(
@@ -150,28 +208,7 @@ impl SessionManager {
     ) -> Result<ManagedLocationResolution, ManagedLocationFactError> {
         use ManagedLocationFactError as Error;
         let config = self.managed_host().ok_or(Error::Unmanaged)?;
-        let nonblank = |value: Option<&str>| {
-            value
-                .filter(|value| !value.trim().is_empty())
-                .ok_or(Error::UnboundHost)
-                .map(str::to_owned)
-        };
-        let host = nonblank(Some(&config.logical_host_id))?;
-        let incarnation = nonblank(config.host_incarnation_id.as_deref())?;
-        let owner = nonblank(config.owner.as_deref())?;
-        let build = crate::build_identity::current();
-        let target = crate::managed_running_target().map_err(|_| Error::UnboundHost)?;
-        let binding = ManagedLocationBinding {
-            logical_host_id: host,
-            host_incarnation_id: incarnation,
-            configured_owner: owner,
-            release_id: target.release_id,
-            product_version: build.product_version.to_owned(),
-            build_id: build.build_id.to_owned(),
-            source_revision: build.source_revision.to_owned(),
-            build_track: build.track.to_owned(),
-            supported_schema_version: nac_core::store::schema_version(),
-        };
+        let binding = self.managed_location_binding()?;
         let root = filesystem::open_absolute_directory(&config.repository_root)
             .map_err(|_| Error::DirectoryUnavailable)?;
         let repository_identity = directory_identity(&root)?;
@@ -262,4 +299,4 @@ fn directory_identity(
 
 #[cfg(all(test, unix))]
 #[path = "managed_locations_tests.rs"]
-mod tests;
+pub(crate) mod tests;
