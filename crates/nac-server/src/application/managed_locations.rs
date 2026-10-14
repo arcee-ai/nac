@@ -68,7 +68,7 @@ pub struct ManagedProjectLocationIdentity {
 
 /// Trusted application output for the private issuer adapter only. It contains
 /// native paths; delivery must never project this object into the public UI.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedLocationFact {
     pub binding: ManagedLocationBinding,
@@ -79,6 +79,20 @@ pub struct ManagedLocationFact {
     pub directory_identity: ManagedDirectoryIdentity,
     #[serde(deserialize_with = "required_project")]
     pub project: Option<ManagedProjectLocationIdentity>,
+}
+
+impl PartialEq for ManagedLocationFact {
+    fn eq(&self, other: &Self) -> bool {
+        self.binding == other.binding
+            && self.selector == other.selector
+            // Path equality normalizes aliases such as /a/./b. A retained fact
+            // binds exact observed path bytes, not merely an equivalent path.
+            && self.repository_root.as_os_str() == other.repository_root.as_os_str()
+            && self.canonical_cwd.as_os_str() == other.canonical_cwd.as_os_str()
+            && self.repository_identity == other.repository_identity
+            && self.directory_identity == other.directory_identity
+            && self.project == other.project
+    }
 }
 
 fn required_project<'de, D: serde::Deserializer<'de>>(

@@ -151,6 +151,17 @@ async fn wrong_purpose_current_target_selector_and_shape_are_refused_before_look
     let mut bad = base.clone();
     bad["target"]["supported_schema_version"] = json!(999);
     assert_eq!(serving.send(&bad).await.0, 403);
+    // Product registry identity stays outside this private native target. A
+    // different product UUID cannot substitute for the actual running build ID.
+    let native_id = base["target"]["release_id"].as_str().unwrap();
+    let product_id = if native_id == "11111111-1111-4111-8111-111111111111" {
+        "22222222-2222-4222-8222-222222222222"
+    } else {
+        "11111111-1111-4111-8111-111111111111"
+    };
+    let mut bad = base.clone();
+    bad["target"]["release_id"] = json!(product_id);
+    assert_eq!(serving.send(&bad).await.0, 403);
     for extra in [
         json!({"kind":"repository_root","cwd":"/private"}),
         json!({"kind":"repository_root","project_id":"ignored"}),
@@ -187,6 +198,17 @@ async fn required_nullable_project_duplicate_fields_and_exact_stat_integers_are_
         .unwrap()
         .remove("project");
     assert_eq!(serving.send(&body).await.0, 403);
+    body["prior_fact"] = reply["fact"].clone();
+    let canonical = body["prior_fact"]["canonical_cwd"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    body["prior_fact"]["canonical_cwd"] = json!(format!("{canonical}/."));
+    assert_eq!(
+        serving.send(&body).await.0,
+        409,
+        "a path alias is not the exact retained fact"
+    );
     body["prior_fact"] = reply["fact"].clone();
     body["prior_fact"]["directory_identity"]["inode"] = json!(u64::MAX);
     assert_eq!(
