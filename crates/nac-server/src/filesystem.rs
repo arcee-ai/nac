@@ -6,6 +6,9 @@
 //! Listing stays metadata-only: names, kinds and absolute paths, never
 //! contents.
 
+mod managed_directory;
+pub(crate) use managed_directory::{open_absolute_directory, open_directory_beneath};
+
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};

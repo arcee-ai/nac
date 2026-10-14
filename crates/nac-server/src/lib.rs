@@ -19,6 +19,11 @@ mod mcp_catalog_api;
 mod mcp_runtime_api;
 mod orchestration;
 mod revert;
+pub use application::managed_locations::{
+    ManagedDirectoryIdentity, ManagedLocationBinding, ManagedLocationFact,
+    ManagedLocationFactError, ManagedLocationResolution, ManagedLocationSelector,
+    ManagedProjectLocationIdentity,
+};
 pub(crate) use managed_control::running_target as managed_running_target;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
