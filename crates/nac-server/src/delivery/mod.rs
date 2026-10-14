@@ -2,6 +2,7 @@ pub(crate) mod contracts;
 pub(crate) mod credentials;
 pub(crate) mod delegation;
 pub(crate) mod error;
+pub(crate) mod managed_fact_listener;
 pub(crate) mod managed_location_facts;
 pub(crate) mod managed_runtime_tls;
 pub(crate) mod managed_secrets;

@@ -946,7 +946,42 @@ pub(crate) async fn serve_with_policy_and_readiness(
     on_listening: impl FnOnce(SocketAddr),
     readiness_policy: application::managed::ManagedReadinessPolicy,
 ) -> Result<()> {
+    serve_with_fact_readiness(addr, policy, manager, None, on_listening, readiness_policy).await
+}
+
+/// Explicit managed mediation: the private fact listener shares the existing
+/// manager, readiness gate, cancellation, drain and persistence shutdown owner.
+/// Passing None preserves ordinary startup without constructing a listener.
+pub async fn serve_with_policy_and_managed_facts(
+    addr: SocketAddr,
+    policy: BindPolicy,
+    manager: SessionManager,
+    facts: Option<ManagedFactListenerOptions>,
+    on_listening: impl FnOnce(SocketAddr),
+) -> Result<()> {
+    serve_with_fact_readiness(
+        addr,
+        policy,
+        manager,
+        facts,
+        on_listening,
+        application::managed::ManagedReadinessPolicy::production(),
+    )
+    .await
+}
+
+pub(crate) async fn serve_with_fact_readiness(
+    addr: SocketAddr,
+    policy: BindPolicy,
+    manager: SessionManager,
+    facts: Option<ManagedFactListenerOptions>,
+    on_listening: impl FnOnce(SocketAddr),
+    readiness_policy: application::managed::ManagedReadinessPolicy,
+) -> Result<()> {
     policy.validate(addr)?;
+    if facts.is_some() {
+        manager.managed_location_binding()?;
+    }
     // Establish the durable store before serving requests. Readiness probes
     // then verify this store in place and never create a blank replacement if
     // it disappears while the process is running. A managed host keeps only
@@ -964,7 +999,13 @@ pub(crate) async fn serve_with_policy_and_readiness(
     let app = if manager.is_recovery_only() {
         recovery_router(&manager)
     } else {
-        match nac_core::store::initialize(&manager.inner.store_path) {
+        let store_path = manager.inner.store_path.clone();
+        let initialized = manager
+            .inner
+            ._store_ownership
+            .call_legacy(move || nac_core::store::initialize(&store_path))
+            .await?;
+        match initialized {
             Ok(()) => {
                 nac_core::reconcile_podman_creation_records(&manager.inner.store_path).await?;
                 router(manager.clone())
@@ -1003,25 +1044,70 @@ pub(crate) async fn serve_with_policy_and_readiness(
     let bound = listener
         .local_addr()
         .with_context(|| format!("failed to read bound address for {addr}"))?;
-    if !manager.is_recovery_only() {
-        if manager.inner.pending_forward_start {
-            application::managed::require_replacement_readiness(&manager, readiness_policy)?;
-            let accepted =
-                manager.inner.managed_identity.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!("managed forward-start identity is unavailable")
-                })?;
-            if !nac_core::store::accept_managed_forward_start(&manager.inner.store_path, accepted)?
-            {
-                anyhow::bail!("accepted managed upgrade target changed before startup completed");
-            }
-        } else {
-            nac_core::store::check_readiness(&manager.inner.store_path)?;
+    let mediated = facts.is_some();
+    let fact_listener = match facts {
+        Some(facts) => {
+            facts
+                .bind(
+                    &manager,
+                    bound,
+                    control_listener
+                        .as_ref()
+                        .map(TcpListener::local_addr)
+                        .transpose()?,
+                    readiness_policy,
+                )
+                .await?
         }
+        None => None,
+    };
+    if !manager.is_recovery_only() {
+        let startup_manager = manager.clone();
+        manager
+            .inner
+            ._store_ownership
+            .call_legacy(move || {
+                if startup_manager.inner.pending_forward_start {
+                    application::managed::require_replacement_readiness(
+                        &startup_manager,
+                        readiness_policy,
+                    )?;
+                    let accepted =
+                        startup_manager
+                            .inner
+                            .managed_identity
+                            .as_ref()
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("managed forward-start identity is unavailable")
+                            })?;
+                    if !nac_core::store::accept_managed_forward_start(
+                        &startup_manager.inner.store_path,
+                        accepted,
+                    )? {
+                        anyhow::bail!(
+                            "accepted managed upgrade target changed before startup completed"
+                        );
+                    }
+                    Ok(())
+                } else {
+                    nac_core::store::check_readiness(&startup_manager.inner.store_path)
+                }
+            })
+            .await??;
     }
+    let app = if mediated && !manager.is_recovery_only() {
+        mediated_only_plaintext_router(app)
+    } else {
+        app
+    };
     on_listening(bound);
     serve_router_listener_with_shutdown(
         listener,
-        control_listener.map(|listener| (listener, managed_control::router(manager.clone()))),
+        AdditionalListeners {
+            control: control_listener
+                .map(|listener| (listener, managed_control::router(manager.clone()))),
+            facts: fact_listener,
+        },
         app,
         manager,
         shutdown_signal(),
@@ -1047,7 +1133,10 @@ where
     let app = router(manager.clone());
     serve_router_listener_with_shutdown(
         listener,
-        control,
+        AdditionalListeners {
+            control,
+            facts: None,
+        },
         app,
         manager,
         shutdown,
@@ -1057,13 +1146,14 @@ where
     .await
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the single forced-shutdown callback is moved only after graceful shutdown starts"
-)]
-async fn serve_router_listener_with_shutdown<F, X>(
+pub(crate) struct AdditionalListeners {
+    pub(crate) control: Option<(TcpListener, Router)>,
+    pub(crate) facts: Option<RuntimeTlsListener>,
+}
+
+pub(crate) async fn serve_router_listener_with_shutdown<F, X>(
     listener: TcpListener,
-    control: Option<(TcpListener, Router)>,
+    additional: AdditionalListeners,
     app: Router,
     manager: SessionManager,
     shutdown: F,
@@ -1074,11 +1164,20 @@ where
     F: Future<Output = ()> + Send + 'static,
     X: FnOnce() + Send + 'static,
 {
-    let mut force_shutdown = Some(force_shutdown);
     let shutdown_manager = manager.clone();
     let (graceful_tx, graceful_rx) = tokio::sync::oneshot::channel();
     let (control_graceful_tx, control_graceful_rx) = tokio::sync::oneshot::channel();
-    let mut control_server = control.map(|(listener, app)| {
+    let (fact_graceful_tx, fact_graceful_rx) = tokio::sync::oneshot::channel();
+    let mut fact_server = additional.facts.map(|listener| {
+        tokio::spawn(serve_managed_location_facts(
+            listener,
+            manager,
+            async move {
+                let _ = fact_graceful_rx.await;
+            },
+        ))
+    });
+    let control_server = additional.control.map(|(listener, app)| {
         tokio::spawn(
             axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
@@ -1095,60 +1194,75 @@ where
             .into_future(),
     );
     tokio::pin!(shutdown);
-
-    let result = tokio::select! {
-        result = &mut server => result
-            .context("server task stopped unexpectedly")?
-            .context("server stopped unexpectedly"),
-        () = &mut shutdown => {
-            // Stop accepting new work before cancellation. The single outer
-            // deadline covers both run cleanup and graceful HTTP/SSE drain.
-            // Its watchdog is independent of the async runtime so a wedged
-            // connection task cannot starve the forced process exit.
-            let _ = graceful_tx.send(());
-            let _ = control_graceful_tx.send(());
-            let (shutdown_complete_tx, shutdown_complete_rx) = std::sync::mpsc::channel();
-            let force_shutdown = force_shutdown.take().expect("force shutdown callback");
-            let watchdog = std::thread::Builder::new()
-                .name("nac-shutdown-watchdog".to_string())
-                .spawn(move || {
-                    if shutdown_complete_rx
-                        .recv_timeout(complete_shutdown_timeout)
-                        .is_err()
-                    {
-                        forced_shutdown_after_timeout(complete_shutdown_timeout, force_shutdown);
-                    }
-                })
-                .context("failed to start shutdown watchdog")?;
-
-            shutdown_manager.stop_local_run_admission().await;
-            shutdown_manager.cancel_local_active_runs_for_shutdown().await;
-            let result = (&mut server)
-                .await
-                .context("server task stopped unexpectedly")?
-                .context("server stopped unexpectedly");
-            if let Some(control_server) = control_server.take() {
-                let _ = control_server.await;
+    let mut public_result = None;
+    let mut fact_result = None;
+    tokio::select! {
+        result = &mut server => public_result = Some(result),
+        result = async {
+            match fact_server.as_mut() {
+                Some(task) => task.await,
+                None => std::future::pending().await,
             }
-            shutdown_manager.quiesce_persistence_callers().await;
-            shutdown_manager.drain_persistence().await?;
-            // Accounting drains inside the existing complete-shutdown watchdog.
-            // A missing/failed receipt is diagnostic, never an application error.
-            let _ = tokio::task::spawn_blocking(|| {
-                nac_core::telemetry::finish_export(Duration::from_millis(100))
-            }).await;
-            let _ = shutdown_complete_tx.send(());
-            watchdog
-                .join()
-                .map_err(|_| anyhow!("shutdown watchdog panicked"))?;
-            result
-        }
-    };
+        } => fact_result = Some(result),
+        () = &mut shutdown => {}
+    }
+    // A failed private listener also stops the host; no partial serving state.
+    // All listeners stop accepting before run cancellation and share the same
+    // independent watchdog through HTTP/TLS drain and persistence quiescence.
+    let _ = graceful_tx.send(());
+    let _ = control_graceful_tx.send(());
+    let _ = fact_graceful_tx.send(());
+    let (shutdown_complete_tx, shutdown_complete_rx) = std::sync::mpsc::channel();
+    let watchdog = std::thread::Builder::new()
+        .name("nac-shutdown-watchdog".to_string())
+        .spawn(move || {
+            if shutdown_complete_rx
+                .recv_timeout(complete_shutdown_timeout)
+                .is_err()
+            {
+                forced_shutdown_after_timeout(complete_shutdown_timeout, force_shutdown);
+            }
+        })
+        .context("failed to start shutdown watchdog")?;
+
+    shutdown_manager.stop_local_run_admission().await;
+    shutdown_manager
+        .cancel_local_active_runs_for_shutdown()
+        .await;
+    let public_result = match public_result {
+        Some(result) => result,
+        None => server.await,
+    }
+    .context("server task stopped unexpectedly")
+    .and_then(|result| result.context("server stopped unexpectedly"));
     if let Some(control_server) = control_server {
-        control_server.abort();
         let _ = control_server.await;
     }
-    result
+    let fact_result = match fact_result {
+        Some(result) => result
+            .context("managed fact listener task failed")
+            .and_then(|result| result),
+        None => match fact_server {
+            Some(task) => task
+                .await
+                .context("managed fact listener task failed")
+                .and_then(|result| result),
+            None => Ok(()),
+        },
+    };
+    // The private request bodies/fact jobs are fully drained before closing
+    // their shared persistence scheduling capability.
+    shutdown_manager.quiesce_persistence_callers().await;
+    shutdown_manager.drain_persistence().await?;
+    let _ = tokio::task::spawn_blocking(|| {
+        nac_core::telemetry::finish_export(Duration::from_millis(100))
+    })
+    .await;
+    let _ = shutdown_complete_tx.send(());
+    watchdog
+        .join()
+        .map_err(|_| anyhow!("shutdown watchdog panicked"))?;
+    public_result.and(fact_result)
 }
 
 fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {
