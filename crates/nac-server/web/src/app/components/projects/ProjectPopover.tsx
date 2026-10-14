@@ -1,3 +1,4 @@
+import type { SessionSummaryView as SessionSummarySnapshot } from "@/app/features/public-native/collectionViews";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -22,7 +23,6 @@ import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useProjects, useVisibleSessions } from "@/app/services/queries";
-import type { SessionSummarySnapshot } from "@/app/types/api";
 
 /** One control of a row, at the size the popover's rows are built to. */
 function RowAction({

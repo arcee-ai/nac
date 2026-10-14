@@ -1,3 +1,4 @@
+import type { ManagedSessionView as ManagedSessionSummary } from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useEffect } from "react";
 import type React from "react";
@@ -19,7 +20,6 @@ import {
 import { type SessionEnv } from "@/app/lib/format";
 import { providerLabel } from "@/app/lib/providers";
 import { type RangeId, type SortId } from "@/app/store/sessionFiltersStore";
-import type { ManagedSessionSummary } from "@/app/types/api";
 
 // Chips are Small/Text buttons; the design's 12px inline padding beats the
 // atom's 8px, and inline style is the only way to win over `.btn-small.btn-text`.

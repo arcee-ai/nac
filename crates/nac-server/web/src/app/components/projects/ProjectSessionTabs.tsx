@@ -1,3 +1,7 @@
+import type {
+  ManagedSessionView as ManagedSessionSummary,
+  SessionSummaryView as SessionSummarySnapshot,
+} from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect, useState } from "react";
@@ -29,11 +33,7 @@ import { NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 
-import type {
-  ManagedSessionSummary,
-  SessionBehavior,
-  SessionSummarySnapshot,
-} from "@/app/types/api";
+import type { SessionBehavior } from "@/app/types/api";
 
 // Size each tab from its title instead of distributing the strip's spare width:
 // equal flex growth leaves short titles with a visibly oversized empty tail.

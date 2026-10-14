@@ -1,6 +1,6 @@
+import type { SessionSummaryView as SessionSummarySnapshot } from "@/app/features/public-native/collectionViews";
 import { numberUntitledSessions, sessionTitle } from "@/app/lib/format";
 import { useSessions } from "@/app/services/queries";
-import type { SessionSummarySnapshot } from "@/app/types/api";
 
 /**
  * Names a chat the way every list in the app names it, with the untitled ones

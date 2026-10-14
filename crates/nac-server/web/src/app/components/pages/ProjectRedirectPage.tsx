@@ -67,6 +67,7 @@ export default function ProjectRedirectPage() {
     !unavailable &&
     ownershipLoaded &&
     project != null &&
+    project.presentation !== "public" &&
     newest == null;
 
   const startChat = actions.newChat;
@@ -87,6 +88,8 @@ export default function ProjectRedirectPage() {
   // Deleted, or a stale link — the listing is the only honest place to land.
   const ownershipConfirmed = confirmedProjectId === projectId;
   if (ownershipConfirmed && !loading && !project) return <Navigate to={routes.list()} replace />;
+  if (ownershipConfirmed && project?.presentation === "public" && !newest)
+    return <Navigate to={routes.list()} replace />;
   if (ownershipConfirmed && newest)
     return <Navigate to={routes.session(newest.summary.session_id)} replace />;
 

@@ -1,3 +1,4 @@
+import type { SessionSummaryView as SessionSummarySnapshot } from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 
@@ -7,7 +8,6 @@ import { SettingsModal } from "@/app/components/modals/SettingsModal";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useCancelRun, useTogglePin } from "@/app/services/queries";
 
-import type { SessionSummarySnapshot } from "@/app/types/api";
 import { toRunError } from "@/app/lib/providerError";
 
 /**

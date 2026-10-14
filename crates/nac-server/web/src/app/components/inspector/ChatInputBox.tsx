@@ -1,3 +1,4 @@
+import type { ManagedSessionView as ManagedSessionSummary } from "@/app/features/public-native/collectionViews";
 import { TerminalSelectionAttachment } from "@/app/features/terminal-selection/TerminalSelectionAttachment";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { shellInput } from "@/app/features/human-shell/input";
@@ -79,7 +80,6 @@ import type {
   SkillCatalogEntry,
   SlashCommandDefinition,
   InboxDelivery,
-  ManagedSessionSummary,
   SessionSnapshotResponse,
 } from "@/app/types/api";
 

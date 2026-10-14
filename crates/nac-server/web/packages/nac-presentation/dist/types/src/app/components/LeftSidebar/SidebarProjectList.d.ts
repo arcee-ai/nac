@@ -1,4 +1,4 @@
-import type { ManagedSessionSummary, ProjectRecord } from "../../types/api.js";
+import type { ManagedSessionView as ManagedSessionSummary, ProjectView as ProjectRecord } from "../../features/public-native/collectionViews.js";
 /**
  * Projects as collapsible groups. The project on screen starts open; a search
  * keeps only the rows that match and opens every group that still has one.

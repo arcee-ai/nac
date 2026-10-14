@@ -1,5 +1,5 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-B0aSnxlc.js";
-import { Ar as r, Er as i, Fi as a, Ii as o, Ni as s, Xr as c, cr as l, d as u, i as d, lr as f, sr as p, t as m, u as h } from "./PerfProfiler-u5udgUm8.js";
+import { Ar as r, Bi as i, Er as a, Li as o, Xr as s, cr as c, d as l, i as u, lr as d, sr as f, t as p, u as m, zi as h } from "./PerfProfiler-CzSGrTBG.js";
 import { a as g, i as _, n as v, o as y, s as b } from "./space-separated-tokens-DZK_KzBN.js";
 import { n as x, t as S } from "./lib-BzcGLYKi.js";
 import { a as C, c as w, d as T, f as E, i as D, l as O, m as k, n as A, o as j, p as M, r as N, s as ee, t as P, u as F, v as te, y as I } from "./micromark-factory-space-DFzJv7G6.js";
@@ -6648,7 +6648,7 @@ function ol(e) {
 	})), al.set(e, t)), t;
 }
 function sl(e) {
-	return o(e) ? e : a(e) ? String(e) : Array.isArray(e) ? e.map(sl).join("") : ne(e) ? sl(e.props.children) : "";
+	return i(e) ? e : h(e) ? String(e) : Array.isArray(e) ? e.map(sl).join("") : ne(e) ? sl(e.props.children) : "";
 }
 function cl(e) {
 	if (!ne(e)) return "plaintext";
@@ -6657,11 +6657,11 @@ function cl(e) {
 }
 function ll({ children: e }) {
 	let t = sl(e).replace(/\n$/, ""), n = cl(e);
-	return /* @__PURE__ */ z(l, {
+	return /* @__PURE__ */ z(c, {
 		code: t,
 		language: n === "plaintext" ? void 0 : n,
 		title: n,
-		size: f.Small,
+		size: d.Small,
 		copyable: !0,
 		expandable: !0,
 		className: "my-6"
@@ -6679,18 +6679,18 @@ function ul(e) {
 	return `${e.length.toString(36)}-${(t >>> 0).toString(36)}`;
 }
 function dl({ href: e, children: t, ...n }) {
-	let { selectRevision: r, selectFileListing: a, selectFile: o, revealSidePanel: s } = c().stores.sessionLayoutStore, { api: l } = c(), f = oe(), m = ae(), g = i(), _ = d(), v = ie(), y = u(m.pathname), b = y ? v.getQueryData(p.sessionSnapshot(y)) : void 0, x = rl(e, [
+	let { selectRevision: r, selectFileListing: i, selectFile: o, revealSidePanel: c } = s().stores.sessionLayoutStore, { api: d } = s(), p = oe(), h = ae(), g = a(), _ = u(), v = ie(), y = l(h.pathname), b = y ? v.getQueryData(f.sessionSnapshot(y)) : void 0, x = rl(e, [
 		b?.workspace?.host_root,
 		b?.metadata.workspace_host_path,
 		b?.metadata.cwd
 	]), S = (e) => {
-		y && (r(null), a("tree"), o(e), s(g), f(h.session(y, "files")));
+		y && (r(null), i("tree"), o(e), c(g), p(m.session(y, "files")));
 	};
 	return x.kind === "workspace" && y ? /* @__PURE__ */ z("a", {
 		...n,
 		href: e,
 		onClick: (e) => {
-			e.preventDefault(), l.openWorkspacePath(y, x.path).catch((e) => {
+			e.preventDefault(), d.openWorkspacePath(y, x.path).catch((e) => {
 				let t = e instanceof Error ? e.message : String(e);
 				/only available for local sessions|lives only inside the sandbox/i.test(t) || _.error(`Could not open file: ${t}`), S(x.path);
 			});
@@ -6718,7 +6718,7 @@ function fl(e) {
 			children: /* @__PURE__ */ z("table", { ...e })
 		}),
 		style: ({ children: e }) => {
-			let t = o(e) ? e : "";
+			let t = i(e) ? e : "";
 			return t ? /* @__PURE__ */ z("style", {
 				href: `mathjax-${ul(t)}`,
 				precedence: "mathjax",
@@ -6776,18 +6776,18 @@ function hl({ source: e, streaming: t }) {
 	}) : i;
 }
 function gl({ source: e, components: t }) {
-	let n = c(), i = re(ol(n.assets?.mathjaxFontUrl)), a = r(), s = n.assets ? {
+	let n = s(), a = re(ol(n.assets?.mathjaxFontUrl)), o = r(), c = n.assets ? {
 		...t,
 		style: ({ children: e }) => {
-			let t = o(e) ? e : "";
-			return t && n.id !== void 0 ? /* @__PURE__ */ z("style", { children: Bc(t, n.id, a) }) : null;
+			let t = i(e) ? e : "";
+			return t && n.id !== void 0 ? /* @__PURE__ */ z("style", { children: Bc(t, n.id, o) }) : null;
 		}
 	} : t;
 	return /* @__PURE__ */ z(Da, {
-		remarkPlugins: i.remark,
-		rehypePlugins: i.rehype,
+		remarkPlugins: a.remark,
+		rehypePlugins: a.rehype,
 		urlTransform: el,
-		components: s,
+		components: c,
 		children: e
 	});
 }
@@ -6797,7 +6797,7 @@ var _l = R(function({ source: e }) {
 		streaming: !0
 	});
 }), vl = R(function({ children: e, streaming: t = !1 }) {
-	return s("Markdown"), /* @__PURE__ */ z(m, {
+	return o("Markdown"), /* @__PURE__ */ z(p, {
 		id: "markdown",
 		children: t ? Rc(e).map((e, t) => /* @__PURE__ */ z(_l, { source: e }, t)) : /* @__PURE__ */ z(hl, {
 			source: e,

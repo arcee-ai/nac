@@ -1,3 +1,7 @@
+import {
+  requireNativeSummary,
+  type NativeSessionSummary,
+} from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { PublicSessionSettings } from "@/app/features/public-native/ConfigurationViews";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
@@ -62,13 +66,7 @@ import {
   useUpdateProject,
 } from "@/app/services/queries";
 
-import type {
-  BackendKind,
-  LightModelSettings,
-  RawSessionConfig,
-  SessionSummarySnapshot,
-  SshTarget,
-} from "@/app/types/api";
+import type { BackendKind, LightModelSettings, RawSessionConfig, SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 function headersToText(headers: Record<string, string>): string {
@@ -211,7 +209,7 @@ function NativeSettingsModal({
       id={id}
       initial={initial}
       initialLight={config?.light_model ?? null}
-      summary={entry.summary}
+      summary={requireNativeSummary(entry.summary)}
       diagnostics={config?.diagnostics ?? []}
       onClose={onClose}
     />
@@ -236,7 +234,7 @@ function SettingsForm({
   /** The light model the session currently runs with, if any. */
   initialLight: LightModelSettings | null;
   /** Carries the presentation version the title save has to match. */
-  summary: SessionSummarySnapshot;
+  summary: NativeSessionSummary;
   diagnostics: string[];
   onClose: () => void;
 }) {

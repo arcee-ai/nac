@@ -1,9 +1,10 @@
+import type { ManagedSessionView as ManagedSessionSummary } from "@/app/features/public-native/collectionViews";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { runtimeForQueryClient } from "@/app/runtime/nativeRuntime";
 import { queryKeys } from "@/app/services/queries/keys";
 
-import type { ManagedSessionSummary, SessionSnapshotResponse } from "@/app/types/api";
+import type { SessionSnapshotResponse } from "@/app/types/api";
 import type { stopRun } from "./commandWorkflow";
 
 /** Restore only optimistic objects still owned by this request; keep newer reads/events. */

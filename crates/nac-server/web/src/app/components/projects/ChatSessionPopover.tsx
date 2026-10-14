@@ -1,3 +1,4 @@
+import type { ManagedSessionView as ManagedSessionSummary } from "@/app/features/public-native/collectionViews";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -8,7 +9,6 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
-import type { ManagedSessionSummary } from "@/app/types/api";
 
 interface ChatSessionPopoverProps {
   /** The project's sessions; already narrowed by the caller. */

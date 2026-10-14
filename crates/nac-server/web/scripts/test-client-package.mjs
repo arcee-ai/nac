@@ -241,7 +241,7 @@ dispose();
   const lock = JSON.parse(await readFile(path.join(consumer, "package-lock.json"), "utf8"));
   assert.equal(
     lock.packages["node_modules/@arcee-ai/nac-client-all-121"].version,
-    "0.0.0-public-native-v1",
+    "0.0.0-public-native-v1.1",
   );
   assert.equal(lock.packages["node_modules/lossless-json"].version, "4.3.0");
   console.log(`verified reproducible ${packageName} artifact ${first.report.integrity}`);

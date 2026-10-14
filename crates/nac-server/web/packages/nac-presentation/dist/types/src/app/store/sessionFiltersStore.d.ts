@@ -1,8 +1,8 @@
+import type { ManagedSessionView as ManagedSessionSummary } from "../features/public-native/collectionViews.js";
 export declare const RANGE_ANY = "any";
 export declare const SORT_DEFAULT = "default";
 import { type SessionEnv } from "../lib/format.js";
 import type { ProjectListItem } from "../lib/projects.js";
-import type { ManagedSessionSummary } from "../types/api.js";
 export type SortId = typeof SORT_DEFAULT | "created_desc" | "created_asc" | "updated_desc" | "title_asc";
 export type RangeId = typeof RANGE_ANY | "24h" | "7d" | "30d";
 interface FiltersState {

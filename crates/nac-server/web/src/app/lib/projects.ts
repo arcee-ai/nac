@@ -1,10 +1,13 @@
+import type {
+  ManagedSessionView as ManagedSessionSummary,
+  ProjectView as ProjectRecord,
+} from "@/app/features/public-native/collectionViews";
 // Projects are stored without any rollup of the sessions inside them, so the
 // counts, spend and running state every project surface shows are joined here
 // from the session list the app already polls.
 
 import { isActiveRun, parseStoreTime } from "@/app/lib/format";
 import { compareSortOrder } from "@/app/lib/sessionOrder";
-import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 /** Delegated descendants are reachable through their parent's hierarchy only. */
 export function primarySessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[] {
@@ -18,15 +21,15 @@ export interface ProjectEntry {
   /** How many of those sessions have a live run. */
   running: number;
   /** Micro-USD across the project, summed from the sessions. */
-  totalCostMicros: number;
+  totalCostMicros: number | bigint | null;
   /** Newest session activity, falling back to the project's own timestamp. */
-  updatedAt: string;
+  updatedAt: string | null;
 }
 
-function newestUpdate(sessions: ManagedSessionSummary[], fallback: string): string {
+function newestUpdate(sessions: ManagedSessionSummary[], fallback: string | null): string | null {
   let newest = fallback;
   for (const entry of primarySessions(sessions)) {
-    if (parseStoreTime(entry.summary.updated_at) > parseStoreTime(newest)) {
+    if (newest === null || parseStoreTime(entry.summary.updated_at) > parseStoreTime(newest)) {
       newest = entry.summary.updated_at;
     }
   }
@@ -90,11 +93,21 @@ export function projectEntries(
       project,
       sessions: owned,
       running: owned.filter((entry) => isActiveRun(entry.active_run)).length,
-      totalCostMicros: owned.reduce(
-        (total, entry) => total + (entry.summary.total_cost_micros ?? 0),
-        0,
-      ),
-      updatedAt: newestUpdate(owned, project.updated_at),
+      totalCostMicros:
+        project.presentation === "public"
+          ? owned.some((entry) => entry.summary.total_cost_micros == null)
+            ? null
+            : owned.reduce((total, entry) => {
+                if (entry.summary.presentation !== "public")
+                  throw new Error("Mixed collection wire families.");
+                return total + BigInt(entry.summary.total_cost_micros ?? 0);
+              }, 0n)
+          : owned.reduce((total, entry) => {
+              const value = entry.summary.total_cost_micros;
+              if (typeof value === "string") throw new Error("Mixed collection wire families.");
+              return total + (value ?? 0);
+            }, 0),
+      updatedAt: newestUpdate(owned, project.updated_at ?? null),
     };
   });
 }
@@ -143,7 +156,7 @@ export function findProject(
 
 /** The four fields the backend treats as one SSH/workspace location. */
 export type SessionLocation = {
-  cwd: string;
+  cwd?: string;
   ssh_host?: string | null;
   ssh_port?: number | null;
   ssh_identity_file?: string | null;
@@ -151,6 +164,8 @@ export type SessionLocation = {
 
 export function sameSessionLocation(left: SessionLocation, right: SessionLocation): boolean {
   return (
+    left.cwd !== undefined &&
+    right.cwd !== undefined &&
     left.cwd === right.cwd &&
     (left.ssh_host ?? null) === (right.ssh_host ?? null) &&
     (left.ssh_port ?? null) === (right.ssh_port ?? null) &&
@@ -165,6 +180,8 @@ export function projectLocationPayload(summary: SessionLocation): {
   ssh_port: number | null;
   ssh_identity_file: string | null;
 } {
+  if (summary.cwd === undefined)
+    throw new Error("This operation requires a supported public location contract.");
   return {
     cwd: summary.cwd,
     ssh_host: summary.ssh_host ?? null,
@@ -185,7 +202,14 @@ export function projectForSessionLocation(
   return projects.find((project) => sameSessionLocation(project, summary)) ?? null;
 }
 
-export type RecencyBucket = "Pinned" | "Today" | "Yesterday" | "This week" | "This month" | "Older";
+export type RecencyBucket =
+  | "Pinned"
+  | "Today"
+  | "Yesterday"
+  | "This week"
+  | "This month"
+  | "Older"
+  | "Unknown";
 
 const BUCKET_ORDER: RecencyBucket[] = [
   "Pinned",
@@ -194,6 +218,7 @@ const BUCKET_ORDER: RecencyBucket[] = [
   "This week",
   "This month",
   "Older",
+  "Unknown",
 ];
 
 export interface RecencyGroup<T> {
@@ -213,7 +238,8 @@ function daysAgo(today: Date, days: number): number {
   return date.getTime();
 }
 
-function bucketFor(updatedAt: string, now: number): RecencyBucket {
+function bucketFor(updatedAt: string | null, now: number): RecencyBucket {
+  if (updatedAt === null) return "Unknown";
   const timestamp = parseStoreTime(updatedAt);
   if (!Number.isFinite(timestamp)) return "Older";
   const today = startOfLocalDay(now);
@@ -231,7 +257,7 @@ function bucketFor(updatedAt: string, now: number): RecencyBucket {
  */
 export function groupByRecency<T>(
   items: T[],
-  describe: (item: T) => { updatedAt: string; pinned: boolean },
+  describe: (item: T) => { updatedAt: string | null; pinned: boolean },
   now: number,
 ): RecencyGroup<T>[] {
   const buckets = new Map<RecencyBucket, T[]>();

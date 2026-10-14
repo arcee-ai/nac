@@ -1,4 +1,4 @@
-import type { ManagedSessionSummary, SessionSummarySnapshot } from "../../types/api.js";
+import type { ManagedSessionView as ManagedSessionSummary, SessionSummaryView as SessionSummarySnapshot } from "../../features/public-native/collectionViews.js";
 /**
  * The phone's navigator: a full-screen modal box (not a popover sheet) holding
  * the chat list, the project list, and — for an unassigned chat — the assign

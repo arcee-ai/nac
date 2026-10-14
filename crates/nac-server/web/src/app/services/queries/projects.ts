@@ -1,15 +1,23 @@
+import type {
+  ProjectCollectionView as ProjectList,
+  ProjectView as ProjectRecord,
+} from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { placeIdAt } from "@/app/lib/sessionOrder";
+import {
+  publicProjectView,
+  requireNativeProject,
+  comparePresentationOrder,
+  requireNativeCollectionWire,
+} from "@/app/features/public-native/collectionViews";
 
 import { useQueryInvalidators } from "@/app/services/queries/invalidation";
 import { queryKeys } from "@/app/services/queries/keys";
 import type {
   CreateProjectRequest,
   DeleteProjectSessions,
-  ProjectList,
-  ProjectRecord,
   UpdateProjectRequest,
 } from "@/app/types/api";
 
@@ -18,23 +26,29 @@ import type {
  * session list rather than polling: every project mutation invalidates it.
  */
 export function useProjects() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   return useQuery<ProjectList>({
     queryKey: queryKeys.projects,
-    queryFn: ({ signal }) => api.listProjects(signal),
+    queryFn: async ({ signal }) =>
+      publicPresentation
+        ? { projects: (await publicPresentation.listProjects(signal)).map(publicProjectView) }
+        : api.listProjects(signal),
     staleTime: 30_000,
     retry: false,
   });
 }
 
 export function useCreateProject() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   return useMutation({
     retry: false,
-    mutationFn: (payload: CreateProjectRequest) => api.createProject(payload),
+    mutationFn: (payload: CreateProjectRequest) => {
+      requireNativeCollectionWire(publicPresentation);
+      return api.createProject(payload);
+    },
     onSuccess: () => invalidate.projects(),
   });
 }
@@ -45,13 +59,15 @@ export interface UpdateProjectVariables {
 }
 
 export function useUpdateProject() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   return useMutation({
     retry: false,
-    mutationFn: ({ projectId, payload }: UpdateProjectVariables) =>
-      api.updateProject(projectId, payload),
+    mutationFn: ({ projectId, payload }: UpdateProjectVariables) => {
+      requireNativeCollectionWire(publicPresentation);
+      return api.updateProject(projectId, payload);
+    },
     onSuccess: () => invalidate.projects(),
   });
 }
@@ -77,12 +93,14 @@ export interface DeleteProjectVariables {
 
 /** Either way the project's sessions move, so the session list moves too. */
 export function useDeleteProject() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   return useMutation({
-    mutationFn: ({ projectId, sessions }: DeleteProjectVariables) =>
-      api.deleteProject(projectId, sessions),
+    mutationFn: ({ projectId, sessions }: DeleteProjectVariables) => {
+      requireNativeCollectionWire(publicPresentation);
+      return api.deleteProject(projectId, sessions);
+    },
     onSuccess: () => Promise.all([invalidate.projects(), invalidate.sessions()]),
   });
 }
@@ -93,12 +111,14 @@ export interface AssignSessionVariables {
 }
 
 export function useAssignSessionToProject() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   return useMutation({
-    mutationFn: ({ projectId, sessionId }: AssignSessionVariables) =>
-      api.assignSessionToProject(projectId, { session_id: sessionId }),
+    mutationFn: ({ projectId, sessionId }: AssignSessionVariables) => {
+      requireNativeCollectionWire(publicPresentation);
+      return api.assignSessionToProject(projectId, { session_id: sessionId });
+    },
     onSuccess: () => Promise.all([invalidate.projects(), invalidate.sessions()]),
   });
 }
@@ -118,7 +138,7 @@ export interface MoveProjectOrderVariables {
  * its response before the order request is built.
  */
 export function useMoveProjectOrder() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   return useMutation({
@@ -128,6 +148,7 @@ export function useMoveProjectOrder() {
       targetPinned,
       targetIndex,
     }: MoveProjectOrderVariables) => {
+      requireNativeCollectionWire(publicPresentation);
       const moving = projects.find((project) => project.project_id === projectId);
       if (!moving) return;
 
@@ -139,7 +160,7 @@ export function useMoveProjectOrder() {
 
       const group = current
         .filter((project) => project.pinned === targetPinned)
-        .sort((a, b) => a.sort_order - b.sort_order);
+        .sort((a, b) => comparePresentationOrder(a.sort_order, b.sort_order));
       const ordered = placeIdAt(
         group.map((project) => project.project_id),
         projectId,
@@ -149,7 +170,10 @@ export function useMoveProjectOrder() {
         pinned: targetPinned,
         project_ids: ordered,
         expected_versions: Object.fromEntries(
-          group.map((project) => [project.project_id, project.presentation_version]),
+          group.map((project) => [
+            project.project_id,
+            requireNativeProject(project).presentation_version,
+          ]),
         ),
       });
     },

@@ -1,3 +1,4 @@
+import type { SessionSummaryView as SessionSummarySnapshot } from "@/app/features/public-native/collectionViews";
 import { useMemo, useState } from "react";
 
 import {
@@ -16,7 +17,6 @@ import { projectForSessionLocation, projectLocationPayload } from "@/app/lib/pro
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
 import { useAssignSessionToProject, useCreateProject, useProjects } from "@/app/services/queries";
-import type { SessionSummarySnapshot } from "@/app/types/api";
 
 /**
  * Adopts a session that belongs to no project.

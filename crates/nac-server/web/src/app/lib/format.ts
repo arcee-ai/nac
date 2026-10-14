@@ -1,13 +1,12 @@
+import { publicNativeInteger } from "../../../packages/nac-client/src/publicNativeInteger.js";
+import type {
+  ManagedSessionView as ManagedSessionSummary,
+  SessionSummaryView as SessionSummarySnapshot,
+} from "@/app/features/public-native/collectionViews";
 // Presentation helpers ported from the legacy UI. Behaviour is intentionally
 // identical, including the exact placeholder strings.
 
-import type {
-  ActiveRunSnapshot,
-  ManagedSessionSummary,
-  SessionSnapshotResponse,
-  SessionSummarySnapshot,
-  TokenUsage,
-} from "@/app/types/api";
+import type { ActiveRunSnapshot, SessionSnapshotResponse, TokenUsage } from "@/app/types/api";
 import { parseDelegatedCompletion } from "@/app/features/delegation/completion";
 
 export function shortId(id: string | null | undefined): string {
@@ -237,8 +236,21 @@ export function numberUntitledSessions(sessions: ManagedSessionSummary[]): Map<s
   return names;
 }
 
-export function formatTokens(n: number | null | undefined): string {
+function exactCompactTokens(n: string, compact: boolean): string {
+  const value = publicNativeInteger(n);
+  const divisor = compact && value >= 1_000_000n ? 1_000_000n : value >= 1_000n ? 1_000n : 1n;
+  if (divisor === 1n) return value.toString();
+  const suffix = divisor === 1_000_000n ? "M" : compact ? "K" : "k";
+  if (value % divisor === 0n || (compact && value / divisor >= 100n)) {
+    return `${(value + divisor / 2n) / divisor}${suffix}`;
+  }
+  const tenths = (value * 10n + divisor / 2n) / divisor;
+  return `${tenths / 10n}.${tenths % 10n}${suffix}`;
+}
+
+export function formatTokens(n: number | string | null | undefined): string {
   if (n == null) return "--";
+  if (typeof n === "string") return exactCompactTokens(n, false);
   const v = Number(n);
   if (!Number.isFinite(v)) return "--";
   if (Math.abs(v) >= 1000) {
@@ -248,8 +260,9 @@ export function formatTokens(n: number | null | undefined): string {
 }
 
 /** Token counts for the chat input bar, e.g. 185000 -> "185K", 14.3e6 -> "14.3M". */
-export function formatTokensCompact(n: number | null | undefined): string {
+export function formatTokensCompact(n: number | string | null | undefined): string {
   if (n == null) return "--";
+  if (typeof n === "string") return exactCompactTokens(n, true);
   const v = Number(n);
   if (!Number.isFinite(v)) return "--";
   const scale = (divisor: number, suffix: string) => {
@@ -276,8 +289,15 @@ export function formatTokensCompact(n: number | null | undefined): string {
  * The space is non-breaking: the two halves say nothing apart, and the bar this
  * sits in is tight enough to wrap them.
  */
-export function formatCostMicros(micros: number | null | undefined): string {
+export function formatCostMicros(micros: number | string | bigint | null | undefined): string {
   if (micros == null) return "--";
+  if (typeof micros === "string" || typeof micros === "bigint") {
+    const value = typeof micros === "string" ? publicNativeInteger(micros) : micros;
+    if (value <= 0n) return "--";
+    if (value < 10_000n) return "<\u00a0$0.01";
+    const cents = (value + 5_000n) / 10_000n;
+    return `$${cents / 100n}.${String(cents % 100n).padStart(2, "0")}`;
+  }
   const value = Math.round(Number(micros));
   if (!Number.isFinite(value) || value <= 0) return "--";
   const dollars = value / 1_000_000;
@@ -341,7 +361,10 @@ export type SessionEnv = (typeof SESSION_ENVS)[number];
  * Where the session runs. Sandbox and ssh are mutually exclusive in practice,
  * and sandbox wins because it is the more specific isolation.
  */
-export function sessionEnvLabel(summary: SessionSummarySnapshot | null | undefined): SessionEnv {
+export function sessionEnvLabel(
+  summary: SessionSummarySnapshot | null | undefined,
+): SessionEnv | null {
+  if (summary?.presentation === "public") return null;
   if (!summary) return ENV_LOCAL;
   if (summary.sandboxed) return ENV_SANDBOX;
   if (summary.ssh_host) return ENV_SSH;
@@ -492,7 +515,7 @@ export function runMetrics(
 
   return {
     model: meta?.model ?? summary?.model ?? "--",
-    env: sessionEnvLabel(summary).toUpperCase(),
+    env: (sessionEnvLabel(summary) ?? "").toUpperCase(),
     active,
     startedAt: active && activeRun ? activeRun.started_at_epoch_ms : null,
     lastResponseMs: snapshot?.response_timing.last_response_duration_ms ?? null,

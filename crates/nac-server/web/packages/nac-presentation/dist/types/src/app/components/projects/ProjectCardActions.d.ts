@@ -21,5 +21,5 @@ interface ProjectCardActionsProps {
  * reordered; a project can also be pinned, while an unassigned chat can be
  * filed under a project instead.
  */
-export declare function ProjectCardActions({ orphan, pinned, onDelete, onTogglePin, onRename, onAssign, reorder, }: ProjectCardActionsProps): import("react").JSX.Element;
+export declare function ProjectCardActions({ orphan, pinned, onDelete, onTogglePin, onRename, onAssign, reorder, }: ProjectCardActionsProps): import("react").JSX.Element | null;
 export {};

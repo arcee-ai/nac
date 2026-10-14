@@ -1,4 +1,4 @@
-import type { ManagedSessionSummary } from "../../types/api.js";
+import type { ManagedSessionView as ManagedSessionSummary } from "../../features/public-native/collectionViews.js";
 interface ChatSessionListProps {
     sessions: ManagedSessionSummary[];
     /** The session currently open, marked as the active row. */

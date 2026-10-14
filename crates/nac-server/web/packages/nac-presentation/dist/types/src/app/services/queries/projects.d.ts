@@ -1,11 +1,10 @@
-import type { DeleteProjectSessions, ProjectRecord, UpdateProjectRequest } from "../../types/api.js";
+import type { ProjectCollectionView as ProjectList, ProjectView as ProjectRecord } from "../../features/public-native/collectionViews.js";
+import type { DeleteProjectSessions, UpdateProjectRequest } from "../../types/api.js";
 /**
  * Projects have no event stream, so this refetches on the same cadence as the
  * session list rather than polling: every project mutation invalidates it.
  */
-export declare function useProjects(): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    projects: import("../../types/openapi.generated.js").components["schemas"]["ProjectRecord"][];
-}>, Error>;
+export declare function useProjects(): import("@tanstack/react-query").UseQueryResult<NoInfer<ProjectList>, Error>;
 export declare function useCreateProject(): import("@tanstack/react-query").UseMutationResult<{
     created_at: string;
     cwd: string;

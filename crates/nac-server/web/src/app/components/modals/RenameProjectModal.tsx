@@ -1,3 +1,4 @@
+import type { ProjectView as ProjectRecord } from "@/app/features/public-native/collectionViews";
 import { useState } from "react";
 
 import { Button, ButtonContent, ButtonVariant, Input, Modal, ModalSize } from "@/app/atoms";
@@ -6,7 +7,6 @@ import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { ApiError } from "@/app/services/api";
 import { useUpdateProject } from "@/app/services/queries";
-import type { ProjectRecord } from "@/app/types/api";
 
 /** Mounted only while open, so the fields start from the current record. */
 export function RenameProjectModal({

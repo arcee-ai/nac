@@ -1,3 +1,4 @@
+import type { ManagedSessionView as ManagedSessionSummary } from "@/app/features/public-native/collectionViews";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMemo } from "react";
 
@@ -9,7 +10,6 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun } from "@/app/lib/format";
 import { groupByRecency } from "@/app/lib/projects";
 import { sessionBehaviorIcon, sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
-import type { ManagedSessionSummary } from "@/app/types/api";
 
 /** Date buckets only shift once a day, so a minute of resolution is plenty. */
 const RECENCY_TICK_MS = 60_000;

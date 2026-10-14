@@ -1,5 +1,8 @@
+import type {
+  ManagedSessionView as ManagedSessionSummary,
+  ProjectView as ProjectRecord,
+} from "@/app/features/public-native/collectionViews";
 import { parseStoreTime } from "@/app/lib/format";
-import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 export interface SessionNavigationItem {
   session: ManagedSessionSummary;

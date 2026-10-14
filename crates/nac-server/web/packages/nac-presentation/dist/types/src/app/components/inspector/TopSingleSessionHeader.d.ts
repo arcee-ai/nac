@@ -1,4 +1,5 @@
-import type { ManagedSessionSummary, SessionSnapshotResponse } from "../../types/api.js";
+import type { ManagedSessionView as ManagedSessionSummary } from "../../features/public-native/collectionViews.js";
+import type { SessionSnapshotResponse } from "../../types/api.js";
 /**
  * The single-session bar above the transcript: title and behavior, the live
  * token and cost reading, then the checkout the chat is working in.

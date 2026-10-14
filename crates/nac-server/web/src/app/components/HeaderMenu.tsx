@@ -100,10 +100,12 @@ export function HeaderMenu({
             <Icon iconName={IconName.Gear} />
             <span className="text-left flex-grow">Configurations</span>
           </TabButton>
-          <TabButton size={itemSize} onClick={act(onSshConfigs)}>
-            <Icon iconName={IconName.Globe} />
-            <span className="text-left flex-grow">SSH configs</span>
-          </TabButton>
+          {!publicPresentation ? (
+            <TabButton size={itemSize} onClick={act(onSshConfigs)}>
+              <Icon iconName={IconName.Globe} />
+              <span className="text-left flex-grow">SSH configs</span>
+            </TabButton>
+          ) : null}
           {onManagedHost ? (
             <TabButton size={itemSize} onClick={act(onManagedHost)}>
               <Icon iconName={IconName.Server} />

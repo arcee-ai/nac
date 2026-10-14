@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { ApiError } from "@/app/services/api";
+import { UnsupportedCollectionCommand } from "@/app/features/public-native/collectionViews";
 import { queryKeys } from "@/app/services/queries/keys";
 import { SetupFailure, type FailureKind, type SetupPhase } from "./workflow";
 
@@ -16,7 +17,8 @@ export class ConfigurationChanged extends Error {
 }
 
 export function classifySetupFailure(cause: unknown, phase?: SetupPhase): FailureKind {
-  if (cause instanceof SetupValidation) return "rejected";
+  if (cause instanceof SetupValidation || cause instanceof UnsupportedCollectionCommand)
+    return "rejected";
   if (cause instanceof ConfigurationChanged) return "conflict";
   if (cause instanceof ApiError) {
     // Project creation has no revision update: a duplicate folder is a known

@@ -1,4 +1,14 @@
+import type {
+  ManagedSessionView as ManagedSessionSummary,
+  SessionSummaryView as SessionSummarySnapshot,
+} from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import {
+  publicSessionView,
+  isNativeSessionView,
+  requireNativeSummary,
+  requireNativeCollectionWire,
+} from "@/app/features/public-native/collectionViews";
 import {
   createChat,
   runCommand,
@@ -51,22 +61,23 @@ import {
 
 import type {
   CreateSessionRequest,
-  ManagedSessionSummary,
   RawSessionConfig,
   SessionSnapshotResponse,
-  SessionSummarySnapshot,
   ThreadEventPage,
   UpdateConfigRequest,
 } from "@/app/types/api";
 
 export function useSessions(pollMs = SESSIONS_POLL_MS) {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   return useQuery<ManagedSessionSummary[]>({
     queryKey: queryKeys.sessions(false),
-    queryFn: ({ signal }) => api.listSessions({}, signal),
+    queryFn: async ({ signal }) =>
+      publicPresentation
+        ? (await publicPresentation.listSessions({}, signal)).map(publicSessionView)
+        : api.listSessions({}, signal),
     refetchInterval: pollMs,
-    staleTime: 0,
+    staleTime: publicPresentation ? pollMs : 0,
     placeholderData: keepPreviousData,
   });
 }
@@ -81,6 +92,7 @@ export function mergeWorkspaceStats(
       .map((entry) => [entry.summary.session_id, entry.workspace_diff]),
   );
   return base.map((entry) => {
+    if (!isNativeSessionView(entry)) return entry;
     const workspaceDiff = workspaceById.get(entry.summary.session_id);
     return workspaceDiff === undefined ? entry : { ...entry, workspace_diff: workspaceDiff };
   });
@@ -95,18 +107,22 @@ export function useSessionsWithWorkspaceStats(
     statsMs: WORKSPACE_STATS_POLL_MS,
   },
 ) {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const base = useSessions(cadence.baseMs);
   const stats = useQuery<ManagedSessionSummary[]>({
     queryKey: queryKeys.sessions(true),
     queryFn: ({ signal }) => api.listSessions({ workspaceStats: true }, signal),
+    enabled: !publicPresentation,
     refetchInterval: cadence.statsMs,
     staleTime: cadence.statsMs,
   });
   const data = useMemo(
-    () => (base.data ? mergeWorkspaceStats(base.data, stats.data ?? []) : base.data),
-    [base.data, stats.data],
+    () =>
+      !publicPresentation && base.data
+        ? mergeWorkspaceStats(base.data, stats.data ?? [])
+        : base.data,
+    [base.data, stats.data, publicPresentation],
   );
   return { ...base, data };
 }
@@ -119,7 +135,7 @@ export function useSessionsWithWorkspaceStats(
  * across a refetch that did not touch it, so the transcript stays put.
  */
 export function useSessionSummary(id: string | null) {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const select = useCallback(
     (sessions: ManagedSessionSummary[]) =>
@@ -128,9 +144,12 @@ export function useSessionSummary(id: string | null) {
   );
   return useQuery<ManagedSessionSummary[], Error, ManagedSessionSummary | null>({
     queryKey: queryKeys.sessions(false),
-    queryFn: ({ signal }) => api.listSessions({}, signal),
+    queryFn: async ({ signal }) =>
+      publicPresentation
+        ? (await publicPresentation.listSessions({}, signal)).map(publicSessionView)
+        : api.listSessions({}, signal),
     refetchInterval: SESSIONS_POLL_MS,
-    staleTime: 0,
+    staleTime: publicPresentation ? SESSIONS_POLL_MS : 0,
     placeholderData: keepPreviousData,
     select,
   });
@@ -262,14 +281,15 @@ export function useSessionConfig(id: string | null) {
 }
 
 export function useCreateSession() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
     retry: false,
-    mutationFn: (payload: CreateSessionRequest) =>
-      runCommand(
+    mutationFn: (payload: CreateSessionRequest) => {
+      requireNativeCollectionWire(publicPresentation);
+      return runCommand(
         createChat({
           create: () => api.createSession(payload),
           accept: (snapshot) => {
@@ -280,7 +300,8 @@ export function useCreateSession() {
             void invalidate.sessions();
           },
         }),
-      ),
+      );
+    },
   });
 }
 
@@ -307,12 +328,15 @@ function sessionIdsShowingFork(client: QueryClient, forkId: string): string[] {
 }
 
 export function useDeleteSession() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.deleteSession(id),
+    mutationFn: (id: string) => {
+      requireNativeCollectionWire(publicPresentation);
+      return api.deleteSession(id);
+    },
     onSuccess: (_data, id) => {
       void invalidate.sessions();
       client.removeQueries({ queryKey: queryKeys.sessionRoot(id) });
@@ -332,17 +356,19 @@ export interface RenameSessionVariables {
 }
 
 export function useUpdatePresentation() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   return useMutation({
     retry: false,
-    mutationFn: ({ id, title, pinned, expectedVersion }: RenameSessionVariables) =>
-      api.updatePresentation(id, {
+    mutationFn: ({ id, title, pinned, expectedVersion }: RenameSessionVariables) => {
+      requireNativeCollectionWire(publicPresentation);
+      return api.updatePresentation(id, {
         title,
         pinned,
         expected_version: expectedVersion,
-      }),
+      });
+    },
     onSuccess: () => invalidate.sessions(),
   });
 }
@@ -357,7 +383,7 @@ export function useTogglePin() {
         id: summary.session_id,
         title: summary.title ?? "",
         pinned: !summary.pinned,
-        expectedVersion: summary.presentation_version ?? 0,
+        expectedVersion: requireNativeSummary(summary).presentation_version ?? 0,
       }),
   };
 }
@@ -376,7 +402,7 @@ export interface MoveSessionOrderVariables {
  * destination group differs. One invalidation at the end.
  */
 export function useMoveSessionOrder() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   return useMutation({
@@ -386,6 +412,7 @@ export function useMoveSessionOrder() {
       targetPinned,
       targetIndex,
     }: MoveSessionOrderVariables) => {
+      requireNativeCollectionWire(publicPresentation);
       let entries = sessions;
       const entry = entries.find((e) => e.summary.session_id === sessionId);
       if (!entry) {
@@ -396,7 +423,7 @@ export function useMoveSessionOrder() {
         const summary = await api.updatePresentation(sessionId, {
           title: entry.summary.title ?? "",
           pinned: targetPinned,
-          expected_version: entry.summary.presentation_version ?? 0,
+          expected_version: requireNativeSummary(entry.summary).presentation_version ?? 0,
         });
         entries = withUpdatedSummary(entries, summary);
       }
@@ -413,14 +440,16 @@ export function useMoveSessionOrder() {
 }
 
 export function useUpdateConfig() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
     retry: false,
-    mutationFn: ({ id, patch }: { id: string; patch: UpdateConfigRequest }) =>
-      api.updateConfig(id, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateConfigRequest }) => {
+      requireNativeCollectionWire(publicPresentation);
+      return api.updateConfig(id, patch);
+    },
     onSuccess: (_data, { id }) => {
       void client.invalidateQueries({ queryKey: queryKeys.sessionConfig(id) });
       void invalidate.session(id);

@@ -91,11 +91,12 @@ export function useSshConnect() {
 }
 
 export function useSshConfigs() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   return useQuery<SshConfigurationList>({
     queryKey: queryKeys.sshConfigs,
     queryFn: ({ signal }) => api.listSshConfigs(signal),
+    enabled: !publicPresentation,
     staleTime: 30_000,
     retry: false,
   });
@@ -161,11 +162,12 @@ export function useMcpLibrary() {
 }
 
 export function useMcpServers() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   return useQuery<McpServerList>({
     queryKey: queryKeys.mcpServers,
     queryFn: ({ signal }) => api.listMcpServers(signal),
+    enabled: !publicPresentation,
     staleTime: 30_000,
     retry: false,
   });

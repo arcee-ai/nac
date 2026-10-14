@@ -1,3 +1,7 @@
+import type {
+  ManagedSessionView as ManagedSessionSummary,
+  SessionSummaryView as SessionSummarySnapshot,
+} from "@/app/features/public-native/collectionViews";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -39,7 +43,6 @@ import {
   useProjects,
   useVisibleSessions,
 } from "@/app/services/queries";
-import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
 type Tab = "assign" | "chats" | "projects";
 

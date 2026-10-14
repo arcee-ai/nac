@@ -150,7 +150,10 @@ export default function SessionPage() {
     !behaviorKnown || sessionAvailable(policy, behavior, entry?.lineage ?? snapshot?.lineage);
   useSessionStream(available ? id : null);
   useRunStateSync(available ? snapshot?.active_run : null);
-  useAutoSshConnect(available ? id : null, available ? entry?.summary : null);
+  useAutoSshConnect(
+    available ? id : null,
+    available && entry?.summary.presentation !== "public" ? entry?.summary : null,
+  );
   const panelPolicy =
     behavior == null ? null : sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
   const sessionPanels = panelPolicy?.mobilePanels ?? [];

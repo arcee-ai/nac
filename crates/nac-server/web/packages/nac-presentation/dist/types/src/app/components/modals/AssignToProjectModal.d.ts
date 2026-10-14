@@ -1,4 +1,4 @@
-import type { SessionSummarySnapshot } from "../../types/api.js";
+import type { SessionSummaryView as SessionSummarySnapshot } from "../../features/public-native/collectionViews.js";
 /**
  * Adopts a session that belongs to no project.
  *

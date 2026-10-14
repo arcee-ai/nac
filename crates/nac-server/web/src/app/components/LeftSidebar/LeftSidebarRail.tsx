@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type { ReactNode } from "react";
 
 import { Button, ButtonContent, ButtonVariant, Icon, IconName, Logo, Tooltip } from "@/app/atoms";
@@ -20,6 +21,7 @@ export function LeftSidebarRail({
   variant: "session" | "projects";
 }) {
   const projectsPage = variant === "projects";
+  const { publicPresentation } = useNativeRuntime();
   return (
     <div className="flex h-full flex-col justify-between p-2">
       <div className="flex flex-col items-center gap-4 [&>*]:shrink-0">
@@ -39,7 +41,7 @@ export function LeftSidebarRail({
             <Icon iconName={IconName.Folders} />
           </RailButton>
         )}
-        {projectsPage ? (
+        {publicPresentation ? null : projectsPage ? (
           <RailButton label={commands.createLabel} onClick={commands.newProject}>
             <Icon iconName={IconName.Add} />
           </RailButton>
@@ -52,20 +54,26 @@ export function LeftSidebarRail({
             )}
           </NewSessionPopover>
         )}
-        <RailButton label={commands.mcpLabel} onClick={commands.openMcp}>
-          <Icon iconName={IconName.Toolbox} />
-        </RailButton>
-        <RailButton label="SSH" onClick={commands.openSsh}>
-          <Icon iconName={IconName.Globe} />
-        </RailButton>
+        {!publicPresentation ? (
+          <>
+            <RailButton label={commands.mcpLabel} onClick={commands.openMcp}>
+              <Icon iconName={IconName.Toolbox} />
+            </RailButton>
+            <RailButton label="SSH" onClick={commands.openSsh}>
+              <Icon iconName={IconName.Globe} />
+            </RailButton>
+          </>
+        ) : null}
       </div>
       <div className="flex flex-col items-center gap-1 [&>*]:shrink-0">
         <RailButton label="Configurations" onClick={commands.openConfigurations}>
           <Icon iconName={IconName.Gear} />
         </RailButton>
-        <RailButton label="Managed host" onClick={commands.openManaged}>
-          <Icon iconName={IconName.Server} />
-        </RailButton>
+        {!publicPresentation ? (
+          <RailButton label="Managed host" onClick={commands.openManaged}>
+            <Icon iconName={IconName.Server} />
+          </RailButton>
+        ) : null}
       </div>
     </div>
   );

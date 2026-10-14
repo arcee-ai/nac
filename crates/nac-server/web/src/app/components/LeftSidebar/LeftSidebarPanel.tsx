@@ -95,7 +95,9 @@ export function LeftSidebarPanel({
           />
         </div>
         <div className="flex flex-col gap-0.5">
-          {projectsPage ? (
+          {publicPresentation ? (
+            <TabButton onClick={commands.openProjects}>All projects</TabButton>
+          ) : projectsPage ? (
             <TabButton onClick={commands.newProject}>
               <Icon iconName={IconName.Add} />
               <span className="text-left flex-grow">{commands.createLabel}</span>
@@ -133,22 +135,26 @@ export function LeftSidebarPanel({
               </div>
             </>
           )}
-          <TabButton onClick={commands.openMcp} aria-label={commands.mcpLabel}>
-            <Icon iconName={IconName.Toolbox} />
-            <span className="text-left flex-grow">MCP</span>
-            {commands.activeMcp > 0 ? (
-              <Badge text={`${commands.activeMcp} ACTIVE`} color={BadgeColor.Blue} />
-            ) : null}
-          </TabButton>
-          <TabButton onClick={commands.openSsh}>
-            <Icon iconName={IconName.Globe} />
-            <span className="text-left flex-grow">SSH</span>
-            {commands.sshCount > 0 ? (
-              <span className="label-small text-basic-secondary tabular-nums">
-                {commands.sshCount}
-              </span>
-            ) : null}
-          </TabButton>
+          {!publicPresentation ? (
+            <>
+              <TabButton onClick={commands.openMcp} aria-label={commands.mcpLabel}>
+                <Icon iconName={IconName.Toolbox} />
+                <span className="text-left flex-grow">MCP</span>
+                {commands.activeMcp > 0 ? (
+                  <Badge text={`${commands.activeMcp} ACTIVE`} color={BadgeColor.Blue} />
+                ) : null}
+              </TabButton>
+              <TabButton onClick={commands.openSsh}>
+                <Icon iconName={IconName.Globe} />
+                <span className="text-left flex-grow">SSH</span>
+                {commands.sshCount > 0 ? (
+                  <span className="label-small text-basic-secondary tabular-nums">
+                    {commands.sshCount}
+                  </span>
+                ) : null}
+              </TabButton>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -174,10 +180,12 @@ export function LeftSidebarPanel({
             <Icon iconName={IconName.Gear} />
             <span className="text-left flex-grow">Configurations</span>
           </TabButton>
-          <TabButton onClick={commands.openManaged}>
-            <Icon iconName={IconName.Server} />
-            <span className="text-left flex-grow">Managed host</span>
-          </TabButton>
+          {!publicPresentation ? (
+            <TabButton onClick={commands.openManaged}>
+              <Icon iconName={IconName.Server} />
+              <span className="text-left flex-grow">Managed host</span>
+            </TabButton>
+          ) : null}
         </div>
         {!publicPresentation ? (
           <>
