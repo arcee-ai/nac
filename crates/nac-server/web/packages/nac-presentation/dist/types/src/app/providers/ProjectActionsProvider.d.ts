@@ -1,5 +1,5 @@
 import React from "react";
-import type { ProjectRecord, SessionSummarySnapshot } from "../types/api";
+import type { ProjectRecord, SessionSummarySnapshot } from "../types/api.js";
 interface ProjectActions {
     create: () => void;
     /**

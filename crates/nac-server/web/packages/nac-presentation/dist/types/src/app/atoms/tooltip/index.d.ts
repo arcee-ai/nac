@@ -1,5 +1,5 @@
 import React from "react";
-import { AnchorPlacement } from "../../lib/anchor";
+import { AnchorPlacement } from "../../lib/anchor.js";
 export { AnchorPlacement as TooltipPosition };
 type TooltipPosition = AnchorPlacement;
 interface TooltipProps {

@@ -1,4 +1,4 @@
-import type { SessionSummarySnapshot } from "../../types/api";
+import type { SessionSummarySnapshot } from "../../types/api.js";
 interface DeleteModalProps {
     open: boolean;
     onClose: () => void;

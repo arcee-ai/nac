@@ -1,1 +1,1 @@
-export * from "../../src/app/runtime/index";
+export * from "../../src/app/runtime/index.js";

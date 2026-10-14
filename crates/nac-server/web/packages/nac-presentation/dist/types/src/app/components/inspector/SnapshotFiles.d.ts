@@ -1,4 +1,4 @@
-import type { ChangedFileStat } from "../../types/api";
+import type { ChangedFileStat } from "../../types/api.js";
 /**
  * The files a snapshot touched, each opening in the files panel. Sits above the
  * snapshot badge so the turn says what it changed before it says how much.

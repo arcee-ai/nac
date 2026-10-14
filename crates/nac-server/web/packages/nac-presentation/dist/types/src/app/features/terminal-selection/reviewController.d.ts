@@ -1,6 +1,6 @@
-import type { NativeApi } from "../../services/api";
-import type { TerminalSelectionPreviewResponse, TerminalSelectionSubmissionResponse, TerminalSelectionDelivery } from "../../types/api";
-import type { TerminalSelectionCapture } from "../terminal/TerminalPane";
+import type { NativeApi } from "../../services/api.js";
+import type { TerminalSelectionPreviewResponse, TerminalSelectionSubmissionResponse, TerminalSelectionDelivery } from "../../types/api.js";
+import type { TerminalSelectionCapture } from "../terminal/TerminalPane.js";
 /** The pane snapshots rendered text only at an explicit user capture point. */
 export type SelectionCapture = TerminalSelectionCapture;
 export type SelectionSource = Omit<SelectionCapture, "selectedText">;

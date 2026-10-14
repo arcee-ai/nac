@@ -1,5 +1,5 @@
 import React from "react";
-import { InputSize } from "../input";
+import { InputSize } from "../input/index.js";
 interface NumberInputProps {
     value: number;
     onChange: (value: number) => void;

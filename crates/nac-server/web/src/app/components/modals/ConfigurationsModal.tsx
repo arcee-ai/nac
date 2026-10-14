@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { PublicModelConfigurations } from "@/app/features/public-native/ConfigurationViews";
 
 import {
   Button,
@@ -75,6 +77,15 @@ const DRAFT = "__new__";
  * Remounted on every open so a half-finished edit never survives a close.
  */
 export function ConfigurationsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { publicPresentation } = useNativeRuntime();
+  return publicPresentation ? (
+    <PublicModelConfigurations open={open} onClose={onClose} />
+  ) : (
+    <NativeConfigurationsModal open={open} onClose={onClose} />
+  );
+}
+
+function NativeConfigurationsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const mounted = useExitTransition(open);
   if (!mounted) return null;
   return <ConfigurationsManager open={open} onClose={onClose} />;

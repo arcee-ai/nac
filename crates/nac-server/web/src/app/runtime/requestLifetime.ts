@@ -57,6 +57,9 @@ function nativeHttpError(error: unknown): unknown {
 
 /** Uses the existing transport, including fresh headers, error decoding and admission. */
 export class LifetimeTransport extends NacTransport {
+  override get jsonResponseDecodingVersion(): number {
+    return this.source.jsonResponseDecodingVersion ?? 0;
+  }
   constructor(
     private readonly source: NacHttpTransport,
     private readonly lifetime: AbortSignal,

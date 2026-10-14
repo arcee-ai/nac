@@ -1,4 +1,4 @@
-import type { SessionSummarySnapshot } from "../../types/api";
+import type { SessionSummarySnapshot } from "../../types/api.js";
 /**
  * Adopts a session that belongs to no project.
  *

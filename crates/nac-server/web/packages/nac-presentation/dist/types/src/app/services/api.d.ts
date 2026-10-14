@@ -1,5 +1,5 @@
 import { createNacApi } from "../../../packages/nac-client/src/api.js";
-import { nacClient } from "./nacClient";
+import { nacClient } from "./nacClient.js";
 export * from "../../../packages/nac-client/src/api.js";
 export type NativeApi = ReturnType<typeof createNacApi> & {
     getManagedUpgrade(signal?: AbortSignal): Promise<unknown>;

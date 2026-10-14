@@ -1,4 +1,4 @@
-import type { CatalogPick } from "../../../lib/catalog";
+import type { CatalogPick } from "../../../lib/catalog.js";
 export declare function useManagedModelProfile(): {
     defaultPick: CatalogPick | null;
     configured: boolean;

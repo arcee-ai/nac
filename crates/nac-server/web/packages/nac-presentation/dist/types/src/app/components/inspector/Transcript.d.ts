@@ -1,6 +1,6 @@
-import { type ErrorNotice } from "../../hooks/useErrorNotice";
-import { type SessionPanel } from "../../lib/routes";
-import type { RunFailure, SessionGoalRecord, SessionSnapshotResponse } from "../../types/api";
+import { type ErrorNotice } from "../../hooks/useErrorNotice.js";
+import { type SessionPanel } from "../../lib/routes.js";
+import type { RunFailure, SessionGoalRecord, SessionSnapshotResponse } from "../../types/api.js";
 interface TranscriptProps {
     sessionId: string;
     snapshot: SessionSnapshotResponse | null;

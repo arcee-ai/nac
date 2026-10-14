@@ -11,7 +11,7 @@ export declare function useStoreInfo(): import("@tanstack/react-query").UseQuery
 export declare function useSandboxAvailability(enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     detail?: string | null;
     guidance?: string | null;
-    status: import("../../types/openapi.generated").components["schemas"]["SandboxAvailabilityStatus"];
+    status: import("../../types/openapi.generated.js").components["schemas"]["SandboxAvailabilityStatus"];
 }>, Error>;
 /**
  * Sandbox setup in progress for one launch (image pull, container start),
@@ -29,7 +29,7 @@ export declare function useSandboxActivity(enabled: boolean, key: string | null)
  * set; failures are non-fatal because the environment may well supply the key.
  */
 export declare function useStoredCredentials(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    credentials: import("../../types/openapi.generated").components["schemas"]["StoredCredentialSummary"][];
+    credentials: import("../../types/openapi.generated.js").components["schemas"]["StoredCredentialSummary"][];
 }>, Error>;
 export declare function useStoreCredential(): import("@tanstack/react-query").UseMutationResult<void, Error, {
     name: string;
@@ -50,11 +50,11 @@ export declare function useDeleteCredential(): import("@tanstack/react-query").U
  */
 export declare function useManagedLogout(): import("@tanstack/react-query").UseMutationResult<{
     account: string | null;
-    backend: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["BackendKind"];
+    backend: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["BackendKind"];
     base_url: string | null;
     expires_at_ms: number | null;
     organization: string | null;
     path: string;
-    provider: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ManagedAuthProvider"];
+    provider: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ManagedAuthProvider"];
     signed_in: boolean;
 }, Error, "arcee" | "codex", unknown>;

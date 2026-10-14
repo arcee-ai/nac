@@ -1,5 +1,5 @@
-import type { SelectItem } from "../atoms";
-import type { ProviderModel } from "../types/api";
+import type { SelectItem } from "../atoms/index.js";
+import type { ProviderModel } from "../types/api.js";
 /** Long enough to stop firing on every keystroke of a pasted key. */
 export declare const KEY_DEBOUNCE_MS = 600;
 /** Stored keys never leave the server, so a saved setup only shows a stand-in. */

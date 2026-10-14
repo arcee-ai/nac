@@ -454,10 +454,13 @@ export function useSubmitRun() {
             if (admission.status === "not-sent")
               return {
                 kind: "not-sent",
-                error: new DOMException(
-                  "Prompt submission was cancelled before it was sent.",
-                  "AbortError",
-                ),
+                error:
+                  admission.reason === "adapter-not-sent"
+                    ? admission.error
+                    : new DOMException(
+                        "Prompt submission was cancelled before it was sent.",
+                        "AbortError",
+                      ),
               };
             return {
               kind: "uncertain",

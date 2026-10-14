@@ -1,4 +1,4 @@
-import type { ChangedFileStat } from "../../types/api";
+import type { ChangedFileStat } from "../../types/api.js";
 /**
  * The Commit button in the Changes toolbar, opening a message field over the
  * file list. Everything in the checkout goes into the commit, because the panel

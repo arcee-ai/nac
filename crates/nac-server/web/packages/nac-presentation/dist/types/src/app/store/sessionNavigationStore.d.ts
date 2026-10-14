@@ -9,11 +9,11 @@ export declare function createSessionNavigationStore(storage?: Pick<Storage, "ge
     release: () => void;
     restoreSessionNavigation: (raw: string | null) => SessionNavigationState;
     serializeSessionNavigation: (state: SessionNavigationState) => string;
-    sessionNavigationStore: import("../lib/store").Store<SessionNavigationState>;
+    sessionNavigationStore: import("../lib/store.js").Store<SessionNavigationState>;
     toggleSessionNavigationPin: (sessionId: string) => void;
     markSessionViewed: (sessionId: string, updatedAt: string) => void;
     pruneSessionNavigation: (sessionIds: Iterable<string>) => void;
     useSessionNavigationPins: () => ReadonlySet<string>;
     useSessionViewedAt: (sessionId: string) => string;
 };
-export declare const release: () => void, restoreSessionNavigation: (raw: string | null) => SessionNavigationState, serializeSessionNavigation: (state: SessionNavigationState) => string, sessionNavigationStore: import("../lib/store").Store<SessionNavigationState>, toggleSessionNavigationPin: (sessionId: string) => void, markSessionViewed: (sessionId: string, updatedAt: string) => void, pruneSessionNavigation: (sessionIds: Iterable<string>) => void, useSessionNavigationPins: () => ReadonlySet<string>, useSessionViewedAt: (sessionId: string) => string;
+export declare const release: () => void, restoreSessionNavigation: (raw: string | null) => SessionNavigationState, serializeSessionNavigation: (state: SessionNavigationState) => string, sessionNavigationStore: import("../lib/store.js").Store<SessionNavigationState>, toggleSessionNavigationPin: (sessionId: string) => void, markSessionViewed: (sessionId: string, updatedAt: string) => void, pruneSessionNavigation: (sessionIds: Iterable<string>) => void, useSessionNavigationPins: () => ReadonlySet<string>, useSessionViewedAt: (sessionId: string) => string;

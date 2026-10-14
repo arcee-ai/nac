@@ -1,5 +1,5 @@
 import React from "react";
-import type { SessionSummarySnapshot } from "../types/api";
+import type { SessionSummarySnapshot } from "../types/api.js";
 /**
  * Actions on a single chat. Creating one is a project-level action, because a
  * chat is always started inside a project — see `ProjectActionsProvider`.

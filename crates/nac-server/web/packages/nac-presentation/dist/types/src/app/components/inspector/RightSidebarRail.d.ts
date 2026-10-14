@@ -1,5 +1,5 @@
-import { type SessionPanel } from "../../lib/routes";
-import type { SessionBehavior, SessionSnapshotResponse } from "../../types/api";
+import { type SessionPanel } from "../../lib/routes.js";
+import type { SessionBehavior, SessionSnapshotResponse } from "../../types/api.js";
 /** Icon column left behind once the right panel has slid away. Matches the left rail. */
 export declare const RIGHT_SIDEBAR_RAIL_WIDTH = 52;
 /**

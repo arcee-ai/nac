@@ -1,4 +1,4 @@
-import type { SshTarget } from "../../types/api";
+import type { SshTarget } from "../../types/api.js";
 export type SshConnectionBoxMode = "launch" | "settings" | "manage";
 export interface SshConnectionBoxProps {
     mode: SshConnectionBoxMode;

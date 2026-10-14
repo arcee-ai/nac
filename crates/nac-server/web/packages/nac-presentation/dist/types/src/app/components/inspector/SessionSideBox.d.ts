@@ -1,5 +1,5 @@
-import { type SessionPanel } from "../../lib/routes";
-import type { SessionBehavior, SessionSnapshotResponse } from "../../types/api";
+import { type SessionPanel } from "../../lib/routes.js";
+import type { SessionBehavior, SessionSnapshotResponse } from "../../types/api.js";
 interface SessionSideBoxProps {
     sessionId: string;
     snapshot: SessionSnapshotResponse | null;

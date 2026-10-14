@@ -1,5 +1,5 @@
-import { type ManagedUpgradeSnapshot } from "./upgrade";
-import type { BackendKind, ModelCatalog } from "../../types/api";
+import { type ManagedUpgradeSnapshot } from "./upgrade.js";
+import type { BackendKind, ModelCatalog } from "../../types/api.js";
 export declare const managedQueryKeys: {
     hostStatus: readonly ["managed-host-status"];
     github: readonly ["managed-github"];
@@ -12,16 +12,16 @@ export declare const managedQueryKeys: {
 export declare function useManagedHostStatus(): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     build_id: string;
     build_track: string;
-    checks: import("../../types/openapi.generated").components["schemas"]["ReadinessCheck"][];
+    checks: import("../../types/openapi.generated.js").components["schemas"]["ReadinessCheck"][];
     github_status: string;
     logical_host_id: string;
-    maintenance?: null | import("../../types/openapi.generated").components["schemas"]["ManagedMaintenanceSnapshot"];
+    maintenance?: null | import("../../types/openapi.generated.js").components["schemas"]["ManagedMaintenanceSnapshot"];
     maintenance_state: string;
     managed: boolean;
     migration_failure?: string | null;
     migration_state: string;
     minimum_migratable_schema_version: number;
-    model: import("../../types/openapi.generated").components["schemas"]["ManagedModelStatus"];
+    model: import("../../types/openapi.generated.js").components["schemas"]["ManagedModelStatus"];
     model_ready: boolean;
     opened_schema_version?: number | null;
     owner?: string | null;
@@ -38,7 +38,7 @@ export declare function useManagedHostStatus(): import("@tanstack/react-query").
     version: string;
 }>, Error>;
 export declare function useManagedUpgradeSnapshot(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<ManagedUpgradeSnapshot>, Error>;
-export declare function useStartManagedUpgrade(): import("@tanstack/react-query").UseMutationResult<import("./upgrade").ManagedUpgradeOperation, Error, string, unknown>;
+export declare function useStartManagedUpgrade(): import("@tanstack/react-query").UseMutationResult<import("./upgrade.js").ManagedUpgradeOperation, Error, string, unknown>;
 export declare function useManagedGitHub(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     avatar_url?: string | null;
     configured: boolean;
@@ -53,7 +53,7 @@ export declare function useManagedGitHub(enabled?: boolean): import("@tanstack/r
 }>, Error>;
 export declare function useManagedSecrets(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     healthy: boolean;
-    secrets: import("../../types/openapi.generated").components["schemas"]["ManagedSecretSummary"][];
+    secrets: import("../../types/openapi.generated.js").components["schemas"]["ManagedSecretSummary"][];
 }>, Error>;
 export declare function usePutManagedSecret(): import("@tanstack/react-query").UseMutationResult<{
     name: string;
@@ -64,11 +64,11 @@ export declare function usePutManagedSecret(): import("@tanstack/react-query").U
 }, unknown>;
 export declare function useDeleteManagedSecret(): import("@tanstack/react-query").UseMutationResult<void, Error, string, unknown>;
 export declare function useManagedAuth(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    providers: import("../../types/openapi.generated").components["schemas"]["ManagedAuthStatusResponse"][];
+    providers: import("../../types/openapi.generated.js").components["schemas"]["ManagedAuthStatusResponse"][];
 }>, Error>;
 export declare function useManagedProviderModels(backend: BackendKind | null, enabled: boolean, baseUrl?: string | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     base_url: string;
-    models: import("../../types/openapi.generated").components["schemas"]["ProviderModel"][];
+    models: import("../../types/openapi.generated.js").components["schemas"]["ProviderModel"][];
 }>, Error>;
 export declare function useReadyProviderModels(catalog: ModelCatalog | undefined): Map<"deepseek-chat" | "fireworks-chat" | "together-chat" | "openai-responses" | "openai-chat-completions" | "chatgpt-codex-responses" | "anthropic-messages" | "arcee-auth" | "arcee-api", {
     display_name: string | null;

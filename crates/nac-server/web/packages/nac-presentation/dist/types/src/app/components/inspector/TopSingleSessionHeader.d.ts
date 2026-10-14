@@ -1,4 +1,4 @@
-import type { ManagedSessionSummary, SessionSnapshotResponse } from "../../types/api";
+import type { ManagedSessionSummary, SessionSnapshotResponse } from "../../types/api.js";
 /**
  * The single-session bar above the transcript: title and behavior, the live
  * token and cost reading, then the checkout the chat is working in.

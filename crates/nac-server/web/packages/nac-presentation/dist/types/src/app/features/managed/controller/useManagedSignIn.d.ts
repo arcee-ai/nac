@@ -1,4 +1,4 @@
-import type { BackendKind } from "../../../types/api";
+import type { BackendKind } from "../../../types/api.js";
 /**
  * Whether the browser login a backend authenticates through is already in
  * place, and `null` for a backend that takes a key instead.

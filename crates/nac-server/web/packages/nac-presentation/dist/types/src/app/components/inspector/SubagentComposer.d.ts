@@ -1,4 +1,4 @@
-import type { SessionBehavior, SessionLineage, TraditionalChildStatus } from "../../types/api";
+import type { SessionBehavior, SessionLineage, TraditionalChildStatus } from "../../types/api.js";
 export type SubagentTarget = {
     mode: "new-agent";
 } | {

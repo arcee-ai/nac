@@ -1,5 +1,5 @@
-import { type BrowseKind } from "../../services/queries";
-import type { SshTarget } from "../../types/api";
+import { type BrowseKind } from "../../services/queries.js";
+import type { SshTarget } from "../../types/api.js";
 /**
  * Picks a path from the machine running the server, or from an SSH host when
  * `ssh` names one.

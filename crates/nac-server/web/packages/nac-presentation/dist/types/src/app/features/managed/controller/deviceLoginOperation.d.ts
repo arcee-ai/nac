@@ -1,5 +1,5 @@
 import { type QueryClient } from "@tanstack/react-query";
-import type { DeviceLoginStarted, ManagedAuthProvider } from "../../../types/api";
+import type { DeviceLoginStarted, ManagedAuthProvider } from "../../../types/api.js";
 export type DeviceLoginState = {
     status: "idle";
 } | {

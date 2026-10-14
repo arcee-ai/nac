@@ -1,4 +1,4 @@
-import type { SessionBehavior } from "../../types/api";
+import type { SessionBehavior } from "../../types/api.js";
 export declare function SessionBehaviorPicker({ value, onChange, disabled, }: {
     value: SessionBehavior;
     onChange: (behavior: SessionBehavior) => void;

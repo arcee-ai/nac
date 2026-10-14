@@ -11,7 +11,7 @@ export declare function useSubmitShellCommand(sessionId: string): {
         operation_id: string;
         output_id?: string | null;
         request_id: string;
-        state: import("../../types/openapi.generated").components["schemas"]["ShellCommandState"];
+        state: import("../../types/openapi.generated.js").components["schemas"]["ShellCommandState"];
         stderr: string;
         stdout: string;
         timeout_ms: number;
@@ -26,7 +26,7 @@ export declare function useSubmitShellCommand(sessionId: string): {
         operation_id: string;
         output_id?: string | null;
         request_id: string;
-        state: import("../../types/openapi.generated").components["schemas"]["ShellCommandState"];
+        state: import("../../types/openapi.generated.js").components["schemas"]["ShellCommandState"];
         stderr: string;
         stdout: string;
         timeout_ms: number;
@@ -42,7 +42,7 @@ export declare function useCancelShellCommand(sessionId: string): import("@tanst
     operation_id: string;
     output_id?: string | null;
     request_id: string;
-    state: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ShellCommandState"];
+    state: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ShellCommandState"];
     stderr: string;
     stdout: string;
     timeout_ms: number;

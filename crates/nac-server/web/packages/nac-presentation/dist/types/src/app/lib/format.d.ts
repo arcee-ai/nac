@@ -1,4 +1,4 @@
-import type { ActiveRunSnapshot, ManagedSessionSummary, SessionSnapshotResponse, SessionSummarySnapshot, TokenUsage } from "../types/api";
+import type { ActiveRunSnapshot, ManagedSessionSummary, SessionSnapshotResponse, SessionSummarySnapshot, TokenUsage } from "../types/api.js";
 export declare function shortId(id: string | null | undefined): string;
 export declare const INVOKED_SKILLS_OPEN = "<invoked_skills>";
 export declare const INVOKED_SKILLS_CLOSE = "</invoked_skills>";

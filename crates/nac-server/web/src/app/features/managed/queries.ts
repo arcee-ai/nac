@@ -41,11 +41,12 @@ export const managedQueryKeys = {
 };
 
 export function useManagedHostStatus() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   return useQuery<ManagedHostStatus>({
     queryKey: managedQueryKeys.hostStatus,
     queryFn: ({ signal }) => api.getManagedStatus(signal),
+    enabled: !publicPresentation,
     staleTime: 5_000,
     refetchInterval: 15_000,
     retry: false,

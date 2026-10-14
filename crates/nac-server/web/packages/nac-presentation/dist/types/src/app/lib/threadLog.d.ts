@@ -1,4 +1,4 @@
-import type { AgentEvent, ThreadEventPage } from "../types/api";
+import type { AgentEvent, ThreadEventPage } from "../types/api.js";
 export interface ThreadLogLine {
     /**
      * Identifies the event behind the line. The live and the persisted copy of

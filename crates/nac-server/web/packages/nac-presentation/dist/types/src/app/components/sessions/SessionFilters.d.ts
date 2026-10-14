@@ -1,5 +1,5 @@
 import type React from "react";
-import type { ManagedSessionSummary } from "../../types/api";
+import type { ManagedSessionSummary } from "../../types/api.js";
 export declare function SessionFilters({ sessions, showSearch, mobile, sidebar, onChange, }: {
     sessions: ManagedSessionSummary[];
     /** Off where the page already carries the search field, e.g. on a phone. */

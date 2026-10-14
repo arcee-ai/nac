@@ -1,4 +1,4 @@
-import type { ManagedHostStatus } from "../../../types/api";
+import type { ManagedHostStatus } from "../../../types/api.js";
 export interface ManagedHostActions {
     status: ManagedHostStatus | null;
     isManaged: boolean;

@@ -1,6 +1,6 @@
-import { IconName } from "../atoms/icon";
-import type { SessionPanel } from "./routes";
-import type { SessionBehavior, SessionLineage } from "../types/api";
+import { IconName } from "../atoms/icon/index.js";
+import type { SessionPanel } from "./routes.js";
+import type { SessionBehavior, SessionLineage } from "../types/api.js";
 export interface SessionBehaviorPresentation {
     id: SessionBehavior;
     label: string;

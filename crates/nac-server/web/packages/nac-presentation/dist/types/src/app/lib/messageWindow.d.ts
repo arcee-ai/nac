@@ -1,4 +1,4 @@
-import type { MessagesPageResponse, SessionSnapshotResponse } from "../types/api";
+import type { MessagesPageResponse, SessionSnapshotResponse } from "../types/api.js";
 export declare const SNAPSHOT_MESSAGE_LIMIT = 24;
 export declare const SNAPSHOT_THREAD_EVENT_LIMIT = 50;
 export type MessageWindowMerge = {

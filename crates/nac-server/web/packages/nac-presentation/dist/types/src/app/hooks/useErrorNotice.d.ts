@@ -1,4 +1,4 @@
-import { type RunError } from "../lib/providerError";
+import { type RunError } from "../lib/providerError.js";
 export interface ErrorNotice {
     title: string;
     description?: string;

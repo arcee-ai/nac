@@ -1,5 +1,5 @@
 import React from "react";
-import { IconName } from "../icon";
+import { IconName } from "../icon/index.js";
 export declare enum InputSize {
     Small = "input-small",
     Medium = "input-medium",

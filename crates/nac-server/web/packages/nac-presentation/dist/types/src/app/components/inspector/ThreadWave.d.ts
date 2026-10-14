@@ -1,4 +1,4 @@
-import type { TranscriptThread } from "../../lib/transcript";
+import type { TranscriptThread } from "../../lib/transcript.js";
 interface ThreadWaveProps {
     /** Topological levels from one assistant dispatch batch (DAG waves). */
     rows: TranscriptThread[][];

@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import type { ExecutionStatus } from "../../../../packages/nac-client/src/index";
+import type { ExecutionStatus } from "../../../../packages/nac-client/src/index.js";
 export interface TerminalSelectionCapture {
     readonly sessionId: string;
     readonly terminalId: string;

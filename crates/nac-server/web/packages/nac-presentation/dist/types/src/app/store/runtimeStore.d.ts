@@ -1,6 +1,6 @@
-import { type ThreadLogLine } from "../lib/threadLog";
-import type { StreamStatus } from "../services/eventStream";
-import type { ActiveRunSnapshot, AgentEvent, AssistantStreamDelta, SessionEventEnvelope, RunFailure, TokenUsage } from "../types/api";
+import { type ThreadLogLine } from "../lib/threadLog.js";
+import type { StreamStatus } from "../services/eventStream.js";
+import type { ActiveRunSnapshot, AgentEvent, AssistantStreamDelta, SessionEventEnvelope, RunFailure, TokenUsage } from "../types/api.js";
 export type RuntimeEventKind = "run" | "tool" | "mcp" | "thread" | "assistant" | "steering" | "compaction" | "error";
 export interface RuntimeEvent {
     seq: number | null;
@@ -104,7 +104,7 @@ export type RefreshKind = "none" | "messages" | "snapshot" | "replace-snapshot";
 /** One presentation lifetime; hosted preferences are ephemeral. */
 export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem">): {
     release: () => void;
-    runtimeStore: import("../lib/store").Store<RuntimeState>;
+    runtimeStore: import("../lib/store.js").Store<RuntimeState>;
     captureRuntimeActivation: (sessionId: string) => () => boolean;
     resetRuntime: (sessionId: string | null) => void;
     clearRuntimeThreads: () => void;
@@ -126,10 +126,10 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         attempt_count: number;
         diagnostic: string;
         http_status?: number | null;
-        kind: import("../types/openapi.generated").components["schemas"]["RunFailureKind"];
-        partial_output?: import("../types/openapi.generated").components["schemas"]["PartialModelOutput"];
-        phase: import("../types/openapi.generated").components["schemas"]["RunFailurePhase"];
-        recovery_action: import("../types/openapi.generated").components["schemas"]["RecoveryAction"];
+        kind: import("../types/openapi.generated.js").components["schemas"]["RunFailureKind"];
+        partial_output?: import("../types/openapi.generated.js").components["schemas"]["PartialModelOutput"];
+        phase: import("../types/openapi.generated.js").components["schemas"]["RunFailurePhase"];
+        recovery_action: import("../types/openapi.generated.js").components["schemas"]["RecoveryAction"];
         retry_after_ms?: number | null;
         summary: string;
         transient: boolean;
@@ -150,7 +150,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     } | {
         thread_name?: string | null;
         type: "token_usage_updated";
-        usage: import("../types/openapi.generated").components["schemas"]["TokenUsage"];
+        usage: import("../types/openapi.generated.js").components["schemas"]["TokenUsage"];
     } | {
         args_detail?: string | null;
         args_preview: string;
@@ -162,8 +162,8 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     } | {
         call_id: string;
         cleanup_duration_ms?: number | null;
-        command_status?: null | import("../types/openapi.generated").components["schemas"]["CommandStatus"];
-        completion_status?: null | import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"];
+        command_status?: null | import("../types/openapi.generated.js").components["schemas"]["CommandStatus"];
+        completion_status?: null | import("../types/openapi.generated.js").components["schemas"]["ToolCompletionStatus"];
         content_preview: string;
         effective_timeout_ms?: number | null;
         execution_duration_ms?: number | null;
@@ -211,21 +211,21 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         type: "orchestrator_steering_expired";
     } | {
         compaction_id: string;
-        reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+        reason: import("../types/openapi.generated.js").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_started";
     } | {
         compaction_id: string;
-        reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+        reason: import("../types/openapi.generated.js").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_completed";
     } | {
-        cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
+        cause: import("../types/openapi.generated.js").components["schemas"]["CompactionSkipReason"];
         compaction_id: string;
-        reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+        reason: import("../types/openapi.generated.js").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_skipped";
     } | {
         compaction_id: string;
-        failure: import("../types/openapi.generated").components["schemas"]["CompactionFailure"];
-        reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+        failure: import("../types/openapi.generated.js").components["schemas"]["CompactionFailure"];
+        reason: import("../types/openapi.generated.js").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_failed";
     } | {
         exit_code: number;
@@ -233,12 +233,12 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         timed_out: boolean;
         timeout_reason?: string | null;
         type: "thread_finished";
-        usage?: null | import("../types/openapi.generated").components["schemas"]["TokenUsage"];
+        usage?: null | import("../types/openapi.generated.js").components["schemas"]["TokenUsage"];
     } | {
         content: string;
         thread_name?: string | null;
         type: "assistant_message";
-        usage?: null | import("../types/openapi.generated").components["schemas"]["TokenUsage"];
+        usage?: null | import("../types/openapi.generated.js").components["schemas"]["TokenUsage"];
     } | {
         message: string;
         thread_name?: string | null;
@@ -249,7 +249,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         thread_name?: string | null;
         type: "mcp_server_skipped";
     } | {
-        kind: import("../types/openapi.generated").components["schemas"]["McpNotificationKind"];
+        kind: import("../types/openapi.generated.js").components["schemas"]["McpNotificationKind"];
         message: string;
         server_name: string;
         thread_name?: string | null;
@@ -265,7 +265,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useRunUsage: () => {
         cache_read_tokens: number;
         cache_write_tokens: number;
-        cost?: import("../types/openapi.generated").components["schemas"]["TokenCostMicros"];
+        cost?: import("../types/openapi.generated.js").components["schemas"]["TokenCostMicros"];
         input_tokens: number;
         output_tokens: number;
         reasoning_tokens?: number;
@@ -274,7 +274,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useSessionSpend: () => {
         cache_read_tokens: number;
         cache_write_tokens: number;
-        cost?: import("../types/openapi.generated").components["schemas"]["TokenCostMicros"];
+        cost?: import("../types/openapi.generated.js").components["schemas"]["TokenCostMicros"];
         input_tokens: number;
         output_tokens: number;
         reasoning_tokens?: number;
@@ -288,14 +288,14 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useOptimisticUserPrompt: () => string | null;
     getRuntimeState: () => RuntimeState;
 };
-export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, clearRuntimeThreads: () => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null) => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
+export declare const release: () => void, runtimeStore: import("../lib/store.js").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, clearRuntimeThreads: () => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null) => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
     attempt_count: number;
     diagnostic: string;
     http_status?: number | null;
-    kind: import("../types/openapi.generated").components["schemas"]["RunFailureKind"];
-    partial_output?: import("../types/openapi.generated").components["schemas"]["PartialModelOutput"];
-    phase: import("../types/openapi.generated").components["schemas"]["RunFailurePhase"];
-    recovery_action: import("../types/openapi.generated").components["schemas"]["RecoveryAction"];
+    kind: import("../types/openapi.generated.js").components["schemas"]["RunFailureKind"];
+    partial_output?: import("../types/openapi.generated.js").components["schemas"]["PartialModelOutput"];
+    phase: import("../types/openapi.generated.js").components["schemas"]["RunFailurePhase"];
+    recovery_action: import("../types/openapi.generated.js").components["schemas"]["RecoveryAction"];
     retry_after_ms?: number | null;
     summary: string;
     transient: boolean;
@@ -310,7 +310,7 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
 } | {
     thread_name?: string | null;
     type: "token_usage_updated";
-    usage: import("../types/openapi.generated").components["schemas"]["TokenUsage"];
+    usage: import("../types/openapi.generated.js").components["schemas"]["TokenUsage"];
 } | {
     args_detail?: string | null;
     args_preview: string;
@@ -322,8 +322,8 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
 } | {
     call_id: string;
     cleanup_duration_ms?: number | null;
-    command_status?: null | import("../types/openapi.generated").components["schemas"]["CommandStatus"];
-    completion_status?: null | import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"];
+    command_status?: null | import("../types/openapi.generated.js").components["schemas"]["CommandStatus"];
+    completion_status?: null | import("../types/openapi.generated.js").components["schemas"]["ToolCompletionStatus"];
     content_preview: string;
     effective_timeout_ms?: number | null;
     execution_duration_ms?: number | null;
@@ -371,21 +371,21 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     type: "orchestrator_steering_expired";
 } | {
     compaction_id: string;
-    reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+    reason: import("../types/openapi.generated.js").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_started";
 } | {
     compaction_id: string;
-    reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+    reason: import("../types/openapi.generated.js").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_completed";
 } | {
-    cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
+    cause: import("../types/openapi.generated.js").components["schemas"]["CompactionSkipReason"];
     compaction_id: string;
-    reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+    reason: import("../types/openapi.generated.js").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_skipped";
 } | {
     compaction_id: string;
-    failure: import("../types/openapi.generated").components["schemas"]["CompactionFailure"];
-    reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+    failure: import("../types/openapi.generated.js").components["schemas"]["CompactionFailure"];
+    reason: import("../types/openapi.generated.js").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_failed";
 } | {
     exit_code: number;
@@ -393,12 +393,12 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     timed_out: boolean;
     timeout_reason?: string | null;
     type: "thread_finished";
-    usage?: null | import("../types/openapi.generated").components["schemas"]["TokenUsage"];
+    usage?: null | import("../types/openapi.generated.js").components["schemas"]["TokenUsage"];
 } | {
     content: string;
     thread_name?: string | null;
     type: "assistant_message";
-    usage?: null | import("../types/openapi.generated").components["schemas"]["TokenUsage"];
+    usage?: null | import("../types/openapi.generated.js").components["schemas"]["TokenUsage"];
 } | {
     message: string;
     thread_name?: string | null;
@@ -409,7 +409,7 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     thread_name?: string | null;
     type: "mcp_server_skipped";
 } | {
-    kind: import("../types/openapi.generated").components["schemas"]["McpNotificationKind"];
+    kind: import("../types/openapi.generated.js").components["schemas"]["McpNotificationKind"];
     message: string;
     server_name: string;
     thread_name?: string | null;
@@ -424,7 +424,7 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
 })[], useRunUsage: () => {
     cache_read_tokens: number;
     cache_write_tokens: number;
-    cost?: import("../types/openapi.generated").components["schemas"]["TokenCostMicros"];
+    cost?: import("../types/openapi.generated.js").components["schemas"]["TokenCostMicros"];
     input_tokens: number;
     output_tokens: number;
     reasoning_tokens?: number;
@@ -432,7 +432,7 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
 } | null, useSessionSpend: () => {
     cache_read_tokens: number;
     cache_write_tokens: number;
-    cost?: import("../types/openapi.generated").components["schemas"]["TokenCostMicros"];
+    cost?: import("../types/openapi.generated.js").components["schemas"]["TokenCostMicros"];
     input_tokens: number;
     output_tokens: number;
     reasoning_tokens?: number;

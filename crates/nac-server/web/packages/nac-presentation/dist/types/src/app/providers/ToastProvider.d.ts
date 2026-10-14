@@ -1,6 +1,6 @@
 import React from "react";
-import { ToastVariant } from "../atoms/toast/Toast";
-import type { RunError } from "../lib/providerError";
+import { ToastVariant } from "../atoms/toast/Toast.js";
+import type { RunError } from "../lib/providerError.js";
 export { ToastVariant };
 interface ToastOptions {
     /** Seconds before the toast dismisses itself. */

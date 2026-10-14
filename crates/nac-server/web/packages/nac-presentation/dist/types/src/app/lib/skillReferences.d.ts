@@ -1,4 +1,4 @@
-import type { SkillCatalogEntry } from "../types/api";
+import type { SkillCatalogEntry } from "../types/api.js";
 export interface SkillReferenceSegment {
     text: string;
     skillName: string | null;

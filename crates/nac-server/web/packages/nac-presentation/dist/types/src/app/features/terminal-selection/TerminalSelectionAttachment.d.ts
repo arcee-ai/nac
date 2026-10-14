@@ -1,4 +1,4 @@
-import type { TerminalSelectionEvidence } from "../../types/api";
+import type { TerminalSelectionEvidence } from "../../types/api.js";
 interface Props {
     evidence: TerminalSelectionEvidence;
     canonicalText: string;

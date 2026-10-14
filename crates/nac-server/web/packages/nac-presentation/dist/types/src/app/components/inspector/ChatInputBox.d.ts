@@ -1,4 +1,4 @@
-import type { ManagedSessionSummary, SessionSnapshotResponse } from "../../types/api";
+import type { ManagedSessionSummary, SessionSnapshotResponse } from "../../types/api.js";
 interface ChatInputBoxProps {
     sessionId: string;
     snapshot: SessionSnapshotResponse | null;

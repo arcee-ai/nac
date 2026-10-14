@@ -1,4 +1,4 @@
-type RendererModule = typeof import("./markdown-renderer");
+type RendererModule = typeof import("./markdown-renderer.js");
 /**
  * Starts the renderer chunk, or joins the load already running. Shared with the
  * transcript, which holds its first paint back until this settles: until the

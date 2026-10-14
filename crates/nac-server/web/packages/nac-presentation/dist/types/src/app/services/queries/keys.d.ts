@@ -1,4 +1,4 @@
-import type { SshTarget, WorkspaceDiffStage } from "../../types/api";
+import type { SshTarget, WorkspaceDiffStage } from "../../types/api.js";
 export type BrowseKind = "directory" | "toml" | "file";
 /** How often the session list is refreshed; the list has no event stream. */
 export declare const SESSIONS_POLL_MS = 5000;

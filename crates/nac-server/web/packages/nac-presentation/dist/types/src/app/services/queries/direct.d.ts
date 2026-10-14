@@ -1,8 +1,8 @@
-import type { CreateGoalRequest, InboxDelivery, PermissionApprovalMode, PermissionReply, StartManagedOrchestratorRequest, StartTraditionalChildRequest, UpdateGoalRequest } from "../../types/api";
+import type { CreateGoalRequest, InboxDelivery, PermissionApprovalMode, PermissionReply, StartManagedOrchestratorRequest, StartTraditionalChildRequest, UpdateGoalRequest } from "../../types/api.js";
 export declare function useSessionPermissions(sessionId: string, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    approval_mode: import("../../types/openapi.generated").components["schemas"]["PermissionApprovalMode"];
-    grants: import("../../types/openapi.generated").components["schemas"]["PermissionGrantRecord"][];
-    requests: import("../../types/openapi.generated").components["schemas"]["PermissionRequest"][];
+    approval_mode: import("../../types/openapi.generated.js").components["schemas"]["PermissionApprovalMode"];
+    grants: import("../../types/openapi.generated.js").components["schemas"]["PermissionGrantRecord"][];
+    requests: import("../../types/openapi.generated.js").components["schemas"]["PermissionRequest"][];
 }>, Error>;
 export declare function useReplyPermission(): import("@tanstack/react-query").UseMutationResult<void, Error, {
     sessionId: string;
@@ -25,11 +25,11 @@ export declare function useSessionGoal(sessionId: string, enabled: boolean): imp
     continuation_run_id: string | null;
     created_at: string;
     goal_id: string;
-    last_failure: null | import("../../types/openapi.generated").components["schemas"]["RunFailure"];
+    last_failure: null | import("../../types/openapi.generated.js").components["schemas"]["RunFailure"];
     next_attempt_at_epoch_ms: number | null;
     objective: string;
     session_id: string;
-    status: import("../../types/openapi.generated").components["schemas"]["GoalStatus"];
+    status: import("../../types/openapi.generated.js").components["schemas"]["GoalStatus"];
     time_used_ms: number;
     token_budget: number | null;
     tokens_used: number;
@@ -44,11 +44,11 @@ export declare function useCreateGoal(): import("@tanstack/react-query").UseMuta
     continuation_run_id: string | null;
     created_at: string;
     goal_id: string;
-    last_failure: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["RunFailure"];
+    last_failure: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["RunFailure"];
     next_attempt_at_epoch_ms: number | null;
     objective: string;
     session_id: string;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["GoalStatus"];
+    status: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["GoalStatus"];
     time_used_ms: number;
     token_budget: number | null;
     tokens_used: number;
@@ -66,11 +66,11 @@ export declare function useUpdateGoal(): import("@tanstack/react-query").UseMuta
     continuation_run_id: string | null;
     created_at: string;
     goal_id: string;
-    last_failure: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["RunFailure"];
+    last_failure: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["RunFailure"];
     next_attempt_at_epoch_ms: number | null;
     objective: string;
     session_id: string;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["GoalStatus"];
+    status: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["GoalStatus"];
     time_used_ms: number;
     token_budget: number | null;
     tokens_used: number;
@@ -92,7 +92,7 @@ export declare function useTraditionalChildren(sessionId: string, enabled: boole
     completion_inbox_id: number | null;
     created_at: string;
     description: string;
-    execution_mode: null | import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"];
+    execution_mode: null | import("../../types/openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
     failure: string | null;
     generation: number;
     nesting_depth: number;
@@ -101,7 +101,7 @@ export declare function useTraditionalChildren(sessionId: string, enabled: boole
     report: string | null;
     root_session_id: string;
     run_id: string | null;
-    status: import("../../types/openapi.generated").components["schemas"]["TraditionalChildStatus"];
+    status: import("../../types/openapi.generated.js").components["schemas"]["TraditionalChildStatus"];
     updated_at: string;
     verification_summary: string | null;
     version: number;
@@ -112,7 +112,7 @@ export declare function useStartTraditionalChild(): import("@tanstack/react-quer
     completion_inbox_id: number | null;
     created_at: string;
     description: string;
-    execution_mode: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"];
+    execution_mode: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
     failure: string | null;
     generation: number;
     nesting_depth: number;
@@ -121,7 +121,7 @@ export declare function useStartTraditionalChild(): import("@tanstack/react-quer
     report: string | null;
     root_session_id: string;
     run_id: string | null;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildStatus"];
+    status: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TraditionalChildStatus"];
     updated_at: string;
     verification_summary: string | null;
     version: number;
@@ -135,7 +135,7 @@ export declare function useCancelTraditionalChild(): import("@tanstack/react-que
     completion_inbox_id: number | null;
     created_at: string;
     description: string;
-    execution_mode: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"];
+    execution_mode: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
     failure: string | null;
     generation: number;
     nesting_depth: number;
@@ -144,7 +144,7 @@ export declare function useCancelTraditionalChild(): import("@tanstack/react-que
     report: string | null;
     root_session_id: string;
     run_id: string | null;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildStatus"];
+    status: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TraditionalChildStatus"];
     updated_at: string;
     verification_summary: string | null;
     version: number;
@@ -156,7 +156,7 @@ export declare function useManagedOrchestrators(sessionId: string, enabled: bool
     completion_inbox_id?: number | null;
     created_at: string;
     description: string;
-    execution_mode?: null | import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"];
+    execution_mode?: null | import("../../types/openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
     failure?: string | null;
     generation: number;
     orchestrator_session_id: string;
@@ -164,7 +164,7 @@ export declare function useManagedOrchestrators(sessionId: string, enabled: bool
     report?: string | null;
     root_session_id: string;
     run_id?: string | null;
-    status: import("../../types/openapi.generated").components["schemas"]["TraditionalChildStatus"];
+    status: import("../../types/openapi.generated.js").components["schemas"]["TraditionalChildStatus"];
     updated_at: string;
     version: number;
 }[]>, Error>;
@@ -172,7 +172,7 @@ export declare function useStartManagedOrchestrator(): import("@tanstack/react-q
     completion_inbox_id?: number | null;
     created_at: string;
     description: string;
-    execution_mode?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"];
+    execution_mode?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
     failure?: string | null;
     generation: number;
     orchestrator_session_id: string;
@@ -180,7 +180,7 @@ export declare function useStartManagedOrchestrator(): import("@tanstack/react-q
     report?: string | null;
     root_session_id: string;
     run_id?: string | null;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildStatus"];
+    status: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TraditionalChildStatus"];
     updated_at: string;
     version: number;
 }, Error, {
@@ -191,7 +191,7 @@ export declare function useCancelManagedOrchestrator(): import("@tanstack/react-
     completion_inbox_id?: number | null;
     created_at: string;
     description: string;
-    execution_mode?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"];
+    execution_mode?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
     failure?: string | null;
     generation: number;
     orchestrator_session_id: string;
@@ -199,7 +199,7 @@ export declare function useCancelManagedOrchestrator(): import("@tanstack/react-
     report?: string | null;
     root_session_id: string;
     run_id?: string | null;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildStatus"];
+    status: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TraditionalChildStatus"];
     updated_at: string;
     version: number;
 }, Error, {
@@ -212,13 +212,13 @@ export declare function useSessionInbox(sessionId: string, enabled: boolean): im
     created_at: string;
     delivered_at?: string | null;
     delivered_run_id?: string | null;
-    delivery: import("../../types/openapi.generated").components["schemas"]["InboxDelivery"];
+    delivery: import("../../types/openapi.generated.js").components["schemas"]["InboxDelivery"];
     id: number;
     prompt: string;
     session_id: string;
-    status: import("../../types/openapi.generated").components["schemas"]["InboxStatus"];
+    status: import("../../types/openapi.generated.js").components["schemas"]["InboxStatus"];
     target_run_id?: string | null;
-    terminal_selection?: null | import("../../types/openapi.generated").components["schemas"]["TerminalSelectionEvidence"];
+    terminal_selection?: null | import("../../types/openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
     updated_at: string;
     version: number;
 }[]>, Error>;
@@ -228,13 +228,13 @@ export declare function useCreateInboxItem(): import("@tanstack/react-query").Us
     created_at: string;
     delivered_at?: string | null;
     delivered_run_id?: string | null;
-    delivery: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxDelivery"];
+    delivery: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["InboxDelivery"];
     id: number;
     prompt: string;
     session_id: string;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxStatus"];
+    status: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["InboxStatus"];
     target_run_id?: string | null;
-    terminal_selection?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionEvidence"];
+    terminal_selection?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
     updated_at: string;
     version: number;
 }, Error, {
@@ -248,13 +248,13 @@ export declare function useUpdateInboxItem(): import("@tanstack/react-query").Us
     created_at: string;
     delivered_at?: string | null;
     delivered_run_id?: string | null;
-    delivery: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxDelivery"];
+    delivery: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["InboxDelivery"];
     id: number;
     prompt: string;
     session_id: string;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxStatus"];
+    status: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["InboxStatus"];
     target_run_id?: string | null;
-    terminal_selection?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionEvidence"];
+    terminal_selection?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
     updated_at: string;
     version: number;
 }, Error, {
@@ -269,13 +269,13 @@ export declare function useCancelInboxItem(): import("@tanstack/react-query").Us
     created_at: string;
     delivered_at?: string | null;
     delivered_run_id?: string | null;
-    delivery: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxDelivery"];
+    delivery: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["InboxDelivery"];
     id: number;
     prompt: string;
     session_id: string;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxStatus"];
+    status: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["InboxStatus"];
     target_run_id?: string | null;
-    terminal_selection?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionEvidence"];
+    terminal_selection?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
     updated_at: string;
     version: number;
 }, Error, {

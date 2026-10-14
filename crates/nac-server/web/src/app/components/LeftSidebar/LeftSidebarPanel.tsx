@@ -46,6 +46,7 @@ export function LeftSidebarPanel({
     useNativeRuntime().stores.sessionFiltersStore;
 
   const projectsPage = variant === "projects";
+  const { publicPresentation } = useNativeRuntime();
   const [query, setQuery] = useState("");
   const projectQuery = useFilterQuery();
   const { data: sessions = [] } = useVisibleSessions();
@@ -178,25 +179,29 @@ export function LeftSidebarPanel({
             <span className="text-left flex-grow">Managed host</span>
           </TabButton>
         </div>
-        <Separator />
-        <div className="flex items-center gap-2 h-10 pl-4 pr-2">
-          <span className="label-micro text-basic-primary shrink-0">Store:</span>
-          <span
-            className="code code-micro text-basic-tertiary flex-1 min-w-0 truncate"
-            title={storePath}
-          >
-            {storePath || "store path pending"}
-          </span>
-          <CopyButton
-            value={storePath}
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Tertiary}
-            title="Copy the store path"
-            disabled={!storePath}
-            position={TooltipPosition.TopLeft}
-            className="scale-90"
-          />
-        </div>
+        {!publicPresentation ? (
+          <>
+            <Separator />
+            <div className="flex items-center gap-2 h-10 pl-4 pr-2">
+              <span className="label-micro text-basic-primary shrink-0">Store:</span>
+              <span
+                className="code code-micro text-basic-tertiary flex-1 min-w-0 truncate"
+                title={storePath}
+              >
+                {storePath || "store path pending"}
+              </span>
+              <CopyButton
+                value={storePath}
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Tertiary}
+                title="Copy the store path"
+                disabled={!storePath}
+                position={TooltipPosition.TopLeft}
+                className="scale-90"
+              />
+            </div>
+          </>
+        ) : null}
       </div>
     </div>
   );

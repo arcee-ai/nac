@@ -1,4 +1,4 @@
-import type { ManagedSessionSummary, ProjectRecord } from "../types/api";
+import type { ManagedSessionSummary, ProjectRecord } from "../types/api.js";
 /** Delegated descendants are reachable through their parent's hierarchy only. */
 export declare function primarySessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[];
 /** A project together with the sessions that belong to it. */

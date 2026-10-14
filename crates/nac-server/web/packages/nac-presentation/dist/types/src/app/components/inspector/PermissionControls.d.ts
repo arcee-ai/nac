@@ -1,4 +1,4 @@
-import type { SessionBehavior } from "../../types/api";
+import type { SessionBehavior } from "../../types/api.js";
 interface PermissionControlsProps {
     sessionId: string;
     behavior: SessionBehavior | null;

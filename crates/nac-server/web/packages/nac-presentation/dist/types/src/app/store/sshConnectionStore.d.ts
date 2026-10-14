@@ -1,4 +1,4 @@
-import type { SshTarget } from "../types/api";
+import type { SshTarget } from "../types/api.js";
 export type SshConnectionStatus = "unknown" | "connected" | "disconnected";
 /** One presentation lifetime; hosted preferences are ephemeral. */
 export declare function createSshConnectionStore(_storage?: Pick<Storage, "getItem" | "setItem">): {

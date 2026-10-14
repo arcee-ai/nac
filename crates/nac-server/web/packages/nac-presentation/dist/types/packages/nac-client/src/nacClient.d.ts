@@ -28,6 +28,8 @@ export interface NacRequestOptions {
     signal?: AbortSignal;
     acceptStatuses?: readonly number[];
     requestId?: string;
+    /** Selected wire codec reads the original JSON text once; default native decoding is unchanged. */
+    decodeJson?: (text: string) => unknown;
 }
 export interface NacStreamContext {
     credentials: NacCredentialPolicy;
@@ -54,6 +56,10 @@ export declare class UncertainCommandAdmissionError extends Error {
     readonly cause: unknown;
     constructor(requestId: string, cause: unknown);
 }
+/** Trusted transport adapter assertion that no request was dispatched. Never infer from a name or network error. */
+export declare class NacRequestNotSentError extends Error {
+    constructor(cause: unknown);
+}
 export type CommandAdmission<T> = {
     status: "accepted";
     requestId: string;
@@ -62,6 +68,11 @@ export type CommandAdmission<T> = {
     status: "not-sent";
     requestId: string;
     reason: "aborted";
+} | {
+    status: "not-sent";
+    requestId: string;
+    reason: "adapter-not-sent";
+    error: NacRequestNotSentError;
 } | {
     status: "uncertain";
     requestId: string;
@@ -108,6 +119,7 @@ export interface CapturedSessionSnapshot {
     replay: SessionReplayResult;
 }
 export declare class NacTransport {
+    get jsonResponseDecodingVersion(): number;
     readonly endpoint: string;
     readonly credentials: NacCredentialPolicy;
     readonly authorization: NacClientOptions["authorization"];
@@ -121,11 +133,13 @@ export declare class NacTransport {
     newRequestId(): string;
     private configuredHeaders;
     streamContext(): Promise<NacStreamContext>;
-    request<T>(method: Method, path: string, { body, headers, signal, acceptStatuses, requestId, }?: NacRequestOptions): Promise<T>;
+    request<T>(method: Method, path: string, { body, headers, signal, acceptStatuses, requestId, decodeJson, }?: NacRequestOptions): Promise<T>;
     admit<T>(method: Extract<Method, "POST" | "PUT" | "PATCH" | "DELETE">, path: string, options?: NacRequestOptions): Promise<CommandAdmission<T>>;
 }
 /** Public structural port also accepts a consumer's existing authenticated HTTP/SSE transport. */
-export type NacHttpTransport = Pick<NacTransport, "endpoint" | "credentials" | "authorization" | "versionPolicy" | "url" | "eventSourceInit" | "newRequestId" | "streamContext" | "request" | "admit">;
+export type NacHttpTransport = Pick<NacTransport, "endpoint" | "credentials" | "authorization" | "versionPolicy" | "url" | "eventSourceInit" | "newRequestId" | "streamContext" | "request" | "admit"> & {
+    readonly jsonResponseDecodingVersion?: number;
+};
 export declare class NacClient {
     readonly transport: NacHttpTransport;
     constructor(options?: NacClientOptions | NacHttpTransport);

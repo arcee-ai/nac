@@ -1,12 +1,12 @@
 import { type QueryClient } from "@tanstack/react-query";
-import { type BrowseKind } from "./keys";
-import type { BackendKind, SshTarget, UpdateMcpServerRequest, UpdateModelConfigurationRequest, UpdateSshConfigurationRequest } from "../../types/api";
+import { type BrowseKind } from "./keys.js";
+import type { BackendKind, SshTarget, UpdateMcpServerRequest, UpdateModelConfigurationRequest, UpdateSshConfigurationRequest } from "../../types/api.js";
 /**
  * Directory listing from the machine running the server. Only fetched while
  * the picker is open, and never cached long: the filesystem moves under us.
  */
 export declare function useBrowsePath(path: string | null, kind: BrowseKind, hidden: boolean, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    entries: import("../../types/openapi.generated").components["schemas"]["BrowseEntry"][];
+    entries: import("../../types/openapi.generated.js").components["schemas"]["BrowseEntry"][];
     home?: string | null;
     parent?: string | null;
     path: string;
@@ -17,7 +17,7 @@ export declare function useBrowsePath(path: string | null, kind: BrowseKind, hid
  * working directory is picked the way a local one is.
  */
 export declare function useSshBrowsePath(target: SshTarget | null, path: string | null, hidden: boolean, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    entries: import("../../types/openapi.generated").components["schemas"]["BrowseEntry"][];
+    entries: import("../../types/openapi.generated.js").components["schemas"]["BrowseEntry"][];
     home?: string | null;
     parent?: string | null;
     path: string;
@@ -32,14 +32,14 @@ export declare function useSshBrowsePath(target: SshTarget | null, path: string 
  * session created next reuses.
  */
 export declare function useSshConnect(): import("@tanstack/react-query").UseMutationResult<{
-    entries: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["BrowseEntry"][];
+    entries: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["BrowseEntry"][];
     home?: string | null;
     parent?: string | null;
     path: string;
     truncated: boolean;
 }, Error, SshTarget, unknown>;
 export declare function useSshConfigs(): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    configurations: import("../../types/openapi.generated").components["schemas"]["SshConfigurationRecord"][];
+    configurations: import("../../types/openapi.generated.js").components["schemas"]["SshConfigurationRecord"][];
 }>, Error>;
 export declare function useCreateSshConfig(): import("@tanstack/react-query").UseMutationResult<{
     config_id: string;
@@ -69,14 +69,14 @@ export declare function useUpdateSshConfig(): import("@tanstack/react-query").Us
 }, unknown>;
 export declare function useDeleteSshConfig(): import("@tanstack/react-query").UseMutationResult<void, Error, string, unknown>;
 export declare function useMcpLibrary(): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    entries: import("../../types/openapi.generated").components["schemas"]["McpLibraryEntry"][];
+    entries: import("../../types/openapi.generated.js").components["schemas"]["McpLibraryEntry"][];
 }>, Error>;
 export declare function useMcpServers(): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    servers: import("../../types/openapi.generated").components["schemas"]["McpServerView"][];
+    servers: import("../../types/openapi.generated.js").components["schemas"]["McpServerView"][];
 }>, Error>;
 export declare function useCreateMcpServer(): import("@tanstack/react-query").UseMutationResult<{
     allowed_tools?: string[] | null;
-    approval: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpToolApproval"];
+    approval: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpToolApproval"];
     args: string[];
     bearer_token_env_var?: string | null;
     catalog_timeout_ms?: number | null;
@@ -88,19 +88,19 @@ export declare function useCreateMcpServer(): import("@tanstack/react-query").Us
     env_headers: Record<string, string>;
     env_vars: string[];
     execution_timeout_ms?: number | null;
-    header_helper?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpHeaderHelperConfig"];
+    header_helper?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpHeaderHelperConfig"];
     headers: Record<string, string>;
     library_id?: string | null;
     name: string;
-    protocol: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpProtocolSelection"];
+    protocol: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpProtocolSelection"];
     required: boolean;
     startup_timeout_ms?: number | null;
-    tool_approvals: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpToolApproval"]>;
-    transport: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpTransportSchema"];
+    tool_approvals: Record<string, import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpToolApproval"]>;
+    transport: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpTransportSchema"];
     url?: string | null;
 }, Error, {
     allowed_tools?: string[] | null;
-    approval?: import("../../types/openapi.generated").components["schemas"]["McpToolApproval"];
+    approval?: import("../../types/openapi.generated.js").components["schemas"]["McpToolApproval"];
     args?: string[];
     bearer_token_env_var?: string | null;
     catalog_timeout_ms?: number | null;
@@ -112,20 +112,20 @@ export declare function useCreateMcpServer(): import("@tanstack/react-query").Us
     env_headers?: Record<string, string>;
     env_vars?: string[];
     execution_timeout_ms?: number | null;
-    header_helper?: null | import("../../types/openapi.generated").components["schemas"]["McpHeaderHelperConfig"];
+    header_helper?: null | import("../../types/openapi.generated.js").components["schemas"]["McpHeaderHelperConfig"];
     headers?: Record<string, string>;
     library_id?: string | null;
     name: string;
-    protocol?: import("../../types/openapi.generated").components["schemas"]["McpProtocolSelection"];
+    protocol?: import("../../types/openapi.generated.js").components["schemas"]["McpProtocolSelection"];
     required?: boolean;
     startup_timeout_ms?: number | null;
-    tool_approvals?: Record<string, import("../../types/openapi.generated").components["schemas"]["McpToolApproval"]>;
-    transport: import("../../types/openapi.generated").components["schemas"]["McpTransportSchema"];
+    tool_approvals?: Record<string, import("../../types/openapi.generated.js").components["schemas"]["McpToolApproval"]>;
+    transport: import("../../types/openapi.generated.js").components["schemas"]["McpTransportSchema"];
     url?: string | null;
 }, unknown>;
 export declare function useUpdateMcpServer(): import("@tanstack/react-query").UseMutationResult<{
     allowed_tools?: string[] | null;
-    approval: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpToolApproval"];
+    approval: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpToolApproval"];
     args: string[];
     bearer_token_env_var?: string | null;
     catalog_timeout_ms?: number | null;
@@ -137,15 +137,15 @@ export declare function useUpdateMcpServer(): import("@tanstack/react-query").Us
     env_headers: Record<string, string>;
     env_vars: string[];
     execution_timeout_ms?: number | null;
-    header_helper?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpHeaderHelperConfig"];
+    header_helper?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpHeaderHelperConfig"];
     headers: Record<string, string>;
     library_id?: string | null;
     name: string;
-    protocol: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpProtocolSelection"];
+    protocol: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpProtocolSelection"];
     required: boolean;
     startup_timeout_ms?: number | null;
-    tool_approvals: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpToolApproval"]>;
-    transport: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpTransportSchema"];
+    tool_approvals: Record<string, import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpToolApproval"]>;
+    transport: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpTransportSchema"];
     url?: string | null;
 }, Error, {
     serverName: string;
@@ -156,8 +156,8 @@ export declare function useTestMcpServer(): import("@tanstack/react-query").UseM
     auth_required: boolean;
     connected: boolean;
     error?: string | null;
-    probe?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpProbeResult"];
-    tools: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpProbedTool"][];
+    probe?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpProbeResult"];
+    tools: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpProbedTool"][];
 }, Error, {
     args?: string[] | null;
     bearer_token_env_var?: string | null;
@@ -168,17 +168,17 @@ export declare function useTestMcpServer(): import("@tanstack/react-query").UseM
     env_headers?: Record<string, string> | null;
     env_vars?: string[] | null;
     execution_timeout_ms?: number | null;
-    header_helper?: null | import("../../types/openapi.generated").components["schemas"]["UpdateMcpHeaderHelperRequest"];
+    header_helper?: null | import("../../types/openapi.generated.js").components["schemas"]["UpdateMcpHeaderHelperRequest"];
     headers?: Record<string, string | null> | null;
     name?: string | null;
-    protocol?: null | import("../../types/openapi.generated").components["schemas"]["McpProtocolSelection"];
+    protocol?: null | import("../../types/openapi.generated.js").components["schemas"]["McpProtocolSelection"];
     startup_timeout_ms?: number | null;
     stored_name?: string | null;
     transport?: string | null;
     url?: string | null;
 }, unknown>;
 export declare function useMcpRuntimeStatus(): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    servers: import("../../types/openapi.generated").components["schemas"]["McpRuntimeStatus"][];
+    servers: import("../../types/openapi.generated.js").components["schemas"]["McpRuntimeStatus"][];
 }>, Error>;
 export declare function useMcpRuntimeAction(): import("@tanstack/react-query").UseMutationResult<{
     auth_required: boolean;
@@ -188,18 +188,18 @@ export declare function useMcpRuntimeAction(): import("@tanstack/react-query").U
     required: boolean;
     server_name?: string | null;
     server_version?: string | null;
-    state: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpRuntimeState"];
+    state: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["McpRuntimeState"];
     tool_count: number;
 }, Error, {
     serverName: string;
     action: "connect" | "disconnect" | "reload";
 }, unknown>;
 export declare function useModelConfigs(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    configurations: import("../../types/openapi.generated").components["schemas"]["ModelConfigurationRecord"][];
+    configurations: import("../../types/openapi.generated.js").components["schemas"]["ModelConfigurationRecord"][];
 }>, Error>;
 export declare function useProviderModels(backend: BackendKind, apiKey: string, baseUrl: string | null, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     base_url: string;
-    models: import("../../types/openapi.generated").components["schemas"]["ProviderModel"][];
+    models: import("../../types/openapi.generated.js").components["schemas"]["ProviderModel"][];
 }>, Error>;
 /**
  * The same check as `useProviderModels` for a key that is already on file: the
@@ -208,7 +208,7 @@ export declare function useProviderModels(backend: BackendKind, apiKey: string, 
  */
 export declare function useStoredKeyProviderModels(backend: BackendKind, apiKeyEnv: string, baseUrl: string | null, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     base_url: string;
-    models: import("../../types/openapi.generated").components["schemas"]["ProviderModel"][];
+    models: import("../../types/openapi.generated.js").components["schemas"]["ProviderModel"][];
 }>, Error>;
 /**
  * The models a browser login can reach. There is no key to pass, so the stored
@@ -224,7 +224,7 @@ export declare function useStoredKeyProviderModels(backend: BackendKind, apiKeyE
  */
 export declare function useModelCatalog(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     catalog_version: number;
-    providers: import("../../types/openapi.generated").components["schemas"]["ProviderListing"][];
+    providers: import("../../types/openapi.generated.js").components["schemas"]["ProviderListing"][];
 }>, Error>;
 /** Reconcile every cached projection derived from provider-account state. */
 export declare function refreshUnifiedProviderCatalog(client: QueryClient): Promise<void>;
@@ -233,8 +233,8 @@ export declare function refreshProviderAuthentication(client: QueryClient): Prom
 /** Session-scoped slash commands, including prompts discovered from mounted MCP servers. */
 export declare function useSlashCommands(sessionId: string): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     accepts_arguments: boolean;
-    arguments?: import("../../types/openapi.generated").components["schemas"]["McpPromptArgument"][];
-    command: import("../../types/openapi.generated").components["schemas"]["SlashCommand"];
+    arguments?: import("../../types/openapi.generated.js").components["schemas"]["McpPromptArgument"][];
+    command: import("../../types/openapi.generated.js").components["schemas"]["SlashCommand"];
     description: string;
     name: string;
 }[]>, Error>;
@@ -251,12 +251,12 @@ export declare function useSessionSkills(sessionId: string): import("@tanstack/r
 export declare function useResolvedModelConfig(configId: string | null, filePath: string): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     allow_insecure_http: boolean;
     api_key_env: string | null;
-    backend: import("../../types/openapi.generated").components["schemas"]["BackendKind"];
+    backend: import("../../types/openapi.generated.js").components["schemas"]["BackendKind"];
     base_url: string;
     model: string | null;
-    models: import("../../types/openapi.generated").components["schemas"]["ProviderModel"][];
+    models: import("../../types/openapi.generated.js").components["schemas"]["ProviderModel"][];
     models_error: string | null;
-    reasoning_effort: null | import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"];
+    reasoning_effort: null | import("../../types/openapi.generated.js").components["schemas"]["ReasoningEffort"];
 }>, Error>;
 export declare function useCreateModelConfig(): import("@tanstack/react-query").UseMutationResult<{
     allow_insecure_http: boolean;
@@ -267,7 +267,7 @@ export declare function useCreateModelConfig(): import("@tanstack/react-query").
     created_at: string;
     extra_headers: Record<string, string>;
     initial_prompt?: string | null;
-    light_model?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["LightModelSettings"];
+    light_model?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["LightModelSettings"];
     model: string;
     name: string;
     orchestrator_compaction_threshold?: number | null;
@@ -276,15 +276,15 @@ export declare function useCreateModelConfig(): import("@tanstack/react-query").
 }, Error, {
     allow_insecure_http?: boolean;
     api_key?: string | null;
-    backend: import("../../types/openapi.generated").components["schemas"]["BackendKind"];
+    backend: import("../../types/openapi.generated.js").components["schemas"]["BackendKind"];
     base_url?: string | null;
     extra_headers?: Record<string, string> | null;
     initial_prompt?: string | null;
-    light_model?: null | import("../../types/openapi.generated").components["schemas"]["LightModelSettings"];
+    light_model?: null | import("../../types/openapi.generated.js").components["schemas"]["LightModelSettings"];
     model: string;
     name: string;
     orchestrator_compaction_threshold?: number | null;
-    reasoning_effort?: null | import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"];
+    reasoning_effort?: null | import("../../types/openapi.generated.js").components["schemas"]["ReasoningEffort"];
 }, unknown>;
 export declare function useUpdateModelConfig(): import("@tanstack/react-query").UseMutationResult<{
     allow_insecure_http: boolean;
@@ -295,7 +295,7 @@ export declare function useUpdateModelConfig(): import("@tanstack/react-query").
     created_at: string;
     extra_headers: Record<string, string>;
     initial_prompt?: string | null;
-    light_model?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["LightModelSettings"];
+    light_model?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["LightModelSettings"];
     model: string;
     name: string;
     orchestrator_compaction_threshold?: number | null;

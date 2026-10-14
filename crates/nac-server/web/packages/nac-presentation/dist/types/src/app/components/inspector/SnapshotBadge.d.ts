@@ -1,4 +1,4 @@
-import type { WorkspaceRevision } from "../../types/api";
+import type { WorkspaceRevision } from "../../types/api.js";
 /**
  * Everything the badge needs from the files panel. One object shared by every
  * turn, so a memoized message is not re-rendered for carrying it.

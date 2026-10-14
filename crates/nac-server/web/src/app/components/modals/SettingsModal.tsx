@@ -1,4 +1,5 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { PublicSessionSettings } from "@/app/features/public-native/ConfigurationViews";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -150,6 +151,23 @@ function SettingsShell({
 }
 
 export function SettingsModal({
+  open,
+  id,
+  onClose,
+}: {
+  open: boolean;
+  id: string | null;
+  onClose: () => void;
+}) {
+  const { publicPresentation } = useNativeRuntime();
+  return publicPresentation ? (
+    <PublicSessionSettings open={open} id={id} onClose={onClose} />
+  ) : (
+    <NativeSettingsModal open={open} id={id} onClose={onClose} />
+  );
+}
+
+function NativeSettingsModal({
   open,
   id,
   onClose,

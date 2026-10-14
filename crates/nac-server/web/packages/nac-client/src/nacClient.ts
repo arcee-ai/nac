@@ -40,6 +40,8 @@ export interface NacRequestOptions {
   signal?: AbortSignal;
   acceptStatuses?: readonly number[];
   requestId?: string;
+  /** Selected wire codec reads the original JSON text once; default native decoding is unchanged. */
+  decodeJson?: (text: string) => unknown;
 }
 
 export interface NacStreamContext {
@@ -97,9 +99,23 @@ export class UncertainCommandAdmissionError extends Error {
   }
 }
 
+/** Trusted transport adapter assertion that no request was dispatched. Never infer from a name or network error. */
+export class NacRequestNotSentError extends Error {
+  constructor(cause: unknown) {
+    super("The native request was not dispatched.", { cause });
+    this.name = "NacRequestNotSentError";
+  }
+}
+
 export type CommandAdmission<T> =
   | { status: "accepted"; requestId: string; response: T }
   | { status: "not-sent"; requestId: string; reason: "aborted" }
+  | {
+      status: "not-sent";
+      requestId: string;
+      reason: "adapter-not-sent";
+      error: NacRequestNotSentError;
+    }
   | { status: "uncertain"; requestId: string; error: unknown };
 
 export interface SessionSnapshotOptions {
@@ -198,6 +214,9 @@ async function errorDetail(response: Response): Promise<string> {
 }
 
 export class NacTransport {
+  get jsonResponseDecodingVersion(): number {
+    return 1;
+  }
   readonly endpoint: string;
   readonly credentials: NacCredentialPolicy;
   readonly authorization: NacClientOptions["authorization"];
@@ -277,6 +296,7 @@ export class NacTransport {
       signal,
       acceptStatuses = [],
       requestId = this.newRequestId(),
+      decodeJson,
     }: NacRequestOptions = {},
   ): Promise<T> {
     signal?.throwIfAborted();
@@ -294,16 +314,30 @@ export class NacTransport {
       credentials: this.credentials,
     });
 
-    if (!response.ok && !acceptStatuses.includes(response.status)) {
-      throw new ApiError(response.status, method, path, await errorDetail(response), requestId);
+    try {
+      if (!response.ok && !acceptStatuses.includes(response.status)) {
+        throw new ApiError(response.status, method, path, await errorDetail(response), requestId);
+      }
+      if (response.status === 204) {
+        if (decodeJson) throw new Error("Expected a JSON response for the selected codec.");
+        return undefined as T;
+      }
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        if (decodeJson) throw new Error("Expected a JSON response for the selected codec.");
+        const text = await response.text();
+        return (text ? text : undefined) as T;
+      }
+      if (decodeJson) return decodeJson(await response.text()) as T;
+      return (await response.json()) as T;
+    } catch (error) {
+      // Once a response exists, even a mistakenly thrown before-send marker
+      // cannot turn decoding/body failures into a retryable command fate.
+      if (error instanceof NacRequestNotSentError) {
+        throw new Error("NAC response processing failed after dispatch.", { cause: error });
+      }
+      throw error;
     }
-    if (response.status === 204) return undefined as T;
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("application/json")) {
-      const text = await response.text();
-      return (text ? text : undefined) as T;
-    }
-    return (await response.json()) as T;
   }
 
   async admit<T>(
@@ -320,6 +354,9 @@ export class NacTransport {
         response: await this.request<T>(method, path, { ...options, requestId }),
       };
     } catch (error) {
+      if (error instanceof NacRequestNotSentError) {
+        return { status: "not-sent", requestId, reason: "adapter-not-sent", error };
+      }
       if (error instanceof ApiError) throw error;
       return { status: "uncertain", requestId, error };
     }
@@ -348,7 +385,7 @@ export type NacHttpTransport = Pick<
   | "streamContext"
   | "request"
   | "admit"
->;
+> & { readonly jsonResponseDecodingVersion?: number };
 
 export class NacClient {
   readonly transport: NacHttpTransport;
@@ -547,7 +584,9 @@ export class NacClient {
     if (admission.status === "accepted" && admission.response.request_id === frozen.request_id)
       return admission.response;
     if (admission.status === "not-sent")
-      throw new DOMException("Command was not sent", "AbortError");
+      throw admission.reason === "adapter-not-sent"
+        ? admission.error
+        : new DOMException("Command was not sent", "AbortError");
     const cause =
       admission.status === "uncertain"
         ? admission.error

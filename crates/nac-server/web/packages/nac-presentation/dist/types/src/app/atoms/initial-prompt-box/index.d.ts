@@ -1,5 +1,5 @@
 import type React from "react";
-import { type IconName } from "../icon";
+import { type IconName } from "../icon/index.js";
 interface InitialPromptBoxProps {
     icon: IconName;
     title: string;

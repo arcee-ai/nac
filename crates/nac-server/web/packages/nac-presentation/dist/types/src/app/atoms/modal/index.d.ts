@@ -1,5 +1,5 @@
 import React from "react";
-import { IconName } from "../icon";
+import { IconName } from "../icon/index.js";
 export declare enum ModalSize {
     Small = "max-w-[400px]",
     Medium = "max-w-[560px]",

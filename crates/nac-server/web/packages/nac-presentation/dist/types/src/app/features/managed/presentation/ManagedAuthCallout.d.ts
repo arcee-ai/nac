@@ -1,4 +1,4 @@
-import type { BackendKind } from "../../../types/api";
+import type { BackendKind } from "../../../types/api.js";
 /**
  * The browser sign-in a managed provider needs in place of an API key. It sits
  * outside the field rows deliberately: it is an action that sends the user to

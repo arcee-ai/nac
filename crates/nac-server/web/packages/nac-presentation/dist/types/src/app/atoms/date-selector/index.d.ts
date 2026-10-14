@@ -1,7 +1,7 @@
 import React from "react";
-import { ButtonSize } from "../button";
-import { type InputWrapperProps } from "../input/InputWrapper";
-import { PopoverPlacement } from "../popover";
+import { ButtonSize } from "../button/index.js";
+import { type InputWrapperProps } from "../input/InputWrapper.js";
+import { PopoverPlacement } from "../popover/index.js";
 /**
  * Values cross this boundary as `YYYY-MM-DD`, the same calendar-day form a
  * native date input uses. Anything with a time in it would drag a timezone

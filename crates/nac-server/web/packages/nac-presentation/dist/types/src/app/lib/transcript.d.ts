@@ -1,8 +1,8 @@
-import { type DelegatedCompletion } from "../features/delegation/completion";
-import { type ToolPresentation } from "./toolPresentation";
-import { type ThreadLogLine } from "./threadLog";
-import type { RuntimeThread } from "../store/runtimeStore";
-import type { AgentEvent, DispatchWeight, SessionSnapshotResponse, ToolCall } from "../types/api";
+import { type DelegatedCompletion } from "../features/delegation/completion.js";
+import { type ToolPresentation } from "./toolPresentation.js";
+import { type ThreadLogLine } from "./threadLog.js";
+import type { RuntimeThread } from "../store/runtimeStore.js";
+import type { AgentEvent, DispatchWeight, SessionSnapshotResponse, ToolCall } from "../types/api.js";
 /** Exact assistant marker written after any partial response on cancellation. */
 export declare const RUN_CANCELLED_MARKER = "[run cancelled by user]";
 /** Stored sentinel identifying an assistant response abandoned by run failure. */

@@ -1,5 +1,5 @@
-import { UserTerminalInputPump, type UserTerminalApi, type ExecutionApi, type ExecutionStatus, type InputControlStatus, type TerminalControlApi } from "../../../../packages/nac-client/src/index";
-import { createTerminalRenderer } from "./xtermAdapter";
+import { UserTerminalInputPump, type UserTerminalApi, type ExecutionApi, type ExecutionStatus, type InputControlStatus, type TerminalControlApi } from "../../../../packages/nac-client/src/index.js";
+import { createTerminalRenderer } from "./xtermAdapter.js";
 type Adapter = Awaited<ReturnType<typeof createTerminalRenderer>>;
 export interface TerminalControls {
     adapter: Adapter;

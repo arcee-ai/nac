@@ -1,4 +1,4 @@
-import type { ProjectRecord } from "../../types/api";
+import type { ProjectRecord } from "../../types/api.js";
 /** Mounted only while open, so the fields start from the current record. */
 export declare function RenameProjectModal({ open, onClose, project, }: {
     open: boolean;

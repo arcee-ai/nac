@@ -1,5 +1,5 @@
 import type React from "react";
-import { LoaderVariant } from "../loader";
+import { LoaderVariant } from "../loader/index.js";
 export declare enum ButtonSize {
     Medium = "btn-medium",
     Small = "btn-small",

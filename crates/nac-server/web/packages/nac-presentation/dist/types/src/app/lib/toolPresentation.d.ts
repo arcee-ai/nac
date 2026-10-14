@@ -1,4 +1,4 @@
-import type { AgentEvent, SessionSnapshotResponse, ToolCall } from "../types/api";
+import type { AgentEvent, SessionSnapshotResponse, ToolCall } from "../types/api.js";
 export type ToolPresentationStatus = "pending" | "running" | "awaiting-approval" | "success" | "error" | "timed-out" | "cancelled" | "interrupted";
 export interface ToolPresentation {
     callId: string;

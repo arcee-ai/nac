@@ -1,4 +1,4 @@
-import type { SessionSnapshotResponse } from "../../types/api";
+import type { SessionSnapshotResponse } from "../../types/api.js";
 /** Structured plans attached to the session: the list, and one plan in full. */
 export declare function WorksetsView({ snapshot, selected, onSelect, }: {
     snapshot: SessionSnapshotResponse | null;

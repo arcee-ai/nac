@@ -14,6 +14,11 @@ import {
 } from "./presentationStores";
 import { LifetimeTransport } from "./requestLifetime";
 import { TerminalInputRecovery } from "../features/terminal/inputRecovery";
+import {
+  createPublicNacApi,
+  type PublicNacPresentationSource,
+  type PublicNacApi,
+} from "../../../packages/nac-client/src/publicNacApi.js";
 
 /** Opaque consumer bindings, never credentials or native admission authority. */
 export interface NativeRuntimeScope {
@@ -39,6 +44,8 @@ export interface NativeRuntimeOptions {
   eventSource?: SessionStreamOptions["eventSource"];
   /** Hosted reads default to no replay; standalone retains its one retry. */
   queryRetry?: false | 1;
+  /** Explicit public wire family on the SAME admitted transport; never an authorization flag. */
+  publicPresentation?: PublicNacPresentationSource;
 }
 
 const runtimes = new WeakMap<QueryClient, NativeRuntime>();
@@ -53,6 +60,7 @@ export class NativeRuntime {
   readonly stores: ReturnType<typeof createPresentationStores>;
   readonly queryClient: QueryClient;
   readonly terminalInputRecovery = new TerminalInputRecovery();
+  readonly publicPresentation: PublicNacApi | undefined;
   private readonly controller = new AbortController();
   private readonly disposers = new Set<() => void>();
   private readonly listeners = new Set<() => void>();
@@ -63,6 +71,12 @@ export class NativeRuntime {
   constructor(options: NativeRuntimeOptions) {
     if (options.scope.endpoint !== options.client.transport.endpoint)
       throw new Error("Runtime scope must name the supplied client's endpoint.");
+    this.client = new NacClient(
+      new LifetimeTransport(options.client.transport, this.controller.signal),
+    );
+    this.publicPresentation = options.publicPresentation
+      ? createPublicNacApi(this.client, options.publicPresentation)
+      : undefined;
     this.queryClient = new QueryClient({
       defaultOptions: {
         queries: {
@@ -78,9 +92,6 @@ export class NativeRuntime {
     this.assets = options.assets ? Object.freeze({ ...options.assets }) : undefined;
     this.stores = createPresentationStores(options.storage);
     this.scope = Object.freeze({ ...options.scope });
-    this.client = new NacClient(
-      new LifetimeTransport(options.client.transport, this.controller.signal),
-    );
     this.api = createNativeApi(this.client);
     this.eventSource = options.eventSource;
     runtimes.set(this.queryClient, this);
@@ -148,7 +159,7 @@ export const standaloneRuntime: RuntimeDependencies = {
   events: (id: string, handlers: SessionStreamHandlers) => subscribeToSessionEvents(id, handlers),
 };
 export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> &
-  Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery">>;
+  Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "publicPresentation">>;
 export function runtimeForQueryClient(client: QueryClient): RuntimeDependencies {
   return runtimes.get(client) ?? standaloneRuntime;
 }

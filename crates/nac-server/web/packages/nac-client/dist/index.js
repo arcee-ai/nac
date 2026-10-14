@@ -8,3 +8,6 @@ export * from "./userTerminalConnection.js";
 export * from "./userTerminalInputPump.js";
 export * from "./executionApi.js";
 export * from "./terminalControlApi.js";
+export * from "./publicNacApi.js";
+export * from "./sessionStreamWire.js";
+export * from "./publicNativeInteger.js";

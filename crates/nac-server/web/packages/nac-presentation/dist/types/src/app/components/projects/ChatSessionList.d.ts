@@ -1,4 +1,4 @@
-import type { ManagedSessionSummary } from "../../types/api";
+import type { ManagedSessionSummary } from "../../types/api.js";
 interface ChatSessionListProps {
     sessions: ManagedSessionSummary[];
     /** The session currently open, marked as the active row. */

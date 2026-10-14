@@ -7,4 +7,4 @@
 export declare function ConfigurationsModal({ open, onClose }: {
     open: boolean;
     onClose: () => void;
-}): import("react").JSX.Element | null;
+}): import("react").JSX.Element;

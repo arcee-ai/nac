@@ -1,4 +1,4 @@
-import type { ThreadLogLine } from "../../lib/threadLog";
+import type { ThreadLogLine } from "../../lib/threadLog.js";
 /**
  * The newest lines of a thread's log, bottom-aligned and clipped to whatever
  * height the caller gives it, so the tail reads the way a terminal does: the

@@ -1,4 +1,4 @@
-import type { BackendKind, ResolvedModelConfiguration } from "../../types/api";
+import type { BackendKind, ResolvedModelConfiguration } from "../../types/api.js";
 /**
  * The same rows as a fresh setup, filled in from a configuration the server
  * resolved. Everything stays editable — an edit rides along with the session

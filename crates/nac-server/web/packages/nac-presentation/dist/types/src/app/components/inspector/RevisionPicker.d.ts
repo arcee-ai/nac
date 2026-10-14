@@ -1,4 +1,4 @@
-import { PopoverPlacement } from "../../atoms";
+import { PopoverPlacement } from "../../atoms/index.js";
 /**
  * The snapshot chip in the session header, switching the panels between the live
  * working tree and the checkout as it stood at the end of an earlier run.

@@ -1,4 +1,4 @@
-import type { ReviewSnapshot, SelectionReviewController } from "./reviewController";
+import type { ReviewSnapshot, SelectionReviewController } from "./reviewController.js";
 export interface ReviewAvailability {
     readonly mode: "idle" | "busy" | "unknown";
     readonly runId?: string;

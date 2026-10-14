@@ -1,6 +1,6 @@
 import type React from "react";
-import { IconName } from "../icon";
-import { InputLeading, InputTrailing } from "./index";
+import { IconName } from "../icon/index.js";
+import { InputLeading, InputTrailing } from "./index.js";
 export declare enum StickyInputVariant {
     Default = "default",
     Search = "search"
