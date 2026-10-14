@@ -189,7 +189,10 @@ async fn handle(State(manager): State<SessionManager>, request: Request) -> Resp
     )
     .await
     {
-        Ok(response) => response,
+        // Include response serialization in the final expiry check; a future
+        // can finish CPU work without yielding to Tokio's timeout poll.
+        Ok(response) if deadline.is_live() => response,
+        Ok(_) => refusal(&correlation, StatusCode::FORBIDDEN, "refused"),
         Err(_) => refusal(&correlation, StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
     }
 }
