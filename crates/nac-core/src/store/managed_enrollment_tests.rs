@@ -172,3 +172,43 @@ fn enrollment_finish_racing_cancellation_never_revives_terminal_state() {
     );
     assert!(finish_enrollment_attempt(&path, &attempt).is_err());
 }
+
+#[test]
+fn protected_enrollment_journal_child() {
+    let Some(input) = std::env::var_os("NAC_TEST_ENROLLMENT_CHILD_INPUT") else {
+        return;
+    };
+    let (path, attempt): (PathBuf, EnrollmentAttempt) =
+        serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+    assert!(begin_enrollment_attempt(&path, &attempt).unwrap());
+    // The commit succeeds, but the process dies before its caller gets an ack.
+    std::process::exit(91);
+}
+
+#[test]
+fn enrollment_process_death_after_commit_retains_uncertainty_and_consumes_bootstrap() {
+    let (path, attempt) = fixture();
+    let input = path.parent().unwrap().join("child-input.json");
+    std::fs::write(&input, serde_json::to_vec(&(&path, &attempt)).unwrap()).unwrap();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "store::managed_enrollment::tests::protected_enrollment_journal_child",
+            "--nocapture",
+        ])
+        .env("NAC_TEST_ENROLLMENT_CHILD_INPUT", &input)
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(91));
+    assert!(!begin_enrollment_attempt(&path, &attempt).unwrap());
+    let retained = read_enrollment_attempt(&path, &attempt.attempt_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.phase, EnrollmentPhase::Pending);
+    assert_eq!(retained.import_audit_id, None);
+    terminate_enrollment_attempt(&path, &attempt).unwrap();
+    let mut retry = attempt;
+    retry.attempt_id = Uuid::new_v4();
+    retry.serving_lifetime_id = Uuid::new_v4();
+    assert!(begin_enrollment_attempt(&path, &retry).is_err());
+}
