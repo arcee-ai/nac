@@ -52,3 +52,49 @@ check_identity! {
     /// Its original bytes remain owned by the controller's existing serializer.
     NativeImportedCheckSha256
 }
+
+/// Bounded authority-channel stages. No stage represents Ready or execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectedImportPhase {
+    Issue,
+    Consume,
+    PreImport,
+    PostImport,
+    BeforeInitialImported,
+    AfterInitialImported,
+    BeforeFreshImported,
+    AfterFreshImported,
+}
+
+/// Required proof role, not evidence that any issuer transaction committed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportProofKind {
+    Issued,
+    Consumed,
+    Current,
+}
+
+impl ProtectedImportPhase {
+    pub fn sequence(self) -> u8 {
+        match self {
+            Self::Issue => 0,
+            Self::Consume => 1,
+            Self::PreImport => 2,
+            Self::PostImport => 3,
+            Self::BeforeInitialImported => 4,
+            Self::AfterInitialImported => 5,
+            Self::BeforeFreshImported => 6,
+            Self::AfterFreshImported => 7,
+        }
+    }
+
+    pub fn required_proof_kind(self) -> ImportProofKind {
+        match self {
+            Self::Issue => ImportProofKind::Issued,
+            Self::Consume => ImportProofKind::Consumed,
+            _ => ImportProofKind::Current,
+        }
+    }
+}

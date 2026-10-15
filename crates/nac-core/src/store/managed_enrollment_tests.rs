@@ -22,7 +22,7 @@ fn fixture() -> (PathBuf, EnrollmentAttempt) {
             inference_origin: "https://api.arcee.ai".into(),
         },
         original_check_sha256: [1; 32].try_into().unwrap(),
-        serving_lifetime_id: Uuid::new_v4(),
+        authority_channel_lifetime_id: Uuid::new_v4().try_into().unwrap(),
         eligible_subject: "synthetic-subject".into(),
         primary_revision: "synthetic-primary-revision".into(),
         eligibility_audit_id: "synthetic-eligibility-audit".into(),
@@ -41,7 +41,7 @@ fn enrollment_restart_and_lost_ack_are_observational_never_new_import() {
     assert_eq!(retained.phase, EnrollmentPhase::Pending);
     assert!(!begin_enrollment_attempt(&path, &attempt).unwrap());
     let mut rebound = attempt.clone();
-    rebound.serving_lifetime_id = Uuid::new_v4();
+    rebound.authority_channel_lifetime_id = Uuid::new_v4().try_into().unwrap();
     assert!(begin_enrollment_attempt(&path, &rebound).is_err());
     assert!(finish_enrollment_attempt(&path, &rebound).is_err());
     let imported = finish_enrollment_attempt(&path, &attempt).unwrap();
@@ -157,6 +157,59 @@ fn enrollment_typed_check_preserves_retained_array_codec_and_rejects_missing_ide
 }
 
 #[test]
+fn enrollment_authority_lifetime_reads_earlier_draft_history_without_rewriting_it() {
+    let (path, attempt) = fixture();
+    let mut old = serde_json::to_value(&attempt).unwrap();
+    let object = old.as_object_mut().unwrap();
+    let lifetime = object.remove("authority_channel_lifetime_id").unwrap();
+    object.insert("serving_lifetime_id".into(), lifetime);
+    let old_json = serde_json::to_string(&old).unwrap();
+    let connection = Connection::open(&path).unwrap();
+    connection.execute("INSERT INTO managed_enrollment_attempts(attempt_id,bootstrap_id,attempt_json,phase) VALUES(?1,?2,?3,'pending')",
+        params![attempt.attempt_id.to_string(),attempt.binding.bootstrap_id,old_json]).unwrap();
+    append(&connection, attempt.attempt_id, "pending").unwrap();
+    let retained = read_enrollment_attempt(&path, &attempt.attempt_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.attempt, attempt);
+    assert!(!begin_enrollment_attempt(&path, &attempt).unwrap());
+    let after: String = connection
+        .query_row(
+            "SELECT attempt_json FROM managed_enrollment_attempts",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(old_json, after);
+    assert_eq!(retained.phase, EnrollmentPhase::Pending);
+    old["serving_lifetime_id"] = serde_json::json!(Uuid::nil());
+    assert!(serde_json::from_value::<EnrollmentAttempt>(old).is_err());
+}
+
+#[test]
+fn enrollment_protocol_phase_roles_do_not_hide_consume_or_accept_ready() {
+    use nac_contracts::{ImportProofKind, ProtectedImportPhase};
+    let consume: ProtectedImportPhase = serde_json::from_str("\"consume\"").unwrap();
+    assert_eq!(consume.sequence(), 1);
+    assert_eq!(consume.required_proof_kind(), ImportProofKind::Consumed);
+    assert_eq!(
+        ProtectedImportPhase::Issue.required_proof_kind(),
+        ImportProofKind::Issued
+    );
+    assert_eq!(
+        ProtectedImportPhase::PreImport.required_proof_kind(),
+        ImportProofKind::Current
+    );
+    assert_eq!(ProtectedImportPhase::AfterFreshImported.sequence(), 7);
+    for legacy_or_other in ["begin", "current", "ready", "fresh_ready", "Consume"] {
+        assert!(
+            serde_json::from_value::<ProtectedImportPhase>(serde_json::json!(legacy_or_other))
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn enrollment_finish_racing_cancellation_never_revives_terminal_state() {
     let (path, attempt) = fixture();
     begin_enrollment_attempt(&path, &attempt).unwrap();
@@ -225,6 +278,6 @@ fn enrollment_process_death_after_commit_retains_uncertainty_and_consumes_bootst
     terminate_enrollment_attempt(&path, &attempt).unwrap();
     let mut retry = attempt;
     retry.attempt_id = Uuid::new_v4();
-    retry.serving_lifetime_id = Uuid::new_v4();
+    retry.authority_channel_lifetime_id = Uuid::new_v4().try_into().unwrap();
     assert!(begin_enrollment_attempt(&path, &retry).is_err());
 }

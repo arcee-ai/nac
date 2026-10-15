@@ -37,7 +37,7 @@ Root, Native and the coordinator confirmed exclusive allocation of revision 36
 to this slice. Every changed final source/build needs fresh qualification.
 
 An attempt binds the full11 identity, immutable original controller Check hash,
-serving lifetime, genuine eligible subject, primary revision and upstream
+original authority-channel lifetime, genuine eligible subject, primary revision and upstream
 eligibility audit. The journal authenticates none of these inputs itself.
 The live service must obtain them from authenticated current authority.
 
@@ -48,6 +48,11 @@ names the source verifier's nested stage/intent/binding check; and
 action/current/desired check. The journal's `original_check_sha256` uses the last
 type and retains its existing array encoding. None of these digests grants
 authority or substitutes for the other checks.
+
+`AuthorityChannelLifetimeId` identifies the earlier authority channel owner;
+the later Imported/fact/Ready serving lifetime remains a different identity.
+Historical draft records using `serving_lifetime_id` decode through a read alias
+without rewriting their history or constructing a live capability.
 
 `begin_enrollment_attempt` commits a pending uncertainty barrier before private
 import. Only its first insert reports new work. Exact repeats are observational,

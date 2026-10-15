@@ -51,7 +51,8 @@ pub(crate) use worker_dispatches::{
 pub use coordinator::{PersistenceAdmissionError, PersistenceStats, StoreCoordinator};
 pub use managed_enrollment::{
     begin_enrollment_attempt, finish_enrollment_attempt, read_enrollment_attempt,
-    terminate_enrollment_attempt, EnrollmentAttempt, EnrollmentPhase, EnrollmentSnapshot,
+    terminate_enrollment_attempt, AuthorityChannelLifetimeId, EnrollmentAttempt, EnrollmentPhase,
+    EnrollmentSnapshot,
 };
 pub use managed_maintenance::*;
 pub use managed_orchestrators::*;

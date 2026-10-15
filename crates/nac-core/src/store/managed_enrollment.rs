@@ -6,6 +6,28 @@ use nac_contracts::NativeImportedCheckSha256;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Nonsecret identity of the earlier authority TLS channel's original owner.
+/// It is distinct from the later Imported/Ready serving lifetime. Construction
+/// supplies no channel, custody, issuer verification or execution authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "Uuid", into = "Uuid")]
+pub struct AuthorityChannelLifetimeId(Uuid);
+
+impl TryFrom<Uuid> for AuthorityChannelLifetimeId {
+    type Error = anyhow::Error;
+
+    fn try_from(id: Uuid) -> Result<Self> {
+        anyhow::ensure!(!id.is_nil(), "authority channel lifetime is unavailable");
+        Ok(Self(id))
+    }
+}
+
+impl From<AuthorityChannelLifetimeId> for Uuid {
+    fn from(id: AuthorityChannelLifetimeId) -> Self {
+        id.0
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnrollmentAttempt {
@@ -13,7 +35,9 @@ pub struct EnrollmentAttempt {
     pub binding: ManagedHostKeyBinding,
     /// Original private Go Imported Check, never a source eligibility/audit hash.
     pub original_check_sha256: NativeImportedCheckSha256,
-    pub serving_lifetime_id: Uuid,
+    // Read the original draft's historical field without rewriting stored rows.
+    #[serde(alias = "serving_lifetime_id")]
+    pub authority_channel_lifetime_id: AuthorityChannelLifetimeId,
     pub eligible_subject: String,
     pub primary_revision: String,
     pub eligibility_audit_id: String,
@@ -22,10 +46,7 @@ pub struct EnrollmentAttempt {
 impl EnrollmentAttempt {
     fn validate(&self) -> Result<()> {
         self.binding.validate()?;
-        anyhow::ensure!(
-            !self.attempt_id.is_nil() && !self.serving_lifetime_id.is_nil(),
-            "enrollment identity unavailable"
-        );
+        anyhow::ensure!(!self.attempt_id.is_nil(), "enrollment identity unavailable");
         for value in [
             &self.eligible_subject,
             &self.primary_revision,
