@@ -1,13 +1,35 @@
 import type { CreateGoalRequest, InboxDelivery, PermissionApprovalMode, PermissionReply, StartManagedOrchestratorRequest, StartTraditionalChildRequest, UpdateGoalRequest } from "../../types/api";
 export declare function useSessionPermissions(sessionId: string, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     approval_mode: import("../../types/openapi.generated").components["schemas"]["PermissionApprovalMode"];
+    authorizable_review_ids?: string[];
     grants: import("../../types/openapi.generated").components["schemas"]["PermissionGrantRecord"][];
     requests: import("../../types/openapi.generated").components["schemas"]["PermissionRequest"][];
+    reviews?: import("../../types/openapi.generated").components["schemas"]["PermissionReview"][];
 }>, Error>;
 export declare function useReplyPermission(): import("@tanstack/react-query").UseMutationResult<void, Error, {
     sessionId: string;
     requestId: string;
     reply: PermissionReply;
+}, unknown>;
+/** Authorizes one retry of a blocked review. The model is asked to retry and
+ * the retry passes policy and a fresh review; nothing is bypassed. */
+export declare function useAuthorizePermissionReviewRetry(): import("@tanstack/react-query").UseMutationResult<{
+    backend: string;
+    call_id?: string | null;
+    category?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ReviewCategory"];
+    code?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["PermissionReviewCode"];
+    created_at_epoch_ms: number;
+    duration_ms?: number | null;
+    id: string;
+    outcome?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["PermissionReviewOutcome"];
+    resources: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ReviewResource"][];
+    reviewer: string;
+    session_id: string;
+    tool: string;
+    user_authorized_retry: boolean;
+}, Error, {
+    sessionId: string;
+    reviewId: string;
 }, unknown>;
 export declare function useSetPermissionApprovalMode(): import("@tanstack/react-query").UseMutationResult<void, Error, {
     sessionId: string;
