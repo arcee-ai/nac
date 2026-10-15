@@ -1146,6 +1146,35 @@ where
     .await
 }
 
+/// Apply the interactive HTTP socket policy once, before serving a connection.
+/// A small streamed gzip response must not wait for a delayed ACK between its
+/// header and body writes on every sequential terminal observation.
+struct HttpListener {
+    listener: TcpListener,
+    policy_failures: tokio::sync::mpsc::UnboundedSender<std::io::Error>,
+}
+
+impl axum::serve::Listener for HttpListener {
+    type Io = tokio::net::TcpStream;
+    type Addr = SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        let (socket, address) = axum::serve::Listener::accept(&mut self.listener).await;
+        if let Err(error) = socket.set_nodelay(true) {
+            // Never serve a socket with an unapplied policy. Let the shared
+            // shutdown owner drain both HTTP surfaces and report the failure.
+            drop(socket);
+            let _ = self.policy_failures.send(error);
+            return std::future::pending().await;
+        }
+        (socket, address)
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.listener.local_addr()
+    }
+}
+
 pub(crate) struct AdditionalListeners {
     pub(crate) control: Option<(TcpListener, Router)>,
     pub(crate) facts: Option<RuntimeTlsListener>,
@@ -1177,7 +1206,12 @@ where
             },
         ))
     });
+    let (policy_failures_tx, mut policy_failures_rx) = tokio::sync::mpsc::unbounded_channel();
     let control_server = additional.control.map(|(listener, app)| {
+        let listener = HttpListener {
+            listener,
+            policy_failures: policy_failures_tx.clone(),
+        };
         tokio::spawn(
             axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
@@ -1186,6 +1220,10 @@ where
                 .into_future(),
         )
     });
+    let listener = HttpListener {
+        listener,
+        policy_failures: policy_failures_tx,
+    };
     let mut server = tokio::spawn(
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {
@@ -1196,6 +1234,7 @@ where
     tokio::pin!(shutdown);
     let mut public_result = None;
     let mut fact_result = None;
+    let mut socket_policy_result = Ok(());
     tokio::select! {
         result = &mut server => public_result = Some(result),
         result = async {
@@ -1204,6 +1243,9 @@ where
                 None => std::future::pending().await,
             }
         } => fact_result = Some(result),
+        Some(error) = policy_failures_rx.recv() => {
+            socket_policy_result = Err(error).context("failed to set TCP_NODELAY on HTTP connection");
+        }
         () = &mut shutdown => {}
     }
     // A failed private listener also stops the host; no partial serving state.
@@ -1262,7 +1304,7 @@ where
     watchdog
         .join()
         .map_err(|_| anyhow!("shutdown watchdog panicked"))?;
-    public_result.and(fact_result)
+    public_result.and(fact_result).and(socket_policy_result)
 }
 
 fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {
