@@ -76,7 +76,9 @@ export function makeObservationPorts(
               event.type === "permission_asked" ||
               event.type === "permission_replied" ||
               event.type === "permission_dismissed" ||
-              event.type === "permission_approval_mode_changed",
+              event.type === "permission_approval_mode_changed" ||
+              event.type === "permission_review_started" ||
+              event.type === "permission_reviewed",
           });
         },
         onAssistantDelta: (delta) => {
