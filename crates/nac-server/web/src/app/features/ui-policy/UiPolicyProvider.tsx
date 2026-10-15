@@ -30,6 +30,25 @@ export function UiPolicyProvider({
   const config = useQuery({
     queryKey: ["ui-configuration", client.transport.endpoint, clientId(client)],
     queryFn: async ({ signal }) => {
+      if (runtime.publicPresentation) {
+        if (suppliedClient && suppliedClient !== runtime.client) {
+          throw new Error("Public UI configuration must use its bound runtime.");
+        }
+        const value = await runtime.publicPresentation.getUiConfiguration(signal);
+        if (
+          typeof value.orchestration_enabled !== "boolean" ||
+          !Array.isArray(value.diagnostic_codes) ||
+          value.diagnostic_codes.some((code) => code !== "configuration_notice")
+        ) {
+          throw new Error("Invalid public UI configuration response");
+        }
+        return {
+          orchestration_enabled: value.orchestration_enabled,
+          diagnostic: value.diagnostic_codes.length
+            ? "Workspace configuration needs attention."
+            : null,
+        };
+      }
       const value = await client.getUiConfiguration(signal);
       if (
         typeof value.orchestration_enabled !== "boolean" ||

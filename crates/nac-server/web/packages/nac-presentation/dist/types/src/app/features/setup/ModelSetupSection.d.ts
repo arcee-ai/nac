@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { type ConfigurationsPanelInitial, type LaunchModelSelection } from "../../components/modals/ConfigurationsPanel";
+import { type ConfigurationsPanelInitial, type LaunchModelSelection } from "../../components/modals/ConfigurationsPanel.js";
 /** Switching presentations preserves the full tuple without matching presets by model alone. */
 export declare function ModelSetupSection({ initial, onChange, invalid, errorText, children, simple, inheritSavedDefault, existingSession, }: {
     initial?: ConfigurationsPanelInitial;

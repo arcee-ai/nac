@@ -1,4 +1,4 @@
-import type { McpLibraryEntry } from "../../../types/api";
+import type { McpLibraryEntry } from "../../../types/api.js";
 /**
  * The entry's icon when it has one and it loads; its first letter otherwise.
  */

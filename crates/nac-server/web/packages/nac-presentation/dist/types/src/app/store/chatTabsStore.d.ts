@@ -11,7 +11,7 @@ interface ChatTabsState {
 /** One presentation lifetime; hosted preferences are ephemeral. */
 export declare function createChatTabsStore(storage?: Pick<Storage, "getItem" | "setItem">): {
     release: () => void;
-    chatTabsStore: import("../lib/store").Store<ChatTabsState>;
+    chatTabsStore: import("../lib/store.js").Store<ChatTabsState>;
     dismissChatTab: (sessionId: string) => void;
     restoreChatTab: (sessionId: string) => void;
     setChatTabOrder: (projectId: string, sessionIds: readonly string[]) => void;
@@ -19,5 +19,5 @@ export declare function createChatTabsStore(storage?: Pick<Storage, "getItem" | 
     useDismissedChatTabs: () => ReadonlySet<string>;
     useChatTabOrder: (projectId: string | null) => readonly string[];
 };
-export declare const release: () => void, chatTabsStore: import("../lib/store").Store<ChatTabsState>, dismissChatTab: (sessionId: string) => void, restoreChatTab: (sessionId: string) => void, setChatTabOrder: (projectId: string, sessionIds: readonly string[]) => void, pruneChatTabs: (sessionIds: Iterable<string>, projectIds: Iterable<string>) => void, useDismissedChatTabs: () => ReadonlySet<string>, useChatTabOrder: (projectId: string | null) => readonly string[];
+export declare const release: () => void, chatTabsStore: import("../lib/store.js").Store<ChatTabsState>, dismissChatTab: (sessionId: string) => void, restoreChatTab: (sessionId: string) => void, setChatTabOrder: (projectId: string, sessionIds: readonly string[]) => void, pruneChatTabs: (sessionIds: Iterable<string>, projectIds: Iterable<string>) => void, useDismissedChatTabs: () => ReadonlySet<string>, useChatTabOrder: (projectId: string | null) => readonly string[];
 export {};

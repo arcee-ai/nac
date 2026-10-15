@@ -45,7 +45,7 @@ export function createSshConnectionStore(_storage?: Pick<Storage, "getItem" | "s
   function sshTargetFromSummary(
     summary:
       | {
-          ssh_host: string | null;
+          ssh_host?: string | null;
           ssh_port?: number | null;
           ssh_identity_file?: string | null;
         }

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ButtonContent, ButtonVariant } from "../../atoms";
+import { ButtonContent, ButtonVariant } from "../../atoms/index.js";
 /**
  * A footer action: a sticky bar button on mobile, a large button on desktop
  * (where the neutral action renders as a ghost button).

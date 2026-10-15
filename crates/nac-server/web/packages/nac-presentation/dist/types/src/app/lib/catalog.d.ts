@@ -1,4 +1,4 @@
-import type { BackendKind, CatalogModel, CatalogProvider, ModelCatalog, ReasoningEffort } from "../types/api";
+import type { BackendKind, CatalogModel, CatalogProvider, ModelCatalog, ReasoningEffort } from "../types/api.js";
 /** A model chosen out of the catalog, together with where it is served. */
 export interface CatalogPick {
     backend: BackendKind;

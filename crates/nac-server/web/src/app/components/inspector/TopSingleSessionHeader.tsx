@@ -1,3 +1,4 @@
+import type { ManagedSessionView as ManagedSessionSummary } from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { RunDetails } from "@/app/features/direct-session/RunDetails";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
@@ -36,11 +37,7 @@ import {
   useWorkspaceRevisionChanges,
 } from "@/app/services/queries";
 
-import type {
-  ManagedSessionSummary,
-  SessionBehavior,
-  SessionSnapshotResponse,
-} from "@/app/types/api";
+import type { SessionBehavior, SessionSnapshotResponse } from "@/app/types/api";
 
 const BEHAVIOR_BADGE: Record<SessionBehavior, string> = {
   direct: "Agent",

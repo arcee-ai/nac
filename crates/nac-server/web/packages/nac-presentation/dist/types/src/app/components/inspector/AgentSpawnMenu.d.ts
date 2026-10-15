@@ -1,4 +1,4 @@
-import type { SessionBehavior } from "../../types/api";
+import type { SessionBehavior } from "../../types/api.js";
 interface AgentSpawnButtonProps {
     sessionId: string;
     behavior: SessionBehavior | null;

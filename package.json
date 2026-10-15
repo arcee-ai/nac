@@ -1,6 +1,6 @@
 {
   "name": "@arcee-ai/nac-client-all-121",
-  "version": "0.0.0-all-121",
+  "version": "0.0.0-public-native-v1.2",
   "private": true,
   "description": "Revision-pinned experimental NAC HTTP/SSE client artifact for ALL-121",
   "license": "Apache-2.0",
@@ -51,6 +51,9 @@
     "react-dom": ">=19.2.6 <20",
     "react-router-dom": ">=7.15.0 <8",
     "@tanstack/react-query": ">=5.100.10 <6"
+  },
+  "dependencies": {
+    "lossless-json": "4.3.0"
   },
   "peerDependenciesMeta": {
     "react": {

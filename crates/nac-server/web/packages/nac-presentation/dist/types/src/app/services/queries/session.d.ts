@@ -1,24 +1,13 @@
+import type { ManagedSessionView as ManagedSessionSummary, SessionSummaryView as SessionSummarySnapshot } from "../../features/public-native/collectionViews.js";
 import { type InfiniteData, type UseQueryOptions } from "@tanstack/react-query";
-import type { ManagedSessionSummary, SessionSnapshotResponse, SessionSummarySnapshot, UpdateConfigRequest } from "../../types/api";
-export declare function useSessions(pollMs?: number): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    active: boolean;
-    active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-    lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-    summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-    workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-}[]>, Error>;
+import type { SessionSnapshotResponse, UpdateConfigRequest } from "../../types/api.js";
+export declare function useSessions(pollMs?: number): import("@tanstack/react-query").UseQueryResult<NoInfer<ManagedSessionSummary[]>, Error>;
 export declare function mergeWorkspaceStats(base: ManagedSessionSummary[], stats: ManagedSessionSummary[]): ManagedSessionSummary[];
 export declare function useSessionsWithWorkspaceStats(cadence?: {
     baseMs: number;
     statsMs: number;
 }): {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     error: Error;
     isError: true;
     isPending: false;
@@ -41,29 +30,11 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 } | {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     error: null;
     isError: false;
     isPending: false;
@@ -86,29 +57,11 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 } | {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     error: Error;
     isError: true;
     isPending: false;
@@ -131,29 +84,11 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 } | {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     error: null;
     isError: false;
     isPending: true;
@@ -176,29 +111,11 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 } | {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     error: null;
     isError: false;
     isPending: true;
@@ -221,29 +138,11 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 } | {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     isError: false;
     error: null;
     isPending: false;
@@ -266,21 +165,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 };
 /**
  * The single summary a session screen needs, picked out of the polled list.
@@ -289,49 +176,43 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
  * over changes to unrelated sessions; the selected entry keeps its identity
  * across a refetch that did not touch it, so the transcript stays put.
  */
-export declare function useSessionSummary(id: string | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    active: boolean;
-    active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-    lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-    summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-    workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-} | null>, Error>;
+export declare function useSessionSummary(id: string | null): import("@tanstack/react-query").UseQueryResult<NoInfer<ManagedSessionSummary | null>, Error>;
 export declare function useSessionSnapshot(id: string | null, options?: Partial<UseQueryOptions<SessionSnapshotResponse>>): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    active_compaction?: null | import("../../types/openapi.generated").components["schemas"]["ActiveCompactionSnapshot"];
-    active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
+    active_compaction?: null | import("../../types/openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"];
+    active_run?: null | import("../../types/openapi.generated.js").components["schemas"]["ActiveRunSnapshot"];
     active_threads?: string[];
     covered_orchestrator_steering_ids?: number[];
-    forks?: import("../../types/openapi.generated").components["schemas"]["SessionForkLink"][];
+    forks?: import("../../types/openapi.generated.js").components["schemas"]["SessionForkLink"][];
     message_created_at?: (string | null)[];
-    messages: import("../../types/openapi.generated").components["schemas"]["Message"][];
-    metadata: import("../../types/openapi.generated").components["schemas"]["SessionMetadata"];
-    primary_tool_events?: import("../../types/openapi.generated").components["schemas"]["AgentEvent"][];
-    response_timing: import("../../types/openapi.generated").components["schemas"]["ResponseTimingSnapshot"];
-    run_failure?: null | import("../../types/openapi.generated").components["schemas"]["RunFailure"];
-    sessions: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
-    shell_commands?: import("../../types/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
-    thread_episodes: Record<string, import("../../types/openapi.generated").components["schemas"]["EpisodeSnapshot"][]>;
-    thread_event_boundary: import("../../types/openapi.generated").components["schemas"]["SessionEventBoundary"];
-    thread_event_diagnostics?: import("../../types/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-    thread_events?: Record<string, import("../../types/openapi.generated").components["schemas"]["AgentEvent"][]>;
-    thread_steering?: import("../../types/openapi.generated").components["schemas"]["ThreadSteeringRecord"][];
-    threads: import("../../types/openapi.generated").components["schemas"]["ThreadSnapshot"][];
+    messages: import("../../types/openapi.generated.js").components["schemas"]["Message"][];
+    metadata: import("../../types/openapi.generated.js").components["schemas"]["SessionMetadata"];
+    primary_tool_events?: import("../../types/openapi.generated.js").components["schemas"]["AgentEvent"][];
+    response_timing: import("../../types/openapi.generated.js").components["schemas"]["ResponseTimingSnapshot"];
+    run_failure?: null | import("../../types/openapi.generated.js").components["schemas"]["RunFailure"];
+    sessions: import("../../types/openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
+    shell_commands?: import("../../types/openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
+    thread_episodes: Record<string, import("../../types/openapi.generated.js").components["schemas"]["EpisodeSnapshot"][]>;
+    thread_event_boundary: import("../../types/openapi.generated.js").components["schemas"]["SessionEventBoundary"];
+    thread_event_diagnostics?: import("../../types/openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
+    thread_events?: Record<string, import("../../types/openapi.generated.js").components["schemas"]["AgentEvent"][]>;
+    thread_steering?: import("../../types/openapi.generated.js").components["schemas"]["ThreadSteeringRecord"][];
+    threads: import("../../types/openapi.generated.js").components["schemas"]["ThreadSnapshot"][];
     transcript_recovery_warning?: string | null;
-    worksets: import("../../types/openapi.generated").components["schemas"]["WorksetsSnapshot"];
-    workspace: import("../../types/openapi.generated").components["schemas"]["WorkspaceSnapshot"];
+    worksets: import("../../types/openapi.generated.js").components["schemas"]["WorksetsSnapshot"];
+    workspace: import("../../types/openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
 } & {
-    lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-    message_cycle?: null | import("../../types/openapi.generated").components["schemas"]["MessageCycleMetadata"];
-    message_page?: null | import("../../types/openapi.generated").components["schemas"]["MessagePageMetadata"];
-    terminal_selection_attributions?: import("../../types/openapi.generated").components["schemas"]["TerminalSelectionMessageReference"][];
+    lineage?: null | import("../../types/openapi.generated.js").components["schemas"]["SessionLineageSnapshot"];
+    message_cycle?: null | import("../../types/openapi.generated.js").components["schemas"]["MessageCycleMetadata"];
+    message_page?: null | import("../../types/openapi.generated.js").components["schemas"]["MessagePageMetadata"];
+    terminal_selection_attributions?: import("../../types/openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
 }>, Error>;
 export declare function useLoadOlderMessages(id: string): import("@tanstack/react-query").UseMutationResult<boolean, Error, void, unknown>;
 export declare function useThreadEventPages(id: string | null, threadName: string | null): import("@tanstack/react-query").UseInfiniteQueryResult<InfiniteData<{
-    diagnostics?: import("../../types/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-    events: import("../../types/openapi.generated").components["schemas"]["ThreadEventPageItem"][];
+    diagnostics?: import("../../types/openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
+    events: import("../../types/openapi.generated.js").components["schemas"]["ThreadEventPageItem"][];
     has_older: boolean;
     next_before_id?: number | null;
-    thread_event_boundary?: null | import("../../types/openapi.generated").components["schemas"]["SessionEventBoundary"];
+    thread_event_boundary?: null | import("../../types/openapi.generated.js").components["schemas"]["SessionEventBoundary"];
 }, number | null>, Error>;
 export declare function useSessionConfig(id: string | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     allow_insecure_http: boolean;
@@ -341,56 +222,56 @@ export declare function useSessionConfig(id: string | null): import("@tanstack/r
     config_version: number;
     diagnostics?: string[];
     extra_headers_json: string | null;
-    light_model?: null | import("../../types/openapi.generated").components["schemas"]["LightModelSettings"];
+    light_model?: null | import("../../types/openapi.generated.js").components["schemas"]["LightModelSettings"];
     model: string;
     orchestrator_compaction_threshold: number | null;
     reasoning_effort: string | null;
     session_id: string;
 }>, Error>;
 export declare function useCreateSession(): import("@tanstack/react-query").UseMutationResult<{
-    active_compaction?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ActiveCompactionSnapshot"];
-    active_run?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
+    active_compaction?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"];
+    active_run?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ActiveRunSnapshot"];
     active_threads?: string[];
     covered_orchestrator_steering_ids?: number[];
-    forks?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkLink"][];
+    forks?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkLink"][];
     message_created_at?: (string | null)[];
-    messages: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["Message"][];
-    metadata: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionMetadata"];
-    primary_tool_events?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["AgentEvent"][];
-    response_timing: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ResponseTimingSnapshot"];
-    run_failure?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["RunFailure"];
-    sessions: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
-    shell_commands?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
-    thread_episodes: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["EpisodeSnapshot"][]>;
-    thread_event_boundary: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionEventBoundary"];
-    thread_event_diagnostics?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-    thread_events?: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["AgentEvent"][]>;
-    thread_steering?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadSteeringRecord"][];
-    threads: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadSnapshot"][];
+    messages: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["Message"][];
+    metadata: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionMetadata"];
+    primary_tool_events?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["AgentEvent"][];
+    response_timing: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ResponseTimingSnapshot"];
+    run_failure?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["RunFailure"];
+    sessions: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
+    shell_commands?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
+    thread_episodes: Record<string, import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["EpisodeSnapshot"][]>;
+    thread_event_boundary: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionEventBoundary"];
+    thread_event_diagnostics?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
+    thread_events?: Record<string, import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["AgentEvent"][]>;
+    thread_steering?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ThreadSteeringRecord"][];
+    threads: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ThreadSnapshot"][];
     transcript_recovery_warning?: string | null;
-    worksets: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["WorksetsSnapshot"];
-    workspace: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["WorkspaceSnapshot"];
+    worksets: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["WorksetsSnapshot"];
+    workspace: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
 } & {
-    lineage?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-    message_cycle?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["MessageCycleMetadata"];
-    message_page?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["MessagePageMetadata"];
-    terminal_selection_attributions?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionMessageReference"][];
+    lineage?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionLineageSnapshot"];
+    message_cycle?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["MessageCycleMetadata"];
+    message_page?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["MessagePageMetadata"];
+    terminal_selection_attributions?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
 }, Error, {
-    allow_insecure_http?: import("../../types/openapi.generated").components["schemas"]["RequestField_bool_bool"];
-    api_key_env?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
-    backend?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
-    base_url?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
-    behavior?: import("../../types/openapi.generated").components["schemas"]["SessionBehavior"];
+    allow_insecure_http?: import("../../types/openapi.generated.js").components["schemas"]["RequestField_bool_bool"];
+    api_key_env?: import("../../types/openapi.generated.js").components["schemas"]["RequestField_String_String"];
+    backend?: import("../../types/openapi.generated.js").components["schemas"]["RequestField_String_String"];
+    base_url?: import("../../types/openapi.generated.js").components["schemas"]["RequestField_String_String"];
+    behavior?: import("../../types/openapi.generated.js").components["schemas"]["SessionBehavior"];
     cwd?: string | null;
-    extra_headers?: import("../../types/openapi.generated").components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
+    extra_headers?: import("../../types/openapi.generated.js").components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
     first_chat?: boolean;
     first_chat_same_behavior?: boolean;
-    light_model?: import("../../types/openapi.generated").components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
-    model?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
-    orchestrator_compaction_threshold?: import("../../types/openapi.generated").components["schemas"]["RequestField_u64_u64"];
+    light_model?: import("../../types/openapi.generated.js").components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
+    model?: import("../../types/openapi.generated.js").components["schemas"]["RequestField_String_String"];
+    orchestrator_compaction_threshold?: import("../../types/openapi.generated.js").components["schemas"]["RequestField_u64_u64"];
     project_id?: string | null;
-    reasoning_effort?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
-    sandbox?: import("../../types/openapi.generated").components["schemas"]["SandboxRequest"];
+    reasoning_effort?: import("../../types/openapi.generated.js").components["schemas"]["RequestField_String_String"];
+    sandbox?: import("../../types/openapi.generated.js").components["schemas"]["SandboxRequest"];
     ssh_host?: string | null;
     ssh_identity_file?: string | null;
     ssh_port?: number | null;
@@ -405,10 +286,10 @@ export interface RenameSessionVariables {
 }
 export declare function useUpdatePresentation(): import("@tanstack/react-query").UseMutationResult<{
     backend: string;
-    behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+    behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
     created_at: string;
     cwd: string;
-    forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+    forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
     last_user_prompt: string | null;
     model: string;
     model_config_error?: string | null;
@@ -432,10 +313,10 @@ export declare function useUpdatePresentation(): import("@tanstack/react-query")
 export declare function useTogglePin(): {
     toggle: (summary: SessionSummarySnapshot) => Promise<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -465,10 +346,10 @@ export declare function useTogglePin(): {
     status: "idle";
     mutate: import("@tanstack/react-query").UseMutateFunction<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -496,10 +377,10 @@ export declare function useTogglePin(): {
     submittedAt: number;
     mutateAsync: import("@tanstack/react-query").UseMutateAsyncFunction<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -522,10 +403,10 @@ export declare function useTogglePin(): {
 } | {
     toggle: (summary: SessionSummarySnapshot) => Promise<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -555,10 +436,10 @@ export declare function useTogglePin(): {
     status: "pending";
     mutate: import("@tanstack/react-query").UseMutateFunction<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -586,10 +467,10 @@ export declare function useTogglePin(): {
     submittedAt: number;
     mutateAsync: import("@tanstack/react-query").UseMutateAsyncFunction<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -612,10 +493,10 @@ export declare function useTogglePin(): {
 } | {
     toggle: (summary: SessionSummarySnapshot) => Promise<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -645,10 +526,10 @@ export declare function useTogglePin(): {
     status: "error";
     mutate: import("@tanstack/react-query").UseMutateFunction<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -676,10 +557,10 @@ export declare function useTogglePin(): {
     submittedAt: number;
     mutateAsync: import("@tanstack/react-query").UseMutateAsyncFunction<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -702,10 +583,10 @@ export declare function useTogglePin(): {
 } | {
     toggle: (summary: SessionSummarySnapshot) => Promise<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -727,10 +608,10 @@ export declare function useTogglePin(): {
     }>;
     data: {
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -759,10 +640,10 @@ export declare function useTogglePin(): {
     status: "success";
     mutate: import("@tanstack/react-query").UseMutateFunction<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -790,10 +671,10 @@ export declare function useTogglePin(): {
     submittedAt: number;
     mutateAsync: import("@tanstack/react-query").UseMutateAsyncFunction<{
         backend: string;
-        behavior?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionBehavior"];
+        behavior?: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkOrigin"];
+        forked_from?: null | import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionForkOrigin"];
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -828,7 +709,7 @@ export interface MoveSessionOrderVariables {
  */
 export declare function useMoveSessionOrder(): import("@tanstack/react-query").UseMutationResult<{
     pinned: boolean;
-    sessions: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
+    sessions: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
 } | null, Error, MoveSessionOrderVariables, unknown>;
 export declare function useUpdateConfig(): import("@tanstack/react-query").UseMutationResult<void, Error, {
     id: string;
@@ -867,7 +748,7 @@ export declare function useCompactSession(): import("@tanstack/react-query").Use
     status: "compacted";
 } | {
     compaction_id: string;
-    reason: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["CompactionSkipReason"];
+    reason: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["CompactionSkipReason"];
     status: "unchanged";
 }, Error, string, unknown>;
 /**
@@ -913,13 +794,7 @@ export declare function useDismissSessionFork(): import("@tanstack/react-query")
     forkId: string;
 }, unknown>;
 export declare function useVisibleSessions(): {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     error: Error;
     isError: true;
     isPending: false;
@@ -942,29 +817,11 @@ export declare function useVisibleSessions(): {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 } | {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     error: null;
     isError: false;
     isPending: false;
@@ -987,29 +844,11 @@ export declare function useVisibleSessions(): {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 } | {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     error: Error;
     isError: true;
     isPending: false;
@@ -1032,29 +871,11 @@ export declare function useVisibleSessions(): {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 } | {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     error: null;
     isError: false;
     isPending: true;
@@ -1077,29 +898,11 @@ export declare function useVisibleSessions(): {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 } | {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     error: null;
     isError: false;
     isPending: true;
@@ -1122,29 +925,11 @@ export declare function useVisibleSessions(): {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 } | {
-    data: {
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[] | undefined;
+    data: ManagedSessionSummary[] | undefined;
     isError: false;
     error: null;
     isPending: false;
@@ -1167,19 +952,7 @@ export declare function useVisibleSessions(): {
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>, Error>>;
+    refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<ManagedSessionSummary[]>, Error>>;
     fetchStatus: import("@tanstack/query-core").FetchStatus;
-    promise: Promise<NoInfer<{
-        active: boolean;
-        active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
-        summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
-    }[]>>;
+    promise: Promise<NoInfer<ManagedSessionSummary[]>>;
 };

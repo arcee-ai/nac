@@ -1,4 +1,4 @@
-import { PopoverPlacement } from "../../atoms";
+import { PopoverPlacement } from "../../atoms/index.js";
 /**
  * The branch chip in the session header, opening a list of local branches with an
  * escape hatch for making a new one. Switching is refused while an agent could

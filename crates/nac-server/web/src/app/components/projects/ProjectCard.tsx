@@ -1,3 +1,4 @@
+import type { SessionSummaryView as SessionSummarySnapshot } from "@/app/features/public-native/collectionViews";
 import { useRef, useState } from "react";
 
 import {
@@ -17,7 +18,6 @@ import { cn } from "@/app/lib/cn";
 import { formatCostMicros, isActiveRun, sessionEnvLabel } from "@/app/lib/format";
 import type { ProjectListItem } from "@/app/lib/projects";
 import { providerLabel } from "@/app/lib/providers";
-import type { SessionSummarySnapshot } from "@/app/types/api";
 
 // Figma ProjectCard has a full-bleed "Surface" layer below the content that
 // carries the interaction state. Tokens are applied as CSS variables because the
@@ -56,13 +56,14 @@ function surfaceToken({
  * is the only place the environment is recorded.
  */
 interface CardFacts {
+  presentation: "native" | "public";
   id: string;
   orphan: boolean;
   title: string;
-  cwd: string;
+  cwd?: string;
   pinned: boolean;
   running: boolean;
-  costMicros: number;
+  costMicros: number | string | bigint | null;
   /** "3 Sessions" for a project. A loose chat rolls nothing up, so it has none. */
   countLabel: string | null;
   /** Drives the run badge next to the title; a loose chat only ever runs once. */
@@ -80,6 +81,7 @@ function factsFor(
     const { project, sessions, running, totalCostMicros } = item.entry;
     const live = sessions.find((entry) => isActiveRun(entry.active_run));
     return {
+      presentation: project.presentation === "public" ? "public" : "native",
       id: project.project_id,
       orphan: false,
       title: project.name,
@@ -95,6 +97,7 @@ function factsFor(
   const { summary, active_run } = item.session;
   const running = isActiveRun(active_run);
   return {
+    presentation: summary.presentation === "public" ? "public" : "native",
     id: summary.session_id,
     orphan: true,
     title: sessionTitle(summary),
@@ -102,7 +105,7 @@ function factsFor(
     // Pinning is a project affordance; an unassigned chat is never pinned.
     pinned: false,
     running,
-    costMicros: summary.total_cost_micros ?? 0,
+    costMicros: summary.total_cost_micros ?? null,
     countLabel: null,
     runningCount: running ? 1 : 0,
     representative: summary,
@@ -110,7 +113,8 @@ function factsFor(
 }
 
 function Metrics({ facts }: { facts: CardFacts }) {
-  const costLabel = facts.costMicros > 0 ? formatCostMicros(facts.costMicros) : null;
+  const formatted = formatCostMicros(facts.costMicros);
+  const costLabel = formatted === "--" ? null : formatted;
   return (
     <div className="flex items-center gap-2.5 shrink-0 min-w-0">
       {costLabel ? (
@@ -126,6 +130,7 @@ function Metrics({ facts }: { facts: CardFacts }) {
 }
 
 function Provenance({ facts }: { facts: CardFacts }) {
+  if (facts.presentation === "public") return null;
   const provider = providerLabel(facts.representative?.backend);
   return (
     <div className="flex flex-wrap items-center gap-2.5 min-w-0 whitespace-nowrap">
@@ -259,9 +264,10 @@ export function ProjectCard({
   // user's focus, which is also how the design shows the Focused state. A touch
   // screen never reaches that state, so the actions stay out and the
   // provenance moves up under the title instead.
-  const showActions = !isDesktop || hover || focused || selected;
-  const showDesktopHandle = Boolean(reorder) && isDesktop;
-  const showMobileReorder = Boolean(reorder) && !isDesktop;
+  const showActions =
+    facts.presentation !== "public" && (!isDesktop || hover || focused || selected);
+  const showDesktopHandle = facts.presentation !== "public" && Boolean(reorder) && isDesktop;
+  const showMobileReorder = facts.presentation !== "public" && Boolean(reorder) && !isDesktop;
   // Touch / narrow layouts stick "hover" after a tap; only desktop gets hover bg.
   const surfaceHover = isDesktop && hover;
 

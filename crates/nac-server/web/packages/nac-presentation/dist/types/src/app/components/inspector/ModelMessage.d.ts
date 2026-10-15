@@ -1,6 +1,6 @@
-import { type FilesPanelLink } from "./SnapshotBadge";
-import { type ModelTurn } from "../../lib/transcript";
-import type { SessionForkLink, WorkspaceRevision } from "../../types/api";
+import { type FilesPanelLink } from "./SnapshotBadge.js";
+import { type ModelTurn } from "../../lib/transcript.js";
+import type { SessionForkLink, WorkspaceRevision } from "../../types/api.js";
 interface ModelMessageProps {
     turn: ModelTurn;
     model: string;

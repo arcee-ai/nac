@@ -1,4 +1,4 @@
-import { type ConfigurationsPanelInitial, type LaunchModelSelection } from "./ConfigurationsPanel";
+import { type ConfigurationsPanelInitial, type LaunchModelSelection } from "./ConfigurationsPanel.js";
 /**
  * The ordinary primary-model control: one catalog spanning every configured
  * provider. Provider connection and advanced presets intentionally live

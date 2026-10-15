@@ -1,4 +1,4 @@
-import type { SessionSnapshotResponse } from "../../types/api";
+import type { SessionSnapshotResponse } from "../../types/api.js";
 /**
  * Retained workstreams and their episodes, merged with the live SSE state so a
  * running thread shows the commands it is issuing before any episode is

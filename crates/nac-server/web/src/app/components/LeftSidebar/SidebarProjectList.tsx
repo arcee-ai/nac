@@ -1,3 +1,7 @@
+import type {
+  ManagedSessionView as ManagedSessionSummary,
+  ProjectView as ProjectRecord,
+} from "@/app/features/public-native/collectionViews";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -19,7 +23,6 @@ import { groupByRecency, projectEntries } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { sessionBehaviorIcon, sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
-import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 /** Date buckets only shift once a day. */
 const RECENCY_TICK_MS = 60_000;

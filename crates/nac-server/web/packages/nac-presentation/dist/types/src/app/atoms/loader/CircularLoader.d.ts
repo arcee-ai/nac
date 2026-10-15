@@ -1,5 +1,5 @@
 import React from "react";
-import { LoaderSize } from "./index";
+import { LoaderSize } from "./index.js";
 /** Stroke colour for the arc; mirrors `LoaderVariant` but as a stroke class. */
 export declare enum CircularLoaderVariant {
     Brand = "stroke-[var(--color-fill-accent-primary)]",

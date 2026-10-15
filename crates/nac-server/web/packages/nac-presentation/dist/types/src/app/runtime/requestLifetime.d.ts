@@ -1,10 +1,11 @@
-import { NacTransport, type NacHttpTransport, type NacRequestOptions, type NacStreamContext, type CommandAdmission } from "../services/nacClient";
+import { NacTransport, type NacHttpTransport, type NacRequestOptions, type NacStreamContext, type CommandAdmission } from "../services/nacClient.js";
 /** Cancel waiting on adapters which may ignore AbortSignal, and discard their late results. */
 export declare function withinLifetime<T>(signal: AbortSignal, read: () => Promise<T>): Promise<T>;
 /** Uses the existing transport, including fresh headers, error decoding and admission. */
 export declare class LifetimeTransport extends NacTransport {
     private readonly source;
     private readonly lifetime;
+    get jsonResponseDecodingVersion(): number;
     constructor(source: NacHttpTransport, lifetime: AbortSignal);
     url(path: string): string;
     eventSourceInit(): EventSourceInit;

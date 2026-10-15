@@ -1,4 +1,4 @@
-import type { ManagedUpgradeOperation, ManagedUpgradeSnapshot } from "./upgrade";
+import type { ManagedUpgradeOperation, ManagedUpgradeSnapshot } from "./upgrade.js";
 export declare class ManagedUpgradeContractError extends Error {
     constructor();
 }

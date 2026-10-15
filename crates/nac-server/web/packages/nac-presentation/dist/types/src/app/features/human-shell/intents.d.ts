@@ -1,4 +1,4 @@
-import type { ShellCommandRequest } from "../../types/api";
+import type { ShellCommandRequest } from "../../types/api.js";
 export interface ShellIntent {
     readonly request: Readonly<ShellCommandRequest>;
     readonly phase: "dispatching" | "uncertain";

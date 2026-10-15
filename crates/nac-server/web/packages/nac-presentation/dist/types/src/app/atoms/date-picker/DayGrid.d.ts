@@ -1,5 +1,5 @@
 import React from "react";
-import { type CalendarDay } from "./utils";
+import { type CalendarDay } from "./utils.js";
 export interface DateRange {
     from?: Date;
     to?: Date;

@@ -1,4 +1,4 @@
-import { type ManagedTab } from "../model";
+import { type ManagedTab } from "../model.js";
 export declare function ManagedHostModal({ open, onClose, tab, onTabChange, onGitHubConnected, }: {
     open: boolean;
     onClose: () => void;

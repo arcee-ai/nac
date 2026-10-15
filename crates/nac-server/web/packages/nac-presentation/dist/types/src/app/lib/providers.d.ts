@@ -1,4 +1,4 @@
-import type { BackendKind, ManagedAuthProvider } from "../types/api";
+import type { BackendKind, ManagedAuthProvider } from "../types/api.js";
 /** Display order shared by every provider list in the UI. */
 export declare const PROVIDER_KINDS: BackendKind[];
 /** Stable rank for sorting provider lists; unknown backends sink to the end. */

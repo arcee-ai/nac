@@ -4,7 +4,7 @@ export declare const terminalKeys: {
 };
 export declare function useUserTerminals(sessionId: string): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     protocol_version: number;
-    terminals: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["UserTerminalResponse"][];
+    terminals: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["UserTerminalResponse"][];
 }>, Error>;
 export declare function useUserTerminalStatus(sessionId: string, id: string): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     alive: boolean;
@@ -31,7 +31,7 @@ export declare const executionKeys: {
     list: (sessionId: string) => readonly ["session", string, "executions"];
 };
 export declare function useExecutions(sessionId: string): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    executions: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ExecutionStatus"][];
+    executions: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ExecutionStatus"][];
     protocol_version: number;
 }>, Error>;
 export declare function useStopExecution(sessionId: string, id: string): import("@tanstack/react-query").UseMutationResult<void, Error, void, unknown>;

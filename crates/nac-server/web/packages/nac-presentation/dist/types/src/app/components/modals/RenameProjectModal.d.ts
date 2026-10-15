@@ -1,4 +1,4 @@
-import type { ProjectRecord } from "../../types/api";
+import type { ProjectView as ProjectRecord } from "../../features/public-native/collectionViews.js";
 /** Mounted only while open, so the fields start from the current record. */
 export declare function RenameProjectModal({ open, onClose, project, }: {
     open: boolean;

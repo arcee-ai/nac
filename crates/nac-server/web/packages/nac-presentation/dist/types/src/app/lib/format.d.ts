@@ -1,4 +1,5 @@
-import type { ActiveRunSnapshot, ManagedSessionSummary, SessionSnapshotResponse, SessionSummarySnapshot, TokenUsage } from "../types/api";
+import type { ManagedSessionView as ManagedSessionSummary, SessionSummaryView as SessionSummarySnapshot } from "../features/public-native/collectionViews.js";
+import type { ActiveRunSnapshot, SessionSnapshotResponse, TokenUsage } from "../types/api.js";
 export declare function shortId(id: string | null | undefined): string;
 export declare const INVOKED_SKILLS_OPEN = "<invoked_skills>";
 export declare const INVOKED_SKILLS_CLOSE = "</invoked_skills>";
@@ -47,9 +48,9 @@ export declare function sessionTitle(summary: SessionSummarySnapshot | null | un
  * UTC, so they sort correctly without being parsed into dates first.
  */
 export declare function numberUntitledSessions(sessions: ManagedSessionSummary[]): Map<string, string>;
-export declare function formatTokens(n: number | null | undefined): string;
+export declare function formatTokens(n: number | string | null | undefined): string;
 /** Token counts for the chat input bar, e.g. 185000 -> "185K", 14.3e6 -> "14.3M". */
-export declare function formatTokensCompact(n: number | null | undefined): string;
+export declare function formatTokensCompact(n: number | string | null | undefined): string;
 /**
  * Spend wherever it is shown — the chat input bar and the session cards.
  * Anything that is not a positive amount reads as "--": zero means the catalog
@@ -65,7 +66,7 @@ export declare function formatTokensCompact(n: number | null | undefined): strin
  * The space is non-breaking: the two halves say nothing apart, and the bar this
  * sits in is tight enough to wrap them.
  */
-export declare function formatCostMicros(micros: number | null | undefined): string;
+export declare function formatCostMicros(micros: number | string | bigint | null | undefined): string;
 /** Clock for a running session card: MM:SS, widening to H:MM:SS past an hour. */
 export declare function formatClock(ms: number | null | undefined): string;
 /**
@@ -89,7 +90,7 @@ export type SessionEnv = (typeof SESSION_ENVS)[number];
  * Where the session runs. Sandbox and ssh are mutually exclusive in practice,
  * and sandbox wins because it is the more specific isolation.
  */
-export declare function sessionEnvLabel(summary: SessionSummarySnapshot | null | undefined): SessionEnv;
+export declare function sessionEnvLabel(summary: SessionSummarySnapshot | null | undefined): SessionEnv | null;
 /** A truthy active run without a terminal state still counts as running. */
 export declare function isActiveRun(activeRun: (ActiveRunSnapshot & {
     state?: string;

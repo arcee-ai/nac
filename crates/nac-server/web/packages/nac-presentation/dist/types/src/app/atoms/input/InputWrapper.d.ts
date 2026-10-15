@@ -1,5 +1,5 @@
 import type React from "react";
-import { type HoverHintConfig } from "../label";
+import { type HoverHintConfig } from "../label/index.js";
 export interface InputWrapperProps {
     label?: React.ReactNode;
     required?: boolean;

@@ -1,9 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
-import { NacClient } from "../services/nacClient";
-import { createNativeApi } from "../services/api";
-import { type SessionStreamHandlers, type SessionStreamOptions } from "../services/eventStream";
-import { createPresentationStores } from "./presentationStores";
-import { TerminalInputRecovery } from "../features/terminal/inputRecovery";
+import { NacClient } from "../services/nacClient.js";
+import { createNativeApi } from "../services/api.js";
+import { type SessionStreamHandlers, type SessionStreamOptions } from "../services/eventStream.js";
+import { createPresentationStores } from "./presentationStores.js";
+import { TerminalInputRecovery } from "../features/terminal/inputRecovery.js";
+import { type PublicNacPresentationSource, type PublicNacApi } from "../../../packages/nac-client/src/publicNacApi.js";
 /** Opaque consumer bindings, never credentials or native admission authority. */
 export interface NativeRuntimeScope {
     owner: string;
@@ -26,6 +27,8 @@ export interface NativeRuntimeOptions {
     eventSource?: SessionStreamOptions["eventSource"];
     /** Hosted reads default to no replay; standalone retains its one retry. */
     queryRetry?: false | 1;
+    /** Explicit public wire family on the SAME admitted transport; never an authorization flag. */
+    publicPresentation?: PublicNacPresentationSource;
 }
 export declare class NativeRuntime {
     readonly id: number;
@@ -36,6 +39,7 @@ export declare class NativeRuntime {
     readonly stores: ReturnType<typeof createPresentationStores>;
     readonly queryClient: QueryClient;
     readonly terminalInputRecovery: TerminalInputRecovery;
+    readonly publicPresentation: PublicNacApi | undefined;
     private readonly controller;
     private readonly disposers;
     private readonly listeners;
@@ -53,5 +57,5 @@ export declare class NativeRuntime {
 }
 export declare function createNativeRuntime(options: NativeRuntimeOptions): NativeRuntime;
 export declare const standaloneRuntime: RuntimeDependencies;
-export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery">>;
+export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "publicPresentation">>;
 export declare function runtimeForQueryClient(client: QueryClient): RuntimeDependencies;

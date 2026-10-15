@@ -1,4 +1,4 @@
-import type { ProjectRecord } from "../../types/api";
+import type { ProjectView as ProjectRecord } from "../../features/public-native/collectionViews.js";
 export declare function DeleteProjectModal({ open, onClose, project, }: {
     open: boolean;
     onClose: () => void;

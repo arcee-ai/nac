@@ -86,13 +86,17 @@ try {
   await writeFile(
     path.join(consumer, "runtime.mjs"),
     `import assert from "node:assert/strict";
-import { NAC_HTTP_CLIENT_VERSION, createNacClient, createNacApi, NAC_API_SURFACE, UserTerminalConnection, UserTerminalInputPump, NAC_TERMINAL_PROTOCOL_VERSION, createExecutionConnection } from ${JSON.stringify(packageName)};
+import { NAC_HTTP_CLIENT_VERSION, createNacClient, createNacApi, createPublicNacApi, createPublicNacCreationApi, subscribeToSessionEventsWithWire, exactSessionCursorProtocol, NAC_API_SURFACE, UserTerminalConnection, UserTerminalInputPump, NAC_TERMINAL_PROTOCOL_VERSION, createExecutionConnection } from ${JSON.stringify(packageName)};
 
 assert.equal(NAC_HTTP_CLIENT_VERSION, 1);
 assert.equal(NAC_TERMINAL_PROTOCOL_VERSION, 1);
 assert.equal(typeof UserTerminalConnection, "function");
 assert.equal(typeof createExecutionConnection, "function");
 assert.equal(typeof UserTerminalInputPump, "function");
+assert.equal(typeof createPublicNacApi, "function");
+assert.equal(typeof createPublicNacCreationApi, "function");
+assert.equal(typeof subscribeToSessionEventsWithWire, "function");
+assert.equal(exactSessionCursorProtocol.query({epoch: "epoch", sequence: "18446744073709551615"}).after_sequence_id, "18446744073709551615");
 const client = createNacClient({
   endpoint: "https://nac.example/runtime/v1",
   credentials: "omit",
@@ -101,6 +105,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
+assert.equal(client.transport.jsonResponseDecodingVersion, 1);
 assert.equal(Object.keys(NAC_API_SURFACE).length, 146);
 for (const owner of Object.values(NAC_API_SURFACE)) {
   if (owner.startsWith("api.")) assert.equal(typeof api[owner.slice(4)], "function", owner);
@@ -131,6 +136,15 @@ assert.deepEqual(context, {
     `import {
   createNacClient,
   createNacApi,
+  createPublicNacApi,
+  createPublicNacCreationApi,
+  type PublicNacCreationSource,
+  type PublicNacCreateSession,
+  type PublicNacCreatedSession,
+  type PublicNacRuntimeMetadata,
+  type PublicNacPresentationSource,
+  type PublicNacSessionConfig,
+  type PublicNacModelCatalog,
   type ProjectRecord,
   type SessionGoalRecord,
   type PermissionStateResponse,
@@ -149,9 +163,35 @@ assert.deepEqual(context, {
   type InputDeliveryReceipt,
   type ExecutionHistoryResponse,
 } from ${JSON.stringify(packageName)};
+import type { NativeRuntimeOptions } from ${JSON.stringify(`${packageName}/presentation`)};
 
 const client = createNacClient({ endpoint: "/nac", credentials: "same-origin" });
 const api = createNacApi(client);
+declare const publicSource: PublicNacPresentationSource;
+declare const options: NativeRuntimeOptions;
+options.publicPresentation = publicSource;
+// @ts-expect-error a flag is not an explicit public wire source
+options.publicPresentation = true;
+const publicApi = createPublicNacApi(client, publicSource);
+const publicConfig: Promise<PublicNacSessionConfig> = publicApi.getSessionConfig("session");
+void publicConfig;
+declare const creationSource: PublicNacCreationSource;
+declare const creationBody: PublicNacCreateSession;
+const creationApi = createPublicNacCreationApi(client, creationSource);
+const created: Promise<CommandAdmission<PublicNacCreatedSession>> = creationApi.createSession(creationBody);
+const runtimeMetadata: Promise<PublicNacRuntimeMetadata> = creationApi.getRuntimeMetadata();
+void created; void runtimeMetadata;
+// @ts-expect-error creation ports do not install the six-read presentation contract
+options.publicPresentation = creationSource;
+// @ts-expect-error schema revisions remain exact strings
+const roundedSchema: PublicNacRuntimeMetadata["schema_version"] = 9007199254740993;
+void roundedSchema;
+declare const price: PublicNacModelCatalog["providers"][number]["models"][number]["cost"]["input"];
+const exactPriceText: string = price.value;
+void exactPriceText;
+// @ts-expect-error public price tokens retain the actual LosslessNumber type
+const roundedPrice: number = price;
+void roundedPrice;
 const projects: Promise<ProjectRecord> = api.createProject({ name: "typed", cwd: "/repo" });
 const goal: Promise<SessionGoalRecord | null> = api.getGoal("session");
 const permissions: Promise<PermissionStateResponse> = api.getPermissions("session");
@@ -216,7 +256,11 @@ dispose();
   );
 
   const lock = JSON.parse(await readFile(path.join(consumer, "package-lock.json"), "utf8"));
-  assert.equal(lock.packages["node_modules/@arcee-ai/nac-client-all-121"].version, "0.0.0-all-121");
+  assert.equal(
+    lock.packages["node_modules/@arcee-ai/nac-client-all-121"].version,
+    "0.0.0-public-native-v1.2",
+  );
+  assert.equal(lock.packages["node_modules/lossless-json"].version, "4.3.0");
   console.log(`verified reproducible ${packageName} artifact ${first.report.integrity}`);
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });

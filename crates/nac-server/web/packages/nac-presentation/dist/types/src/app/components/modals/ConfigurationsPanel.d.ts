@@ -1,4 +1,4 @@
-import type { BackendKind, CreateModelConfigurationRequest, LightModelSettings } from "../../types/api";
+import type { BackendKind, CreateModelConfigurationRequest, LightModelSettings } from "../../types/api.js";
 /** What the panel hands the launch form once a provider setup is complete. */
 export type LaunchModelSelection = {
     kind: "save";

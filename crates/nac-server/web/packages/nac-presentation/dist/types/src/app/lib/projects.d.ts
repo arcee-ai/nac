@@ -1,4 +1,4 @@
-import type { ManagedSessionSummary, ProjectRecord } from "../types/api";
+import type { ManagedSessionView as ManagedSessionSummary, ProjectView as ProjectRecord } from "../features/public-native/collectionViews.js";
 /** Delegated descendants are reachable through their parent's hierarchy only. */
 export declare function primarySessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[];
 /** A project together with the sessions that belong to it. */
@@ -8,9 +8,9 @@ export interface ProjectEntry {
     /** How many of those sessions have a live run. */
     running: number;
     /** Micro-USD across the project, summed from the sessions. */
-    totalCostMicros: number;
+    totalCostMicros: number | bigint | null;
     /** Newest session activity, falling back to the project's own timestamp. */
-    updatedAt: string;
+    updatedAt: string | null;
 }
 export declare function newestPrimarySessionForProject(sessions: ManagedSessionSummary[], projectId: string): ManagedSessionSummary | null;
 /**
@@ -44,7 +44,7 @@ export declare function projectListItems(projects: ProjectRecord[], sessions: Ma
 export declare function findProject(projects: ProjectRecord[], projectId: string | null | undefined): ProjectRecord | null;
 /** The four fields the backend treats as one SSH/workspace location. */
 export type SessionLocation = {
-    cwd: string;
+    cwd?: string;
     ssh_host?: string | null;
     ssh_port?: number | null;
     ssh_identity_file?: string | null;
@@ -62,7 +62,7 @@ export declare function projectLocationPayload(summary: SessionLocation): {
  * because the session keeps its own `cwd` and the backend refuses a mismatch.
  */
 export declare function projectForSessionLocation(projects: ProjectRecord[], summary: SessionLocation | null | undefined): ProjectRecord | null;
-export type RecencyBucket = "Pinned" | "Today" | "Yesterday" | "This week" | "This month" | "Older";
+export type RecencyBucket = "Pinned" | "Today" | "Yesterday" | "This week" | "This month" | "Older" | "Unknown";
 export interface RecencyGroup<T> {
     label: RecencyBucket;
     items: T[];
@@ -73,6 +73,6 @@ export interface RecencyGroup<T> {
  * order within each bucket is whatever the caller passed in.
  */
 export declare function groupByRecency<T>(items: T[], describe: (item: T) => {
-    updatedAt: string;
+    updatedAt: string | null;
     pinned: boolean;
 }, now: number): RecencyGroup<T>[];

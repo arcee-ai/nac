@@ -1,5 +1,5 @@
-import type { TranscriptTurn } from "./transcript";
-import type { WorkspaceRevision } from "../types/api";
+import type { TranscriptTurn } from "./transcript.js";
+import type { WorkspaceRevision } from "../types/api.js";
 /** How a revision is named once it is no longer the working tree. */
 export declare const revisionTitle: (ordinal: number) => string;
 /** The list arrives newest first, so the oldest revision is number one. */

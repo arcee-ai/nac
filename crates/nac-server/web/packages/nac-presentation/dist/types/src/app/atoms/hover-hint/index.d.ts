@@ -1,5 +1,5 @@
 import type React from "react";
-import { AnchorPlacement } from "../../lib/anchor";
+import { AnchorPlacement } from "../../lib/anchor.js";
 export declare enum HoverHintSize {
     Small = 16,
     Medium = 20,

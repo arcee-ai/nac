@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import type { McpLibraryEntry } from "../../../types/api";
+import type { McpLibraryEntry } from "../../../types/api.js";
 /**
  * The curated catalog. Embedded in the binary today; entries will later come
  * from a remote index, so the picker treats the list as data either way.

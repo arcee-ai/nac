@@ -1,5 +1,5 @@
 import type React from "react";
-import { ButtonContent, ButtonVariant } from "./index";
+import { ButtonContent, ButtonVariant } from "./index.js";
 interface StickyButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "size"> {
     variant?: ButtonVariant;
     content?: ButtonContent;

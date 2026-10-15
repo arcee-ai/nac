@@ -1,4 +1,4 @@
-import type { ApiSchema } from "./openapi.generated";
+import type { ApiSchema } from "./openapi.generated.js";
 /** `nac_core::model::types::BackendKind`, serialized kebab-case. */
 export type BackendKind = ApiSchema<"BackendKind">;
 /** `nac_core::model::types::ReasoningEffort`, serialized lowercase. */

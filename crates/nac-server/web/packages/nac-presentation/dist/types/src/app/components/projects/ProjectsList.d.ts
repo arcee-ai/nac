@@ -1,4 +1,4 @@
-import { type ProjectListItem } from "../../lib/projects";
+import { type ProjectListItem } from "../../lib/projects.js";
 interface ProjectsListProps {
     items: ProjectListItem[];
     /** Project currently open, or the session id when an orphan is open. */

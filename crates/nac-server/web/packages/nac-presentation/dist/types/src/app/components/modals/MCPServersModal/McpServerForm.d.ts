@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import type { McpLibraryEntry, McpServerView } from "../../../types/api";
+import type { McpLibraryEntry, McpServerView } from "../../../types/api.js";
 export declare function McpServerForm({ record, template, libraryEntry, onBack, onClose, onSaved, onDeleted, setFooter, }: {
     record: McpServerView | null;
     template: McpLibraryEntry | null;

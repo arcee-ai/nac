@@ -1,4 +1,4 @@
-import { type ManagedUpgradeBlocker } from "../upgrade";
+import { type ManagedUpgradeBlocker } from "../upgrade.js";
 export type UpgradeBlockerSettlement = "requesting" | "settling" | "failed";
 /**
  * Browser controller for the externally-owned durable upgrade. It never
@@ -7,7 +7,7 @@ export type UpgradeBlockerSettlement = "requesting" | "settling" | "failed";
  * the ordinary NAC operations named by the sanitized facade projection.
  */
 export declare function useManagedUpgrade(): {
-    snapshot: import("@tanstack/react-query").UseQueryResult<NoInfer<import("../upgrade").ManagedUpgradeSnapshot>, Error>;
+    snapshot: import("@tanstack/react-query").UseQueryResult<NoInfer<import("../upgrade.js").ManagedUpgradeSnapshot>, Error>;
     confirmationOpen: boolean;
     startError: string;
     startPending: boolean;

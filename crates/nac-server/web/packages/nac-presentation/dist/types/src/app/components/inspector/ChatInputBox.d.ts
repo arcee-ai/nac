@@ -1,4 +1,5 @@
-import type { ManagedSessionSummary, SessionSnapshotResponse } from "../../types/api";
+import type { ManagedSessionView as ManagedSessionSummary } from "../../features/public-native/collectionViews.js";
+import type { SessionSnapshotResponse } from "../../types/api.js";
 interface ChatInputBoxProps {
     sessionId: string;
     snapshot: SessionSnapshotResponse | null;

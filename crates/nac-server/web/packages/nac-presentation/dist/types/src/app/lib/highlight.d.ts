@@ -1,4 +1,4 @@
-import type { WorkspaceDiffLine, WorkspaceDiffSection } from "../types/api";
+import type { WorkspaceDiffLine, WorkspaceDiffSection } from "../types/api.js";
 export interface CodeToken {
     text: string;
     /** CSS color, typically a `var(--color-…)` from the nac theme. */

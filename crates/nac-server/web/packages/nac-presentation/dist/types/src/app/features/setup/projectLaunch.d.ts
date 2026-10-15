@@ -1,7 +1,7 @@
-import type { LaunchModelSelection } from "../../components/modals/ConfigurationsPanel";
-import type { LightSelection } from "../../components/modals/LightModelSection";
-import { type UiPolicy } from "../ui-policy/policy";
-import type { CreateSessionRequest, LightModelSettings, SessionBehavior } from "../../types/api";
+import type { LaunchModelSelection } from "../../components/modals/ConfigurationsPanel.js";
+import type { LightSelection } from "../../components/modals/LightModelSection.js";
+import { type UiPolicy } from "../ui-policy/policy.js";
+import type { CreateSessionRequest, LightModelSettings, SessionBehavior } from "../../types/api.js";
 export interface SandboxOptions {
     noMount: boolean;
     image: string;

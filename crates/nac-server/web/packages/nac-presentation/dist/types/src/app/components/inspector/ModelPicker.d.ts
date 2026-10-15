@@ -1,4 +1,4 @@
-import type { SessionMetadata } from "../../types/api";
+import type { SessionMetadata } from "../../types/api.js";
 /**
  * The session's current model and reasoning, directly switchable beside the
  * composer from one catalog spanning every connected provider. Cross-provider

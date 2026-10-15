@@ -1,4 +1,4 @@
-import type { LightModelSettings, SessionBehavior } from "../../types/api";
+import type { LightModelSettings, SessionBehavior } from "../../types/api.js";
 export type LightMode = "single" | "dual";
 /**
  * What the section reports upward. `light` is null while the dual form is

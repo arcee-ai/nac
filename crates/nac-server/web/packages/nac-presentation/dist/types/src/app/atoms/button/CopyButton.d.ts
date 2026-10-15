@@ -1,6 +1,6 @@
 import type React from "react";
-import { AnchorPlacement } from "../../lib/anchor";
-import { ButtonContent, ButtonSize, ButtonVariant } from "./index";
+import { AnchorPlacement } from "../../lib/anchor.js";
+import { ButtonContent, ButtonSize, ButtonVariant } from "./index.js";
 interface CopyButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> {
     /** Text placed on the clipboard when the button is pressed. */
     value: string;

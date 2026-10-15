@@ -1,5 +1,5 @@
-import type { LaunchModelSelection } from "../../components/modals/ConfigurationsPanel";
-import type { ModelConfigurationRecord } from "../../types/api";
+import type { LaunchModelSelection } from "../../components/modals/ConfigurationsPanel.js";
+import type { ModelConfigurationRecord } from "../../types/api.js";
 /** A persisted preset carries selectors, never credential values. */
 export declare function savedModelSelection(record: ModelConfigurationRecord): Extract<LaunchModelSelection, {
     kind: "resolved";

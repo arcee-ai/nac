@@ -19,6 +19,11 @@ mod mcp_catalog_api;
 mod mcp_runtime_api;
 mod orchestration;
 mod revert;
+pub use application::managed_locations::{
+    ManagedDirectoryIdentity, ManagedLocationBinding, ManagedLocationFact,
+    ManagedLocationFactError, ManagedLocationResolution, ManagedLocationSelector,
+    ManagedProjectLocationIdentity,
+};
 pub(crate) use managed_control::running_target as managed_running_target;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -40,6 +45,14 @@ pub use delivery::credentials::{
 };
 pub use delivery::delegation::{StartManagedOrchestratorRequest, StartTraditionalChildRequest};
 pub use delivery::error::ApiError;
+pub use delivery::managed_fact_listener::ManagedFactListenerOptions;
+pub use delivery::managed_location_facts::{
+    serve_managed_location_facts, MANAGED_LOCATION_FACT_PATH, MANAGED_LOCATION_FACT_PURPOSE,
+};
+pub use delivery::managed_runtime_tls::{
+    denied_runtime_router, mediated_only_plaintext_router, serve_denied_runtime,
+    RuntimeTlsIdentity, RuntimeTlsListener,
+};
 pub use delivery::managed_secrets::{
     ManagedSecretList, ManagedSecretSummary, PutManagedSecretRequest,
 };
@@ -53,7 +66,8 @@ pub use delivery::projects::{
     UpdateProjectRequest,
 };
 pub use delivery::server::{
-    openapi_document, router, serve, serve_with, serve_with_policy, BindPolicy, ServerOptions,
+    openapi_document, router, serve, serve_with, serve_with_policy,
+    serve_with_policy_and_managed_facts, BindPolicy, ServerOptions,
 };
 pub use delivery::sessions::{
     ListSessionsQuery, ReorderSessionsRequest, ReorderSessionsResponse,

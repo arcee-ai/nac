@@ -1,5 +1,5 @@
 import React from "react";
-import { type DateRange } from "./DayGrid";
+import { type DateRange } from "./DayGrid.js";
 export type { DateRange };
 interface DatePickerProps {
     /** Single-date mode. Ignored when `range` is used. */

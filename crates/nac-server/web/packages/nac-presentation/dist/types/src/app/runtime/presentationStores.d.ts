@@ -1,15 +1,15 @@
-import * as panelWidth from "../hooks/usePanelListWidth";
-import * as threadLogHeight from "../hooks/useThreadLogHeight";
-import * as lastLight from "../lib/lastLight";
-import * as attentionStore from "../store/attentionStore";
-import * as chatTabsStore from "../store/chatTabsStore";
-import * as composerStore from "../store/composerStore";
-import * as runtimeStore from "../store/runtimeStore";
-import * as sessionFiltersStore from "../store/sessionFiltersStore";
-import * as sessionLayoutStore from "../store/sessionLayoutStore";
-import * as sessionNavigationStore from "../store/sessionNavigationStore";
-import * as sidebarLayoutStore from "../store/sidebarLayoutStore";
-import * as sshConnectionStore from "../store/sshConnectionStore";
+import * as panelWidth from "../hooks/usePanelListWidth.js";
+import * as threadLogHeight from "../hooks/useThreadLogHeight.js";
+import * as lastLight from "../lib/lastLight.js";
+import * as attentionStore from "../store/attentionStore.js";
+import * as chatTabsStore from "../store/chatTabsStore.js";
+import * as composerStore from "../store/composerStore.js";
+import * as runtimeStore from "../store/runtimeStore.js";
+import * as sessionFiltersStore from "../store/sessionFiltersStore.js";
+import * as sessionLayoutStore from "../store/sessionLayoutStore.js";
+import * as sessionNavigationStore from "../store/sessionNavigationStore.js";
+import * as sidebarLayoutStore from "../store/sidebarLayoutStore.js";
+import * as sshConnectionStore from "../store/sshConnectionStore.js";
 export interface PresentationStores {
     panelWidth: ReturnType<typeof panelWidth.createPanelWidth>;
     threadLogHeight: ReturnType<typeof threadLogHeight.createThreadLogHeight>;

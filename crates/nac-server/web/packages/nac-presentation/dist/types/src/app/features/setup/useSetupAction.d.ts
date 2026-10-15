@@ -1,5 +1,5 @@
 import type { Effect } from "effect";
-import { type SetupFailure } from "./workflow";
+import { type SetupFailure } from "./workflow.js";
 /** One form attempt at a time; unknown writes require a fresh review, never an edit retry. */
 export declare function useSetupAction(open?: boolean): {
     busy: boolean;

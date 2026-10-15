@@ -3,7 +3,7 @@ import { cn } from "@/app/lib/cn";
 
 interface ProjectsEmptyStateProps {
   /** Opens the new-project dialog. */
-  onStart: () => void;
+  onStart?: () => void;
   onAddRepository?: () => void;
   onManagedSettings?: () => void;
   modelReady?: boolean;
@@ -40,7 +40,9 @@ export function ProjectsEmptyState({
           <p className="text-medium text-basic-tertiary">
             {managed
               ? "Connect a repository or create a Project from an existing path."
-              : "Create your first and start building!"}
+              : onStart
+                ? "Create your first and start building!"
+                : "Your projects will appear here."}
           </p>
         </div>
         {managed ? (
@@ -62,15 +64,17 @@ export function ProjectsEmptyState({
           </div>
         ) : null}
         <div className="flex flex-wrap justify-center gap-2">
-          <Button
-            variant={ButtonVariant.Primary}
-            size={ButtonSize.Large}
-            content={ButtonContent.Text}
-            onClick={managed ? onAddRepository : onStart}
-          >
-            {managed ? "Add repository" : "Get Started"}
-          </Button>
-          {managed ? (
+          {managed || onStart ? (
+            <Button
+              variant={ButtonVariant.Primary}
+              size={ButtonSize.Large}
+              content={ButtonContent.Text}
+              onClick={managed ? onAddRepository : onStart}
+            >
+              {managed ? "Add repository" : "Get Started"}
+            </Button>
+          ) : null}
+          {managed && onStart ? (
             <Button
               variant={ButtonVariant.Secondary}
               size={ButtonSize.Large}

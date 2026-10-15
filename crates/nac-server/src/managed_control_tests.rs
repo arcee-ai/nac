@@ -1039,6 +1039,35 @@ async fn every_replacement_readiness_failure_keeps_maintenance_and_diagnostics()
 
 #[cfg(unix)]
 #[tokio::test]
+async fn replacement_cannot_accept_before_configured_fact_listener_binds() {
+    let fixture = Fixture::new();
+    let replacement = fixture.prepare_running_replacement("fact-bind-before-accept");
+    let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let facts = crate::ManagedFactListenerOptions::new(
+        occupied.local_addr().unwrap(),
+        crate::delivery::managed_runtime_tls::tests::identity(),
+    );
+    let result = crate::delivery::server::serve_with_fact_readiness(
+        "127.0.0.1:0".parse().unwrap(),
+        crate::BindPolicy::LoopbackOnly,
+        replacement,
+        Some(facts),
+        |_| panic!("fact bind failure must not report listening"),
+        fixture.readiness_policy(None),
+    )
+    .await;
+    assert!(result.is_err());
+    let snapshot =
+        nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path).unwrap();
+    assert_eq!(
+        snapshot.state,
+        nac_core::store::ManagedMaintenanceState::Maintenance
+    );
+    assert!(snapshot.accepted_identity.is_none());
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn fully_ready_replacement_accepts_only_after_both_listeners_bind() {
     let fixture = Fixture::new();
     let replacement = fixture.prepare_running_replacement("readiness-success");

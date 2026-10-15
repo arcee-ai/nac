@@ -1,4 +1,4 @@
-import type { SessionBehavior } from "../../types/api";
+import type { SessionBehavior } from "../../types/api.js";
 export declare function DelegatedWorkView({ sessionId, behavior, }: {
     sessionId: string;
     behavior: SessionBehavior;

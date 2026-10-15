@@ -1,4 +1,4 @@
-import type { ToolPresentation } from "../../lib/toolPresentation";
+import type { ToolPresentation } from "../../lib/toolPresentation.js";
 /** Compact primary-transcript presentation for one safe tool lifecycle. */
 export declare const ToolCallDetail: import("react").MemoExoticComponent<({ tool }: {
     tool: ToolPresentation;

@@ -1,3 +1,3 @@
-import type { RunFailure, SessionGoalRecord } from "../types/api";
+import type { RunFailure, SessionGoalRecord } from "../types/api.js";
 /** Keep state-preserving recovery distinct from destructive transcript rewind. */
 export declare function failureRecoveryAffordance(failure: RunFailure, goal: SessionGoalRecord | null | undefined, hasOriginalPrompt: boolean): "resume_goal" | "settings" | "regenerate" | null;

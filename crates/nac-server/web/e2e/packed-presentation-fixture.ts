@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { EmbeddedHarness } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
+import { packedRuntimeDependencies } from "./packed-runtime-dependencies";
 
 const execute = promisify(execFile);
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,12 +30,13 @@ export async function startPackedPresentation(harness: EmbeddedHarness, id: stri
     { cwd: repository },
   );
   const report = JSON.parse(stdout)[0];
+  const runtimeDependencies = await packedRuntimeDependencies(repository, web, consumer);
   await fs.writeFile(
     path.join(consumer, "package.json"),
     JSON.stringify({
       private: true,
       type: "module",
-      dependencies: { [packageName]: `file:./${report.filename}` },
+      dependencies: { [packageName]: `file:./${report.filename}`, ...runtimeDependencies },
     }),
   );
   await execute(

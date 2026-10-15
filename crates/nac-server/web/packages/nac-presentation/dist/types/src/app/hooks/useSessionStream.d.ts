@@ -1,4 +1,4 @@
-import type { ActiveRunSnapshot } from "../types/api";
+import type { ActiveRunSnapshot } from "../types/api.js";
 /** Bind React activation to the scoped session observation workflow. */
 export declare function useSessionStream(sessionId: string | null): void;
 /**

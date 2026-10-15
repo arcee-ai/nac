@@ -1,4 +1,4 @@
-import type { KvRow } from "../../../lib/mcpKvRows";
+import type { KvRow } from "../../../lib/mcpKvRows.js";
 export declare function KvEditor({ label, hint, keyPlaceholder, rows, onChange, }: {
     label: string;
     hint: string;

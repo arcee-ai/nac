@@ -1,5 +1,5 @@
-import type { SelectItem } from "../../atoms";
-import type { ReasoningEffort } from "../../types/api";
+import type { SelectItem } from "../../atoms/index.js";
+import type { ReasoningEffort } from "../../types/api.js";
 export declare const BACKEND_OPTIONS: SelectItem[];
 /** The providers themselves, for a row that has to name one. */
 export declare const PROTOCOL_ITEMS: SelectItem[];

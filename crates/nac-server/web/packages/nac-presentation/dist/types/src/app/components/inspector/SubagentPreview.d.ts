@@ -1,4 +1,4 @@
-import { IconName } from "../../atoms";
+import { IconName } from "../../atoms/index.js";
 /**
  * The subagent's own conversation, the same turns the chat transcript draws,
  * including the load shimmer and the live model pill. The parent's runtime

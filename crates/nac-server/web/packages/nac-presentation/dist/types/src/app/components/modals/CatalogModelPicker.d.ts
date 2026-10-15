@@ -1,5 +1,5 @@
-import { type CatalogPick } from "../../lib/catalog";
-import type { BackendKind, ModelCatalog, ProviderModel } from "../../types/api";
+import { type CatalogPick } from "../../lib/catalog.js";
+import type { BackendKind, ModelCatalog, ProviderModel } from "../../types/api.js";
 export declare function CatalogModelPicker({ catalog, loading, failed, disabled, compact, liveByBackend, value, onSelect, }: {
     catalog: ModelCatalog | undefined;
     loading: boolean;

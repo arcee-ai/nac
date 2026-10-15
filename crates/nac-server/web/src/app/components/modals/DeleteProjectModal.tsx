@@ -1,3 +1,4 @@
+import type { ProjectView as ProjectRecord } from "@/app/features/public-native/collectionViews";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
@@ -5,7 +6,7 @@ import { toRunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useDeleteProject } from "@/app/services/queries";
-import type { DeleteProjectSessions, ProjectRecord } from "@/app/types/api";
+import type { DeleteProjectSessions } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 const plural = (count: number) => (count === 1 ? "chat" : "chats");

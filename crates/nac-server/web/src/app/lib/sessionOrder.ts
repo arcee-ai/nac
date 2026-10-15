@@ -1,9 +1,14 @@
-import { parseStoreTime } from "@/app/lib/format";
 import type {
-  ManagedSessionSummary,
-  ReorderSessionsRequest,
-  SessionSummarySnapshot,
-} from "@/app/types/api";
+  ManagedSessionView as ManagedSessionSummary,
+  SessionSummaryView as SessionSummarySnapshot,
+} from "@/app/features/public-native/collectionViews";
+import { parseStoreTime } from "@/app/lib/format";
+import {
+  comparePresentationOrder,
+  requireNativeSummary,
+  isNativeSessionView,
+} from "@/app/features/public-native/collectionViews";
+import type { ReorderSessionsRequest } from "@/app/types/api";
 
 export type DropEdge = "before" | "after";
 
@@ -39,7 +44,7 @@ export function applyTabOrder(
 
 export function compareSortOrder(a: SessionSummarySnapshot, b: SessionSummarySnapshot): number {
   return (
-    (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+    comparePresentationOrder(a.sort_order, b.sort_order) ||
     parseStoreTime(b.created_at) - parseStoreTime(a.created_at)
   );
 }
@@ -62,7 +67,8 @@ export function reorderRequest(
   const byId = new Map(entries.map((entry) => [entry.summary.session_id, entry]));
   const expected_versions: Record<string, number> = {};
   for (const id of sessionIds) {
-    expected_versions[id] = byId.get(id)?.summary.presentation_version ?? 0;
+    const summary = byId.get(id)?.summary;
+    expected_versions[id] = summary ? (requireNativeSummary(summary).presentation_version ?? 0) : 0;
   }
   return { pinned, session_ids: sessionIds, expected_versions };
 }
@@ -75,9 +81,12 @@ export function withUpdatedSummary(
   entries: ManagedSessionSummary[],
   summary: SessionSummarySnapshot,
 ): ManagedSessionSummary[] {
-  return entries.map((entry) =>
-    entry.summary.session_id === summary.session_id ? { ...entry, summary } : entry,
-  );
+  const native = requireNativeSummary(summary);
+  return entries.map((entry) => {
+    if (entry.summary.session_id !== native.session_id) return entry;
+    if (!isNativeSessionView(entry)) throw new Error("Mixed collection wire families.");
+    return { ...entry, summary: native };
+  });
 }
 
 /** Drop before/after a visible card → index in the full pin group. */

@@ -8,3 +8,8 @@ export {
   type NativeRuntimeScope,
 } from "./nativeRuntime";
 export { RuntimeContext, useNativeRuntime } from "./RuntimeContext";
+export type {
+  PublicNacApi,
+  PublicNacPresentationSource,
+  PublicNacResponseDecoders,
+} from "../../../packages/nac-client/src/publicNacApi.js";

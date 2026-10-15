@@ -1,4 +1,4 @@
-import { type RunError } from "../lib/providerError";
+import { type RunError } from "../lib/providerError.js";
 /**
  * Whether a run failure asking for a login should be kept off screen, because
  * the login it asked for is back in place — or because nothing has said yet

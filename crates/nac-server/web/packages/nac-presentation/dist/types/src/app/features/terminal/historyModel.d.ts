@@ -1,4 +1,4 @@
-import type { ExecutionHistoryEntry } from "../../../../packages/nac-client/src/types";
+import type { ExecutionHistoryEntry } from "../../../../packages/nac-client/src/types.js";
 export declare function historySourceLabel(entry: ExecutionHistoryEntry): string;
 export declare function historyOutcome(entry: ExecutionHistoryEntry): string;
 export declare function historyOutputCopy(entry: ExecutionHistoryEntry): string;
@@ -13,11 +13,11 @@ export declare function readOnlyHistorySource(entry: ExecutionHistoryEntry): {
     cwd: string;
     exit_code?: number | null;
     id: string;
-    origin: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ExecutionOrigin"];
+    origin: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ExecutionOrigin"];
     output_complete: boolean;
     output_error?: string | null;
-    process_state: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ExecutionProcessState"];
-    representation: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ExecutionRepresentation"];
+    process_state: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ExecutionProcessState"];
+    representation: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["ExecutionRepresentation"];
     request_id?: string | null;
     retained: boolean;
     rows: number;

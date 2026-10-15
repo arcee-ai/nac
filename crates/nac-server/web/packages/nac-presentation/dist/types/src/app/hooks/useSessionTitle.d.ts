@@ -1,4 +1,4 @@
-import type { SessionSummarySnapshot } from "../types/api";
+import type { SessionSummaryView as SessionSummarySnapshot } from "../features/public-native/collectionViews.js";
 /**
  * Names a chat the way every list in the app names it, with the untitled ones
  * numbered apart.

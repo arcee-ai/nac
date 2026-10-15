@@ -1,4 +1,5 @@
-import type { ManagedSessionSummary, SessionBehavior, SessionLineage } from "@/app/types/api";
+import type { ManagedSessionView as ManagedSessionSummary } from "@/app/features/public-native/collectionViews";
+import type { SessionBehavior, SessionLineage } from "@/app/types/api";
 
 export interface UiPolicy {
   orchestrationEnabled: boolean;

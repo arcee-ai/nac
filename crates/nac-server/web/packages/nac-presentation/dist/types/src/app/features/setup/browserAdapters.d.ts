@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { type FailureKind, type SetupPhase } from "./workflow";
+import { type FailureKind, type SetupPhase } from "./workflow.js";
 export declare class SetupValidation extends Error {
 }
 export declare class ConfigurationChanged extends Error {

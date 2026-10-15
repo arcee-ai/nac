@@ -39,6 +39,13 @@ export class UncertainCommandAdmissionError extends Error {
         this.cause = cause;
     }
 }
+/** Trusted transport adapter assertion that no request was dispatched. Never infer from a name or network error. */
+export class NacRequestNotSentError extends Error {
+    constructor(cause) {
+        super("The native request was not dispatched.", { cause });
+        this.name = "NacRequestNotSentError";
+    }
+}
 let fallbackRequestSequence = 0;
 function defaultRequestId() {
     if (typeof globalThis.crypto?.randomUUID === "function")
@@ -90,6 +97,9 @@ async function errorDetail(response) {
     }
 }
 export class NacTransport {
+    get jsonResponseDecodingVersion() {
+        return 1;
+    }
     endpoint;
     credentials;
     authorization;
@@ -146,7 +156,7 @@ export class NacTransport {
             requestId,
         };
     }
-    async request(method, path, { body, headers, signal, acceptStatuses = [], requestId = this.newRequestId(), } = {}) {
+    async request(method, path, { body, headers, signal, acceptStatuses = [], requestId = this.newRequestId(), decodeJson, } = {}) {
         signal?.throwIfAborted();
         const requestHeaders = await this.configuredHeaders(requestId, headers);
         signal?.throwIfAborted();
@@ -160,17 +170,34 @@ export class NacTransport {
             signal,
             credentials: this.credentials,
         });
-        if (!response.ok && !acceptStatuses.includes(response.status)) {
-            throw new ApiError(response.status, method, path, await errorDetail(response), requestId);
+        try {
+            if (!response.ok && !acceptStatuses.includes(response.status)) {
+                throw new ApiError(response.status, method, path, await errorDetail(response), requestId);
+            }
+            if (response.status === 204) {
+                if (decodeJson)
+                    throw new Error("Expected a JSON response for the selected codec.");
+                return undefined;
+            }
+            const contentType = response.headers.get("content-type") ?? "";
+            if (!contentType.includes("application/json")) {
+                if (decodeJson)
+                    throw new Error("Expected a JSON response for the selected codec.");
+                const text = await response.text();
+                return (text ? text : undefined);
+            }
+            if (decodeJson)
+                return decodeJson(await response.text());
+            return (await response.json());
         }
-        if (response.status === 204)
-            return undefined;
-        const contentType = response.headers.get("content-type") ?? "";
-        if (!contentType.includes("application/json")) {
-            const text = await response.text();
-            return (text ? text : undefined);
+        catch (error) {
+            // Once a response exists, even a mistakenly thrown before-send marker
+            // cannot turn decoding/body failures into a retryable command fate.
+            if (error instanceof NacRequestNotSentError) {
+                throw new Error("NAC response processing failed after dispatch.", { cause: error });
+            }
+            throw error;
         }
-        return (await response.json());
     }
     async admit(method, path, options = {}) {
         const requestId = options.requestId ?? this.newRequestId();
@@ -184,6 +211,9 @@ export class NacTransport {
             };
         }
         catch (error) {
+            if (error instanceof NacRequestNotSentError) {
+                return { status: "not-sent", requestId, reason: "adapter-not-sent", error };
+            }
             if (error instanceof ApiError)
                 throw error;
             return { status: "uncertain", requestId, error };
@@ -352,7 +382,9 @@ export class NacClient {
         if (admission.status === "accepted" && admission.response.request_id === frozen.request_id)
             return admission.response;
         if (admission.status === "not-sent")
-            throw new DOMException("Command was not sent", "AbortError");
+            throw admission.reason === "adapter-not-sent"
+                ? admission.error
+                : new DOMException("Command was not sent", "AbortError");
         const cause = admission.status === "uncertain"
             ? admission.error
             : new Error("Human command response changed request identity");

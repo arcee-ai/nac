@@ -1,5 +1,5 @@
 import type React from "react";
-import { type IconName } from "../icon";
+import { type IconName } from "../icon/index.js";
 export declare enum HorizontalTabsItemVariant {
     Accent = "accent",
     Neutral = "neutral"

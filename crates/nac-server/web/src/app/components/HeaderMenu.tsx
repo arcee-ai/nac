@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 
 import {
   Button,
@@ -36,6 +37,7 @@ export function HeaderMenu({
   onManagedHost?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const { publicPresentation } = useNativeRuntime();
   const isMobile = useIsMobile();
   const { data: storeInfo } = useStoreInfo();
   const storePath = storeInfo?.store_path ?? "store path pending";
@@ -59,45 +61,51 @@ export function HeaderMenu({
       sheetClassName="px-2"
       content={
         <div className="flex flex-col gap-2">
-          <div
-            className={cn(
-              "flex items-center",
-              isMobile ? "h-16 gap-2 pl-4 pr-2" : "h-9 gap-1 pl-2",
-            )}
-          >
-            <span
-              className={cn(
-                "text-basic-primary shrink-0",
-                isMobile ? "label-medium" : "label-small",
-              )}
-            >
-              Store:
-            </span>
-            <span
-              className={cn(
-                "code text-info-primary flex-1 min-w-0 truncate",
-                isMobile ? "code-medium" : "code-small",
-              )}
-              title={storePath}
-            >
-              {storePath}
-            </span>
-            <CopyButton
-              value={storePath}
-              size={ButtonSize.Medium}
-              variant={ButtonVariant.Ghost}
-              title="Copy the store path"
-            />
-          </div>
-          <Separator />
+          {!publicPresentation ? (
+            <>
+              <div
+                className={cn(
+                  "flex items-center",
+                  isMobile ? "h-16 gap-2 pl-4 pr-2" : "h-9 gap-1 pl-2",
+                )}
+              >
+                <span
+                  className={cn(
+                    "text-basic-primary shrink-0",
+                    isMobile ? "label-medium" : "label-small",
+                  )}
+                >
+                  Store:
+                </span>
+                <span
+                  className={cn(
+                    "code text-info-primary flex-1 min-w-0 truncate",
+                    isMobile ? "code-medium" : "code-small",
+                  )}
+                  title={storePath}
+                >
+                  {storePath}
+                </span>
+                <CopyButton
+                  value={storePath}
+                  size={ButtonSize.Medium}
+                  variant={ButtonVariant.Ghost}
+                  title="Copy the store path"
+                />
+              </div>
+              <Separator />
+            </>
+          ) : null}
           <TabButton size={itemSize} onClick={act(onConfigurations)}>
             <Icon iconName={IconName.Gear} />
             <span className="text-left flex-grow">Configurations</span>
           </TabButton>
-          <TabButton size={itemSize} onClick={act(onSshConfigs)}>
-            <Icon iconName={IconName.Globe} />
-            <span className="text-left flex-grow">SSH configs</span>
-          </TabButton>
+          {!publicPresentation ? (
+            <TabButton size={itemSize} onClick={act(onSshConfigs)}>
+              <Icon iconName={IconName.Globe} />
+              <span className="text-left flex-grow">SSH configs</span>
+            </TabButton>
+          ) : null}
           {onManagedHost ? (
             <TabButton size={itemSize} onClick={act(onManagedHost)}>
               <Icon iconName={IconName.Server} />

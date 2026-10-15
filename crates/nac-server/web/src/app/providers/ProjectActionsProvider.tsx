@@ -1,3 +1,8 @@
+import { requireNativeCollectionWire } from "@/app/features/public-native/collectionViews";
+import type {
+  ProjectView as ProjectRecord,
+  SessionSummaryView as SessionSummarySnapshot,
+} from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { visibleSessions } from "@/app/features/ui-policy/policy";
@@ -22,7 +27,6 @@ import {
   useSessions,
   useToggleProjectPin,
 } from "@/app/services/queries";
-import type { ProjectRecord, SessionSummarySnapshot } from "@/app/types/api";
 
 interface ProjectActions {
   create: () => void;
@@ -48,6 +52,7 @@ type ModalKind = "create" | "assign" | "rename" | "delete";
  * share, along with the dialogs they open, so every surface behaves the same.
  */
 export function ProjectActionsProvider({ children }: { children: React.ReactNode }) {
+  const { publicPresentation } = useNativeRuntime();
   const { pruneSessionNavigation } = useNativeRuntime().stores.sessionNavigationStore;
 
   const { pruneChatTabs } = useNativeRuntime().stores.chatTabsStore;
@@ -89,14 +94,21 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
     [adoptSession, toast],
   );
 
-  const newChat = useCallback(async (projectId: string, firstChat = false) => {
-    setRequiredFirstChat(firstChat);
-    setNewChatProjectId(projectId);
-  }, []);
+  const newChat = useCallback(
+    async (projectId: string, firstChat = false) => {
+      requireNativeCollectionWire(publicPresentation);
+      setRequiredFirstChat(firstChat);
+      setNewChatProjectId(projectId);
+    },
+    [publicPresentation],
+  );
 
   const value = useMemo<ProjectActions>(
     () => ({
-      create: () => setModal("create"),
+      create: () => {
+        requireNativeCollectionWire(publicPresentation);
+        setModal("create");
+      },
       assign: (summary) => {
         // A session keeps its own working directory and the backend refuses to
         // file it anywhere else, so a project covering that location is not a
@@ -126,7 +138,7 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
       },
       newChat,
     }),
-    [togglePin, newChat, toast, adopt, projectList],
+    [togglePin, newChat, toast, adopt, projectList, publicPresentation],
   );
 
   // The tab strips remember how they were arranged across visits, and this is
@@ -162,14 +174,14 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   useKeyboardShortcuts([
     {
       keys: NEW_CHAT_KEYS,
-      enabled: openProjectId != null,
+      enabled: !publicPresentation && openProjectId != null,
       onTrigger: () => {
         if (openProjectId) void newChat(openProjectId);
       },
     },
     {
       keys: NEW_PROJECT_KEYS,
-      enabled: openProjectId == null,
+      enabled: !publicPresentation && openProjectId == null,
       onTrigger: () => setModal("create"),
     },
   ]);

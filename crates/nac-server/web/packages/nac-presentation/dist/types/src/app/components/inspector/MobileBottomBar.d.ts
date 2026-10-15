@@ -1,4 +1,4 @@
-import { type SessionPanel } from "../../lib/routes";
+import { type SessionPanel } from "../../lib/routes.js";
 /**
  * The phone's panel switcher: a floating pill pinned to the bottom of the
  * modal box, standing in for the tab row a wide box fits in its header.

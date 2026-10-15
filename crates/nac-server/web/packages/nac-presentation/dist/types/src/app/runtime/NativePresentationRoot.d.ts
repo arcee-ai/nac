@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import type { NativeRuntime } from "./nativeRuntime";
+import type { NativeRuntime } from "./nativeRuntime.js";
 export interface NativePresentationRootProps {
     runtime: NativeRuntime;
     /** Caller owns location and navigation; use MemoryRouter for an embedded view. */

@@ -1,4 +1,4 @@
-import { ButtonSize, IconName, PopoverPlacement, type SelectItem } from "../../atoms";
+import { ButtonSize, IconName, PopoverPlacement, type SelectItem } from "../../atoms/index.js";
 export declare function SmallSelect({ items, value, onValueChange, placeholder, disabled, size, trailingIcon, triggerClassName, placement, onOpenChange, }: {
     items: SelectItem[];
     value: string;

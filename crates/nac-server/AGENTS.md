@@ -41,6 +41,9 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
 - `src/delivery/` — contracts, errors, thin handlers, router/OpenAPI assembly,
   and server startup.
 - `src/delivery/server.rs` — assembled router and `openapi_document()` seam.
+- `src/delivery/managed_fact_listener.rs` — explicit operator input validation
+  and private pinned-D listener construction. `server.rs` retains its shared
+  readiness/shutdown owner; the ordinary router never mounts private facts.
 - `src/lib.rs` — composition state, remaining cross-use-case lifecycle wiring,
   and public re-exports; new cohesive operations should prefer an owner above.
 - `src/mcp.rs` / `mcp_api.rs` — outgoing session-control MCP and HTTP MCP config.

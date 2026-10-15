@@ -1,9 +1,9 @@
+import type { ManagedSessionView as ManagedSessionSummary } from "@/app/features/public-native/collectionViews";
 // Sessions whose run finished while the user was looking elsewhere. The list
 // view renders a dot for them until they are opened.
 
 import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 import { isActiveRun } from "@/app/lib/format";
-import type { ManagedSessionSummary } from "@/app/types/api";
 
 interface AttentionState {
   flagged: Record<string, boolean>;

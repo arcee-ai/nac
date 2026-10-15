@@ -5,6 +5,38 @@ import { fileURLToPath } from "node:url";
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const output = path.join(web, "packages/nac-presentation/dist");
 const types = path.join(output, "types");
+const relativeModule = /\b(from\s+|import\s*\(\s*|import\s+)(["'])(\.[^"']+)\2/g;
+async function portableModules(source, directory) {
+  const replacements = new Map();
+  for (const match of source.matchAll(relativeModule)) {
+    const specifier = match[3];
+    if (/\.(?:[cm]?js|json|css)$/.test(specifier) || replacements.has(specifier)) continue;
+    const stem = specifier.replace(/(?:\.d)?\.tsx?$/, "");
+    const file = path.resolve(directory, stem);
+    if (
+      await fs.stat(`${file}.d.ts`).then(
+        (entry) => entry.isFile(),
+        () => false,
+      )
+    ) {
+      replacements.set(specifier, `${stem}.js`);
+    } else if (
+      await fs.stat(path.join(file, "index.d.ts")).then(
+        (entry) => entry.isFile(),
+        () => false,
+      )
+    ) {
+      replacements.set(specifier, `${stem}/index.js`);
+    } else {
+      throw new Error(`Unresolved presentation declaration ${specifier} in ${directory}`);
+    }
+  }
+  return source.replace(
+    relativeModule,
+    (_match, prefix, quote, specifier) =>
+      prefix + quote + (replacements.get(specifier) ?? specifier) + quote,
+  );
+}
 async function rewrite(directory) {
   for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
     const file = path.join(directory, entry.name);
@@ -20,6 +52,7 @@ async function rewrite(directory) {
       });
       source = source.replace(/^import ["'][^"']+\.css["'];\n/gm, "");
       source = source.replace(/[\t ]+$/gm, "");
+      source = await portableModules(source, directory);
       await fs.writeFile(file, source);
     }
   }

@@ -1,4 +1,4 @@
-import type { SessionSummarySnapshot } from "../../types/api";
+import type { SessionSummaryView as SessionSummarySnapshot } from "../../features/public-native/collectionViews.js";
 interface RenameModalProps {
     open: boolean;
     onClose: () => void;

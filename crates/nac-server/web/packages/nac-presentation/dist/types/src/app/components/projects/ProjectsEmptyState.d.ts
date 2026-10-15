@@ -1,6 +1,6 @@
 interface ProjectsEmptyStateProps {
     /** Opens the new-project dialog. */
-    onStart: () => void;
+    onStart?: () => void;
     onAddRepository?: () => void;
     onManagedSettings?: () => void;
     modelReady?: boolean;

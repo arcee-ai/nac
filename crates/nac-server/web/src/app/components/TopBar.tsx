@@ -32,6 +32,7 @@ const GROUND_FADE =
 const SURFACE_STYLE = { backgroundImage: `${GROUND_FADE}, ${GROUND_FADE}` };
 
 export function TopBar() {
+  const { publicPresentation } = useNativeRuntime();
   const { useSidebarOffset } = useNativeRuntime().stores.sidebarLayoutStore;
 
   const [configuring, setConfiguring] = useState(false);
@@ -90,7 +91,7 @@ export function TopBar() {
         <div className="relative flex items-center shrink-0 gap-2">
           {/* On the list a phone has no filter rail to create from, so the
               primary action rides in the bar. */}
-          {isMobile && !inTrail ? (
+          {isMobile && !inTrail && !publicPresentation ? (
             <Button
               variant={ButtonVariant.Primary}
               size={ButtonSize.Medium}
@@ -102,8 +103,8 @@ export function TopBar() {
               <Icon iconName={IconName.Add} />
             </Button>
           ) : null}
-          <SessionHeaderActions />
-          <McpServersButton onOpen={() => setMcpServers(true)} />
+          {!publicPresentation ? <SessionHeaderActions /> : null}
+          {!publicPresentation ? <McpServersButton onOpen={() => setMcpServers(true)} /> : null}
           <HeaderMenu
             onConfigurations={() => setConfiguring(true)}
             onSshConfigs={() => setSshConfigs(true)}

@@ -1,4 +1,9 @@
+import {
+  requireNativeSummary,
+  type NativeSessionSummary,
+} from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { PublicSessionSettings } from "@/app/features/public-native/ConfigurationViews";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -61,13 +66,7 @@ import {
   useUpdateProject,
 } from "@/app/services/queries";
 
-import type {
-  BackendKind,
-  LightModelSettings,
-  RawSessionConfig,
-  SessionSummarySnapshot,
-  SshTarget,
-} from "@/app/types/api";
+import type { BackendKind, LightModelSettings, RawSessionConfig, SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 function headersToText(headers: Record<string, string>): string {
@@ -158,6 +157,23 @@ export function SettingsModal({
   id: string | null;
   onClose: () => void;
 }) {
+  const { publicPresentation } = useNativeRuntime();
+  return publicPresentation ? (
+    <PublicSessionSettings open={open} id={id} onClose={onClose} />
+  ) : (
+    <NativeSettingsModal open={open} id={id} onClose={onClose} />
+  );
+}
+
+function NativeSettingsModal({
+  open,
+  id,
+  onClose,
+}: {
+  open: boolean;
+  id: string | null;
+  onClose: () => void;
+}) {
   // Keyed on `mounted` rather than `open`: dropping the queries the moment the
   // dialog starts closing would blank the form out mid-slide.
   const mounted = useExitTransition(open);
@@ -193,7 +209,7 @@ export function SettingsModal({
       id={id}
       initial={initial}
       initialLight={config?.light_model ?? null}
-      summary={entry.summary}
+      summary={requireNativeSummary(entry.summary)}
       diagnostics={config?.diagnostics ?? []}
       onClose={onClose}
     />
@@ -218,7 +234,7 @@ function SettingsForm({
   /** The light model the session currently runs with, if any. */
   initialLight: LightModelSettings | null;
   /** Carries the presentation version the title save has to match. */
-  summary: SessionSummarySnapshot;
+  summary: NativeSessionSummary;
   diagnostics: string[];
   onClose: () => void;
 }) {

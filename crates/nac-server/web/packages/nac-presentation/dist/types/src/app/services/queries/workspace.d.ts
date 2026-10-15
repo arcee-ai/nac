@@ -1,9 +1,9 @@
-import type { WorkspaceDiffStage } from "../../types/api";
+import type { WorkspaceDiffStage } from "../../types/api.js";
 export declare function useWorkspaceDiff(id: string | null, path: string | null, stage?: WorkspaceDiffStage | "all", context?: number, revision?: number | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     error: string | null;
     old_path: string | null;
     path: string;
-    sections: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffSection"][];
+    sections: import("../../types/openapi.generated.js").components["schemas"]["WorkspaceDiffSection"][];
 }>, Error>;
 /**
  * Every file git considers part of the project, for the Files tree. With a
@@ -39,7 +39,7 @@ export declare function useWorkspaceRevisions(id: string | null): import("@tanst
 }[]>, Error>;
 /** What the run behind a revision changed. Frozen, so it is cached for good. */
 export declare function useWorkspaceRevisionChanges(id: string | null, revision: number | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    changed_files: import("../../types/openapi.generated").components["schemas"]["ChangedFileStat"][];
+    changed_files: import("../../types/openapi.generated.js").components["schemas"]["ChangedFileStat"][];
     error?: string | null;
     total_additions: number;
     total_deletions: number;
@@ -49,12 +49,12 @@ export declare function useWorkspaceRevisionChanges(id: string | null, revision:
  * open, since it shells out to git on the host.
  */
 export declare function useBranches(id: string | null, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    branches: import("../../types/openapi.generated").components["schemas"]["Branch"][];
+    branches: import("../../types/openapi.generated.js").components["schemas"]["Branch"][];
     current?: string | null;
     dirty: boolean;
 }>, Error>;
 export declare function useSwitchBranch(id: string): import("@tanstack/react-query").UseMutationResult<{
-    branches: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["Branch"][];
+    branches: import("../../../../packages/nac-client/src/openapi.generated.js").components["schemas"]["Branch"][];
     current?: string | null;
     dirty: boolean;
 }, Error, {

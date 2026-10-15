@@ -1,5 +1,5 @@
-import type { CatalogPick } from "../../lib/catalog";
-import type { ManagedCloneOperation, ManagedHostStatus, ModelCatalog, ProviderModelsRequest } from "../../types/api";
+import type { CatalogPick } from "../../lib/catalog.js";
+import type { ManagedCloneOperation, ManagedHostStatus, ModelCatalog, ProviderModelsRequest } from "../../types/api.js";
 export type ManagedTab = "status" | "github" | "secrets";
 export declare const MANAGED_TABS: readonly ManagedTab[];
 export declare function managedSecretNameError(name: string): string;

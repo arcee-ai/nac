@@ -1,3 +1,9 @@
+import { comparePresentationOrder } from "@/app/features/public-native/collectionViews";
+import type {
+  ManagedSessionView as ManagedSessionSummary,
+  ProjectView as ProjectRecord,
+  SessionSummaryView as SessionSummarySnapshot,
+} from "@/app/features/public-native/collectionViews";
 export const RANGE_ANY = "any";
 export const SORT_DEFAULT = "default";
 // Client-side view state for the sessions list. The API returns every session,
@@ -17,7 +23,6 @@ import {
 } from "@/app/lib/format";
 import { providersFromBackends } from "@/app/lib/providers";
 import type { ProjectListItem } from "@/app/lib/projects";
-import type { ManagedSessionSummary, ProjectRecord, SessionSummarySnapshot } from "@/app/types/api";
 
 export type SortId =
   | typeof SORT_DEFAULT
@@ -114,7 +119,7 @@ export function createSessionFiltersStore(_storage?: Pick<Storage, "getItem" | "
   }
 
   /** Unparseable timestamps must not hide a session, so they pass every range. */
-  function withinRange(value: string, range: RangeId, now: number): boolean {
+  function withinRange(value: string | null | undefined, range: RangeId, now: number): boolean {
     const span = RANGE_MS[range];
     if (!span) return true;
     const ts = parseStoreTime(value);
@@ -145,7 +150,7 @@ export function createSessionFiltersStore(_storage?: Pick<Storage, "getItem" | "
     // `sort_order` is the custom index, then creation time as a stable tiebreak.
     [SORT_DEFAULT]: (a, b) => {
       const order =
-        (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+        comparePresentationOrder(a.sort_order, b.sort_order) ||
         parseStoreTime(b.created_at) - parseStoreTime(a.created_at);
       return order;
     },
@@ -169,10 +174,16 @@ export function createSessionFiltersStore(_storage?: Pick<Storage, "getItem" | "
         if (!matchesQuery(summary, needle, numbered)) return false;
         if (!withinRange(summary.created_at, filters.createdRange, now)) return false;
         if (!withinRange(summary.updated_at, filters.modifiedRange, now)) return false;
-        if (filters.envs.length > 0 && !filters.envs.includes(sessionEnvLabel(summary))) {
+        if (
+          filters.envs.length > 0 &&
+          !filters.envs.some((env) => env === sessionEnvLabel(summary))
+        ) {
           return false;
         }
-        if (filters.providers.length > 0 && !filters.providers.includes(summary.backend)) {
+        if (
+          filters.providers.length > 0 &&
+          !filters.providers.some((provider) => provider === summary.backend)
+        ) {
           return false;
         }
         return true;
@@ -214,9 +225,12 @@ export function createSessionFiltersStore(_storage?: Pick<Storage, "getItem" | "
       : sessionTitle(item.session.summary, numbered);
   }
 
-  function itemTimes(item: ProjectListItem): { createdAt: string; updatedAt: string } {
+  function itemTimes(item: ProjectListItem): {
+    createdAt: string | null;
+    updatedAt: string | null;
+  } {
     return item.kind === "project"
-      ? { createdAt: item.entry.project.created_at, updatedAt: item.entry.updatedAt }
+      ? { createdAt: item.entry.project.created_at ?? null, updatedAt: item.entry.updatedAt }
       : {
           createdAt: item.session.summary.created_at,
           updatedAt: item.session.summary.updated_at,
@@ -238,10 +252,16 @@ export function createSessionFiltersStore(_storage?: Pick<Storage, "getItem" | "
       const numbered = numberUntitledSessions(sessionsFromItems(items));
       const needle = filters.query.trim().toLowerCase();
       const facetPasses = (summary: SessionSummarySnapshot) => {
-        if (filters.envs.length > 0 && !filters.envs.includes(sessionEnvLabel(summary))) {
+        if (
+          filters.envs.length > 0 &&
+          !filters.envs.some((env) => env === sessionEnvLabel(summary))
+        ) {
           return false;
         }
-        return filters.providers.length === 0 || filters.providers.includes(summary.backend);
+        return (
+          filters.providers.length === 0 ||
+          filters.providers.some((provider) => provider === summary.backend)
+        );
       };
       const facetsActive = filters.envs.length > 0 || filters.providers.length > 0;
 
@@ -284,7 +304,12 @@ export function createSessionFiltersStore(_storage?: Pick<Storage, "getItem" | "
   /** Provider chips are derived from the data so they never list unused ones. */
   function useSessionProviders(sessions: ManagedSessionSummary[]): string[] {
     return useMemo(
-      () => providersFromBackends(sessions.map(({ summary }) => summary.backend)),
+      () =>
+        providersFromBackends(
+          sessions.flatMap(({ summary }) =>
+            summary.backend === undefined ? [] : [summary.backend],
+          ),
+        ),
       [sessions],
     );
   }

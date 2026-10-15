@@ -1,9 +1,9 @@
 import React from "react";
-import { AnchorPlacement } from "../../lib/anchor";
-import { ButtonSize, ButtonVariant } from "../button";
-import { IconName } from "../icon";
-import type { HoverHintConfig } from "../label";
-import { TabButtonSize } from "../tab-button";
+import { AnchorPlacement } from "../../lib/anchor.js";
+import { ButtonSize, ButtonVariant } from "../button/index.js";
+import { IconName } from "../icon/index.js";
+import type { HoverHintConfig } from "../label/index.js";
+import { TabButtonSize } from "../tab-button/index.js";
 export interface SelectItem {
     id: string;
     label: React.ReactNode;

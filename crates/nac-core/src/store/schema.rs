@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 mod managed_tables;
 mod migration_status;
 mod model_configurations;
+#[cfg(test)]
+mod protected_enrollment_tests;
 mod transaction_observation;
 mod transcript_tables;
 mod wal_preflight;
@@ -47,6 +49,8 @@ mod future_schema_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 36 adds protected enrollment uncertainty and immutable audit history on the
+// actual v34 union. Divergent, unshipped historical v35 is not an upgrade input.
 // 34 unifies both historical v33 shapes without rewriting their durable facts:
 // identified terminal-selection inbox admission and the human shell journal.
 // 33 independently introduced each of those additions on its owning branch.
@@ -75,7 +79,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 34;
+const STORE_SCHEMA_VERSION: i64 = 36;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -434,12 +438,21 @@ fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
 
 fn reject_future_schema_before_open(path: &Path) -> Result<()> {
     if let Some(version) = preflight_schema_version(path)? {
+        reject_divergent_schema(version)?;
         if version > STORE_SCHEMA_VERSION {
             return Err(anyhow!(
                 "unsupported store schema version {version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
             ));
         }
     }
+    Ok(())
+}
+
+fn reject_divergent_schema(version: i64) -> Result<()> {
+    anyhow::ensure!(
+        version != 35,
+        "unsupported divergent store schema 35; explicit ancestry reconciliation is required"
+    );
     Ok(())
 }
 
@@ -706,6 +719,7 @@ fn open_connection_with_hooks(
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let preflight_schema_version: i64 =
         conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    reject_divergent_schema(preflight_schema_version)?;
     if preflight_schema_version > STORE_SCHEMA_VERSION {
         return Err(anyhow!(
             "unsupported store schema version {preflight_schema_version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -724,6 +738,7 @@ fn open_connection_with_hooks(
     after_lock();
     let schema_version: i64 =
         transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    reject_divergent_schema(schema_version)?;
     let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
     match schema_version {
         0 | 1 => {
@@ -768,8 +783,8 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | STORE_SCHEMA_VERSION => {
-        }
+        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34
+        | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -958,6 +973,9 @@ fn open_connection_with_hooks(
         "INTEGER NOT NULL DEFAULT 0",
     )?;
     super::shell_commands::create_shell_commands_table(&transaction)?;
+    if schema_version < 36 {
+        super::managed_enrollment::create_tables(&transaction)?;
+    }
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
@@ -1818,6 +1836,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "session_run_recovery",
         "session_inbox",
         "human_shell_operations",
+        "managed_enrollment_events",
         "permission_grants",
         "traditional_children",
         "managed_orchestrators",

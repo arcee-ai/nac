@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import type { TraditionalChildStatus } from "../../types/api";
+import type { TraditionalChildStatus } from "../../types/api.js";
 export interface SubagentChatInputBoxProps {
     value: string;
     onChange: (value: string) => void;

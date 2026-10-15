@@ -1,5 +1,5 @@
+import type { ProjectView as ProjectRecord, SessionSummaryView as SessionSummarySnapshot } from "../features/public-native/collectionViews.js";
 import React from "react";
-import type { ProjectRecord, SessionSummarySnapshot } from "../types/api";
 interface ProjectActions {
     create: () => void;
     /**

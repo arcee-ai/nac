@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   Button,
   ButtonContent,
@@ -78,6 +79,8 @@ export function ProjectCardActions({
   onAssign,
   reorder,
 }: ProjectCardActionsProps) {
+  const { publicPresentation } = useNativeRuntime();
+  if (publicPresentation) return null;
   return (
     <div
       className={

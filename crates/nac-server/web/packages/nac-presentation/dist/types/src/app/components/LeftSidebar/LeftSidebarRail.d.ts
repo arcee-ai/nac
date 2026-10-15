@@ -1,4 +1,4 @@
-import type { SidebarCommands } from "./useSidebarCommands.tsx";
+import type { SidebarCommands } from "./useSidebarCommands.js";
 /** Icon column left behind once the panel has slid away. */
 export declare function LeftSidebarRail({ commands, onToggle, toggleKeys, variant, }: {
     commands: SidebarCommands;

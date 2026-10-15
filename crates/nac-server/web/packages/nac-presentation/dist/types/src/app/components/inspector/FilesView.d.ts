@@ -1,4 +1,4 @@
-import type { SessionSnapshotResponse } from "../../types/api";
+import type { SessionSnapshotResponse } from "../../types/api.js";
 /**
  * The files of the checkout — either all of them as a folder tree or only what
  * git reports as changed — with the selected one shown beside the list: its

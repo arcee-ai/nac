@@ -1,3 +1,7 @@
+import type {
+  ManagedSessionView as ManagedSessionSummary,
+  SessionSummaryView as SessionSummarySnapshot,
+} from "@/app/features/public-native/collectionViews";
 import { useLocation, useNavigate } from "react-router-dom";
 import { flushSync } from "react-dom";
 
@@ -8,7 +12,6 @@ import { toRunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useDeleteSession, useSessions } from "@/app/services/queries";
-import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
 interface DeleteModalProps {
   open: boolean;

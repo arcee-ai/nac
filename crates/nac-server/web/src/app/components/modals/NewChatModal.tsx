@@ -1,3 +1,4 @@
+import { requireNativeSummary } from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import {
@@ -163,7 +164,10 @@ function NewChatForm({
   const inherited = useMemo<InheritedModelSelection | null>(() => {
     if (defaultConfig) return fromSavedConfiguration(defaultConfig);
     if (siblingConfig.data && sibling) {
-      return fromSessionConfiguration(siblingConfig.data, sibling.summary.backend);
+      return fromSessionConfiguration(
+        siblingConfig.data,
+        requireNativeSummary(sibling.summary).backend,
+      );
     }
     return null;
   }, [defaultConfig, siblingConfig.data, sibling]);

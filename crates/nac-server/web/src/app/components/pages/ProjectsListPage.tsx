@@ -1,3 +1,5 @@
+import { comparePresentationOrder } from "@/app/features/public-native/collectionViews";
+import type { ProjectView as ProjectRecord } from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { visibleSessions } from "@/app/features/ui-policy/policy";
@@ -47,8 +49,6 @@ import {
   useProjects,
   useSessionsWithWorkspaceStats,
 } from "@/app/services/queries";
-
-import type { ProjectRecord } from "@/app/types/api";
 
 // Columns are 360px at minimum and stretch to fill the row, so the design's
 // 3-up layout falls out naturally at the 1520px reference width and wider
@@ -213,10 +213,11 @@ function hitTestDropTarget(
 function pinnedGroup(projects: ProjectRecord[], pinned: boolean): ProjectRecord[] {
   return projects
     .filter((project) => project.pinned === pinned)
-    .sort((a, b) => a.sort_order - b.sort_order);
+    .sort((a, b) => comparePresentationOrder(a.sort_order, b.sort_order));
 }
 
 export default function ProjectsListPage() {
+  const { publicPresentation } = useNativeRuntime();
   const { useVisibleProjectItems, useIsDefaultSort, useFilterQuery, setQuery } =
     useNativeRuntime().stores.sessionFiltersStore;
 
@@ -591,7 +592,7 @@ export default function ProjectsListPage() {
         <div className="min-h-0 min-w-0 flex-1">
           <ProjectsEmptyState
             mobile={isMobile}
-            onStart={projectActions.create}
+            onStart={publicPresentation ? undefined : projectActions.create}
             onAddRepository={managed.isManaged ? managed.addRepository : undefined}
             onManagedSettings={managed.isManaged ? managed.openSettings : undefined}
             modelReady={managed.status?.model_ready}

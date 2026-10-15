@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
 
 interface ChatSessionActionsProps {
@@ -16,6 +17,8 @@ export function ChatSessionActions({
   onRename,
   onDelete,
 }: ChatSessionActionsProps) {
+  const { publicPresentation } = useNativeRuntime();
+  if (publicPresentation) return null;
   return (
     <>
       {onPin ? (

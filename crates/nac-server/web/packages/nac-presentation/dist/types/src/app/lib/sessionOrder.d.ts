@@ -1,4 +1,5 @@
-import type { ManagedSessionSummary, ReorderSessionsRequest, SessionSummarySnapshot } from "../types/api";
+import type { ManagedSessionView as ManagedSessionSummary, SessionSummaryView as SessionSummarySnapshot } from "../features/public-native/collectionViews.js";
+import type { ReorderSessionsRequest } from "../types/api.js";
 export type DropEdge = "before" | "after";
 /** Insert `id` at `index` in `ids`, removing any prior occurrence. */
 export declare function placeIdAt(ids: string[], id: string, index: number): string[];

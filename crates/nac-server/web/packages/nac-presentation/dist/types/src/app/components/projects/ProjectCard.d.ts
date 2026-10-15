@@ -1,4 +1,4 @@
-import type { ProjectListItem } from "../../lib/projects";
+import type { ProjectListItem } from "../../lib/projects.js";
 export type ProjectListKind = "project" | "orphan";
 export interface ProjectReorderStart {
     itemId: string;

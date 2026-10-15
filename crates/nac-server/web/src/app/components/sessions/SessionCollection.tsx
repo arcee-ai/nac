@@ -1,3 +1,7 @@
+import type {
+  ManagedSessionView as ManagedSessionSummary,
+  ProjectView as ProjectRecord,
+} from "@/app/features/public-native/collectionViews";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
@@ -11,8 +15,6 @@ import { isActiveRun } from "@/app/lib/format";
 import { buildSessionNavigation, isSessionUnread } from "@/app/lib/sessionNavigation";
 import { routes } from "@/app/lib/routes";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
-
-import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 function SessionCollectionRow({
   entry,

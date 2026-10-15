@@ -1,6 +1,6 @@
 import { Cause, Effect } from "effect";
-import type { ShellCommandRequest, ShellCommandSnapshot } from "../../types/api";
-import type { ShellIntents } from "./intents";
+import type { ShellCommandRequest, ShellCommandSnapshot } from "../../types/api.js";
+import type { ShellIntents } from "./intents.js";
 declare const HumanCommandFailure_base: new <A extends Record<string, any> = {}>(args: import("effect/Types").VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => Cause.YieldableError & {
     readonly _tag: "HumanCommandFailure";
 } & Readonly<A>;
@@ -33,7 +33,7 @@ export declare function runHumanCommand(workflow: Effect.Effect<ShellCommandSnap
     operation_id: string;
     output_id?: string | null;
     request_id: string;
-    state: import("../../types/openapi.generated").components["schemas"]["ShellCommandState"];
+    state: import("../../types/openapi.generated.js").components["schemas"]["ShellCommandState"];
     stderr: string;
     stdout: string;
     timeout_ms: number;

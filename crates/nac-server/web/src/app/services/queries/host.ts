@@ -17,11 +17,12 @@ import type {
 } from "@/app/types/api";
 
 export function useStoreInfo() {
-  const { api } = useNativeRuntime();
+  const { api, publicPresentation } = useNativeRuntime();
 
   return useQuery<StoreInfo>({
     queryKey: queryKeys.storeInfo,
     queryFn: ({ signal }) => api.getStore(signal),
+    enabled: !publicPresentation,
     staleTime: Infinity,
   });
 }

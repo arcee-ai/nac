@@ -1,3 +1,5 @@
+import { requireNativeSummary } from "@/app/features/public-native/collectionViews";
+import type { SessionSummaryView as SessionSummarySnapshot } from "@/app/features/public-native/collectionViews";
 import { useState } from "react";
 
 import { Button, ButtonContent, ButtonVariant, Input, Modal, ModalSize } from "@/app/atoms";
@@ -6,7 +8,7 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useUpdatePresentation } from "@/app/services/queries";
 import { ApiError } from "@/app/services/api";
-import type { SessionSummarySnapshot } from "@/app/types/api";
+
 import { toRunError } from "@/app/lib/providerError";
 
 interface RenameModalProps {
@@ -45,7 +47,7 @@ function RenameForm({
         id: summary.session_id,
         title: title.trim(),
         pinned: canPin ? pinned : false,
-        expectedVersion: summary.presentation_version ?? 0,
+        expectedVersion: requireNativeSummary(summary).presentation_version ?? 0,
       });
       toast.success("Session presentation saved");
       onClose();

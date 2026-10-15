@@ -1,31 +1,58 @@
 // Endpoint-aware session SSE client with explicit replay and backpressure policy.
 import { nacClient } from "./nacClient.js";
+import { nativeSessionStreamWire, } from "./sessionStreamWire.js";
 const INITIAL_RETRY_MS = 500;
 const MAX_RETRY_MS = 10_000;
 const MAX_ATTEMPTS_BEFORE_OPEN = 4;
 const DEFAULT_MAX_PENDING_EVENTS = 256;
-function parseEvent(event) {
-    try {
-        return JSON.parse(event.data);
-    }
-    catch {
-        return null;
-    }
-}
-function cursorOf(envelope) {
-    return { epoch_id: envelope.epoch_id, sequence_id: envelope.sequence_id };
-}
-function sameOrBefore(cursor, previous) {
-    return (previous !== null &&
-        cursor.epoch_id === previous.epoch_id &&
-        cursor.sequence_id <= previous.sequence_id);
-}
 /**
  * Open a stream for one session. Delivery is ordered and bounded. If a slow
  * handler fills the queue, the connection is closed and replay resumes from
  * the last event the handler actually accepted.
  */
 export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
+    return subscribeWithWire(sessionId, handlers, options, nativeSessionStreamWire);
+}
+/** Explicit alternate wire family over the SAME ordered native stream/reconnect owner. */
+export function subscribeToSessionEventsWithWire(sessionId, handlers, wire, options) {
+    if (!options.client ||
+        typeof options.eventSource !== "function" ||
+        wire.invalidFrame !== "stop" ||
+        wire.epochPolicy !== "replay-boundary") {
+        throw new Error("An explicit stream wire requires a bound client, stream factory and strict decoding.");
+    }
+    for (const name of [
+        "streamPath",
+        "decodeEnvelope",
+        "decodeAssistantDelta",
+        "decodeReplayBoundary",
+        "decodeReplayGap",
+        "decodeLagged",
+        "cursorFromEnvelope",
+        "cursorFromBoundary",
+    ]) {
+        if (typeof wire[name] !== "function")
+            throw new Error("Missing explicit session stream codec.");
+    }
+    for (const name of ["epoch", "sequence", "compare", "successor", "query"]) {
+        if (typeof wire.cursor?.[name] !== "function")
+            throw new Error("Missing explicit session cursor protocol.");
+    }
+    if (options.initialCursor !== undefined && options.initialCursor !== null)
+        wire.cursor.query(options.initialCursor);
+    if ((options.maxConnectionMs !== undefined &&
+        (!Number.isFinite(options.maxConnectionMs) || options.maxConnectionMs <= 0)) ||
+        (options.maxPendingEvents !== undefined &&
+            (!Number.isSafeInteger(options.maxPendingEvents) || options.maxPendingEvents <= 0))) {
+        throw new Error("Session stream limits must be finite and positive.");
+    }
+    const selected = Object.freeze({ ...wire, cursor: Object.freeze({ ...wire.cursor }) });
+    return subscribeWithWire(sessionId, handlers, {
+        ...options,
+        maxConnectionMs: Math.min(299_000, Math.max(1, options.maxConnectionMs ?? 299_000)),
+    }, selected);
+}
+function subscribeWithWire(sessionId, handlers, options, wire) {
     const client = options.client ?? nacClient;
     const createEventSource = options.eventSource;
     const nativeEventSourceInit = createEventSource ? null : client.transport.eventSourceInit();
@@ -34,8 +61,8 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
     let connectionTimer = null;
     let retryTimer = null;
     let retryDelay = INITIAL_RETRY_MS;
-    let reconnectCursor = null;
-    let deliveredCursor = null;
+    let reconnectCursor = options.initialCursor ?? null;
+    let deliveredCursor = options.initialCursor ?? null;
     let replayBoundary = null;
     let closed = false;
     let everOpened = false;
@@ -47,7 +74,26 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
         if (!closed)
             handlers.onStatus?.(status);
     };
-    const observedCursor = () => pending.length > 0 ? cursorOf(pending[pending.length - 1]) : deliveredCursor;
+    function decodeFrame(event, decode) {
+        try {
+            return decode(event.data);
+        }
+        catch (error) {
+            if (wire.invalidFrame === "stop") {
+                handlers.onTransportError?.(error);
+                setStatus("error");
+                closed = true;
+                deliveryGeneration += 1;
+                pending.length = 0;
+                if (retryTimer)
+                    clearTimeout(retryTimer);
+                retryTimer = null;
+                closeSource();
+            }
+            return null;
+        }
+    }
+    const observedCursor = () => pending.length > 0 ? wire.cursorFromEnvelope(pending[pending.length - 1]) : deliveredCursor;
     const closeSource = () => {
         if (connectionTimer)
             clearTimeout(connectionTimer);
@@ -104,7 +150,7 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
                 if (generation !== deliveryGeneration)
                     return;
                 pending.shift();
-                deliveredCursor = cursorOf(envelope);
+                deliveredCursor = wire.cursorFromEnvelope(envelope);
                 reconnectCursor = deliveredCursor;
             }
         }
@@ -118,11 +164,12 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
         if (closed)
             return;
         setStatus(reconnectCursor === null ? "connecting" : "reconnecting");
-        const base = client.transport.url(`/sessions/${encodeURIComponent(sessionId)}/events/stream`);
+        const base = client.transport.url(wire.streamPath(sessionId));
         const params = new URLSearchParams();
         if (reconnectCursor !== null) {
-            params.set("after_epoch_id", reconnectCursor.epoch_id);
-            params.set("after_sequence_id", String(reconnectCursor.sequence_id));
+            const query = wire.cursor.query(reconnectCursor);
+            params.set("after_epoch_id", query.after_epoch_id);
+            params.set("after_sequence_id", query.after_sequence_id);
         }
         const url = params.size === 0 ? base : `${base}?${params.toString()}`;
         if (createEventSource) {
@@ -150,22 +197,35 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
         source.addEventListener("session_event", (event) => {
             if (!isCurrentConnection() || !(event instanceof MessageEvent))
                 return;
-            const envelope = parseEvent(event);
-            if (!envelope)
+            const decoded = decodeFrame(event, (text) => {
+                const envelope = wire.decodeEnvelope(text);
+                if (!envelope)
+                    return null;
+                const cursor = wire.cursorFromEnvelope(envelope);
+                wire.cursor.query(cursor);
+                if (wire.epochPolicy === "replay-boundary" &&
+                    (replayBoundary === null ||
+                        wire.cursor.epoch(cursor) !== wire.cursor.epoch(replayBoundary))) {
+                    throw new Error("Session event does not match its replay epoch.");
+                }
+                return { envelope, cursor };
+            });
+            if (!decoded)
                 return;
-            const cursor = cursorOf(envelope);
+            const { envelope, cursor } = decoded;
             const previous = observedCursor();
-            if (sameOrBefore(cursor, previous)) {
+            const comparison = previous === null ? null : wire.cursor.compare(cursor, previous);
+            if (comparison !== null && comparison <= 0) {
                 handlers.onDuplicate?.(envelope);
                 return;
             }
             if (previous !== null &&
-                cursor.epoch_id === previous.epoch_id &&
-                cursor.sequence_id !== previous.sequence_id + 1) {
+                wire.cursor.epoch(cursor) === wire.cursor.epoch(previous) &&
+                wire.cursor.sequence(cursor) !== wire.cursor.successor(wire.cursor.sequence(previous))) {
                 handlers.onSequenceGap?.({
-                    epochId: cursor.epoch_id,
-                    expectedSequenceId: previous.sequence_id + 1,
-                    receivedSequenceId: cursor.sequence_id,
+                    epochId: wire.cursor.epoch(cursor),
+                    expectedSequenceId: wire.cursor.successor(wire.cursor.sequence(previous)),
+                    receivedSequenceId: wire.cursor.sequence(cursor),
                 });
                 deliveryGeneration += 1;
                 pending.length = 0;
@@ -184,7 +244,7 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
         source.addEventListener("assistant_delta", (event) => {
             if (!isCurrentConnection() || !(event instanceof MessageEvent))
                 return;
-            const parsed = parseEvent(event);
+            const parsed = decodeFrame(event, wire.decodeAssistantDelta);
             if (!parsed)
                 return;
             options.instrumentation?.onAssistantDelta?.(parsed);
@@ -193,14 +253,20 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
         source.addEventListener("replay_boundary", (event) => {
             if (!isCurrentConnection() || !(event instanceof MessageEvent))
                 return;
-            const parsed = parseEvent(event);
-            if (!parsed)
+            const decoded = decodeFrame(event, (text) => {
+                const frame = wire.decodeReplayBoundary(text);
+                if (!frame)
+                    return null;
+                const cursor = wire.cursorFromBoundary(frame);
+                wire.cursor.query(cursor);
+                return { frame, cursor };
+            });
+            if (!decoded)
                 return;
-            replayBoundary = {
-                epoch_id: parsed.epoch_id,
-                sequence_id: parsed.replay_boundary_sequence_id,
-            };
-            if (reconnectCursor !== null && reconnectCursor.epoch_id !== parsed.epoch_id) {
+            const parsed = decoded.frame;
+            replayBoundary = decoded.cursor;
+            if (reconnectCursor !== null &&
+                wire.cursor.epoch(reconnectCursor) !== wire.cursor.epoch(replayBoundary)) {
                 reconnectCursor = replayBoundary;
                 deliveredCursor = null;
                 deliveryGeneration += 1;
@@ -211,14 +277,14 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
         source.addEventListener("replay_gap", (event) => {
             if (!isCurrentConnection() || !(event instanceof MessageEvent))
                 return;
-            const parsed = parseEvent(event);
+            const parsed = decodeFrame(event, wire.decodeReplayGap);
             if (parsed)
                 handlers.onReplayGap?.(parsed);
         });
         source.addEventListener("lagged", (event) => {
             if (!isCurrentConnection() || !(event instanceof MessageEvent))
                 return;
-            const parsed = parseEvent(event);
+            const parsed = decodeFrame(event, wire.decodeLagged);
             if (parsed)
                 handlers.onLagged?.(parsed);
         });

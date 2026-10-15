@@ -1,4 +1,4 @@
-import type { BackendKind, LightModelSettings, UpdateConfigRequest } from "../types/api";
+import type { BackendKind, LightModelSettings, UpdateConfigRequest } from "../types/api.js";
 export declare function inheritPrimaryCredential(light: LightModelSettings, primaryBackend: BackendKind, primaryApiKeyEnv: string | null, previousApiKeyEnv?: string | null): LightModelSettings;
 /**
  * Drop a light-model credential that came from inheriting the launch's

@@ -1,5 +1,5 @@
 import type React from "react";
-import { IconName } from "../icon";
+import { IconName } from "../icon/index.js";
 interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> {
     title: string;
     active?: boolean;
