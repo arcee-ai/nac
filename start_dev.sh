@@ -106,9 +106,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # Non-interactive Bash otherwise keeps every background child in this script's
-# process group. Monitor mode gives each child its own group, so cleanup reaches
-# cargo/npm descendants on both supported developer platforms.
-set -m
+# process group. Enable monitor mode only while launching each long-lived tree
+# leader. Leaving it enabled globally also makes short-lived readiness and
+# watchdog commands create process groups, which can trigger Apple Bash 3.2's
+# intermittent `child setpgid ... Operation not permitted` warning.
 
 API_URL="http://$BIND"
 APP_URL="http://$VITE_HOST:$VITE_PORT"
@@ -128,8 +129,10 @@ SERVER_ARGS=(--bind "$BIND" --no-open -y)
 if [[ -n "${DEV_STORE_PATH:-}" ]]; then
   SERVER_ARGS+=(--store-path "$DEV_STORE_PATH")
 fi
+set -m
 "${NAC_DEV_SERVER_BIN:-target/$PROFILE/nac-web}" "${SERVER_ARGS[@]}" &
 BACKEND_PID=$!
+set +m
 
 # Vite would otherwise start proxying to a socket that is not listening yet and
 # the first requests would fail with a connection error.
@@ -161,9 +164,11 @@ elif [[ "$DEV_OPEN" != 0 ]]; then
   echo "start_dev.sh: DEV_OPEN must be 0 or 1, got '$DEV_OPEN'" >&2
   exit 2
 fi
+set -m
 NAC_API_URL="$API_URL" \
   npm --prefix "$WEB_DIR" run dev -- "${VITE_ARGS[@]}" &
 VITE_PID=$!
+set +m
 
 frontend_ready=false
 for _ in $(seq 1 150); do
