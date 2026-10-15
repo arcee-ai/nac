@@ -16,16 +16,16 @@ answer modes:
   once**. Enabling it also safely drains requests already waiting at that
   broker. It never creates remembered grants and cannot override a hard or
   configured denial.
-- **Approve for me** sends requests that reach the approval broker to Jev, an
-  automatic reviewer reached through ArceeFM, when they are eligible: ordinary
+- **Approve for me** sends eligible requests that reach the approval broker to an
+  automatic review service through ArceeFM: ordinary
   commands, reads outside the workspace that are not credential files, and
   broad execution on the Podman backend. Git, Cargo, Make, shells and
   interpreters run repository-controlled code, so on Local and SSH they keep
-  the manual prompt even for read-only commands such as `git status`. Jev can
+  the manual prompt even for read-only commands such as `git status`. Review can
   allow one exact invocation once. On a Podman sandbox whose only writable
   host mount is a workspace without Git metadata anywhere in it (checked
   again at every review, including nested and bare repositories; a
-  workspace of more than 20,000 entries counts as having it), Jev needs
+  workspace of more than 20,000 entries counts as having it), review needs
   less confidence to allow a command than on Local or SSH. A sandbox that can write Git
   metadata is reviewed like Local, because that metadata is shared beyond
   the session: a live checkout's `.git` holds every branch and its hooks,
@@ -53,8 +53,9 @@ Traditional children keep their own requester identity, transcript, remembered
 grants, configured rules, and execution backend. A manual prompt identifies the
 child that requested access. Managed orchestrator sessions are a distinct
 durable topology and do not inherit this setting. The primary composer shows
-**Auto-approve on** for as long as the mode is active so the disable control
-remains easy to find.
+the selected mode for as long as it is enabled so the disable control remains
+easy to find. For Approve for me, enabled describes the saved answer policy;
+it does not guarantee that the review service is available.
 
 Remembered grants remain separately scoped to the exact resource, backend
 class, and session configuration revision that NAC derived. Forgetting a grant
@@ -87,6 +88,28 @@ and fall back to the API key if the login has expired or is rejected. Without ei
 "Sign in to Arcee or configure an Arcee API key in NAC before enabling Approve
 for me." and the previous mode stays selected.
 
+Enabling this mode checks local credentials and the approved endpoint origin.
+It does not contact the review service or check model access, credits or
+connectivity. The permissions dialog shows **Service availability not checked**
+until a review runs, **Review in progress** while it runs, then the last
+retained result. A completed review describes that request only; it does not
+guarantee availability for the next one.
+
+There are three distinct paths:
+
+| Request | What happens |
+| --- | --- |
+| Not eligible for automatic review | A manual permission prompt appears; without an interactive approver, the action is denied. |
+| Eligible, with an approving verdict | That exact invocation is allowed once. No remembered grant is created. |
+| Eligible, but rejected, uncertain, unavailable or timed out | The action is not executed. An error returns to the agent; no manual prompt opens automatically. Switch to Manual and ask the agent to try again if you want to decide the request yourself. |
+
+Unavailable reviews include a fixed failure category, without provider response
+text or credentials. The dialog explains whether to sign in again, check
+workspace access or credits, ask an administrator to check the review model or
+endpoint, or retry after a rate limit, timeout or service failure. Rejected and
+uncertain verdicts are decisions about the action; an unavailable review
+produced no decision.
+
 The reviewer sees a bounded, redacted description of the prepared operation:
 the tool, canonical resources, backend and, as intent, the messages a person
 typed to the session tree through the app or the HTTP API (prompts, queued
@@ -116,22 +139,64 @@ reviews stop the run; switch to Manual to continue during an outage.
 
 Blocked actions are listed in the permissions dialog. **Authorize retry** asks
 the agent to retry exactly that action once; the retry passes policy and a
-fresh review with your authorization as context. Blocked actions and
-authorizations are not kept across restarts.
+fresh review with your authorization as context. It does not repair unavailable
+service configuration or bypass a review.
+
+Recent reviews, blocked actions and retry authorizations are held in server
+memory. They disappear on restart and when an idle session is unloaded after
+its clients disconnect. An empty Automatic reviews panel therefore does not
+prove no reviews occurred. The selected mode and recorded human intent remain
+saved; turning the mode off still clears intent as described above. Keep any
+required audit evidence separately, and do not rely on this panel as a durable
+review log.
+
+### Environment readiness
+
+The session's coding model and the permission reviewer have separate access and
+billing requirements. A working ChatGPT connection does not establish Arcee
+review readiness; insufficient credits for an Arcee coding model are also
+separate from a missing review model.
+
+The current reviewer adapter requests `typesafe/jev-1.13` at the credential's
+Arcee origin on `/api/alpha/decisions`. Each environment needs an active,
+API-enabled registry row of type `decisions` for that name, included in the
+selected workspace's access profile. An authenticated request can return
+HTTP 404 when that row or access is missing, before billing or inference runs.
+
+ArceeFM administrators import the model from provider discovery or create it
+through the model registry. Discovery alone writes no model rows, and provider
+field synchronization updates existing rows only. Importing an active model
+does not by itself establish API access for every workspace. Check the API flag,
+model type and access-profile membership in the target environment. Deploying
+NAC does not provision these records or workspace credits.
+
+Use credentials issued by the environment being tested. A normal
+`nac-web arcee-auth login` targets production. For API-key testing against dev2,
+use a dev2-issued `ARCEE_API_KEY` with
+`NAC_REVIEW_ARCEE_BASE_URL=https://api2.apps.dev.arcee.ai/api/v1` in an isolated
+`NAC_HOME` without a stored production login. The URL override applies only to
+API-key reviews; stored logins use their own environment and take precedence.
 
 ### Testing the reviewer
 
 - `make test-e2e-review` runs the browser journey against a build with the
   `review-fixture` feature, whose scripted reviewer replaces Jev only when
   `NAC_REVIEW_FIXTURE` is set. Ordinary builds cannot load it.
-- `cargo test -p nac-core live_jev_smoke -- --ignored --nocapture` sends one
-  synthetic request to the configured Arcee environment. Jev is currently
-  deployed to the dev environments only; to test there with an Arcee API key
+- `cargo test --locked -p nac-core live_jev_smoke -- --ignored --nocapture` sends one
+  synthetic request to the configured Arcee environment. To test with an Arcee API key
   from that environment, set `ARCEE_API_KEY` and
   `NAC_REVIEW_ARCEE_BASE_URL=https://api.apps.dev.arcee.ai/api/v1` (or the
   dev2 host). The override applies only to API-key review and must be an
   approved Arcee origin.
-- `cargo test -p nac-core live_jev_corpus -- --ignored --nocapture` runs the
+- `cargo test --locked -p nac-core live_jev_corpus -- --ignored --nocapture` runs the
   labeled corpus through NAC's real projection and Jev, and fails on any
   approved high-risk fixture. Set `NAC_JEV_CORPUS_REPORT` to write a JSON
   report with verdicts, latency and cost.
+
+The scripted browser journey checks NAC's approval flow, not deployment
+readiness or the live reviewer's judgment. Before enabling an environment for
+users, require a successful live smoke test, rerun the labeled corpus after
+changes to intent, confinement, the rubric or thresholds, and run a real
+session through both a routine approval and a blocked action. Record the code
+revision, environment and result; an older corpus pass does not establish that
+the current deployment is ready.

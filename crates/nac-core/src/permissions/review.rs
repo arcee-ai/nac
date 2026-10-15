@@ -100,17 +100,6 @@ pub enum ReviewVerdict {
     Uncertain(Option<ReviewCategory>),
 }
 
-/// The review could not produce a verdict: missing credentials, transport
-/// failure, timeout or malformed output. Never an allow.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReviewUnavailable(pub String);
-
-impl std::fmt::Display for ReviewUnavailable {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
 /// The narrow port the broker uses. Adapters (Jev, test fakes, a future
 /// open-source reviewer) live outside the permission domain.
 pub trait PermissionReviewer: Send + Sync {
@@ -182,6 +171,9 @@ pub struct PermissionReview {
     pub code: Option<PermissionReviewCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<ReviewCategory>,
+    /// A fixed, safe explanation for an unavailable review. No provider text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<PermissionReviewFailureReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     pub reviewer: String,

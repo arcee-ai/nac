@@ -74,7 +74,16 @@ test("reviews eligible requests, returns blocked actions and reviews an authoriz
     .getByRole("radiogroup", { name: "Approval mode" })
     .getByText("Approve for me", { exact: true })
     .click();
-  await expect(page.getByRole("button", { name: /^Approve for me on/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Approve for me enabled/ })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Review service status" })).toContainText(
+    "Service availability not checked",
+  );
+  await expect(page.getByRole("status", { name: "Review service status" })).toContainText(
+    "checks credentials only",
+  );
+  await expect(page.getByRole("region", { name: "Automatic reviews" })).toContainText(
+    "No reviews are retained",
+  );
   await page.keyboard.press("Escape");
 
   await page.getByRole("combobox", { name: "Message" }).fill("ALL37_REVIEW_TOKEN");
@@ -114,8 +123,12 @@ test("reviews eligible requests, returns blocked actions and reviews an authoriz
     { kind: "text", text: "authorized retry complete", stream: true },
   );
 
-  await page.getByRole("button", { name: /^Approve for me on/ }).click();
+  await page.getByRole("button", { name: /^Approve for me enabled/ }).click();
   const reviews = page.getByRole("region", { name: "Automatic reviews" });
+  await expect(page.getByRole("status", { name: "Review service status" })).toContainText(
+    "Last review completed",
+  );
+  await expect(reviews).toContainText("an idle session is unloaded");
   await expect(reviews).toContainText("Blocked: out of scope");
   await expect(reviews).toContainText("blocked.txt");
   await reviews.getByRole("button", { name: "Authorize retry" }).click();
@@ -135,7 +148,7 @@ test("reviews eligible requests, returns blocked actions and reviews an authoriz
   expect(retryReview.outcome).toBe("approved");
   expect(retryReview.user_authorized_retry).toBe(true);
 
-  await page.getByRole("button", { name: /^Approve for me on/ }).click();
+  await page.getByRole("button", { name: /^Approve for me enabled/ }).click();
   await page
     .getByRole("radiogroup", { name: "Approval mode" })
     .getByText("Manual", { exact: true })

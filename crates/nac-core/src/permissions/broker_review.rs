@@ -189,6 +189,7 @@ impl PermissionBroker {
             outcome: None,
             code: None,
             category: None,
+            failure_reason: None,
             duration_ms: None,
             reviewer: reviewer
                 .as_ref()
@@ -207,7 +208,8 @@ impl PermissionBroker {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let started = Instant::now();
         let verdict = match reviewer {
-            None => Err(ReviewUnavailable(
+            None => Err(ReviewUnavailable::new(
+                PermissionReviewFailureReason::ServiceUnavailable,
                 "no automatic reviewer is configured".to_string(),
             )),
             Some(reviewer) => {
@@ -216,6 +218,7 @@ impl PermissionBroker {
                     () = cancellation.cancelled() => {
                         review.outcome = Some(PermissionReviewOutcome::Unavailable);
                         review.code = Some(PermissionReviewCode::ReviewUnavailable);
+                        review.failure_reason = Some(PermissionReviewFailureReason::Cancelled);
                         self.review_memory().record(&review);
                         self.emit_async(crate::events::SessionEvent::PermissionReviewed {
                             review: Box::new(review),
@@ -226,7 +229,8 @@ impl PermissionBroker {
                         ));
                     }
                     verdict = tokio::time::timeout(deadline, reviewer.review(&request)) => {
-                        verdict.unwrap_or_else(|_| Err(ReviewUnavailable(
+                        verdict.unwrap_or_else(|_| Err(ReviewUnavailable::new(
+                            PermissionReviewFailureReason::Timeout,
                             "automatic review timed out".to_string(),
                         )))
                     }
@@ -262,8 +266,9 @@ impl PermissionBroker {
                 Some(PermissionReviewCode::ReviewUncertain),
                 category,
             ),
-            Err(ReviewUnavailable(reason)) => {
-                eprintln!("nac: automatic permission review unavailable: {reason}");
+            Err(error) => {
+                eprintln!("nac: automatic permission review unavailable: {error}");
+                review.failure_reason = Some(error.reason);
                 (
                     PermissionReviewOutcome::Unavailable,
                     Some(PermissionReviewCode::ReviewUnavailable),

@@ -31,6 +31,8 @@ import type {
   SessionBehavior,
 } from "@/app/types/api";
 
+import { PermissionReviewRow, PermissionReviewStatus } from "./PermissionReviews";
+
 const MODE_OPTIONS: {
   mode: PermissionApprovalMode;
   name: string;
@@ -51,92 +53,12 @@ const MODE_OPTIONS: {
     mode: "review",
     name: "Approve for me",
     description:
-      "Jev reviews eligible requests and allows routine ones once. Blocked actions are returned to the agent unexecuted; you can authorize a retry, which is reviewed again. Requests Jev may not judge still ask you. Uses your Arcee sign-in or Arcee API key.",
+      "Eligible requests are reviewed automatically, and routine ones are allowed once. Ineligible requests still ask you. A rejected, uncertain or unavailable review leaves the action unexecuted and returns it to the agent; it does not open a manual prompt. You can switch to Manual to decide requests yourself. Uses your Arcee sign-in or Arcee API key.",
   },
 ];
 
 function modeName(mode: PermissionApprovalMode | undefined): string {
   return MODE_OPTIONS.find((option) => option.mode === mode)?.name ?? "Manual";
-}
-
-function reviewOutcomeLabel(review: PermissionReview): string {
-  switch (review.outcome) {
-    case "rejected":
-      return review.category ? `Blocked: ${review.category.replace(/_/g, " ")}` : "Blocked";
-    case "uncertain":
-      return "Blocked: review was not confident";
-    case "unavailable":
-      return "Review service unavailable";
-    case "approved":
-      return "Allowed by reviewer";
-    default:
-      return "Reviewing";
-  }
-}
-
-function ReviewRow({
-  review,
-  authorizable,
-  authorizing,
-  disabled,
-  disabledReason,
-  onAuthorize,
-}: {
-  review: PermissionReview;
-  authorizable: boolean;
-  authorizing: boolean;
-  disabled: boolean;
-  disabledReason?: string;
-  onAuthorize: () => void;
-}) {
-  const tone =
-    review.outcome === "approved"
-      ? "text-basic-secondary"
-      : review.outcome === undefined || review.outcome === null
-        ? "text-accent-primary"
-        : "text-error-primary";
-  return (
-    <div className="rounded-[4px] bg-elevation-level-2 px-3 py-2">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="tag-label uppercase text-basic-secondary">{review.tool}</span>
-        <span className="tag-label uppercase text-basic-tertiary">{review.backend}</span>
-        {review.backend === "local" || review.backend === "ssh" ? (
-          <span className="tag-label uppercase text-basic-tertiary">unsandboxed host</span>
-        ) : review.backend === "podman_with_host_mounts" ? (
-          <span className="tag-label uppercase text-basic-tertiary">
-            container with writable host mounts
-          </span>
-        ) : null}
-        <span className={`text-small ${tone}`}>{reviewOutcomeLabel(review)}</span>
-      </div>
-      {review.resources.map((resource, index) => (
-        <div
-          key={`${resource.action}:${resource.resource}:${index}`}
-          className="mt-1 break-words text-small text-basic-primary"
-        >
-          <span className="tag-label uppercase text-basic-secondary">{resource.action}</span>{" "}
-          {resource.display || resource.resource}
-        </div>
-      ))}
-      {authorizable ? (
-        <div className="mt-2 flex items-center justify-end gap-2">
-          {disabledReason ? (
-            <span className="text-small text-basic-tertiary">{disabledReason}</span>
-          ) : null}
-          <Button
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Secondary}
-            loading={authorizing}
-            disabled={disabled}
-            title="Ask the agent to retry exactly this action. The retry is reviewed again before it runs."
-            onClick={onAuthorize}
-          >
-            Authorize retry
-          </Button>
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 interface PermissionControlsProps {
@@ -210,6 +132,13 @@ export function PermissionControls({
   const approvalMode = permissions.data?.approval_mode ?? "manual";
   const autoApprove = approvalMode === "auto_approve";
   const reviewMode = approvalMode === "review";
+  const reviewAvailability = !reviews.length
+    ? "Not checked"
+    : reviews[0].outcome === "unavailable"
+      ? "Unavailable"
+      : !reviews[0].outcome
+        ? "Reviewing"
+        : null;
   const inheritedAutoApproval = approvalMode !== "manual" && !autoApprovalAvailable;
   const [manuallyOpen, setManuallyOpen] = useState(false);
   const [dismissedRequests, setDismissedRequests] = useState("");
@@ -320,13 +249,16 @@ export function PermissionControls({
               : autoApprove
                 ? "Auto-approve on — open permissions"
                 : reviewMode
-                  ? `Approve for me on${badge} — open permissions`
+                  ? `Approve for me enabled${badge} — open permissions`
                   : `${label}${badge}`
           }
           onClick={() => setManuallyOpen(true)}
         >
           <Icon iconName={IconName.Private} size={16} />
           <span className="label-micro">{currentModeName}</span>
+          {reviewMode && reviewAvailability ? (
+            <span className="label-micro text-basic-tertiary">{reviewAvailability}</span>
+          ) : null}
         </Button>
       </Tooltip>
 
@@ -346,7 +278,7 @@ export function PermissionControls({
               : autoApprove
                 ? "Automatic approval is active for this session and its owned child agents."
                 : reviewMode
-                  ? "Approve for me is active for this session and its owned child agents."
+                  ? "Approve for me is enabled for this session and its owned child agents. This setting does not guarantee that the review service is available."
                   : "Remembered access for this session."
         }
         footer={
@@ -422,13 +354,15 @@ export function PermissionControls({
                 ))}
                 <div className="text-small text-basic-tertiary">
                   The mode governs this session and all existing or future owned child agents, stays
-                  active across restarts and never creates remembered permissions. Separately
-                  managed orchestrators are not included.
+                  saved across restarts and never creates remembered permissions. Separately managed
+                  orchestrators are not included.
                 </div>
               </section>
             ) : null}
 
-            {reviews.length ? (
+            {reviewMode ? <PermissionReviewStatus reviews={reviews} /> : null}
+
+            {reviewMode || reviews.length ? (
               <section aria-label="Automatic reviews">
                 <div className="mb-2 tag-label uppercase text-basic-tertiary">
                   Automatic reviews
@@ -437,9 +371,19 @@ export function PermissionControls({
                   Blocked actions were returned to the agent unexecuted. Authorizing a retry asks
                   the agent to try exactly that action again; it passes policy and a fresh review.
                 </div>
+                <div className="mb-2 text-small text-basic-tertiary">
+                  Review history, blocked actions and retry authorizations are temporary. They are
+                  lost when the server restarts or an idle session is unloaded, including after all
+                  clients disconnect. The selected mode and recorded human intent remain saved.
+                </div>
+                {reviews.length === 0 ? (
+                  <div className="text-small text-basic-secondary">
+                    No reviews are retained for this session.
+                  </div>
+                ) : null}
                 <div className="flex flex-col gap-2">
                   {reviews.map((review) => (
-                    <ReviewRow
+                    <PermissionReviewRow
                       key={review.id}
                       review={review}
                       authorizable={authorizableReviews.has(review.id)}
@@ -489,7 +433,7 @@ export function PermissionControls({
                 <div className="mb-2 text-small text-basic-secondary">
                   Requested by {requesterLabel ?? "this session"} ({active.session_id}).{" "}
                   {reviewMode
-                    ? "Approve for me does not review this kind of action, so it needs your decision."
+                    ? "This request is not eligible for automatic review, so it needs your decision. Eligibility also depends on the available human intent and redaction checks."
                     : "Manual approval is effective because automatic approval is off for this session and its owned child agents."}
                 </div>
                 <div className="mb-2 tag-label uppercase text-basic-tertiary">Requested access</div>

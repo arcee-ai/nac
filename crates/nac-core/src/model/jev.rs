@@ -13,8 +13,8 @@ use serde_json::{json, Value};
 
 use super::{arcee, backend, BackendKind, ARCEE_AUTH_CANONICAL_BASE_URL};
 use crate::permissions::{
-    PermissionReviewer, ReviewCategory, ReviewRequest, ReviewUnavailable, ReviewVerdict,
-    REVIEW_DEADLINE,
+    PermissionReviewFailureReason, PermissionReviewer, ReviewCategory, ReviewRequest,
+    ReviewUnavailable, ReviewVerdict, REVIEW_DEADLINE,
 };
 
 /// Shown when Approve for me is selected without an Arcee credential.
@@ -136,8 +136,12 @@ fn decide(
     response: &Value,
     backend: &str,
 ) -> std::result::Result<ReviewVerdict, ReviewUnavailable> {
-    let malformed =
-        |detail: &str| ReviewUnavailable(format!("malformed Decisions response: {detail}"));
+    let malformed = |detail: &str| {
+        ReviewUnavailable::new(
+            PermissionReviewFailureReason::InvalidResponse,
+            format!("malformed Decisions response: {detail}"),
+        )
+    };
     let answers = response
         .get("answers")
         .and_then(Value::as_object)
@@ -243,13 +247,26 @@ fn usage(response: &Value) -> DecisionsUsage {
 enum ReviewFailure {
     /// This credential is unusable or was rejected; another may work.
     Credential(String),
-    Other(String),
+    Other(ReviewUnavailable),
 }
 
 enum AttemptError {
-    Transient(String),
+    Transient(ReviewUnavailable),
     Unauthorized,
-    Fatal(String),
+    Fatal(ReviewUnavailable),
+}
+
+fn http_failure_reason(status: reqwest::StatusCode) -> PermissionReviewFailureReason {
+    use PermissionReviewFailureReason::*;
+    match status.as_u16() {
+        401 => Authentication,
+        402 => InsufficientCredits,
+        403 => AccessDenied,
+        404 => ModelUnavailable,
+        408 | 504 => Timeout,
+        429 => RateLimited,
+        _ => ServiceUnavailable,
+    }
 }
 
 impl JevReviewer {
@@ -269,10 +286,20 @@ impl JevReviewer {
             .send()
             .await
             .map_err(|error| {
-                if error.is_timeout() || error.is_connect() {
-                    AttemptError::Transient(format!("request failed: {}", error.without_url()))
+                let transient = error.is_timeout() || error.is_connect();
+                let reason = if error.is_timeout() {
+                    PermissionReviewFailureReason::Timeout
                 } else {
-                    AttemptError::Fatal(format!("request failed: {}", error.without_url()))
+                    PermissionReviewFailureReason::ServiceUnavailable
+                };
+                let unavailable = ReviewUnavailable::new(
+                    reason,
+                    format!("request failed: {}", error.without_url()),
+                );
+                if transient {
+                    AttemptError::Transient(unavailable)
+                } else {
+                    AttemptError::Fatal(unavailable)
                 }
             })?;
         let status = response.status();
@@ -280,8 +307,9 @@ impl JevReviewer {
             return Err(AttemptError::Unauthorized);
         }
         if status.is_server_error() || matches!(status.as_u16(), 408 | 429) {
-            return Err(AttemptError::Transient(format!(
-                "Decisions returned HTTP {status}"
+            return Err(AttemptError::Transient(ReviewUnavailable::new(
+                http_failure_reason(status),
+                format!("Decisions returned HTTP {status}"),
             )));
         }
         if !status.is_success() {
@@ -300,14 +328,17 @@ impl JevReviewer {
                 .map(|detail| super::redact_credentials(&detail, &[bearer]))
                 .map(|detail| format!(": {}", detail.chars().take(200).collect::<String>()))
                 .unwrap_or_default();
-            return Err(AttemptError::Fatal(format!(
-                "Decisions returned HTTP {status}{detail}"
+            return Err(AttemptError::Fatal(ReviewUnavailable::new(
+                http_failure_reason(status),
+                format!("Decisions returned HTTP {status}{detail}"),
             )));
         }
-        response
-            .json::<Value>()
-            .await
-            .map_err(|_| AttemptError::Fatal("Decisions response is not JSON".to_string()))
+        response.json::<Value>().await.map_err(|_| {
+            AttemptError::Fatal(ReviewUnavailable::new(
+                PermissionReviewFailureReason::InvalidResponse,
+                "Decisions response is not JSON",
+            ))
+        })
     }
 
     async fn review_inner(
@@ -317,12 +348,26 @@ impl JevReviewer {
         // Credential discovery reads files; keep it off the async workers.
         let credentials = tokio::task::spawn_blocking(resolve_credentials)
             .await
-            .map_err(|error| ReviewUnavailable(format!("credential lookup failed: {error}")))?
-            .map_err(ReviewUnavailable)?;
-        let client =
-            arcee::no_redirect_client().map_err(|error| ReviewUnavailable(error.to_string()))?;
+            .map_err(|error| {
+                ReviewUnavailable::new(
+                    PermissionReviewFailureReason::Authentication,
+                    format!("credential lookup failed: {error}"),
+                )
+            })?
+            .map_err(|error| {
+                ReviewUnavailable::new(PermissionReviewFailureReason::Authentication, error)
+            })?;
+        let client = arcee::no_redirect_client().map_err(|error| {
+            ReviewUnavailable::new(
+                PermissionReviewFailureReason::ServiceUnavailable,
+                error.to_string(),
+            )
+        })?;
         let state = serde_json::to_value(request).map_err(|error| {
-            ReviewUnavailable(format!("review state could not be encoded: {error}"))
+            ReviewUnavailable::new(
+                PermissionReviewFailureReason::ServiceUnavailable,
+                format!("review state could not be encoded: {error}"),
+            )
         })?;
         let body = json!({
             "model": self.model,
@@ -337,12 +382,13 @@ impl JevReviewer {
             {
                 Ok(result) => return Ok(result),
                 Err(ReviewFailure::Credential(message)) => last = Some(message),
-                Err(ReviewFailure::Other(message)) => return Err(ReviewUnavailable(message)),
+                Err(ReviewFailure::Other(error)) => return Err(error),
             }
         }
-        Err(ReviewUnavailable(last.unwrap_or_else(|| {
-            ARCEE_REVIEW_CREDENTIAL_REQUIRED.to_string()
-        })))
+        Err(ReviewUnavailable::new(
+            PermissionReviewFailureReason::Authentication,
+            last.unwrap_or_else(|| ARCEE_REVIEW_CREDENTIAL_REQUIRED.to_string()),
+        ))
     }
 
     /// One review with one credential. A credential failure lets the caller
@@ -373,7 +419,7 @@ impl JevReviewer {
                 Ok(response) => {
                     return decide(&response, backend)
                         .map(|verdict| (verdict, usage(&response)))
-                        .map_err(|ReviewUnavailable(message)| ReviewFailure::Other(message))
+                        .map_err(ReviewFailure::Other)
                 }
                 Err(AttemptError::Unauthorized) => match credential {
                     Credential::StoredLogin { base_url } if !refreshed => {
@@ -451,7 +497,7 @@ pub async fn smoke_test_jev_reviewer() -> Result<(ReviewVerdict, Duration)> {
     let verdict = reviewer
         .review(&request)
         .await
-        .map_err(|error| anyhow!(error.0))?;
+        .map_err(|error| anyhow!(error.to_string()))?;
     Ok((verdict, started.elapsed()))
 }
 

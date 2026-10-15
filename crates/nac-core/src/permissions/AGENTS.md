@@ -49,6 +49,8 @@ separate owners.
   review of one eligible Ask request, and blocked-action retry authorization.
 - `review.rs` — review eligibility, the redacted reviewer projection, and
   per-run review limits. The reviewer itself (Jev) lives in `../model/jev.rs`.
+- `review_failure.rs` — fixed failure categories for clients; provider details
+  remain server diagnostics and never become model or UI error text.
 - `../store/permission_grants.rs` — durable remembered-grant adapter.
 - `permissions_tests.rs` — sibling characterization suite.
 

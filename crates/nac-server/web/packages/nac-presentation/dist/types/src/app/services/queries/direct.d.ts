@@ -20,6 +20,7 @@ export declare function useAuthorizePermissionReviewRetry(): import("@tanstack/r
     code?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["PermissionReviewCode"];
     created_at_epoch_ms: number;
     duration_ms?: number | null;
+    failure_reason?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["PermissionReviewFailureReason"];
     id: string;
     outcome?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["PermissionReviewOutcome"];
     resources: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ReviewResource"][];

@@ -14455,6 +14455,17 @@
             "format": "int64",
             "minimum": 0
           },
+          "failure_reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PermissionReviewFailureReason",
+                "description": "A fixed, safe explanation for an unavailable review. No provider text."
+              }
+            ]
+          },
           "id": {
             "type": "string"
           },
@@ -14496,6 +14507,21 @@
           "review_uncertain",
           "review_unavailable",
           "review_stopped"
+        ]
+      },
+      "PermissionReviewFailureReason": {
+        "type": "string",
+        "description": "Safe failure categories that clients can explain without provider details.",
+        "enum": [
+          "authentication",
+          "access_denied",
+          "model_unavailable",
+          "insufficient_credits",
+          "rate_limited",
+          "timeout",
+          "invalid_response",
+          "service_unavailable",
+          "cancelled"
         ]
       },
       "PermissionReviewOutcome": {

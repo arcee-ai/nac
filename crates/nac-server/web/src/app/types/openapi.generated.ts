@@ -856,6 +856,7 @@ export interface components {
       code?: null | components["schemas"]["PermissionReviewCode"];
       created_at_epoch_ms: number;
       duration_ms?: number | null;
+      failure_reason?: null | components["schemas"]["PermissionReviewFailureReason"];
       id: string;
       outcome?: null | components["schemas"]["PermissionReviewOutcome"];
       resources: components["schemas"]["ReviewResource"][];
@@ -869,6 +870,16 @@ export interface components {
       | "review_uncertain"
       | "review_unavailable"
       | "review_stopped";
+    PermissionReviewFailureReason:
+      | "authentication"
+      | "access_denied"
+      | "model_unavailable"
+      | "insufficient_credits"
+      | "rate_limited"
+      | "timeout"
+      | "invalid_response"
+      | "service_unavailable"
+      | "cancelled";
     PermissionReviewOutcome: "approved" | "rejected" | "uncertain" | "unavailable";
     PermissionStateResponse: {
       approval_mode: components["schemas"]["PermissionApprovalMode"];

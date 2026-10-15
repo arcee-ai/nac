@@ -24,6 +24,7 @@ mod opaque_policy;
 mod resource_binding;
 mod resource_projection;
 mod review;
+mod review_failure;
 mod shell_parser;
 
 use command_classification::*;
@@ -43,9 +44,10 @@ pub(crate) use review::{
 };
 pub use review::{
     retry_authorization_message, PermissionReview, PermissionReviewCode, PermissionReviewOutcome,
-    PermissionReviewer, ReviewCategory, ReviewRequest, ReviewResource, ReviewUnavailable,
-    ReviewVerdict, REVIEW_DEADLINE,
+    PermissionReviewer, ReviewCategory, ReviewRequest, ReviewResource, ReviewVerdict,
+    REVIEW_DEADLINE,
 };
+pub use review_failure::{PermissionReviewFailureReason, ReviewUnavailable};
 use shell_parser::{canonical_command, command_grant_candidate, parse_shell, ParsedShell};
 
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);

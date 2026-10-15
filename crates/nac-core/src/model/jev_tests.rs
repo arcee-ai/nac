@@ -2,6 +2,27 @@ use serde_json::json;
 
 use super::*;
 
+#[test]
+fn unavailable_http_responses_have_safe_failure_categories() {
+    use PermissionReviewFailureReason::*;
+    for (status, want) in [
+        (401, Authentication),
+        (402, InsufficientCredits),
+        (403, AccessDenied),
+        (404, ModelUnavailable),
+        (408, Timeout),
+        (429, RateLimited),
+        (500, ServiceUnavailable),
+        (504, Timeout),
+    ] {
+        assert_eq!(
+            http_failure_reason(reqwest::StatusCode::from_u16(status).unwrap()),
+            want,
+            "HTTP {status}"
+        );
+    }
+}
+
 fn response(noul: f64, choice: &str, confidence: f64) -> Value {
     json!({
         "model": "typesafe/jev-1.13",

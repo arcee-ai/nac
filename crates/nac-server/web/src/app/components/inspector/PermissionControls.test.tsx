@@ -290,7 +290,7 @@ describe("direct permission controls", () => {
     await waitFor(() =>
       expect(
         screen.getByRole("button", {
-          name: "Approve for me on — open permissions",
+          name: "Approve for me enabled — open permissions",
         }),
       ).toBeTruthy(),
     );
@@ -310,6 +310,30 @@ describe("direct permission controls", () => {
     await waitFor(() => expect(document.body.textContent).toContain(message));
     expect((screen.getByRole("radio", { name: "Manual" }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy();
+  });
+
+  it("explains eligibility, availability and temporary history before the first review", () => {
+    const state: PermissionStateResponse = {
+      approval_mode: "review",
+      requests: [],
+      grants: [],
+      reviews: [],
+      authorizable_review_ids: [],
+    };
+    fakes.getPermissions.mockResolvedValue(state);
+    mount(state);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Approve for me enabled — open permissions" }),
+    );
+    expect(screen.getByRole("status").textContent).toContain("Service availability not checked");
+    expect(document.body.textContent).toContain("Ineligible requests still ask you");
+    expect(document.body.textContent).toContain("it does not open a manual prompt");
+    const history = screen.getByRole("region", { name: "Automatic reviews" });
+    expect(history.textContent).toContain("No reviews are retained");
+    expect(history.textContent).toContain("idle session is unloaded");
+    expect(history.textContent).toContain("mode and recorded human intent remain saved");
+    expect(screen.getByRole("button", { name: "Switch to Manual" })).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/jev/i);
   });
 
   it("lists blocked reviews and authorizes one retry or switches to Manual", async () => {
@@ -370,7 +394,7 @@ describe("direct permission controls", () => {
     mount(state);
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Approve for me on (1) — open permissions",
+        name: "Approve for me enabled (1) — open permissions",
       }),
     );
 

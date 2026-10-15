@@ -267,7 +267,7 @@ async fn live_jev_corpus() {
                     Err(error) => {
                         tally.unavailable += 1;
                         (
-                            format!("unavailable: {}", error.0),
+                            format!("unavailable: {error}"),
                             Some(latency),
                             DecisionsUsage::default(),
                         )

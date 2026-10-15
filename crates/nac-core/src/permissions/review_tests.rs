@@ -563,6 +563,7 @@ fn a_blocked_review_stays_listed_after_newer_reviews_fill_recent() {
         outcome: Some(outcome),
         code: None,
         category: None,
+        failure_reason: None,
         duration_ms: None,
         reviewer: "fake".to_string(),
         created_at_epoch_ms: at,

@@ -419,7 +419,10 @@ async fn rejected_uncertain_and_unavailable_reviews_return_unexecuted_codes() {
     let reviewer = FakeReviewer::answering([
         Ok(ReviewVerdict::Reject(ReviewCategory::Destructive)),
         Ok(ReviewVerdict::Uncertain(Some(ReviewCategory::Unclear))),
-        Err(ReviewUnavailable("boom".to_string())),
+        Err(ReviewUnavailable::new(
+            PermissionReviewFailureReason::ServiceUnavailable,
+            "boom".to_string(),
+        )),
     ]);
     let (_path, broker) = review_broker(PermissionBackend::Local, reviewer).await;
 
@@ -446,6 +449,34 @@ async fn rejected_uncertain_and_unavailable_reviews_return_unexecuted_codes() {
     assert_eq!(blocked.len(), 2, "only judged blocks can be authorized");
     assert_eq!(blocked[0].outcome, Some(PermissionReviewOutcome::Uncertain));
     assert_eq!(blocked[1].outcome, Some(PermissionReviewOutcome::Rejected));
+}
+
+#[tokio::test]
+async fn unavailable_reviews_expose_a_safe_reason_without_provider_details() {
+    for reason in [
+        PermissionReviewFailureReason::Authentication,
+        PermissionReviewFailureReason::ModelUnavailable,
+        PermissionReviewFailureReason::InsufficientCredits,
+    ] {
+        let detail = "private-provider-detail-canary";
+        let reviewer = FakeReviewer::answering([Err(ReviewUnavailable::new(reason, detail))]);
+        let (_path, broker) = review_broker(PermissionBackend::Local, reviewer).await;
+        let message = denied(authorize(&broker, &[execute("command:[ls]")]).await);
+        assert!(message.contains("operation_executed=false"));
+        assert!(!message.contains(detail));
+        assert!(broker.pending().is_empty());
+        assert!(broker.grants().unwrap().is_empty());
+        let review = broker.recent_reviews().remove(0);
+        assert_eq!(review.failure_reason, Some(reason));
+        let serialized = serde_json::to_string(&review).unwrap();
+        assert!(!serialized.contains(detail));
+
+        // Older event records have no failure reason and remain readable.
+        let mut old = serde_json::to_value(&review).unwrap();
+        old.as_object_mut().unwrap().remove("failure_reason");
+        let old: PermissionReview = serde_json::from_value(old).unwrap();
+        assert_eq!(old.failure_reason, None);
+    }
 }
 
 #[tokio::test]
@@ -477,8 +508,14 @@ async fn three_consecutive_blocks_stop_the_run_across_variants() {
 #[tokio::test]
 async fn stopped_runs_deny_further_reviews_without_calling_the_reviewer() {
     let reviewer = FakeReviewer::answering([
-        Err(ReviewUnavailable("down".to_string())),
-        Err(ReviewUnavailable("down".to_string())),
+        Err(ReviewUnavailable::new(
+            PermissionReviewFailureReason::ServiceUnavailable,
+            "down".to_string(),
+        )),
+        Err(ReviewUnavailable::new(
+            PermissionReviewFailureReason::ServiceUnavailable,
+            "down".to_string(),
+        )),
     ]);
     let (_path, broker) = review_broker(PermissionBackend::Local, Arc::clone(&reviewer)).await;
     broker.begin_review_run();
@@ -730,9 +767,12 @@ impl PermissionReviewer for GatedReviewer {
         Box::pin(async move {
             self.started.notify_one();
             let receiver = self.release.lock().await.take().expect("reviewed once");
-            receiver
-                .await
-                .map_err(|_| ReviewUnavailable("released without a verdict".to_string()))
+            receiver.await.map_err(|_| {
+                ReviewUnavailable::new(
+                    PermissionReviewFailureReason::ServiceUnavailable,
+                    "released without a verdict".to_string(),
+                )
+            })
         })
     }
 
@@ -888,7 +928,8 @@ async fn a_retry_authorization_returns_unless_a_verdict_settles_the_action() {
     assert_eq!(broker.pending_retry_authorizations_for_test(), 1);
 
     // An unavailable review judged nothing.
-    broker.set_reviewer(FakeReviewer::answering([Err(ReviewUnavailable(
+    broker.set_reviewer(FakeReviewer::answering([Err(ReviewUnavailable::new(
+        PermissionReviewFailureReason::ServiceUnavailable,
         "down".to_string(),
     ))]));
     let reason = denied(authorize(&broker, &action).await);
@@ -1227,8 +1268,10 @@ async fn recent_reviews_expose_reviewing_and_final_states() {
     assert_eq!(finished[0].outcome, Some(PermissionReviewOutcome::Approved));
     assert!(broker.blocked_reviews().is_empty());
 
-    let unavailable_reviewer =
-        FakeReviewer::answering([Err(ReviewUnavailable("down".to_string()))]);
+    let unavailable_reviewer = FakeReviewer::answering([Err(ReviewUnavailable::new(
+        PermissionReviewFailureReason::ServiceUnavailable,
+        "down".to_string(),
+    ))]);
     broker.set_reviewer(unavailable_reviewer);
     let _ = authorize(&broker, &[execute("command:[pwd]")]).await;
     let recent = broker.recent_reviews();

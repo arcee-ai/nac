@@ -721,6 +721,7 @@ export declare function createNacApi(nacClient: NacClient): {
         code?: null | import("./openapi.generated.js").components["schemas"]["PermissionReviewCode"];
         created_at_epoch_ms: number;
         duration_ms?: number | null;
+        failure_reason?: null | import("./openapi.generated.js").components["schemas"]["PermissionReviewFailureReason"];
         id: string;
         outcome?: null | import("./openapi.generated.js").components["schemas"]["PermissionReviewOutcome"];
         resources: import("./openapi.generated.js").components["schemas"]["ReviewResource"][];

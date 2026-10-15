@@ -454,6 +454,7 @@ fn blocked_review(id: &str) -> nac_core::permissions::PermissionReview {
         outcome: Some(nac_core::permissions::PermissionReviewOutcome::Rejected),
         code: Some(nac_core::permissions::PermissionReviewCode::ReviewRejected),
         category: Some(nac_core::permissions::ReviewCategory::OutOfScope),
+        failure_reason: None,
         duration_ms: Some(5),
         reviewer: "test".to_string(),
         created_at_epoch_ms: 1,
