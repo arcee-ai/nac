@@ -414,6 +414,7 @@ async fn cached_manager_reconciles_peer_interruption_before_resubmission() {
             SubmitPromptRequest {
                 prompt: "continue after peer".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();

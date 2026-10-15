@@ -25,6 +25,7 @@ use crate::{
 pub(crate) struct CreateInboxItem {
     pub(crate) delivery: InboxDelivery,
     pub(crate) prompt: String,
+    pub(crate) origin: nac_core::store::InputOrigin,
 }
 
 pub(crate) struct UpdateInboxItem {
@@ -69,6 +70,9 @@ impl<'a> SessionIntentApplication<'a> {
             )
             .await?;
         let service = self.manager.attach_session(session_id).await?;
+        // A person's item becomes review intent as typed, before expansion.
+        let review_intent = (command.origin == nac_core::store::InputOrigin::Person)
+            .then(|| command.prompt.clone());
         let prompt = match service.prepare_user_input(&command.prompt) {
             PreparedUserInput::Empty => return Err(anyhow!("prompt is empty")),
             PreparedUserInput::InvalidSlashCommand { message } => return Err(anyhow!(message)),
@@ -84,7 +88,12 @@ impl<'a> SessionIntentApplication<'a> {
             PreparedUserInput::SubmitPrompt(prompt) => prompt,
         };
         service
-            .enqueue_direct_input(command.delivery, &prompt.agent_prompt, None)
+            .enqueue_direct_input(
+                command.delivery,
+                &prompt.agent_prompt,
+                None,
+                review_intent.as_deref(),
+            )
             .await
     }
 
@@ -203,6 +212,24 @@ impl<'a> SessionIntentApplication<'a> {
             .await
     }
 
+    pub(crate) async fn authorize_permission_review_retry(
+        &self,
+        session_id: &str,
+        review_id: &str,
+    ) -> Result<nac_core::permissions::PermissionReview> {
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Direct,
+            )
+            .await?;
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .authorize_permission_review_retry(review_id)
+            .await
+    }
+
     pub(crate) async fn delete_permission_grant(
         &self,
         session_id: &str,
@@ -227,6 +254,8 @@ pub(crate) struct PermissionState {
     pub(crate) approval_mode: PermissionApprovalMode,
     pub(crate) requests: Vec<PermissionRequest>,
     pub(crate) grants: Vec<PermissionGrantRecord>,
+    pub(crate) reviews: Vec<nac_core::permissions::PermissionReview>,
+    pub(crate) authorizable_review_ids: Vec<String>,
 }
 
 /// Attached-session projections and read-only durable state.
@@ -332,6 +361,12 @@ impl<'a> SessionStateApplication<'a> {
             approval_mode: service.permission_approval_mode().await?,
             requests: service.list_permission_requests()?,
             grants: service.list_permission_grants()?,
+            reviews: service.list_permission_reviews()?,
+            authorizable_review_ids: service
+                .list_blocked_permission_reviews()?
+                .into_iter()
+                .map(|review| review.id)
+                .collect(),
         })
     }
 

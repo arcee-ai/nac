@@ -48,7 +48,13 @@ impl OrchestrationOperations {
         session_id: &str,
         request: SubmitPromptRequest,
     ) -> Result<SubmitPromptResponse> {
-        self.manager.submit_prompt(session_id, request).await
+        self.manager
+            .submit_prompt(
+                session_id,
+                request,
+                nac_core::store::InputOrigin::Automation,
+            )
+            .await
     }
 
     pub(crate) async fn steer(
@@ -64,6 +70,7 @@ impl OrchestrationOperations {
                     session_id,
                     &thread_name,
                     ThreadSteeringRequest { instruction },
+                    nac_core::store::InputOrigin::Automation,
                 )
                 .await?;
             Ok(json!({
@@ -76,6 +83,7 @@ impl OrchestrationOperations {
                 .queue_orchestrator_steering(
                     session_id,
                     OrchestratorSteeringRequest { instruction },
+                    nac_core::store::InputOrigin::Automation,
                 )
                 .await?;
             Ok(json!({

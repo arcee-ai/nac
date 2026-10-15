@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [features]
 managed-fault-fixture = ["nac-core/managed-fault-fixture"]
+review-fixture = ["nac-core/review-fixture"]
 
 [dependencies]
 nac-contracts = { path = "../nac-contracts" }

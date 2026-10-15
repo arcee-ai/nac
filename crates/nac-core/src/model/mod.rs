@@ -48,12 +48,15 @@ mod chat_stream;
 mod chatgpt_codex;
 mod client;
 mod history;
+mod jev;
 mod providers;
 mod pseudo_tool_calls;
 mod redact;
 mod requests;
 mod responses;
 mod responses_stream;
+#[cfg(feature = "review-fixture")]
+mod review_fixture;
 mod sse;
 mod stream;
 #[cfg(test)]
@@ -78,13 +81,59 @@ pub use catalog::{
 pub(crate) use catalog::{
     Compat, CompletionsThinkingFormat, CompletionsTokenLimit, ModelMetadata, ThinkingLevelMap,
 };
+pub use jev::{smoke_test_jev_reviewer, JevReviewer, ARCEE_REVIEW_CREDENTIAL_REQUIRED};
+#[cfg(feature = "review-fixture")]
+pub use review_fixture::ScriptedReviewer;
+
+/// The automatic reviewer for new permission brokers: Jev, unless a
+/// `review-fixture` build is running a scripted browser journey.
+pub(crate) fn default_permission_reviewer(
+) -> std::sync::Arc<dyn crate::permissions::PermissionReviewer> {
+    #[cfg(feature = "review-fixture")]
+    if let Some(reviewer) = ScriptedReviewer::from_environment() {
+        return std::sync::Arc::new(reviewer);
+    }
+    std::sync::Arc::new(JevReviewer::default())
+}
 pub use providers::{
     list_managed_provider_models, list_provider_models, list_provider_models_with_http_policy,
     provider_default_base_url, provider_uses_api_key, ProviderModel,
 };
 pub(crate) use redact::{
     redact_credentials, redact_credentials_with_extra_headers, redact_json_body_with_extra_headers,
+    REDACTED as REDACTED_MARKER,
 };
+
+/// Credential values NAC itself holds or can see: stored API keys, the stored
+/// Arcee login tokens, and secret-named process environment variables. Used
+/// only to remove exact values from text that leaves the process, so an
+/// unreadable store is an error rather than an empty set.
+pub(crate) fn known_credential_values() -> Result<Vec<String>> {
+    let mut values = api_key_store::stored_api_key_values()?;
+    if let Some(auth) = arcee::read_stored_auth_optional()? {
+        values.push(auth.access_token);
+        values.push(auth.refresh_token);
+    }
+    values.extend(
+        std::env::vars()
+            .filter(|(name, value)| {
+                crate::permissions::is_secret_name(name) && plausible_secret_value(value)
+            })
+            .map(|(_, value)| value),
+    );
+    values.retain(|value| !value.is_empty());
+    values.sort();
+    values.dedup();
+    Ok(values)
+}
+
+/// Whether an environment value under a secret-shaped name can be a secret.
+/// Flags such as TOKENIZERS_PARALLELISM=false or KEYTIMEOUT=1 are too short
+/// to be credentials, and matching them would mark ordinary commands as
+/// redacted.
+fn plausible_secret_value(value: &str) -> bool {
+    value.trim().len() >= 8
+}
 
 /// Resolve the API key a backend would use at run time.
 ///

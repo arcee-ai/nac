@@ -248,6 +248,7 @@ impl SessionService {
             .run_prompt_commit(&run_id)
             .expect("newly admitted run must own its prompt commit channel");
         let inbox_item_id = self.run_inbox_item_id(&run_id);
+        let review_intent = self.run_review_intent(&run_id);
         let event_bus = self.event_bus.clone();
         let service = self.clone();
         let task = tokio::spawn(async move {
@@ -279,7 +280,13 @@ impl SessionService {
                 ));
                 agent.set_steering_dispatch_id(Some(task_run_id.to_string()));
                 let result = agent
-                    .send_session_run(&expanded_prompt, &task_run_id, prompt_commit, inbox_item_id)
+                    .send_session_run(
+                        &expanded_prompt,
+                        &task_run_id,
+                        prompt_commit,
+                        inbox_item_id,
+                        review_intent,
+                    )
                     .await
                     .map_err(|error| {
                         error
@@ -390,6 +397,7 @@ impl SessionService {
         let RunAdmissionKind {
             terminal_selection,
             inbox_item_id,
+            review_intent,
             goal_continuation,
             child_execution_mode,
             managed_orchestrator_execution_mode,
@@ -633,6 +641,7 @@ impl SessionService {
             transcript_baseline: None,
             command_cancellation,
             inbox_item_id,
+            review_intent,
             _operation_lease: operation_lease,
             _workspace_activity_lease: workspace_activity_lease,
         }));

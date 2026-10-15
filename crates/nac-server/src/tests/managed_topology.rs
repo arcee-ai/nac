@@ -118,6 +118,101 @@ async fn attaching_direct_session_reconciles_one_stale_goal_claim_without_duplic
     let _ = std::fs::remove_dir_all(root);
 }
 
+fn session_review_intent(store_path: &std::path::Path) -> Option<String> {
+    rusqlite::Connection::open(store_path)
+        .unwrap()
+        .query_row(
+            "SELECT permission_review_intent FROM sessions WHERE session_id = 'direct'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+fn item_review_intent(store_path: &std::path::Path, item_id: i64) -> Option<String> {
+    rusqlite::Connection::open(store_path)
+        .unwrap()
+        .query_row(
+            "SELECT review_intent FROM session_inbox WHERE id = ?1",
+            [item_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[tokio::test]
+async fn only_human_routes_tag_input_and_intent_waits_for_delivery() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("direct_review_intent");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-intent-test-key"));
+    seed_direct_session(&root, "direct");
+    let store_path = root.join("store.db");
+    // Holding the lease keeps queued items from starting a run.
+    let _lease = sessions::SessionOperationLease::try_acquire(&store_path, "direct").unwrap();
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/direct/inbox")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({"delivery": "queue", "prompt": "fix the parser test"})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let person: InboxItemResponse = serde_json::from_slice(&response_body(response).await).unwrap();
+    // The item carries what the person typed; it becomes intent only when
+    // it reaches the model, so a queued item never widens the running task.
+    assert_eq!(
+        item_review_intent(&store_path, person.id).as_deref(),
+        Some("fix the parser test")
+    );
+    assert_eq!(session_review_intent(&store_path), None);
+
+    let automation = manager
+        .create_direct_inbox_item(
+            "direct",
+            CreateInboxItemRequest {
+                delivery: InboxDelivery::Queue,
+                prompt: "publish the release".to_string(),
+            },
+            nac_core::store::InputOrigin::Automation,
+        )
+        .await
+        .unwrap();
+    assert_eq!(item_review_intent(&store_path, automation.id), None);
+
+    // Cancelling before delivery never publishes it.
+    let cancelled = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/sessions/direct/inbox/{}", person.id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(
+                    r#"{{"expected_version":{}}}"#,
+                    person.version
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status(), StatusCode::OK);
+    assert_eq!(session_review_intent(&store_path), None);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test]
 async fn direct_inbox_http_api_lists_edits_and_cancels_pending_input() {
     let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
@@ -156,6 +251,12 @@ async fn direct_inbox_http_api_lists_edits_and_cancels_pending_input() {
     let created: InboxItemResponse = serde_json::from_slice(&create_body).unwrap();
     assert_eq!(created.status, nac_core::store::InboxStatus::Pending);
     assert_eq!(created.prompt, "do this later");
+    // What a person typed travels with the item until it reaches the model.
+    assert_eq!(
+        item_review_intent(&store_path, created.id).as_deref(),
+        Some("do this later")
+    );
+    assert_eq!(session_review_intent(&store_path), None);
 
     let list = get_response(app.clone(), "/sessions/direct/inbox", None).await;
     assert_eq!(list.status(), StatusCode::OK);
@@ -234,6 +335,236 @@ async fn direct_inbox_http_api_lists_edits_and_cancels_pending_input() {
         .unwrap();
     assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
 
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn approve_for_me_requires_existing_arcee_auth_and_preserves_the_previous_mode() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("direct_review_mode_http");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-permission-test-key"));
+    seed_direct_session(&root, "direct");
+    let app = router(test_manager(&root));
+    let put_mode = |mode: &'static str| {
+        Request::builder()
+            .method("PUT")
+            .uri("/sessions/direct/permissions/mode")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(format!(r#"{{"mode":"{mode}"}}"#)))
+            .unwrap()
+    };
+
+    let auto = app.clone().oneshot(put_mode("auto_approve")).await.unwrap();
+    assert_eq!(auto.status(), StatusCode::NO_CONTENT);
+    let rejected = app.clone().oneshot(put_mode("review")).await.unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    let body = String::from_utf8(response_body(rejected).await.to_vec()).unwrap();
+    assert!(
+        body.contains(nac_core::model::ARCEE_REVIEW_CREDENTIAL_REQUIRED),
+        "{body}"
+    );
+    let state: PermissionStateResponse = serde_json::from_slice(
+        &response_body(get_response(app.clone(), "/sessions/direct/permissions", None).await).await,
+    )
+    .unwrap();
+    assert_eq!(
+        state.approval_mode,
+        nac_core::permissions::PermissionApprovalMode::AutoApprove,
+        "a failed selection keeps the previous mode"
+    );
+
+    // A configured Arcee API key is enough; no separate reviewer credential.
+    unsafe { std::env::set_var("ARCEE_API_KEY", "synthetic-arcee-test-key") };
+    let enabled = app.clone().oneshot(put_mode("review")).await.unwrap();
+    assert_eq!(enabled.status(), StatusCode::NO_CONTENT);
+    let state: PermissionStateResponse = serde_json::from_slice(
+        &response_body(get_response(app.clone(), "/sessions/direct/permissions", None).await).await,
+    )
+    .unwrap();
+    assert_eq!(
+        state.approval_mode,
+        nac_core::permissions::PermissionApprovalMode::Review
+    );
+    assert!(state.reviews.is_empty());
+
+    let missing = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/direct/permissions/reviews/missing/authorize-retry")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    let manual = app.clone().oneshot(put_mode("manual")).await.unwrap();
+    assert_eq!(manual.status(), StatusCode::NO_CONTENT);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn approve_for_me_accepts_an_existing_arcee_login() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("direct_review_mode_login");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-permission-test-key"));
+    write_arcee_auth(&nac_home, "https://api.arcee.ai/api/v1");
+    seed_direct_session(&root, "direct");
+    let app = router(test_manager(&root));
+
+    let enabled = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/sessions/direct/permissions/mode")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"mode":"review"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(enabled.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        nac_core::sessions::load_permission_approval_mode(&root.join("store.db"), "direct")
+            .unwrap(),
+        nac_core::permissions::PermissionApprovalMode::Review
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+fn blocked_review(id: &str) -> nac_core::permissions::PermissionReview {
+    let review = nac_core::permissions::PermissionReview {
+        id: id.to_string(),
+        session_id: "direct".to_string(),
+        call_id: Some("call-1".to_string()),
+        tool: "exec_command".to_string(),
+        backend: "local".to_string(),
+        resources: vec![nac_core::permissions::ReviewResource {
+            action: "execute".to_string(),
+            resource: "command:[git][push]".to_string(),
+            display: "git push".to_string(),
+        }],
+        user_authorized_retry: false,
+        outcome: Some(nac_core::permissions::PermissionReviewOutcome::Rejected),
+        code: Some(nac_core::permissions::PermissionReviewCode::ReviewRejected),
+        category: Some(nac_core::permissions::ReviewCategory::OutOfScope),
+        failure_reason: None,
+        duration_ms: Some(5),
+        reviewer: "test".to_string(),
+        created_at_epoch_ms: 1,
+    };
+    review
+}
+
+#[tokio::test]
+async fn authorize_retry_queues_one_steer_and_rolls_back_when_enqueue_fails() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("direct_review_retry_http");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-permission-test-key"));
+    unsafe { std::env::set_var("ARCEE_API_KEY", "synthetic-arcee-test-key") };
+    seed_direct_session(&root, "direct");
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
+    let service = manager.attach_session("direct").await.unwrap();
+    let broker = service.permission_broker_for_test().unwrap();
+    let authorize = |review_id: &str| {
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/sessions/direct/permissions/reviews/{review_id}/authorize-retry"
+            ))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let state = |app: axum::Router| async move {
+        serde_json::from_slice::<PermissionStateResponse>(
+            &response_body(get_response(app, "/sessions/direct/permissions", None).await).await,
+        )
+        .unwrap()
+    };
+
+    // A failed enqueue leaves the action authorizable and nothing queued.
+    broker.insert_blocked_review_for_test(blocked_review("review-fail"));
+    nac_core::session_service::SessionService::fail_next_retry_enqueue_for_test();
+    let failed = app.clone().oneshot(authorize("review-fail")).await.unwrap();
+    assert_eq!(failed.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let after_failure = state(app.clone()).await;
+    assert_eq!(
+        after_failure.authorizable_review_ids,
+        vec!["review-fail".to_string()]
+    );
+    assert!(service.list_direct_inbox().unwrap().is_empty());
+
+    // A successful authorization queues exactly one user-authored steer and
+    // is single use.
+    let authorized = app.clone().oneshot(authorize("review-fail")).await.unwrap();
+    assert_eq!(authorized.status(), StatusCode::OK);
+    let body: nac_core::permissions::PermissionReview =
+        serde_json::from_slice(&response_body(authorized).await).unwrap();
+    assert_eq!(body.id, "review-fail");
+    let inbox = service.list_direct_inbox().unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].delivery, nac_core::store::InboxDelivery::Steer);
+    assert!(
+        inbox[0].content.contains("git push"),
+        "{}",
+        inbox[0].content
+    );
+    assert!(inbox[0].content.contains("reviewed again"));
+    assert!(state(app.clone()).await.authorizable_review_ids.is_empty());
+    let again = app.clone().oneshot(authorize("review-fail")).await.unwrap();
+    assert_eq!(again.status(), StatusCode::NOT_FOUND);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn a_retry_wake_failure_after_recording_keeps_one_request_and_one_authorization() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("direct_review_retry_wake");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-permission-test-key"));
+    seed_direct_session(&root, "direct");
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
+    let service = manager.attach_session("direct").await.unwrap();
+    let broker = service.permission_broker_for_test().unwrap();
+    broker.insert_blocked_review_for_test(blocked_review("review-wake"));
+    let authorize = || {
+        Request::builder()
+            .method("POST")
+            .uri("/sessions/direct/permissions/reviews/review-wake/authorize-retry")
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    // The request is recorded, then starting a run fails.
+    nac_core::session_service::SessionService::fail_next_retry_wake_for_test();
+    let recorded = app.clone().oneshot(authorize()).await.unwrap();
+    assert_eq!(recorded.status(), StatusCode::OK);
+    let inbox = service.list_direct_inbox().unwrap();
+    assert_eq!(inbox.len(), 1, "the durable request stays queued");
+    assert_eq!(inbox[0].delivery, nac_core::store::InboxDelivery::Steer);
+    assert_eq!(
+        broker.pending_retry_authorizations_for_test(),
+        1,
+        "the authorization stays with the queued request"
+    );
+    assert!(broker.blocked_reviews().is_empty());
+
+    // A second attempt cannot add another request or authorization.
+    let again = app.clone().oneshot(authorize()).await.unwrap();
+    assert_eq!(again.status(), StatusCode::NOT_FOUND);
+    assert_eq!(service.list_direct_inbox().unwrap().len(), 1);
+    assert_eq!(broker.pending_retry_authorizations_for_test(), 1);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -402,6 +733,7 @@ async fn direct_goal_http_api_creates_edits_pauses_resumes_and_clears() {
             SubmitPromptRequest {
                 prompt: "hold the local run open".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();

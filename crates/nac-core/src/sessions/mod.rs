@@ -22,7 +22,7 @@ pub use db::MALFORMED_LIGHT_MODEL_DIAGNOSTIC;
 pub(crate) use db::{
     compare_and_update_permission_approval_state, insert_new_session_in_transaction,
     list_sessions_with_connection, load_effective_permission_approval_state,
-    load_session_run_state, reserve_permission_approval_transition,
+    load_permission_review_intent, load_session_run_state, reserve_permission_approval_transition,
 };
 pub use db::{
     create_session, delete_session, increment_run_count, list_sessions, load_last_session,
@@ -59,6 +59,32 @@ pub(crate) async fn load_last_session_async(path: PathBuf) -> Result<SessionSnap
 
 use codec::*;
 pub(crate) use summary::{last_user_prompt, visible_message_count};
+
+/// What a reviewer knows of the user's intent for a session tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReviewIntent {
+    /// The messages a person typed since Approve for me was last turned
+    /// off, oldest first, each recorded when it reached the model.
+    Accepted(Vec<String>),
+    /// No person has typed input for this tree, for example a session
+    /// driven only over MCP. Review does not proceed without scope.
+    NeverRecorded,
+    /// The messages outgrew what is kept, or could not be read.
+    /// Review must not proceed without scope.
+    Unavailable,
+}
+
+/// The review intent a reviewer may use for a session. Any failure to read
+/// it is `Unavailable`.
+pub async fn reviewable_intent(path: std::path::PathBuf, session_id: String) -> ReviewIntent {
+    crate::store::spawn_blocking_store_caller(move || {
+        load_permission_review_intent(&path, &session_id)
+    })
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or(ReviewIntent::Unavailable)
+}
 
 /// Immutable execution behavior selected when a top-level session is created.
 /// Stored as text so future behaviors can fail closed instead of being

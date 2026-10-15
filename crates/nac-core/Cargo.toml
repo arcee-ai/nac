@@ -13,6 +13,8 @@ name = "nac_core"
 default = []
 test-support = []
 managed-fault-fixture = []
+# Scripted automatic reviewer for production-build browser journeys only.
+review-fixture = []
 openapi = ["dep:utoipa", "nac-contracts/openapi"]
 
 [dependencies]

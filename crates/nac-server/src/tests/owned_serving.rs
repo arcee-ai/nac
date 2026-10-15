@@ -188,6 +188,7 @@ async fn owned_current_thread_orchestrator_steering_awaits_durable_admission() {
             SubmitPromptRequest {
                 prompt: "hold run".into(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();
@@ -197,6 +198,7 @@ async fn owned_current_thread_orchestrator_steering_awaits_durable_admission() {
             OrchestratorSteeringRequest {
                 instruction: "change direction".into(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();

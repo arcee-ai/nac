@@ -1253,10 +1253,14 @@ impl SessionManager {
         self.session_state().direct_inbox(session_id).await
     }
 
+    /// Creates a direct inbox item. Only human-facing routes pass
+    /// `InputOrigin::Person`, which makes the item review intent when it
+    /// reaches the model.
     pub async fn create_direct_inbox_item(
         &self,
         session_id: &str,
         request: CreateInboxItemRequest,
+        origin: nac_core::store::InputOrigin,
     ) -> Result<SessionInboxRecord> {
         self.session_intents()
             .create_inbox_item(
@@ -1264,6 +1268,7 @@ impl SessionManager {
                 application::sessions::CreateInboxItem {
                     delivery: request.delivery,
                     prompt: request.prompt,
+                    origin,
                 },
             )
             .await
@@ -1304,6 +1309,8 @@ impl SessionManager {
             approval_mode: state.approval_mode,
             requests: state.requests,
             grants: state.grants,
+            reviews: state.reviews,
+            authorizable_review_ids: state.authorizable_review_ids,
         })
     }
 
@@ -1379,6 +1386,16 @@ impl SessionManager {
             .await
     }
 
+    pub async fn authorize_permission_review_retry(
+        &self,
+        session_id: &str,
+        review_id: &str,
+    ) -> Result<nac_core::permissions::PermissionReview> {
+        self.session_intents()
+            .authorize_permission_review_retry(session_id, review_id)
+            .await
+    }
+
     pub async fn delete_permission_grant(&self, session_id: &str, grant_id: &str) -> Result<()> {
         self.session_intents()
             .delete_permission_grant(session_id, grant_id)
@@ -1404,14 +1421,18 @@ impl SessionManager {
         self.session_state().skills(session_id).await
     }
 
+    /// Submits a prompt. Only human-facing routes pass
+    /// `InputOrigin::Person`, which makes the prompt review intent when it
+    /// reaches the model.
     pub async fn submit_prompt(
         &self,
         session_id: &str,
         request: SubmitPromptRequest,
+        origin: nac_core::store::InputOrigin,
     ) -> Result<SubmitPromptResponse> {
         let submitted = self
             .session_runs()
-            .submit(session_id, request.prompt)
+            .submit(session_id, request.prompt, origin)
             .await?;
         Ok(SubmitPromptResponse {
             run_id: submitted.run_id,
@@ -1442,10 +1463,11 @@ impl SessionManager {
         session_id: &str,
         thread_name: &str,
         request: ThreadSteeringRequest,
+        origin: nac_core::store::InputOrigin,
     ) -> Result<ThreadSteeringResponse> {
         let steering = self
             .session_runs()
-            .queue_thread_steering(session_id, thread_name, request.instruction)
+            .queue_thread_steering(session_id, thread_name, request.instruction, origin)
             .await?;
         Ok(ThreadSteeringResponse {
             steering_id: steering.steering_id,
@@ -1469,6 +1491,7 @@ impl SessionManager {
                 thread_name,
                 request.instruction,
                 expected_run_id,
+                nac_core::store::InputOrigin::Automation,
             )
             .await?;
         Ok(ThreadSteeringResponse {
@@ -1483,10 +1506,11 @@ impl SessionManager {
         &self,
         session_id: &str,
         request: OrchestratorSteeringRequest,
+        origin: nac_core::store::InputOrigin,
     ) -> Result<OrchestratorSteeringResponse> {
         let steering = self
             .session_runs()
-            .queue_orchestrator_steering(session_id, request.instruction)
+            .queue_orchestrator_steering(session_id, request.instruction, origin)
             .await?;
         Ok(OrchestratorSteeringResponse {
             steering_id: steering.steering_id,

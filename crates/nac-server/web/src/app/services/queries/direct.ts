@@ -50,6 +50,20 @@ export function useReplyPermission() {
   });
 }
 
+/** Authorizes one retry of a blocked review. The model is asked to retry and
+ * the retry passes policy and a fresh review; nothing is bypassed. */
+export function useAuthorizePermissionReviewRetry() {
+  const { api } = useNativeRuntime();
+
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, reviewId }: { sessionId: string; reviewId: string }) =>
+      api.authorizePermissionReviewRetry(sessionId, reviewId),
+    onSuccess: (_data, variables) =>
+      client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
+  });
+}
+
 export function useSetPermissionApprovalMode() {
   const { api } = useNativeRuntime();
 

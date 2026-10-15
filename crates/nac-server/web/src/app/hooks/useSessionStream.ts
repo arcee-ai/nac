@@ -45,7 +45,9 @@ export function useDelegatedPermissionStream(sessionId: string, enabled: boolean
           envelope.event.type === "permission_asked" ||
           envelope.event.type === "permission_replied" ||
           envelope.event.type === "permission_dismissed" ||
-          envelope.event.type === "permission_approval_mode_changed"
+          envelope.event.type === "permission_approval_mode_changed" ||
+          envelope.event.type === "permission_review_started" ||
+          envelope.event.type === "permission_reviewed"
         ) {
           refresh();
         }

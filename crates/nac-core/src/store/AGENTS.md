@@ -56,6 +56,9 @@ workspace revisions, recovery markers, and cross-process coordination.
 - `session_inbox.rs`, `session_goals.rs`, `steering.rs` — durable continuation.
 - `run_recovery.rs`, `orchestrator_compaction.rs` — recovery markers.
 - `permission_grants.rs` — remembered authorization persistence.
+- `review_intent.rs` — the messages a person typed to a session tree,
+  recorded inside the transactions that deliver them to the model and read
+  by Approve for me as intent.
 - `projects.rs`, `workspace_revisions.rs`, configuration modules — product
   records with stable public values.
 - `../sessions/codec.rs`, `db.rs`, `operation_lease.rs`, `snapshot.rs` — session

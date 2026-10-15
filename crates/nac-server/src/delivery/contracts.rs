@@ -507,6 +507,14 @@ pub struct PermissionStateResponse {
     pub approval_mode: PermissionApprovalMode,
     pub requests: Vec<PermissionRequest>,
     pub grants: Vec<PermissionGrantRecord>,
+    /// Recent automatic reviews in every state, newest first: in progress
+    /// (no outcome), approved, blocked or unavailable. Empty outside Approve
+    /// for me.
+    #[serde(default)]
+    pub reviews: Vec<nac_core::permissions::PermissionReview>,
+    /// Blocked reviews the user may still authorize for one retry.
+    #[serde(default)]
+    pub authorizable_review_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]

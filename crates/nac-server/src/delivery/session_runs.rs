@@ -13,6 +13,7 @@ use nac_core::{
         SessionEventEnvelope, SessionReplayGap,
     },
     session_service::SessionEventReceiver,
+    store::InputOrigin,
 };
 use serde::Serialize;
 
@@ -37,10 +38,10 @@ pub(crate) async fn submit_prompt(
     AxumPath(session_id): AxumPath<String>,
     Json(request): Json<SubmitPromptRequest>,
 ) -> std::result::Result<(StatusCode, Json<SubmitPromptResponse>), ApiError> {
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(manager.submit_prompt(&session_id, request).await?),
-    ))
+    let submitted = manager
+        .submit_prompt(&session_id, request, InputOrigin::Person)
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(submitted)))
 }
 
 #[utoipa::path(
@@ -59,14 +60,10 @@ pub(crate) async fn queue_orchestrator_steering_handler(
 ) -> std::result::Result<(StatusCode, Json<OrchestratorSteeringResponse>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
     validate_steering_instruction(&request.instruction)?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(
-            manager
-                .queue_orchestrator_steering(&session_id, request)
-                .await?,
-        ),
-    ))
+    let queued = manager
+        .queue_orchestrator_steering(&session_id, request, InputOrigin::Person)
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(queued)))
 }
 
 #[utoipa::path(
@@ -85,14 +82,10 @@ pub(crate) async fn queue_thread_steering_handler(
 ) -> std::result::Result<(StatusCode, Json<ThreadSteeringResponse>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
     validate_steering_instruction(&request.instruction)?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(
-            manager
-                .queue_thread_steering(&session_id, &thread_name, request)
-                .await?,
-        ),
-    ))
+    let queued = manager
+        .queue_thread_steering(&session_id, &thread_name, request, InputOrigin::Person)
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(queued)))
 }
 
 pub(crate) fn event_cursor(

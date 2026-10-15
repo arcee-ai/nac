@@ -322,7 +322,7 @@ impl SessionManager {
 
         let display_prompt = prompt.display_prompt.clone();
         let handle = client
-            .try_submit_prepared_prompt_with_lease(prompt, operation_lease)
+            .try_submit_prepared_prompt_with_lease(prompt, operation_lease, None)
             .map_err(|error| {
                 report_regenerate_failure(session_id, "start the repeated run", &error)
             })?;

@@ -91,6 +91,11 @@ impl PermissionBroker {
             event_bus: StdMutex::new(None),
             state: StdMutex::new(PermissionBrokerState::default()),
             approval_observer: tokio::sync::Mutex::new(PermissionApprovalObserver::default()),
+            reviewer: StdMutex::new(None),
+            review: StdMutex::new(ReviewMemory::default()),
+            review_deadline: StdMutex::new(REVIEW_DEADLINE),
+            command_environment: StdMutex::new(None),
+            review_backend: StdMutex::new(review::ReviewBackendSource::Fixed(backend.into())),
         }
     }
 
@@ -152,6 +157,32 @@ impl PermissionBroker {
         AfterCommit: FnOnce() -> AfterCommitFuture,
         AfterCommitFuture: std::future::Future<Output = ()>,
     {
+        if mode == PermissionApprovalMode::Review {
+            let available = match self.reviewer() {
+                Some(reviewer) => tokio::task::spawn_blocking(move || reviewer.check_available())
+                    .await
+                    .unwrap_or_else(|error| {
+                        Err(format!(
+                            "automatic permission review could not be checked: {error}"
+                        ))
+                    }),
+                None => {
+                    Err("automatic permission review is not available in this session".to_string())
+                }
+            };
+            if let Err(message) = available {
+                return Err(PermissionApprovalModeUpdateError::ReviewerUnavailable(message).into());
+            }
+            // Selecting Approve for me again changes nothing. Reserving a
+            // transition would move the revision and discard reviews in
+            // flight, so it is a no-op.
+            if matches!(
+                self.load_approval_state().await,
+                Ok((PermissionApprovalMode::Review, _, _))
+            ) {
+                return Ok(());
+            }
+        }
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
         let revision = crate::store::spawn_blocking_store_caller(move || {
@@ -404,6 +435,17 @@ impl PermissionBroker {
             Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
                 return AuthorizationOutcome::Allowed;
             }
+            Ok((PermissionApprovalMode::Review, generation, revision)) => {
+                // Ineligible requests fall through to the manual path below,
+                // which still fails closed without an interactive client.
+                if let Some(outcome) = self
+                    .review(tool, resources, context, cancellation, revision)
+                    .await
+                {
+                    return outcome;
+                }
+                (PermissionApprovalMode::Review, generation, revision)
+            }
             Ok(state) => state,
             Err(reason) => return AuthorizationOutcome::Denied(reason),
         };
@@ -446,15 +488,21 @@ impl PermissionBroker {
             Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
                 return AuthorizationOutcome::Allowed;
             }
-            Ok((PermissionApprovalMode::Manual, generation, _))
-                if generation > initial_auto_generation =>
-            {
+            Ok((
+                PermissionApprovalMode::Manual | PermissionApprovalMode::Review,
+                generation,
+                _,
+            )) if generation > initial_auto_generation => {
                 // Auto-approve was enabled and then disabled while this Ask
                 // was already resolving broker ownership. The enable still
                 // owns this invocation even though it never became pending.
                 return AuthorizationOutcome::Allowed;
             }
-            Ok((PermissionApprovalMode::Manual, generation, _)) => generation,
+            Ok((
+                PermissionApprovalMode::Manual | PermissionApprovalMode::Review,
+                generation,
+                _,
+            )) => generation,
             Err(reason) => return AuthorizationOutcome::Denied(reason),
         };
         {
@@ -648,7 +696,9 @@ impl PermissionBroker {
         dismissed
     }
 
-    async fn load_approval_state(&self) -> Result<(PermissionApprovalMode, i64, i64), String> {
+    pub(super) async fn load_approval_state(
+        &self,
+    ) -> Result<(PermissionApprovalMode, i64, i64), String> {
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
         crate::store::spawn_blocking_store_caller(move || {
@@ -734,7 +784,7 @@ impl PermissionBroker {
         "the interactive session client disconnected while approval was pending".to_string()
     }
 
-    async fn emit_async(&self, event: crate::events::SessionEvent) {
+    pub(super) async fn emit_async(&self, event: crate::events::SessionEvent) {
         if crate::store::coordinator::owner_for(&self.store_path).is_ok_and(|owner| owner.is_some())
         {
             let bus = self
@@ -764,7 +814,7 @@ impl PermissionBroker {
     }
 }
 
-fn epoch_millis_now() -> u64 {
+pub(super) fn epoch_millis_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
