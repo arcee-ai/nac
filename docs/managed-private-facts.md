@@ -44,7 +44,8 @@ its health/readiness probes. The separately authenticated maintenance listener
 keeps its existing admission. The private fact endpoint is never mounted on
 either ordinary router. Omitting the new flag preserves standalone behavior.
 
-The private listener uses the same `SessionManager`, store, readiness owner,
+The private listener requires TLS 1.3, including for its enrolled and pinned D
+peer. It uses the same `SessionManager`, store, readiness owner,
 and complete shutdown watchdog as the existing server. Shutdown stops public,
 maintenance, and private acceptance before cancelling local runs. All HTTP/TLS
 requests drain before persistence callers quiesce and the executor drains.

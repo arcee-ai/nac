@@ -43,12 +43,20 @@ pub(crate) async fn client(
     addr: SocketAddr,
     peer: Option<&str>,
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>> {
+    client_with_versions(addr, peer, &[&rustls::version::TLS13]).await
+}
+
+async fn client_with_versions(
+    addr: SocketAddr,
+    peer: Option<&str>,
+    versions: &[&'static rustls::SupportedProtocolVersion],
+) -> Result<tokio_rustls::client::TlsStream<TcpStream>> {
     let mut roots = rustls::RootCertStore::empty();
     roots.add(certificate("ca"))?;
     let builder = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::aws_lc_rs::default_provider(),
     ))
-    .with_safe_default_protocol_versions()?
+    .with_protocol_versions(versions)?
     .with_root_certificates(roots);
     let config = match peer {
         Some(peer) => builder.with_client_auth_cert(vec![certificate(peer)], key(peer))?,
@@ -60,6 +68,41 @@ pub(crate) async fn client(
             TcpStream::connect(addr).await?,
         )
         .await?)
+}
+
+#[tokio::test]
+async fn native_listener_requires_tls13_even_for_the_enrolled_d_certificate() {
+    let listener = RuntimeTlsListener::bind("127.0.0.1:0".parse().unwrap(), identity())
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let (stop, done) = oneshot::channel();
+    let task = tokio::spawn(serve_authenticated_runtime(
+        listener,
+        Router::new().route("/probe", axum::routing::get(|| async { "" })),
+        async {
+            let _ = done.await;
+        },
+    ));
+    let legacy = tokio::time::timeout(
+        Duration::from_secs(2),
+        client_with_versions(address, Some("d-service"), &[&rustls::version::TLS12]),
+    )
+    .await
+    .unwrap();
+    let modern = exchange(address, Some("d-service"), "GET", "/probe", b"", &[])
+        .await
+        .unwrap();
+    // Drop any legacy stream before shutdown, including the pre-fix success.
+    let legacy_was_refused = legacy.is_err();
+    drop(legacy);
+    stop.send(()).unwrap();
+    task.await.unwrap().unwrap();
+    assert_eq!(modern.0, 200);
+    assert!(
+        legacy_was_refused,
+        "the actual enrolled peer must not downgrade Native to TLS1.2"
+    );
 }
 
 pub(crate) async fn exchange(
