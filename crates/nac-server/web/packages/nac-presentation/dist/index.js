@@ -16736,24 +16736,29 @@ function __({ sessionId: e, onReopen: t }) {
 				className: "text-basic-secondary",
 				children: "Up to 32 recent entries. Older metadata can expire. Reopening observes output and sends no input."
 			}),
-			n.isPending ? /* @__PURE__ */ Y("p", {
-				role: "status",
-				children: "Loading recent activity…"
-			}) : null,
-			n.isError ? /* @__PURE__ */ X("p", {
-				role: "alert",
+			/* @__PURE__ */ X("div", {
+				className: "min-h-7",
 				children: [
-					"Recent activity unavailable.",
-					" ",
-					/* @__PURE__ */ Y(z, {
-						type: "button",
-						size: j.Small,
-						onClick: () => void n.refetch(),
-						children: "Refresh recent activity"
-					})
+					n.isPending ? /* @__PURE__ */ Y("p", {
+						role: "status",
+						children: "Loading recent activity…"
+					}) : null,
+					n.isError ? /* @__PURE__ */ X("p", {
+						role: "alert",
+						children: [
+							"Recent activity unavailable.",
+							" ",
+							/* @__PURE__ */ Y(z, {
+								type: "button",
+								size: j.Small,
+								onClick: () => void n.refetch(),
+								children: "Refresh recent activity"
+							})
+						]
+					}) : null,
+					!n.isPending && !n.isError && a.length === 0 ? /* @__PURE__ */ Y("p", { children: "No recent activity is available." }) : null
 				]
-			}) : null,
-			!n.isPending && !n.isError && a.length === 0 ? /* @__PURE__ */ Y("p", { children: "No recent activity is available." }) : null,
+			}),
 			r && !o ? /* @__PURE__ */ Y("p", {
 				role: "status",
 				children: "Selected activity is no longer in bounded history."
