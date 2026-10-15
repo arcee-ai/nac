@@ -41,14 +41,17 @@ type Fixtures = {
 type Options = {
   exaCredential: string | undefined;
   orchestration: string | null;
+  /** Extra server environment for fixture-only builds, such as a scripted reviewer. */
+  serverEnvironment: Record<string, string>;
 };
 
 export const test = base.extend<Fixtures & Options>({
   exaCredential: [undefined, { option: true }],
   orchestration: ["1", { option: true }],
-  harness: async ({ request, exaCredential, orchestration }, use, testInfo) => {
+  serverEnvironment: [{}, { option: true }],
+  harness: async ({ request, exaCredential, orchestration, serverEnvironment }, use, testInfo) => {
     void request;
-    let running = await startHarness(testInfo, exaCredential, orchestration);
+    let running = await startHarness(testInfo, exaCredential, orchestration, serverEnvironment);
     const harness: EmbeddedHarness = {
       ...running,
       restart: async (nextGate) => {
@@ -56,7 +59,13 @@ export const test = base.extend<Fixtures & Options>({
           throw new Error("Gate restart fixture requires the ordinary embedded harness");
         const previousOutput = running.output;
         await running.stopServer();
-        running = await startHarness(testInfo, exaCredential, nextGate, running.provider);
+        running = await startHarness(
+          testInfo,
+          exaCredential,
+          nextGate,
+          serverEnvironment,
+          running.provider,
+        );
         running.output.unshift(...previousOutput);
         Object.assign(harness, running);
       },
@@ -284,6 +293,7 @@ async function startHarness(
   testInfo: TestInfo,
   exaCredential: string | undefined,
   orchestration: string | null,
+  serverEnvironment: Record<string, string>,
   existingProvider?: ScriptedProvider,
 ): Promise<RunningHarness> {
   if (process.platform === "win32") {
@@ -362,6 +372,7 @@ async function startHarness(
         OPENAI_API_KEY: "nac-e2e-openai-dummy-only",
         DEEPSEEK_API_KEY: "nac-e2e-deepseek-dummy-only",
         MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
+        ...serverEnvironment,
         [cleanupMarkerEnvironment]: cleanupMarker,
         ...(exaCredential == null
           ? {}

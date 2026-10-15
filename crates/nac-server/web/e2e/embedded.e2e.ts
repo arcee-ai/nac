@@ -491,7 +491,10 @@ test("persists session auto-approval, drains pending asks, and restores manual m
     "Awaiting approval",
   );
 
-  await page.getByRole("switch", { name: "Approve all automatically" }).click();
+  await page
+    .getByRole("radiogroup", { name: "Approval mode" })
+    .getByText("Approve all", { exact: true })
+    .click();
   await expect(
     page.getByRole("button", { name: "Auto-approve on — open permissions" }),
   ).toBeVisible();
@@ -508,11 +511,11 @@ test("persists session auto-approval, drains pending asks, and restores manual m
     page.getByRole("button", { name: "Auto-approve on — open permissions" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
-  const toggle = page.getByRole("switch", {
-    name: "Approve all automatically",
-  });
-  await expect(toggle).toHaveAttribute("aria-checked", "true");
-  await toggle.click();
+  await expect(page.getByRole("radio", { name: "Approve all", exact: true })).toBeChecked();
+  await page
+    .getByRole("radiogroup", { name: "Approval mode" })
+    .getByText("Manual", { exact: true })
+    .click();
   await expect(page.getByRole("button", { name: "Permissions" })).toBeVisible();
   await page.keyboard.press("Escape");
 
@@ -603,10 +606,13 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await page.getByRole("button", { name: "Permissions" }).click();
   const permissions = page.getByRole("dialog");
   await expect(permissions).toContainText(
-    "This setting governs this session and all existing or future owned child agents",
+    "The mode governs this session and all existing or future owned child agents",
   );
   await expect(permissions).toContainText("Separately managed orchestrators are not included");
-  await permissions.getByRole("switch", { name: "Approve all automatically" }).click();
+  await permissions
+    .getByRole("radiogroup", { name: "Approval mode" })
+    .getByText("Approve all", { exact: true })
+    .click();
   await page.keyboard.press("Escape");
 
   const automaticSend = await launchForegroundChild(page, "Automatic child", "ALL58_AUTO_CHILD");
@@ -621,7 +627,10 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await expect(page.getByText("Permission required")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
-  await page.getByRole("switch", { name: "Approve all automatically" }).click();
+  await page
+    .getByRole("radiogroup", { name: "Approval mode" })
+    .getByText("Manual", { exact: true })
+    .click();
   await page.keyboard.press("Escape");
 
   const manualSend = await launchForegroundChild(page, "Manual child", "ALL58_MANUAL_CHILD");
