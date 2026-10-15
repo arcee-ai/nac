@@ -957,7 +957,7 @@ async fn fenced_prompt_lost_ack_replays_before_adopting_the_user_turn() {
         .writer
         .lose_next_append_ack_for_test();
     agent
-        .push_and_log_run_prompt(user_message("one prompt"), &run_id, None)
+        .push_and_log_run_prompt(user_message("one prompt"), &run_id, None, None)
         .await
         .unwrap();
     assert_eq!(agent.messages.len(), 2);
@@ -987,7 +987,7 @@ async fn fenced_prompt_persistent_uncertainty_never_requests_a_new_logical_run()
         .writer
         .lose_append_acks_for_test(2);
     let error = agent
-        .push_and_log_run_prompt(user_message("one prompt"), &run_id, None)
+        .push_and_log_run_prompt(user_message("one prompt"), &run_id, None, None)
         .await
         .unwrap_err();
     let failure = error
@@ -1023,7 +1023,7 @@ async fn fenced_prompt_failed_reload_retains_canonical_input_on_retry() {
             .writer
             .lose_append_acks_for_test(2);
         agent
-            .push_and_log_run_prompt(user_message("retain this prompt"), &run_id, None)
+            .push_and_log_run_prompt(user_message("retain this prompt"), &run_id, None, None)
             .await
             .unwrap_err();
         // A real SQLite read failure after commit, without altering the row.
@@ -1113,7 +1113,7 @@ async fn fenced_prompt_definitive_error_clears_pending_state() {
     ).unwrap();
     let run_id = SessionRunId::from_stored("prompt-run".into());
     agent
-        .push_and_log_run_prompt(user_message("rejected"), &run_id, None)
+        .push_and_log_run_prompt(user_message("rejected"), &run_id, None, None)
         .await
         .unwrap_err();
     assert_eq!(agent.messages.len(), 1);

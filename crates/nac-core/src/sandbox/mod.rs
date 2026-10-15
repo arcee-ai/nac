@@ -211,6 +211,78 @@ impl Default for SandboxSpec {
     }
 }
 
+impl SandboxSpec {
+    /// Whether code in this sandbox can write host data beyond the workspace's
+    /// own files. The only writable mount allowed is the workspace at the
+    /// default workdir, and only when it holds no Git administrative data.
+    /// Git metadata is shared beyond the session: a live checkout's `.git`
+    /// holds every branch's refs and its hooks, and a forked worktree's
+    /// overlays write the host repository's `objects` and `refs`, so code
+    /// that can write it can move another branch or plant a hook that runs
+    /// on the host. Any other writable mount, such as one added with
+    /// `--mount`, counts too.
+    pub(crate) fn mounts_host_data_beyond_workspace(&self) -> bool {
+        self.mounts
+            .iter()
+            .filter(|mount| !mount.read_only)
+            .any(|mount| {
+                mount.guest != Path::new(DEFAULT_SANDBOX_WORKDIR) || holds_git_metadata(&mount.host)
+            })
+    }
+}
+
+/// Most directory entries examined when looking for Git metadata in a
+/// workspace. A workspace with more counts as holding it.
+const GIT_METADATA_SCAN_LIMIT: usize = 20_000;
+
+/// Whether a writable workspace holds Git administrative data anywhere in
+/// it: a `.git` entry, or the `HEAD`, `objects` and `refs` of a bare
+/// repository, at any depth. Code that can write a repository's metadata can
+/// move its refs or plant a hook that runs when someone uses it on the host.
+/// Symbolic links are not followed. Anything that cannot be checked, and a
+/// workspace too large to check within `GIT_METADATA_SCAN_LIMIT` entries,
+/// counts as holding it.
+fn holds_git_metadata(workspace: &Path) -> bool {
+    if std::fs::symlink_metadata(workspace).map_or(true, |metadata| !metadata.is_dir()) {
+        return true;
+    }
+    let mut pending = vec![workspace.to_path_buf()];
+    let mut examined = 0;
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return true;
+        };
+        let mut bare = [false; 3];
+        for entry in entries {
+            examined += 1;
+            if examined > GIT_METADATA_SCAN_LIMIT {
+                return true;
+            }
+            let Ok(entry) = entry else {
+                return true;
+            };
+            let Ok(file_type) = entry.file_type() else {
+                return true;
+            };
+            let name = entry.file_name();
+            match name.to_str() {
+                Some(".git") => return true,
+                Some("HEAD") => bare[0] = true,
+                Some("objects") => bare[1] = true,
+                Some("refs") => bare[2] = true,
+                _ => {}
+            }
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            }
+        }
+        if bare.iter().all(|found| *found) {
+            return true;
+        }
+    }
+    false
+}
+
 /// The per-session worktree a sandboxed session runs in, when its working
 /// directory was forked from a git repository instead of mounting the user's
 /// live checkout. Recorded so a resumed session can re-attach the worktree and

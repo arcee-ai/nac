@@ -261,6 +261,7 @@ pub fn queue_managed_orchestrator_steering(
         ORCHESTRATOR_STEERING_TARGET,
         run_id,
         instruction,
+        super::InputOrigin::Automation,
     )?;
     transaction.commit()?;
     Ok(record)

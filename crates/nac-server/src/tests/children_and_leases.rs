@@ -564,6 +564,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
             SubmitPromptRequest {
                 prompt: "bypass parent ownership".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap_err();
@@ -576,6 +577,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
             SubmitPromptRequest {
                 prompt: "bypass parent ownership".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap_err();
@@ -630,6 +632,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
                 OrchestratorSteeringRequest {
                     instruction: "bypass parent steering".to_string(),
                 },
+                nac_core::store::InputOrigin::Automation,
             )
             .await
             .unwrap_err();

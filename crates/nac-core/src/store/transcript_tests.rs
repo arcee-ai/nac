@@ -435,6 +435,154 @@ fn inbox_delivery_and_transcript_commit_are_atomic_for_steers_and_prompts() {
 }
 
 #[test]
+fn person_input_becomes_review_intent_only_as_it_reaches_the_model() {
+    use crate::sessions::ReviewIntent::{Accepted, NeverRecorded};
+    let path = temp_store_path("person_intent");
+    initialize(&path).unwrap();
+    crate::store::insert_test_session(&path, "session");
+    let intent = || crate::sessions::load_permission_review_intent(&path, "session").unwrap();
+    let user = |content: &str| Message::User {
+        content: content.to_string(),
+    };
+    let messages =
+        |texts: &[&str]| Accepted(texts.iter().map(|text| (*text).to_string()).collect());
+    let writer = TranscriptLogWriter::new(&path).unwrap();
+    let settle_runs = || {
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "DELETE FROM session_run_recovery WHERE session_id = 'session'",
+                [],
+            )
+            .unwrap();
+    };
+
+    // Automation never becomes intent.
+    writer
+        .append_run_prompt("session", 0, &user("goal continuation"), "run-0")
+        .unwrap();
+    assert_eq!(intent(), NeverRecorded);
+    settle_runs();
+
+    // A person's prompt counts as typed, before expansion.
+    writer
+        .append_person_run_prompt("session", 1, &user("expanded /fix"), "run-a", "/fix tests")
+        .unwrap();
+    assert_eq!(intent(), messages(&["/fix tests"]));
+
+    // A person's steer counts when it is delivered, not before.
+    let steer = create_person_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Steer,
+        "do not push",
+        Some("run-a"),
+        None,
+        "do not push",
+    )
+    .unwrap();
+    create_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Steer,
+        "retry the blocked action",
+        Some("run-a"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(intent(), messages(&["/fix tests"]));
+    let delivered = writer
+        .append_pending_inbox_steers("session", "run-a", 2)
+        .unwrap();
+    assert_eq!(delivered.len(), 2);
+    assert_eq!(delivered[0].id, steer.id);
+    assert_eq!(intent(), messages(&["/fix tests", "do not push"]));
+
+    // So does a person's steering through the orchestrator queue.
+    let steering = queue_person_thread_steering(
+        &path,
+        "session",
+        ORCHESTRATOR_STEERING_TARGET,
+        "run-a",
+        "keep it short",
+    )
+    .unwrap();
+    queue_thread_steering(
+        &path,
+        "session",
+        ORCHESTRATOR_STEERING_TARGET,
+        "run-a",
+        "child report",
+    )
+    .unwrap();
+    let claimed = claim_thread_steering(&path, "session", "run-a").unwrap();
+    assert_eq!(claimed.len(), 2);
+    assert_eq!(claimed[0].id, steering.id);
+    writer
+        .append_claimed_thread_steering(
+            "session",
+            "run-a",
+            &claimed.iter().map(|record| record.id).collect::<Vec<_>>(),
+            4,
+            &[user("keep it short"), user("child report")],
+        )
+        .unwrap();
+    assert_eq!(
+        intent(),
+        messages(&["/fix tests", "do not push", "keep it short"])
+    );
+
+    // A queued item counts once it starts a run; until then, and if it is
+    // cancelled, it changes nothing. A new run does not lift what came
+    // before.
+    let cancelled = create_person_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Queue,
+        "publish the release",
+        None,
+        None,
+        "publish the release",
+    )
+    .unwrap();
+    cancel_pending_session_inbox_item(&path, "session", cancelled.id, cancelled.version).unwrap();
+    let queued = create_person_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Queue,
+        "now update the docs",
+        None,
+        None,
+        "now update the docs",
+    )
+    .unwrap();
+    assert_eq!(
+        intent(),
+        messages(&["/fix tests", "do not push", "keep it short"])
+    );
+    settle_runs();
+    writer
+        .append_inbox_run_prompt(
+            "session",
+            6,
+            &user("now update the docs"),
+            "run-b",
+            queued.id,
+        )
+        .unwrap();
+    assert_eq!(
+        intent(),
+        messages(&[
+            "/fix tests",
+            "do not push",
+            "keep it short",
+            "now update the docs"
+        ])
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn transcript_log_gap_repair_keeps_the_trusted_prefix_and_refreshes_summary() {
     let path = temp_store_path("gap_repair");
     initialize(&path).unwrap();

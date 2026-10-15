@@ -814,6 +814,9 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::session_state::update_permission_approval_mode
         ))
         .routes(routes!(delivery::session_state::reply_permission_request))
+        .routes(routes!(
+            delivery::session_state::authorize_permission_review_retry
+        ))
         .routes(routes!(delivery::session_state::delete_permission_grant))
         .routes(routes!(delivery::session_state::thread_events))
         .routes(routes!(delivery::workspace::workspace_diff))

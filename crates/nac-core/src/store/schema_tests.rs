@@ -2,7 +2,7 @@ use super::*;
 #[path = "schema/http_policy_tests.rs"]
 mod http_policy_tests;
 
-fn temp_store_path(label: &str) -> PathBuf {
+pub(super) fn temp_store_path(label: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -54,7 +54,7 @@ fn create_legacy_base(conn: &Connection) {
     .unwrap();
 }
 
-fn insert_legacy_session(conn: &Connection, session_id: &str) {
+pub(super) fn insert_legacy_session(conn: &Connection, session_id: &str) {
     conn.execute(
         "INSERT INTO sessions
              (session_id, cwd, store_path, model, base_url, messages_json,
@@ -170,6 +170,7 @@ fn assert_current_schema(conn: &Connection) {
         "permission_approval_mode",
         "permission_auto_approve_generation",
         "permission_approval_revision",
+        "permission_reviewer",
         "allow_insecure_http",
         "orchestrator_compaction_threshold",
         "visible_message_count",
@@ -191,7 +192,8 @@ fn assert_current_schema(conn: &Connection) {
             "created_at",
             "claimed_at",
             "delivered_at",
-            "expired_at"
+            "expired_at",
+            "review_intent"
         ]
     );
     assert_eq!(
@@ -222,6 +224,7 @@ fn assert_current_schema(conn: &Connection) {
             "version",
             "admission_id",
             "admission_digest",
+            "review_intent",
         ]
     );
     assert_eq!(
@@ -511,7 +514,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 34);
+    assert_eq!(STORE_SCHEMA_VERSION, 35);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -566,7 +569,8 @@ fn v24_store_adds_manual_session_permission_approval_mode() {
     insert_legacy_session(&legacy, "legacy-session");
     legacy
         .execute_batch(
-            "ALTER TABLE sessions DROP COLUMN permission_approval_mode;
+            "ALTER TABLE sessions DROP COLUMN permission_reviewer;
+             ALTER TABLE sessions DROP COLUMN permission_approval_mode;
              ALTER TABLE sessions DROP COLUMN permission_auto_approve_generation;
              ALTER TABLE sessions DROP COLUMN permission_approval_revision;
              PRAGMA user_version = 24;",
@@ -661,7 +665,8 @@ fn v25_managed_store_adds_the_complete_permission_mode_schema() {
     insert_legacy_session(&predecessor, "managed-v25-session");
     predecessor
         .execute_batch(
-            "ALTER TABLE sessions DROP COLUMN permission_approval_mode;
+            "ALTER TABLE sessions DROP COLUMN permission_reviewer;
+             ALTER TABLE sessions DROP COLUMN permission_approval_mode;
              ALTER TABLE sessions DROP COLUMN permission_auto_approve_generation;
              ALTER TABLE sessions DROP COLUMN permission_approval_revision;
              PRAGMA user_version = 25;",
@@ -761,6 +766,7 @@ fn v17_store_adds_the_durable_session_inbox() {
             "version",
             "admission_id",
             "admission_digest",
+            "review_intent",
         ]
     );
     assert_eq!(

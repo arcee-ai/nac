@@ -438,6 +438,15 @@ fn mark_inbox_item_delivered(
             "inbox item {item_id} was changed or delivered before its transcript commit"
         ));
     }
+    // A person's item becomes review intent as it reaches the model.
+    let review_intent: Option<String> = transaction.query_row(
+        "SELECT review_intent FROM session_inbox WHERE session_id = ?1 AND id = ?2",
+        params![session_id, item_id],
+        |row| row.get(0),
+    )?;
+    if let Some(text) = review_intent {
+        super::record_review_intent(transaction, session_id, &text)?;
+    }
     Ok(())
 }
 
@@ -595,7 +604,30 @@ impl TranscriptLogWriter {
         }, call |command| command.writer.append_run_prompt(&command.session_id, command.idx, &command.message, &command.run_id),
         correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
 
-        self.append_run_prompt_inner(session_id, idx, message, run_id, None)
+        self.append_run_prompt_inner(session_id, idx, message, run_id, None, None)
+    }
+
+    /// Appends a run prompt a person typed on a human-facing route and, in
+    /// the same transaction, records `review_intent` (their text as typed,
+    /// before expansion) as review intent.
+    pub fn append_person_run_prompt(
+        &self,
+        session_id: &str,
+        idx: u64,
+        message: &Message,
+        run_id: &str,
+        review_intent: &str,
+    ) -> Result<()> {
+        coordinate_writer!(self, Result<()>, {
+            session_id: String = session_id.to_owned(),
+            idx: u64 = idx,
+            message: Message = message.clone(),
+            run_id: String = run_id.to_owned(),
+            review_intent: String = review_intent.to_owned(),
+        }, call |command| command.writer.append_person_run_prompt(&command.session_id, command.idx, &command.message, &command.run_id, &command.review_intent),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
+        self.append_run_prompt_inner(session_id, idx, message, run_id, None, Some(review_intent))
     }
 
     pub fn append_inbox_run_prompt(
@@ -615,7 +647,7 @@ impl TranscriptLogWriter {
         }, call |command| command.writer.append_inbox_run_prompt(&command.session_id, command.idx, &command.message, &command.run_id, command.inbox_item_id),
         correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
 
-        self.append_run_prompt_inner(session_id, idx, message, run_id, Some(inbox_item_id))
+        self.append_run_prompt_inner(session_id, idx, message, run_id, Some(inbox_item_id), None)
     }
 
     fn append_run_prompt_inner(
@@ -625,6 +657,7 @@ impl TranscriptLogWriter {
         message: &Message,
         run_id: &str,
         inbox_item_id: Option<i64>,
+        review_intent: Option<&str>,
     ) -> Result<()> {
         let Message::User { content } = message else {
             anyhow::bail!("a run prompt must be a user transcript message");
@@ -648,6 +681,9 @@ impl TranscriptLogWriter {
                         content,
                     )?;
                     mark_inbox_item_delivered(transaction, session_id, item_id, run_id, content)?;
+                }
+                if let Some(text) = review_intent {
+                    super::record_review_intent(transaction, session_id, text)?;
                 }
                 Ok(())
             },
@@ -710,7 +746,7 @@ impl TranscriptLogWriter {
                 session_id,
                 record.id,
                 run_id,
-                &record.content,
+                &record.content
             )?;
         }
         let ids = records.iter().map(|r| r.id).collect::<Vec<_>>();

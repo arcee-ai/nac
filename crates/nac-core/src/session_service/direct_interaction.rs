@@ -117,6 +117,91 @@ impl SessionService {
             .await
     }
 
+    /// Recent automatic reviews in every state, newest first.
+    pub fn list_permission_reviews(&self) -> Result<Vec<crate::permissions::PermissionReview>> {
+        Ok(self.direct_permission_broker()?.recent_reviews())
+    }
+
+    /// Blocked reviews the user may still authorize for one retry.
+    pub fn list_blocked_permission_reviews(
+        &self,
+    ) -> Result<Vec<crate::permissions::PermissionReview>> {
+        Ok(self.direct_permission_broker()?.blocked_reviews())
+    }
+
+    /// Makes the next retry authorization fail to record its request.
+    #[cfg(feature = "test-support")]
+    pub fn fail_next_retry_enqueue_for_test() {
+        FAIL_NEXT_RETRY_ENQUEUE.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Makes the next retry authorization fail to start a run after its
+    /// request was recorded.
+    #[cfg(feature = "test-support")]
+    pub fn fail_next_retry_wake_for_test() {
+        FAIL_NEXT_RETRY_WAKE.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(feature = "test-support")]
+    pub fn permission_broker_for_test(&self) -> Result<Arc<crate::permissions::PermissionBroker>> {
+        self.direct_permission_broker().map(Arc::clone)
+    }
+
+    /// Records the user's explicit authorization to retry one blocked action
+    /// and asks the model, through the steering inbox, to retry it. The retry
+    /// is a new invocation: policy runs again and it is reviewed afresh.
+    pub async fn authorize_permission_review_retry(
+        &self,
+        review_id: &str,
+    ) -> Result<crate::permissions::PermissionReview> {
+        self.require_direct_primary_behavior_async().await?;
+        let broker = std::sync::Arc::clone(self.direct_permission_broker()?);
+        let review = broker.authorize_review_retry(review_id)?;
+        #[cfg(feature = "test-support")]
+        let injected = FAIL_NEXT_RETRY_ENQUEUE.swap(false, std::sync::atomic::Ordering::SeqCst);
+        #[cfg(not(feature = "test-support"))]
+        let injected = false;
+        let inserted = if injected {
+            Err(anyhow::anyhow!("injected retry enqueue failure"))
+        } else {
+            self.insert_direct_input_unchecked(
+                crate::store::InboxDelivery::Steer,
+                &crate::permissions::retry_authorization_message(&review),
+                None,
+                None,
+            )
+            .await
+        };
+        let target_run_id = match inserted {
+            Ok((_, target_run_id)) => target_run_id,
+            Err(error) => {
+                // The retry request was not recorded, so the authorization
+                // must not linger and the blocked action stays authorizable.
+                broker.revoke_review_retry(review_id);
+                return Err(error);
+            }
+        };
+        // From here the request is durable and the authorization stays with
+        // it. A failed wake leaves the item pending for normal inbox
+        // admission; it is not rolled back or duplicated.
+        if target_run_id.is_none() {
+            #[cfg(feature = "test-support")]
+            let wake = if FAIL_NEXT_RETRY_WAKE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                Err(anyhow::anyhow!("injected retry wake failure"))
+            } else {
+                self.start_next_direct_inbox_item().await.map(|_| ())
+            };
+            #[cfg(not(feature = "test-support"))]
+            let wake = self.start_next_direct_inbox_item().await.map(|_| ());
+            if let Err(error) = wake {
+                eprintln!(
+                    "nac: authorized retry for review {review_id} is queued but could not start a run yet: {error:#}"
+                );
+            }
+        }
+        Ok(review)
+    }
+
     pub fn delete_permission_grant(&self, grant_id: &str) -> Result<()> {
         self.direct_permission_broker()?.delete_grant(grant_id)
     }
@@ -131,14 +216,19 @@ impl SessionService {
         crate::store::list_session_inbox(&self.metadata.store_path, session_id)
     }
 
+    /// Queues direct input. `review_intent` is set only for input a person
+    /// typed on a human-facing route: their text as typed, before
+    /// expansion, which becomes review intent when the item reaches the
+    /// model.
     pub async fn enqueue_direct_input(
         &self,
         delivery: crate::store::InboxDelivery,
         content: &str,
         client_id: Option<&SessionClientId>,
+        review_intent: Option<&str>,
     ) -> Result<crate::store::SessionInboxRecord> {
         self.require_direct_primary_behavior_async().await?;
-        self.enqueue_direct_input_unchecked(delivery, content, client_id)
+        self.enqueue_direct_input_unchecked(delivery, content, client_id, review_intent)
             .await
     }
 
@@ -162,7 +252,7 @@ impl SessionService {
         if child.is_none() {
             return Err(anyhow::anyhow!("traditional child was not found"));
         }
-        self.enqueue_direct_input_unchecked(delivery, content, None)
+        self.enqueue_direct_input_unchecked(delivery, content, None, None)
             .await
     }
 
@@ -171,10 +261,31 @@ impl SessionService {
         delivery: crate::store::InboxDelivery,
         content: &str,
         client_id: Option<&SessionClientId>,
+        review_intent: Option<&str>,
     ) -> Result<crate::store::SessionInboxRecord> {
+        let (record, target_run_id) = self
+            .insert_direct_input_unchecked(delivery, content, client_id, review_intent)
+            .await?;
+        if target_run_id.is_none() {
+            self.start_next_direct_inbox_item().await?;
+        }
+        Ok(record)
+    }
+
+    /// Durably records one inbox item without waking the session. Returns the
+    /// run a steer was targeted at, if any; an untargeted item still needs
+    /// [`Self::start_next_direct_inbox_item`].
+    async fn insert_direct_input_unchecked(
+        &self,
+        delivery: crate::store::InboxDelivery,
+        content: &str,
+        client_id: Option<&SessionClientId>,
+        review_intent: Option<&str>,
+    ) -> Result<(crate::store::SessionInboxRecord, Option<String>)> {
         let service = self.clone();
         let content = content.to_owned();
         let client_id = client_id.cloned();
+        let review_intent = review_intent.map(str::to_owned);
         let (record, target_run_id) =
             crate::store::call_legacy_store(&self.metadata.store_path, move || -> Result<_> {
                 let session_id = service
@@ -191,21 +302,29 @@ impl SessionService {
                     ) if !run.finishing => Some(run.snapshot.run_id.to_string()),
                     _ => None,
                 };
-                let record = crate::store::create_session_inbox_item(
-                    &service.metadata.store_path,
-                    session_id,
-                    delivery,
-                    &content,
-                    target_run_id.as_deref(),
-                    client_id.as_ref().map(SessionClientId::as_str),
-                )?;
+                let record = match review_intent.as_deref() {
+                    Some(review_intent) => crate::store::create_person_session_inbox_item(
+                        &service.metadata.store_path,
+                        session_id,
+                        delivery,
+                        &content,
+                        target_run_id.as_deref(),
+                        client_id.as_ref().map(SessionClientId::as_str),
+                        review_intent,
+                    )?,
+                    None => crate::store::create_session_inbox_item(
+                        &service.metadata.store_path,
+                        session_id,
+                        delivery,
+                        &content,
+                        target_run_id.as_deref(),
+                        client_id.as_ref().map(SessionClientId::as_str),
+                    )?,
+                };
                 Ok((record, target_run_id))
             })
             .await??;
-        if target_run_id.is_none() {
-            self.start_next_direct_inbox_item().await?;
-        }
-        Ok(record)
+        Ok((record, target_run_id))
     }
 
     pub async fn update_direct_inbox_item(
@@ -613,3 +732,11 @@ impl SessionService {
 
 #[cfg(test)]
 mod owned_lifecycle_tests;
+
+#[cfg(feature = "test-support")]
+static FAIL_NEXT_RETRY_ENQUEUE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "test-support")]
+static FAIL_NEXT_RETRY_WAKE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
