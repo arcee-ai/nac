@@ -21,7 +21,7 @@ fn fixture() -> (PathBuf, EnrollmentAttempt) {
             clerk_instance_id: "fixture-clerk".into(),
             inference_origin: "https://api.arcee.ai".into(),
         },
-        original_check_sha256: [1; 32],
+        original_check_sha256: [1; 32].try_into().unwrap(),
         serving_lifetime_id: Uuid::new_v4(),
         eligible_subject: "synthetic-subject".into(),
         primary_revision: "synthetic-primary-revision".into(),
@@ -128,7 +128,7 @@ fn enrollment_identity_changes_cannot_retarget_pending_work() {
     for field in 0..5 {
         let mut changed = attempt.clone();
         match field {
-            0 => changed.original_check_sha256 = [2; 32],
+            0 => changed.original_check_sha256 = [2; 32].try_into().unwrap(),
             1 => changed.binding.key_generation += 1,
             2 => changed.eligible_subject = "other".into(),
             3 => changed.primary_revision = "other".into(),
@@ -138,6 +138,22 @@ fn enrollment_identity_changes_cannot_retarget_pending_work() {
         assert!(finish_enrollment_attempt(&path, &changed).is_err());
         assert!(terminate_enrollment_attempt(&path, &changed).is_err());
     }
+}
+
+#[test]
+fn enrollment_typed_check_preserves_retained_array_codec_and_rejects_missing_identity() {
+    let (_, attempt) = fixture();
+    let mut json = serde_json::to_value(&attempt).unwrap();
+    assert_eq!(
+        json["original_check_sha256"],
+        serde_json::to_value([1u8; 32]).unwrap()
+    );
+    assert_eq!(
+        serde_json::from_value::<EnrollmentAttempt>(json.clone()).unwrap(),
+        attempt
+    );
+    json["original_check_sha256"] = serde_json::to_value([0u8; 32]).unwrap();
+    assert!(serde_json::from_value::<EnrollmentAttempt>(json).is_err());
 }
 
 #[test]

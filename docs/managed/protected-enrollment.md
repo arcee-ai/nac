@@ -41,6 +41,14 @@ serving lifetime, genuine eligible subject, primary revision and upstream
 eligibility audit. The journal authenticates none of these inputs itself.
 The live service must obtain them from authenticated current authority.
 
+The check identities remain distinct inward types: `LifecycleAuditCheckSha256`
+names the flat, domain-separated lifecycle SQL audit; `SourceBootstrapCheckSha256`
+names the source verifier's nested stage/intent/binding check; and
+`NativeImportedCheckSha256` names the private carrier's exact Go
+action/current/desired check. The journal's `original_check_sha256` uses the last
+type and retains its existing array encoding. None of these digests grants
+authority or substitutes for the other checks.
+
 `begin_enrollment_attempt` commits a pending uncertainty barrier before private
 import. Only its first insert reports new work. Exact repeats are observational,
 including after lost acknowledgment or restart. Bootstrap identity cannot be

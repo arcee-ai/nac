@@ -2,6 +2,7 @@
 //! No credential, provider request, filesystem effect or live capability belongs here.
 use super::*;
 use crate::model::ManagedHostKeyBinding;
+use nac_contracts::NativeImportedCheckSha256;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,7 +11,8 @@ use uuid::Uuid;
 pub struct EnrollmentAttempt {
     pub attempt_id: Uuid,
     pub binding: ManagedHostKeyBinding,
-    pub original_check_sha256: [u8; 32],
+    /// Original private Go Imported Check, never a source eligibility/audit hash.
+    pub original_check_sha256: NativeImportedCheckSha256,
     pub serving_lifetime_id: Uuid,
     pub eligible_subject: String,
     pub primary_revision: String,
@@ -21,9 +23,7 @@ impl EnrollmentAttempt {
     fn validate(&self) -> Result<()> {
         self.binding.validate()?;
         anyhow::ensure!(
-            !self.attempt_id.is_nil()
-                && !self.serving_lifetime_id.is_nil()
-                && self.original_check_sha256 != [0; 32],
+            !self.attempt_id.is_nil() && !self.serving_lifetime_id.is_nil(),
             "enrollment identity unavailable"
         );
         for value in [
