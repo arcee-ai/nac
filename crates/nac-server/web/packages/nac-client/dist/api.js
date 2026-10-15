@@ -173,6 +173,7 @@ export function createNacApi(nacClient) {
         replyPermission: (id, requestId, reply) => request("POST", `${sessionPath(id)}/permissions/${encodeURIComponent(requestId)}`, {
             body: { reply },
         }),
+        authorizePermissionReviewRetry: (id, reviewId) => request("POST", `${sessionPath(id)}/permissions/reviews/${encodeURIComponent(reviewId)}/authorize-retry`),
         setPermissionApprovalMode: (id, mode) => request("PUT", `${sessionPath(id)}/permissions/mode`, {
             body: { mode },
         }),

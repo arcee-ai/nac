@@ -824,7 +824,7 @@ export interface components {
       steering_id: number;
     };
     PartialModelOutput: { reasoning?: boolean; text?: boolean; tool_call?: boolean };
-    PermissionApprovalMode: "manual" | "auto_approve";
+    PermissionApprovalMode: "manual" | "auto_approve" | "review";
     PermissionGrantRecord: {
       action: string;
       backend: string;
@@ -849,10 +849,33 @@ export interface components {
       resource: string;
       save_resource?: string | null;
     };
+    PermissionReview: {
+      backend: string;
+      call_id?: string | null;
+      category?: null | components["schemas"]["ReviewCategory"];
+      code?: null | components["schemas"]["PermissionReviewCode"];
+      created_at_epoch_ms: number;
+      duration_ms?: number | null;
+      id: string;
+      outcome?: null | components["schemas"]["PermissionReviewOutcome"];
+      resources: components["schemas"]["ReviewResource"][];
+      reviewer: string;
+      session_id: string;
+      tool: string;
+      user_authorized_retry: boolean;
+    };
+    PermissionReviewCode:
+      | "review_rejected"
+      | "review_uncertain"
+      | "review_unavailable"
+      | "review_stopped";
+    PermissionReviewOutcome: "approved" | "rejected" | "uncertain" | "unavailable";
     PermissionStateResponse: {
       approval_mode: components["schemas"]["PermissionApprovalMode"];
+      authorizable_review_ids?: string[];
       grants: components["schemas"]["PermissionGrantRecord"][];
       requests: components["schemas"]["PermissionRequest"][];
+      reviews?: components["schemas"]["PermissionReview"][];
     };
     ProjectList: { projects: components["schemas"]["ProjectRecord"][] };
     ProjectRecord: {
@@ -1034,6 +1057,14 @@ export interface components {
       transcript_len: number;
       workspace_restored: boolean;
     };
+    ReviewCategory:
+      | "routine"
+      | "destructive"
+      | "exfiltration"
+      | "credential"
+      | "out_of_scope"
+      | "unclear";
+    ReviewResource: { action: string; display: string; resource: string };
     RunFailure: {
       attempt_count: number;
       diagnostic: string;
@@ -1106,6 +1137,8 @@ export interface components {
           mode: components["schemas"]["PermissionApprovalMode"];
           type: "permission_approval_mode_changed";
         }
+      | { review: components["schemas"]["PermissionReview"]; type: "permission_review_started" }
+      | { review: components["schemas"]["PermissionReview"]; type: "permission_reviewed" }
       | { session_id: string; type: "snapshot_saved" }
       | { transcript_len: number; type: "transcript_appended" }
       | { transcript_len: number; type: "transcript_reverted" };

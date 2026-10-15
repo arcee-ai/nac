@@ -708,10 +708,27 @@ export declare function createNacApi(nacClient: NacClient): {
     }>;
     getPermissions: (id: string, signal?: AbortSignal) => Promise<{
         approval_mode: import("./openapi.generated.js").components["schemas"]["PermissionApprovalMode"];
+        authorizable_review_ids?: string[];
         grants: import("./openapi.generated.js").components["schemas"]["PermissionGrantRecord"][];
         requests: import("./openapi.generated.js").components["schemas"]["PermissionRequest"][];
+        reviews?: import("./openapi.generated.js").components["schemas"]["PermissionReview"][];
     }>;
     replyPermission: (id: string, requestId: string, reply: PermissionReply) => Promise<void>;
+    authorizePermissionReviewRetry: (id: string, reviewId: string) => Promise<{
+        backend: string;
+        call_id?: string | null;
+        category?: null | import("./openapi.generated.js").components["schemas"]["ReviewCategory"];
+        code?: null | import("./openapi.generated.js").components["schemas"]["PermissionReviewCode"];
+        created_at_epoch_ms: number;
+        duration_ms?: number | null;
+        id: string;
+        outcome?: null | import("./openapi.generated.js").components["schemas"]["PermissionReviewOutcome"];
+        resources: import("./openapi.generated.js").components["schemas"]["ReviewResource"][];
+        reviewer: string;
+        session_id: string;
+        tool: string;
+        user_authorized_retry: boolean;
+    }>;
     setPermissionApprovalMode: (id: string, mode: PermissionApprovalMode) => Promise<void>;
     deletePermissionGrant: (id: string, grantId: string) => Promise<void>;
     getGoal: (id: string, signal?: AbortSignal) => Promise<{

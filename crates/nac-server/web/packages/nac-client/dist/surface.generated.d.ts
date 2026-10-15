@@ -119,6 +119,7 @@ export declare const NAC_API_SURFACE: {
     readonly "GET /sessions/{session_id}/permissions": "api.getPermissions";
     readonly "DELETE /sessions/{session_id}/permissions/grants/{grant_id}": "api.deletePermissionGrant";
     readonly "PUT /sessions/{session_id}/permissions/mode": "api.setPermissionApprovalMode";
+    readonly "POST /sessions/{session_id}/permissions/reviews/{review_id}/authorize-retry": "api.authorizePermissionReviewRetry";
     readonly "POST /sessions/{session_id}/permissions/{request_id}": "api.replyPermission";
     readonly "PUT /sessions/{session_id}/presentation": "api.updatePresentation";
     readonly "POST /sessions/{session_id}/regenerate": "api.regenerateRun";
