@@ -170,6 +170,15 @@ impl fmt::Display for UnsafeCredentialPermissionsError {
 impl std::error::Error for UnsafeCredentialPermissionsError {}
 
 pub fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
+    read_auth_bytes_inner(path, None)
+}
+
+/// Read a private snapshot without allocating beyond the selected byte limit.
+pub fn read_auth_bytes_from_path_limited(path: &Path, max_bytes: u64) -> Result<Option<Vec<u8>>> {
+    read_auth_bytes_inner(path, Some(max_bytes))
+}
+
+fn read_auth_bytes_inner(path: &Path, max_bytes: Option<u64>) -> Result<Option<Vec<u8>>> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             return Err(anyhow!(
@@ -209,8 +218,23 @@ pub fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
     ensure_open_credential_file_is_safe(&file, path)?;
 
     let mut raw = Vec::new();
-    file.read_to_end(&mut raw)
-        .with_context(|| format!("failed to read credential file {}", path.display()))?;
+    match max_bytes {
+        Some(limit) => {
+            file.take(limit.saturating_add(1))
+                .read_to_end(&mut raw)
+                .with_context(|| format!("failed to read credential file {}", path.display()))?;
+            if raw.len() as u64 > limit {
+                return Err(anyhow!(
+                    "credential file {} exceeds the size limit",
+                    path.display()
+                ));
+            }
+        }
+        None => {
+            file.read_to_end(&mut raw)
+                .with_context(|| format!("failed to read credential file {}", path.display()))?;
+        }
+    }
     Ok(Some(raw))
 }
 
@@ -656,6 +680,20 @@ mod tests {
             read_auth_string_from_path(&path).unwrap().as_deref(),
             Some("regular-credential-content")
         );
+    }
+
+    #[test]
+    fn bounded_private_credential_read_enforces_exact_byte_limit_without_secret_errors() {
+        let dir = TestDir::new("bounded-read");
+        let path = dir.path("private.json");
+        write_auth_string_to_path(&path, "private-value").unwrap();
+        assert_eq!(
+            read_auth_bytes_from_path_limited(&path, 13).unwrap(),
+            Some(b"private-value".to_vec())
+        );
+        let error = read_auth_bytes_from_path_limited(&path, 12).unwrap_err();
+        assert!(error.to_string().contains("exceeds the size limit"));
+        assert!(!error.to_string().contains("private-value"));
     }
 
     #[test]

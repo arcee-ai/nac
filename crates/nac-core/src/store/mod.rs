@@ -10,6 +10,7 @@ pub(crate) use blocking_caller::call_legacy_store;
 pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 #[macro_use]
 pub(crate) mod coordinated_commands;
+mod managed_enrollment;
 mod managed_maintenance;
 mod managed_orchestrators;
 mod managed_probe;
@@ -48,6 +49,10 @@ pub(crate) use worker_dispatches::{
 };
 
 pub use coordinator::{PersistenceAdmissionError, PersistenceStats, StoreCoordinator};
+pub use managed_enrollment::{
+    begin_enrollment_attempt, finish_enrollment_attempt, read_enrollment_attempt,
+    terminate_enrollment_attempt, EnrollmentAttempt, EnrollmentPhase, EnrollmentSnapshot,
+};
 pub use managed_maintenance::*;
 pub use managed_orchestrators::*;
 pub use managed_probe::{
