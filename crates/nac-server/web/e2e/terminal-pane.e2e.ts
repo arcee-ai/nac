@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
+import { UserTerminalConnection } from "../packages/nac-client/dist/userTerminalConnection.js";
 import { createDirectSession, expect, test } from "./harness";
 
 for (const mobile of [false, true]) {
@@ -127,25 +128,40 @@ test("embedded pane resets and replays an actual retention gap", async ({
       ),
     ),
   });
-  await expect
-    .poll(async () => {
-      const observer = await api.attachUserTerminal(session, terminal.terminal_id, {
-        protocol_version: 1,
-        page_limit: 128,
-      });
-      try {
-        const frame = await api.pullUserTerminal(
-          session,
-          terminal.terminal_id,
-          observer.observer_id,
-          { protocol_version: 1, acknowledge_reset: false, wait_ms: 0 },
-        );
-        return frame.gap;
-      } finally {
-        await api.detachUserTerminal(session, terminal.terminal_id, observer.observer_id);
-      }
-    })
-    .toBe(true);
+  // A first gap can arrive while head is still producing output. Prove that
+  // this finite producer reached its emitted marker before the fresh browser
+  // observer attaches. The independent probe performs real reset/write ACKs.
+  let sawGap = false;
+  let tail = "";
+  const decoder = new TextDecoder();
+  const probe = new UserTerminalConnection(
+    api,
+    session,
+    terminal.terminal_id,
+    {
+      reset: async (reason) => {
+        sawGap ||= reason === "gap";
+        tail = "";
+      },
+      write: async (bytes) => {
+        tail = (tail + decoder.decode(bytes)).slice(-256);
+      },
+    },
+    { pageLimit: 65_536, waitMs: 0 },
+  );
+  await probe.attach();
+  try {
+    await expect
+      .poll(async () => {
+        for (;;) {
+          const frame = await probe.readNext();
+          if (frame.caught_up) return sawGap && tail.includes("GAP-OK");
+        }
+      })
+      .toBe(true);
+  } finally {
+    await probe.detach();
+  }
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();
