@@ -1039,3 +1039,6 @@ mod terminal_selection;
 
 #[path = "tests/terminal_control.rs"]
 mod terminal_control;
+
+#[path = "tests/http_transport.rs"]
+mod http_transport;

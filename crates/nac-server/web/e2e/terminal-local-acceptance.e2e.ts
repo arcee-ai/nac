@@ -117,7 +117,14 @@ async function armRenderedMarker(pane: Locator, marker: string) {
   }, marker);
 }
 
-async function copyRow(page: Page, pane: Locator, line: string, cols: number, rows: number) {
+async function copyRow(
+  page: Page,
+  pane: Locator,
+  line: string,
+  cols: number,
+  rows: number,
+  beforeCopy?: () => Promise<void>,
+) {
   const texts = await pane.locator(".xterm-accessibility-tree > div").allTextContents();
   const row = texts.findIndex((text) => text.trimEnd() === line);
   expect(row, JSON.stringify(texts)).toBeGreaterThanOrEqual(0);
@@ -129,6 +136,7 @@ async function copyRow(page: Page, pane: Locator, line: string, cols: number, ro
   await page.mouse.down();
   await page.mouse.move(grid!.x + (line.length + 0.25) * cell, y, { steps: 10 });
   await page.mouse.up();
+  await beforeCopy?.();
   return pane.locator(".xterm-helper-textarea").evaluate((textarea) => {
     const data = new DataTransfer();
     textarea.dispatchEvent(
@@ -430,6 +438,25 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   page,
 }, info) => {
   const session = await createDirectSession(request, harness);
+  let initialHistory = true;
+  let releaseHistory!: () => void;
+  const historyReleased = new Promise<void>((resolve) => {
+    releaseHistory = resolve;
+  });
+  let historyPending!: () => void;
+  const pendingHistory = new Promise<void>((resolve) => {
+    historyPending = resolve;
+  });
+  // Reproduce the observed CI race: the first live history refresh completes
+  // after the drag but before copy. Its empty-state row must not resize xterm.
+  await page.route(`**/sessions/${session}/executions/history`, async (route) => {
+    if (!initialHistory) {
+      historyPending();
+      await historyReleased;
+    }
+    initialHistory = false;
+    await route.continue();
+  });
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
   const root = path.join(harness.runRoot, "workspace");
@@ -445,6 +472,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     ].join("\n") + "\n",
   );
   const pane = await show(page, harness.baseUrl, session);
+  await expect(pane.getByText("No recent activity is available.")).toBeVisible();
   await pane.getByRole("button", { name: "New shell", exact: true }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
@@ -491,9 +519,26 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       .poll(() => pages.reduce((total, frame) => total + frame.bytes, 0))
       .toBeGreaterThan(256 * 1024);
     const before = await api.getUserTerminal(session, terminal);
-    expect(await copyRow(page, pane, "SELECT-WHILE-OUTPUT", before.cols, before.rows)).toBe(
-      "SELECT-WHILE-OUTPUT",
-    );
+    measurements.rowsBeforeHistoryRefresh = before.rows;
+    expect(
+      await copyRow(page, pane, "SELECT-WHILE-OUTPUT", before.cols, before.rows, async () => {
+        await pendingHistory;
+        releaseHistory();
+        await expect(pane.getByText("No recent activity is available.")).toHaveCount(0);
+        await expect(
+          pane.getByLabel("Recent activity").locator("option").filter({ hasText: "Human shell" }),
+        ).toHaveCount(1);
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            ),
+        );
+        const afterHistory = await api.getUserTerminal(session, terminal);
+        measurements.rowsAfterHistoryRefresh = afterHistory.rows;
+        expect(afterHistory.rows).toBe(before.rows);
+      }),
+    ).toBe("SELECT-WHILE-OUTPUT");
     const resizedAt = performance.now();
     await page.setViewportSize({ width: 1050, height: 650 });
     await expect
@@ -530,6 +575,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     measurements.closeSettledMs = performance.now() - closeAt;
     expect(measurements.closeSettledMs).toBeLessThan(1500);
   } finally {
+    releaseHistory();
     await page.evaluate(() => {
       window.terminalRenderedMarker?.dispose();
       delete window.terminalRenderedMarker;
