@@ -23,7 +23,7 @@ export type EmbeddedHarness = {
   provider: ScriptedProvider;
   runRoot: string;
   waitForNoWorkerProcesses: () => Promise<void>;
-  restart: (orchestration: string | null) => Promise<void>;
+  restart: (orchestration: string | null, preserveOrigin?: boolean) => Promise<void>;
 };
 
 type RunningHarness = Omit<EmbeddedHarness, "restart"> & {
@@ -51,12 +51,18 @@ export const test = base.extend<Fixtures & Options>({
     let running = await startHarness(testInfo, exaCredential, orchestration);
     const harness: EmbeddedHarness = {
       ...running,
-      restart: async (nextGate) => {
+      restart: async (nextGate, preserveOrigin = false) => {
         if (exaCredential != null)
           throw new Error("Gate restart fixture requires the ordinary embedded harness");
         const previousOutput = running.output;
         await running.stopServer();
-        running = await startHarness(testInfo, exaCredential, nextGate, running.provider);
+        running = await startHarness(
+          testInfo,
+          exaCredential,
+          nextGate,
+          running.provider,
+          preserveOrigin ? new URL(running.baseUrl).host : undefined,
+        );
         running.output.unshift(...previousOutput);
         Object.assign(harness, running);
       },
@@ -285,6 +291,7 @@ async function startHarness(
   exaCredential: string | undefined,
   orchestration: string | null,
   existingProvider?: ScriptedProvider,
+  bindAddress = "127.0.0.1:0",
 ): Promise<RunningHarness> {
   if (process.platform === "win32") {
     throw new Error(
@@ -330,7 +337,7 @@ async function startHarness(
     binaryPath,
     [
       "--bind",
-      "127.0.0.1:0",
+      bindAddress,
       "--directory",
       workspace,
       "--store-path",

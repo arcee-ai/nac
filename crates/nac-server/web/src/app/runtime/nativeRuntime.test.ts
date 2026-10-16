@@ -111,10 +111,16 @@ describe("native runtime lifetime", () => {
     left.stores.chatTabsStore.dismissChatTab("same");
     left.stores.sessionLayoutStore.selectFile("private-left.txt");
     left.stores.composerStore.sendPrompt("private-left-prompt");
+    const draft = left.stores.promptDraftStore.update("same", "private-left-draft");
+    expect(right.stores.promptDraftStore.get("same").text).toBe("");
     expect(right.stores.runtimeStore.getRuntimeState().streamText).toBe("");
     expect(right.stores.chatTabsStore.chatTabsStore.getState().dismissed.size).toBe(0);
     expect(right.stores.sessionLayoutStore.sessionLayoutStore.getState().selectedFile).toBeNull();
     left.close();
+    expect(left.stores.promptDraftStore.get("same").text).toBe("");
+    expect(left.stores.promptDraftStore.acknowledge("same", draft)).toBe(false);
+    left.stores.promptDraftStore.update("same", "late write");
+    expect(left.stores.promptDraftStore.get("same").text).toBe("");
     expect(left.stores.runtimeStore.getRuntimeState().streamText).toBe("");
     expect(left.stores.chatTabsStore.chatTabsStore.getState().dismissed.size).toBe(0);
     expect(left.queryClient.getQueryCache().getAll()).toHaveLength(0);

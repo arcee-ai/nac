@@ -307,13 +307,17 @@ function sessionIdsShowingFork(client: QueryClient, forkId: string): string[] {
 }
 
 export function useDeleteSession() {
-  const { api } = useNativeRuntime();
+  const {
+    api,
+    stores: { promptDraftStore },
+  } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteSession(id),
     onSuccess: (_data, id) => {
+      promptDraftStore.purgeSessions([id]);
       void invalidate.sessions();
       client.removeQueries({ queryKey: queryKeys.sessionRoot(id) });
       for (const sourceId of sessionIdsShowingFork(client, id)) {
