@@ -300,12 +300,14 @@ export function PermissionControls({
                   variant={
                     entry.key === selected?.key ? ButtonVariant.Secondary : ButtonVariant.Ghost
                   }
-                  className="h-auto text-left whitespace-normal break-words"
+                  className="!h-auto min-h-9 min-w-0 !py-2"
                   aria-pressed={entry.key === selected?.key}
                   disabled={busy}
                   onClick={() => setSelectedRequest(entry.key)}
                 >
-                  {entry.scope.label} ({entry.scope.sessionId}): {entry.request.tool}
+                  <span className="min-w-0 flex-1 whitespace-normal text-left [overflow-wrap:anywhere]">
+                    {entry.scope.label} ({entry.scope.sessionId}): {entry.request.tool}
+                  </span>
                 </Button>
               ))}
             </section>

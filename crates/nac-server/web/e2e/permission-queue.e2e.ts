@@ -41,11 +41,17 @@ for (const mobile of [false, true]) {
     const parent = await createDirectSession(request, harness);
     // Foreground completion stays in the launch reply rather than waking a
     // separate parent turn via the background inbox.
-    const starts = ["first", "second"].map((owner) =>
+    const descriptions = {
+      first: "Review persistence, inherited approval mode, and narrow remembered-grant ownership",
+      second:
+        "Verify permission queue recovery, sibling isolation, and completed-child grant revocation",
+    };
+    const owners = ["first", "second"] as const;
+    const starts = owners.map((owner) =>
       request.post(`${harness.baseUrl}/sessions/${parent}/children`, {
         data: {
           profile: "general",
-          description: owner,
+          description: descriptions[owner],
           prompt: `ALL333_${owner}_TOKEN`,
           background: false,
         },
@@ -58,8 +64,9 @@ for (const mobile of [false, true]) {
       child_session_id: string;
       description: string;
     }>;
-    const children = ["first", "second"].map(
-      (owner) => records.find((child) => child.description === owner)!.child_session_id,
+    const children = owners.map(
+      (owner) =>
+        records.find((child) => child.description === descriptions[owner])!.child_session_id,
     );
     // A child broker gives an unattached parent only a short connect grace.
     // Hold the model before it can ask until both actual UI streams are live.
@@ -119,8 +126,53 @@ for (const mobile of [false, true]) {
           .poll(() => [...subscriptions].some((url) => url.includes(`/sessions/${child}/`)))
           .toBe(true);
       }
+      if (mobile) await expect.poll(async () => (await dialog.boundingBox())?.x).toBe(0);
+      // Check actual rendered text bounds, including long child descriptions
+      // and unbroken session IDs. The atom's nowrap/fixed-height styles must
+      // not clip an approval choice on a narrow viewport.
+      const rows = await dialog
+        .getByRole("region", { name: "Pending permission requests" })
+        .getByRole("button")
+        .evaluateAll((buttons) =>
+          buttons.map((button) => {
+            const bounds = button.getBoundingClientRect();
+            const range = button.ownerDocument.createRange();
+            range.selectNodeContents(button);
+            return {
+              left: bounds.left,
+              right: bounds.right,
+              top: bounds.top,
+              bottom: bounds.bottom,
+              viewport: button.ownerDocument.defaultView!.innerWidth,
+              text: Array.from(
+                range.getClientRects() as ArrayLike<{
+                  left: number;
+                  right: number;
+                  top: number;
+                  bottom: number;
+                }>,
+                (rect) => ({
+                  left: rect.left,
+                  right: rect.right,
+                  top: rect.top,
+                  bottom: rect.bottom,
+                }),
+              ),
+            };
+          }),
+        );
+      for (const row of rows) {
+        expect(row.left).toBeGreaterThanOrEqual(0);
+        expect(row.right).toBeLessThanOrEqual(row.viewport);
+        for (const text of row.text) {
+          expect(text.left).toBeGreaterThanOrEqual(row.left - 1);
+          expect(text.right).toBeLessThanOrEqual(row.right + 1);
+          expect(text.top).toBeGreaterThanOrEqual(row.top - 1);
+          expect(text.bottom).toBeLessThanOrEqual(row.bottom + 1);
+        }
+      }
       const first = dialog.getByRole("button", {
-        name: `child agent “first” (${children[0]}): read`,
+        name: `child agent “${descriptions.first}” (${children[0]}): read`,
       });
       const access = dialog.getByRole("region", { name: "Requested access" });
       await dialog.getByRole("button", { name: `this session (${parent}): read` }).click();
@@ -128,7 +180,9 @@ for (const mobile of [false, true]) {
       await dialog.getByRole("button", { name: "Allow once", exact: true }).click();
       await waitForRunIdle(request, harness, parent);
       await first.click();
-      await expect(access).toContainText(`Requested by child agent “first” (${children[0]})`);
+      await expect(access).toContainText(
+        `Requested by child agent “${descriptions.first}” (${children[0]})`,
+      );
       await expect(access).toContainText(file);
       await dialog.getByRole("button", { name: "Always allow", exact: true }).click();
       await expect(first).toHaveCount(0);
@@ -144,9 +198,13 @@ for (const mobile of [false, true]) {
       expect((await state(children[1])).requests).toHaveLength(1);
 
       await dialog
-        .getByRole("button", { name: `child agent “second” (${children[1]}): read` })
+        .getByRole("button", {
+          name: `child agent “${descriptions.second}” (${children[1]}): read`,
+        })
         .click();
-      await expect(access).toContainText(`Requested by child agent “second” (${children[1]})`);
+      await expect(access).toContainText(
+        `Requested by child agent “${descriptions.second}” (${children[1]})`,
+      );
       await dialog.getByRole("button", { name: "Reject", exact: true }).click();
       await harness.provider.waitForRequestCount(6);
       for (const response of await Promise.all(starts)) expect(response.status()).toBe(201);
@@ -162,7 +220,9 @@ for (const mobile of [false, true]) {
       await page.reload();
       await page.getByRole("button", { name: "Permissions (2)", exact: true }).click();
       const manager = page.getByRole("dialog", { name: "Permissions", exact: true });
-      const scope = manager.getByRole("region", { name: "Remembered for child agent “first”" });
+      const scope = manager.getByRole("region", {
+        name: `Remembered for child agent “${descriptions.first}”`,
+      });
       await expect(scope).toContainText(children[0]);
       await expect(scope).toContainText(file);
       await scope.getByRole("button", { name: "Forget read permission" }).click();

@@ -13705,19 +13705,22 @@ function xh({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 								p.length,
 								")"
 							]
-						}), p.map((e) => /* @__PURE__ */ X(R, {
+						}), p.map((e) => /* @__PURE__ */ Y(R, {
 							variant: e.key === ee?.key ? N.Secondary : N.Ghost,
-							className: "h-auto text-left whitespace-normal break-words",
+							className: "!h-auto min-h-9 min-w-0 !py-2",
 							"aria-pressed": e.key === ee?.key,
 							disabled: ie,
 							onClick: () => E(e.key),
-							children: [
-								e.scope.label,
-								" (",
-								e.scope.sessionId,
-								"): ",
-								e.request.tool
-							]
+							children: /* @__PURE__ */ X("span", {
+								className: "min-w-0 flex-1 whitespace-normal text-left [overflow-wrap:anywhere]",
+								children: [
+									e.scope.label,
+									" (",
+									e.scope.sessionId,
+									"): ",
+									e.request.tool
+								]
+							})
 						}, e.key))]
 					}) : /* @__PURE__ */ Y("div", {
 						className: "text-small text-basic-secondary",
