@@ -13,8 +13,8 @@ for (const viewport of [
     await page.setViewportSize(viewport);
     const a = await createDirectSession(request, harness);
     const b = await createDirectSession(request, harness);
-    const aUrl = `${harness.baseUrl}/#/session/${a}/threads`;
-    const bUrl = `${harness.baseUrl}/#/session/${b}/threads`;
+    const aUrl = `${harness.baseUrl}/#/session/${a}/files`;
+    const bUrl = `${harness.baseUrl}/#/session/${b}/files`;
     const input = page.getByRole("combobox", { name: "Message" });
     const aText = "  雪🙂 exact spaces  \n\n!echo never-run\n";
     const bText = "/compact\nunsent second draft  ";
@@ -28,16 +28,21 @@ for (const viewport of [
         mutations.push(req.url());
     });
     await page.goto(aUrl);
+    await expect(page).toHaveURL(aUrl);
+    await expect(page.getByLabel("Loading conversation")).toHaveCount(0);
     await input.fill(aText);
     // Hash routing keeps the same runtime while replacing the keyed session view.
     await page.evaluate((url) => {
       location.hash = new URL(url).hash;
     }, bUrl);
+    await expect(page).toHaveURL(bUrl);
     await expect(input).toHaveValue("");
     await input.fill(bText);
     await page.goBack();
+    await expect(page).toHaveURL(aUrl);
     await expect(input).toHaveValue(aText);
     await page.goForward();
+    await expect(page).toHaveURL(bUrl);
     await expect(input).toHaveValue(bText);
     await page.evaluate(() => {
       location.hash = "#/";
@@ -67,7 +72,7 @@ test("isolates persisted primary drafts after same-origin serving-instance repla
   request,
 }) => {
   const id = await createDirectSession(request, harness);
-  const url = `${harness.baseUrl}/#/session/${id}/threads`;
+  const url = `${harness.baseUrl}/#/session/${id}/files`;
   await page.goto(url);
   const input = page.getByRole("combobox", { name: "Message" });
   await input.fill("private to the original serving lifetime\n雪");
@@ -98,9 +103,15 @@ test("keeps a pending primary send guarded through navigation and preserves newe
   );
   const a = await createDirectSession(request, harness);
   const b = await createDirectSession(request, harness);
+  const aUrl = `${harness.baseUrl}/#/session/${a}/files`;
+  const bUrl = `${harness.baseUrl}/#/session/${b}/files`;
   const gate = new ScriptGate();
   let dispatches = 0;
   await page.route(`${harness.baseUrl}/sessions/${a}/runs`, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
     dispatches += 1;
     gate.markAccepted();
     await gate.waitForRelease();
@@ -108,15 +119,21 @@ test("keeps a pending primary send guarded through navigation and preserves newe
   });
   const input = page.getByRole("combobox", { name: "Message" });
   try {
-    await page.goto(`${harness.baseUrl}/#/session/${a}/threads`);
+    // Direct sessions normalize unsupported panels once their snapshot arrives.
+    // Start on their canonical panel and observe readiness before navigation.
+    await page.goto(aUrl);
+    await expect(page).toHaveURL(aUrl);
+    await expect(page.getByLabel("Loading conversation")).toHaveCount(0);
     await input.fill("E2E_DRAFT_PENDING_ONCE");
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect.poll(() => dispatches).toBe(1);
-    await page.evaluate((id) => {
-      location.hash = `#/session/${id}/threads`;
-    }, b);
+    await page.evaluate((url) => {
+      location.hash = new URL(url).hash;
+    }, bUrl);
+    await expect(page).toHaveURL(bUrl);
     await expect(input).toHaveValue("");
     await page.goBack();
+    await expect(page).toHaveURL(aUrl);
     await expect(input).toHaveValue("E2E_DRAFT_PENDING_ONCE");
     const send = page.getByRole("button", { name: "Send", exact: true });
     await expect(send).toBeDisabled();
