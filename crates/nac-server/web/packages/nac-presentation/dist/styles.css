@@ -1151,6 +1151,10 @@
     height: min(760px, 100vh - 32px);
   }
 
+[data-nac-runtime]:is(.h-auto), [data-nac-runtime] .h-auto {
+    height: auto;
+  }
+
 [data-nac-runtime]:is(.h-fit), [data-nac-runtime] .h-fit {
     height: fit-content;
   }
@@ -3177,6 +3181,10 @@
 
 [data-nac-runtime]:is(.text-ellipsis), [data-nac-runtime] .text-ellipsis {
     text-overflow: ellipsis;
+  }
+
+[data-nac-runtime]:is(.whitespace-normal), [data-nac-runtime] .whitespace-normal {
+    white-space: normal;
   }
 
 [data-nac-runtime]:is(.whitespace-nowrap), [data-nac-runtime] .whitespace-nowrap {

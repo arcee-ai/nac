@@ -1,0 +1,223 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
+import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
+
+for (const mobile of [false, true]) {
+  test(`consolidates scoped parent and child approvals ${mobile ? "mobile" : "desktop"}`, async ({
+    harness,
+    page,
+    request,
+  }) => {
+    test.setTimeout(90_000);
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 720 });
+    const file = path.join(harness.runRoot, "external-permission.txt");
+    await fs.writeFile(file, "scoped permission fixture\n");
+    for (const owner of ["parent", "first", "second"]) {
+      harness.provider.enqueue(
+        `ask-${owner}`,
+        { token: `ALL333_${owner}_TOKEN` },
+        {
+          kind: "function_call",
+          name: "read",
+          callId: `read-${owner}`,
+          arguments: { path: file },
+          stream: "request",
+        },
+      );
+      harness.provider.enqueue(
+        `done-${owner}`,
+        { functionOutputCallId: `read-${owner}` },
+        {
+          kind: "text",
+          text: `${owner} finished`,
+          stream: "request",
+        },
+      );
+    }
+    const parent = await createDirectSession(request, harness);
+    // Foreground completion stays in the launch reply rather than waking a
+    // separate parent turn via the background inbox.
+    const starts = ["first", "second"].map((owner) =>
+      request.post(`${harness.baseUrl}/sessions/${parent}/children`, {
+        data: {
+          profile: "general",
+          description: owner,
+          prompt: `ALL333_${owner}_TOKEN`,
+          background: false,
+        },
+        timeout: 90_000,
+      }),
+    );
+    await harness.provider.waitForRequestCount(2);
+    const childrenResponse = await request.get(`${harness.baseUrl}/sessions/${parent}/children`);
+    const records = (await childrenResponse.json()) as Array<{
+      child_session_id: string;
+      description: string;
+    }>;
+    const children = ["first", "second"].map(
+      (owner) => records.find((child) => child.description === owner)!.child_session_id,
+    );
+    await page.goto(`${harness.baseUrl}/#/session/${parent}/delegated`);
+    await expect(page.getByRole("region", { name: "Pending permission requests" })).toContainText(
+      "Pending requests (2)",
+    );
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Permissions (2)", exact: true })).toHaveCount(1);
+    await page.getByRole("combobox", { name: "Message" }).fill("ALL333_parent_TOKEN");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await harness.provider.waitForRequestCount(3);
+    const dialog = page.getByRole("dialog", { name: "Permission required", exact: true });
+    await expect(dialog).toHaveCount(1);
+    await expect(dialog.getByRole("region", { name: "Pending permission requests" })).toContainText(
+      "Pending requests (3)",
+    );
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Permissions (3)", exact: true })).toHaveCount(1);
+    await expect(page.getByText("(3 pending)", { exact: true })).toBeVisible();
+
+    // The broker intentionally rejects pending asks when its LAST interactive
+    // client disconnects. Keep a second parent view attached so this reload
+    // exercises UI recovery without weakening that existing fail-closed rule.
+    const observer = new AbortController();
+    try {
+      const observed = await Promise.all(
+        [parent, ...children].map((id) =>
+          fetch(`${harness.baseUrl}/sessions/${id}/events/stream`, { signal: observer.signal }),
+        ),
+      );
+      for (const response of observed) expect(response.ok).toBe(true);
+      const subscriptions = new Set<string>();
+      page.on("request", (entry) => {
+        if (entry.resourceType() === "eventsource") subscriptions.add(entry.url());
+      });
+      await page.reload();
+      await expect(dialog).toHaveCount(1);
+      await expect(
+        dialog.getByRole("region", { name: "Pending permission requests" }),
+      ).toContainText("Pending requests (3)");
+      for (const child of children) {
+        await expect
+          .poll(() => [...subscriptions].some((url) => url.includes(`/sessions/${child}/`)))
+          .toBe(true);
+      }
+      const first = dialog.getByRole("button", {
+        name: `child agent “first” (${children[0]}): read`,
+      });
+      const access = dialog.getByRole("region", { name: "Requested access" });
+      await dialog.getByRole("button", { name: `this session (${parent}): read` }).click();
+      await expect(access).toContainText(`Requested by this session (${parent})`);
+      await dialog.getByRole("button", { name: "Allow once", exact: true }).click();
+      await waitForRunIdle(request, harness, parent);
+      await first.click();
+      await expect(access).toContainText(`Requested by child agent “first” (${children[0]})`);
+      await expect(access).toContainText(file);
+      await dialog.getByRole("button", { name: "Always allow", exact: true }).click();
+      await expect(first).toHaveCount(0);
+      const state = async (id: string) => {
+        const response = await request.get(`${harness.baseUrl}/sessions/${id}/permissions`);
+        expect(response.ok()).toBe(true);
+        return response.json();
+      };
+      await expect.poll(async () => (await state(children[0])).grants.length).toBe(2);
+      expect((await state(parent)).grants).toHaveLength(0);
+      expect((await state(children[1])).grants).toHaveLength(0);
+      expect((await state(parent)).requests).toHaveLength(0);
+      expect((await state(children[1])).requests).toHaveLength(1);
+
+      await dialog
+        .getByRole("button", { name: `child agent “second” (${children[1]}): read` })
+        .click();
+      await expect(access).toContainText(`Requested by child agent “second” (${children[1]})`);
+      await dialog.getByRole("button", { name: "Reject", exact: true }).click();
+      await harness.provider.waitForRequestCount(6);
+      for (const response of await Promise.all(starts)) expect(response.status()).toBe(201);
+      await waitForRunIdle(request, harness, parent);
+      await expect
+        .poll(async () => {
+          const response = await request.get(`${harness.baseUrl}/sessions/${parent}/children`);
+          return (await response.json()).every(
+            (child: { status: string }) => child.status !== "running",
+          );
+        })
+        .toBe(true);
+      await page.reload();
+      await page.getByRole("button", { name: "Permissions (2)", exact: true }).click();
+      const manager = page.getByRole("dialog", { name: "Permissions", exact: true });
+      const scope = manager.getByRole("region", { name: "Remembered for child agent “first”" });
+      await expect(scope).toContainText(children[0]);
+      await expect(scope).toContainText(file);
+      await scope.getByRole("button", { name: "Forget read permission" }).click();
+      await expect
+        .poll(async () =>
+          (await state(children[0])).grants.map((grant: { action: string }) => grant.action),
+        )
+        .toEqual(["external_directory"]);
+      await scope.getByRole("button", { name: "Forget external_directory permission" }).click();
+      await expect(scope).toContainText("No remembered permissions.");
+      expect((await state(children[0])).grants).toHaveLength(0);
+      expect((await state(parent)).grants).toHaveLength(0);
+      expect((await state(children[1])).grants).toHaveLength(0);
+      await expect(manager.getByRole("switch", { name: "Approve all automatically" })).toHaveCount(
+        1,
+      );
+      harness.provider.assertConsumed();
+    } finally {
+      observer.abort();
+    }
+  });
+}
+
+// The consolidated UI must not resurrect a request dismissed by the safety
+// broker, nor make a last-client disconnect execute a pending operation.
+test("last-client disconnect dismisses queued access without executing it", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const destination = path.join(harness.runRoot, "must-not-be-written.txt");
+  harness.provider.enqueue(
+    "disconnected-write",
+    { token: "ALL333_DISCONNECT_TOKEN" },
+    {
+      kind: "function_call",
+      name: "write",
+      callId: "disconnected-write",
+      arguments: { path: destination, content: "must not execute", expected_revision: null },
+      stream: "request",
+    },
+  );
+  harness.provider.enqueue(
+    "disconnected-complete",
+    { functionOutputCallId: "disconnected-write" },
+    {
+      kind: "text",
+      text: "disconnect failure handled",
+      stream: "request",
+    },
+  );
+  const session = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${session}/delegated`);
+  await page.getByRole("combobox", { name: "Message" }).fill("ALL333_DISCONNECT_TOKEN");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Permission required", exact: true }),
+  ).toBeVisible();
+  await page.goto("about:blank");
+  await harness.provider.waitForRequestCount(2);
+  await waitForRunIdle(request, harness, session);
+  const response = await request.get(`${harness.baseUrl}/sessions/${session}/permissions`);
+  const state = await response.json();
+  expect(state.requests).toHaveLength(0);
+  expect(state.grants).toHaveLength(0);
+  await expect(fs.stat(destination)).rejects.toMatchObject({ code: "ENOENT" });
+  await page.goto(`${harness.baseUrl}/#/session/${session}/delegated`);
+  await expect(page.getByRole("dialog", { name: "Permission required", exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.locator('[data-tool-call-id="disconnected-write"]')).toContainText("Failed");
+  await expect(
+    page.getByText(/interactive session client disconnected while approval was pending/).first(),
+  ).toBeVisible();
+  harness.provider.assertConsumed();
+});
