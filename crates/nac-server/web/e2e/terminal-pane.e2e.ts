@@ -152,6 +152,8 @@ test("embedded pane resets and replays an actual retention gap", async ({
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
   await expect(pane).toBeVisible();
   await expect(pane.getByRole("alert")).toContainText("Earlier output was discarded");
+  // Observe real replay before checking xterm's throttled accessibility mirror.
+  await expect(pane.locator(".xterm-rows")).toContainText("GAP-OK");
   await expect(pane.locator(".xterm-accessibility")).toContainText("GAP-OK");
   expect((await api.getUserTerminal(session, terminal.terminal_id)).alive).toBe(true);
   await pane.getByRole("button", { name: "Close shell", exact: true }).click();
