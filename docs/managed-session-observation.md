@@ -50,6 +50,10 @@ Ready; no filesystem-write or shell readiness probes run.
 | `/sessions/{id}` | `kind: "snapshot"`; optional `message_limit`, `thread_event_limit`, `include_sessions`, `include_system` | `application/json`; unchanged `SessionSnapshotResponse` |
 | `/sessions/{id}/events` | `kind: "events"`; optional `cursor: {epoch_id, sequence_id}`, `limit` | `application/json`; unchanged `{boundary, events}` |
 | `/sessions/{id}/events/stream` | `kind: "stream"`; optional same cursor and limit | `text/event-stream`; existing named Native SSE frames |
+| `/projects` | `kind: "projects"`; omit `session_id` | `application/json`; maintained `ProjectList {projects}` |
+| `/sessions` | `kind: "sessions"`; omit `session_id`; optional `project_id`, `workspace_stats: false` | `application/json`; maintained `ManagedSessionSummary[]` |
+| `/sessions/{id}/messages` | `kind: "messages"`; optional `before`, `limit`, `include_system` | `application/json`; unchanged `MessagesPageResponse` |
+| `/sessions/{id}/threads/{thread}/events` | `kind: "thread_events"`; `thread_name`, optional `before_id`, `limit` | `application/json`; unchanged `ThreadEventPage` |
 
 The same operation also supports the presentation's mandatory host-scoped
 bootstrap: `observation: {"kind":"ui_configuration"}` with `session_id` omitted
@@ -64,6 +68,33 @@ to this private read. `/public/ui-config` uses a distinct public DTO and is not
 an alias for this Native response. The ordinary
 runtime fence and presentation bootstrap guard remain effective.
 
+The project/session collection operations query the actual durable catalog,
+preserve project filters and the maintained cached-owner/run annotations, and
+do not replace the catalog with a list of active services. A genuinely stored
+cold session can appear in the index while selected reads still refuse it.
+`workspace_stats: true` is explicitly refused: the ordinary enrichment invokes
+git/SSH and must not become fabricated zero/clean statistics. Message and thread
+pages require the same current cached owner as snapshots, preserve canonical
+page cursors/limits and Native event sanitization, and leave queued work pending.
+
+For the selected default Native presentation, UI configuration is the only
+global mount gate. Genuine projects and base sessions support choosing an
+actually listed existing non-SSH session. The existing SDK owns snapshot/SSE
+reconciliation and coalesced transcript paging; no extra replay owner is added.
+The separate boundary-zero/snapshot/replay helper remains callable but is not
+the mounted presentation's stream loop. Selecting an empty project may attempt
+creation and selecting an SSH row may attempt SSH browse; those effects remain
+denied. The index cannot admit or warm a selected service.
+
+Optional/background managed status, workspace statistics, store, MCP, SSH,
+provider, configuration and workspace/file/revision features remain explicitly
+unsupported on this boundary, preserving their actual local error/pending UI.
+The ordinary managed-status projection calls full readiness checks, including
+filesystem-write/command probes, so it is not copied into these passive reads.
+No Ready/checks, provider availability, empty-success collections, cleanliness
+or alternate public DTO is synthesized to satisfy those queries. Feature-level
+and full physical presentation acceptance remain separate requirements.
+
 The paired platform cursor maps to one closed cursor object. Sequences remain
 Native numeric values; no alternate string codec is selected. Event replay is
 bounded to the existing default replay limit (256). `limit: 0` returns the
@@ -77,7 +108,8 @@ The response carries `Cache-Control: no-store` and the request correlation.
 
 ## Passive ownership and limits
 
-Only a current cached `SessionService` can be observed. Missing, evicted or
+Selected-session snapshots/events/pages require a current cached `SessionService`.
+Missing, evicted or
 configuration-stale services return 503, including after restart. They are
 never attached, resumed or replaced merely to satisfy a view. This is an
 explicit support limit, not an empty snapshot or invented durable event bus.

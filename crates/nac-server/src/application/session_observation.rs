@@ -5,7 +5,10 @@ use std::sync::Arc;
 use anyhow::{ensure, Context, Result};
 use nac_core::{
     events::{SessionEventBoundary, SessionEventEnvelope},
-    session_service::{FrontendSnapshotLoadOptions, SessionFrontendSnapshotLoad, SessionService},
+    session_service::{
+        FrontendSnapshotLoadOptions, MessagePageRequest, MessagesPageSnapshot,
+        SessionFrontendSnapshotLoad, SessionService, ThreadEventPage,
+    },
 };
 
 use crate::SessionManager;
@@ -69,6 +72,34 @@ impl SessionObservation {
     ) -> Result<(SessionEventBoundary, Vec<SessionEventEnvelope>)> {
         self.require_current().await?;
         Ok(self.service.recent_events(cursor, limit))
+    }
+
+    pub(crate) async fn messages(
+        &self,
+        request: MessagePageRequest,
+    ) -> Result<MessagesPageSnapshot> {
+        self.require_current().await?;
+        let page = self.service.messages_page(request).await?;
+        self.require_current().await?;
+        Ok(page)
+    }
+
+    pub(crate) async fn thread_events(
+        &self,
+        thread_name: String,
+        before_id: Option<i64>,
+        limit: usize,
+    ) -> Result<ThreadEventPage> {
+        self.require_current().await?;
+        let service = Arc::clone(&self.service);
+        let page = self
+            .manager
+            .inner
+            ._store_ownership
+            .call_legacy(move || service.thread_events_page(&thread_name, before_id, limit))
+            .await??;
+        self.require_current().await?;
+        Ok(page)
     }
 
     pub(crate) async fn subscribe(

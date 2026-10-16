@@ -162,6 +162,14 @@ async fn cache_session(
     f: &Fixture,
     manager: &SessionManager,
 ) -> std::sync::Arc<nac_core::session_service::SessionService> {
+    cache_session_with_messages(f, manager, Vec::new()).await
+}
+
+async fn cache_session_with_messages(
+    f: &Fixture,
+    manager: &SessionManager,
+    messages: Vec<nac_core::types::Message>,
+) -> std::sync::Arc<nac_core::session_service::SessionService> {
     let path = manager.inner.store_path.clone();
     let mut snapshot = nac_core::sessions::new_snapshot(
         "session".into(),
@@ -172,7 +180,7 @@ async fn cache_session(
         None,
         None,
         None,
-        vec![],
+        messages,
         None,
         Default::default(),
     );
@@ -212,6 +220,183 @@ async fn cache_session(
         .await
         .insert("session".into(), service.clone());
     service
+}
+
+fn host_input(f: &Fixture, kind: &str) -> Value {
+    let mut body = input(f, kind);
+    body.as_object_mut().unwrap().remove("session_id");
+    body
+}
+
+#[tokio::test]
+async fn durable_indexes_preserve_real_cold_rows_without_attaching_or_probing() {
+    let f = Fixture::new();
+    let manager = manager(&f);
+    f.register("index-project", f.config.repository_root.clone(), None);
+    let mut snapshot = nac_core::sessions::new_snapshot(
+        "cold-session".into(),
+        f.root.clone(),
+        "model".into(),
+        "https://model.invalid/v1".into(),
+        nac_core::model::BackendKind::OpenAiResponses,
+        None,
+        None,
+        None,
+        Vec::new(),
+        None,
+        Default::default(),
+    );
+    snapshot.project_id = Some("index-project".into());
+    nac_core::sessions::create_session(&manager.inner.store_path, &snapshot).unwrap();
+    let serving = Serving::new(manager.clone()).await;
+    let (status, projects) = serving.send(&host_input(&f, "projects")).await;
+    assert_eq!(status, 200, "{projects}");
+    assert_eq!(
+        projects["projects"],
+        serde_json::to_value(manager.projects().list().unwrap()).unwrap()
+    );
+    assert_eq!(projects["projects"][0]["project_id"], "index-project");
+    let mut query = host_input(&f, "sessions");
+    query["observation"]["project_id"] = json!("index-project");
+    let (status, sessions) = serving.send(&query).await;
+    assert_eq!(status, 200, "{sessions}");
+    assert_eq!(
+        sessions,
+        serde_json::to_value(
+            manager
+                .session_catalog()
+                .list_for_project(false, Some("index-project"))
+                .await
+                .unwrap()
+        )
+        .unwrap()
+    );
+    assert_eq!(sessions[0]["summary"]["session_id"], "cold-session");
+    assert_eq!(sessions[0]["active"], false);
+    assert!(sessions[0].get("workspace_diff").is_none());
+    query["observation"]["workspace_stats"] = json!(true);
+    assert_eq!(serving.send(&query).await.0, 403);
+    query["observation"]["workspace_stats"] = json!(false);
+    query["observation"]["project_id"] = json!("other-project");
+    assert_eq!(serving.send(&query).await.1, json!([]));
+    let mut cold = input(&f, "snapshot");
+    cold["session_id"] = json!("cold-session");
+    assert_eq!(serving.send(&cold).await.0, 503);
+    assert!(manager.inner.active_sessions.read().await.is_empty());
+    serving.close().await;
+}
+
+#[tokio::test]
+async fn cached_message_and_thread_pages_return_real_records_without_waking_work() {
+    use nac_core::types::Message;
+    let f = Fixture::new();
+    let manager = manager(&f);
+    let messages = vec![
+        Message::System {
+            content: "system".into(),
+        },
+        Message::User {
+            content: "ask-one".into(),
+        },
+        serde_json::from_value(json!({"role":"assistant","content":"answer-one"})).unwrap(),
+        Message::User {
+            content: "ask-two".into(),
+        },
+        serde_json::from_value(json!({"role":"assistant","content":"answer-two"})).unwrap(),
+    ];
+    let service = cache_session_with_messages(&f, &manager, messages).await;
+    for id in 1..=3 {
+        let event = nac_core::events::AgentEvent::ThreadSteeringQueued {
+            name: "worker".into(),
+            steering_id: id,
+            instruction_preview: format!("record-{id}"),
+        };
+        nac_core::store::ThreadEventWriter::new(&manager.inner.store_path)
+            .unwrap()
+            .append("session", "worker", &serde_json::to_string(&event).unwrap())
+            .unwrap();
+    }
+    let queued = nac_core::store::create_session_inbox_item(
+        &manager.inner.store_path,
+        "session",
+        nac_core::store::InboxDelivery::Queue,
+        "remain queued",
+        None,
+        None,
+    )
+    .unwrap();
+    let before = service.recent_events(None, 0).0;
+    let serving = Serving::new(manager.clone()).await;
+    let mut request = input(&f, "messages");
+    request["observation"]["limit"] = json!(1);
+    let (status, page) = serving.send(&request).await;
+    assert_eq!(status, 200, "{page}");
+    assert_eq!(page["messages"][0]["content"], "answer-two");
+    assert_eq!(page["page"]["has_older"], true);
+    assert!(page["created_at"].is_array());
+    request["observation"]["before"] = page["page"]["start"].clone();
+    let (status, older) = serving.send(&request).await;
+    assert_eq!(status, 200, "{older}");
+    assert_eq!(older["messages"][0]["content"], "ask-two");
+    let mut thread = input(&f, "thread_events");
+    thread["observation"]["thread_name"] = json!("worker");
+    thread["observation"]["limit"] = json!(1);
+    let (status, events) = serving.send(&thread).await;
+    assert_eq!(status, 200, "{events}");
+    assert_eq!(events["events"].as_array().unwrap().len(), 1);
+    assert!(events["next_before_id"].is_i64());
+    assert_eq!(events["events"][0]["event"]["steering_id"], 3);
+    thread["observation"]["before_id"] = events["next_before_id"].clone();
+    let (status, older) = serving.send(&thread).await;
+    assert_eq!(status, 200, "{older}");
+    assert_eq!(older["events"][0]["event"]["steering_id"], 2);
+    assert_eq!(service.recent_events(None, 0).0, before);
+    assert!(!service.has_active_operation());
+    assert!(
+        nac_core::store::list_session_inbox(&manager.inner.store_path, "session")
+            .unwrap()
+            .iter()
+            .any(
+                |item| item.id == queued.id && item.status == nac_core::store::InboxStatus::Pending
+            )
+    );
+    manager.inner.active_sessions.write().await.clear();
+    assert_eq!(serving.send(&request).await.0, 503);
+    assert_eq!(serving.send(&thread).await.0, 503);
+    assert!(manager.inner.active_sessions.read().await.is_empty());
+    serving.close().await;
+}
+
+#[tokio::test]
+async fn catalog_and_paging_shapes_refuse_cross_scope_and_background_operations() {
+    let f = Fixture::new();
+    let manager = manager(&f);
+    let serving = Serving::new(manager).await;
+    for kind in ["projects", "sessions"] {
+        assert_eq!(serving.send(&input(&f, kind)).await.0, 403);
+        let mut extra = host_input(&f, kind);
+        extra["observation"]["ready"] = json!(true);
+        assert_eq!(serving.send(&extra).await.0, 403);
+    }
+    for kind in [
+        "managed_status",
+        "workspace_stats",
+        "store",
+        "mcp_library",
+        "ssh_configs",
+        "create",
+        "attach",
+    ] {
+        assert_eq!(serving.send(&host_input(&f, kind)).await.0, 403);
+    }
+    for kind in ["messages", "thread_events"] {
+        let mut missing = host_input(&f, kind);
+        if kind == "thread_events" {
+            missing["observation"]["thread_name"] = json!("worker");
+        }
+        assert_eq!(serving.send(&missing).await.0, 403);
+    }
+    serving.close().await;
 }
 
 #[tokio::test]
@@ -335,6 +520,9 @@ async fn passive_snapshot_uses_the_actual_owned_store_executor() {
     let (status, body) = serving.send(&input(&f, "snapshot")).await;
     assert_eq!(status, 200, "{body}");
     assert!(!service.has_active_operation());
+    for kind in ["projects", "sessions"] {
+        assert_eq!(serving.send(&host_input(&f, kind)).await.0, 200);
+    }
     serving.close().await;
     manager.inner._store_ownership.drain().await.unwrap();
 }
