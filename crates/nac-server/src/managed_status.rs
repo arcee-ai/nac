@@ -54,6 +54,65 @@ pub(crate) async fn retain_probe_identity(
         .map(Some)
 }
 
+/// A response-scoped native observation, never platform admission or an access
+/// lease. Keeping the original guard through serialization prevents replacement
+/// acceptance from crossing the read-to-response-construction interval.
+pub(crate) struct ManagedBindingSnapshot {
+    pub(crate) binding: crate::ManagedLocationBinding,
+    pub(crate) store_ready: bool,
+    pub(crate) maintenance_state: &'static str,
+    pub(crate) migration_state: &'static str,
+    pub(crate) opened_schema_version: Option<i64>,
+    pub(crate) replacement_state: &'static str,
+    _replacement: nac_core::sessions::HostAdmissionLease,
+}
+
+pub(crate) async fn managed_binding_snapshot(
+    manager: SessionManager,
+) -> anyhow::Result<ManagedBindingSnapshot> {
+    run_probe(move || {
+        let identity = manager
+            .managed_identity()
+            .ok_or_else(|| anyhow::anyhow!("managed replacement identity unavailable"))?;
+        let replacement =
+            nac_core::store::retain_managed_probe_identity(&manager.inner.store_path, identity)?;
+        let binding = manager.managed_location_binding()?;
+        anyhow::ensure!(
+            binding.logical_host_id == identity.managed_host_id
+                && binding.host_incarnation_id == identity.host_incarnation_id
+                && binding.release_id == identity.target.release_id
+                && binding.source_revision == identity.target.source_sha
+                && binding.product_version == identity.target.product_version
+                && binding.supported_schema_version == identity.target.schema_version,
+            "managed replacement identity differs from configured running binding"
+        );
+        // Full runtime readiness includes filesystem-write and shell probes.
+        // This operation observes only committed store/replacement state.
+        let migration = nac_core::store::observe_probe_migration_status(&manager.inner.store_path);
+        let maintenance = nac_core::store::observe_managed_probe_store_for_identity(
+            &manager.inner.store_path,
+            identity,
+        )?;
+        let serving = maintenance == nac_core::store::ManagedMaintenanceState::Serving;
+        let accepted =
+            nac_core::store::observe_managed_probe_acceptance(&manager.inner.store_path, identity)?;
+        Ok(ManagedBindingSnapshot {
+            binding,
+            store_ready: !manager.is_recovery_only()
+                && migration.state == nac_core::store::StoreMigrationState::Current
+                && serving,
+            maintenance_state: if serving { "serving" } else { "maintenance" },
+            migration_state: migration.state.as_str(),
+            opened_schema_version: migration.opened_schema_version,
+            // The initial configured serving identity has no accepted upgrade
+            // operation. Do not label that state a durable accepted replacement.
+            replacement_state: if accepted { "accepted" } else { "configured" },
+            _replacement: replacement,
+        })
+    })
+    .await?
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub(crate) struct ReadinessResponse {
     status: &'static str,

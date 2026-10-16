@@ -20,6 +20,10 @@ use crate::{
     SessionManager,
 };
 
+#[path = "managed_host_observation.rs"]
+mod host_observation;
+pub use host_observation::{MANAGED_HOST_OBSERVATION_PATH, MANAGED_HOST_OBSERVATION_PURPOSE};
+
 pub const MANAGED_LOCATION_FACT_PATH: &str = "/internal/v1/managed-location-facts";
 pub const MANAGED_LOCATION_FACT_PURPOSE: &str = "working-location-facts.v1";
 const MAX_BODY_BYTES: usize = 32 * 1024;
@@ -131,6 +135,10 @@ fn refusal(request_id: &str, status: StatusCode, error: &'static str) -> Respons
 fn router(manager: SessionManager) -> Router {
     Router::new()
         .route(MANAGED_LOCATION_FACT_PATH, post(handle))
+        .route(
+            MANAGED_HOST_OBSERVATION_PATH,
+            post(host_observation::handle),
+        )
         .with_state(manager)
 }
 
