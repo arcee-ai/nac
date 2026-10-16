@@ -216,6 +216,53 @@ test.describe("inherited native web", () => {
     await assertIsolated(harness, request, [parent, child_session_id]);
   });
 
+  test("expires an inherited native request and closes its connection without retaining its key", async ({
+    harness,
+    request,
+  }) => {
+    const parent = await createSession(request, harness, "direct");
+    harness.provider.enqueue(
+      "inherited-timeout",
+      { token: "INHERITED_TIMEOUT", requiredTools: ["web_search", "web_fetch"] },
+      {
+        kind: "function_call",
+        name: "web_search",
+        callId: "inherited-timeout",
+        arguments: { query: "E2E_HANGING_EXA", _nac: { timeout_ms: 2000 } },
+      },
+    );
+    harness.provider.enqueue(
+      "timeout-observed",
+      { functionOutputCallId: "inherited-timeout" },
+      { kind: "text", text: "Inherited request timed out" },
+    );
+    const launched = await request.post(`${harness.baseUrl}/sessions/${parent}/children`, {
+      data: {
+        profile: "general",
+        description: "Bounded native research",
+        prompt: "INHERITED_TIMEOUT",
+        background: false,
+      },
+    });
+    expect(launched.ok(), await launched.text()).toBe(true);
+    const { child_session_id } = (await launched.json()) as { child_session_id: string };
+    await harness.exa!.hangingRequestAccepted;
+    await harness.exa!.hangingRequestClosed;
+    await waitForRunIdle(request, harness, child_session_id);
+    const continuation = harness.provider.requests.find(
+      (entry) => entry.matchedStep === "timeout-observed",
+    )?.body as { input: Array<{ type?: string; call_id?: string; output?: string }> };
+    const output = continuation.input.find(
+      (entry) => entry.type === "function_call_output" && entry.call_id === "inherited-timeout",
+    )?.output;
+    expect(output).toBeDefined();
+    expect(JSON.parse(output!)._nac.status).toBe("timed_out");
+    expect(harness.exa!.requests).toHaveLength(1);
+    expect(harness.exa!.requests[0].apiKey).toBe(CANARY);
+    harness.provider.assertConsumed();
+    await assertIsolated(harness, request, [parent, child_session_id]);
+  });
+
   for (const managedNativeWeb of [true, false]) {
     test.describe(`${managedNativeWeb ? "managed" : "ordinary local"} dispatch`, () => {
       test.use({ managedNativeWeb });
