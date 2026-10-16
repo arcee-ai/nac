@@ -73,6 +73,8 @@ function mount(state: PermissionStateResponse, requesterLabel?: string) {
   );
 }
 
+vi.spyOn(api, "listTraditionalChildren").mockResolvedValue([]);
+
 beforeEach(() => {
   fakes.getPermissions.mockReset().mockResolvedValue({ requests: [], grants: [] });
   fakes.replyPermission.mockReset().mockResolvedValue(undefined);

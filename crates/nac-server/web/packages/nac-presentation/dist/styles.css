@@ -1015,6 +1015,10 @@
     height: calc(var(--spacing) * 6) !important;
   }
 
+[data-nac-runtime]:is(.\!h-auto), [data-nac-runtime] .\!h-auto {
+    height: auto !important;
+  }
+
 [data-nac-runtime]:is(.h-1), [data-nac-runtime] .h-1 {
     height: var(--spacing);
   }
@@ -2786,6 +2790,10 @@
     padding-block: calc(var(--spacing) * .5) !important;
   }
 
+[data-nac-runtime]:is(.\!py-2), [data-nac-runtime] .\!py-2 {
+    padding-block: calc(var(--spacing) * 2) !important;
+  }
+
 [data-nac-runtime]:is(.py-1), [data-nac-runtime] .py-1 {
     padding-block: var(--spacing);
   }
@@ -3163,6 +3171,10 @@
     text-wrap: wrap;
   }
 
+[data-nac-runtime]:is(.\[overflow-wrap\:anywhere\]), [data-nac-runtime] .\[overflow-wrap\:anywhere\] {
+    overflow-wrap: anywhere;
+  }
+
 [data-nac-runtime]:is(.break-words), [data-nac-runtime] .break-words {
     overflow-wrap: break-word;
   }
@@ -3177,6 +3189,10 @@
 
 [data-nac-runtime]:is(.text-ellipsis), [data-nac-runtime] .text-ellipsis {
     text-overflow: ellipsis;
+  }
+
+[data-nac-runtime]:is(.whitespace-normal), [data-nac-runtime] .whitespace-normal {
+    white-space: normal;
   }
 
 [data-nac-runtime]:is(.whitespace-nowrap), [data-nac-runtime] .whitespace-nowrap {
