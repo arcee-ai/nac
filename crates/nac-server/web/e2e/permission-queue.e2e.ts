@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
+import { ScriptGate } from "./scripted-provider";
 
 for (const mobile of [false, true]) {
   test(`consolidates scoped parent and child approvals ${mobile ? "mobile" : "desktop"}`, async ({
@@ -13,6 +14,7 @@ for (const mobile of [false, true]) {
     await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 720 });
     const file = path.join(harness.runRoot, "external-permission.txt");
     await fs.writeFile(file, "scoped permission fixture\n");
+    const childGate = new ScriptGate();
     for (const owner of ["parent", "first", "second"]) {
       harness.provider.enqueue(
         `ask-${owner}`,
@@ -24,6 +26,7 @@ for (const mobile of [false, true]) {
           arguments: { path: file },
           stream: "request",
         },
+        owner === "parent" ? undefined : childGate,
       );
       harness.provider.enqueue(
         `done-${owner}`,
@@ -58,7 +61,22 @@ for (const mobile of [false, true]) {
     const children = ["first", "second"].map(
       (owner) => records.find((child) => child.description === owner)!.child_session_id,
     );
+    // A child broker gives an unattached parent only a short connect grace.
+    // Hold the model before it can ask until both actual UI streams are live.
+    const connected = children.map((id) =>
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `/sessions/${id}/events/stream` && response.ok(),
+      ),
+    );
     await page.goto(`${harness.baseUrl}/#/session/${parent}/delegated`);
+    await Promise.all(connected);
+    await expect(page.getByRole("button", { name: "Permissions", exact: true })).toHaveCount(1);
+    for (const id of children) {
+      const response = await request.get(`${harness.baseUrl}/sessions/${id}/permissions`);
+      expect((await response.json()).requests).toHaveLength(0);
+    }
+    childGate.release();
     await expect(page.getByRole("region", { name: "Pending permission requests" })).toContainText(
       "Pending requests (2)",
     );
@@ -77,7 +95,7 @@ for (const mobile of [false, true]) {
     await expect(page.getByText("(3 pending)", { exact: true })).toBeVisible();
 
     // The broker intentionally rejects pending asks when its LAST interactive
-    // client disconnects. Keep a second parent view attached so this reload
+    // client disconnects. Keep additional observers attached so this reload
     // exercises UI recovery without weakening that existing fail-closed rule.
     const observer = new AbortController();
     try {
