@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tower::ServiceExt;
 
-fn manager(f: &Fixture) -> SessionManager {
+pub(crate) fn manager(f: &Fixture) -> SessionManager {
     let mut config = f.config.clone();
     config.version = nac_managed::MANAGED_CONFIG_VERSION;
     config.managed_control_bind = Some("127.0.0.1:3211".into());

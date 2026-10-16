@@ -48,7 +48,8 @@ pub use delivery::error::ApiError;
 pub use delivery::managed_fact_listener::ManagedFactListenerOptions;
 pub use delivery::managed_location_facts::{
     serve_managed_location_facts, MANAGED_HOST_OBSERVATION_PATH, MANAGED_HOST_OBSERVATION_PURPOSE,
-    MANAGED_LOCATION_FACT_PATH, MANAGED_LOCATION_FACT_PURPOSE,
+    MANAGED_LOCATION_FACT_PATH, MANAGED_LOCATION_FACT_PURPOSE, MANAGED_SESSION_OBSERVATION_PATH,
+    MANAGED_SESSION_OBSERVATION_PURPOSE,
 };
 pub use delivery::managed_runtime_tls::{
     denied_runtime_router, mediated_only_plaintext_router, serve_denied_runtime,

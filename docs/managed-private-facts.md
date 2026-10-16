@@ -51,7 +51,7 @@ maintenance, and private acceptance before cancelling local runs. All HTTP/TLS
 requests drain before persistence callers quiesce and the executor drains.
 An unexpected private serving failure also initiates this shutdown sequence.
 
-The only private route is `POST /internal/v1/managed-location-facts`, purpose
+The private location-facts route is `POST /internal/v1/managed-location-facts`, purpose
 `working-location-facts.v1`. It requires the actual CA-verified, pinned D TLS
 peer, exact current native target, one correlation header and the original
 bounded `X-NAC-Expires-At-Epoch-Ms` deadline. D remains responsible for fresh
@@ -60,6 +60,10 @@ checks, the durable POST claim, and deadline derivation. The native receiver
 accepts no forwarded product credentials or user/operation authority marker.
 An HTTP filesystem fact conveys data; it creates no public reference, retained
 file descriptor, lease, authorization, or mutation grant.
+
+The same listener separately exposes [managed-host metadata](managed-host-observation.md)
+and [passive session snapshot/events/SSE](managed-session-observation.md).
+These do not open the ordinary runtime or install platform admission/transport.
 
 Native running release identity remains independent of the product registry
 release ID. Deployment owners must qualify the artifact, OCI/platform digest,

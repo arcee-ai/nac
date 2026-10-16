@@ -23,6 +23,11 @@ use crate::{
 #[path = "managed_host_observation.rs"]
 mod host_observation;
 pub use host_observation::{MANAGED_HOST_OBSERVATION_PATH, MANAGED_HOST_OBSERVATION_PURPOSE};
+#[path = "managed_session_observation.rs"]
+mod session_observation;
+pub use session_observation::{
+    MANAGED_SESSION_OBSERVATION_PATH, MANAGED_SESSION_OBSERVATION_PURPOSE,
+};
 
 pub const MANAGED_LOCATION_FACT_PATH: &str = "/internal/v1/managed-location-facts";
 pub const MANAGED_LOCATION_FACT_PURPOSE: &str = "working-location-facts.v1";
@@ -33,6 +38,9 @@ struct FactDeadline {
     epoch_ms: i64,
     monotonic: tokio::time::Instant,
 }
+
+#[derive(Clone)]
+struct ObservationShutdown(tokio::sync::watch::Receiver<bool>);
 
 fn utc_epoch_ms() -> Option<i64> {
     SystemTime::now()
@@ -139,6 +147,10 @@ fn router(manager: SessionManager) -> Router {
             MANAGED_HOST_OBSERVATION_PATH,
             post(host_observation::handle),
         )
+        .route(
+            MANAGED_SESSION_OBSERVATION_PATH,
+            post(session_observation::handle),
+        )
         .with_state(manager)
 }
 
@@ -152,7 +164,13 @@ pub async fn serve_managed_location_facts(
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
     manager.managed_location_binding()?;
-    serve_authenticated_runtime(listener, router(manager), shutdown).await
+    let (stopping, stopped) = tokio::sync::watch::channel(false);
+    let app = router(manager).layer(axum::Extension(ObservationShutdown(stopped)));
+    serve_authenticated_runtime(listener, app, async move {
+        shutdown.await;
+        let _ = stopping.send(true);
+    })
+    .await
 }
 
 async fn handle(State(manager): State<SessionManager>, request: Request) -> Response {

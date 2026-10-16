@@ -136,4 +136,4 @@ async fn observe(
 
 #[cfg(all(test, unix))]
 #[path = "managed_host_observation_tests.rs"]
-mod tests;
+pub(super) mod tests;

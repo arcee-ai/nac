@@ -20,7 +20,7 @@ static PROBE_CALLERS: LazyLock<Arc<tokio::sync::Semaphore>> =
 static PROBE_ADMISSIONS: LazyLock<Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
 
-async fn run_probe<F, R>(operation: F) -> anyhow::Result<R>
+pub(crate) async fn run_probe<F, R>(operation: F) -> anyhow::Result<R>
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
