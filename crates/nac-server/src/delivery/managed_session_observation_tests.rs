@@ -16,6 +16,12 @@ fn input(f: &Fixture, kind: &str) -> Value {
         "session_id":"session","observation":{"kind":kind}})
 }
 
+fn ui_input(f: &Fixture) -> Value {
+    let mut body = input(f, "ui_configuration");
+    body.as_object_mut().unwrap().remove("session_id");
+    body
+}
+
 fn headers(stream: bool, milliseconds: i64) -> Vec<(&'static str, String)> {
     vec![
         ("Content-Type", "application/json".into()),
@@ -73,6 +79,83 @@ impl Serving {
         self.stop.send(()).unwrap();
         self.task.await.unwrap().unwrap();
     }
+}
+
+#[tokio::test]
+async fn ui_bootstrap_returns_actual_captured_policy_without_a_session() {
+    let f = Fixture::new();
+    let manager = manager(&f);
+    let expected = crate::delivery::ui_configuration::UiConfiguration::from_environment();
+    let serving = Serving::new(manager.clone()).await;
+    let (status, body) = serving.send(&ui_input(&f)).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body, serde_json::to_value(expected).unwrap());
+    assert!(body["orchestration_enabled"].is_boolean());
+    assert!(body["diagnostic"].is_null() || body["diagnostic"].is_string());
+    assert!(manager.inner.active_sessions.read().await.is_empty());
+    for kind in ["snapshot", "events"] {
+        assert_eq!(serving.send(&input(&f, kind)).await.0, 503);
+    }
+    assert!(manager.inner.active_sessions.read().await.is_empty());
+    serving.close().await;
+}
+
+#[tokio::test]
+async fn ui_bootstrap_rejects_session_selectors_and_malformed_cross_operation_shapes() {
+    let f = Fixture::new();
+    let manager = manager(&f);
+    let serving = Serving::new(manager).await;
+    assert_eq!(serving.send(&input(&f, "ui_configuration")).await.0, 403);
+    let mut null_session = ui_input(&f);
+    null_session["session_id"] = Value::Null;
+    assert_eq!(serving.send(&null_session).await.0, 403);
+    for kind in ["snapshot", "events", "stream"] {
+        let mut body = input(&f, kind);
+        body.as_object_mut().unwrap().remove("session_id");
+        assert_eq!(serving.send(&body).await.0, 403);
+    }
+    let mut extra = ui_input(&f);
+    extra["observation"]["orchestration_enabled"] = json!(true);
+    assert_eq!(serving.send(&extra).await.0, 403);
+    let mut stale = ui_input(&f);
+    stale["target"]["host_incarnation_id"] = json!("old");
+    assert_eq!(serving.send(&stale).await.0, 409);
+    let mut wrong = ui_input(&f);
+    wrong["request_id"] = json!("other");
+    assert_eq!(serving.send(&wrong).await.0, 403);
+    for forbidden in ["Authorization", "Cookie", "Origin"] {
+        let mut h = headers(false, 30_000);
+        h.push((forbidden, "forbidden".into()));
+        assert_eq!(
+            exchange(
+                serving.address,
+                Some("d-service"),
+                "POST",
+                MANAGED_SESSION_OBSERVATION_PATH,
+                &serde_json::to_vec(&ui_input(&f)).unwrap(),
+                &h
+            )
+            .await
+            .unwrap()
+            .0,
+            403
+        );
+    }
+    assert_eq!(
+        exchange(
+            serving.address,
+            Some("d-service"),
+            "POST",
+            MANAGED_SESSION_OBSERVATION_PATH,
+            &serde_json::to_vec(&ui_input(&f)).unwrap(),
+            &headers(false, 0)
+        )
+        .await
+        .unwrap()
+        .0,
+        403
+    );
+    serving.close().await;
 }
 
 async fn cache_session(

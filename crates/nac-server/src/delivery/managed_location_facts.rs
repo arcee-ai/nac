@@ -152,6 +152,9 @@ fn router(manager: SessionManager) -> Router {
             post(session_observation::handle),
         )
         .with_state(manager)
+        .layer(axum::Extension(
+            super::ui_configuration::UiConfiguration::from_environment(),
+        ))
 }
 
 /// Opt-in serving requires an actual configured pinned-D TLS listener. The

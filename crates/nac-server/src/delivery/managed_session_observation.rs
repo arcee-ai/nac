@@ -29,6 +29,7 @@ struct Cursor {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Observation {
+    UiConfiguration {},
     Snapshot {
         thread_event_limit: Option<usize>,
         include_sessions: Option<bool>,
@@ -53,8 +54,16 @@ struct Input {
     purpose: String,
     request_id: String,
     target: Target,
-    session_id: String,
+    #[serde(default, deserialize_with = "present_session_id")]
+    session_id: Option<String>,
     observation: Observation,
+}
+
+fn present_session_id<'de, D: serde::Deserializer<'de>>(
+    input: D,
+) -> Result<Option<String>, D::Error> {
+    // Omission is host-scoped; an explicitly supplied null is not a session ID.
+    String::deserialize(input).map(Some)
 }
 
 fn refused(status: StatusCode) -> Response {
@@ -158,6 +167,10 @@ async fn observe(
     deadline: FactDeadline,
     mut stopping: tokio::sync::watch::Receiver<bool>,
 ) -> Response {
+    let ui_configuration = request
+        .extensions()
+        .get::<super::super::ui_configuration::UiConfiguration>()
+        .cloned();
     let Ok(bytes) = to_bytes(request.into_body(), 4096).await else {
         return refused(StatusCode::FORBIDDEN);
     };
@@ -167,7 +180,11 @@ async fn observe(
     if input.schema != MANAGED_SESSION_OBSERVATION_PURPOSE
         || input.purpose != MANAGED_SESSION_OBSERVATION_PURPOSE
         || input.request_id != correlation
-        || !safe_id(&input.session_id)
+        || if matches!(input.observation, Observation::UiConfiguration { .. }) {
+            input.session_id.is_some()
+        } else {
+            !input.session_id.as_deref().is_some_and(safe_id)
+        }
         || !deadline.is_live()
         || accept
             != if matches!(input.observation, Observation::Stream { .. }) {
@@ -189,17 +206,35 @@ async fn observe(
     if !binding.store_ready || !deadline.is_live() {
         return refused(StatusCode::SERVICE_UNAVAILABLE);
     }
-    let Ok(session) = SessionObservation::resolve(manager.clone(), &input.session_id).await else {
-        // No cached current owner is a refusal, never a reason to attach.
-        return refused(StatusCode::SERVICE_UNAVAILABLE);
+    let session = if let Some(id) = &input.session_id {
+        let Ok(session) = SessionObservation::resolve(manager.clone(), id).await else {
+            // No cached current owner is a refusal, never a reason to attach.
+            return refused(StatusCode::SERVICE_UNAVAILABLE);
+        };
+        Some(session)
+    } else {
+        None
     };
     match input.observation {
+        Observation::UiConfiguration {} => {
+            let Some(config) = ui_configuration else {
+                return refused(StatusCode::SERVICE_UNAVAILABLE);
+            };
+            // Exact maintained server-owned projection, captured once when
+            // this private router was built. No session or environment reload.
+            let response = Json(config).into_response();
+            drop(binding);
+            response
+        }
         Observation::Snapshot {
             thread_event_limit,
             include_sessions,
             message_limit,
             include_system,
         } => {
+            let (Some(session), Some(session_id)) = (session, input.session_id) else {
+                return refused(StatusCode::SERVICE_UNAVAILABLE);
+            };
             // The bounded original worker owns the replacement guard through
             // every underlying read and serialization. Timeout/disconnect can
             // abandon the wait, never the still-running read's guard.
@@ -222,7 +257,7 @@ async fn observe(
                         return refused(StatusCode::SERVICE_UNAVAILABLE);
                     };
                     let lineage_manager = manager.clone();
-                    let id = input.session_id;
+                    let id = session_id;
                     let Ok(Ok(lineage)) = manager
                         .inner
                         ._store_ownership
@@ -256,6 +291,9 @@ async fn observe(
             .unwrap_or_else(|_| refused(StatusCode::SERVICE_UNAVAILABLE))
         }
         Observation::Events { cursor, limit } | Observation::Stream { cursor, limit } => {
+            let Some(session) = session else {
+                return refused(StatusCode::SERVICE_UNAVAILABLE);
+            };
             let cursor = match cursor {
                 Some(cursor) if safe_id(&cursor.epoch_id) => Some(SessionEventBoundary {
                     epoch_id: cursor.epoch_id,

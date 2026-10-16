@@ -51,6 +51,19 @@ Ready; no filesystem-write or shell readiness probes run.
 | `/sessions/{id}/events` | `kind: "events"`; optional `cursor: {epoch_id, sequence_id}`, `limit` | `application/json`; unchanged `{boundary, events}` |
 | `/sessions/{id}/events/stream` | `kind: "stream"`; optional same cursor and limit | `text/event-stream`; existing named Native SSE frames |
 
+The same operation also supports the presentation's mandatory host-scoped
+bootstrap: `observation: {"kind":"ui_configuration"}` with `session_id` omitted
+and `Accept: application/json`. It returns the maintained Native
+`UiConfiguration` projection (`orchestration_enabled: boolean`,
+`diagnostic: string|null`) captured from actual server configuration once when
+the private router is built. It performs no session lookup, creates no cached
+service and invents no policy flags or diagnostic codes. A supplied session ID
+for this operation is refused; the three session operations still require
+their exact session ID. The existing platform client maps `GET /ui-config`
+to this private read. `/public/ui-config` uses a distinct public DTO and is not
+an alias for this Native response. The ordinary
+runtime fence and presentation bootstrap guard remain effective.
+
 The paired platform cursor maps to one closed cursor object. Sequences remain
 Native numeric values; no alternate string codec is selected. Event replay is
 bounded to the existing default replay limit (256). `limit: 0` returns the
