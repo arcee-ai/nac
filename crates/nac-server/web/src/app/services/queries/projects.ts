@@ -77,13 +77,19 @@ export interface DeleteProjectVariables {
 
 /** Either way the project's sessions move, so the session list moves too. */
 export function useDeleteProject() {
-  const { api } = useNativeRuntime();
+  const {
+    api,
+    stores: { promptDraftStore },
+  } = useNativeRuntime();
 
   const invalidate = useQueryInvalidators();
   return useMutation({
     mutationFn: ({ projectId, sessions }: DeleteProjectVariables) =>
       api.deleteProject(projectId, sessions),
-    onSuccess: () => Promise.all([invalidate.projects(), invalidate.sessions()]),
+    onSuccess: (result) => {
+      promptDraftStore.purgeSessions(result.deleted_session_ids);
+      return Promise.all([invalidate.projects(), invalidate.sessions()]);
+    },
   });
 }
 

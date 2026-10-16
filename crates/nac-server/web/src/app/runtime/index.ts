@@ -8,3 +8,5 @@ export {
   type NativeRuntimeScope,
 } from "./nativeRuntime";
 export { RuntimeContext, useNativeRuntime } from "./RuntimeContext";
+
+export type { PromptDraftStorage } from "../store/promptDraftStore";

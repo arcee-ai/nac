@@ -32,6 +32,25 @@ revoked eligibility or host deletion, then unmount its React root. Bindings are
 opaque state partitions and never authorization. Accepted mutations with lost
 responses require authoritative readback without replay.
 
+Primary prompt text survives route changes within the runtime. For same-tab
+reload recovery, callers may supply a separate `draftStorage` adapter with
+`getItem`, `setItem` and `removeItem`, backed by tab-scoped storage. The standalone
+entry uses `sessionStorage`; preference `storage` does not persist drafts. Records
+are versioned and partitioned by all seven immutable runtime binding fields and
+session ID. Supply the complete owner/profile/organization/host/incarnation/
+endpoint/release binding and replace the runtime when any field changes.
+
+Before logout, revoked access or host removal, call
+`runtime.stores.promptDraftStore.purgeAll()` before `runtime.close()` to remove
+that binding's persisted text. Use `purgeSessions(ids)` for confirmed session
+access loss/deletion; built-in deletion clears only confirmed deleted IDs.
+Closing a tab or a runtime alone retains reload recovery. No pending request,
+attachment payload or terminal input is saved. The store retains up to 100 drafts
+and one million characters by evicting oldest inactive records, always keeping
+the currently edited prompt verbatim. Storage errors fall back to memory and
+attempt to remove stale persisted data. Writes are synchronous, so route changes
+and pagehide require no delayed flush. Restoration never submits text.
+
 Hosted query reads default to no retries. The standalone entry explicitly sets
 `queryRetry: 1` to retain its existing transient-read recovery; callers may select
 that same bounded policy. Mutation retries remain disabled in either profile.

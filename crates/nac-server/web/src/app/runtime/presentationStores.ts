@@ -3,6 +3,9 @@ import * as threadLogHeight from "../hooks/useThreadLogHeight";
 import * as lastLight from "../lib/lastLight";
 import * as attentionStore from "../store/attentionStore";
 import * as chatTabsStore from "../store/chatTabsStore";
+import * as promptDraftStore from "../store/promptDraftStore";
+import type { NativeRuntimeScope } from "./nativeRuntime";
+import type { PromptDraftStorage } from "../store/promptDraftStore";
 import * as composerStore from "../store/composerStore";
 import * as runtimeStore from "../store/runtimeStore";
 import * as sessionFiltersStore from "../store/sessionFiltersStore";
@@ -17,6 +20,7 @@ export interface PresentationStores {
   lastLight: ReturnType<typeof lastLight.createLastLight>;
   attentionStore: ReturnType<typeof attentionStore.createAttentionStore>;
   chatTabsStore: ReturnType<typeof chatTabsStore.createChatTabsStore>;
+  promptDraftStore: ReturnType<typeof promptDraftStore.createPromptDraftStore>;
   composerStore: ReturnType<typeof composerStore.createComposerStore>;
   runtimeStore: ReturnType<typeof runtimeStore.createRuntimeStore>;
   sessionFiltersStore: ReturnType<typeof sessionFiltersStore.createSessionFiltersStore>;
@@ -28,8 +32,11 @@ export interface PresentationStores {
 
 export function createPresentationStores(
   storage?: Pick<Storage, "getItem" | "setItem">,
+  scope?: NativeRuntimeScope,
+  draftStorage?: PromptDraftStorage,
 ): PresentationStores {
   return {
+    promptDraftStore: promptDraftStore.createPromptDraftStore(scope, draftStorage),
     panelWidth: panelWidth.createPanelWidth(storage),
     threadLogHeight: threadLogHeight.createThreadLogHeight(storage),
     lastLight: lastLight.createLastLight(storage),
@@ -46,6 +53,7 @@ export function createPresentationStores(
 }
 
 export const standalonePresentationStores = {
+  promptDraftStore,
   panelWidth,
   threadLogHeight,
   lastLight,

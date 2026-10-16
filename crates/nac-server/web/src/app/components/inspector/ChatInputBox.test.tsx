@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { SessionActionsProvider } from "@/app/providers/SessionActionsProvider";
 import { ToastProvider } from "@/app/providers/ToastProvider";
+import { draftPrompt, sendPrompt } from "@/app/store/composerStore";
+import { purgeAll, get as getDraft } from "@/app/store/promptDraftStore";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
 import { resetRuntime, syncRunFromSnapshot } from "@/app/store/runtimeStore";
@@ -133,20 +135,24 @@ let mobile = false;
 function composer(
   {
     behavior = null,
+    sessionId = "session",
     goalState = null,
     inboxItems = [],
     lineage = null,
     entryAvailable = true,
     snapshotAvailable = false,
     shellCommands = [],
+    messages = [],
   }: {
     behavior?: SessionBehavior | null;
+    sessionId?: string;
     goalState?: SessionGoalRecord | null;
     inboxItems?: InboxItem[];
     lineage?: ManagedSessionSummary["lineage"];
     entryAvailable?: boolean;
     snapshotAvailable?: boolean;
     shellCommands?: ShellCommandSnapshot[];
+    messages?: SessionSnapshotResponse["messages"];
   } = {},
   expectInput = true,
 ) {
@@ -157,23 +163,23 @@ function composer(
     },
   });
   if (commandFixtures !== undefined) {
-    client.setQueryData(queryKeys.sessionCommands("session"), commandFixtures);
+    client.setQueryData(queryKeys.sessionCommands(sessionId), commandFixtures);
   }
   if (skillFixtures !== undefined) {
-    client.setQueryData(queryKeys.sessionSkills("session"), skillFixtures);
+    client.setQueryData(queryKeys.sessionSkills(sessionId), skillFixtures);
   }
   if (behavior) {
-    client.setQueryData(queryKeys.sessionPermissions("session"), { requests: [], grants: [] });
-    client.setQueryData(queryKeys.sessionGoal("session"), goalState);
+    client.setQueryData(queryKeys.sessionPermissions(sessionId), { requests: [], grants: [] });
+    client.setQueryData(queryKeys.sessionGoal(sessionId), goalState);
     fakes.getGoal.mockResolvedValue(goalState);
-    client.setQueryData(queryKeys.sessionInbox("session"), inboxItems);
-    client.setQueryData(queryKeys.traditionalChildren("session"), []);
+    client.setQueryData(queryKeys.sessionInbox(sessionId), inboxItems);
+    client.setQueryData(queryKeys.traditionalChildren(sessionId), []);
   }
   const knownEntry: ManagedSessionSummary = {
     active: false,
     lineage,
     summary: {
-      session_id: "session",
+      session_id: sessionId,
       behavior: behavior ?? "orchestrator",
       cwd: "/tmp/project",
       model: "gpt-5.6-sol",
@@ -192,7 +198,7 @@ function composer(
   const snapshot = snapshotAvailable
     ? ({
         metadata: {
-          session_id: "session",
+          session_id: sessionId,
           behavior: behavior ?? "orchestrator",
           cwd: "/tmp/project",
           workspace_host_path: "/tmp/project",
@@ -202,7 +208,7 @@ function composer(
           sandbox_status: "off",
           agents_md_status: "off",
         },
-        messages: [],
+        messages,
         shell_commands: shellCommands,
         response_timing: {
           last_response_duration_ms: null,
@@ -216,7 +222,7 @@ function composer(
       <MemoryRouter>
         <ToastProvider>
           <SessionActionsProvider>
-            <ChatInputBox sessionId="session" snapshot={snapshot} entry={entry} />
+            <ChatInputBox sessionId={sessionId} snapshot={snapshot} entry={entry} />
           </SessionActionsProvider>
         </ToastProvider>
       </MemoryRouter>
@@ -224,7 +230,7 @@ function composer(
   );
   if (!expectInput) return null as never;
   const textarea = screen.getByRole("combobox", { name: "Message" });
-  textarea.focus();
+  act(() => textarea.focus());
   // SAFETY: the composer renders a single textarea as its combobox input.
   return textarea as HTMLTextAreaElement;
 }
@@ -238,6 +244,7 @@ function pending<T>(): Promise<T> {
 }
 
 beforeEach(() => {
+  purgeAll();
   resetRuntime("session");
   mobile = false;
   commandFixtures = [compactDefinition, goalDefinition];
@@ -1139,3 +1146,179 @@ describe("human command composer integration", () => {
     expect(fakes.submitRun).not.toHaveBeenCalled();
   });
 });
+
+describe("primary composer draft lifetime", () => {
+  it("restores independent exact text across session remounts without sending", () => {
+    const text = "  雪🙂\n\n!echo untouched  \n";
+    type(composer(), text);
+    cleanup();
+    resetRuntime("b");
+    type(composer({ sessionId: "b" }), "/compact");
+    cleanup();
+    resetRuntime("session");
+    expect(composer().value).toBe(text);
+    cleanup();
+    resetRuntime("b");
+    expect(composer({ sessionId: "b" }).value).toBe("/compact");
+    expect(fakes.submitRun).not.toHaveBeenCalled();
+    expect(fakes.submitShellCommand).not.toHaveBeenCalled();
+    expect(fakes.compactSession).not.toHaveBeenCalled();
+  });
+
+  it("clears a successful originating submission after navigation without touching another draft", async () => {
+    const result = Promise.withResolvers<unknown>();
+    fakes.steerOrchestrator.mockReturnValue(result.promise);
+    syncRunFromSnapshot({
+      run_id: "run",
+      prompt_preview: "running",
+      started_at_epoch_ms: Date.now(),
+    });
+    const textarea = composer();
+    type(textarea, "send me");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(fakes.steerOrchestrator).toHaveBeenCalled());
+    cleanup();
+    resetRuntime("b");
+    const other = composer({ sessionId: "b" });
+    type(other, "keep b");
+    await act(async () => result.resolve({ status: "queued" }));
+    expect(other.value).toBe("keep b");
+    expect(getDraft("session").text).toBe("");
+    cleanup();
+    resetRuntime("session");
+    expect(composer().value).toBe("");
+  });
+
+  it("retains identical text at a newer revision after a late successful steer", async () => {
+    const result = Promise.withResolvers<unknown>();
+    fakes.steerOrchestrator.mockReturnValue(result.promise);
+    syncRunFromSnapshot({
+      run_id: "run",
+      prompt_preview: "running",
+      started_at_epoch_ms: Date.now(),
+    });
+    const textarea = composer();
+    type(textarea, "same text");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(fakes.steerOrchestrator).toHaveBeenCalled());
+    type(textarea, "different");
+    type(textarea, "same text");
+    await act(async () => result.resolve({ status: "queued" }));
+    expect(textarea.value).toBe("same text");
+    cleanup();
+    expect(composer().value).toBe("same text");
+  });
+
+  it("retains rejected text after leaving the originating view", async () => {
+    const result = Promise.withResolvers<unknown>();
+    fakes.steerOrchestrator.mockReturnValue(result.promise);
+    syncRunFromSnapshot({
+      run_id: "run",
+      prompt_preview: "running",
+      started_at_epoch_ms: Date.now(),
+    });
+    const textarea = composer();
+    type(textarea, "retry later");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(fakes.steerOrchestrator).toHaveBeenCalled());
+    cleanup();
+    resetRuntime(null);
+    await act(async () => result.reject(new Error("rejected")));
+    resetRuntime("session");
+    expect(composer().value).toBe("retry later");
+  });
+});
+
+it("checkpoints explicit draft handoffs and completions without auto-sending restored text", () => {
+  const textarea = composer();
+  act(() => draftPrompt("session", "  handoff\nexact  "));
+  expect(textarea.value).toBe("  handoff\nexact  ");
+  cleanup();
+  const restored = composer();
+  expect(restored.value).toBe("  handoff\nexact  ");
+  type(restored, "/comp");
+  fireEvent.keyDown(restored, { key: "Tab" });
+  cleanup();
+  expect(composer().value).toBe("/compact");
+  expect(fakes.submitRun).not.toHaveBeenCalled();
+  expect(fakes.compactSession).not.toHaveBeenCalled();
+});
+
+it("keeps a field draft even when a starter prompt has identical text", async () => {
+  const textarea = composer();
+  type(textarea, "starter text");
+  act(() => sendPrompt("starter text"));
+  await waitFor(() => expect(fakes.submitRun).toHaveBeenCalledOnce());
+  await act(async () => {});
+  expect(textarea.value).toBe("starter text");
+});
+
+it("keeps history previews ephemeral and checkpoints committed history", () => {
+  const options = {
+    snapshotAvailable: true,
+    messages: [
+      { role: "user", content: "earlier exact\ntext" },
+    ] as SessionSnapshotResponse["messages"],
+  };
+  const textarea = composer(options);
+  fireEvent.keyDown(textarea, { key: "ArrowUp" });
+  expect(textarea.value).toBe("");
+  expect(getDraft("session").text).toBe("");
+  cleanup();
+  const restored = composer(options);
+  expect(restored.value).toBe("");
+  fireEvent.keyDown(restored, { key: "ArrowUp" });
+  fireEvent.keyDown(restored, { key: "Tab" });
+  expect(restored.value).toBe("earlier exact\ntext");
+  cleanup();
+  expect(composer(options).value).toBe("earlier exact\ntext");
+});
+
+it.each(["send", "queue", "compact", "shell"] as const)(
+  "settles accepted %s after the originating view unmounts",
+  async (kind) => {
+    const result = Promise.withResolvers<unknown>();
+    const fake =
+      kind === "send"
+        ? fakes.submitRun
+        : kind === "queue"
+          ? fakes.createInboxItem
+          : kind === "compact"
+            ? fakes.compactSession
+            : fakes.submitShellCommand;
+    fake.mockReturnValue(result.promise);
+    if (kind === "queue")
+      syncRunFromSnapshot({
+        run_id: "live",
+        prompt_preview: "working",
+        started_at_epoch_ms: Date.now(),
+      });
+    const textarea = composer({ behavior: "direct" });
+    type(
+      textarea,
+      kind === "shell" ? "!echo accepted" : kind === "compact" ? "/compact" : "accepted prompt",
+    );
+    if (kind === "compact") fireEvent.keyDown(textarea, { key: "Escape" });
+    if (kind === "queue") fireEvent.click(screen.getByRole("button", { name: "Queue Next" }));
+    else fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(fake).toHaveBeenCalled());
+    cleanup();
+    resetRuntime("b");
+    const other = composer({ sessionId: "b" });
+    type(other, "keep other");
+    await act(async () =>
+      result.resolve(
+        kind === "send"
+          ? {
+              status: "accepted",
+              response: { run_id: "run", client_id: null, display_prompt: "accepted prompt" },
+            }
+          : kind === "shell"
+            ? { request_id: "command", state: "completed" }
+            : {},
+      ),
+    );
+    expect(other.value).toBe("keep other");
+    expect(getDraft("session").text).toBe("");
+  },
+);
