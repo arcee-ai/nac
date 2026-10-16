@@ -23,3 +23,5 @@ verification performed and its result, and any failure or remaining risk. The
 parent can inspect this child transcript, so do not repeat long logs.
 
 Delegation label: {description}
+
+When the parent has native web_search and web_fetch, they are inherited for your admitted generation. Use these tools for web research when exposed. The eight native coding tools remain your coding baseline.

@@ -1,27 +1,123 @@
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
+
 use anyhow::Result;
 
 use super::AgentMode;
 
-/// Credential source for the request-scoped first-party web capability.
-/// Workers are populated only from the post-MCP delegated snapshot; eligible
-/// direct agents retain the established environment/store refresh behavior.
+type CredentialSource = dyn Fn() -> Result<Option<String>> + Send + Sync;
+type ParentKey = (PathBuf, String);
+
+// Only constructed direct primaries publish a source. Bindings survive idle
+// agent eviction for this process, but never restart. No credential bytes live
+// in this map; generation admission revalidates the durable parent identity.
+static PARENT_SOURCES: LazyLock<Mutex<HashMap<ParentKey, Arc<CredentialSource>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Construction-owned eligibility, separate from tool JSON and authorization.
+/// Delegates resolve only a trusted parent binding at generation admission; their
+/// model requests cannot consult ambient credentials or refresh mid-generation.
 pub(super) enum NativeWebCapabilities {
     Disabled,
-    Direct,
+    Direct(Arc<CredentialSource>),
+    Inherited {
+        store: PathBuf,
+        session: String,
+        parent: String,
+        credential: Option<String>,
+    },
     Worker(Option<String>),
 }
 
 impl NativeWebCapabilities {
-    pub(super) fn new(mode: AgentMode, traditional_child: bool) -> Self {
-        match mode {
-            AgentMode::Worker => Self::Worker(None),
-            AgentMode::Direct if !traditional_child => Self::Direct,
-            AgentMode::Direct | AgentMode::Orchestrator => Self::Disabled,
+    pub(super) fn new(mode: AgentMode, store: &Path, session: Option<&str>) -> Result<Self> {
+        if mode == AgentMode::Worker {
+            return Ok(Self::Worker(None));
+        }
+        if let Some(session) = session {
+            if let Some(parent) = parent_for(store, session)? {
+                return Ok(Self::Inherited {
+                    store: store.to_path_buf(),
+                    session: session.to_string(),
+                    parent,
+                    credential: None,
+                });
+            }
+        }
+        if mode != AgentMode::Direct {
+            return Ok(Self::Disabled);
+        }
+        let source: Arc<CredentialSource> = Arc::new(resolve_direct_credential);
+        Ok(Self::Direct(source))
+    }
+
+    // Publish only after the entire agent constructor succeeds. Failed backend
+    // or tool construction must never establish parent delegation authority.
+    pub(super) fn register_parent(&self, store: &Path, session: Option<&str>) {
+        let Self::Direct(source) = self else { return };
+        if let Some(session) = session {
+            let mut sources = PARENT_SOURCES
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            sources.insert(
+                (store.to_path_buf(), session.to_string()),
+                Arc::clone(source),
+            );
         }
     }
 
     pub(super) fn is_eligible(&self) -> bool {
         !matches!(self, Self::Disabled)
+    }
+
+    pub(super) fn admit_generation(&mut self) -> Result<()> {
+        if let Self::Inherited {
+            store,
+            session,
+            parent,
+            credential,
+        } = self
+        {
+            // Reattachment and continuation revalidate durable ownership. No
+            // source on this process/host means no grant, even if ambient Exa
+            // credentials exist. The parent must be constructed by its runtime.
+            *credential = None;
+            if parent_for(store, session)?.as_ref() != Some(parent) {
+                return Ok(());
+            }
+            let eligible =
+                crate::sessions::load_session_summary(store, parent)?.is_some_and(|summary| {
+                    matches!(
+                        summary.behavior,
+                        crate::sessions::SessionBehavior::Direct
+                            | crate::sessions::SessionBehavior::DirectWithOrchestrator
+                    )
+                });
+            if !eligible {
+                PARENT_SOURCES
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(&(store.clone(), parent.clone()));
+                return Ok(());
+            }
+            let source = PARENT_SOURCES
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&(store.clone(), parent.clone()))
+                .cloned();
+            if let Some(source) = source {
+                let resolved = source()?.filter(|value| !value.trim().is_empty());
+                if resolved
+                    .as_ref()
+                    .is_some_and(|value| value.len() > 32 * 1024)
+                {
+                    anyhow::bail!("parent native web credential exceeds the delegation bound");
+                }
+                *credential = resolved;
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn set_worker_credential(&mut self, credential: Option<String>) {
@@ -33,12 +129,26 @@ impl NativeWebCapabilities {
     pub(super) fn resolve_credential(&self) -> Result<Option<String>> {
         match self {
             Self::Disabled => Ok(None),
-            Self::Direct => match crate::worker_credentials::managed_exa_api_key() {
-                Some(credential) => Ok(Some(credential)),
-                None => crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV),
-            },
-            Self::Worker(credential) => Ok(credential.clone()),
+            Self::Direct(source) => source(),
+            Self::Inherited { credential, .. } | Self::Worker(credential) => Ok(credential.clone()),
         }
+    }
+}
+
+fn parent_for(store: &Path, session: &str) -> Result<Option<String>> {
+    let parent = if let Some(child) = crate::store::load_traditional_child(store, session)? {
+        Some(child.parent_session_id)
+    } else {
+        crate::store::load_managed_orchestrator(store, session)?
+            .map(|child| child.parent_session_id)
+    };
+    Ok(parent)
+}
+
+fn resolve_direct_credential() -> Result<Option<String>> {
+    match crate::worker_credentials::managed_exa_api_key() {
+        Some(credential) => Ok(Some(credential)),
+        None => crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV),
     }
 }
 
@@ -77,7 +187,9 @@ mod tests {
             )
             .unwrap();
         }
-        let capability = NativeWebCapabilities::new(AgentMode::Direct, false);
+        let capability =
+            NativeWebCapabilities::new(AgentMode::Direct, &nac_home.join("store.db"), None)
+                .unwrap();
         assert_eq!(
             capability.resolve_credential().unwrap().as_deref(),
             Some(CANARY)
@@ -127,3 +239,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "web_inheritance_tests.rs"]
+mod inheritance_tests;

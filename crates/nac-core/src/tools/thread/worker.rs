@@ -247,11 +247,13 @@ pub(super) async fn run_worker(
             "worker executable path was not configured; cannot spawn managed worker",
         )
     })?;
-    // Command-environment providers are attached only for an explicitly
-    // configured Managed NAC host. Ordinary local workers retain their prior
-    // process semantics and do not participate in native credential delegation.
-    let delegates_native_credentials = runtime.command_environment.is_some();
-    let native_credentials = if delegates_native_credentials {
+    // Existing managed provisioning remains independent. Ordinary local workers
+    // can receive only the eligible orchestrator's admitted native-web snapshot.
+    let delegates_native_credentials =
+        runtime.command_environment.is_some() || runtime.web_credential.is_some();
+    let native_credentials = if let Some(credential) = runtime.web_credential.as_ref() {
+        ManagedWorkerNativeCredentials::from_exa_api_key(Some(credential.secret().to_string()))
+    } else if runtime.command_environment.is_some() {
         ManagedWorkerNativeCredentials::from_process_environment()?
     } else {
         ManagedWorkerNativeCredentials::default()
@@ -1095,9 +1097,15 @@ mod tests {
         runtime.workspace_cwd = root.clone();
         runtime.config_cwd = root.clone();
         runtime.worker_executable = Some(executable);
-        runtime.command_environment = Some(Arc::new(
-            nac_managed::ManagedCommandEnvironmentProvider::new(None, None, None),
-        ));
+        if std::env::var_os("NAC_TEST_INHERITED_NATIVE_WEB").is_some() {
+            runtime.web_credential = Some(Arc::new(crate::tools::web::ExaCredential::new(
+                NATIVE_CREDENTIAL_CANARY.into(),
+            )));
+        } else {
+            runtime.command_environment = Some(Arc::new(
+                nac_managed::ManagedCommandEnvironmentProvider::new(None, None, None),
+            ));
+        }
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         runtime.event_sink = crate::events::EventSink::channel(event_tx);
         let no_sources = Vec::<String>::new();
@@ -1133,71 +1141,74 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn managed_worker_private_socket_isolates_exa_from_adversarial_mcp() {
-        let root = std::env::temp_dir().join(format!(
-            "nac_worker_native_credential_{}",
-            uuid::Uuid::new_v4()
-        ));
-        let credential = NATIVE_CREDENTIAL_CANARY;
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "tools::thread::worker::tests::native_credential_worker_process_helper",
-                "--nocapture",
-            ])
-            .env("NAC_WORKER_NATIVE_CREDENTIAL_ROOT", &root)
-            .env("EXA_API_KEY", credential)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "worker credential helper failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            std::fs::read_to_string(root.join("inherited-exa")).unwrap(),
-            "unset"
-        );
-        assert_eq!(
-            std::fs::read_to_string(root.join("mcp-expansion")).unwrap(),
-            "absent"
-        );
-        assert_eq!(
-            std::fs::read_to_string(root.join("mcp-descendant")).unwrap(),
-            "env=absent;fd=absent;argv=absent"
-        );
-        assert_eq!(
-            std::fs::read_to_string(root.join("credential-delivered")).unwrap(),
-            "yes"
-        );
-        #[cfg(target_os = "linux")]
-        assert_eq!(
-            std::fs::read_to_string(root.join("racer-observation")).unwrap(),
-            "credential=absent"
-        );
-        let observations = std::fs::read_to_string(root.join("mcp-observations")).unwrap();
-        assert!(!observations.contains(credential));
-        assert!(observations.contains("env=absent"));
-        #[cfg(target_os = "linux")]
-        assert!(observations.contains("proc-fd=unopenable"));
-        let argv = std::fs::read_to_string(root.join("argv")).unwrap();
-        assert!(!argv.contains(credential));
-        #[cfg(target_os = "linux")]
-        {
-            assert!(argv.contains("native-credential-socket"));
-            assert!(!argv.contains("native-credential-fd"));
+        for inherited in [false, true] {
+            let root = std::env::temp_dir().join(format!(
+                "nac_worker_native_credential_{}",
+                uuid::Uuid::new_v4()
+            ));
+            let credential = NATIVE_CREDENTIAL_CANARY;
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tools::thread::worker::tests::native_credential_worker_process_helper",
+                    "--nocapture",
+                ])
+                .env("NAC_WORKER_NATIVE_CREDENTIAL_ROOT", &root)
+                .env("EXA_API_KEY", credential)
+                .envs(inherited.then_some(("NAC_TEST_INHERITED_NATIVE_WEB", "1")))
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "worker credential helper failed: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("inherited-exa")).unwrap(),
+                "unset"
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("mcp-expansion")).unwrap(),
+                "absent"
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("mcp-descendant")).unwrap(),
+                "env=absent;fd=absent;argv=absent"
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("credential-delivered")).unwrap(),
+                "yes"
+            );
+            #[cfg(target_os = "linux")]
+            assert_eq!(
+                std::fs::read_to_string(root.join("racer-observation")).unwrap(),
+                "credential=absent"
+            );
+            let observations = std::fs::read_to_string(root.join("mcp-observations")).unwrap();
+            assert!(!observations.contains(credential));
+            assert!(observations.contains("env=absent"));
+            #[cfg(target_os = "linux")]
+            assert!(observations.contains("proc-fd=unopenable"));
+            let argv = std::fs::read_to_string(root.join("argv")).unwrap();
+            assert!(!argv.contains(credential));
+            #[cfg(target_os = "linux")]
+            {
+                assert!(argv.contains("native-credential-socket"));
+                assert!(!argv.contains("native-credential-fd"));
+            }
+            for output_path in ["stdout", "stderr"] {
+                let rendered = std::fs::read_to_string(root.join(output_path)).unwrap();
+                assert!(rendered.contains("[REDACTED]"), "{output_path}: {rendered}");
+                assert!(!rendered.contains(credential), "{output_path}: {rendered}");
+            }
+            assert!(!std::fs::read_to_string(root.join("event-log"))
+                .unwrap()
+                .contains(credential));
+            assert!(!String::from_utf8_lossy(&output.stdout).contains(credential));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains(credential));
+            let _ = std::fs::remove_dir_all(root);
         }
-        for output_path in ["stdout", "stderr"] {
-            let rendered = std::fs::read_to_string(root.join(output_path)).unwrap();
-            assert!(rendered.contains("[REDACTED]"), "{output_path}: {rendered}");
-            assert!(!rendered.contains(credential), "{output_path}: {rendered}");
-        }
-        assert!(!std::fs::read_to_string(root.join("event-log"))
-            .unwrap()
-            .contains(credential));
-        assert!(!String::from_utf8_lossy(&output.stdout).contains(credential));
-        assert!(!String::from_utf8_lossy(&output.stderr).contains(credential));
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

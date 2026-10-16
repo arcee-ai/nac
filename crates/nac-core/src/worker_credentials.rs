@@ -112,6 +112,10 @@ impl ManagedWorkerNativeCredentials {
         self.exa_api_key
     }
 
+    pub(crate) fn from_exa_api_key(exa_api_key: Option<String>) -> Self {
+        Self { exa_api_key }
+    }
+
     #[cfg(test)]
     pub(crate) fn for_test(exa_api_key: Option<&str>) -> Self {
         Self {

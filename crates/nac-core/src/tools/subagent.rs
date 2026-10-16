@@ -67,7 +67,7 @@ impl NativeTool for SubagentTool {
     fn definition(&self) -> ToolDefinition {
         definition(
             "subagent",
-            "Launch or continue a durable traditional child session. New children have fresh context and inherit the parent model/backend/workspace ceiling. Pass null as child_session_id to launch a new child; a string continues that exact child and steers its current generation when it is running. Foreground waits for a structured outcome; background returns immediately and delivers exactly one completion through the parent inbox. Available profiles:\n- general: general coding work with the eight native coding tools; nesting, goals, and orchestrator control are disabled.",
+            "Launch or continue a durable traditional child session. New children have fresh context and inherit the parent model/backend/workspace ceiling. Pass null as child_session_id to launch a new child; a string continues that exact child and steers its current generation when it is running. Foreground waits for a structured outcome; background returns immediately and delivers exactly one completion through the parent inbox. Available profiles:\n- general: general coding work with the eight native coding tools plus native web_search/web_fetch inherited when available to the parent; nesting, goals, and orchestrator control are disabled.",
             json!({
                 "profile": {"type": "string", "enum": [GENERAL_CHILD_PROFILE], "description": "The immutable child profile."},
                 "description": {"type": "string", "minLength": 1, "maxLength": 120, "description": "A short 3-5 word task label shown to the user."},

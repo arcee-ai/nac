@@ -262,9 +262,15 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         &parent_web[crate::tools::DIRECT_TOOL_NAMES.len()..],
         crate::tools::WEB_TOOL_NAMES
     );
+    let child_web =
+        capability_names(child.model_request_capabilities_for_test(Some("child-exa-canary")));
     assert_eq!(
-        capability_names(child.model_request_capabilities_for_test(Some("child-exa-canary"))),
+        &child_web[..crate::tools::WORKER_TOOL_NAMES.len()],
         crate::tools::WORKER_TOOL_NAMES
+    );
+    assert_eq!(
+        &child_web[crate::tools::WORKER_TOOL_NAMES.len()..],
+        crate::tools::WEB_TOOL_NAMES
     );
     let delegating_web = capability_names(
         delegating.model_request_capabilities_for_test(Some("delegating-exa-canary")),

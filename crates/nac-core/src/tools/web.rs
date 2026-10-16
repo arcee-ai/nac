@@ -51,7 +51,7 @@ impl ExaCredential {
         Self(value)
     }
 
-    fn secret(&self) -> &str {
+    pub(crate) fn secret(&self) -> &str {
         &self.0
     }
 }
@@ -190,15 +190,15 @@ impl NativeTool for WebSearchTool {
     fn permission_resources(
         &self,
         input: &Self::Input,
-        _services: ToolServices<'_>,
+        services: ToolServices<'_>,
     ) -> Result<Vec<PermissionResource>, ToolResult> {
         let digest = Sha256::digest(input.query.as_bytes());
-        Ok(vec![PermissionResource::new(
-            "web_search",
-            format!("search:sha256:{digest:x}"),
-        )
-        .with_display("Allow `web_search` to search the web?")
-        .with_save_resource("search:*")])
+        Ok(vec![headless_web_policy(
+            PermissionResource::new("web_search", format!("search:sha256:{digest:x}"))
+                .with_display("Allow `web_search` to search the web?")
+                .with_save_resource("search:*"),
+            services,
+        )])
     }
 
     fn execute<'a>(
@@ -260,14 +260,17 @@ impl NativeTool for WebFetchTool {
     fn permission_resources(
         &self,
         input: &Self::Input,
-        _services: ToolServices<'_>,
+        services: ToolServices<'_>,
     ) -> Result<Vec<PermissionResource>, ToolResult> {
         let resource = permission_url_resource(&input.target);
         let display = display_url(&input.target);
         let origin = target_origin(&input.target);
-        Ok(vec![PermissionResource::new("web_fetch", resource)
-            .with_display(format!("Allow `web_fetch` to fetch this URL?\n{display}"))
-            .with_save_resource(format!("url:{origin}/*"))])
+        Ok(vec![headless_web_policy(
+            PermissionResource::new("web_fetch", resource)
+                .with_display(format!("Allow `web_fetch` to fetch this URL?\n{display}"))
+                .with_save_resource(format!("url:{origin}/*")),
+            services,
+        )])
     }
 
     fn execute<'a>(
@@ -297,6 +300,31 @@ impl NativeTool for WebFetchTool {
             }
         })
     }
+}
+
+// Delegated orchestrators and workers have no interactive broker. Capability
+// inheritance must still honor configured Deny and fail closed on Ask, using
+// the selected backend's ordinary policy, just like imported capabilities.
+fn headless_web_policy(
+    mut resource: PermissionResource,
+    services: ToolServices<'_>,
+) -> PermissionResource {
+    use crate::permissions::{PermissionBackend, PermissionEffect, PermissionPolicy};
+    if services.runtime.permission_broker.is_none() {
+        let policy = PermissionPolicy::for_backend(
+            PermissionBackend::from_execution_backend(services.runtime.backend.as_ref()),
+            services.runtime.permission_rules.iter().cloned(),
+        );
+        let decision = policy.evaluate(std::slice::from_ref(&resource), &[]);
+        if decision.effect != PermissionEffect::Allow {
+            resource = resource.with_hard_denial(match decision.effect {
+                PermissionEffect::Deny => "native web tool is denied by permission policy",
+                PermissionEffect::Ask => "native web tool requires interactive approval, but this run has no approval broker",
+                PermissionEffect::Allow => unreachable!(),
+            });
+        }
+    }
+    resource
 }
 
 #[expect(

@@ -17,12 +17,28 @@ async fn managed_native_credential_mcp_isolation_helper() {
     };
     let root = PathBuf::from(root);
     fs::create_dir_all(&root).unwrap();
-    crate::worker_credentials::capture_managed_native_credentials_from_environment().unwrap();
-    assert!(env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
-    assert_eq!(
-        crate::worker_credentials::managed_exa_api_key().as_deref(),
-        Some(MANAGED_EXA_CANARY)
-    );
+    if env::var_os("NAC_LOCAL_MCP_NATIVE_KEY").is_none() {
+        crate::worker_credentials::capture_managed_native_credentials_from_environment().unwrap();
+        assert!(env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
+        assert_eq!(
+            crate::worker_credentials::managed_exa_api_key().as_deref(),
+            Some(MANAGED_EXA_CANARY)
+        );
+    } else {
+        assert_eq!(
+            env::var(crate::model::EXA_API_KEY_ENV).unwrap(),
+            MANAGED_EXA_CANARY
+        );
+        assert!(super::config::native_safe_env(crate::model::EXA_API_KEY_ENV).is_err());
+        let mut descendant = super::transport::build_stdio_command(
+            "/bin/sh",
+            &["-c".into(), "test -z \"${EXA_API_KEY-}\"".into()],
+            &BTreeMap::new(),
+            &root,
+        )
+        .unwrap();
+        assert!(descendant.status().await.unwrap().success());
+    }
 
     let http_url = "http://127.0.0.1:9/arbitrary-mcp-endpoint";
     let argv_marker = root.join("stdio-argv-spawned");
@@ -1244,4 +1260,28 @@ url = {url}
     restore_env("NAC_HOME", original_nac_home);
     restore_env("XDG_CONFIG_HOME", original_xdg);
     let _ = fs::remove_dir_all(&nac_home);
+}
+
+#[test]
+fn local_native_credential_cannot_enter_mcp_configuration_or_descendants() {
+    let root = unique_temp_dir("local_native_mcp");
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "mcp::tests::managed_native_credential_mcp_isolation_helper",
+            "--nocapture",
+        ])
+        .env("NAC_MANAGED_MCP_ISOLATION_ROOT", &root)
+        .env("NAC_LOCAL_MCP_NATIVE_KEY", "1")
+        .env(crate::model::EXA_API_KEY_ENV, MANAGED_EXA_CANARY)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains(MANAGED_EXA_CANARY));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains(MANAGED_EXA_CANARY));
+    let _ = fs::remove_dir_all(root);
 }
