@@ -59,3 +59,28 @@ for (const viewport of [
     expect(harness.provider.requests).toHaveLength(0);
   });
 }
+
+test("isolates persisted primary drafts after same-origin serving-instance replacement", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const id = await createDirectSession(request, harness);
+  const url = `${harness.baseUrl}/#/session/${id}/threads`;
+  await page.goto(url);
+  const input = page.getByRole("combobox", { name: "Message" });
+  await input.fill("private to the original serving lifetime\n雪");
+  const firstBinding = await page.locator("#nac-presentation-binding").textContent();
+  await page.reload();
+  await expect(input).toHaveValue("private to the original serving lifetime\n雪");
+  expect(await page.locator("#nac-presentation-binding").textContent()).toBe(firstBinding);
+  const origin = harness.baseUrl;
+  await harness.restart("1", true);
+  expect(harness.baseUrl).toBe(origin);
+  // The same durable session survives, at the identical origin and URL.
+  expect((await request.get(`${origin}/sessions/${id}`)).ok()).toBe(true);
+  await page.reload();
+  await expect(input).toHaveValue("");
+  expect(await page.locator("#nac-presentation-binding").textContent()).not.toBe(firstBinding);
+  expect(harness.provider.requests).toHaveLength(0);
+});

@@ -35,7 +35,12 @@ responses require authoritative readback without replay.
 Primary prompt text survives route changes within the runtime. For same-tab
 reload recovery, callers may supply a separate `draftStorage` adapter with
 `getItem`, `setItem` and `removeItem`, backed by tab-scoped storage. The standalone
-entry uses `sessionStorage`; preference `storage` does not persist drafts. Records
+entry enables `sessionStorage` only after validating its credential-free embedded
+HTML bootstrap. That bootstrap captures the actual binary build identity and a
+serving-router instance, so same-server reloads recover drafts while same-origin
+server replacement/upgrades cannot restore the previous serving lifetime. An
+absent/invalid bootstrap (including Vite dev) keeps drafts in memory. The browser
+origin binds the standalone client endpoint. Preference `storage` does not persist drafts. Records
 are versioned and partitioned by all seven immutable runtime binding fields and
 session ID. Supply the complete owner/profile/organization/host/incarnation/
 endpoint/release binding and replace the runtime when any field changes.

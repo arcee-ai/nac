@@ -2,29 +2,34 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createNativeRuntime } from "./app/runtime/nativeRuntime";
 import { NativePresentationRoot } from "./app/runtime/NativePresentationRoot";
-import { nacClient } from "./app/services/nacClient";
+import { readStandaloneScope } from "./app/runtime/standaloneScope";
+import { createNacClient } from "./app/services/nacClient";
 import { HashRouter } from "react-router-dom";
 
 import { ThemeProvider } from "./app/providers/ThemeProvider";
 import "./index.css";
 
+const client = createNacClient({ endpoint: location.origin, credentials: "same-origin" });
+const scope = readStandaloneScope(document, client.transport.endpoint);
 const runtime = createNativeRuntime({
-  scope: {
+  scope: scope ?? {
     owner: "standalone",
     profile: "standalone",
     organization: "standalone",
     host: "standalone",
     incarnation: "standalone",
-    endpoint: "",
+    endpoint: client.transport.endpoint,
     release: "standalone",
   },
-  client: nacClient,
+  client,
   storage: localStorage,
-  draftStorage: {
-    getItem: (key) => sessionStorage.getItem(key),
-    setItem: (key, value) => sessionStorage.setItem(key, value),
-    removeItem: (key) => sessionStorage.removeItem(key),
-  },
+  draftStorage: scope
+    ? {
+        getItem: (key) => sessionStorage.getItem(key),
+        setItem: (key, value) => sessionStorage.setItem(key, value),
+        removeItem: (key) => sessionStorage.removeItem(key),
+      }
+    : undefined,
   queryRetry: 1,
 });
 
