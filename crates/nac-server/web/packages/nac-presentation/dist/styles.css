@@ -1155,10 +1155,6 @@
     height: min(760px, 100vh - 32px);
   }
 
-[data-nac-runtime]:is(.h-auto), [data-nac-runtime] .h-auto {
-    height: auto;
-  }
-
 [data-nac-runtime]:is(.h-fit), [data-nac-runtime] .h-fit {
     height: fit-content;
   }
