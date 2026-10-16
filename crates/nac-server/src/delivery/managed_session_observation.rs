@@ -30,6 +30,22 @@ struct Cursor {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Observation {
     UiConfiguration {},
+    Projects {},
+    Sessions {
+        project_id: Option<String>,
+        workspace_stats: Option<bool>,
+    },
+    Messages {
+        before: Option<usize>,
+        limit: Option<usize>,
+        #[serde(default)]
+        include_system: bool,
+    },
+    ThreadEvents {
+        thread_name: String,
+        before_id: Option<i64>,
+        limit: Option<usize>,
+    },
     Snapshot {
         thread_event_limit: Option<usize>,
         include_sessions: Option<bool>,
@@ -81,6 +97,22 @@ fn safe_id(text: &str) -> bool {
         && text
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+}
+
+/// Keep the original bounded worker and replacement guard alive until every
+/// underlying read and serialization finishes, even if its waiter is dropped.
+async fn project(
+    binding: crate::managed_status::ManagedBindingSnapshot,
+    projection: impl std::future::Future<Output = Response> + Send + 'static,
+) -> Response {
+    let runtime = tokio::runtime::Handle::current();
+    crate::managed_status::run_probe(move || {
+        let response = runtime.block_on(projection);
+        drop(binding);
+        response
+    })
+    .await
+    .unwrap_or_else(|_| refused(StatusCode::SERVICE_UNAVAILABLE))
 }
 
 pub(super) async fn handle(State(manager): State<SessionManager>, request: Request) -> Response {
@@ -180,7 +212,12 @@ async fn observe(
     if input.schema != MANAGED_SESSION_OBSERVATION_PURPOSE
         || input.purpose != MANAGED_SESSION_OBSERVATION_PURPOSE
         || input.request_id != correlation
-        || if matches!(input.observation, Observation::UiConfiguration { .. }) {
+        || if matches!(
+            input.observation,
+            Observation::UiConfiguration { .. }
+                | Observation::Projects { .. }
+                | Observation::Sessions { .. }
+        ) {
             input.session_id.is_some()
         } else {
             !input.session_id.as_deref().is_some_and(safe_id)
@@ -226,6 +263,111 @@ async fn observe(
             drop(binding);
             response
         }
+        Observation::Projects {} => {
+            project(binding, async move {
+                let query_manager = manager.clone();
+                let Ok(Ok(projects)) = manager
+                    .inner
+                    ._store_ownership
+                    .call_legacy(move || query_manager.projects().list())
+                    .await
+                else {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                };
+                if !deadline.is_live() {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                }
+                Json(super::super::projects::ProjectList { projects }).into_response()
+            })
+            .await
+        }
+        Observation::Sessions {
+            project_id,
+            workspace_stats,
+        } => {
+            // Workspace statistics invoke git/SSH. This passive index never
+            // substitutes zero/clean facts or silently discards that request.
+            if workspace_stats == Some(true) || project_id.as_deref().is_some_and(|id| !safe_id(id))
+            {
+                return refused(StatusCode::FORBIDDEN);
+            }
+            project(binding, async move {
+                let Ok(sessions) = manager
+                    .session_catalog()
+                    .list_for_project(false, project_id.as_deref())
+                    .await
+                else {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                };
+                if !deadline.is_live() {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                }
+                Json(sessions).into_response()
+            })
+            .await
+        }
+        Observation::Messages {
+            before,
+            limit,
+            include_system,
+        } => {
+            let Some(session) = session else {
+                return refused(StatusCode::SERVICE_UNAVAILABLE);
+            };
+            project(binding, async move {
+                let Ok(page) = session
+                    .messages(MessagePageRequest {
+                        before,
+                        limit: limit
+                            .unwrap_or(crate::DEFAULT_MESSAGE_PAGE_LIMIT)
+                            .clamp(1, crate::MAX_MESSAGE_PAGE_LIMIT),
+                        include_system,
+                    })
+                    .await
+                else {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                };
+                if !deadline.is_live() {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                }
+                Json(crate::MessagesPageResponse::from(page)).into_response()
+            })
+            .await
+        }
+        Observation::ThreadEvents {
+            thread_name,
+            before_id,
+            limit,
+        } => {
+            if thread_name.is_empty()
+                || thread_name.len() > 512
+                || thread_name.chars().any(char::is_control)
+            {
+                return refused(StatusCode::FORBIDDEN);
+            }
+            let Some(session) = session else {
+                return refused(StatusCode::SERVICE_UNAVAILABLE);
+            };
+            project(binding, async move {
+                let Ok(page) = session
+                    .thread_events(
+                        thread_name,
+                        before_id,
+                        limit
+                            .unwrap_or(crate::DEFAULT_THREAD_EVENT_PAGE_LIMIT)
+                            .clamp(1, crate::MAX_THREAD_EVENT_PAGE_LIMIT),
+                    )
+                    .await
+                else {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                };
+                if !deadline.is_live() {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                }
+                Json(page).into_response()
+            })
+            .await
+        }
         Observation::Snapshot {
             thread_event_limit,
             include_sessions,
@@ -238,57 +380,51 @@ async fn observe(
             // The bounded original worker owns the replacement guard through
             // every underlying read and serialization. Timeout/disconnect can
             // abandon the wait, never the still-running read's guard.
-            let runtime = tokio::runtime::Handle::current();
-            crate::managed_status::run_probe(move || {
-                runtime.block_on(async move {
-                    let mut options = FrontendSnapshotLoadOptions::default();
-                    options.thread_event_limit = thread_event_limit
-                        .unwrap_or(options.thread_event_limit)
-                        .clamp(1, crate::MAX_THREAD_EVENT_PAGE_LIMIT);
-                    options.include_sessions = include_sessions.unwrap_or(true);
-                    if let Some(limit) = message_limit {
-                        options.messages = FrontendSnapshotMessages::Page(MessagePageRequest {
-                            before: None,
-                            limit: limit.clamp(1, crate::MAX_MESSAGE_PAGE_LIMIT),
-                            include_system,
-                        });
-                    }
-                    let Ok(loaded) = session.snapshot(options).await else {
-                        return refused(StatusCode::SERVICE_UNAVAILABLE);
-                    };
-                    let lineage_manager = manager.clone();
-                    let id = session_id;
-                    let Ok(Ok(lineage)) = manager
-                        .inner
-                        ._store_ownership
-                        .call_legacy(move || lineage_manager.session_lineage(&id))
-                        .await
-                    else {
-                        return refused(StatusCode::SERVICE_UNAVAILABLE);
-                    };
-                    if !deadline.is_live() || session.require_current().await.is_err() {
-                        return refused(StatusCode::SERVICE_UNAVAILABLE);
-                    }
-                    // Serialize while retaining the original replacement guard.
-                    let response = Json(crate::SessionSnapshotResponse {
-                        terminal_selection_attributions:
-                            super::super::contracts::selection_message_references(
-                                loaded.terminal_selection_attributions,
-                                &loaded.snapshot.messages,
-                                &loaded.canonical_message_indices,
-                            ),
-                        snapshot: loaded.snapshot,
-                        lineage,
-                        message_page: loaded.message_page.map(Into::into),
-                        message_cycle: loaded.message_cycle.map(Into::into),
-                    })
-                    .into_response();
-                    drop(binding);
-                    response
+            project(binding, async move {
+                let mut options = FrontendSnapshotLoadOptions::default();
+                options.thread_event_limit = thread_event_limit
+                    .unwrap_or(options.thread_event_limit)
+                    .clamp(1, crate::MAX_THREAD_EVENT_PAGE_LIMIT);
+                options.include_sessions = include_sessions.unwrap_or(true);
+                if let Some(limit) = message_limit {
+                    options.messages = FrontendSnapshotMessages::Page(MessagePageRequest {
+                        before: None,
+                        limit: limit.clamp(1, crate::MAX_MESSAGE_PAGE_LIMIT),
+                        include_system,
+                    });
+                }
+                let Ok(loaded) = session.snapshot(options).await else {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                };
+                let lineage_manager = manager.clone();
+                let id = session_id;
+                let Ok(Ok(lineage)) = manager
+                    .inner
+                    ._store_ownership
+                    .call_legacy(move || lineage_manager.session_lineage(&id))
+                    .await
+                else {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                };
+                if !deadline.is_live() || session.require_current().await.is_err() {
+                    return refused(StatusCode::SERVICE_UNAVAILABLE);
+                }
+                // Serialize while retaining the original replacement guard.
+                Json(crate::SessionSnapshotResponse {
+                    terminal_selection_attributions:
+                        super::super::contracts::selection_message_references(
+                            loaded.terminal_selection_attributions,
+                            &loaded.snapshot.messages,
+                            &loaded.canonical_message_indices,
+                        ),
+                    snapshot: loaded.snapshot,
+                    lineage,
+                    message_page: loaded.message_page.map(Into::into),
+                    message_cycle: loaded.message_cycle.map(Into::into),
                 })
+                .into_response()
             })
             .await
-            .unwrap_or_else(|_| refused(StatusCode::SERVICE_UNAVAILABLE))
         }
         Observation::Events { cursor, limit } | Observation::Stream { cursor, limit } => {
             let Some(session) = session else {
