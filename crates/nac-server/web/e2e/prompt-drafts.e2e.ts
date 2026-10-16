@@ -1,4 +1,5 @@
-import { createDirectSession, expect, test } from "./harness";
+import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
+import { ScriptGate } from "./scripted-provider";
 
 for (const viewport of [
   { name: "desktop", width: 1440, height: 1000 },
@@ -83,4 +84,53 @@ test("isolates persisted primary drafts after same-origin serving-instance repla
   await expect(input).toHaveValue("");
   expect(await page.locator("#nac-presentation-binding").textContent()).not.toBe(firstBinding);
   expect(harness.provider.requests).toHaveLength(0);
+});
+
+test("keeps a pending primary send guarded through navigation and preserves newer text", async ({
+  harness,
+  page,
+  request,
+}) => {
+  harness.provider.enqueue(
+    "one-pending-draft",
+    { token: "E2E_DRAFT_PENDING_ONCE", requiredTools: ["read"] },
+    { kind: "text", text: "accepted once" },
+  );
+  const a = await createDirectSession(request, harness);
+  const b = await createDirectSession(request, harness);
+  const gate = new ScriptGate();
+  let dispatches = 0;
+  await page.route(`${harness.baseUrl}/sessions/${a}/runs`, async (route) => {
+    dispatches += 1;
+    gate.markAccepted();
+    await gate.waitForRelease();
+    await route.continue();
+  });
+  const input = page.getByRole("combobox", { name: "Message" });
+  try {
+    await page.goto(`${harness.baseUrl}/#/session/${a}/threads`);
+    await input.fill("E2E_DRAFT_PENDING_ONCE");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect.poll(() => dispatches).toBe(1);
+    await page.evaluate((id) => {
+      location.hash = `#/session/${id}/threads`;
+    }, b);
+    await expect(input).toHaveValue("");
+    await page.goBack();
+    await expect(input).toHaveValue("E2E_DRAFT_PENDING_ONCE");
+    const send = page.getByRole("button", { name: "Send", exact: true });
+    await expect(send).toBeDisabled();
+    await input.fill("newer draft while acceptance is pending");
+    await input.press("Enter");
+    expect(dispatches).toBe(1);
+    gate.release();
+    await harness.provider.waitForRequestCount(1);
+    await waitForRunIdle(request, harness, a);
+    await expect(input).toHaveValue("newer draft while acceptance is pending");
+    await expect(send).toBeEnabled();
+    expect(dispatches).toBe(1);
+    harness.provider.assertConsumed();
+  } finally {
+    gate.release();
+  }
 });

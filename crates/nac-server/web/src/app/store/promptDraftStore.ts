@@ -29,6 +29,8 @@ export function createPromptDraftStore(scope?: NativeRuntimeScope, storage?: Pro
   const key = binding ? `nac:prompt-drafts:v1:${JSON.stringify(binding)}` : null;
   const drafts = new Map<string, PromptDraft>();
   const listeners = new Set<() => void>();
+  // In-memory request ownership survives view remounts, never a reload or runtime replacement.
+  const submissions = new Map<string, object>();
   let revision = 0;
   let closed = false;
 
@@ -118,6 +120,25 @@ export function createPromptDraftStore(scope?: NativeRuntimeScope, storage?: Pro
         () => get(sessionId),
         () => get(sessionId),
       ),
+    isSubmitting: (sessionId: string) => submissions.has(sessionId),
+    useSubmitting: (sessionId: string) =>
+      useSyncExternalStore(
+        subscribe,
+        () => submissions.has(sessionId),
+        () => submissions.has(sessionId),
+      ),
+    /** One pending primary-composer operation per session, independent of its current view. */
+    claimSubmission: (sessionId: string): (() => void) | null => {
+      if (closed || submissions.has(sessionId)) return null;
+      const claim = {};
+      submissions.set(sessionId, claim);
+      notify();
+      return () => {
+        if (closed || submissions.get(sessionId) !== claim) return;
+        submissions.delete(sessionId);
+        notify();
+      };
+    },
     acknowledge: (sessionId: string, submitted: PromptDraft): boolean => {
       if (closed || get(sessionId) !== submitted) return false;
       update(sessionId, "");
@@ -126,7 +147,10 @@ export function createPromptDraftStore(scope?: NativeRuntimeScope, storage?: Pro
     /** Use on confirmed deletion or loss of access, never against a partial session list. */
     purgeSessions: (sessionIds: readonly string[]) => {
       if (closed) return;
-      for (const id of sessionIds) drafts.delete(id);
+      for (const id of sessionIds) {
+        drafts.delete(id);
+        submissions.delete(id);
+      }
       persist();
       notify();
     },
@@ -134,12 +158,14 @@ export function createPromptDraftStore(scope?: NativeRuntimeScope, storage?: Pro
     purgeAll: () => {
       if (closed) return;
       drafts.clear();
+      submissions.clear();
       persist();
       notify();
     },
     release: () => {
       closed = true;
       drafts.clear();
+      submissions.clear();
       notify();
       listeners.clear();
     },
@@ -147,5 +173,16 @@ export function createPromptDraftStore(scope?: NativeRuntimeScope, storage?: Pro
 }
 
 // Compatibility fixtures remain ephemeral. Production supplies an explicit runtime.
-export const { get, update, subscribe, useDraft, acknowledge, purgeSessions, purgeAll, release } =
-  createPromptDraftStore();
+export const {
+  get,
+  update,
+  subscribe,
+  useDraft,
+  isSubmitting,
+  useSubmitting,
+  claimSubmission,
+  acknowledge,
+  purgeSessions,
+  purgeAll,
+  release,
+} = createPromptDraftStore();

@@ -278,6 +278,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   perfRender("ChatInputBox");
   const drafts = runtime.stores.promptDraftStore;
   const { text: value } = drafts.useDraft(sessionId);
+  const submissionPending = drafts.useSubmitting(sessionId);
   const setValue = useCallback(
     (text: string) => {
       drafts.update(sessionId, text);
@@ -339,7 +340,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const mirrorRef = useRef<HTMLDivElement>(null);
   const completionCaretRef = useRef<number | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const submitInFlight = useRef(false);
   const listboxId = useId();
 
   // The snapshot only accounts for a run once it ends, so while one is going
@@ -379,6 +379,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const runningClassic = running && behavior === "orchestrator" && !readOnly;
   const runningInteractive = runningDirect || runningClassic;
   const mutationPending =
+    submissionPending ||
     submitRun.isPending ||
     submitShell.isPending ||
     steerOrchestrator.isPending ||
@@ -714,7 +715,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       const text = requestedText ?? value;
       const input = shellInput(text);
       const prompt = input.kind === "prompt" ? input.prompt.trim() : text.trim();
-      if (!prompt || busy || submitInFlight.current) return;
+      if (!prompt || busy) return;
       const fromField = requestedText === undefined || requestedDelivery !== undefined;
       const submittedDraft = drafts.get(sessionId);
       const current = captureRuntimeActivation(sessionId);
@@ -725,7 +726,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         resetHistory();
         if (ref.current) ref.current.style.height = `${rowPx}px`;
       };
-      submitInFlight.current = true;
+      const finishSubmission = drafts.claimSubmission(sessionId);
+      if (!finishSubmission) return;
 
       try {
         if (input.kind === "command") {
@@ -819,7 +821,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           toast.error(`Failed to send: ${humanErrorText(toRunError(error), backend)}`);
         }
       } finally {
-        submitInFlight.current = false;
+        finishSubmission();
       }
     },
     [

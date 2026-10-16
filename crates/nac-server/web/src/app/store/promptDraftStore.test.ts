@@ -148,3 +148,38 @@ describe("runtime primary prompt drafts", () => {
     expect(drafts.get("100").text).toBe("");
   });
 });
+
+it("owns transient submission claims across views and fences stale release callbacks", () => {
+  const drafts = createPromptDraftStore();
+  const finish = drafts.claimSubmission("a")!;
+  expect(drafts.isSubmitting("a")).toBe(true);
+  expect(drafts.claimSubmission("a")).toBeNull();
+  const finishOther = drafts.claimSubmission("b")!;
+  drafts.update("a", "newer text");
+  expect(drafts.claimSubmission("a")).toBeNull();
+  finish();
+  expect(drafts.isSubmitting("a")).toBe(false);
+  expect(drafts.isSubmitting("b")).toBe(true);
+  const finishNext = drafts.claimSubmission("a")!;
+  finish();
+  expect(drafts.isSubmitting("a")).toBe(true);
+  finishNext();
+  finishOther();
+  drafts.release();
+  expect(drafts.claimSubmission("a")).toBeNull();
+});
+
+it("persists text without request claims and keeps stale claims away from a new lifetime", () => {
+  const adapter = storage();
+  const drafts = createPromptDraftStore(scope, adapter);
+  const old = drafts.claimSubmission("a")!;
+  drafts.update("a", "unsent text");
+  const restored = createPromptDraftStore(scope, adapter);
+  expect(restored.get("a").text).toBe("unsent text");
+  expect(restored.isSubmitting("a")).toBe(false);
+  const next = restored.claimSubmission("a")!;
+  drafts.release();
+  old();
+  expect(restored.isSubmitting("a")).toBe(true);
+  next();
+});

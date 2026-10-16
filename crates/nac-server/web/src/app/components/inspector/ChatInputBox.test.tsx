@@ -1226,6 +1226,9 @@ describe("primary composer draft lifetime", () => {
     await act(async () => result.reject(new Error("rejected")));
     resetRuntime("session");
     expect(composer().value).toBe("retry later");
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 });
 
@@ -1320,5 +1323,80 @@ it.each(["send", "queue", "compact", "shell"] as const)(
     );
     expect(other.value).toBe("keep other");
     expect(getDraft("session").text).toBe("");
+  },
+);
+
+it.each(["send", "steer", "queue", "compact", "shell"] as const)(
+  "keeps an outstanding %s guarded across A → B → A remounts",
+  async (kind) => {
+    const result = Promise.withResolvers<unknown>();
+    const fake =
+      kind === "send"
+        ? fakes.submitRun
+        : kind === "steer"
+          ? fakes.steerOrchestrator
+          : kind === "queue"
+            ? fakes.createInboxItem
+            : kind === "compact"
+              ? fakes.compactSession
+              : fakes.submitShellCommand;
+    fake.mockReturnValue(result.promise);
+    const active = kind === "steer" || kind === "queue";
+    const options = {
+      behavior: kind === "steer" ? ("orchestrator" as const) : ("direct" as const),
+    };
+    const running = () => {
+      if (active)
+        syncRunFromSnapshot({
+          run_id: "live",
+          prompt_preview: "working",
+          started_at_epoch_ms: Date.now(),
+        });
+    };
+    running();
+    const text =
+      kind === "shell" ? "!echo once" : kind === "compact" ? "/compact" : "deliver this once";
+    const input = composer(options);
+    type(input, text);
+    if (kind === "compact") fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: kind === "queue" ? "Queue Next" : active ? "Steer active run" : "Send",
+      }),
+    );
+    await waitFor(() => expect(fake).toHaveBeenCalledOnce());
+    cleanup();
+    resetRuntime("b");
+    type(composer({ sessionId: "b" }), "separate draft");
+    cleanup();
+    resetRuntime("session");
+    running();
+    const restored = composer(options);
+    expect(restored.value).toBe(text);
+    if (kind === "compact") fireEvent.keyDown(restored, { key: "Escape" });
+    const send = screen.getByRole("button", {
+      name: kind === "queue" ? "Queue Next" : active ? "Steer active run" : "Send",
+    });
+    // A stale keyboard callback must also be unable to admit the revision twice.
+    fireEvent.keyDown(restored, { key: "Enter" });
+    await act(async () => {});
+    expect(fake).toHaveBeenCalledOnce();
+    expect((send as HTMLButtonElement).disabled).toBe(true);
+    type(restored, "newer draft");
+    await act(async () =>
+      result.resolve(
+        kind === "send"
+          ? {
+              status: "accepted",
+              response: { run_id: "run", client_id: null, display_prompt: text },
+            }
+          : kind === "shell"
+            ? { request_id: "command", state: "completed" }
+            : {},
+      ),
+    );
+    await waitFor(() => expect((send as HTMLButtonElement).disabled).toBe(false));
+    expect(restored.value).toBe("newer draft");
+    expect(getDraft("b").text).toBe("separate draft");
   },
 );

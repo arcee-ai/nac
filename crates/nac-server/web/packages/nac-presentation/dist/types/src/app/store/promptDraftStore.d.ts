@@ -11,6 +11,10 @@ export declare function createPromptDraftStore(scope?: NativeRuntimeScope, stora
     update: (sessionId: string, text: string) => PromptDraft;
     subscribe: (listener: () => void) => () => void;
     useDraft: (sessionId: string) => PromptDraft;
+    isSubmitting: (sessionId: string) => boolean;
+    useSubmitting: (sessionId: string) => boolean;
+    /** One pending primary-composer operation per session, independent of its current view. */
+    claimSubmission: (sessionId: string) => (() => void) | null;
     acknowledge: (sessionId: string, submitted: PromptDraft) => boolean;
     /** Use on confirmed deletion or loss of access, never against a partial session list. */
     purgeSessions: (sessionIds: readonly string[]) => void;
@@ -18,4 +22,4 @@ export declare function createPromptDraftStore(scope?: NativeRuntimeScope, stora
     purgeAll: () => void;
     release: () => void;
 };
-export declare const get: (sessionId: string) => PromptDraft, update: (sessionId: string, text: string) => PromptDraft, subscribe: (listener: () => void) => () => void, useDraft: (sessionId: string) => PromptDraft, acknowledge: (sessionId: string, submitted: PromptDraft) => boolean, purgeSessions: (sessionIds: readonly string[]) => void, purgeAll: () => void, release: () => void;
+export declare const get: (sessionId: string) => PromptDraft, update: (sessionId: string, text: string) => PromptDraft, subscribe: (listener: () => void) => () => void, useDraft: (sessionId: string) => PromptDraft, isSubmitting: (sessionId: string) => boolean, useSubmitting: (sessionId: string) => boolean, claimSubmission: (sessionId: string) => (() => void) | null, acknowledge: (sessionId: string, submitted: PromptDraft) => boolean, purgeSessions: (sessionIds: readonly string[]) => void, purgeAll: () => void, release: () => void;
