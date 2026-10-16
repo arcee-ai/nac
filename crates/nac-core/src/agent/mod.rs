@@ -313,7 +313,8 @@ impl Agent {
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
         }
-        let native_web_capabilities = NativeWebCapabilities::new(mode, traditional_child.is_some());
+        let native_web_capabilities =
+            NativeWebCapabilities::new(mode, &config.store_path, config.session_id.as_deref())?;
         if native_web_capabilities.is_eligible()
             && tool_defs.iter().any(|definition| {
                 tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str())
@@ -391,7 +392,7 @@ impl Agent {
         // The initial messages are exactly the snapshot blob written at
         // session creation; the log tail starts at this length.
         let committed_log_len = messages.len() as u64;
-        Ok(Self {
+        let agent = Self {
             client,
             mode,
             messages,
@@ -442,7 +443,12 @@ impl Agent {
             recovered_run_failure: None,
             last_usage: None,
             partial_stream: StdMutex::new(ModelStreamDelta::default()),
-        })
+        };
+        agent.native_web_capabilities.register_parent(
+            &agent.tool_runtime.store_path,
+            agent.tool_runtime.session_id.as_deref(),
+        );
+        Ok(agent)
     }
 
     /// Attach an optional process-environment provider after session
@@ -457,6 +463,10 @@ impl Agent {
     pub(crate) fn set_worker_web_credential(&mut self, credential: Option<String>) {
         self.native_web_capabilities
             .set_worker_credential(credential);
+    }
+
+    pub(crate) fn admit_native_web_generation(&mut self) -> Result<()> {
+        self.native_web_capabilities.admit_generation()
     }
 
     /// Build one immutable capability view for the next model request and tool round.
@@ -600,6 +610,7 @@ impl Agent {
     }
 
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
+        self.admit_native_web_generation()?;
         self.send_inner(prompt, None).await
     }
 

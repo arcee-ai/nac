@@ -422,8 +422,7 @@ fn forward_env_vars(target: &mut BTreeMap<String, String>, names: &[String]) -> 
         if name.is_empty() {
             bail!("forwarded environment variable name must not be blank");
         }
-        let value =
-            env::var(name).with_context(|| format!("environment variable '{name}' is not set"))?;
+        let value = super::config::native_safe_env(name)?;
         target.entry(name.to_string()).or_insert(value);
     }
     Ok(())
@@ -444,6 +443,7 @@ pub(super) fn build_stdio_command(
     command.current_dir(cwd);
     command.args(args);
     command.envs(envs);
+    command.env_remove(crate::model::EXA_API_KEY_ENV);
     command.stdin(std::process::Stdio::piped());
     command.stdout(std::process::Stdio::piped());
     command.stderr(std::process::Stdio::inherit());
@@ -464,7 +464,7 @@ fn build_http_transport_config(
     let mut custom_headers = HashMap::new();
     let mut resolved = expand_map(headers)?;
     for (name, variable) in env_headers {
-        let value = env::var(variable).with_context(|| {
+        let value = super::config::native_safe_env(variable).with_context(|| {
             format!("environment variable '{variable}' for HTTP header '{name}' is not set")
         })?;
         resolved.insert(name.clone(), value);
@@ -482,7 +482,7 @@ fn build_http_transport_config(
     let mut config =
         StreamableHttpClientTransportConfig::with_uri(url).custom_headers(custom_headers);
     if let Some(variable) = bearer_token_env_var {
-        let token = env::var(variable).with_context(|| {
+        let token = super::config::native_safe_env(variable).with_context(|| {
             format!("bearer token environment variable '{variable}' is not set")
         })?;
         config = config.auth_header(token);
@@ -529,6 +529,7 @@ pub(super) async fn run_header_helper(
         .current_dir(cwd)
         .args(args)
         .envs(envs)
+        .env_remove(crate::model::EXA_API_KEY_ENV)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

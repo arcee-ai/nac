@@ -114,6 +114,13 @@ impl SessionService {
                     )),
                 }
             })?;
+            agent.admit_native_web_generation().map_err(|error| {
+                OperationAdmissionPreparationError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to admit native web inheritance: {error:#}"
+                    )),
+                }
+            })?;
             drop(agent);
             if let (Some(session_id), Some(durable_blob)) =
                 (self.metadata.session_id.as_deref(), durable_blob)

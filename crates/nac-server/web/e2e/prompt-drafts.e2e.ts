@@ -81,7 +81,7 @@ test("isolates persisted primary drafts after same-origin serving-instance repla
   await expect(input).toHaveValue("private to the original serving lifetime\n雪");
   expect(await page.locator("#nac-presentation-binding").textContent()).toBe(firstBinding);
   const origin = harness.baseUrl;
-  await harness.restart("1", true);
+  await harness.restart("1", undefined, true);
   expect(harness.baseUrl).toBe(origin);
   // The same durable session survives, at the identical origin and URL.
   expect((await request.get(`${origin}/sessions/${id}`)).ok()).toBe(true);

@@ -325,6 +325,15 @@ pub(super) fn expand_map(values: &BTreeMap<String, String>) -> Result<BTreeMap<S
     Ok(expanded)
 }
 
+// Native integration credentials are never MCP configuration capabilities,
+// including ordinary local parents that resolve their source from the host.
+pub(super) fn native_safe_env(name: &str) -> Result<String> {
+    if name == crate::model::EXA_API_KEY_ENV {
+        bail!("environment variable '{name}' is not set");
+    }
+    env::var(name).with_context(|| format!("environment variable '{name}' is not set"))
+}
+
 pub(super) fn expand_env(input: &str) -> Result<String> {
     let mut out = String::new();
     let mut rest = input;
@@ -336,8 +345,7 @@ pub(super) fn expand_env(input: &str) -> Result<String> {
             bail!("invalid environment placeholder '{input}'");
         };
         let name = &after_start[..end];
-        let value =
-            env::var(name).with_context(|| format!("environment variable '{name}' is not set"))?;
+        let value = native_safe_env(name)?;
         out.push_str(&value);
         rest = &after_start[end + 1..];
     }
