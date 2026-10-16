@@ -50,8 +50,19 @@ impl SessionService {
     fn load_frontend_snapshot_blocking(
         &self,
         options: FrontendSnapshotLoadOptions,
+        passive: bool,
     ) -> Result<FrontendSnapshotBlockingLoad> {
-        let workspace = self.workspace_snapshot();
+        let workspace = if passive {
+            // A workspace refresh can execute git/SSH and refresh its index.
+            // Report that enrichment as unavailable rather than running it or
+            // presenting fabricated clean-workspace facts.
+            let mut workspace = view::workspace_snapshot(&self.metadata.cwd, None);
+            workspace.error =
+                Some("workspace inspection unavailable in passive observation".into());
+            workspace
+        } else {
+            self.workspace_snapshot()
+        };
         #[cfg(test)]
         if let Some(gate) = &self.frontend_snapshot_after_workspace_gate {
             gate.pause();
@@ -297,6 +308,36 @@ impl SessionService {
         } else {
             Vec::new()
         };
+        self.frontend_snapshot_with_recorded_commands(options, shell_commands, false)
+            .await
+    }
+
+    /// Passive projection of an already-owned service. Unlike the ordinary
+    /// frontend snapshot this never reconciles unfinished shell-command rows.
+    /// It neither attaches a service nor acquires run authority.
+    pub async fn observe_frontend_snapshot_with_options(
+        &self,
+        options: FrontendSnapshotLoadOptions,
+    ) -> Result<SessionFrontendSnapshotLoad> {
+        let path = self.metadata.store_path.clone();
+        let session_id = self.metadata.session_id.clone();
+        let shell_commands = crate::store::spawn_blocking_store_caller(move || {
+            session_id
+                .map(|id| crate::store::list_shell_commands(&path, &id))
+                .transpose()
+                .map(Option::unwrap_or_default)
+        })
+        .await??;
+        self.frontend_snapshot_with_recorded_commands(options, shell_commands, true)
+            .await
+    }
+
+    async fn frontend_snapshot_with_recorded_commands(
+        &self,
+        options: FrontendSnapshotLoadOptions,
+        shell_commands: Vec<ShellCommandSnapshot>,
+        passive: bool,
+    ) -> Result<SessionFrontendSnapshotLoad> {
         // SQLite and git are synchronous. Keep all dashboard storage reads on
         // one connection and move that connection plus git subprocesses off
         // the async runtime workers. Load steering before the transcript so a
@@ -304,7 +345,7 @@ impl SessionService {
         // the subsequent transcript scan, never rendered twice.
         let blocking_service = self.clone();
         let blocking_task = crate::store::spawn_blocking_store_caller(move || {
-            blocking_service.load_frontend_snapshot_blocking(options)
+            blocking_service.load_frontend_snapshot_blocking(options, passive)
         });
         let active_threads = self.active_thread_names();
         let blocking = blocking_task

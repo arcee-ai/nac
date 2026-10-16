@@ -57,8 +57,8 @@ pub use managed_enrollment::{
 pub use managed_maintenance::*;
 pub use managed_orchestrators::*;
 pub use managed_probe::{
-    observe_managed_probe_store, observe_managed_probe_store_for_identity,
-    retain_managed_probe_identity,
+    observe_managed_probe_acceptance, observe_managed_probe_store,
+    observe_managed_probe_store_for_identity, retain_managed_probe_identity,
 };
 pub use model_configurations::*;
 pub use permission_grants::*;
