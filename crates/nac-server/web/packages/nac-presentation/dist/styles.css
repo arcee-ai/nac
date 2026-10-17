@@ -1259,6 +1259,10 @@
     min-height: calc(var(--spacing) * 5);
   }
 
+[data-nac-runtime]:is(.min-h-7), [data-nac-runtime] .min-h-7 {
+    min-height: calc(var(--spacing) * 7);
+  }
+
 [data-nac-runtime]:is(.min-h-9), [data-nac-runtime] .min-h-9 {
     min-height: calc(var(--spacing) * 9);
   }

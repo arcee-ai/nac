@@ -46,18 +46,22 @@ export function RecentExecutionHistory({ sessionId, onReopen }: RecentExecutionH
         Up to 32 recent entries. Older metadata can expire. Reopening observes output and sends no
         input.
       </p>
-      {query.isPending ? <p role="status">Loading recent activity…</p> : null}
-      {query.isError ? (
-        <p role="alert">
-          Recent activity unavailable.{" "}
-          <Button type="button" size={ButtonSize.Small} onClick={() => void query.refetch()}>
-            Refresh recent activity
-          </Button>
-        </p>
-      ) : null}
-      {!query.isPending && !query.isError && entries.length === 0 ? (
-        <p>No recent activity is available.</p>
-      ) : null}
+      {/* A passive history refresh must not remove a row from the live terminal
+          layout: xterm clears the user's current selection on a row resize. */}
+      <div className="min-h-7">
+        {query.isPending ? <p role="status">Loading recent activity…</p> : null}
+        {query.isError ? (
+          <p role="alert">
+            Recent activity unavailable.{" "}
+            <Button type="button" size={ButtonSize.Small} onClick={() => void query.refetch()}>
+              Refresh recent activity
+            </Button>
+          </p>
+        ) : null}
+        {!query.isPending && !query.isError && entries.length === 0 ? (
+          <p>No recent activity is available.</p>
+        ) : null}
+      </div>
       {selected && !entry ? (
         <p role="status">Selected activity is no longer in bounded history.</p>
       ) : null}
