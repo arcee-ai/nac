@@ -1,3 +1,4 @@
+use super::presentation_bootstrap::PresentationDocument;
 use super::ui_configuration::{self, UiConfiguration};
 use crate::*;
 use nac_core::commands::{slash_command_definitions, SlashCommandDefinition};
@@ -665,6 +666,7 @@ fn embedded_frontend_router() -> Router {
         .route("/", get(index_html))
         .route("/app", get(index_html))
         .route("/assets/{*path}", get(serve_asset))
+        .layer(axum::Extension(PresentationDocument::capture()))
 }
 
 fn documented_api() -> OpenApiRouter<SessionManager> {
@@ -1284,7 +1286,9 @@ async fn health(State(manager): State<SessionManager>) -> (StatusCode, Json<Heal
 // self-contained executable with no runtime filesystem dependency.
 pub(crate) static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets");
 
-async fn index_html() -> impl IntoResponse {
+async fn index_html(
+    axum::Extension(document): axum::Extension<PresentationDocument>,
+) -> impl IntoResponse {
     (
         [
             (header::CONTENT_TYPE, "text/html; charset=utf-8"),
@@ -1292,7 +1296,7 @@ async fn index_html() -> impl IntoResponse {
             // cached or a client would keep loading a stale build forever.
             (header::CACHE_CONTROL, "no-cache"),
         ],
-        include_str!("../../assets/dist/index.html"),
+        document.0.to_string(),
     )
 }
 

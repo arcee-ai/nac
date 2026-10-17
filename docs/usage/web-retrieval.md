@@ -1,23 +1,34 @@
 # Native web retrieval
 
-NAC provides `web_search` and `web_fetch` to top-level direct sessions and
-Managed NAC orchestrator workers when a nonblank `EXA_API_KEY` is available. A
-direct session resolves the process environment first and then NAC's managed
-credential store. A Managed NAC worker uses only its server process's
-environment snapshot at dispatch. Ordinary local workers retain their prior
-credential-free behavior. When the applicable source has no usable value, both
-tools are silently absent.
+NAC provides `web_search` and `web_fetch` to top-level direct sessions when a
+nonblank `EXA_API_KEY` is available. Direct sessions prefer a captured managed
+startup credential when present, otherwise resolve the process environment and
+then NAC's credential store. Both direct behaviors inherit these tools to traditional children; a
+`direct-with-orchestrator` parent also inherits them to its managed orchestrator
+subagents and their workers. No child flag or additional credential setup is
+required. The eight native coding tools remain the traditional child baseline;
+nesting, goals and orchestration control remain absent.
 
-The capability decision is refreshed for every model request. Direct sessions
-refresh their credential at that boundary; a worker keeps its dispatch
-snapshot. The credential and visible tool names form one immutable request
-snapshot, so a tool response cannot invoke web retrieval unless the request
-that produced it admitted the tools. Orchestrator primaries and traditional
-child sessions never receive these capabilities. A top-level direct session
-using managed-orchestrator control tools does receive them.
+Only a construction-owned parent source can grant inherited native web.
+Child JSON cannot supply eligibility or credentials. This process binding survives
+idle-agent eviction. Each generation checks its
+durable parent relationship and captures that parent's currently usable source.
+Steering and subsequent model requests keep the admitted generation snapshot;
+continuation rechecks rotation or removal. Reattachment/restart never persists a
+key: a recovered parent runtime must re-establish its source before a new child
+generation can inherit. A missing parent source on this process/host fails
+closed, even if another host or owner has credentials. Existing active generations
+retain their admitted snapshot until they finish.
+
+Direct primaries still refresh at every model request. Visible names, allowed
+tools and credentials form one immutable request/tool-round snapshot. Unrelated
+top-level orchestrators remain excluded. Established Managed NAC worker
+provisioning remains independent: it uses the server startup snapshot at dispatch.
+Ordinary local workers gain no ambient credential lookup; eligible inherited
+orchestrators forward only their admitted native snapshot.
 
 The orchestrator removes `EXA_API_KEY` from the worker process environment and
-keeps stdin exclusively for cancellation. On Linux, each managed dispatch gets
+keeps stdin exclusively for cancellation. On Linux, each credential-bearing dispatch gets
 a mode-0600 filesystem Unix socket. The worker first reapplies the managed
 process hardening, connects without inheriting a credential descriptor, and
 authenticates the server PID with `SO_PEERCRED`; the server likewise accepts
@@ -41,6 +52,9 @@ On macOS, the managed-worker socket inheritance and readiness protections still
 apply, but there is no Linux-equivalent `prctl`/procfs guarantee here. A
 same-user macOS MCP process is therefore outside this isolation claim; use
 privilege separation or an external credential broker for that threat model.
+
+Native Exa credentials cannot be expanded or forwarded through MCP configuration,
+stdio environments, or HTTP-header helpers, including on local hosts.
 
 Exact-value redaction covers retained worker stdout and stderr; the key is
 never included in model-visible tool definitions or durable worker episodes.

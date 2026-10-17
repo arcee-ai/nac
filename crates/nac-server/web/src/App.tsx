@@ -18,7 +18,8 @@ export function KeyedSessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   return (
     <section className="relative flex h-full min-h-0 overflow-hidden bg-elevation-ground">
-      {/* The session page remounts per id so its draft and panel state reset.
+      {/* The session page remounts per id so its panel and focus state reset.
+          Text drafts belong to the runtime and survive this remount.
           The sidebar stays put, or its open project groups replay their height
           animation on every session click. */}
       <LeftSidebar />

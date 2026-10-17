@@ -23,7 +23,11 @@ export type EmbeddedHarness = {
   provider: ScriptedProvider;
   runRoot: string;
   waitForNoWorkerProcesses: () => Promise<void>;
-  restart: (orchestration: string | null) => Promise<void>;
+  restart: (
+    orchestration: string | null,
+    nativeCredential?: string | null,
+    preserveOrigin?: boolean,
+  ) => Promise<void>;
 };
 
 type RunningHarness = Omit<EmbeddedHarness, "restart"> & {
@@ -41,22 +45,36 @@ type Fixtures = {
 type Options = {
   exaCredential: string | undefined;
   orchestration: string | null;
+  managedNativeWeb: boolean;
 };
 
 export const test = base.extend<Fixtures & Options>({
   exaCredential: [undefined, { option: true }],
   orchestration: ["1", { option: true }],
-  harness: async ({ request, exaCredential, orchestration }, use, testInfo) => {
+  managedNativeWeb: [true, { option: true }],
+  harness: async ({ request, exaCredential, orchestration, managedNativeWeb }, use, testInfo) => {
     void request;
-    let running = await startHarness(testInfo, exaCredential, orchestration);
+    let running = await startHarness(
+      testInfo,
+      exaCredential,
+      orchestration,
+      undefined,
+      managedNativeWeb,
+    );
     const harness: EmbeddedHarness = {
       ...running,
-      restart: async (nextGate) => {
-        if (exaCredential != null)
-          throw new Error("Gate restart fixture requires the ordinary embedded harness");
+      restart: async (nextGate, nativeCredential, preserveOrigin = false) => {
         const previousOutput = running.output;
         await running.stopServer();
-        running = await startHarness(testInfo, exaCredential, nextGate, running.provider);
+        running = await startHarness(
+          testInfo,
+          nativeCredential === undefined ? exaCredential : (nativeCredential ?? undefined),
+          nextGate,
+          running.provider,
+          managedNativeWeb,
+          running.exa,
+          preserveOrigin ? new URL(running.baseUrl).host : undefined,
+        );
         running.output.unshift(...previousOutput);
         Object.assign(harness, running);
       },
@@ -285,6 +303,9 @@ async function startHarness(
   exaCredential: string | undefined,
   orchestration: string | null,
   existingProvider?: ScriptedProvider,
+  managedNativeWeb = true,
+  existingExa?: ExaDouble,
+  bindAddress = "127.0.0.1:0",
 ): Promise<RunningHarness> {
   if (process.platform === "win32") {
     throw new Error(
@@ -309,15 +330,17 @@ async function startHarness(
   await fs.access(binaryPath);
   const provider = existingProvider ?? new ScriptedProvider();
   if (!existingProvider) await provider.start();
-  let exa: ExaDouble | undefined;
+  let exa = existingExa;
   try {
-    if (exaCredential != null) exa = await ExaDouble.start(runRoot);
+    if (exaCredential != null && exa == null) exa = await ExaDouble.start(runRoot);
   } catch (error) {
     await provider.stop();
     throw error;
   }
   const managedConfig =
-    exaCredential == null ? undefined : await writeManagedConfiguration(runRoot, workspace, home);
+    exa == null || !managedNativeWeb
+      ? undefined
+      : await writeManagedConfiguration(runRoot, workspace, home);
   const output: string[] = [];
   let resolveAddress!: (url: string) => void;
   let rejectAddress!: (error: Error) => void;
@@ -330,7 +353,7 @@ async function startHarness(
     binaryPath,
     [
       "--bind",
-      "127.0.0.1:0",
+      bindAddress,
       "--directory",
       workspace,
       "--store-path",
@@ -367,8 +390,12 @@ async function startHarness(
           ? {}
           : {
               EXA_API_KEY: exaCredential,
-              NAC_E2E_EXA_CA_CERT: exa!.caCertificatePath,
-              NAC_E2E_EXA_HTTPS_PROXY: exa!.proxyUrl,
+            }),
+        ...(exa == null
+          ? {}
+          : {
+              NAC_E2E_EXA_CA_CERT: exa.caCertificatePath,
+              NAC_E2E_EXA_HTTPS_PROXY: exa.proxyUrl,
             }),
       },
     },

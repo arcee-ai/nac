@@ -276,13 +276,15 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   const navigate = useNavigate();
   perfRender("ChatInputBox");
-  const [value, setValue] = useState("");
-  // Async submission must only clear the prompt it actually sent. A user can
-  // already be drafting a steer by the time the initial POST settles.
-  const valueRef = useRef(value);
-  useEffect(() => {
-    valueRef.current = value;
-  }, [value]);
+  const drafts = runtime.stores.promptDraftStore;
+  const { text: value } = drafts.useDraft(sessionId);
+  const submissionPending = drafts.useSubmitting(sessionId);
+  const setValue = useCallback(
+    (text: string) => {
+      drafts.update(sessionId, text);
+    },
+    [drafts, sessionId],
+  );
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   // Everything narrower than the desktop column drops what will not fit there:
@@ -338,7 +340,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const mirrorRef = useRef<HTMLDivElement>(null);
   const completionCaretRef = useRef<number | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const submitInFlight = useRef(false);
   const listboxId = useId();
 
   // The snapshot only accounts for a run once it ends, so while one is going
@@ -378,6 +379,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const runningClassic = running && behavior === "orchestrator" && !readOnly;
   const runningInteractive = runningDirect || runningClassic;
   const mutationPending =
+    submissionPending ||
     submitRun.isPending ||
     submitShell.isPending ||
     steerOrchestrator.isPending ||
@@ -585,7 +587,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       setDismissedSuggestion(dismissed);
       setHoveredSuggestion(null);
     },
-    [commandQuery, resize, skillQuery, value],
+    [commandQuery, resize, setValue, skillQuery, value],
   );
 
   const skillSegments = useMemo(
@@ -615,7 +617,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       el.style.overflow = "";
       resize();
     }
-  }, [collapsed, resize]);
+  }, [collapsed, resize, value]);
 
   /** Tapping the collapsed line means "carry on typing", so the caret goes last. */
   const focusEnd = useCallback(() => {
@@ -652,7 +654,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       let goal = goalQuery.data;
       if (goal === undefined) {
         const result = await goalQuery.refetch();
-        if (!current()) return;
+        if (!current()) return false;
         if (result.error) throw result.error;
         goal = result.data;
       }
@@ -709,21 +711,23 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
    * unsent draft survives being overtaken by one.
    */
   const submit = useCallback(
-    async (text: string = value, requestedDelivery?: InboxDelivery) => {
+    async (requestedText?: string, requestedDelivery?: InboxDelivery) => {
+      const text = requestedText ?? value;
       const input = shellInput(text);
       const prompt = input.kind === "prompt" ? input.prompt.trim() : text.trim();
-      if (!prompt || busy || submitInFlight.current) return;
-      const fromField = text === value;
+      if (!prompt || busy) return;
+      const fromField = requestedText === undefined || requestedDelivery !== undefined;
+      const submittedDraft = drafts.get(sessionId);
+      const current = captureRuntimeActivation(sessionId);
       const clearField = () => {
-        if (!fromField || valueRef.current !== text) return;
-        valueRef.current = "";
-        setValue("");
+        if (!fromField || !drafts.acknowledge(sessionId, submittedDraft)) return;
+        if (!current()) return;
         setSelection({ start: 0, end: 0 });
         resetHistory();
         if (ref.current) ref.current.style.height = `${rowPx}px`;
       };
-      submitInFlight.current = true;
-      const current = captureRuntimeActivation(sessionId);
+      const finishSubmission = drafts.claimSubmission(sessionId);
+      if (!finishSubmission) return;
 
       try {
         if (input.kind === "command") {
@@ -750,7 +754,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           }
           try {
             await submitShell.mutateAsync(input.command);
-            if (shellCurrent()) clearField();
+            clearField();
           } catch (error) {
             if (shellCurrent()) toast.error(`Command outcome: ${errorMessage(toRunError(error))}`);
           }
@@ -771,9 +775,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         if (command?.command === "compact") {
           try {
             await compactSession.mutateAsync(sessionId);
+            clearField();
             if (!current()) return;
             pushLocalEvent("compaction", "▶ compacting context…");
-            clearField();
           } catch (error) {
             if (!current()) return;
             pushLocalEvent("error", `compact failed: ${errorMessage(toRunError(error))}`, true);
@@ -783,9 +787,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         }
         if (command?.command === "goal") {
           try {
-            await runGoalCommand(prompt);
-            if (!current()) return;
-            clearField();
+            const result = await runGoalCommand(prompt);
+            if (result !== false) clearField();
           } catch (error) {
             if (!current()) return;
             toast.error(`Goal command failed: ${humanErrorText(toRunError(error))}`);
@@ -806,23 +809,24 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               submit: () => submitRun.mutateAsync({ id: sessionId, prompt }),
             }),
           );
+          clearField();
           if (!current()) return;
           if (result === "submitted") pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
           else if (runningDirect || requestedDelivery) {
             pushLocalEvent("steering", `▶ ${requestedDelivery ?? "steer"}: ${prompt.slice(0, 80)}`);
           }
-          clearField();
         } catch (error) {
           if (!current()) return;
           pushLocalEvent("error", `submit failed: ${errorMessage(toRunError(error))}`, true);
           toast.error(`Failed to send: ${humanErrorText(toRunError(error), backend)}`);
         }
       } finally {
-        submitInFlight.current = false;
+        finishSubmission();
       }
     },
     [
       value,
+      drafts,
       busy,
       captureRuntimeActivation,
       sessionId,
@@ -860,7 +864,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     let focusFrame: number | undefined;
     const unsubscribe = consumeDraftRequests(sessionId, (text) => {
       setValue(text);
-      valueRef.current = text;
       if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
       focusFrame = requestAnimationFrame(() => ref.current?.focus());
     });
@@ -868,7 +871,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       unsubscribe();
       if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
     };
-  }, [sessionId, consumeDraftRequests]);
+  }, [sessionId, consumeDraftRequests, setValue]);
 
   const stop = useCallback(async () => {
     await actions.stopRun(sessionId);

@@ -85,10 +85,14 @@ impl ToolRuntime {
     pub(crate) async fn command_environment_snapshot(
         &self,
     ) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
-        match self.command_environment.as_ref() {
-            Some(provider) => provider.snapshot().await,
-            None => Ok(nac_contracts::CommandEnvironmentSnapshot::empty()),
+        let mut snapshot = match self.command_environment.as_ref() {
+            Some(provider) => provider.snapshot().await?,
+            None => nac_contracts::CommandEnvironmentSnapshot::empty(),
+        };
+        if let Some(credential) = self.web_credential.as_ref() {
+            snapshot.extend_redactions([credential.secret().to_string()]);
         }
+        Ok(snapshot)
     }
 
     /// Human output retains the managed launch policy plus native private

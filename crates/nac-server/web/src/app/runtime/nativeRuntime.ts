@@ -13,6 +13,7 @@ import {
   standalonePresentationStores,
 } from "./presentationStores";
 import { LifetimeTransport } from "./requestLifetime";
+import type { PromptDraftStorage } from "../store/promptDraftStore";
 import { TerminalInputRecovery } from "../features/terminal/inputRecovery";
 
 /** Opaque consumer bindings, never credentials or native admission authority. */
@@ -35,6 +36,8 @@ export interface NativeRuntimeOptions {
   scope: NativeRuntimeScope;
   client: Pick<NacClient, "transport">;
   storage?: Pick<Storage, "getItem" | "setItem">;
+  /** Text drafts only; caller owns tab lifetime and complete identity scoping. */
+  draftStorage?: PromptDraftStorage;
   assets?: NativePresentationAssets;
   eventSource?: SessionStreamOptions["eventSource"];
   /** Hosted reads default to no replay; standalone retains its one retry. */
@@ -76,7 +79,7 @@ export class NativeRuntime {
       },
     });
     this.assets = options.assets ? Object.freeze({ ...options.assets }) : undefined;
-    this.stores = createPresentationStores(options.storage);
+    this.stores = createPresentationStores(options.storage, options.scope, options.draftStorage);
     this.scope = Object.freeze({ ...options.scope });
     this.client = new NacClient(
       new LifetimeTransport(options.client.transport, this.controller.signal),
