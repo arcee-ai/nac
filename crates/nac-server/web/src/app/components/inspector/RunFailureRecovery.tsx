@@ -1,9 +1,18 @@
 import { ChatSessionMessage, ChatSessionMessageVariant } from "@/app/atoms";
-import { useLoginUsability } from "@/app/features/managed/controller/useLoginUsability";
+import {
+  useLoginUsability,
+  type LoginUsability,
+} from "@/app/features/managed/controller/useLoginUsability";
 import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
 import { isBackendKind, managedAuthProvider } from "@/app/lib/providers";
-import { failureRecoveryAffordance } from "@/app/lib/runFailure";
+import { failureRecoveryAffordance, type LoginRecovery } from "@/app/lib/runFailure";
 import type { RunFailure, SessionGoalRecord } from "@/app/types/api";
+
+const LOGIN_RECOVERY = {
+  unknown: "checking",
+  unusable: "needed",
+  usable: "restored",
+} satisfies Record<LoginUsability, LoginRecovery>;
 
 /** A run's durable failure with its recovery, a sign-in first for a refused login. */
 export function RunFailureRecovery({
@@ -30,7 +39,7 @@ export function RunFailureRecovery({
     failure,
     goal,
     onRegenerate !== null,
-    signsIn ? (usability === "usable" ? "restored" : "needed") : undefined,
+    signsIn ? LOGIN_RECOVERY[usability] : undefined,
   );
   const action =
     affordance === "resume_goal"

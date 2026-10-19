@@ -1,7 +1,7 @@
 import type { RunFailure, SessionGoalRecord } from "@/app/types/api";
 
 /** Where a backend that signs in stands after its login was refused. */
-export type LoginRecovery = "needed" | "restored";
+export type LoginRecovery = "checking" | "needed" | "restored";
 
 /** Keep state-preserving recovery distinct from destructive transcript rewind. */
 export function failureRecoveryAffordance(
@@ -15,6 +15,7 @@ export function failureRecoveryAffordance(
   }
   if (failure.recovery_action === "settings") {
     if (!login || failure.kind !== "authentication") return "settings";
+    if (login === "checking") return null;
     if (login === "needed") return "sign_in";
     if (goal?.status === "blocked") return "resume_goal";
     return hasOriginalPrompt ? "regenerate" : null;

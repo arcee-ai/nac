@@ -153,9 +153,12 @@ export function ManagedAuthCallout({
       </div>
       <div className="flex flex-col items-stretch md:items-end gap-1 shrink-0">
         {control}
-        {failed || expired ? (
+        {failed || expired || logout.isError ? (
           <p className="label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] md:text-right pt-1 opacity-70">
-            {humanErrorText(failed ? state.message : reach.error, backend)}
+            {humanErrorText(
+              failed ? state.message : logout.isError ? logout.error : reach.error,
+              backend,
+            )}
           </p>
         ) : null}
       </div>

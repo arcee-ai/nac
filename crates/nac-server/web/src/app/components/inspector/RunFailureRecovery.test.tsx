@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { RunFailureRecovery } from "@/app/components/inspector/RunFailureRecovery";
@@ -126,4 +126,47 @@ it("resumes a blocked goal once the login works", async () => {
 
   await screen.findByText("Resume goal");
   await waitFor(() => expect(screen.queryByText("Regenerate from original prompt")).toBeNull());
+});
+
+it("signs the refused credential out, completes the device login and retries", async () => {
+  server.credential = { expires: Date.now() + 3_600_000 };
+  vi.spyOn(window, "open").mockReturnValue(null);
+  const logout = vi.spyOn(api, "managedLogout").mockImplementation(() => {
+    server.credential = null;
+    return Promise.resolve(authList().providers[0]);
+  });
+  vi.spyOn(api, "startManagedLogin").mockResolvedValue({
+    login_id: "login-1",
+    provider: "arcee",
+    user_code: "ABCD-1234",
+    verification_uri: "https://platform.arcee.ai/device?code=ABCD-1234",
+    expires_in_secs: 600,
+  });
+  vi.spyOn(api, "pollManagedLogin").mockImplementation(() => {
+    signInElsewhere();
+    return Promise.resolve({ state: "complete", auth: authList().providers[0] });
+  });
+  const onRegenerate = vi.fn();
+  renderRecovery(newClient(), null, onRegenerate);
+
+  fireEvent.click(await screen.findByText("Sign in to Arcee again"));
+  fireEvent.click(await screen.findByText("Regenerate from original prompt"));
+
+  expect(logout).toHaveBeenCalledWith("arcee");
+  expect(onRegenerate).toHaveBeenCalledOnce();
+});
+
+it("notices a sign-in made at the CLI on its next poll", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    renderRecovery(newClient());
+    await screen.findByText("Sign in with Arcee");
+
+    signInElsewhere();
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+
+    await screen.findByText("Regenerate from original prompt");
+  } finally {
+    vi.useRealTimers();
+  }
 });
