@@ -65,3 +65,9 @@ describe("humanError for an Arcee API key", () => {
     });
   });
 });
+
+it("names the account a signed-out ChatGPT login belongs to", () => {
+  expect(humanError("HTTP 500 from upstream", "chatgpt-codex-responses", false).title).toBe(
+    "Not signed in to ChatGPT",
+  );
+});

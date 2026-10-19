@@ -3699,16 +3699,19 @@ var du = {
 		kind: "login",
 		label: "Sign in again"
 	}
-}, fu = {
-	title: "Not signed in to Arcee",
-	description: "Sign in to continue using the API.",
-	fix: {
-		kind: "login",
-		label: "Sign in"
-	}
 };
+function fu(e) {
+	return {
+		title: `Not signed in to ${e}`,
+		description: "Sign in to continue using the API.",
+		fix: {
+			kind: "login",
+			label: "Sign in"
+		}
+	};
+}
 function pu(e, t, n) {
-	let r = iu(e), i = _u(e) ? e.status : null, a = r.toLowerCase(), o = (...e) => e.some((e) => a.includes(e)), s = ou(r, i), c = t ? cr(t) !== null : !1, l = r.match(/invalid model configuration:\s*(.+)/is);
+	let r = iu(e), i = _u(e) ? e.status : null, a = r.toLowerCase(), o = (...e) => e.some((e) => a.includes(e)), s = ou(r, i), c = t ? cr(t) : null, l = r.match(/invalid model configuration:\s*(.+)/is);
 	if (l) return {
 		title: "Configuration needs repair",
 		description: hu(l[1]),
@@ -3717,7 +3720,7 @@ function pu(e, t, n) {
 			label: "Open settings"
 		}
 	};
-	if (c && n === !1) return fu;
+	if (c !== null && n === !1) return fu(Un(c));
 	if (o("hard_limit_exceeded", "hard limit exceeded")) return {
 		title: "Spending limit reached",
 		description: "This request would take the workspace below its hard limit. Raise the limit or reduce usage to continue.",
@@ -3736,9 +3739,9 @@ function pu(e, t, n) {
 			url: au(r, tu)
 		}
 	};
-	if (o("arcee auth is not configured")) return fu;
+	if (o("arcee auth is not configured")) return fu("Arcee");
 	let u = o("rejected this api key", "invalid or expired api key", "auth.invalid_api_key", "auth.missing_bearer", "missing or invalid authorization header");
-	return u || o("arcee authorization was revoked", "arcee token refresh failed", "rejected this login", "authentication_error") || s.has(401) ? !c && (u || t === "arcee-api") ? {
+	return u || o("arcee authorization was revoked", "arcee token refresh failed", "rejected this login", "authentication_error") || s.has(401) ? c === null && (u || t === "arcee-api") ? {
 		title: "There was a problem with authentication",
 		description: "The API key was rejected. Add a valid Arcee API key to continue.",
 		fix: {
@@ -21002,16 +21005,18 @@ function Gb() {
 //#endregion
 //#region src/app/hooks/useAuthErrorSuppressed.ts
 function Kb(e, t) {
-	let n = t != null && pu(t, e).fix?.kind === "login", r = e ? cr(e) : null, i = Ln(n && r !== null), a = i.data?.providers.find((e) => e.provider === r), o = a?.backend ?? null, s = !!a?.signed_in, c = Dt(o, n && s), l = pi();
+	let n = e ? cr(e) : null, r = Ln(t != null && n !== null), i = r.data?.providers.find((e) => e.provider === n), a = !!i?.signed_in, o = t != null && pu(t, e, i?.signed_in ?? null).fix?.kind === "login", [s, c] = q(null);
+	o && s !== t && c(t), t == null && s !== null && c(null);
+	let l = o || t != null && s === t, u = i?.backend ?? null, d = Dt(u, l && a), f = pi();
 	W(() => {
-		!n || o === null || l.invalidateQueries({ queryKey: hr.managedProviderModels(o) });
+		!l || u === null || f.invalidateQueries({ queryKey: hr.managedProviderModels(u) });
 	}, [
-		n,
-		o,
-		l
+		l,
+		u,
+		f
 	]);
-	let u = r === null || i.isError || i.data != null && !s || c.isError;
-	return n && !u;
+	let p = n === null || r.isError || r.data != null && !a || d.isError;
+	return l && !p;
 }
 //#endregion
 //#region src/app/hooks/useErrorNotice.ts

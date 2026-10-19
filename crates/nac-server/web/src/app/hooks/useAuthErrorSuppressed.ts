@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { managedAuthProvider } from "@/app/lib/providers";
@@ -21,15 +21,20 @@ import { queryKeys, useManagedAuth, useManagedProviderModels } from "@/app/servi
  * Authentication row asks: whether the request that spends it succeeds. Until
  * that answer arrives the box stays down, since showing it first and retracting
  * it a moment later tells a signed-in user to sign in again. A failure that a
- * login has no bearing on is reported as it is, with nothing fetched for it.
+ * login has no bearing on is reported as it is.
  */
 export function useAuthErrorSuppressed(backend: string | null, error: RunError): boolean {
-  const asksForLogin = error != null && humanError(error, backend).fix?.kind === "login";
   const provider = backend ? managedAuthProvider(backend) : null;
-  const auth = useManagedAuth(asksForLogin && provider !== null);
+  const auth = useManagedAuth(error != null && provider !== null);
   const entry = auth.data?.providers.find((status) => status.provider === provider);
-  const probeBackend = entry?.backend ?? null;
   const signedIn = Boolean(entry?.signed_in);
+  const asksNow =
+    error != null && humanError(error, backend, entry?.signed_in ?? null).fix?.kind === "login";
+  const [askedFor, setAskedFor] = useState<RunError>(null);
+  if (asksNow && askedFor !== error) setAskedFor(error);
+  if (error == null && askedFor !== null) setAskedFor(null);
+  const asksForLogin = asksNow || (error != null && askedFor === error);
+  const probeBackend = entry?.backend ?? null;
   const reach = useManagedProviderModels(probeBackend, asksForLogin && signedIn);
 
   const client = useQueryClient();
