@@ -17,8 +17,7 @@ export interface ErrorNotice {
  * whatever carries it out from here: the browser login, this session's
  * settings, the page on the platform that holds the account, or a retry the
  * caller supplies. A fix nothing here can perform is dropped, leaving the
- * wording to stand on its own. For a backend that signs in, the server's record
- * of whether a login is on file outranks what the failure text claims.
+ * wording to stand on its own.
  */
 export function useErrorNotice(sessionId: string | null, backend?: string | null) {
   const actions = useSessionActions();

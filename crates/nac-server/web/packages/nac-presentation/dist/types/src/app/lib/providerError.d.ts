@@ -40,8 +40,7 @@ export declare function toRunError(cause: unknown): RunError;
  * The failure as the user should read it. `backend` decides which credential an
  * authentication failure is about — a stored login is fixed by signing in
  * again, an API key by pasting a working one — and can be left out where the
- * session is not known. `signedIn` is the server's own word on whether that
- * login is on file; `null` or omitted means it has not been asked.
+ * session is not known. `signedIn` is whether that login is on file, if known.
  */
 export declare function humanError(error: RunError, backend?: string | null, signedIn?: boolean | null): HumanError;
 /** One line for a toast, footer, or hint, where there is no room for a fix. */

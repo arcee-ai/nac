@@ -177,8 +177,7 @@ const NOT_SIGNED_IN: HumanError = {
  * The failure as the user should read it. `backend` decides which credential an
  * authentication failure is about — a stored login is fixed by signing in
  * again, an API key by pasting a working one — and can be left out where the
- * session is not known. `signedIn` is the server's own word on whether that
- * login is on file; `null` or omitted means it has not been asked.
+ * session is not known. `signedIn` is whether that login is on file, if known.
  */
 export function humanError(
   error: RunError,
@@ -203,8 +202,7 @@ export function humanError(
     };
   }
 
-  // A login backend with no login on file cannot have spent anything, whatever
-  // its last failure reads like, so the missing login is what to fix first.
+  // No login on file outranks whatever the failure text claims.
   if (storedLogin && signedIn === false) return NOT_SIGNED_IN;
 
   // Billing is asked before credentials: a request that ran out of credits was
@@ -263,8 +261,7 @@ export function humanError(
     ) ||
     codes.has(401);
   if (authFailed) {
-    // A key is replaced in the settings; a stored login is signed in again,
-    // even though the platform words a refused access token as a bad API key.
+    // A key is fixed in settings; a login signs in again, though its refused token reads as a bad key.
     if (!storedLogin && (keyRejected || backend === "arcee-api")) {
       return {
         title: "There was a problem with authentication",
