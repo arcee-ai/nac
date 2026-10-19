@@ -34,12 +34,14 @@ const PROVIDER_ICONS = {
 export function ManagedAuthCallout({
   backend,
   className = "",
+  onSignedIn,
 }: {
   backend: BackendKind;
   className?: string;
+  onSignedIn?: () => void;
 }) {
   const { provider, signedIn } = useManagedSignIn(backend);
-  const { state, start, cancel } = useDeviceLogin(undefined, provider);
+  const { state, start, cancel } = useDeviceLogin(onSignedIn, provider);
   const logout = useManagedLogout();
   // Being signed in only says the credential is on file. Whether it still works
   // is answered by the one request that spends it, so this asks for the model

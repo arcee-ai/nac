@@ -16,6 +16,7 @@ export function failureRecoveryAffordance(
   if (failure.recovery_action === "settings") {
     if (!login || failure.kind !== "authentication") return "settings";
     if (login === "needed") return "sign_in";
+    if (goal?.status === "blocked") return "resume_goal";
     return hasOriginalPrompt ? "regenerate" : null;
   }
   if (failure.recovery_action === "regenerate_with_rewind" && hasOriginalPrompt) {

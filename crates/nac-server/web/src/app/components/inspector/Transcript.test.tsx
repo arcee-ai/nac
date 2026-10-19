@@ -207,6 +207,12 @@ describe("failureRecoveryAffordance for a refused login", () => {
     expect(failureRecoveryAffordance(failure, null, false, "restored")).toBeNull();
   });
 
+  it("resumes a blocked goal rather than rewinding it once the sign-in has succeeded", () => {
+    const goal = { status: "blocked" } as SessionGoalRecord;
+
+    expect(failureRecoveryAffordance(failure, goal, true, "restored")).toBe("resume_goal");
+  });
+
   it("keeps settings for a key or a configuration failure", () => {
     expect(failureRecoveryAffordance(failure, null, true)).toBe("settings");
     expect(

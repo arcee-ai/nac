@@ -26,7 +26,7 @@ import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
-import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
+import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -36,7 +36,7 @@ import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
 import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
-import { managedAuthProvider } from "@/app/lib/providers";
+import { isBackendKind, managedAuthProvider } from "@/app/lib/providers";
 import { failureRecoveryAffordance } from "@/app/lib/runFailure";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import { routes, type SessionPanel } from "@/app/lib/routes";
@@ -545,7 +545,6 @@ export function Transcript({
     : null;
   const [signedInFor, setSignedInFor] = useState<string | null>(null);
   if (running && signedInFor !== null) setSignedInFor(null);
-  const { start: startLogin } = useDeviceLogin(() => setSignedInFor(failureKey));
   const recoveryAffordance = durableFailure
     ? failureRecoveryAffordance(
         durableFailure,
@@ -572,19 +571,17 @@ export function Transcript({
               );
           },
         }
-      : recoveryAffordance === "sign_in" && loginProvider !== null
-        ? { label: "Sign in again", onClick: () => void startLogin(loginProvider) }
-        : recoveryAffordance === "settings"
+      : recoveryAffordance === "settings"
+        ? {
+            label: "Open settings",
+            onClick: () => sessionActions.settings(sessionId),
+          }
+        : recoveryAffordance === "regenerate" && latestUser?.kind === "user"
           ? {
-              label: "Open settings",
-              onClick: () => sessionActions.settings(sessionId),
+              label: "Regenerate from original prompt",
+              onClick: () => resend(latestUser.messageIndex),
             }
-          : recoveryAffordance === "regenerate" && latestUser?.kind === "user"
-            ? {
-                label: "Regenerate from original prompt",
-                onClick: () => resend(latestUser.messageIndex),
-              }
-            : undefined
+          : undefined
     : undefined;
   // Prefer the session notice when both fire; a broken config already explains
   // why the run could not continue.
@@ -859,6 +856,13 @@ export function Transcript({
               failure={durableFailure}
               goal={goalQuery.data}
               action={failureAction}
+            />
+          ) : null}
+          {recoveryAffordance === "sign_in" && backend && isBackendKind(backend) ? (
+            <ManagedAuthCallout
+              backend={backend}
+              className="mt-2"
+              onSignedIn={() => setSignedInFor(failureKey)}
             />
           ) : null}
 
