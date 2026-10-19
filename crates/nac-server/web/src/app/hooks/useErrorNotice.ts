@@ -4,7 +4,6 @@ import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin
 import { managedAuthProvider } from "@/app/lib/providers";
 import { humanError, type ErrorFix, type RunError } from "@/app/lib/providerError";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
-import { useManagedAuth } from "@/app/services/queries";
 
 export interface ErrorNotice {
   title: string;
@@ -23,13 +22,10 @@ export function useErrorNotice(sessionId: string | null, backend?: string | null
   const actions = useSessionActions();
   const { start } = useDeviceLogin();
   const provider = backend ? managedAuthProvider(backend) : null;
-  const auth = useManagedAuth(provider !== null);
-  const signedIn =
-    auth.data?.providers.find((status) => status.provider === provider)?.signed_in ?? null;
 
   return useCallback(
     (error: RunError, retry?: () => void): ErrorNotice => {
-      const { title, description, fix } = humanError(error, backend, signedIn);
+      const { title, description, fix } = humanError(error, backend);
       return {
         title,
         description,
@@ -40,7 +36,7 @@ export function useErrorNotice(sessionId: string | null, backend?: string | null
         }),
       };
     },
-    [actions, backend, provider, sessionId, signedIn, start],
+    [actions, backend, provider, sessionId, start],
   );
 }
 

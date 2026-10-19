@@ -26,6 +26,7 @@ import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
+import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -35,6 +36,7 @@ import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
 import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
+import { managedAuthProvider } from "@/app/lib/providers";
 import { failureRecoveryAffordance } from "@/app/lib/runFailure";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import { routes, type SessionPanel } from "@/app/lib/routes";
@@ -245,6 +247,8 @@ export function Transcript({
   const sessionActions = useSessionActions();
   const navigate = useNavigate();
   const backend = snapshot?.metadata.backend ?? null;
+  const loginProvider = backend ? managedAuthProvider(backend) : null;
+  const { start: startLogin } = useDeviceLogin();
   const toNotice = useErrorNotice(sessionId, backend);
   // Read before the notice is built, since hook order cannot depend on whether
   // this run failed.
@@ -537,7 +541,12 @@ export function Transcript({
     : null;
   const latestUser = [...turns].reverse().find((turn) => turn.kind === "user");
   const recoveryAffordance = durableFailure
-    ? failureRecoveryAffordance(durableFailure, goalQuery.data, latestUser?.kind === "user")
+    ? failureRecoveryAffordance(
+        durableFailure,
+        goalQuery.data,
+        latestUser?.kind === "user",
+        loginProvider !== null,
+      )
     : null;
   const failureAction = durableFailure
     ? recoveryAffordance === "resume_goal"
@@ -557,17 +566,19 @@ export function Transcript({
               );
           },
         }
-      : recoveryAffordance === "settings"
-        ? {
-            label: "Open settings",
-            onClick: () => sessionActions.settings(sessionId),
-          }
-        : recoveryAffordance === "regenerate" && latestUser?.kind === "user"
+      : recoveryAffordance === "sign_in" && loginProvider !== null
+        ? { label: "Sign in again", onClick: () => void startLogin(loginProvider) }
+        : recoveryAffordance === "settings"
           ? {
-              label: "Regenerate from original prompt",
-              onClick: () => resend(latestUser.messageIndex),
+              label: "Open settings",
+              onClick: () => sessionActions.settings(sessionId),
             }
-          : undefined
+          : recoveryAffordance === "regenerate" && latestUser?.kind === "user"
+            ? {
+                label: "Regenerate from original prompt",
+                onClick: () => resend(latestUser.messageIndex),
+              }
+            : undefined
     : undefined;
   // Prefer the session notice when both fire; a broken config already explains
   // why the run could not continue.

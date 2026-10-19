@@ -3,6 +3,9 @@ use super::auth_store::{
     read_auth_string_from_path, with_arcee_auth_lock, write_auth_string_to_path, FileLock,
 };
 use super::*;
+use crate::run_failure::{
+    PartialModelOutput, RecoveryAction, RunFailure, RunFailureKind, RunFailurePhase,
+};
 use anyhow::{bail, Context};
 use std::fs;
 use std::io;
@@ -56,6 +59,62 @@ impl std::error::Error for StoredArceeAuthConfigurationError {}
 fn stored_auth_configuration_error(message: impl Into<String>) -> anyhow::Error {
     anyhow!(StoredArceeAuthConfigurationError {
         message: message.into(),
+    })
+}
+
+/// A stored login that cannot sign an inference request, as a run failure.
+pub(super) fn auth_run_failure(error: anyhow::Error) -> anyhow::Error {
+    let transient_transport = error.chain().any(|source| {
+        source
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|error| error.is_connect() || error.is_timeout())
+    });
+    let not_signed_in = error
+        .downcast_ref::<StoredArceeAuthConfigurationError>()
+        .is_some();
+    let (kind, summary) = if transient_transport {
+        (
+            RunFailureKind::Transport,
+            "The connection failed while refreshing Arcee authentication.",
+        )
+    } else if not_signed_in {
+        (
+            RunFailureKind::Authentication,
+            "Not signed in to Arcee. Sign in to continue.",
+        )
+    } else {
+        (
+            RunFailureKind::Authentication,
+            "The Arcee sign-in expired or was revoked. Sign in again to continue.",
+        )
+    };
+    anyhow::Error::new(RunFailure {
+        kind,
+        phase: RunFailurePhase::Request,
+        transient: transient_transport,
+        partial_output: PartialModelOutput::default(),
+        attempt_count: 1,
+        http_status: None,
+        retry_after_ms: None,
+        summary: summary.to_string(),
+        diagnostic: truncate(&redact_credentials(&format!("{error:#}"), &[])),
+        recovery_action: RecoveryAction::None,
+    })
+}
+
+/// The platform refused an access token that a refresh had just produced.
+pub(super) fn rejected_login_run_failure(message: &str) -> anyhow::Error {
+    anyhow::Error::new(RunFailure {
+        kind: RunFailureKind::Authentication,
+        phase: RunFailurePhase::Request,
+        transient: false,
+        partial_output: PartialModelOutput::default(),
+        attempt_count: 1,
+        http_status: Some(401),
+        retry_after_ms: None,
+        summary: "Arcee rejected the sign-in. Sign in again to continue.".to_string(),
+        diagnostic: truncate(&redact_credentials(message, &[])),
+        recovery_action: RecoveryAction::None,
     })
 }
 

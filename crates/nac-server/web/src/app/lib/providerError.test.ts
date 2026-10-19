@@ -29,20 +29,11 @@ describe("humanError for an Arcee login", () => {
     });
   });
 
-  it("puts a missing login ahead of a billing-shaped failure", () => {
-    const notice = humanError(INSUFFICIENT_CREDITS, "arcee-auth", false);
+  it("keeps credit guidance for a genuine credit failure", () => {
+    const notice = humanError(INSUFFICIENT_CREDITS, "arcee-auth");
 
-    expect(notice.title).toBe("Not signed in to Arcee");
-    expect(notice.fix).toEqual({ kind: "login", label: "Sign in" });
-  });
-
-  it("keeps credit guidance while signed in or before the login is known", () => {
-    for (const signedIn of [true, null]) {
-      const notice = humanError(INSUFFICIENT_CREDITS, "arcee-auth", signedIn);
-
-      expect(notice.title).toBe("Not enough credits for this request");
-      expect(notice.fix).toMatchObject({ kind: "link", label: "Open wallet" });
-    }
+    expect(notice.title).toBe("Not enough credits for this request");
+    expect(notice.fix).toMatchObject({ kind: "link", label: "Open wallet" });
   });
 });
 
@@ -54,8 +45,8 @@ describe("humanError for an Arcee API key", () => {
     });
   });
 
-  it("keeps credit guidance whatever the login state", () => {
-    const notice = humanError(INSUFFICIENT_CREDITS, "arcee-api", false);
+  it("keeps credit guidance for a genuine credit failure", () => {
+    const notice = humanError(INSUFFICIENT_CREDITS, "arcee-api");
 
     expect(notice.title).toBe("Not enough credits for this request");
     expect(notice.fix).toMatchObject({
@@ -64,10 +55,4 @@ describe("humanError for an Arcee API key", () => {
       url: "https://platform.arcee.ai/api/wallet",
     });
   });
-});
-
-it("names the account a signed-out ChatGPT login belongs to", () => {
-  expect(humanError("HTTP 500 from upstream", "chatgpt-codex-responses", false).title).toBe(
-    "Not signed in to ChatGPT",
-  );
 });

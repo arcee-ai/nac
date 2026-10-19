@@ -186,3 +186,26 @@ describe("RunFailureNotice", () => {
     );
   });
 });
+
+describe("failureRecoveryAffordance for a refused login", () => {
+  const failure: RunFailure = {
+    kind: "authentication",
+    phase: "request",
+    transient: false,
+    attempt_count: 1,
+    summary: "Not signed in to Arcee. Sign in to continue.",
+    diagnostic: "Arcee auth is not configured.",
+    recovery_action: "settings",
+  };
+
+  it("offers a sign-in on a backend that signs in", () => {
+    expect(failureRecoveryAffordance(failure, null, true, true)).toBe("sign_in");
+  });
+
+  it("keeps settings for a key or a configuration failure", () => {
+    expect(failureRecoveryAffordance(failure, null, true, false)).toBe("settings");
+    expect(failureRecoveryAffordance({ ...failure, kind: "configuration" }, null, true, true)).toBe(
+      "settings",
+    );
+  });
+});

@@ -16,7 +16,7 @@
 import { isJsonObject } from "@/app/lib/json";
 import type { JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
-import { managedAuthLabel, managedAuthProvider } from "@/app/lib/providers";
+import { managedAuthProvider } from "@/app/lib/providers";
 
 /** What the surface showing the error can offer to do about it. */
 export interface ErrorFix {
@@ -166,32 +166,18 @@ const SIGN_IN_AGAIN: HumanError = {
   fix: { kind: "login", label: "Sign in again" },
 };
 
-/** Copy for a login backend with no login on file. */
-function notSignedIn(account: string): HumanError {
-  return {
-    title: `Not signed in to ${account}`,
-    description: "Sign in to continue using the API.",
-    fix: { kind: "login", label: "Sign in" },
-  };
-}
-
 /**
  * The failure as the user should read it. `backend` decides which credential an
  * authentication failure is about — a stored login is fixed by signing in
  * again, an API key by pasting a working one — and can be left out where the
- * session is not known. `signedIn` is whether that login is on file, if known.
+ * session is not known.
  */
-export function humanError(
-  error: RunError,
-  backend?: string | null,
-  signedIn?: boolean | null,
-): HumanError {
+export function humanError(error: RunError, backend?: string | null): HumanError {
   const raw = rawMessage(error);
   const status = hasStatus(error) ? error.status : null;
   const text = raw.toLowerCase();
   const has = (...needles: string[]) => needles.some((needle) => text.includes(needle));
   const codes = statusCodes(raw, status);
-  const provider = backend ? managedAuthProvider(backend) : null;
 
   // nac's own configuration errors say exactly what is wrong with the setup,
   // which is more than any rewrite could, so they are only framed.
@@ -203,9 +189,6 @@ export function humanError(
       fix: { kind: "settings", label: "Open settings" },
     };
   }
-
-  // No login on file outranks whatever the failure text claims.
-  if (provider !== null && signedIn === false) return notSignedIn(managedAuthLabel(provider));
 
   // Billing is asked before credentials: a request that ran out of credits was
   // authenticated perfectly well, and its body still names the key that paid.
@@ -245,7 +228,13 @@ export function humanError(
     };
   }
 
-  if (has("arcee auth is not configured")) return notSignedIn("Arcee");
+  if (has("arcee auth is not configured")) {
+    return {
+      title: "Not signed in to Arcee",
+      description: "Sign in to continue using the API.",
+      fix: { kind: "login", label: "Sign in" },
+    };
+  }
   const keyRejected = has(
     "rejected this api key",
     "invalid or expired api key",
@@ -263,8 +252,9 @@ export function humanError(
     ) ||
     codes.has(401);
   if (authFailed) {
-    // A key is fixed in settings; a login signs in again, though its refused token reads as a bad key.
-    if (provider === null && (keyRejected || backend === "arcee-api")) {
+    // A key is replaced in the settings; a stored login (even one refused as a bad key) signs in again.
+    const storedLogin = backend ? managedAuthProvider(backend) !== null : false;
+    if (!storedLogin && (keyRejected || backend === "arcee-api")) {
       return {
         title: "There was a problem with authentication",
         description: "The API key was rejected. Add a valid Arcee API key to continue.",

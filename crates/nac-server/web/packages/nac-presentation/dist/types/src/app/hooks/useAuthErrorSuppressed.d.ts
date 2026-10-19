@@ -15,6 +15,6 @@ import { type RunError } from "../lib/providerError";
  * Authentication row asks: whether the request that spends it succeeds. Until
  * that answer arrives the box stays down, since showing it first and retracting
  * it a moment later tells a signed-in user to sign in again. A failure that a
- * login has no bearing on is reported as it is.
+ * login has no bearing on is reported as it is, with nothing fetched for it.
  */
 export declare function useAuthErrorSuppressed(backend: string | null, error: RunError): boolean;
