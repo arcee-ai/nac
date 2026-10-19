@@ -1236,3 +1236,98 @@ fn arcee_logout_unlinks_canonical_symlink_without_touching_target() {
     assert!(fs::symlink_metadata(&canonical).is_err());
     assert_eq!(fs::read_to_string(target).unwrap(), "target-credentials");
 }
+
+fn run_failure_of(error: anyhow::Error) -> RunFailure {
+    auth_run_failure(error)
+        .downcast_ref::<RunFailure>()
+        .expect("an auth failure is a structured run failure")
+        .clone()
+}
+
+#[tokio::test]
+async fn revoked_refresh_asks_for_a_sign_in_again() {
+    let dir = TestDir::new("revoked-run-failure");
+    let (_, arcee_path) = dir.paths();
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "400 Bad Request",
+        json!({ "error": "invalid_grant" }).to_string(),
+    )]);
+
+    let error = refresh_and_store_auth_at(
+        &no_redirect_client().unwrap(),
+        &ArceeAuthService::for_test(&server.base_url),
+        &arcee_path,
+        stored_auth("jwt-access-1"),
+    )
+    .await
+    .expect_err("a revoked refresh fails");
+    server.finish();
+
+    let failure = run_failure_of(error);
+    assert_eq!(failure.kind, RunFailureKind::Authentication);
+    assert!(!failure.transient);
+    assert!(failure.summary.contains("expired or was revoked"));
+}
+
+#[tokio::test]
+async fn refresh_outage_is_a_retryable_capacity_failure_not_a_sign_in() {
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "503 Service Unavailable",
+        "upstream unavailable",
+    )]);
+
+    let error = request_token_refresh(
+        &no_redirect_client().unwrap(),
+        &ArceeAuthService::for_test(&server.base_url),
+        "opaque-refresh",
+        LEGACY_CLIENT_ID,
+    )
+    .await
+    .expect_err("server error should propagate");
+    server.finish();
+
+    let failure = run_failure_of(error);
+    assert_eq!(failure.kind, RunFailureKind::Capacity);
+    assert!(failure.transient);
+}
+
+#[tokio::test]
+async fn refused_refresh_asks_for_a_sign_in_again() {
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "401 Unauthorized",
+        json!({ "error": "unauthorized" }).to_string(),
+    )]);
+
+    let error = request_token_refresh(
+        &no_redirect_client().unwrap(),
+        &ArceeAuthService::for_test(&server.base_url),
+        "opaque-refresh",
+        LEGACY_CLIENT_ID,
+    )
+    .await
+    .expect_err("a refused refresh fails");
+    server.finish();
+
+    let failure = run_failure_of(error);
+    assert_eq!(failure.kind, RunFailureKind::Authentication);
+    assert!(failure.summary.contains("Sign in again"));
+}
+
+#[test]
+fn unexpected_refresh_errors_stay_unknown() {
+    let failure = run_failure_of(anyhow!("failed to parse Arcee token refresh response"));
+
+    assert_eq!(failure.kind, RunFailureKind::Unknown);
+}
+
+#[test]
+fn token_refused_after_refresh_asks_for_a_sign_in_again() {
+    let error = rejected_login_run_failure(
+        r#"HTTP 401 from https://api.arcee.ai/api/v1/chat/completions: {"error":{"code":"auth.invalid_api_key"}}"#,
+    );
+    let failure = error.downcast_ref::<RunFailure>().unwrap();
+
+    assert_eq!(failure.kind, RunFailureKind::Authentication);
+    assert_eq!(failure.http_status, Some(401));
+    assert!(failure.summary.contains("Sign in again"));
+}

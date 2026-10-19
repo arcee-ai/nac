@@ -16,6 +16,7 @@
 import { isJsonObject } from "@/app/lib/json";
 import type { JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
+import { managedAuthProvider } from "@/app/lib/providers";
 
 /** What the surface showing the error can offer to do about it. */
 export interface ErrorFix {
@@ -251,8 +252,9 @@ export function humanError(error: RunError, backend?: string | null): HumanError
     ) ||
     codes.has(401);
   if (authFailed) {
-    // A key is replaced in the settings; a stored login is signed in again.
-    if (keyRejected || backend === "arcee-api") {
+    // A key is replaced in the settings; a stored login (even one refused as a bad key) signs in again.
+    const storedLogin = backend ? managedAuthProvider(backend) !== null : false;
+    if (!storedLogin && (keyRejected || backend === "arcee-api")) {
       return {
         title: "There was a problem with authentication",
         description: "The API key was rejected. Add a valid Arcee API key to continue.",

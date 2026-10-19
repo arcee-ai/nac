@@ -110,6 +110,27 @@ impl RunFailure {
         }
     }
 
+    /// A request that failed before the provider produced any output.
+    pub fn request(
+        kind: RunFailureKind,
+        transient: bool,
+        summary: impl Into<String>,
+        diagnostic: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            phase: RunFailurePhase::Request,
+            transient,
+            partial_output: PartialModelOutput::default(),
+            attempt_count: 1,
+            http_status: None,
+            retry_after_ms: None,
+            summary: summary.into(),
+            diagnostic: diagnostic.into(),
+            recovery_action: RecoveryAction::None,
+        }
+    }
+
     pub fn with_recovery_action(mut self, action: RecoveryAction) -> Self {
         self.recovery_action = action;
         self

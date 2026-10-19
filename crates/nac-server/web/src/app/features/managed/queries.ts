@@ -137,7 +137,7 @@ export function useDeleteManagedSecret() {
   });
 }
 
-export function useManagedAuth(enabled = true) {
+export function useManagedAuth(enabled = true, refetchInterval: number | false = false) {
   const { api } = useNativeRuntime();
 
   return useQuery<ManagedAuthList>({
@@ -145,7 +145,30 @@ export function useManagedAuth(enabled = true) {
     queryFn: ({ signal }) => api.listManagedAuth(signal),
     enabled,
     staleTime: 30_000,
+    refetchInterval,
     retry: false,
+  });
+}
+
+/** Whether `credential` reaches the provider, probed afresh for each refused run. */
+export function useProviderReachAfterRefusal(
+  backend: BackendKind | null,
+  refusal: string | null,
+  credential: string | null,
+) {
+  const { api } = useNativeRuntime();
+
+  return useQuery<ProviderModelList>({
+    queryKey: [
+      ...managedQueryKeys.providerModels(backend ?? ""),
+      "after-refusal",
+      refusal,
+      credential,
+    ],
+    queryFn: ({ signal }) => api.listProviderModels({ backend: backend! }, signal),
+    enabled: backend !== null && refusal !== null && credential !== null,
+    retry: false,
+    staleTime: Infinity,
   });
 }
 
