@@ -35,15 +35,13 @@ export function ManagedAuthCallout({
   backend,
   className = "",
   rejected = false,
-  onSignedIn,
 }: {
   backend: BackendKind;
   className?: string;
   rejected?: boolean;
-  onSignedIn?: () => void;
 }) {
   const { provider, signedIn } = useManagedSignIn(backend);
-  const { state, start, cancel } = useDeviceLogin(onSignedIn, provider);
+  const { state, start, cancel } = useDeviceLogin(undefined, provider);
   const logout = useManagedLogout();
   // Being signed in only says the credential is on file. Whether it still works
   // is answered by the one request that spends it, so this asks for the model
@@ -58,6 +56,8 @@ export function ManagedAuthCallout({
   const invalid = failed || expired || rejected;
   const waiting = state.status === "waiting";
   const settled = signedIn && !invalid;
+  // Managed repair never overwrites a credential, so a refused one is signed out first.
+  const replacing = rejected && signedIn;
 
   const control = waiting ? (
     <div className="flex items-center gap-2">
@@ -111,10 +111,14 @@ export function ManagedAuthCallout({
       variant={ButtonVariant.Primary}
       size={ButtonSize.Medium}
       content={ButtonContent.IconRight}
-      loading={state.status === "starting"}
-      onClick={() => void start(provider)}
+      loading={state.status === "starting" || logout.isPending}
+      onClick={() =>
+        void (replacing ? logout.mutateAsync(provider) : Promise.resolve())
+          .then(() => start(provider))
+          .catch(() => {})
+      }
     >
-      <span>Sign in with {label}</span>
+      <span>{replacing ? `Sign in to ${label} again` : `Sign in with ${label}`}</span>
       <Icon iconName={IconName.External} />
     </Button>
   );

@@ -3,7 +3,8 @@
 import { render, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { RunFailureNotice, TranscriptRecoveryNotice } from "@/app/components/inspector/Transcript";
+import { RunFailureNotice } from "@/app/components/inspector/RunFailureRecovery";
+import { TranscriptRecoveryNotice } from "@/app/components/inspector/Transcript";
 import { failureRecoveryAffordance } from "@/app/lib/runFailure";
 import type { RunFailure, SessionGoalRecord } from "@/app/types/api";
 

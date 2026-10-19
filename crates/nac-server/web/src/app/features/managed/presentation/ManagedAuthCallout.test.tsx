@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
@@ -9,20 +9,30 @@ import type { DeviceLoginState } from "@/app/features/managed/controller/useDevi
 const fakes = vi.hoisted(() => ({
   signedIn: true,
   state: { status: "idle" } as DeviceLoginState,
-  onSuccess: undefined as (() => void) | undefined,
+  calls: [] as string[],
 }));
 
 vi.mock("@/app/features/managed/controller/useManagedSignIn", () => ({
   useManagedSignIn: () => ({ provider: "codex", signedIn: fakes.signedIn }),
 }));
 vi.mock("@/app/features/managed/controller/useDeviceLogin", () => ({
-  useDeviceLogin: (onSuccess?: () => void) => {
-    fakes.onSuccess = onSuccess;
-    return { state: fakes.state, start: vi.fn(), cancel: vi.fn() };
-  },
+  useDeviceLogin: () => ({
+    state: fakes.state,
+    start: (provider: string) => {
+      fakes.calls.push(`start:${provider}`);
+      return Promise.resolve();
+    },
+    cancel: vi.fn(),
+  }),
 }));
 vi.mock("@/app/services/queries", () => ({
-  useManagedLogout: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useManagedLogout: () => ({
+    isPending: false,
+    mutateAsync: (provider: string) => {
+      fakes.calls.push(`logout:${provider}`);
+      return Promise.resolve();
+    },
+  }),
   // A model index cached from before the login was refused still reads healthy.
   useManagedProviderModels: () => ({ isError: false, error: null }),
 }));
@@ -30,7 +40,7 @@ vi.mock("@/app/services/queries", () => ({
 beforeEach(() => {
   fakes.signedIn = true;
   fakes.state = { status: "idle" };
-  fakes.onSuccess = undefined;
+  fakes.calls = [];
 });
 afterEach(cleanup);
 
@@ -41,11 +51,22 @@ it("reports a healthy login as signed in", () => {
   expect(screen.queryByText("Sign in with ChatGPT")).toBeNull();
 });
 
-it("offers a sign-in for a rejected login even while a credential is on file", () => {
+it("signs a refused credential out before signing in again", async () => {
   render(<ManagedAuthCallout backend="chatgpt-codex-responses" rejected />);
 
-  expect(screen.getByText("Sign in with ChatGPT")).toBeTruthy();
   expect(screen.queryByText("Signed in")).toBeNull();
+  fireEvent.click(screen.getByText("Sign in to ChatGPT again"));
+
+  await waitFor(() => expect(fakes.calls).toEqual(["logout:codex", "start:codex"]));
+});
+
+it("signs in directly when no credential is on file", async () => {
+  fakes.signedIn = false;
+  render(<ManagedAuthCallout backend="chatgpt-codex-responses" rejected />);
+
+  fireEvent.click(screen.getByText("Sign in with ChatGPT"));
+
+  await waitFor(() => expect(fakes.calls).toEqual(["start:codex"]));
 });
 
 it("shows the device code, the verification page and cancel while the sign-in waits", () => {
@@ -65,13 +86,4 @@ it("shows the device code, the verification page and cancel while the sign-in wa
     "noopener,noreferrer",
   );
   open.mockRestore();
-});
-
-it("reports a completed sign-in to its caller", () => {
-  const onSignedIn = vi.fn();
-  render(<ManagedAuthCallout backend="chatgpt-codex-responses" rejected onSignedIn={onSignedIn} />);
-
-  fakes.onSuccess?.();
-
-  expect(onSignedIn).toHaveBeenCalledOnce();
 });

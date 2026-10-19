@@ -9,9 +9,8 @@ import type { BackendKind } from "../../../types/api";
  * file in NAC home backs every session using that backend — which is why this
  * reports being signed in even when the sign-in happened elsewhere.
  */
-export declare function ManagedAuthCallout({ backend, className, rejected, onSignedIn, }: {
+export declare function ManagedAuthCallout({ backend, className, rejected, }: {
     backend: BackendKind;
     className?: string;
     rejected?: boolean;
-    onSignedIn?: () => void;
 }): import("react").JSX.Element | null;

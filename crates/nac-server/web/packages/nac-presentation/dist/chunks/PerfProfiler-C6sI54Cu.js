@@ -14233,17 +14233,33 @@ function yI() {
 		onSuccess: () => Promise.all([t.invalidateQueries({ queryKey: fI.secrets }), t.invalidateQueries({ queryKey: fI.hostStatus })])
 	});
 }
-function bI(e = !0) {
-	let { api: t } = k();
+function bI(e = !0, t = !1) {
+	let { api: n } = k();
 	return _({
 		queryKey: fI.auth,
-		queryFn: ({ signal: e }) => t.listManagedAuth(e),
+		queryFn: ({ signal: e }) => n.listManagedAuth(e),
 		enabled: e,
 		staleTime: 3e4,
+		refetchInterval: t,
 		retry: !1
 	});
 }
-function xI(e, t, n = null) {
+function xI(e, t, n) {
+	let { api: r } = k();
+	return _({
+		queryKey: [
+			...fI.providerModels(e ?? ""),
+			"after-refusal",
+			t,
+			n
+		],
+		queryFn: ({ signal: t }) => r.listProviderModels({ backend: e }, t),
+		enabled: e !== null && t !== null && n !== null,
+		retry: !1,
+		staleTime: Infinity
+	});
+}
+function SI(e, t, n = null) {
 	let { api: r } = k();
 	return _({
 		queryKey: fI.providerModels(e ?? "", n),
@@ -14256,7 +14272,7 @@ function xI(e, t, n = null) {
 		staleTime: 3e5
 	});
 }
-function SI(e) {
+function CI(e) {
 	let { api: t } = k(), n = pI().data ?? null, r = s(() => FF(e, n), [e, n]), i = g({ queries: r.map((e) => ({
 		queryKey: fI.providerModels(e.backend, e.base_url),
 		queryFn: ({ signal: n }) => t.listProviderModels(e, n),
@@ -14270,7 +14286,7 @@ function SI(e) {
 }
 //#endregion
 //#region src/app/lib/routes.ts
-var CI = [
+var wI = [
 	"sessions",
 	"threads",
 	"delegated",
@@ -14278,7 +14294,7 @@ var CI = [
 	"terminal",
 	"worksets",
 	"history"
-], wI = {
+], TI = {
 	sessions: "Sessions",
 	threads: "Threads",
 	delegated: "Subagents",
@@ -14287,29 +14303,29 @@ var CI = [
 	worksets: "Worksets",
 	history: "History"
 };
-CI.filter((e) => e !== "history");
-var TI = "files";
-function EI(e) {
-	return CI.includes(e ?? "");
+wI.filter((e) => e !== "history");
+var EI = "files";
+function DI(e) {
+	return wI.includes(e ?? "");
 }
-var DI = {
+var OI = {
 	list: () => "/",
-	session: (e, t = TI) => `/session/${encodeURIComponent(e)}/${t}`,
+	session: (e, t = EI) => `/session/${encodeURIComponent(e)}/${t}`,
 	project: (e) => `/project/${encodeURIComponent(e)}`,
 	designPreview: () => "/design"
 };
-function OI(e) {
+function kI(e) {
 	let [, t, n] = e.split("/");
 	return t !== "session" || !n ? null : decodeURIComponent(n);
 }
-function kI(e) {
+function AI(e) {
 	let [, t, n] = e.split("/");
 	return t !== "project" || !n ? null : decodeURIComponent(n);
 }
 //#endregion
 //#region src/app/providers/ToastProvider.tsx
-var AI = n(null), jI = 150, MI = 3, NI = 0, PI = () => `toast-${Date.now()}-${NI++}`;
-function FI({ toasts: e, removeToast: t }) {
+var jI = n(null), MI = 150, NI = 3, PI = 0, FI = () => `toast-${Date.now()}-${PI++}`;
+function II({ toasts: e, removeToast: t }) {
 	let n = Oc(), r = c(/* @__PURE__ */ new Map());
 	return a(() => {
 		let n = r.current;
@@ -14332,27 +14348,27 @@ function FI({ toasts: e, removeToast: t }) {
 		}, e.id))
 	}), n);
 }
-function II({ children: e }) {
+function LI({ children: e }) {
 	let [t, n] = l([]), i = r((e) => {
-		let t = PI();
+		let t = FI();
 		return n((n) => [...n, {
 			id: t,
 			content: e.content,
 			variant: e.variant ?? Kl.Info,
-			life: e.life ?? MI,
+			life: e.life ?? NI,
 			keep: e.keep ?? !1,
 			dismissing: !1
 		}]), t;
 	}, []), a = r((e) => {
 		n((t) => {
 			let r = t.find((t) => t.id === e);
-			return !r || r.dismissing ? t : (setTimeout(() => n((t) => t.filter((t) => t.id !== e)), jI), t.map((t) => t.id === e ? {
+			return !r || r.dismissing ? t : (setTimeout(() => n((t) => t.filter((t) => t.id !== e)), MI), t.map((t) => t.id === e ? {
 				...t,
 				dismissing: !0
 			} : t));
 		});
 	}, []), o = r(() => {
-		n((e) => e.length === 0 ? e : (setTimeout(() => n((e) => e.filter((e) => !e.dismissing)), jI), e.map((e) => ({
+		n((e) => e.length === 0 ? e : (setTimeout(() => n((e) => e.filter((e) => !e.dismissing)), MI), e.map((e) => ({
 			...e,
 			dismissing: !0
 		}))));
@@ -14385,33 +14401,33 @@ function II({ children: e }) {
 		a,
 		o
 	]);
-	return /* @__PURE__ */ S(AI.Provider, {
+	return /* @__PURE__ */ S(jI.Provider, {
 		value: c,
-		children: [e, /* @__PURE__ */ x(FI, {
+		children: [e, /* @__PURE__ */ x(II, {
 			toasts: t,
 			removeToast: a
 		})]
 	});
 }
-function LI() {
-	let e = i(AI);
+function RI() {
+	let e = i(jI);
 	if (!e) throw Error("useToast must be used within a ToastProvider");
 	return e;
 }
-function RI(e) {
+function zI(e) {
 	return e instanceof Error ? e.message : String(e);
 }
 //#endregion
 //#region src/app/lib/PerfProfiler.tsx
-var zI = (e, t, n) => {
+var BI = (e, t, n) => {
 	`${e}`;
 };
-function BI({ id: e, children: n }) {
+function VI({ id: e, children: n }) {
 	return Le() ? /* @__PURE__ */ x(t, {
 		id: e,
-		onRender: zI,
+		onRender: BI,
 		children: n
 	}) : /* @__PURE__ */ x(b, { children: n });
 }
 //#endregion
-export { oF as $, Pj as $n, oo as $r, NN as $t, GF as A, Ot as Ai, zM as An, Oc as Ar, mP as At, DF as B, he as Bi, $M as Bn, ec as Br, qN as Bt, UF as C, Kt as Ci, mN as Cn, Bc as Cr, jP as Ct, HF as D, Gt as Di, nN as Dn, Pc as Dr, vP as Dt, VF as E, tn as Ei, tN as En, Nc as Er, kP as Et, PF as F, Be as Fi, XM as Fn, ic as Fr, KN as Ft, bF as G, YM as Gn, lo as Gr, RN as Gt, wF as H, Se as Hi, FM as Hn, N as Hr, BN as Ht, jF as I, Fe as Ii, PM as In, ac as Ir, UN as It, hF as J, jM as Jn, fo as Jr, WN as Jt, yF as K, HM as Kn, po as Kr, JN as Kt, EF as L, Pe as Li, qM as Ln, rc as Lr, VN as Lt, MF as M, rt as Mi, MM as Mn, pc as Mr, aP as Mt, NF as N, Re as Ni, NM as Nn, lc as Nr, $N as Nt, zF as O, kt as Oi, RM as On, Dc as Or, yP as Ot, AF as P, ze as Pi, BM as Pn, oc as Pr, YN as Pt, aF as Q, Mj as Qn, io as Qr, PN as Qt, SF as R, De as Ri, ZM as Rn, tc as Rr, ZN as Rt, hI as S, rn as Si, gN as Sn, Uc as Sr, zP as St, WF as T, ln as Ti, cN as Tn, Mc as Tr, IP as Tt, CF as U, w as Ui, IM as Un, mo as Ur, XN as Ut, xF as V, ge as Vi, KM as Vn, Xs as Vr, LN as Vt, vF as W, ne as Wi, LM as Wn, ho as Wr, IN as Wt, _F as X, Aj as Xn, k as Xr, QN as Xt, mF as Y, EM as Yn, so as Yr, HN as Yt, gF as Z, jj as Zn, ro as Zr, FN as Zt, xI as _, Bt as _i, DN as _n, Zc as _r, $P as _t, TI as a, li as ai, sN as an, qp as ar, eF as at, vI as b, qt as bi, oN as bn, Ic as br, dF as bt, EI as c, Qr as ci, lN as cn, Gl as cr, JP as ct, OI as d, ar as di, _N as dn, Vl as dr, BP as dt, eo as ei, MN as en, Oj as er, YP as et, fI as f, ir as fi, fN as fn, Ml as fr, HP as ft, pI as g, Jt as gi, ON as gn, tl as gr, qP as gt, gI as h, Yt as hi, SN as hn, nl as hr, nF as ht, LI as i, ai as ii, kN as in, pC as ir, KP as it, OF as j, et as ji, GM as jn, Tc as jr, iP as jt, LF as k, an as ki, WM as kn, Ac as kr, SP as kt, kI as l, sr as li, dN as ln, Ul as lr, GP as lt, bI as m, zt as mi, yN as mn, cl as mr, iF as mt, II as n, ci as ni, rN as nn, dC as nr, uF as nt, CI as o, ti as oi, hN as on, lf as or, cF as ot, yI as p, cr as pi, CN as pn, Fl as pr, rF as pt, pF as q, VM as qn, uo as qr, GN as qt, RI as r, si as ri, pN as rn, fC as rr, lF as rt, wI as s, ri as si, jN as sn, P as sr, sF as st, BI as t, ei as ti, TN as tn, kj as tr, ZP as tt, DI as u, or as ui, vN as un, Hl as ur, UP as ut, _I as v, Vt as vi, EN as vn, Yc as vr, tF as vt, RF as w, Xt as wi, AN as wn, Hc as wr, FP as wt, SI as x, Rt as xi, aN as xn, Wc as xr, PP as xt, mI as y, Zt as yi, iN as yn, Gc as yr, QP as yt, TF as z, Ee as zi, QM as zn, nc as zr, zN as zt };
+export { aF as $, Mj as $n, io as $r, PN as $t, LF as A, an as Ai, WM as An, Ac as Ar, SP as At, TF as B, Ee as Bi, QM as Bn, nc as Br, zN as Bt, hI as C, rn as Ci, gN as Cn, Uc as Cr, zP as Ct, VF as D, tn as Di, tN as Dn, Nc as Dr, kP as Dt, WF as E, ln as Ei, cN as En, Mc as Er, IP as Et, AF as F, ze as Fi, BM as Fn, oc as Fr, YN as Ft, vF as G, ne as Gi, LM as Gn, ho as Gr, IN as Gt, xF as H, ge as Hi, KM as Hn, Xs as Hr, LN as Ht, PF as I, Be as Ii, XM as In, ic as Ir, KN as It, pF as J, VM as Jn, uo as Jr, GN as Jt, bF as K, YM as Kn, lo as Kr, RN as Kt, jF as L, Fe as Li, PM as Ln, ac as Lr, UN as Lt, OF as M, et as Mi, GM as Mn, Tc as Mr, iP as Mt, MF as N, rt as Ni, MM as Nn, pc as Nr, aP as Nt, HF as O, Gt as Oi, nN as On, Pc as Or, vP as Ot, NF as P, Re as Pi, NM as Pn, lc as Pr, $N as Pt, gF as Q, jj as Qn, ro as Qr, FN as Qt, EF as R, Pe as Ri, qM as Rn, rc as Rr, VN as Rt, CI as S, Rt as Si, aN as Sn, Wc as Sr, PP as St, RF as T, Xt as Ti, AN as Tn, Hc as Tr, FP as Tt, wF as U, Se as Ui, FM as Un, N as Ur, BN as Ut, DF as V, he as Vi, $M as Vn, ec as Vr, qN as Vt, CF as W, w as Wi, IM as Wn, mo as Wr, XN as Wt, mF as X, EM as Xn, so as Xr, HN as Xt, hF as Y, jM as Yn, fo as Yr, WN as Yt, _F as Z, Aj as Zn, k as Zr, QN as Zt, SI as _, Jt as _i, ON as _n, tl as _r, qP as _t, EI as a, ai, kN as an, pC as ar, KP as at, xI as b, Zt as bi, iN as bn, Gc as br, QP as bt, DI as c, ri as ci, jN as cn, P as cr, sF as ct, kI as d, or as di, vN as dn, Hl as dr, UP as dt, oo as ei, NN as en, Pj as er, oF as et, fI as f, ar as fi, _N as fn, Vl as fr, BP as ft, pI as g, Yt as gi, SN as gn, nl as gr, nF as gt, gI as h, zt as hi, yN as hn, cl as hr, iF as ht, RI as i, si as ii, pN as in, fC as ir, lF as it, GF as j, Ot as ji, zM as jn, Oc as jr, mP as jt, zF as k, kt as ki, RM as kn, Dc as kr, yP as kt, AI as l, Qr as li, lN as ln, Gl as lr, JP as lt, bI as m, cr as mi, CN as mn, Fl as mr, rF as mt, LI as n, ei as ni, TN as nn, kj as nr, ZP as nt, wI as o, li as oi, sN as on, qp as or, eF as ot, yI as p, ir as pi, fN as pn, Ml as pr, HP as pt, yF as q, HM as qn, po as qr, JN as qt, zI as r, ci as ri, rN as rn, dC as rr, uF as rt, TI as s, ti as si, hN as sn, lf as sr, cF as st, VI as t, eo as ti, MN as tn, Oj as tr, YP as tt, OI as u, sr as ui, dN as un, Ul as ur, GP as ut, _I as v, Bt as vi, DN as vn, Zc as vr, $P as vt, UF as w, Kt as wi, mN as wn, Bc as wr, jP as wt, vI as x, qt as xi, oN as xn, Ic as xr, dF as xt, mI as y, Vt as yi, EN as yn, Yc as yr, tF as yt, SF as z, De as zi, ZM as zn, tc as zr, ZN as zt };

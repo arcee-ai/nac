@@ -23,10 +23,10 @@ import {
   ShimmerLoader,
 } from "@/app/atoms";
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
+import { RunFailureRecovery } from "@/app/components/inspector/RunFailureRecovery";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
-import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -36,8 +36,6 @@ import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
 import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
-import { isBackendKind, managedAuthProvider } from "@/app/lib/providers";
-import { failureRecoveryAffordance } from "@/app/lib/runFailure";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import { routes, type SessionPanel } from "@/app/lib/routes";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
@@ -62,7 +60,7 @@ import {
   useWorkspaceRevisions,
 } from "@/app/services/queries";
 
-import type { RunFailure, SessionGoalRecord, SessionSnapshotResponse } from "@/app/types/api";
+import type { SessionSnapshotResponse } from "@/app/types/api";
 
 interface TranscriptProps {
   sessionId: string;
@@ -90,78 +88,6 @@ export function TranscriptRecoveryNotice({ warning }: { warning?: string | null 
       {warning}
     </ChatSessionMessage>
   );
-}
-
-export function RunFailureNotice({
-  failure,
-  goal,
-  action,
-}: {
-  failure: RunFailure;
-  goal?: SessionGoalRecord | null;
-  action?: { label: string; onClick: () => void };
-}) {
-  const retryScheduled = failure.recovery_action === "automatic_retry" && goal?.status === "active";
-  const retryExhausted = failure.recovery_action === "resume_goal" && goal?.status === "blocked";
-  const providerCapacity = failure.kind === "capacity";
-  const partial = Boolean(
-    failure.partial_output?.text ||
-    failure.partial_output?.reasoning ||
-    failure.partial_output?.tool_call,
-  );
-  const title = providerCapacity
-    ? failure.summary
-    : retryScheduled
-      ? "Goal retry scheduled"
-      : retryExhausted
-        ? "Goal stopped after repeated run failures"
-        : partial
-          ? "Run stopped after a partial response"
-          : failure.summary;
-  const retryTime = goal?.next_attempt_at_epoch_ms
-    ? new Date(goal.next_attempt_at_epoch_ms).toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit",
-        second: "2-digit",
-      })
-    : null;
-  const summaryPrefix = providerCapacity ? "" : `${failure.summary} `;
-  const explanation = retryScheduled
-    ? `${summaryPrefix}The durable goal and its usage were preserved. NAC will continue automatically${retryTime ? ` at ${retryTime}` : ""}.`
-    : retryExhausted
-      ? `${summaryPrefix}The durable goal and its usage were preserved. Resume it when you want another bounded retry sequence.`
-      : providerCapacity
-        ? `Retrying later may be necessary.${providerRetryDelay(failure.retry_after_ms)}`
-        : failure.summary;
-  return (
-    <ChatSessionMessage
-      role={retryScheduled ? "status" : "alert"}
-      variant={retryScheduled ? ChatSessionMessageVariant.Info : ChatSessionMessageVariant.Danger}
-      title={title}
-      action={action}
-    >
-      <span>{explanation}</span>
-      <details className="mt-2">
-        <summary className="cursor-pointer">Diagnostics</summary>
-        <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-xs">
-          {failure.diagnostic}
-        </pre>
-      </details>
-    </ChatSessionMessage>
-  );
-}
-
-function providerRetryDelay(retryAfterMs: number | null | undefined): string {
-  if (retryAfterMs == null) return "";
-  if (retryAfterMs >= 60_000 && retryAfterMs % 60_000 === 0) {
-    const minutes = retryAfterMs / 60_000;
-    return ` The provider asked NAC to wait at least ${minutes} ${minutes === 1 ? "minute" : "minutes"} before retrying.`;
-  }
-  if (retryAfterMs >= 1_000 && retryAfterMs % 1_000 === 0) {
-    const seconds = retryAfterMs / 1_000;
-    return ` The provider asked NAC to wait at least ${seconds} ${seconds === 1 ? "second" : "seconds"} before retrying.`;
-  }
-  return ` The provider asked NAC to wait at least ${retryAfterMs} milliseconds before retrying.`;
 }
 
 /**
@@ -247,7 +173,6 @@ export function Transcript({
   const sessionActions = useSessionActions();
   const navigate = useNavigate();
   const backend = snapshot?.metadata.backend ?? null;
-  const loginProvider = backend ? managedAuthProvider(backend) : null;
   const toNotice = useErrorNotice(sessionId, backend);
   // Read before the notice is built, since hook order cannot depend on whether
   // this run failed.
@@ -539,50 +464,19 @@ export function Transcript({
     ? (liveFailure ?? snapshot?.run_failure ?? goalQuery.data?.last_failure ?? null)
     : null;
   const latestUser = [...turns].reverse().find((turn) => turn.kind === "user");
-  // The failure a completed sign-in answered, so its box turns to a retry.
-  const failureKey = durableFailure
-    ? `${durableFailure.summary}\n${durableFailure.diagnostic}`
-    : null;
-  const [signedInFor, setSignedInFor] = useState<string | null>(null);
-  if (running && signedInFor !== null) setSignedInFor(null);
-  const recoveryAffordance = durableFailure
-    ? failureRecoveryAffordance(
-        durableFailure,
-        goalQuery.data,
-        latestUser?.kind === "user",
-        loginProvider === null ? undefined : signedInFor === failureKey ? "restored" : "needed",
-      )
-    : null;
-  const failureAction = durableFailure
-    ? recoveryAffordance === "resume_goal"
-      ? {
-          label: "Resume goal",
-          onClick: () => {
-            const goal = goalQuery.data;
-            if (!goal) return;
-            void updateGoal
-              .mutateAsync({
-                sessionId,
-                goalId: goal.goal_id,
-                payload: { expected_version: goal.version, status: "active" },
-              })
-              .catch((err) =>
-                toast.error(`Failed to resume goal: ${humanErrorText(toRunError(err), backend)}`),
-              );
-          },
-        }
-      : recoveryAffordance === "settings"
-        ? {
-            label: "Open settings",
-            onClick: () => sessionActions.settings(sessionId),
-          }
-        : recoveryAffordance === "regenerate" && latestUser?.kind === "user"
-          ? {
-              label: "Regenerate from original prompt",
-              onClick: () => resend(latestUser.messageIndex),
-            }
-          : undefined
-    : undefined;
+  const resumeGoal = () => {
+    const goal = goalQuery.data;
+    if (!goal) return;
+    void updateGoal
+      .mutateAsync({
+        sessionId,
+        goalId: goal.goal_id,
+        payload: { expected_version: goal.version, status: "active" },
+      })
+      .catch((err) =>
+        toast.error(`Failed to resume goal: ${humanErrorText(toRunError(err), backend)}`),
+      );
+  };
   // Prefer the session notice when both fire; a broken config already explains
   // why the run could not continue.
   const notice = durableFailure
@@ -852,18 +746,15 @@ export function Transcript({
           ) : null}
 
           {durableFailure ? (
-            <RunFailureNotice
+            <RunFailureRecovery
               failure={durableFailure}
               goal={goalQuery.data}
-              action={failureAction}
-            />
-          ) : null}
-          {recoveryAffordance === "sign_in" && backend && isBackendKind(backend) ? (
-            <ManagedAuthCallout
               backend={backend}
-              className="mt-2"
-              rejected
-              onSignedIn={() => setSignedInFor(failureKey)}
+              onResumeGoal={resumeGoal}
+              onOpenSettings={() => sessionActions.settings(sessionId)}
+              onRegenerate={
+                latestUser?.kind === "user" ? () => resend(latestUser.messageIndex) : null
+              }
             />
           ) : null}
 
