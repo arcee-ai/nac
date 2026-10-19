@@ -21307,7 +21307,9 @@ function tx({ sessionId: e, snapshot: t, panel: n, onFocusPanel: r, errorNotice:
 		me,
 		_t,
 		gt
-	]), yt = !!(t && Ke.length === 0 && !k && !B), bt = j && !k ? j : null, xt = k ? null : ne ?? t?.run_failure ?? Ee.data?.last_failure ?? null, wt = [...Ke].reverse().find((e) => e.kind === "user"), Tt = xt ? `${xt.summary}\n${xt.diagnostic}` : null, [Et, Dt] = q(null), { start: Ot } = Ku(() => Dt(Tt)), kt = xt ? Yb(xt, Ee.data, wt?.kind === "user", _e === null ? void 0 : Et === Tt ? "restored" : "needed") : null, At = xt ? kt === "resume_goal" ? {
+	]), yt = !!(t && Ke.length === 0 && !k && !B), bt = j && !k ? j : null, xt = k ? null : ne ?? t?.run_failure ?? Ee.data?.last_failure ?? null, wt = [...Ke].reverse().find((e) => e.kind === "user"), Tt = xt ? `${xt.summary}\n${xt.diagnostic}` : null, [Et, Dt] = q(null);
+	k && Et !== null && Dt(null);
+	let { start: Ot } = Ku(() => Dt(Tt)), kt = xt ? Yb(xt, Ee.data, wt?.kind === "user", _e === null ? void 0 : Et === Tt ? "restored" : "needed") : null, At = xt ? kt === "resume_goal" ? {
 		label: "Resume goal",
 		onClick: () => {
 			let t = Ee.data;

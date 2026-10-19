@@ -544,6 +544,7 @@ export function Transcript({
     ? `${durableFailure.summary}\n${durableFailure.diagnostic}`
     : null;
   const [signedInFor, setSignedInFor] = useState<string | null>(null);
+  if (running && signedInFor !== null) setSignedInFor(null);
   const { start: startLogin } = useDeviceLogin(() => setSignedInFor(failureKey));
   const recoveryAffordance = durableFailure
     ? failureRecoveryAffordance(
