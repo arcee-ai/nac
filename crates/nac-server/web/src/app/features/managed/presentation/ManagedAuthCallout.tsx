@@ -34,10 +34,12 @@ const PROVIDER_ICONS = {
 export function ManagedAuthCallout({
   backend,
   className = "",
+  rejected = false,
   onSignedIn,
 }: {
   backend: BackendKind;
   className?: string;
+  rejected?: boolean;
   onSignedIn?: () => void;
 }) {
   const { provider, signedIn } = useManagedSignIn(backend);
@@ -53,7 +55,7 @@ export function ManagedAuthCallout({
   const label = managedAuthLabel(provider);
   const failed = state.status === "failed";
   const expired = signedIn && reach.isError;
-  const invalid = failed || expired;
+  const invalid = failed || expired || rejected;
   const waiting = state.status === "waiting";
   const settled = signedIn && !invalid;
 
@@ -138,7 +140,7 @@ export function ManagedAuthCallout({
       </div>
       <div className="flex flex-col items-stretch md:items-end gap-1 shrink-0">
         {control}
-        {invalid ? (
+        {failed || expired ? (
           <p className="label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] md:text-right pt-1 opacity-70">
             {humanErrorText(failed ? state.message : reach.error, backend)}
           </p>

@@ -862,6 +862,7 @@ export function Transcript({
             <ManagedAuthCallout
               backend={backend}
               className="mt-2"
+              rejected
               onSignedIn={() => setSignedInFor(failureKey)}
             />
           ) : null}

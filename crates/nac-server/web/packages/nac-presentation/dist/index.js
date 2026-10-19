@@ -4370,19 +4370,19 @@ var Yu = {
 	arcee: V.Arcee,
 	codex: V.ChatGpt
 };
-function Xu({ backend: e, className: t = "", onSignedIn: n }) {
-	let { provider: r, signedIn: i } = Ju(e), { state: a, start: o, cancel: s } = qu(n, r), c = Dt(), l = Ot(e, !!r && i);
-	if (!r) return null;
-	let u = lr(r), f = a.status === "failed", p = i && l.isError, m = f || p, h = a.status === "waiting", g = i && !m, _ = h ? /* @__PURE__ */ X("div", {
+function Xu({ backend: e, className: t = "", rejected: n = !1, onSignedIn: r }) {
+	let { provider: i, signedIn: a } = Ju(e), { state: o, start: s, cancel: c } = qu(r, i), l = Dt(), u = Ot(e, !!i && a);
+	if (!i) return null;
+	let f = lr(i), p = o.status === "failed", m = a && u.isError, h = p || m || n, g = o.status === "waiting", _ = a && !h, v = g ? /* @__PURE__ */ X("div", {
 		className: "flex items-center gap-2",
 		children: [
 			/* @__PURE__ */ Y(I, { size: B.Micro }),
-			a.prompt.user_code ? /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y("span", {
+			o.prompt.user_code ? /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y("span", {
 				className: "text-micro text-basic-muted",
 				children: "Code"
 			}), /* @__PURE__ */ Y("span", {
 				className: "label-small text-basic-primary tabular-nums",
-				children: a.prompt.user_code
+				children: o.prompt.user_code
 			})] }) : /* @__PURE__ */ Y("span", {
 				className: "text-micro text-basic-muted",
 				children: "Waiting for the browser"
@@ -4391,11 +4391,11 @@ function Xu({ backend: e, className: t = "", onSignedIn: n }) {
 				variant: P.Ghost,
 				size: j.Medium,
 				content: z.Text,
-				onClick: () => void s(),
+				onClick: () => void c(),
 				children: "Cancel"
 			})
 		]
-	}) : g ? /* @__PURE__ */ X("div", {
+	}) : _ ? /* @__PURE__ */ X("div", {
 		className: "flex items-center gap-2",
 		children: [/* @__PURE__ */ X("div", {
 			className: "flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4",
@@ -4410,40 +4410,40 @@ function Xu({ backend: e, className: t = "", onSignedIn: n }) {
 			variant: P.Ghost,
 			size: j.Medium,
 			content: z.Text,
-			loading: c.isPending,
-			onClick: () => void c.mutateAsync(r).catch(() => {}),
+			loading: l.isPending,
+			onClick: () => void l.mutateAsync(i).catch(() => {}),
 			children: "Sign out"
 		})]
 	}) : /* @__PURE__ */ X(R, {
 		variant: P.Primary,
 		size: j.Medium,
 		content: z.IconRight,
-		loading: a.status === "starting",
-		onClick: () => void o(r),
-		children: [/* @__PURE__ */ X("span", { children: ["Sign in with ", u] }), /* @__PURE__ */ Y(d, { iconName: V.External })]
-	}), v = h ? `Approve the request in the ${u} tab NAC opened.` : g ? "NAC holds this login and every session on this provider uses it." : `This provider authenticates with ${u} in your browser instead of with an API key.`;
+		loading: o.status === "starting",
+		onClick: () => void s(i),
+		children: [/* @__PURE__ */ X("span", { children: ["Sign in with ", f] }), /* @__PURE__ */ Y(d, { iconName: V.External })]
+	}), y = g ? `Approve the request in the ${f} tab NAC opened.` : _ ? "NAC holds this login and every session on this provider uses it." : `This provider authenticates with ${f} in your browser instead of with an API key.`;
 	return /* @__PURE__ */ X("div", {
-		className: N("flex flex-col gap-3 rounded-[8px] border bg-elevation-level-2 p-3 md:flex-row md:items-center md:justify-between md:gap-4", m ? "border-error-primary" : "border-muted", t),
+		className: N("flex flex-col gap-3 rounded-[8px] border bg-elevation-level-2 p-3 md:flex-row md:items-center md:justify-between md:gap-4", h ? "border-error-primary" : "border-muted", t),
 		children: [/* @__PURE__ */ X("div", {
 			className: "flex items-start gap-2 min-w-0",
 			children: [/* @__PURE__ */ Y(d, {
-				iconName: Yu[r],
-				className: N("shrink-0", m ? "text-error-primary" : "text-basic-secondary")
+				iconName: Yu[i],
+				className: N("shrink-0", h ? "text-error-primary" : "text-basic-secondary")
 			}), /* @__PURE__ */ X("div", {
 				className: "flex flex-col gap-0.5 min-w-0",
 				children: [/* @__PURE__ */ X("span", {
-					className: N("label-small", m ? "text-error-primary" : "text-basic-primary"),
-					children: [u, " sign-in"]
+					className: N("label-small", h ? "text-error-primary" : "text-basic-primary"),
+					children: [f, " sign-in"]
 				}), /* @__PURE__ */ Y("span", {
 					className: "text-micro text-basic-muted",
-					children: v
+					children: y
 				})]
 			})]
 		}), /* @__PURE__ */ X("div", {
 			className: "flex flex-col items-stretch md:items-end gap-1 shrink-0",
-			children: [_, m ? /* @__PURE__ */ Y("p", {
+			children: [v, p || m ? /* @__PURE__ */ Y("p", {
 				className: "label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] md:text-right pt-1 opacity-70",
-				children: mu(f ? a.message : l.error, e)
+				children: mu(p ? o.message : u.error, e)
 			}) : null]
 		})]
 	});
@@ -21487,6 +21487,7 @@ function nx({ sessionId: e, snapshot: t, panel: n, onFocusPanel: r, errorNotice:
 						Ot === "sign_in" && _e && Wn(_e) ? /* @__PURE__ */ Y(Xu, {
 							backend: _e,
 							className: "mt-2",
+							rejected: !0,
 							onSignedIn: () => Dt(Tt)
 						}) : null,
 						(t?.shell_commands ?? []).filter((e) => e.state === "accepted" || e.state === "started").map((t) => /* @__PURE__ */ Y(Ub, {
