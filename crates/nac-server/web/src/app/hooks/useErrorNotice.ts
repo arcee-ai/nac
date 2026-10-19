@@ -4,6 +4,7 @@ import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin
 import { managedAuthProvider } from "@/app/lib/providers";
 import { humanError, type ErrorFix, type RunError } from "@/app/lib/providerError";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
+import { useManagedAuth } from "@/app/services/queries";
 
 export interface ErrorNotice {
   title: string;
@@ -16,16 +17,20 @@ export interface ErrorNotice {
  * whatever carries it out from here: the browser login, this session's
  * settings, the page on the platform that holds the account, or a retry the
  * caller supplies. A fix nothing here can perform is dropped, leaving the
- * wording to stand on its own.
+ * wording to stand on its own. For a backend that signs in, the server's record
+ * of whether a login is on file outranks what the failure text claims.
  */
 export function useErrorNotice(sessionId: string | null, backend?: string | null) {
   const actions = useSessionActions();
   const { start } = useDeviceLogin();
   const provider = backend ? managedAuthProvider(backend) : null;
+  const auth = useManagedAuth(provider !== null);
+  const signedIn =
+    auth.data?.providers.find((status) => status.provider === provider)?.signed_in ?? null;
 
   return useCallback(
     (error: RunError, retry?: () => void): ErrorNotice => {
-      const { title, description, fix } = humanError(error, backend);
+      const { title, description, fix } = humanError(error, backend, signedIn);
       return {
         title,
         description,
@@ -36,7 +41,7 @@ export function useErrorNotice(sessionId: string | null, backend?: string | null
         }),
       };
     },
-    [actions, backend, provider, sessionId, start],
+    [actions, backend, provider, sessionId, signedIn, start],
   );
 }
 
