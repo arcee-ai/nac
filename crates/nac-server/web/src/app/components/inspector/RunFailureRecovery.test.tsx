@@ -182,3 +182,19 @@ it("notices a sign-in made at the CLI on its next poll", async () => {
     vi.useRealTimers();
   }
 });
+
+it("keeps the sign-in panel up and reports a failed sign-out without starting a login", async () => {
+  server.latency = 30;
+  server.credential = { expires: Date.now() + 3_600_000 };
+  vi.spyOn(api, "managedLogout").mockImplementation(() =>
+    later(() => Promise.reject(new Error("Could not remove the stored Arcee credential"))),
+  );
+  const start = vi.spyOn(api, "startManagedLogin");
+  renderRecovery(newClient());
+
+  fireEvent.click(await screen.findByText("Sign in to Arcee again"));
+
+  await screen.findByText(/Could not remove the stored Arcee credential/);
+  expect(screen.getByText("Sign in to Arcee again")).toBeTruthy();
+  expect(start).not.toHaveBeenCalled();
+});
