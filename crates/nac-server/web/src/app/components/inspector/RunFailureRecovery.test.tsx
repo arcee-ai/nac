@@ -20,7 +20,13 @@ const refused: RunFailure = {
 };
 
 // What the server reports: which credential is on file, and whether it works.
-const server = { credential: null as { expires: number } | null, works: false };
+const server = { credential: null as { expires: number } | null, works: false, latency: 0 };
+
+function later<T>(answer: () => T): Promise<Awaited<T>> {
+  return new Promise((resolve, reject) =>
+    setTimeout(() => Promise.resolve(answer()).then(resolve, reject), server.latency),
+  );
+}
 
 function authList(): ManagedAuthList {
   return {
@@ -42,11 +48,14 @@ function authList(): ManagedAuthList {
 beforeEach(() => {
   server.credential = null;
   server.works = false;
-  vi.spyOn(api, "listManagedAuth").mockImplementation(() => Promise.resolve(authList()));
+  server.latency = 0;
+  vi.spyOn(api, "listManagedAuth").mockImplementation(() => later(authList));
   vi.spyOn(api, "listProviderModels").mockImplementation(() =>
-    server.works
-      ? Promise.resolve({ base_url: "https://api.arcee.ai/api/v1", models: [] })
-      : Promise.reject(new Error("HTTP 401 from https://api.arcee.ai/api/v1/models")),
+    later(() =>
+      server.works
+        ? { base_url: "https://api.arcee.ai/api/v1", models: [] }
+        : Promise.reject(new Error("HTTP 401 from https://api.arcee.ai/api/v1/models")),
+    ),
   );
 });
 afterEach(() => {
@@ -129,13 +138,15 @@ it("resumes a blocked goal once the login works", async () => {
 });
 
 it("signs the refused credential out, completes the device login and retries", async () => {
+  // A real server answers after the sign-out's re-check has rendered.
+  server.latency = 30;
   server.credential = { expires: Date.now() + 3_600_000 };
   vi.spyOn(window, "open").mockReturnValue(null);
   const logout = vi.spyOn(api, "managedLogout").mockImplementation(() => {
     server.credential = null;
-    return Promise.resolve(authList().providers[0]);
+    return later(() => authList().providers[0]);
   });
-  vi.spyOn(api, "startManagedLogin").mockResolvedValue({
+  const start = vi.spyOn(api, "startManagedLogin").mockResolvedValue({
     login_id: "login-1",
     provider: "arcee",
     user_code: "ABCD-1234",
@@ -153,6 +164,7 @@ it("signs the refused credential out, completes the device login and retries", a
   fireEvent.click(await screen.findByText("Regenerate from original prompt"));
 
   expect(logout).toHaveBeenCalledWith("arcee");
+  expect(start).toHaveBeenCalledWith("arcee");
   expect(onRegenerate).toHaveBeenCalledOnce();
 });
 

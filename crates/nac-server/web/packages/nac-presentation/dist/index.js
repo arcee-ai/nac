@@ -21020,26 +21020,30 @@ function Yb(e, t, n, r) {
 //#endregion
 //#region src/app/components/inspector/RunFailureRecovery.tsx
 var Xb = {
-	unknown: "checking",
 	unusable: "needed",
 	usable: "restored"
 };
 function Zb({ failure: e, goal: t, backend: n, onResumeGoal: r, onOpenSettings: i, onRegenerate: a }) {
-	let o = n !== null && It(n) !== null, s = Jb(n, e.kind === "authentication" ? `${e.summary}\n${e.diagnostic}` : null), c = Yb(e, t, a !== null, o ? Xb[s] : void 0);
+	let o = n !== null && It(n) !== null, s = e.kind === "authentication" ? `${e.summary}\n${e.diagnostic}` : null, c = Jb(n, s), [l, u] = q(), d = c === "unknown" ? null : Xb[c];
+	d && (l?.refusal !== s || l.login !== d) && u({
+		refusal: s,
+		login: d
+	});
+	let f = d ?? (l?.refusal === s ? l.login : "checking"), p = Yb(e, t, a !== null, o ? f : void 0);
 	return /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y(Qb, {
 		failure: e,
 		goal: t,
-		action: c === "resume_goal" ? {
+		action: p === "resume_goal" ? {
 			label: "Resume goal",
 			onClick: r
-		} : c === "settings" ? {
+		} : p === "settings" ? {
 			label: "Open settings",
 			onClick: i
-		} : c === "regenerate" && a ? {
+		} : p === "regenerate" && a ? {
 			label: "Regenerate from original prompt",
 			onClick: a
 		} : void 0
-	}), c === "sign_in" && n && dr(n) ? /* @__PURE__ */ Y(Zu, {
+	}), p === "sign_in" && n && dr(n) ? /* @__PURE__ */ Y(Zu, {
 		backend: n,
 		className: "mt-2",
 		rejected: !0

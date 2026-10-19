@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { ChatSessionMessage, ChatSessionMessageVariant } from "@/app/atoms";
 import {
   useLoginUsability,
@@ -9,10 +11,9 @@ import { failureRecoveryAffordance, type LoginRecovery } from "@/app/lib/runFail
 import type { RunFailure, SessionGoalRecord } from "@/app/types/api";
 
 const LOGIN_RECOVERY = {
-  unknown: "checking",
   unusable: "needed",
   usable: "restored",
-} satisfies Record<LoginUsability, LoginRecovery>;
+} satisfies Record<Exclude<LoginUsability, "unknown">, LoginRecovery>;
 
 /** A run's durable failure with its recovery, a sign-in first for a refused login. */
 export function RunFailureRecovery({
@@ -31,15 +32,20 @@ export function RunFailureRecovery({
   onRegenerate: (() => void) | null;
 }) {
   const signsIn = backend !== null && managedAuthProvider(backend) !== null;
-  const usability = useLoginUsability(
-    backend,
-    failure.kind === "authentication" ? `${failure.summary}\n${failure.diagnostic}` : null,
-  );
+  const refusal =
+    failure.kind === "authentication" ? `${failure.summary}\n${failure.diagnostic}` : null;
+  const usability = useLoginUsability(backend, refusal);
+  // A re-check (signing out triggers one) keeps the last answer, so a started sign-in survives.
+  const [decided, setDecided] = useState<{ refusal: string | null; login: LoginRecovery }>();
+  const current = usability === "unknown" ? null : LOGIN_RECOVERY[usability];
+  if (current && (decided?.refusal !== refusal || decided.login !== current))
+    setDecided({ refusal, login: current });
+  const login = current ?? (decided?.refusal === refusal ? decided.login : "checking");
   const affordance = failureRecoveryAffordance(
     failure,
     goal,
     onRegenerate !== null,
-    signsIn ? LOGIN_RECOVERY[usability] : undefined,
+    signsIn ? login : undefined,
   );
   const action =
     affordance === "resume_goal"
