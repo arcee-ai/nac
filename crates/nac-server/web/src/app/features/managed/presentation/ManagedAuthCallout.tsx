@@ -75,6 +75,15 @@ export function ManagedAuthCallout({
       <Button
         variant={ButtonVariant.Ghost}
         size={ButtonSize.Medium}
+        content={ButtonContent.IconRight}
+        onClick={() => window.open(state.prompt.verification_uri, "_blank", "noopener,noreferrer")}
+      >
+        <span>Open {label}</span>
+        <Icon iconName={IconName.External} />
+      </Button>
+      <Button
+        variant={ButtonVariant.Ghost}
+        size={ButtonSize.Medium}
         content={ButtonContent.Text}
         onClick={() => void cancel()}
       >
@@ -111,7 +120,7 @@ export function ManagedAuthCallout({
   );
 
   const description = waiting
-    ? `Approve the request in the ${label} tab NAC opened.`
+    ? `Approve the request on ${label}, then return here.`
     : settled
       ? `NAC holds this login and every session on this provider uses it.`
       : `This provider authenticates with ${label} in your browser instead of with an API key.`;

@@ -4387,6 +4387,13 @@ function Xu({ backend: e, className: t = "", rejected: n = !1, onSignedIn: r }) 
 				className: "text-micro text-basic-muted",
 				children: "Waiting for the browser"
 			}),
+			/* @__PURE__ */ X(R, {
+				variant: P.Ghost,
+				size: j.Medium,
+				content: z.IconRight,
+				onClick: () => window.open(o.prompt.verification_uri, "_blank", "noopener,noreferrer"),
+				children: [/* @__PURE__ */ X("span", { children: ["Open ", f] }), /* @__PURE__ */ Y(d, { iconName: V.External })]
+			}),
 			/* @__PURE__ */ Y(R, {
 				variant: P.Ghost,
 				size: j.Medium,
@@ -4421,7 +4428,7 @@ function Xu({ backend: e, className: t = "", rejected: n = !1, onSignedIn: r }) 
 		loading: o.status === "starting",
 		onClick: () => void s(i),
 		children: [/* @__PURE__ */ X("span", { children: ["Sign in with ", f] }), /* @__PURE__ */ Y(d, { iconName: V.External })]
-	}), y = g ? `Approve the request in the ${f} tab NAC opened.` : _ ? "NAC holds this login and every session on this provider uses it." : `This provider authenticates with ${f} in your browser instead of with an API key.`;
+	}), y = g ? `Approve the request on ${f}, then return here.` : _ ? "NAC holds this login and every session on this provider uses it." : `This provider authenticates with ${f} in your browser instead of with an API key.`;
 	return /* @__PURE__ */ X("div", {
 		className: N("flex flex-col gap-3 rounded-[8px] border bg-elevation-level-2 p-3 md:flex-row md:items-center md:justify-between md:gap-4", h ? "border-error-primary" : "border-muted", t),
 		children: [/* @__PURE__ */ X("div", {
