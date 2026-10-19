@@ -3,9 +3,7 @@ use super::auth_store::{
     read_auth_string_from_path, with_arcee_auth_lock, write_auth_string_to_path, FileLock,
 };
 use super::*;
-use crate::run_failure::{
-    PartialModelOutput, RecoveryAction, RunFailure, RunFailureKind, RunFailurePhase,
-};
+use crate::run_failure::{RunFailure, RunFailureKind};
 use anyhow::{bail, Context};
 use std::fs;
 use std::io;
@@ -46,6 +44,7 @@ pub(super) enum ArceeEndpointKind {
 #[derive(Debug)]
 pub(super) struct StoredArceeAuthConfigurationError {
     message: String,
+    revoked: bool,
 }
 
 impl std::fmt::Display for StoredArceeAuthConfigurationError {
@@ -59,63 +58,82 @@ impl std::error::Error for StoredArceeAuthConfigurationError {}
 fn stored_auth_configuration_error(message: impl Into<String>) -> anyhow::Error {
     anyhow!(StoredArceeAuthConfigurationError {
         message: message.into(),
+        revoked: false,
     })
 }
 
+/// A refresh the platform answered with an HTTP failure other than revocation.
+#[derive(Debug)]
+struct ArceeRefreshHttpError {
+    status: u16,
+    message: String,
+}
+
+impl std::fmt::Display for ArceeRefreshHttpError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ArceeRefreshHttpError {}
+
 /// A stored login that cannot sign an inference request, as a run failure.
 pub(super) fn auth_run_failure(error: anyhow::Error) -> anyhow::Error {
-    let transient_transport = error.chain().any(|source| {
-        source
-            .downcast_ref::<reqwest::Error>()
-            .is_some_and(|error| error.is_connect() || error.is_timeout())
-    });
-    let not_signed_in = error
-        .downcast_ref::<StoredArceeAuthConfigurationError>()
-        .is_some();
-    let (kind, summary) = if transient_transport {
-        (
+    let diagnostic = truncate(&redact_credentials(&format!("{error:#}"), &[]));
+    let stored = error.downcast_ref::<StoredArceeAuthConfigurationError>();
+    let refresh_status = error
+        .downcast_ref::<ArceeRefreshHttpError>()
+        .map(|refresh| refresh.status);
+    let failure = if is_transient_transport(&error) {
+        RunFailure::request(
             RunFailureKind::Transport,
+            true,
             "The connection failed while refreshing Arcee authentication.",
+            diagnostic,
         )
-    } else if not_signed_in {
-        (
+    } else if let Some(stored) = stored {
+        RunFailure::request(
             RunFailureKind::Authentication,
-            "Not signed in to Arcee. Sign in to continue.",
+            false,
+            if stored.revoked {
+                "The Arcee sign-in expired or was revoked. Sign in again to continue."
+            } else {
+                "Not signed in to Arcee. Sign in to continue."
+            },
+            diagnostic,
         )
+    } else if let Some(status) = refresh_status {
+        if status == 429 || status >= 500 {
+            RunFailure::request(
+                RunFailureKind::Capacity,
+                true,
+                "The Arcee sign-in service is temporarily unavailable.",
+                diagnostic,
+            )
+        } else {
+            RunFailure::request(
+                RunFailureKind::Authentication,
+                false,
+                "The Arcee sign-in could not be refreshed. Sign in again to continue.",
+                diagnostic,
+            )
+        }
     } else {
-        (
-            RunFailureKind::Authentication,
-            "The Arcee sign-in expired or was revoked. Sign in again to continue.",
-        )
+        RunFailure::unknown(diagnostic)
     };
-    anyhow::Error::new(RunFailure {
-        kind,
-        phase: RunFailurePhase::Request,
-        transient: transient_transport,
-        partial_output: PartialModelOutput::default(),
-        attempt_count: 1,
-        http_status: None,
-        retry_after_ms: None,
-        summary: summary.to_string(),
-        diagnostic: truncate(&redact_credentials(&format!("{error:#}"), &[])),
-        recovery_action: RecoveryAction::None,
-    })
+    anyhow::Error::new(failure)
 }
 
 /// The platform refused an access token that a refresh had just produced.
 pub(super) fn rejected_login_run_failure(message: &str) -> anyhow::Error {
-    anyhow::Error::new(RunFailure {
-        kind: RunFailureKind::Authentication,
-        phase: RunFailurePhase::Request,
-        transient: false,
-        partial_output: PartialModelOutput::default(),
-        attempt_count: 1,
-        http_status: Some(401),
-        retry_after_ms: None,
-        summary: "Arcee rejected the sign-in. Sign in again to continue.".to_string(),
-        diagnostic: truncate(&redact_credentials(message, &[])),
-        recovery_action: RecoveryAction::None,
-    })
+    let mut failure = RunFailure::request(
+        RunFailureKind::Authentication,
+        false,
+        "Arcee rejected the sign-in. Sign in again to continue.",
+        truncate(&redact_credentials(message, &[])),
+    );
+    failure.http_status = Some(401);
+    anyhow::Error::new(failure)
 }
 
 fn classify_stored_auth_data_error(error: anyhow::Error) -> anyhow::Error {
@@ -932,9 +950,12 @@ async fn refresh_and_store_auth_at(
         }
         RefreshOutcome::Revoked => {
             let _ = remove_auth_path(auth_path);
-            Err(stored_auth_configuration_error(
-                "Arcee authorization was revoked or expired; run `nac arcee-auth login` again.",
-            ))
+            Err(anyhow!(StoredArceeAuthConfigurationError {
+                message:
+                    "Arcee authorization was revoked or expired; run `nac arcee-auth login` again."
+                        .to_string(),
+                revoked: true,
+            }))
         }
     }
 }
@@ -1016,11 +1037,14 @@ pub(super) async fn request_token_refresh(
 
     match error_code.as_deref() {
         Some("invalid_grant") | Some("invalid_client") => Ok(RefreshOutcome::Revoked),
-        _ => Err(anyhow!(
-            "Arcee token refresh failed with HTTP {}: {}",
-            status.as_u16(),
-            truncate(&redact_credentials(&body, &[refresh_token]))
-        )),
+        _ => Err(anyhow!(ArceeRefreshHttpError {
+            status: status.as_u16(),
+            message: format!(
+                "Arcee token refresh failed with HTTP {}: {}",
+                status.as_u16(),
+                truncate(&redact_credentials(&body, &[refresh_token]))
+            ),
+        })),
     }
 }
 

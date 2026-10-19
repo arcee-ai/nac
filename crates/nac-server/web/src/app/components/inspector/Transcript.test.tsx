@@ -199,13 +199,18 @@ describe("failureRecoveryAffordance for a refused login", () => {
   };
 
   it("offers a sign-in on a backend that signs in", () => {
-    expect(failureRecoveryAffordance(failure, null, true, true)).toBe("sign_in");
+    expect(failureRecoveryAffordance(failure, null, true, "needed")).toBe("sign_in");
+  });
+
+  it("offers the retry once the sign-in has succeeded", () => {
+    expect(failureRecoveryAffordance(failure, null, true, "restored")).toBe("regenerate");
+    expect(failureRecoveryAffordance(failure, null, false, "restored")).toBeNull();
   });
 
   it("keeps settings for a key or a configuration failure", () => {
-    expect(failureRecoveryAffordance(failure, null, true, false)).toBe("settings");
-    expect(failureRecoveryAffordance({ ...failure, kind: "configuration" }, null, true, true)).toBe(
-      "settings",
-    );
+    expect(failureRecoveryAffordance(failure, null, true)).toBe("settings");
+    expect(
+      failureRecoveryAffordance({ ...failure, kind: "configuration" }, null, true, "needed"),
+    ).toBe("settings");
   });
 });

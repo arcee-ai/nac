@@ -248,7 +248,6 @@ export function Transcript({
   const navigate = useNavigate();
   const backend = snapshot?.metadata.backend ?? null;
   const loginProvider = backend ? managedAuthProvider(backend) : null;
-  const { start: startLogin } = useDeviceLogin();
   const toNotice = useErrorNotice(sessionId, backend);
   // Read before the notice is built, since hook order cannot depend on whether
   // this run failed.
@@ -540,12 +539,18 @@ export function Transcript({
     ? (liveFailure ?? snapshot?.run_failure ?? goalQuery.data?.last_failure ?? null)
     : null;
   const latestUser = [...turns].reverse().find((turn) => turn.kind === "user");
+  // The failure a completed sign-in answered, so its box turns to a retry.
+  const failureKey = durableFailure
+    ? `${durableFailure.summary}\n${durableFailure.diagnostic}`
+    : null;
+  const [signedInFor, setSignedInFor] = useState<string | null>(null);
+  const { start: startLogin } = useDeviceLogin(() => setSignedInFor(failureKey));
   const recoveryAffordance = durableFailure
     ? failureRecoveryAffordance(
         durableFailure,
         goalQuery.data,
         latestUser?.kind === "user",
-        loginProvider !== null,
+        loginProvider === null ? undefined : signedInFor === failureKey ? "restored" : "needed",
       )
     : null;
   const failureAction = durableFailure

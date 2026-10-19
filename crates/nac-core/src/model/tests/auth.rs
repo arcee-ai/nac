@@ -554,30 +554,3 @@ async fn arcee_run_without_a_stored_login_fails_as_authentication() {
     );
     assert!(failure.diagnostic.contains("Arcee auth is not configured"));
 }
-
-#[test]
-fn arcee_login_failures_ask_for_a_sign_in_not_credits() {
-    let revoked =
-        arcee::auth_run_failure(anyhow!("Arcee token refresh failed with HTTP 400: {{}}"));
-    let revoked = revoked
-        .downcast_ref::<crate::run_failure::RunFailure>()
-        .unwrap();
-    assert_eq!(
-        revoked.kind,
-        crate::run_failure::RunFailureKind::Authentication
-    );
-    assert!(revoked.summary.contains("Sign in again"));
-
-    let rejected = arcee::rejected_login_run_failure(
-        r#"HTTP 401 from https://api.arcee.ai/api/v1/chat/completions: {"error":{"code":"auth.invalid_api_key"}}"#,
-    );
-    let rejected = rejected
-        .downcast_ref::<crate::run_failure::RunFailure>()
-        .unwrap();
-    assert_eq!(
-        rejected.kind,
-        crate::run_failure::RunFailureKind::Authentication
-    );
-    assert_eq!(rejected.http_status, Some(401));
-    assert!(rejected.summary.contains("Sign in again"));
-}

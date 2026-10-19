@@ -78,38 +78,29 @@ fn codex_auth_run_failure(error: anyhow::Error) -> RunFailure {
     let configuration = error
         .downcast_ref::<StoredCodexAuthConfigurationError>()
         .is_some();
-    let transient_transport = error.chain().any(|source| {
-        source
-            .downcast_ref::<reqwest::Error>()
-            .is_some_and(|error| error.is_connect() || error.is_timeout())
-    });
-    let kind = if configuration {
-        RunFailureKind::Configuration
+    let transient_transport = is_transient_transport(&error);
+    let (kind, summary) = if configuration {
+        (
+            RunFailureKind::Configuration,
+            "Codex authentication is not configured correctly.",
+        )
     } else if transient_transport {
-        RunFailureKind::Transport
+        (
+            RunFailureKind::Transport,
+            "The connection failed while refreshing Codex authentication.",
+        )
     } else {
-        RunFailureKind::Authentication
+        (
+            RunFailureKind::Authentication,
+            "Codex authentication could not be refreshed.",
+        )
     };
-    RunFailure {
+    RunFailure::request(
         kind,
-        phase: RunFailurePhase::Request,
-        transient: transient_transport,
-        partial_output: PartialModelOutput::default(),
-        attempt_count: 1,
-        http_status: None,
-        retry_after_ms: None,
-        summary: match kind {
-            RunFailureKind::Configuration => {
-                "Codex authentication is not configured correctly.".to_string()
-            }
-            RunFailureKind::Transport => {
-                "The connection failed while refreshing Codex authentication.".to_string()
-            }
-            _ => "Codex authentication could not be refreshed.".to_string(),
-        },
-        diagnostic: truncate(&redact_credentials(&format!("{error:#}"), &[])),
-        recovery_action: RecoveryAction::None,
-    }
+        transient_transport,
+        summary,
+        truncate(&redact_credentials(&format!("{error:#}"), &[])),
+    )
 }
 
 #[derive(Debug, Deserialize)]
