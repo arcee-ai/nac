@@ -137,6 +137,18 @@ describe("stdio arguments", () => {
     expect(fakes.create.mock.calls[0][0].args).toEqual(sent);
   });
 
+  it("shows the agentic-mcp example as two fields and sends exactly those two", async () => {
+    render(<Form record={stdioRecord(["--allow", ALLOWLIST])} />);
+    expect(screen.getAllByRole("textbox", { name: /^Argument \d+$/ })).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fakes.update).toHaveBeenCalledOnce());
+    expect(fakes.test.mock.calls[0][0].args).toEqual(["--allow", ALLOWLIST]);
+    expect(fakes.update.mock.calls[0][0].payload.args).toEqual(["--allow", ALLOWLIST]);
+  });
+
   it("reopens a saved configuration in order and updates it after a removal", async () => {
     render(<Form record={stdioRecord(["--allow", ALLOWLIST, "--verbose"])} />);
     expect([1, 2, 3].map((n) => argument(n).value)).toEqual(["--allow", ALLOWLIST, "--verbose"]);

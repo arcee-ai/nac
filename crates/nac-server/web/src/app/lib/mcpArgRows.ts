@@ -11,8 +11,8 @@ export function newArgRow(value = ""): ArgRow {
   return { id: nextId, value };
 }
 
-export function argRows(args: readonly string[] | null | undefined): ArgRow[] {
-  return (args ?? []).map((value) => newArgRow(value));
+export function argRows(args: readonly string[] = []): ArgRow[] {
+  return args.map((value) => newArgRow(value));
 }
 
 /** One argument per row, in order: trimmed, blanks dropped (the old one-per-line policy), never split. */
