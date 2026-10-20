@@ -305,13 +305,25 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});\n
       await form.getByRole("button", { name: "Stdio", exact: true }).click();
       await form.getByRole("button", { name: "Legacy", exact: true }).click();
       await form.getByPlaceholder("npx").fill(process.execPath);
-      await form.getByPlaceholder("-y\nsome-mcp-server").fill(script);
+      // A long comma list is still one argument; the fixture script ignores it.
+      const allowlist = Array.from({ length: 12 }, (_, at) => `linear_tool_${at}`).join(",");
+      for (const value of [script, allowlist]) {
+        await form.getByRole("button", { name: "Add argument", exact: true }).click();
+        await page.keyboard.insertText(value);
+      }
+      await expect(form.getByRole("textbox", { name: "Argument 2" })).toHaveValue(allowlist);
+      await expect(form.getByRole("button", { name: "Remove argument 2" })).toBeInViewport();
+      expect(
+        await page.locator("html").evaluate((root) => root.scrollWidth <= root.clientWidth),
+      ).toBe(true);
       await form.getByRole("button", { name: "Test connection", exact: true }).click();
       await expect(form.getByText("1 tool found", { exact: true })).toBeVisible();
       await expect(form.getByText("fixture_echo", { exact: true })).toBeVisible();
       await form.getByRole("button", { name: "Save", exact: true }).click();
       if (mobile) await page.getByRole("button", { name: "injected_fixture", exact: true }).click();
       const editing = page.getByRole("dialog").last();
+      await expect(editing.getByRole("textbox", { name: "Argument 1" })).toHaveValue(script);
+      await expect(editing.getByRole("textbox", { name: "Argument 2" })).toHaveValue(allowlist);
       await editing.getByRole("button", { name: "Connect", exact: true }).click();
       await expect(editing.getByText("Runtime: connected", { exact: true })).toBeVisible();
       await editing.getByRole("button", { name: "Reload", exact: true }).click();
