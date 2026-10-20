@@ -44,10 +44,7 @@ const Radio: React.FC<RadioProps> = ({
         className={cn(
           "size-4 rounded-full border shadow-concave",
           disabled
-            ? cn(
-                "bg-btn-secondary-disabled",
-                checked ? "border-primary" : "border-muted",
-              )
+            ? cn("bg-btn-secondary-disabled", checked ? "border-primary" : "border-muted")
             : "border-primary bg-btn-secondary group-hover:bg-btn-secondary-hovered group-active:bg-btn-secondary-pressed",
         )}
       />

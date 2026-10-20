@@ -29,7 +29,8 @@ const InputWrapper: React.FC<InputWrapperProps> = ({
   children,
 }) => {
   const labelSize = caption === "compact" ? LabelSize.Micro : LabelSize.Small;
-  const captionClass = caption === "compact" ? "label-micro" : caption === "large" ? "label-small" : "text-micro";
+  const captionClass =
+    caption === "compact" ? "label-micro" : caption === "large" ? "label-small" : "text-micro";
 
   return (
     <div className={cn("flex text-left flex-col gap-1", className)}>

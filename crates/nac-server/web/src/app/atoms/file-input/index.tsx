@@ -74,7 +74,9 @@ const FileInput: React.FC<FileInputProps> = ({
             aria-hidden="true"
             color="var(--color-fill-basic-primary)"
           />
-          <span className="file-input-meta min-w-0 flex-1 truncate text-basic-primary">{file.name}</span>
+          <span className="file-input-meta min-w-0 flex-1 truncate text-basic-primary">
+            {file.name}
+          </span>
           <span className="file-input-meta shrink-0 text-basic-tertiary">{file.size}</span>
           <button
             type="button"

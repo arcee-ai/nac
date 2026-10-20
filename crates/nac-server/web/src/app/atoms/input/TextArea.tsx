@@ -38,10 +38,10 @@ const TextArea: React.FC<TextAreaProps> & { Size: typeof TextAreaSize } = ({
     required={required}
     validation={validation}
     validationText={validationText}
-      hintText={hintText}
-      caption={textAreaSize === TextAreaSize.Large ? "large" : "compact"}
-      className={className}
-    >
+    hintText={hintText}
+    caption={textAreaSize === TextAreaSize.Large ? "large" : "compact"}
+    className={className}
+  >
     <textarea
       ref={ref}
       className={cn(

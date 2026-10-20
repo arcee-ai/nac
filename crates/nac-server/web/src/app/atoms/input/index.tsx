@@ -155,10 +155,7 @@ const Input: React.FC<InputProps> & {
           <Icon
             iconName={leadingIconName}
             size={iconSizeFor[inputSize]}
-            className={cn(
-              "absolute",
-              largeSearch ? "top-3 left-1.5" : leadingIconPos[inputSize],
-            )}
+            className={cn("absolute", largeSearch ? "top-3 left-1.5" : leadingIconPos[inputSize])}
             color={iconColor}
           />
         ) : null}
