@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { SubagentChatInputBox } from "@/app/components/inspector/SubagentChatInputBox";
 import { toRunError } from "@/app/lib/providerError";
@@ -47,7 +48,10 @@ export function SubagentComposer({
   const startOrchestrator = useStartManagedOrchestrator();
   const cancelChild = useCancelTraditionalChild();
   const cancelOrchestrator = useCancelManagedOrchestrator();
-  const [value, setValue] = useState("");
+  // Kept by durable target outside this component, so a remount on a status
+  // change or a trip to the transcript and back does not drop an unsent message.
+  const drafts = useNativeRuntime().stores.promptDraftStore;
+  const draft = drafts.useDraft(target.id);
   const [background, setBackground] = useState(target.background);
   const running = target.status === "running";
   const busy =
@@ -57,7 +61,8 @@ export function SubagentComposer({
     cancelOrchestrator.isPending;
 
   const submit = async () => {
-    const prompt = value.trim();
+    const submitted = draft;
+    const prompt = submitted.text.trim();
     if (!prompt) return;
     try {
       if (target.mode === "orchestrator") {
@@ -82,7 +87,8 @@ export function SubagentComposer({
           },
         });
       }
-      setValue("");
+      // Text typed while the request was in flight is a new message; keep it.
+      drafts.acknowledge(target.id, submitted);
     } catch (error) {
       toast.error(`Unable to update the subagent: ${errorMessage(toRunError(error))}`);
     }
@@ -108,8 +114,8 @@ export function SubagentComposer({
 
   return (
     <SubagentChatInputBox
-      value={value}
-      onChange={setValue}
+      value={draft.text}
+      onChange={(text) => drafts.update(target.id, text)}
       onSubmit={() => void submit()}
       onStop={() => void stop()}
       running={running}

@@ -38,6 +38,12 @@ interface SessionLayoutState {
   selectedThreadRunning: boolean;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
+  /**
+   * Subagent row each parent's Subagents panel has open, by parent session.
+   * Kept per parent rather than reset with the session, so returning from a
+   * subagent's transcript reopens the row that was open.
+   */
+  selectedSubagents: ReadonlyMap<string, string>;
   /** Revision the panels are looking at, or null for the live working tree. */
   selectedRevision: number | null;
   /** File the Files panel is showing. */
@@ -64,6 +70,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     selectedThreadEpisode: null,
     selectedThreadRunning: false,
     selectedWorkset: null,
+    selectedSubagents: new Map(),
     selectedRevision: null,
     selectedFile: null,
     toggledFolders: new Set(),
@@ -208,6 +215,13 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     if (selectedWorkset) showSidePanelList(false);
   }
 
+  function selectSubagent(parentSessionId: string, key: string): void {
+    if (getState().selectedSubagents.get(parentSessionId) === key) return;
+    setState((state) => ({
+      selectedSubagents: new Map(state.selectedSubagents).set(parentSessionId, key),
+    }));
+  }
+
   /** Point the panels at a captured revision, or back at the working tree. */
   function selectRevision(selectedRevision: number | null): void {
     setState({ selectedRevision });
@@ -275,6 +289,8 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
   const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
   const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
+  const useSelectedSubagent = (parentSessionId: string) =>
+    useStore((s) => s.selectedSubagents.get(parentSessionId) ?? null);
   const useSelectedRevision = () => useStore((s) => s.selectedRevision);
   const useSelectedFile = () => useStore((s) => s.selectedFile);
   const useToggledFolders = () => useStore((s) => s.toggledFolders);
@@ -294,6 +310,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     selectThread,
     setSelectedThreadRunning,
     selectWorkset,
+    selectSubagent,
     selectRevision,
     selectFile,
     toggleFolder,
@@ -308,6 +325,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     useSelectedThreadEpisode,
     useSelectedThreadRunning,
     useSelectedWorkset,
+    useSelectedSubagent,
     useSelectedRevision,
     useSelectedFile,
     useToggledFolders,
@@ -328,6 +346,7 @@ export const {
   selectThread,
   setSelectedThreadRunning,
   selectWorkset,
+  selectSubagent,
   selectRevision,
   selectFile,
   toggleFolder,
@@ -342,6 +361,7 @@ export const {
   useSelectedThreadEpisode,
   useSelectedThreadRunning,
   useSelectedWorkset,
+  useSelectedSubagent,
   useSelectedRevision,
   useSelectedFile,
   useToggledFolders,

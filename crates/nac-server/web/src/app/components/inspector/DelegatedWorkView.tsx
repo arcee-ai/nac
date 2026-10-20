@@ -1,11 +1,12 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 
 import { Button, ButtonSize, ButtonVariant, ChatSessionButton, Icon, IconName } from "@/app/atoms";
 import { SubagentComposer } from "@/app/components/inspector/SubagentComposer";
 import { SubagentPreview } from "@/app/components/inspector/SubagentPreview";
 import { PanelSplit } from "@/app/components/inspector/PanelSplit";
+import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
 import { groupByRecency } from "@/app/lib/projects";
 
@@ -87,19 +88,19 @@ export function DelegatedWorkView({
   sessionId: string;
   behavior: SessionBehavior;
 }) {
-  const { showSidePanelList } = useNativeRuntime().stores.sessionLayoutStore;
+  const { showSidePanelList, selectSubagent, useSelectedSubagent } =
+    useNativeRuntime().stores.sessionLayoutStore;
+  // Below the desktop width the list and the detail are never both on screen.
+  const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
+  const narrow = isMobile || isTablet;
 
   const supportsOrchestrators =
     useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
   const children = useTraditionalChildren(sessionId, true);
   const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
   const now = useNow(60_000);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [seenSession, setSeenSession] = useState(sessionId);
-  if (seenSession !== sessionId) {
-    setSeenSession(sessionId);
-    setSelectedKey(null);
-  }
+  const selectedKey = useSelectedSubagent(sessionId);
 
   const rows = useMemo(() => {
     const childRows = (children.data ?? []).map(rowFromChild);
@@ -111,20 +112,24 @@ export function DelegatedWorkView({
 
   const newestKey =
     [...rows].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.key ?? null;
-  if (!supportsOrchestrators && selectedKey?.startsWith("orchestrator:")) setSelectedKey(null);
-  if (selectedKey == null && newestKey != null) setSelectedKey(newestKey);
-
+  // A choice that is hidden by policy or gone from the list is kept, not
+  // replaced: the newest row stands in until it comes back. Drafts belong to
+  // their own subagent, so the stand-in never shows or sends the hidden one's.
   const selected =
     rows.find((row) => row.key === selectedKey) ??
     rows.find((row) => row.key === newestKey) ??
     null;
+  // Pin the first default, so another subagent updating does not move it.
+  useEffect(() => {
+    if (selectedKey == null && newestKey != null) selectSubagent(sessionId, newestKey);
+  }, [newestKey, selectSubagent, selectedKey, sessionId]);
   const groups = useMemo(
     () => groupByRecency(rows, (row) => ({ updatedAt: row.updatedAt, pinned: false }), now),
     [rows, now],
   );
 
   const chooseRow = (key: string) => {
-    setSelectedKey(key);
+    selectSubagent(sessionId, key);
     showSidePanelList(false);
   };
 
@@ -150,8 +155,18 @@ export function DelegatedWorkView({
       </Button>
     </div>
   );
+  // Shown wherever the list is, so a narrow list opened over a failed or
+  // pending load still explains itself and offers the retry.
+  const listState = failed ? (
+    loadError
+  ) : rows.length === 0 && !loaded ? (
+    <p role="status" className="label-small m-auto text-basic-tertiary">
+      Loading subagents…
+    </p>
+  ) : null;
   const list = (
     <div className="flex flex-col gap-8">
+      {listState}
       {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-2">
           <div className="flex items-baseline gap-2 px-2">
@@ -186,7 +201,8 @@ export function DelegatedWorkView({
               fallbackText={selected.fallbackText}
               icon={selected.icon}
             />
-            <div className="shrink-0 p-2">
+            {/* A phone's tab bar floats over the bottom of the panel, as for Files and Threads. */}
+            <div className="shrink-0 p-2 pb-[104px] md:pb-2">
               <SubagentComposer
                 key={`${selected.mode}:${selected.id}:${selected.status}`}
                 parentSessionId={sessionId}
@@ -197,14 +213,12 @@ export function DelegatedWorkView({
               />
             </div>
           </>
-        ) : failed ? (
-          loadError
-        ) : loaded ? (
-          <NoSubagents />
+        ) : listState ? (
+          narrow ? (
+            listState
+          ) : null
         ) : (
-          <p role="status" className="label-small m-auto text-basic-tertiary">
-            Loading subagents…
-          </p>
+          <NoSubagents />
         )}
       </div>
     </PanelSplit>
