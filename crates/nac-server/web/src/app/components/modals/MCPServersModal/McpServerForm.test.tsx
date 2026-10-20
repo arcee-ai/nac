@@ -192,6 +192,27 @@ describe("stdio arguments", () => {
     expect(document.activeElement).toBe(argument(1));
   });
 
+  it("splits a pasted one-per-line list into fields and keeps a single-line paste whole", async () => {
+    render(<Form record={stdioRecord(["--allow", "--verbose"])} />);
+    const paste = (field: HTMLInputElement, text: string) =>
+      fireEvent.paste(field, { clipboardData: { getData: () => text } });
+
+    argument(2).setSelectionRange(2, 9);
+    paste(argument(2), "quiet\r\n-y\n\nsome-mcp-server\n");
+    expect(document.activeElement).toBe(argument(4));
+    paste(argument(1), ALLOWLIST);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fakes.update).toHaveBeenCalledOnce());
+    // A paste without newlines is left to the input, so only the multi-line paste changed rows.
+    expect(fakes.update.mock.calls[0][0].payload.args).toEqual([
+      "--allow",
+      "--quiet",
+      "-y",
+      "some-mcp-server",
+    ]);
+  });
+
   it("never submits a surrounding form from its buttons", () => {
     render(<Form record={stdioRecord(["one"])} />);
 

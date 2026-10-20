@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, type ClipboardEvent } from "react";
 
 import {
   Button,
@@ -51,6 +51,27 @@ export function ArgsEditor({
     pendingFocus.current = (rows[index + 1] ?? rows[index - 1])?.id ?? "add";
     onChange(rows.filter((_, at) => at !== index));
   };
+  // An input drops newlines, so a pasted one-per-line list would become one glued argument.
+  const paste = (index: number, event: ClipboardEvent<HTMLInputElement>) => {
+    const text = event.clipboardData.getData("text");
+    if (!/[\r\n]/.test(text)) return;
+    event.preventDefault();
+    const { selectionStart, selectionEnd } = event.currentTarget;
+    const value = rows[index].value;
+    const lines = (
+      value.slice(0, selectionStart ?? value.length) +
+      text +
+      value.slice(selectionEnd ?? value.length)
+    )
+      .split(/\r\n|\r|\n/)
+      .filter((line) => line.trim());
+    if (lines.length === 0) return;
+    const pasted = lines.map((line, at) =>
+      at === 0 ? { ...rows[index], value: line } : newArgRow(line),
+    );
+    pendingFocus.current = pasted[pasted.length - 1].id;
+    onChange([...rows.slice(0, index), ...pasted, ...rows.slice(index + 1)]);
+  };
   const lower = itemLabel.toLowerCase();
 
   return (
@@ -72,6 +93,7 @@ export function ArgsEditor({
             inputClassName="font-mono"
             aria-label={`${itemLabel} ${index + 1}`}
             value={row.value}
+            onPaste={(event) => paste(index, event)}
             onChange={(event) =>
               onChange(
                 rows.map((item) =>
