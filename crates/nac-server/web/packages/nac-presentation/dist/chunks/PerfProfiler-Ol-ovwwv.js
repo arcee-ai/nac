@@ -5735,8 +5735,12 @@ ec.Name = Xs;
 //#endregion
 //#region src/app/atoms/loader/index.tsx
 var tc = /* @__PURE__ */ function(e) {
-	return e[e.XSmall = 16] = "XSmall", e[e.Micro = 16] = "Micro", e[e.Small = 20] = "Small", e[e.Medium = 24] = "Medium", e[e.MediumLarge = 28] = "MediumLarge", e[e.Large = 32] = "Large", e[e.X2Large = 36] = "X2Large", e[e.X3Large = 40] = "X3Large", e[e.XLarge = 48] = "XLarge", e;
-}({}), nc = /* @__PURE__ */ function(e) {
+	return e[e.XSmall = 16] = "XSmall", e[e.Small = 20] = "Small", e[e.Medium = 24] = "Medium", e[e.MediumLarge = 28] = "MediumLarge", e[e.Large = 32] = "Large", e[e.X2Large = 36] = "X2Large", e[e.X3Large = 40] = "X3Large", e[e.XLarge = 48] = "XLarge", e;
+}({});
+(function(e) {
+	e.Micro = 16;
+})(tc ||= {});
+var nc = /* @__PURE__ */ function(e) {
 	return e.Brand = "var(--color-fill-accent-primary)", e.Neutral = "var(--color-fill-basic-primary)", e.Destructive = "var(--color-fill-error-primary)", e.OnPrimary = "var(--color-fill-btn-primary)", e;
 }({}), rc = ({ size: e = 48, variant: t = "var(--color-fill-basic-primary)", className: n = "", ...r }) => /* @__PURE__ */ x("div", {
 	className: N("loader flex size-fit", n),

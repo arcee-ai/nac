@@ -5,7 +5,6 @@ import { cn } from "../../lib/cn";
 /** Pixel sizes from the Figma Loader component (xs through 4xl). */
 export enum LoaderSize {
   XSmall = 16,
-  Micro = 16,
   Small = 20,
   Medium = 24,
   MediumLarge = 28,
@@ -13,6 +12,11 @@ export enum LoaderSize {
   X2Large = 36,
   X3Large = 40,
   XLarge = 48,
+}
+
+/** 16px, same as {@link LoaderSize.XSmall}. Existing call sites use this name. */
+export namespace LoaderSize {
+  export const Micro = LoaderSize.XSmall;
 }
 
 /** CSS color for the spinning glyph; the icon path renders with currentColor. */
