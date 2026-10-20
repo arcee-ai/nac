@@ -112,8 +112,7 @@ async function expectTabOrder(page: Page, names: string[]) {
   }
 }
 
-/** Neither the dialog nor any scroll container inside it overflows sideways, and every
- * argument field and Add/Remove button stays within the dialog. */
+/** Checks every scroll container in the dialog, which can clip overflow the page never sees. */
 async function expectNoSidewaysOverflow(dialog: Locator, controls: Locator) {
   const overflowing = await dialog.evaluate((root: DomElement) =>
     [root, ...Array.from(root.querySelectorAll("*"))]
