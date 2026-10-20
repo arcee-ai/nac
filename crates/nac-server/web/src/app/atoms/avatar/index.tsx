@@ -38,12 +38,11 @@ const Avatar: React.FC<AvatarProps> & { Size: typeof AvatarSize } = ({
   glyph = false,
   className = "",
 }) => {
-  const [failed, setFailed] = React.useState(false);
-  React.useEffect(() => setFailed(false), [imageUrl]);
+  const [failedUrl, setFailedUrl] = React.useState<string | null>(null);
 
   const trimmed = name?.trim() ?? "";
   const initial = glyph ? trimmed : (trimmed[0]?.toUpperCase() ?? "?");
-  const showImage = Boolean(imageUrl) && !failed;
+  const showImage = Boolean(imageUrl) && failedUrl !== imageUrl;
   const customColor = color !== DEFAULT_COLOR;
 
   return (
@@ -66,7 +65,7 @@ const Avatar: React.FC<AvatarProps> & { Size: typeof AvatarSize } = ({
           src={imageUrl ?? undefined}
           alt={trimmed}
           className="size-full rounded-full object-cover"
-          onError={() => setFailed(true)}
+          onError={() => setFailedUrl(imageUrl ?? null)}
         />
       ) : (
         initial

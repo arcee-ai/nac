@@ -49,7 +49,7 @@ const Switch: React.FC<SwitchProps> = ({
     onClick={() => !disabled && onChange?.(!checked)}
     className={cn(
       "relative shrink-0 rounded-full shadow-convex transition-colors duration-150",
-      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--blue-600)]",
+      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]",
       TRACK[size],
       disabled
         ? cn(

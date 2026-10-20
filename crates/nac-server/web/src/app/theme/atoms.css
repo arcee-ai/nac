@@ -595,18 +595,6 @@
 textarea.input {
   resize: none;
 }
-textarea.input-small {
-  height: 93px;
-  padding: 4px;
-}
-textarea.input-medium {
-  height: 86px;
-  padding: 8px;
-}
-textarea.input-large {
-  height: 120px;
-  padding: 12px;
-}
 .input-wrapper .btn {
   position: absolute;
   top: 0;
@@ -632,7 +620,7 @@ textarea.input-large {
   box-shadow: none;
 }
 .btn-sticky:focus-visible {
-  outline: 2px solid var(--blue-600);
+  outline: 2px solid var(--color-border-focus-outline);
   outline-offset: 2px;
 }
 .btn-sticky.btn-large.btn-icon {
@@ -913,7 +901,7 @@ textarea.input-large {
   outline: none;
 }
 .range-input:focus-visible {
-  outline: 2px solid var(--blue-600);
+  outline: 2px solid var(--color-border-focus-outline);
   outline-offset: 2px;
 }
 .range-knob {

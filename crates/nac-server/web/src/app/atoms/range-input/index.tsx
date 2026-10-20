@@ -146,7 +146,10 @@ const RangeInput: React.FC<RangeInputProps> = ({
         style={{ width: `${percent}%` }}
       />
       <div
-        className="range-knob absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-input-knob"
+        className={cn(
+          "range-knob absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full",
+          disabled ? "bg-input-knob-disabled" : "bg-input-knob",
+        )}
         style={{ left: `${percent}%` }}
       />
     </div>

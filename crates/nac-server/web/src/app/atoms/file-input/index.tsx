@@ -54,6 +54,8 @@ const FileInput: React.FC<FileInputProps> = ({
         ref={inputRef}
         type="file"
         className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
         multiple={multiple}
         accept={accept}
         disabled={disabled}
@@ -106,8 +108,8 @@ const FileInput: React.FC<FileInputProps> = ({
           {uploadLabel}
         </Button>
       ) : null}
-      {errors.map((error) => (
-        <p key={error} className="label-micro w-full text-error-primary">
+      {errors.map((error, index) => (
+        <p key={`${index}-${error}`} className="label-micro w-full text-error-primary">
           {error}
         </p>
       ))}

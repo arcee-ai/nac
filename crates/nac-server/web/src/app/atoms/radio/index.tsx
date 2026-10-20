@@ -59,10 +59,14 @@ const Radio: React.FC<RadioProps> = ({
       ) : null}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--blue-600)] opacity-0 peer-focus-visible:opacity-100"
+        className="pointer-events-none absolute left-1/2 top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--color-border-focus-outline)] opacity-0 peer-focus-visible:opacity-100"
       />
     </span>
-    {children ? <span className="label-small text-basic-primary">{children}</span> : null}
+    {children ? (
+      <span className={cn("label-small", disabled ? "text-basic-muted" : "text-basic-primary")}>
+        {children}
+      </span>
+    ) : null}
   </label>
 );
 
