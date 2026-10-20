@@ -5,6 +5,7 @@ import type { Locator, Page } from "@playwright/test";
 
 import { createProject, createSession, expect, test } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
+import { STDIO_MCP_SERVER, openCustomMcpServer } from "./mcp-library-fixture";
 
 // Browser globals used inside evaluate(); the e2e project has no DOM lib.
 type DomElement = {
@@ -39,13 +40,6 @@ test.use({ orchestration: "0" });
 
 const ALLOWLIST = "linear_add_comment,linear_read_issue,linear_update_issue";
 const SPACED = `--label="${"a long spaced value ".repeat(8).trim()}"`;
-// The local stdio double has one inert tool and ignores its arguments.
-const STDIO_SERVER = `const rl=require('node:readline').createInterface({input:process.stdin});
-rl.on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;
-const result=m.method==='initialize'?{protocolVersion:m.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}}:
-m.method==='tools/list'?{tools:[{name:'fixture_echo',description:'Local inert fixture',inputSchema:{type:'object',properties:{}}}]}:{};
-process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});\n`;
-
 type Sent = { method: string; path: string; body: Record<string, unknown> };
 
 /** Records the browser's MCP library writes, with the JSON body each one sent. */
@@ -64,18 +58,26 @@ function recordWrites(page: Page) {
   return sent;
 }
 
-async function openCustomServer(page: Page, mobile: boolean) {
-  await page.getByRole("button", { name: /^MCP servers/ }).click();
-  await page
-    .getByRole("button", { name: mobile ? "Add server" : "Custom server", exact: true })
-    .click();
-  if (mobile) await page.getByRole("button", { name: "Custom", exact: true }).click();
-  return page.getByRole("dialog").last();
-}
-
 async function reopen(page: Page, mobile: boolean, name: string) {
   if (mobile) await page.getByRole("button", { name, exact: true }).click();
-  return page.getByRole("dialog").last();
+  const dialog = page.getByRole("dialog").last();
+  // The phone editor slides in; measure it only once its position has stopped changing.
+  const left = async () => (await dialog.boundingBox())?.x;
+  await expect
+    .poll(async () => {
+      const before = await left();
+      await page.waitForTimeout(100);
+      return before === (await left());
+    })
+    .toBe(true);
+  return dialog;
+}
+
+/** The header helper's forwarded-environment list, found by its label. */
+function forwardedEnvironment(dialog: Locator) {
+  return dialog
+    .getByText("Header helper forwarded environment", { exact: true })
+    .locator("xpath=ancestor::div[.//textarea][1]//textarea");
 }
 
 /** Real clipboard paste over the given selection of `field`. */
@@ -110,8 +112,9 @@ async function expectTabOrder(page: Page, names: string[]) {
   }
 }
 
-/** Neither the dialog nor any scroll container inside it overflows sideways. */
-async function expectNoSidewaysOverflow(dialog: Locator, removeButtons: Locator) {
+/** Neither the dialog nor any scroll container inside it overflows sideways, and every
+ * argument field and Add/Remove button stays within the dialog. */
+async function expectNoSidewaysOverflow(dialog: Locator, controls: Locator) {
   const overflowing = await dialog.evaluate((root: DomElement) =>
     [root, ...Array.from(root.querySelectorAll("*"))]
       .filter((element) => {
@@ -125,8 +128,10 @@ async function expectNoSidewaysOverflow(dialog: Locator, removeButtons: Locator)
   );
   expect(overflowing).toEqual([]);
   const bounds = (await dialog.boundingBox())!;
-  for (const button of await removeButtons.all()) {
-    const box = (await button.boundingBox())!;
+  const all = await controls.all();
+  expect(all.length).toBeGreaterThan(2);
+  for (const control of all) {
+    const box = (await control.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(bounds.x - 1);
     expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1);
   }
@@ -199,7 +204,7 @@ for (const mobile of [false, true]) {
     test.setTimeout(90_000);
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     const script = path.join(harness.runRoot, "argument-mcp.cjs");
-    await fs.writeFile(script, STDIO_SERVER);
+    await fs.writeFile(script, STDIO_MCP_SERVER);
     const project = await createProject(request, harness, { name: "MCP argument rows" });
     const fixture = await startHostedFixture(
       harness,
@@ -211,7 +216,7 @@ for (const mobile of [false, true]) {
         .grantPermissions(["clipboard-read", "clipboard-write"], { origin: fixture.baseUrl });
       await page.goto(fixture.baseUrl);
       const sent = recordWrites(page);
-      const form = await openCustomServer(page, mobile);
+      const form = await openCustomMcpServer(page, mobile);
       await form.getByPlaceholder("my_server").fill("argument_rows");
       await form.getByRole("button", { name: "Stdio", exact: true }).click();
       await form.getByRole("button", { name: "Legacy", exact: true }).click();
@@ -220,6 +225,10 @@ for (const mobile of [false, true]) {
       const field = (n: number) =>
         form.getByRole("textbox", { name: `Argument ${n}`, exact: true });
       const removes = form.getByRole("button", { name: /^Remove argument \d+$/ });
+      const controls = form
+        .getByRole("textbox", { name: /^Argument \d+$/ })
+        .or(removes)
+        .or(form.getByRole("button", { name: "Add argument", exact: true }));
 
       // Keyboard only from the command field: Add, then removing the only row returns to Add.
       await command.focus();
@@ -230,8 +239,16 @@ for (const mobile of [false, true]) {
       await page.keyboard.press("Space");
       expect(await focused(page)).toEqual({ name: "Add argument", ring: true });
       await expect(field(1)).toHaveCount(0);
-      for (const value of [script, "--middle", "--placeholder", "--keep-me", "--quiet-mode"]) {
-        await page.keyboard.press("Enter");
+      for (const [at, value] of [
+        script,
+        "--middle",
+        "--placeholder",
+        "--keep-me",
+        "--quiet-mode",
+      ].entries()) {
+        // Both activation keys add a row and focus it.
+        await page.keyboard.press(at === 1 ? "Space" : "Enter");
+        expect(await focused(page)).toEqual({ name: `Argument ${at + 1}`, ring: true });
         await page.keyboard.insertText(value);
         await page.keyboard.press("Tab");
         await page.keyboard.press("Tab");
@@ -283,8 +300,15 @@ for (const mobile of [false, true]) {
       await form.getByRole("button", { name: "Add argument", exact: true }).click();
       await page.keyboard.insertText(SPACED);
 
-      await expectNoSidewaysOverflow(form, removes);
+      await expectNoSidewaysOverflow(form, controls);
       await expectScrollsInside(page, field(6));
+      // Add and Remove still work beside the long value.
+      await form.getByRole("button", { name: "Add argument", exact: true }).click();
+      await expect(field(7)).toBeFocused();
+      await form.getByRole("button", { name: "Remove argument 7", exact: true }).click();
+      await expect(field(7)).toHaveCount(0);
+      await expect(field(6)).toHaveValue(SPACED);
+      await expect(field(6)).toBeFocused();
 
       const args = [script, ALLOWLIST, "--loud", "-y-mode", SPACED];
       await form.getByRole("button", { name: "Test connection", exact: true }).click();
@@ -300,7 +324,7 @@ for (const mobile of [false, true]) {
       const editing = await reopen(page, mobile, "argument_rows");
       for (const [at, value] of args.entries()) await expect(field(at + 1)).toHaveValue(value);
       await expect(editing.getByRole("textbox", { name: /^Argument \d+$/ })).toHaveCount(5);
-      await expectNoSidewaysOverflow(editing, removes);
+      await expectNoSidewaysOverflow(editing, controls);
       const saved = (
         await (await request.get(`${harness.baseUrl}/mcp_library/servers`)).json()
       ).servers.find((server: { name: string }) => server.name === "argument_rows");
@@ -319,10 +343,10 @@ for (const mobile of [false, true]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     const record = path.join(harness.runRoot, `helper-${viewport}.json`);
     const helper = path.join(harness.runRoot, "header-helper.cjs");
-    // The helper records the argv and forwarded HOME it ran with, then prints one header.
+    // The helper records its argv and the forwarded variable, then prints one header.
     await fs.writeFile(
       helper,
-      `require('node:fs').writeFileSync(${JSON.stringify(record)},JSON.stringify({args:process.argv.slice(2),home:process.env.HOME??null}));
+      `require('node:fs').writeFileSync(${JSON.stringify(record)},JSON.stringify({args:process.argv.slice(2),forwarded:process.env.NAC_E2E_API_KEY??null}));
 process.stdout.write(JSON.stringify({'X-Fixture-Token':'helper-ran'}));\n`,
     );
     const upstream = await startHttpServer();
@@ -334,14 +358,17 @@ process.stdout.write(JSON.stringify({'X-Fixture-Token':'helper-ran'}));\n`,
     try {
       await page.goto(fixture.baseUrl);
       const sent = recordWrites(page);
-      const form = await openCustomServer(page, mobile);
+      const form = await openCustomMcpServer(page, mobile);
       await form.getByPlaceholder("my_server").fill("helper_rows");
       await form.getByRole("button", { name: "Legacy", exact: true }).click();
       await form.getByPlaceholder("https://example.com/mcp").fill(upstream.url);
       await form.getByPlaceholder("./refresh-mcp-headers").fill(process.execPath);
       const field = (n: number) =>
         form.getByRole("textbox", { name: `Header helper argument ${n}`, exact: true });
-      const removes = form.getByRole("button", { name: /^Remove header helper argument \d+$/ });
+      const controls = form
+        .getByRole("textbox", { name: /^Header helper argument \d+$/ })
+        .or(form.getByRole("button", { name: /^Remove header helper argument \d+$/ }))
+        .or(form.getByRole("button", { name: "Add argument", exact: true }));
       for (const value of [helper, "--drop-me", "--profile", "a b", ALLOWLIST]) {
         await form.getByRole("button", { name: "Add argument", exact: true }).click();
         await page.keyboard.insertText(value);
@@ -353,34 +380,50 @@ process.stdout.write(JSON.stringify({'X-Fixture-Token':'helper-ran'}));\n`,
       await field(3).fill("a b c");
       await form.getByRole("button", { name: "Add argument", exact: true }).click();
       await page.keyboard.insertText(SPACED);
-      // The forwarded-environment list is the only multi-line field on the HTTP form.
-      await expect(form.locator("textarea")).toHaveCount(1);
-      await form.locator("textarea").fill("HOME");
+      const forwarded = forwardedEnvironment(form);
 
-      await expectNoSidewaysOverflow(form, removes);
+      await expectNoSidewaysOverflow(form, controls);
       await expectScrollsInside(page, field(5));
+      await form.getByRole("button", { name: "Remove header helper argument 5" }).click();
+      await expect(field(5)).toHaveCount(0);
+      await expect(field(4)).toBeFocused();
+      await form.getByRole("button", { name: "Add argument", exact: true }).click();
+      await expect(field(5)).toBeFocused();
+      await page.keyboard.insertText(SPACED);
 
       const args = [helper, "--profile", "a b c", ALLOWLIST, SPACED];
-      await form.getByRole("button", { name: "Test connection", exact: true }).click();
+      const testConnection = form.getByRole("button", { name: "Test connection", exact: true });
+      // The helper inherits the server environment, so the value alone would not show the
+      // forwarded list is read; forwarding a name the server lacks must fail the test first.
+      await forwarded.fill("NAC_E2E_UNSET_FORWARD");
+      await testConnection.click();
+      await expect(page.getByText(/^Test failed:/)).toBeVisible();
+      await expect(fs.stat(record)).rejects.toThrow();
+      // NAC_E2E_API_KEY is set only by the e2e harness for nac-web.
+      await forwarded.fill("NAC_E2E_API_KEY");
+      await testConnection.click();
       await expect(form.getByText("1 tool found", { exact: true })).toBeVisible();
       const ran = JSON.parse(await fs.readFile(record, "utf8"));
-      expect(ran.args).toEqual(args.slice(1));
-      expect(ran.home).toEqual(expect.stringMatching(/./));
+      expect(ran).toEqual({ args: args.slice(1), forwarded: "nac-e2e-dummy-only" });
       expect(upstream.headers.some((h) => h["x-fixture-token"] === "helper-ran")).toBe(true);
       await form.getByRole("button", { name: "Save", exact: true }).click();
-      await expect.poll(() => sent.length).toBe(2);
-      for (const call of sent)
-        expect(call.body.header_helper).toMatchObject({ args, env_vars: ["HOME"] });
+      await expect.poll(() => sent.length).toBe(3);
+      expect(sent.map((call) => call.body.header_helper)).toMatchObject([
+        { args, env_vars: ["NAC_E2E_UNSET_FORWARD"] },
+        { args, env_vars: ["NAC_E2E_API_KEY"] },
+        { args, env_vars: ["NAC_E2E_API_KEY"] },
+      ]);
 
       const editing = await reopen(page, mobile, "helper_rows");
       for (const [at, value] of args.entries())
         await expect(
           editing.getByRole("textbox", { name: `Header helper argument ${at + 1}`, exact: true }),
         ).toHaveValue(value);
+      await expect(forwardedEnvironment(editing)).toHaveValue("NAC_E2E_API_KEY");
       const saved = (
         await (await request.get(`${harness.baseUrl}/mcp_library/servers`)).json()
       ).servers.find((server: { name: string }) => server.name === "helper_rows");
-      expect(saved.header_helper).toMatchObject({ args, env_vars: ["HOME"] });
+      expect(saved.header_helper).toMatchObject({ args, env_vars: ["NAC_E2E_API_KEY"] });
     } finally {
       await fixture.stop();
       await upstream.stop();

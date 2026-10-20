@@ -6,6 +6,7 @@ import type { Page } from "@playwright/test";
 
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
+import { STDIO_MCP_SERVER, openCustomMcpServer } from "./mcp-library-fixture";
 
 const execute = promisify(execFile);
 test.skip(
@@ -282,25 +283,13 @@ for (const mobile of [false, true]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     // This local outgoing stdio double has one inert tool; no inbound OAuth or remote service.
     const script = path.join(harness.runRoot, "outgoing-mcp.cjs");
-    await fs.writeFile(
-      script,
-      `const rl=require('node:readline').createInterface({input:process.stdin});
-rl.on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;
-const result=m.method==='initialize'?{protocolVersion:m.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}}:
-m.method==='tools/list'?{tools:[{name:'fixture_echo',description:'Local inert fixture',inputSchema:{type:'object',properties:{}}}]}:{};
-process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});\n`,
-    );
+    await fs.writeFile(script, STDIO_MCP_SERVER);
     const project = await createProject(request, harness, { name: "Injected outgoing MCP" });
     const id = await createSession(request, harness, "direct", project);
     const fixture = await startHostedFixture(harness, id);
     try {
       await page.goto(fixture.baseUrl);
-      await page.getByRole("button", { name: /^MCP servers/ }).click();
-      await page
-        .getByRole("button", { name: mobile ? "Add server" : "Custom server", exact: true })
-        .click();
-      if (mobile) await page.getByRole("button", { name: "Custom", exact: true }).click();
-      const form = page.getByRole("dialog").last();
+      const form = await openCustomMcpServer(page, mobile);
       await form.getByPlaceholder("my_server").fill("injected_fixture");
       await form.getByRole("button", { name: "Stdio", exact: true }).click();
       await form.getByRole("button", { name: "Legacy", exact: true }).click();
