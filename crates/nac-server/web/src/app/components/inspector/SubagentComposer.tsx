@@ -14,35 +14,21 @@ import {
 } from "@/app/services/queries";
 import type { SessionBehavior, SessionLineage, TraditionalChildStatus } from "@/app/types/api";
 
-export type SubagentTarget =
-  | { mode: "new-agent" }
-  | { mode: "new-orchestrator" }
-  | {
-      mode: "child" | "orchestrator";
-      id: string;
-      description: string;
-      status: TraditionalChildStatus;
-      background: boolean;
-    };
-
-function descriptionFromPrompt(prompt: string): string {
-  const line = prompt.trim().split("\n")[0] ?? "";
-  return line.length > 80 ? `${line.slice(0, 77)}…` : line;
+export interface SubagentTarget {
+  mode: "child" | "orchestrator";
+  id: string;
+  description: string;
+  status: TraditionalChildStatus;
+  background: boolean;
 }
 
-/**
- * Sends, steers, or stops one parent-owned subagent. A new launch takes its
- * description from the first line of the prompt.
- */
+/** Sends, steers, or stops one existing parent-owned subagent. */
 export function SubagentComposer({
   parentSessionId,
   target,
   permissionSessionId,
   permissionBehavior,
   requesterLabel,
-  onStarted,
-  autoFocus = false,
-  focusRequest = 0,
   showPermissions = true,
 }: {
   parentSessionId: string;
@@ -50,9 +36,6 @@ export function SubagentComposer({
   permissionSessionId: string;
   permissionBehavior: SessionBehavior | null;
   requesterLabel?: string;
-  onStarted?: (id: string) => void;
-  autoFocus?: boolean;
-  focusRequest?: number;
   /**
    * The parent composer and a running child's bridge already present permission
    * dialogs. The panel composer must not open a second copy of the same ask.
@@ -65,50 +48,39 @@ export function SubagentComposer({
   const cancelChild = useCancelTraditionalChild();
   const cancelOrchestrator = useCancelManagedOrchestrator();
   const [value, setValue] = useState("");
-  const [background, setBackground] = useState(
-    target.mode === "child" || target.mode === "orchestrator" ? target.background : true,
-  );
-  const running =
-    (target.mode === "child" || target.mode === "orchestrator") && target.status === "running";
+  const [background, setBackground] = useState(target.background);
+  const running = target.status === "running";
   const busy =
     startChild.isPending ||
     startOrchestrator.isPending ||
     cancelChild.isPending ||
     cancelOrchestrator.isPending;
-  const existing = target.mode === "child" || target.mode === "orchestrator" ? target : null;
 
   const submit = async () => {
     const prompt = value.trim();
     if (!prompt) return;
-    const description = existing ? existing.description : descriptionFromPrompt(prompt);
-    if (!description) {
-      toast.error("A message is required.");
-      return;
-    }
     try {
-      if (target.mode === "new-orchestrator" || target.mode === "orchestrator") {
-        const started = await startOrchestrator.mutateAsync({
+      if (target.mode === "orchestrator") {
+        await startOrchestrator.mutateAsync({
           sessionId: parentSessionId,
           payload: {
-            description,
+            description: target.description,
             prompt,
             background,
-            orchestrator_session_id: target.mode === "orchestrator" ? target.id : null,
+            orchestrator_session_id: target.id,
           },
         });
-        onStarted?.(started.orchestrator_session_id);
       } else {
-        const started = await startChild.mutateAsync({
+        await startChild.mutateAsync({
           sessionId: parentSessionId,
           payload: {
             profile: "general",
-            description,
+            description: target.description,
             prompt,
             background,
-            child_session_id: target.mode === "child" ? target.id : null,
+            child_session_id: target.id,
           },
         });
-        onStarted?.(started.child_session_id);
       }
       setValue("");
     } catch (error) {
@@ -117,17 +89,16 @@ export function SubagentComposer({
   };
 
   const stop = async () => {
-    if (!existing) return;
     try {
-      if (existing.mode === "child") {
+      if (target.mode === "child") {
         await cancelChild.mutateAsync({
           sessionId: parentSessionId,
-          childId: existing.id,
+          childId: target.id,
         });
       } else {
         await cancelOrchestrator.mutateAsync({
           sessionId: parentSessionId,
-          orchestratorId: existing.id,
+          orchestratorId: target.id,
         });
       }
     } catch (error) {
@@ -141,12 +112,10 @@ export function SubagentComposer({
       onChange={setValue}
       onSubmit={() => void submit()}
       onStop={() => void stop()}
-      autoFocus={autoFocus}
-      focusRequest={focusRequest}
       running={running}
-      background={running && existing ? existing.background : background}
+      background={running ? target.background : background}
       onBackgroundChange={setBackground}
-      status={existing?.status}
+      status={target.status}
       busy={busy}
       permission={
         showPermissions ? (

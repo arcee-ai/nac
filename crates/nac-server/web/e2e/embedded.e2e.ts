@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Page } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 
 import {
   createDirectSession,
@@ -34,15 +34,17 @@ async function showSidePanel(page: Page) {
   }).toPass();
 }
 
-/** Spawn menu → foreground child. The first prompt line is the description. */
-async function launchForegroundChild(page: Page, description: string, prompt: string) {
-  await page.getByRole("button", { name: "Spawn" }).click();
-  await page.getByRole("button", { name: "Create Subagent" }).click();
-  const field = page.getByRole("textbox", { name: "Send a message" });
-  await field.fill(`${description}\n${prompt}`);
-  const form = page.locator("form").filter({ has: field });
-  await form.getByRole("switch", { name: "Run in the background" }).click();
-  return form.getByRole("button", { name: "Send" });
+/** Starts a foreground child the way the parent's subagent tool does; the reply waits for its outcome. */
+function startForegroundChild(
+  request: APIRequestContext,
+  harness: { baseUrl: string },
+  sessionId: string,
+  description: string,
+  prompt: string,
+) {
+  return request.post(`${harness.baseUrl}/sessions/${sessionId}/children`, {
+    data: { profile: "general", description, prompt, background: false },
+  });
 }
 
 test("serves the production-embedded application and hashed assets", async ({
@@ -609,13 +611,13 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await permissions.getByRole("switch", { name: "Approve all automatically" }).click();
   await page.keyboard.press("Escape");
 
-  const automaticSend = await launchForegroundChild(page, "Automatic child", "ALL58_AUTO_CHILD");
-  const automaticStart = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      response.url().endsWith(`/sessions/${sessionId}/children`),
+  const automaticStart = startForegroundChild(
+    request,
+    harness,
+    sessionId,
+    "Automatic child",
+    "ALL58_AUTO_CHILD",
   );
-  await automaticSend.click();
   await harness.provider.waitForRequestCount(2);
   expect((await automaticStart).status()).toBe(201);
   await expect(page.getByText("Permission required")).toHaveCount(0);
@@ -624,13 +626,13 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await page.getByRole("switch", { name: "Approve all automatically" }).click();
   await page.keyboard.press("Escape");
 
-  const manualSend = await launchForegroundChild(page, "Manual child", "ALL58_MANUAL_CHILD");
-  const manualStart = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      response.url().endsWith(`/sessions/${sessionId}/children`),
+  const manualStart = startForegroundChild(
+    request,
+    harness,
+    sessionId,
+    "Manual child",
+    "ALL58_MANUAL_CHILD",
   );
-  await manualSend.click();
   await harness.provider.waitForRequestCount(3);
 
   await expect
@@ -800,7 +802,8 @@ test("asks for immutable behavior on every first and new chat", async ({
   expect(hybridPresentation.ok()).toBe(true);
   await page.getByRole("tab", { name: "Subagents" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${hybridSessionId}/delegated$`));
-  await expect(page.getByRole("button", { name: "New Orchestrator" })).toBeVisible();
+  await expect(page.getByText("No subagents yet")).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Orchestrator" })).toHaveCount(0);
 
   const runningGate = new ScriptGate();
   harness.provider.enqueue(
@@ -816,8 +819,8 @@ test("asks for immutable behavior on every first and new chat", async ({
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
-  await expect(page.getByRole("button", { name: "New Agent" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "New Orchestrator" })).toBeVisible();
+  await expect(page.getByText("No subagents yet")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Spawn" })).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Sessions" })).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Subagents" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();

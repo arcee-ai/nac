@@ -17,16 +17,17 @@ its traditional children. It answers only requests that reach each child's
 broker after configured and hard denials; remembered grants remain child-local.
 Managed orchestrators are a separate topology and do not inherit the mode.
 
-Open the people control beside the direct-session composer to start, inspect,
-continue, steer, cancel, or open a child transcript. The first visible profile
-is `general`. It exposes exactly `read`, `write`, `edit`, `glob`, `grep`,
+The parent agent starts children with its subagent tool; ask it to delegate
+work. The web UI has no manual launch. Children appear in the parent's
+Subagents panel, where you can inspect, continue, steer, cancel, or open each
+one. The first visible profile is `general`. It exposes exactly `read`, `write`, `edit`, `glob`, `grep`,
 `exec_command`, `write_stdin`, and `read_command_output`; it cannot create goals,
 launch another child, or control orchestrator sessions.
 
 The parent's Delegated work panel shows each child's description, coding-agent
 type, status, and generation. Opening a row shows the child's lineage and a
 **Back to Parent** action. That transcript is read-only in the web MVP;
-continue, steer, and cancel it from the parent's people control. Child goal
+continue, steer, and cancel it from the parent's Subagents panel. Child goal
 ownership is rejected by the service as well as hidden by the UI.
 
 A foreground launch waits for the generation's structured outcome. A background

@@ -38,10 +38,6 @@ export interface SubagentChatInputBoxProps {
   status?: TraditionalChildStatus | null;
   busy?: boolean;
   permission?: ReactNode;
-  /** Put the caret in the field once this composer is shown. */
-  autoFocus?: boolean;
-  /** Changes whenever a new launch should take the caret again. */
-  focusRequest?: number;
 }
 
 /**
@@ -60,8 +56,6 @@ export function SubagentChatInputBox({
   status = null,
   busy = false,
   permission,
-  autoFocus = false,
-  focusRequest = 0,
 }: SubagentChatInputBoxProps) {
   const field = useRef<HTMLTextAreaElement>(null);
   const filled = value.trim().length > 0;
@@ -79,16 +73,6 @@ export function SubagentChatInputBox({
     element.style.height = "auto";
     element.style.height = `${element.scrollHeight}px`;
   }, [value]);
-
-  useLayoutEffect(() => {
-    if (!autoFocus) return;
-    const focus = () => field.current?.focus({ preventScroll: true });
-    focus();
-    // The spawn menu unmounts in the same turn and can move focus back to the
-    // parent composer. Retry once the panel is focusable.
-    const frame = requestAnimationFrame(focus);
-    return () => cancelAnimationFrame(frame);
-  }, [autoFocus, focusRequest]);
 
   return (
     <form

@@ -7,11 +7,7 @@ import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 interface SessionLayoutState {
   /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
   collapsed: boolean;
-  /**
-   * Whether the next collapsed change should tween. A launch from the composer
-   * opens a collapsed panel in place, so the chat column does not replay its
-   * layout for half a second.
-   */
+  /** Whether the next collapsed change should tween; restoring a project's stored rail does not. */
   sidePanelAnimate: boolean;
   /**
    * Project the collapsed preference belongs to. Null until the open session's
@@ -46,13 +42,6 @@ interface SessionLayoutState {
   selectedRevision: number | null;
   /** File the Files panel is showing. */
   selectedFile: string | null;
-  /**
-   * Subagents tab opened on a blank launch, from the parent composer's spawn
-   * menu or from New Agent / New Orchestrator in the list.
-   */
-  subagentLaunch: "agent" | "orchestrator" | null;
-  /** Bumps every time a blank subagent launch is requested, so the composer can take focus again. */
-  subagentLaunchRequest: number;
   /** Folders flipped away from their default open state, by path. */
   toggledFolders: ReadonlySet<string>;
   /**
@@ -79,8 +68,6 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     selectedFile: null,
     toggledFolders: new Set(),
     fileListing: "tree",
-    subagentLaunch: null,
-    subagentLaunchRequest: 0,
   });
   const initial_sessionLayoutStore = sessionLayoutStore.getState();
 
@@ -244,28 +231,8 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     setState({ fileListing });
   }
 
-  /** Open the Subagents tab on a blank agent or orchestrator launch. */
-  function openSubagentLaunch(subagentLaunch: "agent" | "orchestrator"): void {
-    setState((state) => ({
-      subagentLaunch,
-      panelList: false,
-      subagentLaunchRequest: state.subagentLaunchRequest + 1,
-      collapsed: false,
-      // The chat is laid out against the column width. Tweening that from the
-      // rail to half the screen reflows the whole transcript, which reads as the
-      // session resetting. The panel is already full size off to the side, so it
-      // can appear without that tween.
-      sidePanelAnimate: state.collapsed ? false : state.sidePanelAnimate,
-    }));
-    rememberCollapsed(false);
-  }
-
   function setSidePanelAnimate(sidePanelAnimate: boolean): void {
     if (getState().sidePanelAnimate !== sidePanelAnimate) setState({ sidePanelAnimate });
-  }
-
-  function clearSubagentLaunch(): void {
-    if (getState().subagentLaunch != null) setState({ subagentLaunch: null });
   }
 
   /**
@@ -293,7 +260,6 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
       toggledFolders: new Set(),
       panelList: false,
       selectedThreadRunning: false,
-      subagentLaunch: null,
     });
   }
 
@@ -313,8 +279,6 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   const useSelectedFile = () => useStore((s) => s.selectedFile);
   const useToggledFolders = () => useStore((s) => s.toggledFolders);
   const useFileListing = () => useStore((s) => s.fileListing);
-  const useSubagentLaunch = () => useStore((s) => s.subagentLaunch);
-  const useSubagentLaunchRequest = () => useStore((s) => s.subagentLaunchRequest);
   return {
     release: () => {
       sessionLayoutStore.setState(initial_sessionLayoutStore);
@@ -334,9 +298,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     selectFile,
     toggleFolder,
     selectFileListing,
-    openSubagentLaunch,
     setSidePanelAnimate,
-    clearSubagentLaunch,
     resetSessionSelection,
     useSidePanelCollapsed,
     useSidePanelAnimate,
@@ -350,8 +312,6 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     useSelectedFile,
     useToggledFolders,
     useFileListing,
-    useSubagentLaunch,
-    useSubagentLaunchRequest,
   };
 }
 
@@ -372,9 +332,7 @@ export const {
   selectFile,
   toggleFolder,
   selectFileListing,
-  openSubagentLaunch,
   setSidePanelAnimate,
-  clearSubagentLaunch,
   resetSessionSelection,
   useSidePanelCollapsed,
   useSidePanelAnimate,
@@ -388,6 +346,4 @@ export const {
   useSelectedFile,
   useToggledFolders,
   useFileListing,
-  useSubagentLaunch,
-  useSubagentLaunchRequest,
 } = createSessionLayoutStore(standalonePreferenceStorage);

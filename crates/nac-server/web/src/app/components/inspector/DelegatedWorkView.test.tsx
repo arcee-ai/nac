@@ -7,7 +7,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { openSubagentLaunch, clearSubagentLaunch } from "@/app/store/sessionLayoutStore";
 import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
@@ -123,17 +122,12 @@ beforeEach(() => {
   startOrchestrator.mockReset().mockResolvedValue(orchestrator);
   cancelOrchestrator.mockReset().mockResolvedValue({ ...orchestrator, status: "cancelled" });
 });
-afterEach(() => {
-  cleanup();
-  clearSubagentLaunch();
-});
+afterEach(cleanup);
 
 describe("delegated work", () => {
   it("keeps coding agents and managed orchestrators visibly distinct", () => {
     mount("direct-with-orchestrator");
 
-    expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "New Orchestrator" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Run the compatibility audit" })).toBeTruthy();
     expect(screen.getAllByText("Running in the background").length).toBeGreaterThan(0);
@@ -219,12 +213,50 @@ describe("delegated work", () => {
   });
 });
 
-it("hides cached managed relationships and normalizes a stale managed launch while retaining children", async () => {
-  openSubagentLaunch("orchestrator");
+it("hides cached managed relationships while retaining children", async () => {
   mount("direct-with-orchestrator", true, false);
-  expect(screen.queryByText("Launch Orchestrator")).toBeNull();
-  expect(screen.queryByRole("button", { name: "New Orchestrator" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Run the compatibility audit" })).toBeNull();
   expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy();
   await waitFor(() => expect(listOrchestrators).not.toHaveBeenCalled());
+});
+
+it("offers no way to start a subagent when there are none", async () => {
+  listChildren.mockResolvedValue([]);
+  listOrchestrators.mockResolvedValue([]);
+  mount("direct-with-orchestrator", false);
+
+  expect(await screen.findByText("No subagents yet")).toBeTruthy();
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(screen.queryByRole("button", { name: "New Agent" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "New Orchestrator" })).toBeNull();
+  expect(startChild).not.toHaveBeenCalled();
+  expect(startOrchestrator).not.toHaveBeenCalled();
+});
+
+it("keeps the selected subagent and its draft when another one updates", async () => {
+  const client = mount("direct-with-orchestrator");
+  fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Send a message" }), {
+    target: { value: "Half-written follow-up" },
+  });
+
+  act(() => {
+    client.setQueryData(queryKeys.traditionalChildren("parent"), [
+      { ...child, report: "Still going.", updated_at: "2026-08-26T00:00:00Z", version: 4 },
+    ]);
+  });
+
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("textbox", { name: "Send a message" }) as HTMLTextAreaElement).value,
+    ).toBe("Half-written follow-up"),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await waitFor(() =>
+    expect(startOrchestrator).toHaveBeenCalledWith(
+      "parent",
+      expect.objectContaining({ orchestrator_session_id: "orchestrator-1" }),
+    ),
+  );
+  expect(startChild).not.toHaveBeenCalled();
 });

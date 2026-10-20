@@ -95,14 +95,7 @@ for (const orchestration of [null, "0"] as const) {
         await expect(page).toHaveURL(new RegExp(`/session/${directId}/files`));
         await expect(page.getByRole("tab", { name: "Threads", exact: true })).toHaveCount(0);
         await expect(page.getByRole("tab", { name: "Worksets", exact: true })).toHaveCount(0);
-        if (!mobile) await page.getByRole("button", { name: "Spawn", exact: true }).click();
-        if (!mobile)
-          await expect(
-            page.getByRole("button", { name: "Create Subagent", exact: true }),
-          ).toBeVisible();
-        await expect(
-          page.getByRole("button", { name: "Create Orchestrator", exact: true }),
-        ).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Spawn", exact: true })).toHaveCount(0);
         await page.reload();
         await expect(page.getByText("direct policy response")).toBeVisible();
         harness.provider.enqueue(
