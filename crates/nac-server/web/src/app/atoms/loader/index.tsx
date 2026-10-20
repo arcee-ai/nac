@@ -2,13 +2,16 @@ import type React from "react";
 import Icon, { IconName } from "../icon";
 import { cn } from "../../lib/cn";
 
-/** Pixel sizes, mirroring the ArceeFM LoaderSize enum. */
+/** Pixel sizes from the Figma Loader component (xs through 4xl). */
 export enum LoaderSize {
-  XSmall = 12,
+  XSmall = 16,
   Micro = 16,
   Small = 20,
   Medium = 24,
+  MediumLarge = 28,
   Large = 32,
+  X2Large = 36,
+  X3Large = 40,
   XLarge = 48,
 }
 
@@ -28,8 +31,8 @@ interface LoaderProps extends React.HTMLAttributes<HTMLDivElement> {
 const Loader: React.FC<LoaderProps> & {
   Size: typeof LoaderSize;
   Variant: typeof LoaderVariant;
-} = ({ size = LoaderSize.XLarge, variant = LoaderVariant.Brand, className = "", ...props }) => (
-  <div className={cn("flex w-fit h-fit animate-spin loader", className)} {...props}>
+} = ({ size = LoaderSize.XLarge, variant = LoaderVariant.Neutral, className = "", ...props }) => (
+  <div className={cn("loader flex size-fit", className)} {...props}>
     <Icon iconName={IconName.Loader} size={size} color={variant} />
   </div>
 );

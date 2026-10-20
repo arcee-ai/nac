@@ -87,7 +87,7 @@ const StickyInput: React.FC<StickyInputProps> & {
   return (
     <div
       className={cn(
-        "bg-elevation-level-3 shadow-2xl overflow-hidden h-10",
+        "bg-elevation-level-3 shadow-xl overflow-hidden h-10",
         stretches ? "flex w-full" : "inline-flex w-fit",
         radius,
         className,

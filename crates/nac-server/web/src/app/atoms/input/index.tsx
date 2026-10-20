@@ -48,9 +48,9 @@ const padLeftIcon = {
   [InputSize.Large]: "pl-12",
 } satisfies Record<InputSize, string>;
 const padRightIcon = {
-  [InputSize.Small]: "pr-7",
-  [InputSize.Medium]: "pr-11",
-  [InputSize.Large]: "pr-14",
+  [InputSize.Small]: "pr-6",
+  [InputSize.Medium]: "pr-9",
+  [InputSize.Large]: "pr-12",
 } satisfies Record<InputSize, string>;
 const leadingIconPos = {
   [InputSize.Small]: "top-1 left-1",
@@ -109,13 +109,16 @@ const Input: React.FC<InputProps> & {
   ref,
   ...props
 }) => {
+  const hasLeading = leading !== InputLeading.None || Boolean(leadingSlot);
+  const hasTrailing = trailing !== InputTrailing.None;
+  const largeSearch = inputSize === InputSize.Large && hasLeading && !hasTrailing;
   const inputClasses = cn(
     "w-full input font-normal",
     inputSize,
     inputClassName,
     rounded ? "rounded-full" : "rounded-[4px]",
-    leading === InputLeading.None && !leadingSlot ? padLeft[inputSize] : padLeftIcon[inputSize],
-    trailing === InputTrailing.None ? padRight[inputSize] : padRightIcon[inputSize],
+    !hasLeading ? padLeft[inputSize] : largeSearch ? "input-pad-search" : padLeftIcon[inputSize],
+    !hasTrailing ? padRight[inputSize] : padRightIcon[inputSize],
     isDisabled && "input-disabled",
     validation && "input-validation",
   );
@@ -130,12 +133,16 @@ const Input: React.FC<InputProps> & {
       validation={validation}
       validationText={validationText}
       hintText={hintText}
+      caption={inputSize === InputSize.Large ? "large" : "compact"}
       className={className}
     >
       <div className="input-wrapper relative w-full h-fit">
         {leadingSlot ? (
           <div
-            className={cn("absolute flex items-center justify-center", leadingIconPos[inputSize])}
+            className={cn(
+              "absolute flex items-center justify-center",
+              largeSearch ? "top-3 left-1.5" : leadingIconPos[inputSize],
+            )}
             style={{
               width: iconSizeFor[inputSize],
               height: iconSizeFor[inputSize],
@@ -148,7 +155,10 @@ const Input: React.FC<InputProps> & {
           <Icon
             iconName={leadingIconName}
             size={iconSizeFor[inputSize]}
-            className={cn("absolute", leadingIconPos[inputSize])}
+            className={cn(
+              "absolute",
+              largeSearch ? "top-3 left-1.5" : leadingIconPos[inputSize],
+            )}
             color={iconColor}
           />
         ) : null}

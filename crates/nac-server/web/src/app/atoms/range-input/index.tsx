@@ -1,7 +1,5 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
-
-const KNOB_RADIUS_PX = 8;
 
 interface RangeInputProps {
   min: number;
@@ -17,8 +15,9 @@ interface RangeInputProps {
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 /**
- * Slider on the input-progress tokens. Dragging goes through pointer events, so
- * mouse, pen and touch share one path and the capture keeps tracking even when
+ * Slider on the input-progress tokens. The resting track uses the muted
+ * progress colors; dragging or a held arrow key switches to the active ones.
+ * The phone uses the taller knob. Pointer capture keeps the drag alive after
  * the pointer leaves the track.
  */
 const RangeInput: React.FC<RangeInputProps> = ({
@@ -32,6 +31,9 @@ const RangeInput: React.FC<RangeInputProps> = ({
   className = "",
 }) => {
   const trackRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [keying, setKeying] = useState(false);
+  const active = !disabled && (dragging || keying);
 
   const emit = useCallback(
     (next: number) => {
@@ -59,7 +61,12 @@ const RangeInput: React.FC<RangeInputProps> = ({
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (disabled) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragging(true);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // A pointer that is already gone cannot be captured.
+    }
     emitFromPointer(event.clientX);
   };
 
@@ -68,6 +75,8 @@ const RangeInput: React.FC<RangeInputProps> = ({
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
     emitFromPointer(event.clientX);
   };
+
+  const stopDragging = () => setDragging(false);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (disabled) return;
@@ -79,22 +88,23 @@ const RangeInput: React.FC<RangeInputProps> = ({
           : 0;
     if (delta) {
       event.preventDefault();
+      setKeying(true);
       emit(value + delta);
       return;
     }
     if (event.key === "Home") {
       event.preventDefault();
+      setKeying(true);
       emit(min);
     }
     if (event.key === "End") {
       event.preventDefault();
+      setKeying(true);
       emit(max);
     }
   };
 
   const percent = max === min ? 0 : ((value - min) / (max - min)) * 100;
-  // Keeps the knob inside the track at both ends instead of hanging over.
-  const knobOffset = KNOB_RADIUS_PX * (1 - (2 * percent) / 100);
 
   return (
     <div
@@ -107,31 +117,37 @@ const RangeInput: React.FC<RangeInputProps> = ({
       aria-valuenow={value}
       aria-disabled={disabled}
       className={cn(
-        "group relative h-1 w-full rounded-full outline-none touch-none select-none",
-        disabled
-          ? "bg-input-progress-bar-disabled cursor-not-allowed"
-          : "bg-input-progress-bar cursor-auto",
+        "range-input relative w-full touch-none select-none",
+        disabled ? "cursor-not-allowed" : "cursor-pointer",
         className,
       )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
+      onPointerUp={stopDragging}
+      onPointerCancel={stopDragging}
       onKeyDown={onKeyDown}
+      onKeyUp={() => setKeying(false)}
+      onBlur={() => {
+        setDragging(false);
+        setKeying(false);
+      }}
     >
       <div
         className={cn(
-          "absolute inset-y-0 left-0 rounded-full",
-          disabled ? "bg-input-progress-disabled" : "bg-input-progress",
+          "pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full",
+          active ? "bg-input-progress-bar" : "bg-input-progress-bar-disabled",
+        )}
+      />
+      <div
+        className={cn(
+          "pointer-events-none absolute top-1/2 left-0 h-1 -translate-y-1/2 rounded-full",
+          active ? "bg-input-progress" : "bg-input-progress-disabled",
         )}
         style={{ width: `${percent}%` }}
       />
       <div
-        className={cn(
-          "absolute top-1/2 w-4 h-4 rounded-full shadow-md -translate-y-1/2 -translate-x-1/2",
-          disabled
-            ? "bg-input-knob-disabled"
-            : "bg-input-knob group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-accent-primary",
-        )}
-        style={{ left: `calc(${percent}% + ${knobOffset}px)` }}
+        className="range-knob absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-input-knob"
+        style={{ left: `${percent}%` }}
       />
     </div>
   );

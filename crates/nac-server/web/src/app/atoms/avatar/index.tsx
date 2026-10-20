@@ -1,20 +1,25 @@
-import type React from "react";
+import React from "react";
 import { cn } from "../../lib/cn";
 
 export enum AvatarSize {
-  Micro = "w-4 h-4 text-[10px]",
-  Small = "w-5 h-5 text-xs",
-  Medium = "w-6 h-6 text-xs",
-  Large = "w-8 h-8 text-sm",
-  XLarge = "w-12 h-12 text-lg",
+  Micro = "size-4 avatar-xs",
+  Small = "size-5 avatar-sm",
+  Medium = "size-6 avatar-md",
+  Large = "size-8 avatar-xl",
+  XLarge = "size-12 avatar-4xl",
+  MediumLarge = "size-7 avatar-lg",
+  X2Large = "size-9 avatar-2xl",
+  X3Large = "size-10 avatar-3xl",
 }
+
+const DEFAULT_COLOR = "var(--color-bg-elevation-ground-inverse)";
 
 interface AvatarProps {
   /** Falls back to the initial of `name` when absent or when the image fails. */
   imageUrl?: string | null;
   name?: string | null;
   size?: AvatarSize;
-  /** Background behind the initial. Ignored once an image is shown. */
+  /** Background behind a glyph, or an override of the letter fill. Ignored once an image is shown. */
   color?: string;
   /** Render `name` as-is instead of taking its first letter, e.g. an emoji. */
   glyph?: boolean;
@@ -29,25 +34,40 @@ const Avatar: React.FC<AvatarProps> & { Size: typeof AvatarSize } = ({
   imageUrl,
   name,
   size = AvatarSize.Medium,
-  color = "var(--color-bg-accent-primary)",
+  color = DEFAULT_COLOR,
   glyph = false,
   className = "",
 }) => {
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => setFailed(false), [imageUrl]);
+
   const trimmed = name?.trim() ?? "";
   const initial = glyph ? trimmed : (trimmed[0]?.toUpperCase() ?? "?");
+  const showImage = Boolean(imageUrl) && !failed;
+  const customColor = color !== DEFAULT_COLOR;
 
   return (
     <div
       className={cn(
-        "flex items-center justify-center shrink-0 rounded-full overflow-hidden",
-        "font-semibold text-primary-inverse shadow-convex",
+        "avatar inline-flex items-center justify-center shrink-0 overflow-hidden rounded-full",
         size,
+        showImage
+          ? "border-tertiary bg-elevation-level-3"
+          : cn(
+              "border-secondary-inversed",
+              glyph || customColor ? "text-primary-inverse" : "text-tertiary-inverse",
+            ),
         className,
       )}
-      style={{ background: imageUrl ? undefined : color }}
+      style={showImage ? undefined : { background: color }}
     >
-      {imageUrl ? (
-        <img src={imageUrl} alt={trimmed} className="w-full h-full object-cover" />
+      {showImage ? (
+        <img
+          src={imageUrl ?? undefined}
+          alt={trimmed}
+          className="size-full rounded-full object-cover"
+          onError={() => setFailed(true)}
+        />
       ) : (
         initial
       )}

@@ -3,9 +3,9 @@ import { cn } from "../../lib/cn";
 import InputWrapper from "./InputWrapper";
 
 export enum TextAreaSize {
-  Small = "p-2 text-micro",
-  Medium = "p-3 text-small",
-  Large = "p-4 text-medium",
+  Small = "input-small",
+  Medium = "input-medium",
+  Large = "input-large",
 }
 
 interface TextAreaProps extends Omit<React.ComponentPropsWithRef<"textarea">, "size"> {
@@ -38,9 +38,10 @@ const TextArea: React.FC<TextAreaProps> & { Size: typeof TextAreaSize } = ({
     required={required}
     validation={validation}
     validationText={validationText}
-    hintText={hintText}
-    className={className}
-  >
+      hintText={hintText}
+      caption={textAreaSize === TextAreaSize.Large ? "large" : "compact"}
+      className={className}
+    >
     <textarea
       ref={ref}
       className={cn(

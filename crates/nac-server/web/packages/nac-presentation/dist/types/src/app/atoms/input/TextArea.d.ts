@@ -1,8 +1,8 @@
 import type React from "react";
 export declare enum TextAreaSize {
-    Small = "p-2 text-micro",
-    Medium = "p-3 text-small",
-    Large = "p-4 text-medium"
+    Small = "input-small",
+    Medium = "input-medium",
+    Large = "input-large"
 }
 interface TextAreaProps extends Omit<React.ComponentPropsWithRef<"textarea">, "size"> {
     textAreaSize?: TextAreaSize;

@@ -25,39 +25,45 @@ const Radio: React.FC<RadioProps> = ({
 }) => (
   <label
     className={cn(
-      "flex items-start gap-2 w-fit",
-      disabled ? "cursor-not-allowed opacity-60" : "",
+      "group flex w-fit items-center gap-2",
+      disabled ? "cursor-not-allowed" : "cursor-pointer",
       className,
     )}
   >
-    <input
-      type="radio"
-      checked={checked}
-      onChange={(event) => onChange(event.target.checked)}
-      disabled={disabled}
-      className="sr-only peer"
-      {...props}
-    />
-    <span
-      aria-hidden="true"
-      className={cn(
-        "flex items-center justify-center shrink-0 mt-[1px] w-4 h-4 rounded-full border transition-colors duration-150",
-        "peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-accent-primary",
-        disabled
-          ? "bg-btn-secondary-disabled border-muted"
-          : "bg-btn-secondary border-secondary hover:bg-btn-secondary-hovered hover:border-tertiary",
-      )}
-    >
+    <span className="relative flex size-4 shrink-0 items-center justify-center">
+      <input
+        type="radio"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        disabled={disabled}
+        className="peer sr-only"
+        {...props}
+      />
+      <span
+        aria-hidden="true"
+        className={cn(
+          "size-4 rounded-full border shadow-concave",
+          disabled
+            ? cn(
+                "bg-btn-secondary-disabled",
+                checked ? "border-primary" : "border-muted",
+              )
+            : "border-primary bg-btn-secondary group-hover:bg-btn-secondary-hovered group-active:bg-btn-secondary-pressed",
+        )}
+      />
       {checked ? (
         <span
-          className="fade w-2 h-2 rounded-full"
-          style={{
-            background: disabled
-              ? "var(--color-fill-btn-accent-muted)"
-              : "var(--color-fill-accent-primary)",
-          }}
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute left-1/2 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-convex",
+            disabled ? "radio-mark-disabled" : "radio-mark",
+          )}
         />
       ) : null}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--blue-600)] opacity-0 peer-focus-visible:opacity-100"
+      />
     </span>
     {children ? <span className="label-small text-basic-primary">{children}</span> : null}
   </label>

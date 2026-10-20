@@ -23,39 +23,42 @@ const Checkbox: React.FC<CheckboxProps> = ({
 }) => (
   <label
     className={cn(
-      "flex items-center gap-2 w-fit",
-      disabled ? "cursor-not-allowed opacity-60" : "",
+      "group flex w-fit items-center gap-2",
+      disabled ? "cursor-not-allowed" : "cursor-pointer",
       className,
     )}
   >
-    <input
-      type="checkbox"
-      checked={checked}
-      onChange={(event) => onChange(event.target.checked)}
-      disabled={disabled}
-      className="sr-only peer"
-      {...props}
-    />
-    <span
-      aria-hidden="true"
-      className={cn(
-        "flex items-center justify-center shrink-0 w-4 h-4 rounded-[4px] border transition-colors duration-150",
-        "peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-accent-primary",
-        disabled
-          ? "bg-btn-secondary-disabled border-muted"
-          : checked
-            ? "bg-btn-secondary-accent border-accent-primary hover:bg-btn-secondary-accent-hovered"
-            : "bg-btn-secondary border-secondary hover:bg-btn-secondary-hovered hover:border-tertiary",
-      )}
-    >
+    <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        disabled={disabled}
+        className="peer sr-only"
+        {...props}
+      />
+      <span
+        aria-hidden="true"
+        className={cn(
+          "h-4 w-4 rounded-[4px] border bg-btn-secondary",
+          disabled
+            ? "border-muted"
+            : "border-secondary group-hover:bg-btn-secondary-hovered group-active:bg-btn-secondary-pressed",
+        )}
+      />
       {checked ? (
         <Icon
           iconName={IconName.Check}
-          size={14}
-          className="fade"
-          color="var(--color-fill-accent-primary)"
+          size={20}
+          aria-hidden="true"
+          color={disabled ? "var(--color-fill-basic-muted)" : "var(--color-fill-basic-primary)"}
+          className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
         />
       ) : null}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-[8px] border-2 border-[var(--blue-600)] opacity-0 peer-focus-visible:opacity-100"
+      />
     </span>
     {children ? <span className="label-small text-basic-primary">{children}</span> : null}
   </label>
