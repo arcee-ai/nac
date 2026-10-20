@@ -6055,7 +6055,7 @@ var Uc = [
 ], Wc = Uc, Gc = ({ keys: e, inversed: t = !1, spelled: n = !1, className: r = "" }) => e.length === 0 ? null : /* @__PURE__ */ x("div", {
 	className: N("flex gap-[3px]", r),
 	children: e.map((e, r) => /* @__PURE__ */ x("kbd", {
-		className: N("inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-[3px] border tag-label", t ? "text-basic-secondary-inverse border-tertiary-inversed" : "text-basic-secondary border-secondary bg-input"),
+		className: N("inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-[3px] border tag-label", t ? "text-secondary-inverse border-tertiary-inversed" : "text-basic-secondary border-secondary bg-input"),
 		children: n ? e : Rc(e)
 	}, r))
 }), Kc = ({ open: e = !1, zIndex: t = 40, opacity: n = .25, blur: r = 2, className: i = "", onClick: a }) => /* @__PURE__ */ x("div", {
@@ -6170,14 +6170,14 @@ var Qc = "tooltip-box text-left w-max h-fit max-w-[240px] flex-col gap-1 shadow-
 	children: [/* @__PURE__ */ S("div", {
 		className: "flex gap-2 items-center",
 		children: [/* @__PURE__ */ x("div", {
-			className: N(s ? "label-medium" : "label-micro", "flex-grow", o ? "text-basic-primary-inverse" : "text-basic-primary"),
+			className: N(s ? "label-medium" : "label-micro", "flex-grow", o ? "text-primary-inverse" : "text-basic-primary"),
 			children: t
 		}), r.length > 0 ? /* @__PURE__ */ x(Gc, {
 			keys: r,
 			inversed: o
 		}) : null]
 	}), n ? /* @__PURE__ */ x("div", {
-		className: N("w-fit h-fit", o ? "text-micro text-basic-secondary-inverse" : "text-medium text-basic-secondary"),
+		className: N("w-fit h-fit", o ? "text-micro text-secondary-inverse" : "text-medium text-basic-secondary"),
 		children: n
 	}) : null]
 }), el = ({ title: e, description: t, keyboardShortcuts: n, position: i, className: a, boxClassName: s, showOnMobile: u = !1, disabled: d = !1, children: f }) => {
@@ -6847,12 +6847,12 @@ var Kl = /* @__PURE__ */ function(e) {
 				transition: "transform 150ms ease-out"
 			},
 			children: /* @__PURE__ */ S("div", {
-				className: ["rounded-[4px] flex gap-2 items-start p-3 pr-12 label-small relative text-notification shadow-2xl overflow-hidden w-[360px]", ql[t]].join(" "),
+				className: ["rounded-[4px] flex gap-2 items-start p-3 pr-12 label-small relative text-[var(--white)] shadow-2xl overflow-hidden w-[360px]", ql[t]].join(" "),
 				children: [
 					/* @__PURE__ */ x(ec, {
 						iconName: Jl[t],
 						size: 20,
-						className: "flex-shrink-0 mt-[2px] min-w-[20px] min-h-[20px] max-w-[20px] max-h-[20px] [&>path]:fill-notification"
+						className: "flex-shrink-0 mt-[2px] min-w-[20px] min-h-[20px] max-w-[20px] max-h-[20px] [&>path]:fill-[var(--white)]"
 					}),
 					/* @__PURE__ */ x("span", {
 						className: "notification-title label-small flex-grow min-w-0 break-words whitespace-pre-line",
@@ -6865,7 +6865,7 @@ var Kl = /* @__PURE__ */ function(e) {
 						onClick: r,
 						children: /* @__PURE__ */ x(ec, {
 							iconName: Xs.Close,
-							className: "[&>path]:!fill-notification"
+							className: "[&>path]:!fill-[var(--white)]"
 						})
 					})
 				]

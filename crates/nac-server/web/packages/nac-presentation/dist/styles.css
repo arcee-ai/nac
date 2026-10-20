@@ -3207,6 +3207,10 @@
     white-space: pre-wrap;
   }
 
+[data-nac-runtime]:is(.text-\[var\(--white\)\]), [data-nac-runtime] .text-\[var\(--white\)\] {
+    color: var(--white);
+  }
+
 [data-nac-runtime]:is(.text-accent-primary), [data-nac-runtime] .text-accent-primary {
     color: var(--color-text-accent-primary);
   }
@@ -3273,6 +3277,14 @@
 
 [data-nac-runtime]:is(.text-input-placeholder), [data-nac-runtime] .text-input-placeholder {
     color: var(--color-text-input-placeholder);
+  }
+
+[data-nac-runtime]:is(.text-primary-inverse), [data-nac-runtime] .text-primary-inverse {
+    color: var(--color-text-primary-inverse);
+  }
+
+[data-nac-runtime]:is(.text-secondary-inverse), [data-nac-runtime] .text-secondary-inverse {
+    color: var(--color-text-secondary-inverse);
   }
 
 [data-nac-runtime]:is(.text-success-primary), [data-nac-runtime] .text-success-primary {
@@ -4163,6 +4175,10 @@
     flex-direction: column;
   }
 
+[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-\[var\(--white\)\] > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-\[var\(--white\)\] > path {
+    fill: var(--white) !important;
+  }
+
 [data-nac-runtime]:is(.\[\&\>path\]\:\!fill-basic-muted > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-basic-muted > path {
     fill: var(--color-fill-basic-muted) !important;
   }
@@ -4173,6 +4189,10 @@
 
 [data-nac-runtime]:is(.\[\&\>path\]\:\!fill-error-primary > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-error-primary > path {
     fill: var(--color-fill-error-primary) !important;
+  }
+
+[data-nac-runtime]:is(.\[\&\>path\]\:fill-\[var\(--white\)\] > path), [data-nac-runtime] .\[\&\>path\]\:fill-\[var\(--white\)\] > path {
+    fill: var(--white);
   }
 
 [data-nac-runtime]:is(.\[\&\>path\]\:fill-basic-tertiary > path), [data-nac-runtime] .\[\&\>path\]\:fill-basic-tertiary > path {
@@ -5394,29 +5414,29 @@
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted), [data-nac-runtime] .btn-secondary-highlighted {
-  color: var(--color-text-btn-secondary-highlighted);
+  color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-secondary-highlighted);
   box-shadow: var(--shadow-convex);
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted:hover), [data-nac-runtime] .btn-secondary-highlighted:hover {
-  color: var(--color-text-btn-secondary-highlighted-hovered);
+  color: var(--color-text-btn-secondary-hovered);
   background-color: var(--color-bg-btn-secondary-highlighted-hovered);
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted:active), [data-nac-runtime] .btn-secondary-highlighted:active {
-  color: var(--color-text-btn-secondary-highlighted-pressed);
+  color: var(--color-text-btn-secondary-pressed);
   background-color: var(--color-bg-btn-secondary-highlighted-pressed);
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled {
   box-shadow: none;
-  color: var(--color-text-btn-secondary-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-secondary-highlighted-disabled);
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled:hover), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled:active), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled:active {
-  color: var(--color-text-btn-secondary-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-secondary-highlighted-disabled);
 }
 
@@ -5448,22 +5468,22 @@
 }
 
 [data-nac-runtime]:is(.btn-ghost), [data-nac-runtime] .btn-ghost {
-  color: var(--color-text-btn-ghost);
+  color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-ghost);
 }
 
 [data-nac-runtime]:is(.btn-ghost:hover), [data-nac-runtime] .btn-ghost:hover {
-  color: var(--color-text-btn-ghost-hovered);
+  color: var(--color-text-btn-secondary-hovered);
   background-color: var(--color-bg-btn-ghost-hovered);
 }
 
 [data-nac-runtime]:is(.btn-ghost:active), [data-nac-runtime] .btn-ghost:active {
-  color: var(--color-text-btn-ghost-pressed);
+  color: var(--color-text-btn-secondary-pressed);
   background-color: var(--color-bg-btn-ghost-pressed);
 }
 
 [data-nac-runtime]:is(.btn-ghost.btn-disabled), [data-nac-runtime] .btn-ghost.btn-disabled, [data-nac-runtime]:is(.btn-ghost.btn-disabled:hover), [data-nac-runtime] .btn-ghost.btn-disabled:hover, [data-nac-runtime]:is(.btn-ghost.btn-disabled:active), [data-nac-runtime] .btn-ghost.btn-disabled:active {
-  color: var(--color-text-btn-ghost-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-disabled);
 }
 
@@ -5508,22 +5528,22 @@
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted), [data-nac-runtime] .btn-ghost-highlighted {
-  color: var(--color-text-btn-ghost-highlighted);
+  color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-ghost-highlighted);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted:hover), [data-nac-runtime] .btn-ghost-highlighted:hover {
-  color: var(--color-text-btn-ghost-highlighted-hovered);
+  color: var(--color-text-btn-secondary-hovered);
   background-color: var(--color-bg-btn-ghost-highlighted-hovered);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted:active), [data-nac-runtime] .btn-ghost-highlighted:active {
-  color: var(--color-text-btn-ghost-highlighted-pressed);
+  color: var(--color-text-btn-secondary-pressed);
   background-color: var(--color-bg-btn-ghost-highlighted-pressed);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted.btn-disabled), [data-nac-runtime] .btn-ghost-highlighted.btn-disabled, [data-nac-runtime]:is(.btn-ghost-highlighted.btn-disabled:hover), [data-nac-runtime] .btn-ghost-highlighted.btn-disabled:hover, [data-nac-runtime]:is(.btn-ghost-highlighted.btn-disabled:active), [data-nac-runtime] .btn-ghost-highlighted.btn-disabled:active {
-  color: var(--color-text-btn-ghost-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-highlighted-disabled);
 }
 
@@ -5649,35 +5669,35 @@
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted .icon path), [data-nac-runtime] .btn-secondary-highlighted .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted);
+  fill: var(--color-fill-btn-secondary);
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted:hover .icon path), [data-nac-runtime] .btn-secondary-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-hovered);
+  fill: var(--color-fill-btn-secondary-hovered);
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted:active .icon path), [data-nac-runtime] .btn-secondary-highlighted:active .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-pressed);
+  fill: var(--color-fill-btn-secondary-pressed);
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled .icon path), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-disabled);
+  fill: var(--color-fill-btn-secondary-disabled);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted .icon path), [data-nac-runtime] .btn-ghost-highlighted .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted);
+  fill: var(--color-fill-btn-secondary);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted:hover .icon path), [data-nac-runtime] .btn-ghost-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-hovered);
+  fill: var(--color-fill-btn-secondary-hovered);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted:active .icon path), [data-nac-runtime] .btn-ghost-highlighted:active .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-pressed);
+  fill: var(--color-fill-btn-secondary-pressed);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted.btn-disabled .icon path), [data-nac-runtime] .btn-ghost-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-disabled);
+  fill: var(--color-fill-btn-secondary-disabled);
 }
 
 [data-nac-runtime]:is(.btn-secondary-accent .icon path), [data-nac-runtime] .btn-secondary-accent .icon path, [data-nac-runtime]:is(.btn-secondary-accent-highlighted .icon path), [data-nac-runtime] .btn-secondary-accent-highlighted .icon path, [data-nac-runtime]:is(.btn-ghost-accent .icon path), [data-nac-runtime] .btn-ghost-accent .icon path, [data-nac-runtime]:is(.btn-tertiary-accent .icon path), [data-nac-runtime] .btn-tertiary-accent .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted-accent .icon path), [data-nac-runtime] .btn-ghost-highlighted-accent .icon path {
