@@ -392,8 +392,7 @@ process.stdout.write(JSON.stringify({'X-Fixture-Token':'helper-ran'}));\n`,
 
       const args = [helper, "--profile", "a b c", ALLOWLIST, SPACED];
       const testConnection = form.getByRole("button", { name: "Test connection", exact: true });
-      // The helper inherits the server environment, so the value alone would not show the
-      // forwarded list is read; forwarding a name the server lacks must fail the test first.
+      // The helper inherits the server environment, so first prove an unset forwarded name fails.
       await forwarded.fill("NAC_E2E_UNSET_FORWARD");
       await testConnection.click();
       await expect(page.getByText(/^Test failed:/)).toBeVisible();
