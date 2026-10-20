@@ -4,9 +4,6 @@ import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
 
-const DEFAULT_HINT =
-  "Supports TXT, MARKDOWN, PDF, HTML, XLSX, XLS, DOCX, CSV, EML, MSG, PPTX, XML, EPUB, PPT, MD, HTM. Max 15MB each.";
-
 export interface FileInputFile {
   id: string;
   name: string;
@@ -31,7 +28,7 @@ const FileInput: React.FC<FileInputProps> = ({
   accept,
   files = [],
   errors = [],
-  hint = DEFAULT_HINT,
+  hint,
   disabled = false,
   onFilesSelected,
   onRemove,

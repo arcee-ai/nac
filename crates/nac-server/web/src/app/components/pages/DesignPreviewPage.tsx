@@ -18,6 +18,8 @@ import {
   type DateStringRange,
   EditableHeader,
   EditableHeaderSize,
+  FileInput,
+  type FileInputFile,
   ForkSessionItem,
   Icon,
   IconName,
@@ -63,6 +65,16 @@ const MODELS = [
   { id: "gpt", label: "GPT", icon: IconName.Ai },
 ];
 
+const SAMPLE_FILES: FileInputFile[] = [{ id: "trace", name: "session-trace.txt", size: "12 KB" }];
+
+function previewFile(file: File): FileInputFile {
+  return {
+    id: `${file.name}-${file.lastModified}`,
+    name: file.name,
+    size: `${Math.ceil(file.size / 1024)} KB`,
+  };
+}
+
 const SAMPLE_CODE = `pub enum AgentEvent {
     RunStarted { thread_name: Option<String> },
     AssistantMessage {
@@ -88,6 +100,7 @@ export default function DesignPreviewPage() {
   const [parallel, setParallel] = useState(4);
   const [temperature, setTemperature] = useState(0.7);
   const [environments, setEnvironments] = useState<string[]>(["local"]);
+  const [files, setFiles] = useState<FileInputFile[]>(SAMPLE_FILES);
   const [page, setPage] = useState(1);
   const [day, setDay] = useState<string | null>(null);
   const [dayRange, setDayRange] = useState<DateStringRange>({
@@ -203,7 +216,7 @@ export default function DesignPreviewPage() {
           </div>
         </BoxSurface>
 
-        <BoxSurface title="Choices and multi-line input">
+        <BoxSurface title="Choices, multi-line and file input">
           <div className="p-4 flex flex-wrap items-start gap-6">
             <div className="flex flex-col gap-2">
               <Checkbox checked={checked} onChange={setChecked}>
@@ -235,6 +248,17 @@ export default function DesignPreviewPage() {
               placeholder="Extra instructions for the agent"
               className="w-[320px]"
             />
+            <div className="flex w-[320px] flex-col gap-2">
+              <FileInput
+                accept=".txt,.md,.pdf"
+                hint="Text, Markdown or PDF."
+                onFilesSelected={(selected) => setFiles(selected.map(previewFile))}
+              />
+              <FileInput
+                files={files}
+                onRemove={(id) => setFiles(files.filter((file) => file.id !== id))}
+              />
+            </div>
           </div>
         </BoxSurface>
 
