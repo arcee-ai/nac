@@ -592,9 +592,6 @@
 .input-large.input-pad-search {
   padding-left: 42px;
 }
-textarea.input {
-  resize: none;
-}
 .input-wrapper .btn {
   position: absolute;
   top: 0;
