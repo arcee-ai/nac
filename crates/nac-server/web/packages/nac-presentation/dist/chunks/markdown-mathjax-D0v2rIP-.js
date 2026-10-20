@@ -1,7 +1,7 @@
 import { t as e } from "./rolldown-runtime-B0aSnxlc.js";
-import { a as t, c as n, o as r, r as i, s as a, t as o } from "./space-separated-tokens-DZK_KzBN.js";
-import { _ as s, l as c, m as l, t as u, v as d, y as f } from "./micromark-factory-space-DFzJv7G6.js";
-//#region node_modules/mathjax-full/js/util/Options.js
+import { a as t, c as n, o as r, r as i, s as a, t as o } from "./space-separated-tokens-DuAMDAzv.js";
+import { _ as s, l as c, m as l, t as u, v as d, y as f } from "./micromark-factory-space-CvA3Rfhx.js";
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/mathjax-full/js/util/Options.js
 var p = /* @__PURE__ */ e(((e) => {
 	var t = e && e.__values || function(e) {
 		var t = typeof Symbol == "function" && Symbol.iterator, n = t && e[t], r = 0;
@@ -31430,7 +31430,7 @@ function An(e) {
 	return typeof e == "object" && !!e && "type" in e && "tagName" in e;
 }
 //#endregion
-//#region node_modules/hast-util-to-text/lib/index.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/hast-util-to-text/lib/index.js
 var jn = /\n/g, Mn = /[\t ]+/g, Nn = R("br"), Pn = R(qn), Fn = R("p"), In = R("tr"), Ln = R([
 	"datalist",
 	"head",
@@ -31532,7 +31532,7 @@ function Jn(e) {
 	return e.tagName === "dialog" && !(e.properties || {}).open;
 }
 //#endregion
-//#region node_modules/rehype-mathjax/lib/create-plugin.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/rehype-mathjax/lib/create-plugin.js
 var Yn = {}, Xn = [];
 function Zn(e) {
 	return function(t) {
@@ -31577,7 +31577,7 @@ function Zn(e) {
 	};
 }
 //#endregion
-//#region node_modules/hast-util-parse-selector/lib/index.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/hast-util-parse-selector/lib/index.js
 var Qn = /[#.]/g;
 function $n(e, t) {
 	let n = e || "", r = {}, i = 0, a, o;
@@ -31594,7 +31594,7 @@ function $n(e, t) {
 	};
 }
 //#endregion
-//#region node_modules/hastscript/lib/create-h.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/hastscript/lib/create-h.js
 function er(e, t, n) {
 	let r = n ? or(n) : void 0;
 	function i(n, i, ...a) {
@@ -31676,11 +31676,11 @@ function or(e) {
 	return t;
 }
 //#endregion
-//#region node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
 var sr = /* @__PURE__ */ "altGlyph.altGlyphDef.altGlyphItem.animateColor.animateMotion.animateTransform.clipPath.feBlend.feColorMatrix.feComponentTransfer.feComposite.feConvolveMatrix.feDiffuseLighting.feDisplacementMap.feDistantLight.feDropShadow.feFlood.feFuncA.feFuncB.feFuncG.feFuncR.feGaussianBlur.feImage.feMerge.feMergeNode.feMorphology.feOffset.fePointLight.feSpecularLighting.feSpotLight.feTile.feTurbulence.foreignObject.glyphRef.linearGradient.radialGradient.solidColor.textArea.textPath".split("."), cr = er(t, "div");
 er(r, "g", sr);
 //#endregion
-//#region node_modules/mathjax-full/js/core/DOMAdaptor.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/mathjax-full/js/core/DOMAdaptor.js
 var lr = /* @__PURE__ */ e(((e) => {
 	var t = e && e.__values || function(e) {
 		var t = typeof Symbol == "function" && Symbol.iterator, n = t && e[t], r = 0;
@@ -47451,13 +47451,13 @@ function ya(e) {
 	return cr(e.kind, e.attributes, t);
 }
 //#endregion
-//#region node_modules/rehype-mathjax/lib/chtml.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/rehype-mathjax/lib/chtml.js
 var ba = wn(), xa = Zn(function(e) {
 	if (!e.chtml || !e.chtml.fontURL) throw Error("rehype-mathjax: missing `fontURL` in options, which must be set to a URL to reach MathJaX fonts");
 	return va(e, new ba.CHTML(e.chtml));
 });
 //#endregion
-//#region node_modules/mdast-util-math/lib/index.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/mdast-util-math/lib/index.js
 function Sa() {
 	return {
 		enter: {
@@ -47598,7 +47598,7 @@ function Ca(e) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-extension-math/lib/math-flow.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/micromark-extension-math/lib/math-flow.js
 var wa = {
 	tokenize: Ea,
 	concrete: !0,
@@ -47668,7 +47668,7 @@ function Da(e, t, n) {
 	}
 }
 //#endregion
-//#region node_modules/micromark-extension-math/lib/math-text.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/micromark-extension-math/lib/math-text.js
 function Oa(e) {
 	let t = (e || {}).singleDollarTextMath;
 	return t ??= !0, {
@@ -47712,7 +47712,7 @@ function Aa(e) {
 	return e !== 36 || this.events[this.events.length - 1][1].type === "characterEscape";
 }
 //#endregion
-//#region node_modules/micromark-extension-math/lib/syntax.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/micromark-extension-math/lib/syntax.js
 function ja(e) {
 	return {
 		flow: { 36: wa },
@@ -47720,7 +47720,7 @@ function ja(e) {
 	};
 }
 //#endregion
-//#region node_modules/remark-math/lib/index.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/remark-math/lib/index.js
 var Ma = {};
 function Na(e) {
 	let t = this, n = e || Ma, r = t.data(), i = r.micromarkExtensions ||= [], a = r.fromMarkdownExtensions ||= [], o = r.toMarkdownExtensions ||= [];

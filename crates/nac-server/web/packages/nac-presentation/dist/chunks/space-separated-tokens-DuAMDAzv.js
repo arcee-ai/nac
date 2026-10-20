@@ -1,5 +1,5 @@
 import { n as e } from "./rolldown-runtime-B0aSnxlc.js";
-//#region node_modules/property-information/lib/util/schema.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/util/schema.js
 var t = class {
 	constructor(e, t, n) {
 		this.normal = t, this.property = e, n && (this.space = n);
@@ -7,19 +7,19 @@ var t = class {
 };
 t.prototype.normal = {}, t.prototype.property = {}, t.prototype.space = void 0;
 //#endregion
-//#region node_modules/property-information/lib/util/merge.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/util/merge.js
 function n(e, n) {
 	let r = {}, i = {};
 	for (let t of e) Object.assign(r, t.property), Object.assign(i, t.normal);
 	return new t(r, i, n);
 }
 //#endregion
-//#region node_modules/property-information/lib/normalize.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/normalize.js
 function r(e) {
 	return e.toLowerCase();
 }
 //#endregion
-//#region node_modules/property-information/lib/util/info.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/util/info.js
 var i = class {
 	constructor(e, t) {
 		this.attribute = t, this.property = e;
@@ -27,7 +27,7 @@ var i = class {
 };
 i.prototype.attribute = "", i.prototype.booleanish = !1, i.prototype.boolean = !1, i.prototype.commaOrSpaceSeparated = !1, i.prototype.commaSeparated = !1, i.prototype.defined = !1, i.prototype.mustUseProperty = !1, i.prototype.number = !1, i.prototype.overloadedBoolean = !1, i.prototype.property = "", i.prototype.spaceSeparated = !1, i.prototype.space = void 0;
 //#endregion
-//#region node_modules/property-information/lib/util/types.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/util/types.js
 var a = /* @__PURE__ */ e({
 	boolean: () => s,
 	booleanish: () => c,
@@ -41,7 +41,7 @@ function m() {
 	return 2 ** ++o;
 }
 //#endregion
-//#region node_modules/property-information/lib/util/defined-info.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/util/defined-info.js
 var h = Object.keys(a), g = class extends i {
 	constructor(e, t, n, r) {
 		let i = -1;
@@ -56,7 +56,7 @@ function _(e, t, n) {
 	n && (e[t] = n);
 }
 //#endregion
-//#region node_modules/property-information/lib/util/create.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/util/create.js
 function v(e) {
 	let n = {}, i = {};
 	for (let [t, a] of Object.entries(e.properties)) {
@@ -66,7 +66,7 @@ function v(e) {
 	return new t(n, i, e.space);
 }
 //#endregion
-//#region node_modules/property-information/lib/aria.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/aria.js
 var y = v({
 	properties: {
 		ariaActiveDescendant: null,
@@ -124,17 +124,17 @@ var y = v({
 	}
 });
 //#endregion
-//#region node_modules/property-information/lib/util/case-sensitive-transform.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/util/case-sensitive-transform.js
 function b(e, t) {
 	return t in e ? e[t] : t;
 }
 //#endregion
-//#region node_modules/property-information/lib/util/case-insensitive-transform.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/util/case-insensitive-transform.js
 function x(e, t) {
 	return b(e, t.toLowerCase());
 }
 //#endregion
-//#region node_modules/property-information/lib/html.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/lib/html.js
 var S = v({
 	attributes: {
 		acceptcharset: "accept-charset",
@@ -1069,7 +1069,7 @@ function M(e) {
 	return e.charAt(1).toUpperCase();
 }
 //#endregion
-//#region node_modules/property-information/index.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/property-information/index.js
 var N = n([
 	y,
 	S,
@@ -1084,7 +1084,7 @@ var N = n([
 	E
 ], "svg");
 //#endregion
-//#region node_modules/comma-separated-tokens/index.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/comma-separated-tokens/index.js
 function F(e) {
 	let t = [], n = String(e || ""), r = n.indexOf(","), i = 0, a = !1;
 	for (; !a;) {
@@ -1099,7 +1099,7 @@ function I(e, t) {
 	return (e[e.length - 1] === "" ? [...e, ""] : e).join((n.padRight ? " " : "") + "," + (n.padLeft === !1 ? "" : " ")).trim();
 }
 //#endregion
-//#region node_modules/space-separated-tokens/index.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/space-separated-tokens/index.js
 function L(e) {
 	let t = String(e || "").trim();
 	return t ? t.split(/[ \t\n\r\f]+/g) : [];

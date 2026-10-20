@@ -1,4 +1,4 @@
-//#region node_modules/ccount/index.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/ccount/index.js
 function e(e, t) {
 	let n = String(e);
 	if (typeof t != "string") throw TypeError("Expected character");
@@ -7,7 +7,7 @@ function e(e, t) {
 	return r;
 }
 //#endregion
-//#region node_modules/hast-util-whitespace/lib/index.js
+//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/hast-util-whitespace/lib/index.js
 var t = /[ \t\n\f\r]/g;
 function n(e) {
 	return typeof e == "object" ? e.type === "text" && r(e.value) : r(e);

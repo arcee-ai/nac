@@ -109,7 +109,7 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: var(--color-bg-scrollbar);
+  background-color: var(--color-bg-divider-tertiary);
   border-radius: 2px;
 }
 
