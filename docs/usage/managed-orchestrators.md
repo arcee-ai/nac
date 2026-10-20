@@ -10,13 +10,13 @@ cannot recursively launch another orchestrator.
 The direct parent starts managed orchestrators with its launch control; ask it
 to delegate the work. The web UI has no manual launch. Each one appears in the
 parent's Subagents panel, where you can inspect, continue, steer, cancel, or
-open its transcript. A new session inherits its
-parent's model, backend and credentials, project, workspace, sandbox or SSH
-configuration, light worker model, and compaction threshold. It starts with a
-fresh transcript and plans through the existing NAC thread/workset topology;
-the direct parent never receives raw thread or workset tools.
+open its transcript. A new session inherits its parent's model, backend and
+credentials, project, workspace, sandbox or SSH configuration, light worker
+model, and compaction threshold. It starts with a fresh transcript and plans
+through the existing NAC thread/workset topology; the direct parent never
+receives raw thread or workset tools.
 
-The parent's Delegated work panel lists managed orchestrators separately from
+The parent's Subagents panel lists managed orchestrators separately from
 traditional coding agents, with description, type, status, and generation.
 Opening a row shows its durable lineage and **Back to Parent** action. The
 managed transcript is read-only in the web MVP; use the parent's Subagents panel

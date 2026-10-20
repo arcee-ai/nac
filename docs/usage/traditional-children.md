@@ -18,17 +18,17 @@ broker after configured and hard denials; remembered grants remain child-local.
 Managed orchestrators are a separate topology and do not inherit the mode.
 
 The parent agent starts children with its subagent tool; ask it to delegate
-work. The web UI has no manual launch. Children appear in the parent's
-Subagents panel, where you can inspect, continue, steer, cancel, or open each
-one. The first visible profile is `general`. It exposes exactly `read`, `write`, `edit`, `glob`, `grep`,
-`exec_command`, `write_stdin`, and `read_command_output`; it cannot create goals,
-launch another child, or control orchestrator sessions.
+work. The web UI has no manual launch. Children appear in the parent's Subagents
+panel, where you can inspect, continue, steer, cancel, or open each one. The
+first visible profile is `general`. It exposes exactly `read`, `write`, `edit`,
+`glob`, `grep`, `exec_command`, `write_stdin`, and `read_command_output`; it
+cannot create goals, launch another child, or control orchestrator sessions.
 
-The parent's Delegated work panel shows each child's description, coding-agent
-type, status, and generation. Opening a row shows the child's lineage and a
-**Back to Parent** action. That transcript is read-only in the web MVP;
-continue, steer, and cancel it from the parent's Subagents panel. Child goal
-ownership is rejected by the service as well as hidden by the UI.
+The parent's Subagents panel shows each child's description, coding-agent type,
+status, and generation. Opening a row shows the child's lineage and a **Back to
+Parent** action. That transcript is read-only in the web MVP; continue, steer,
+and cancel it from the parent's Subagents panel. Child goal ownership is
+rejected by the service as well as hidden by the UI.
 
 A foreground launch waits for the generation's structured outcome. A background
 launch returns its durable child ID immediately. When a background generation
