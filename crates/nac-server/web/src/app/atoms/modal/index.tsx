@@ -52,7 +52,7 @@ interface ModalProps {
   headerActions?: React.ReactNode;
   size?: ModalSize;
   closeOnOverlay?: boolean;
-  /** Full-bleed chrome: header and footer span the card, only the body scrolls. */
+  /** Stretch the body over a card the caller sizes; it still grows with its content. */
   flush?: boolean;
   /**
    * Grow the card to fill the viewport instead of hugging its content. Desktop
@@ -246,9 +246,6 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
 
   if (!mounted) return null;
 
-  // `flush` used to be the only path with a bordered header. Every dialog uses
-  // that chrome now; the flag stays so existing callers remain valid.
-  void flush;
   const onTop = modalStack.length === 0 || modalStack[modalStack.length - 1]?.id === token;
   // On a phone the scrim never dismisses — only the back/close control does.
   const overlayCloses = closeOnOverlay && !isMobile;
@@ -397,10 +394,13 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                 chromeless
                   ? "flex min-h-0 w-full flex-1 flex-col"
                   : "paragraph-medium flex flex-col p-4 text-basic-secondary",
-                // Pinned to the visible height so `h-full` children can scroll
-                // themselves; it scrolls too, so taller content keeps the
-                // padding and footer clearance below it.
-                (isMobile || isFullScreen || flush) && "min-h-0 flex-1 overflow-auto",
+                // A phone or full-screen body is pinned to the visible height so
+                // `h-full` children can scroll themselves; it scrolls too, so
+                // taller content keeps the padding and footer clearance below it.
+                // A flush card body fills the card but grows with its content,
+                // so the wrapper scrolls it; panes that scroll themselves pass
+                // `min-h-0` or `overflow-hidden` to stay pinned.
+                isMobile || isFullScreen ? "min-h-0 flex-1 overflow-auto" : flush && "flex-1",
                 isMobile && footer && MOBILE_FOOTER_CLEARANCE,
                 bodyClassName,
               )}
