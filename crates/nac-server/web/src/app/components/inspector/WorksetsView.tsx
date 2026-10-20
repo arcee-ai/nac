@@ -42,7 +42,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function Item({ item }: { item: WorksetItemSnapshot }) {
   return (
-    <div className="flex flex-col gap-4 p-4 rounded-[8px] border border-muted bg-elevation-level-1">
+    <div className="flex flex-col gap-4 p-4 rounded-[8px] border border-muted bg-elevation-ground">
       {item.role ? <Badge text={item.role} color={BadgeColor.Blue} className="self-start" /> : null}
       <div className="flex flex-col gap-1">
         <span className="header-small text-basic-primary">{item.title}</span>

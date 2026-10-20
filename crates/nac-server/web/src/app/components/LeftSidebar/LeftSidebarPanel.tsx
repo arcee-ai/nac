@@ -56,7 +56,7 @@ export function LeftSidebarPanel({
 
   return (
     <div
-      className="flex h-full flex-col bg-elevation-level-2 border-r border-muted"
+      className="flex h-full flex-col bg-elevation-ground border-r border-muted"
       style={{ boxShadow: "var(--left-sidebar-open)" }}
     >
       <div className="flex items-center justify-between px-4 py-2 border-b border-muted shrink-0">
@@ -174,7 +174,7 @@ export function LeftSidebarPanel({
             <span className="text-left flex-grow">Configurations</span>
           </TabButton>
           <TabButton onClick={commands.openManaged}>
-            <Icon iconName={IconName.Server} />
+            <Icon iconName={IconName.Controls} />
             <span className="text-left flex-grow">Managed host</span>
           </TabButton>
         </div>

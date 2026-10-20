@@ -2,7 +2,8 @@ import React from "react";
 import { IconName } from "../icon";
 export declare enum ModalSize {
     Small = "max-w-[400px]",
-    Medium = "max-w-[560px]",
+    /** Figma ModalBox default width. */
+    Medium = "max-w-[604px]",
     Wide = "max-w-[600px]",
     Large = "max-w-[760px]"
 }
