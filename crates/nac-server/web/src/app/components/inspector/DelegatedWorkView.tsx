@@ -132,8 +132,10 @@ export function DelegatedWorkView({
   // replaces the list; otherwise the rows would vanish on a dropped refetch.
   const failed =
     rows.length === 0 && (children.isError || (supportsOrchestrators && orchestrators.isError));
-  const list = failed ? (
-    <div role="alert" className="rounded-[6px] border border-error-primary p-3">
+  // "None yet" is only true once every list the panel shows has answered.
+  const loaded = children.isSuccess && (!supportsOrchestrators || orchestrators.isSuccess);
+  const loadError = (
+    <div role="alert" className="m-2 rounded-[6px] border border-error-primary p-3">
       <div className="text-small text-error-primary">Subagents could not be loaded.</div>
       <Button
         className="mt-2"
@@ -147,7 +149,8 @@ export function DelegatedWorkView({
         Try again
       </Button>
     </div>
-  ) : (
+  );
+  const list = (
     <div className="flex flex-col gap-8">
       {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-2">
@@ -194,8 +197,14 @@ export function DelegatedWorkView({
               />
             </div>
           </>
-        ) : (
+        ) : failed ? (
+          loadError
+        ) : loaded ? (
           <NoSubagents />
+        ) : (
+          <p role="status" className="label-small m-auto text-basic-tertiary">
+            Loading subagents…
+          </p>
         )}
       </div>
     </PanelSplit>

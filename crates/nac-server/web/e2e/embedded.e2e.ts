@@ -608,7 +608,10 @@ test("applies parent auto-approval to child agents and identifies manual child r
     "This setting governs this session and all existing or future owned child agents",
   );
   await expect(permissions).toContainText("Separately managed orchestrators are not included");
-  await permissions.getByRole("switch", { name: "Approve all automatically" }).click();
+  const automaticMode = permissions.getByRole("switch", { name: "Approve all automatically" });
+  await automaticMode.click();
+  // The child start below is a separate request; it must not overtake the mode change.
+  await expect(automaticMode).toBeChecked();
   await page.keyboard.press("Escape");
 
   const automaticStart = startForegroundChild(
@@ -623,7 +626,9 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await expect(page.getByText("Permission required")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
-  await page.getByRole("switch", { name: "Approve all automatically" }).click();
+  const manualMode = page.getByRole("switch", { name: "Approve all automatically" });
+  await manualMode.click();
+  await expect(manualMode).not.toBeChecked();
   await page.keyboard.press("Escape");
 
   const manualStart = startForegroundChild(

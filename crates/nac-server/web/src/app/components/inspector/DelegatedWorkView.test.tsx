@@ -148,6 +148,7 @@ describe("delegated work", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Subagents could not be loaded",
     );
+    expect(screen.queryByText("No subagents yet")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy(),
@@ -259,4 +260,12 @@ it("keeps the selected subagent and its draft when another one updates", async (
     ),
   );
   expect(startChild).not.toHaveBeenCalled();
+});
+
+it("does not claim there are no subagents while the lists are loading", async () => {
+  listChildren.mockReturnValue(new Promise(() => {}));
+  mount("direct-with-orchestrator", false);
+
+  expect(await screen.findByText("Loading subagents…")).toBeTruthy();
+  expect(screen.queryByText("No subagents yet")).toBeNull();
 });
