@@ -20,9 +20,13 @@ const FOCUSABLE =
 /** Kept in step with the mobile slide transition. */
 const MOBILE_EXIT_MS = 300;
 
-/** Clearance the scrolling body leaves for the footer floating over it. */
+/** Clearance the body leaves for the phone header floating over it. */
 const MOBILE_HEADER_CLEARANCE = "pt-14";
-const MOBILE_FOOTER_CLEARANCE = "pb-16";
+/**
+ * Clearance the body leaves for the phone footer floating over it (64px plus
+ * the body's own 16px). A full-bleed `bodyClassName` such as `p-0` drops it.
+ */
+const MOBILE_FOOTER_CLEARANCE = "pb-20";
 
 export enum ModalSize {
   Small = "max-w-[400px]",
@@ -365,7 +369,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                   size,
                   chromeless
                     ? "shadow-none"
-                    : "max-h-[calc(100dvh-2rem)] overflow-hidden rounded-2xl bg-elevation-level-2 shadow-xl",
+                    : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-2xl bg-elevation-level-2 shadow-xl",
                   isFullScreen && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden",
                 ),
             className,
@@ -384,9 +388,8 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           {header}
           <div
             className={cn(
-              "flex w-full min-h-0 flex-auto flex-col overflow-y-auto",
+              "flex w-full min-h-0 flex-auto flex-col overflow-auto",
               floatingHeader && !chromeless && MOBILE_HEADER_CLEARANCE,
-              isMobile && footer && MOBILE_FOOTER_CLEARANCE,
             )}
           >
             <div
@@ -394,7 +397,11 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                 chromeless
                   ? "flex min-h-0 w-full flex-1 flex-col"
                   : "paragraph-medium flex flex-col p-4 text-basic-secondary",
-                (isMobile || isFullScreen || flush) && "min-h-0 flex-1",
+                // Pinned to the visible height so `h-full` children can scroll
+                // themselves; it scrolls too, so taller content keeps the
+                // padding and footer clearance below it.
+                (isMobile || isFullScreen || flush) && "min-h-0 flex-1 overflow-auto",
+                isMobile && footer && MOBILE_FOOTER_CLEARANCE,
                 bodyClassName,
               )}
             >
