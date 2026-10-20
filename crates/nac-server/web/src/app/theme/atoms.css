@@ -218,26 +218,26 @@
 }
 
 .btn-secondary-highlighted {
-  color: var(--color-text-btn-secondary-highlighted);
+  color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-secondary-highlighted);
   box-shadow: var(--shadow-convex);
 }
 .btn-secondary-highlighted:hover {
-  color: var(--color-text-btn-secondary-highlighted-hovered);
+  color: var(--color-text-btn-secondary-hovered);
   background-color: var(--color-bg-btn-secondary-highlighted-hovered);
 }
 .btn-secondary-highlighted:active {
-  color: var(--color-text-btn-secondary-highlighted-pressed);
+  color: var(--color-text-btn-secondary-pressed);
   background-color: var(--color-bg-btn-secondary-highlighted-pressed);
 }
 .btn-secondary-highlighted.btn-disabled {
   box-shadow: none;
-  color: var(--color-text-btn-secondary-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-secondary-highlighted-disabled);
 }
 .btn-secondary-highlighted.btn-disabled:hover,
 .btn-secondary-highlighted.btn-disabled:active {
-  color: var(--color-text-btn-secondary-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-secondary-highlighted-disabled);
 }
 
@@ -266,24 +266,24 @@
 }
 
 .btn-ghost {
-  color: var(--color-text-btn-ghost);
+  color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-ghost);
 }
 .btn-ghost:hover {
-  color: var(--color-text-btn-ghost-hovered);
+  color: var(--color-text-btn-secondary-hovered);
   background-color: var(--color-bg-btn-ghost-hovered);
 }
 .btn-ghost:active {
-  color: var(--color-text-btn-ghost-pressed);
+  color: var(--color-text-btn-secondary-pressed);
   background-color: var(--color-bg-btn-ghost-pressed);
 }
 .btn-ghost.btn-disabled {
-  color: var(--color-text-btn-ghost-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-disabled);
 }
 .btn-ghost.btn-disabled:hover,
 .btn-ghost.btn-disabled:active {
-  color: var(--color-text-btn-ghost-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-disabled);
 }
 
@@ -332,24 +332,24 @@
 }
 
 .btn-ghost-highlighted {
-  color: var(--color-text-btn-ghost-highlighted);
+  color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-ghost-highlighted);
 }
 .btn-ghost-highlighted:hover {
-  color: var(--color-text-btn-ghost-highlighted-hovered);
+  color: var(--color-text-btn-secondary-hovered);
   background-color: var(--color-bg-btn-ghost-highlighted-hovered);
 }
 .btn-ghost-highlighted:active {
-  color: var(--color-text-btn-ghost-highlighted-pressed);
+  color: var(--color-text-btn-secondary-pressed);
   background-color: var(--color-bg-btn-ghost-highlighted-pressed);
 }
 .btn-ghost-highlighted.btn-disabled {
-  color: var(--color-text-btn-ghost-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-highlighted-disabled);
 }
 .btn-ghost-highlighted.btn-disabled:hover,
 .btn-ghost-highlighted.btn-disabled:active {
-  color: var(--color-text-btn-ghost-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-highlighted-disabled);
 }
 
@@ -479,28 +479,28 @@
   fill: var(--color-fill-btn-secondary-disabled);
 }
 .btn-secondary-highlighted .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted);
+  fill: var(--color-fill-btn-secondary);
 }
 .btn-secondary-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-hovered);
+  fill: var(--color-fill-btn-secondary-hovered);
 }
 .btn-secondary-highlighted:active .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-pressed);
+  fill: var(--color-fill-btn-secondary-pressed);
 }
 .btn-secondary-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-disabled);
+  fill: var(--color-fill-btn-secondary-disabled);
 }
 .btn-ghost-highlighted .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted);
+  fill: var(--color-fill-btn-secondary);
 }
 .btn-ghost-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-hovered);
+  fill: var(--color-fill-btn-secondary-hovered);
 }
 .btn-ghost-highlighted:active .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-pressed);
+  fill: var(--color-fill-btn-secondary-pressed);
 }
 .btn-ghost-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-disabled);
+  fill: var(--color-fill-btn-secondary-disabled);
 }
 .btn-secondary-accent .icon path,
 .btn-secondary-accent-highlighted .icon path,
