@@ -38,11 +38,7 @@ interface SessionLayoutState {
   selectedThreadRunning: boolean;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
-  /**
-   * Subagent row each parent's Subagents panel has open, by parent session.
-   * Kept per parent rather than reset with the session, so returning from a
-   * subagent's transcript reopens the row that was open.
-   */
+  /** Open Subagents row per parent, kept so returning from a transcript reopens it. */
   selectedSubagents: ReadonlyMap<string, string>;
   /** Revision the panels are looking at, or null for the live working tree. */
   selectedRevision: number | null;

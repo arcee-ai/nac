@@ -112,9 +112,7 @@ export function DelegatedWorkView({
 
   const newestKey =
     [...rows].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.key ?? null;
-  // A choice that is hidden by policy or gone from the list is kept, not
-  // replaced: the newest row stands in until it comes back. Drafts belong to
-  // their own subagent, so the stand-in never shows or sends the hidden one's.
+  // A hidden or vanished choice is kept; the newest row stands in until it returns.
   const selected =
     rows.find((row) => row.key === selectedKey) ??
     rows.find((row) => row.key === newestKey) ??
@@ -155,8 +153,7 @@ export function DelegatedWorkView({
       </Button>
     </div>
   );
-  // Shown wherever the list is, so a narrow list opened over a failed or
-  // pending load still explains itself and offers the retry.
+  // In the list too, so a narrow list opened over a failed load still offers the retry.
   const listState = failed ? (
     loadError
   ) : rows.length === 0 && !loaded ? (

@@ -48,8 +48,7 @@ export function SubagentComposer({
   const startOrchestrator = useStartManagedOrchestrator();
   const cancelChild = useCancelTraditionalChild();
   const cancelOrchestrator = useCancelManagedOrchestrator();
-  // Kept by durable target outside this component, so a remount on a status
-  // change or a trip to the transcript and back does not drop an unsent message.
+  // Stored by durable target so status remounts and transcript trips keep the draft.
   const drafts = useNativeRuntime().stores.promptDraftStore;
   const draft = drafts.useDraft(target.id);
   const [background, setBackground] = useState(target.background);

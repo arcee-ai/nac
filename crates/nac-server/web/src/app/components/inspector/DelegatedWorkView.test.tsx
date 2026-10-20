@@ -479,6 +479,15 @@ describe("load state in the narrow list", () => {
     expect(await screen.findByRole("button", { name: "Review permissions" })).toBeTruthy();
   });
 
+  it("says the lists are loading in a tablet list opened before they answer", async () => {
+    listChildren.mockReturnValue(new Promise(() => {}));
+    mount("direct", false, true, { tablet: true });
+    act(() => showSidePanelList(true));
+
+    expect(await screen.findByText("Loading subagents…")).toBeTruthy();
+    expect(screen.queryByText("No subagents yet")).toBeNull();
+  });
+
   it("keeps loaded rows when a later poll fails", async () => {
     const client = mount("direct");
     listChildren.mockRejectedValue(new Error("503"));
