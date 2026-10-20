@@ -1,4 +1,4 @@
-//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/unist-util-is/lib/index.js
+//#region node_modules/unist-util-is/lib/index.js
 var e = (function(e) {
 	if (e == null) return a;
 	if (typeof e == "function") return i(e);
@@ -44,12 +44,12 @@ function o(e) {
 	return typeof e == "object" && !!e && "type" in e;
 }
 //#endregion
-//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/unist-util-visit-parents/lib/color.js
+//#region node_modules/unist-util-visit-parents/lib/color.js
 function s(e) {
 	return e;
 }
 //#endregion
-//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/unist-util-visit-parents/lib/index.js
+//#region node_modules/unist-util-visit-parents/lib/index.js
 var c = [], l = "skip";
 function u(t, n, r, i) {
 	let a;
@@ -82,11 +82,11 @@ function d(e) {
 	return Array.isArray(e) ? e : typeof e == "number" ? [!0, e] : e == null ? c : [e];
 }
 //#endregion
-//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/devlop/lib/default.js
+//#region node_modules/devlop/lib/default.js
 function f() {}
 function p() {}
 //#endregion
-//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/longest-streak/index.js
+//#region node_modules/longest-streak/index.js
 function m(e, t) {
 	let n = String(e), r = n.indexOf(t), i = r, a = 0, o = 0;
 	if (typeof t != "string") throw TypeError("Expected substring");
@@ -94,7 +94,7 @@ function m(e, t) {
 	return o;
 }
 //#endregion
-//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/micromark-util-character/index.js
+//#region node_modules/micromark-util-character/index.js
 var h = D(/[A-Za-z]/), g = D(/[\dA-Za-z]/), _ = D(/[#-'*+\--9=?A-Z^-~]/);
 function v(e) {
 	return e !== null && (e < 32 || e === 127);
@@ -117,7 +117,7 @@ function D(e) {
 	}
 }
 //#endregion
-//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/micromark-factory-space/index.js
+//#region node_modules/micromark-factory-space/index.js
 function O(e, t, n, r) {
 	let i = r ? r - 1 : Infinity, a = 0;
 	return o;

@@ -1,4 +1,4 @@
-//#region ../../../../../../Users/aleksy/Documents/GitHub/nac/crates/nac-server/web/node_modules/@xterm/xterm/lib/xterm.mjs
+//#region node_modules/@xterm/xterm/lib/xterm.mjs
 var e = Object.defineProperty, t = Object.getOwnPropertyDescriptor, n = (t, n) => {
 	for (var r in n) e(t, r, {
 		get: n[r],
