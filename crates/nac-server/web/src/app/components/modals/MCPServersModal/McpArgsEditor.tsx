@@ -65,7 +65,8 @@ export function ArgsEditor({
     )
       .split(/\r\n|\r|\n/)
       .filter((line) => line.trim());
-    if (lines.length === 0) return;
+    // A blank-only replacement still replaces: the row stays, emptied, and the serializer drops it.
+    if (lines.length === 0) lines.push("");
     const pasted = lines.map((line, at) =>
       at === 0 ? { ...rows[index], value: line } : newArgRow(line),
     );
