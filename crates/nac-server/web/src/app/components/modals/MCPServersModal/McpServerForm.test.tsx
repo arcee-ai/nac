@@ -164,6 +164,17 @@ describe("stdio arguments", () => {
     });
   });
 
+  it("saves a configuration with every argument removed as no arguments", async () => {
+    render(<Form record={stdioRecord(["--allow", ALLOWLIST])} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove argument 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove argument 1" }));
+    expect(screen.getByText("No arguments.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fakes.update).toHaveBeenCalledOnce());
+    expect(fakes.update.mock.calls[0][0].payload.args).toEqual([]);
+  });
+
   it("moves focus to the new field, then to a neighbour or Add argument on removal", () => {
     render(<Form record={stdioRecord(["one", "two", "three"])} />);
 
@@ -191,6 +202,21 @@ describe("stdio arguments", () => {
 });
 
 describe("header helper arguments", () => {
+  it("sends the added rows when creating a server", async () => {
+    render(<Form record={null} />);
+    type(screen.getByPlaceholderText("my_server"), "linear");
+    type(screen.getByPlaceholderText("https://example.com/mcp"), "https://mcp.example.test/mcp");
+    type(screen.getByPlaceholderText("./refresh-mcp-headers"), "./refresh-headers");
+    for (const value of ["--profile", "a b"]) {
+      fireEvent.click(screen.getByRole("button", { name: "Add argument" }));
+      type(document.activeElement as HTMLInputElement, value);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fakes.create).toHaveBeenCalledOnce());
+    expect(fakes.create.mock.calls[0][0].header_helper.args).toEqual(["--profile", "a b"]);
+  });
+
   it("uses the same rows and serialization for update and Test connection", async () => {
     render(<Form record={httpRecord(["--profile", "a b"])} />);
     const item = "Header helper argument";
