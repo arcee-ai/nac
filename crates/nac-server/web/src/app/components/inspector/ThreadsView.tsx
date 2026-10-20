@@ -316,7 +316,7 @@ function LogScroller({
     <div
       ref={scrollRef}
       className={cn(
-        "flex flex-col flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0 bg-elevation-level-0-5",
+        "flex flex-col flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0 bg-elevation-ground",
         className,
       )}
       onScroll={() => {

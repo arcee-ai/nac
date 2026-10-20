@@ -134,9 +134,7 @@ export function PanelSplit({
     // second dialog stacked on top of it.
     return (
       <>
-        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-0-5">
-          {children}
-        </div>
+        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
         <Modal
           open={showList}
           onClose={() => showSidePanelList(false)}
@@ -194,9 +192,7 @@ export function PanelSplit({
             </div>
           </div>
         ) : (
-          <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-0-5">
-            {children}
-          </div>
+          <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
         )}
       </div>
     );
