@@ -16,11 +16,15 @@ model, and compaction threshold. It starts with a fresh transcript and plans
 through the existing NAC thread/workset topology; the direct parent never
 receives raw thread or workset tools.
 
-The parent's Subagents panel lists managed orchestrators separately from
-traditional coding agents, with description, type, status, and generation.
-Opening a row shows its durable lineage and **Back to Parent** action. The
-managed transcript is read-only in the web MVP; use the parent's Subagents panel
-for continuation, steering, and cancellation.
+The parent's Subagents panel lists managed orchestrators beside traditional
+coding agents, each with its own icon, and marks the ones still running.
+Selecting a row previews its transcript above a composer for that orchestrator:
+**Send** starts its next generation, **Steer** and **Stop** act on the running
+one. **Open** goes to the orchestrator's own page, which names it a managed NAC
+orchestrator, adds its Threads and Worksets panels, and returns to the parent
+with **Parent chat**. That page keeps the same composer, which acts through the
+parent, but its transcript has no resend, revert, fork, branch, or commit
+controls.
 
 A foreground launch waits for the generation's final report. A background
 launch returns immediately, then atomically queues one completion for the

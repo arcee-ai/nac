@@ -24,11 +24,15 @@ first visible profile is `general`. It exposes exactly `read`, `write`, `edit`,
 `glob`, `grep`, `exec_command`, `write_stdin`, and `read_command_output`; it
 cannot create goals, launch another child, or control orchestrator sessions.
 
-The parent's Subagents panel shows each child's description, coding-agent type,
-status, and generation. Opening a row shows the child's lineage and a **Back to
-Parent** action. That transcript is read-only in the web MVP; continue, steer,
-and cancel it from the parent's Subagents panel. Child goal ownership is
-rejected by the service as well as hidden by the UI.
+The parent's Subagents panel lists each child by description, with the coding-
+agent icon, and marks the ones still running. Selecting a row previews its
+transcript above a composer for that child: **Send** continues a finished child,
+**Steer** and **Stop** act on the running generation. **Open** goes to the
+child's own page, which names it a traditional coding agent and returns to the
+parent with **Parent chat**. That page keeps the same composer, which acts
+through the parent, but its transcript has none of a primary chat's history
+controls: no resend, revert, fork, goal, branch, or commit. Child goal ownership
+is rejected by the service as well as hidden by the UI.
 
 A foreground launch waits for the generation's structured outcome. A background
 launch returns its durable child ID immediately. When a background generation
