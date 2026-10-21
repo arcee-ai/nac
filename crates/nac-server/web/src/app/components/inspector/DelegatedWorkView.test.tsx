@@ -342,6 +342,55 @@ describe("selection and drafts", () => {
     expect(draftBox("Send a message").value).toBe("Also check grants");
   });
 
+  it("clears a sent message before a foreground start answers, so the remount cannot resend it", async () => {
+    const finished = { ...child, status: "completed" as const, report: "Done.", version: 4 };
+    const client = mount("direct");
+    client.setQueryData(queryKeys.traditionalChildren("parent"), [finished]);
+    startChild.mockReturnValue(new Promise(() => {}));
+    fireEvent.change(await waitFor(() => draftBox("Send a message")), {
+      target: { value: "Run it again" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(draftBox("Send a message").value).toBe("");
+
+    act(() => {
+      client.setQueryData(queryKeys.traditionalChildren("parent"), [
+        { ...finished, status: "running", version: 5 },
+      ]);
+    });
+    fireEvent.keyDown(await waitFor(() => draftBox("Steer a message")), { key: "Enter" });
+
+    expect(draftBox("Steer a message").value).toBe("");
+    expect(startChild).toHaveBeenCalledOnce();
+  });
+
+  it("gives a failed message back unless something new was typed", async () => {
+    const finished = { ...child, status: "completed" as const, report: "Done.", version: 4 };
+    const client = mount("direct");
+    client.setQueryData(queryKeys.traditionalChildren("parent"), [finished]);
+    startChild.mockRejectedValueOnce(new Error("busy"));
+    const box = await waitFor(() => draftBox("Send a message"));
+    fireEvent.change(box, { target: { value: "Run it again" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(draftBox("Send a message").value).toBe("Run it again"));
+
+    // The running remount re-enables the box while the first request is still open.
+    let reject = (_: Error) => {};
+    startChild.mockReturnValueOnce(new Promise((_, fail) => (reject = fail)));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    act(() => {
+      client.setQueryData(queryKeys.traditionalChildren("parent"), [
+        { ...finished, status: "running", version: 5 },
+      ]);
+    });
+    fireEvent.change(await waitFor(() => draftBox("Steer a message")), {
+      target: { value: "Something else" },
+    });
+    await act(async () => reject(new Error("busy")));
+
+    expect(draftBox("Steer a message").value).toBe("Something else");
+  });
+
   it("keeps a selection and a draft per parent", async () => {
     listChildren.mockImplementation(async (parent) =>
       parent === "parent"

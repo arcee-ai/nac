@@ -60,9 +60,10 @@ export function SubagentComposer({
     cancelOrchestrator.isPending;
 
   const submit = async () => {
-    const submitted = draft;
-    const prompt = submitted.text.trim();
+    const prompt = draft.text.trim();
     if (!prompt) return;
+    // A foreground start answers only after its run, so clear now; the running remount must not resend.
+    const cleared = drafts.update(target.id, "");
     try {
       if (target.mode === "orchestrator") {
         await startOrchestrator.mutateAsync({
@@ -86,9 +87,9 @@ export function SubagentComposer({
           },
         });
       }
-      // Text typed while the request was in flight is a new message; keep it.
-      drafts.acknowledge(target.id, submitted);
     } catch (error) {
+      // Give the failed text back unless something new was typed meanwhile.
+      if (drafts.get(target.id) === cleared) drafts.update(target.id, draft.text);
       toast.error(`Unable to update the subagent: ${errorMessage(toRunError(error))}`);
     }
   };
