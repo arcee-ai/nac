@@ -397,9 +397,10 @@ describe("selection and drafts", () => {
     expect(cancelChild).not.toHaveBeenCalled();
 
     await act(async () => reply.resolve(child));
-    expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty("disabled", false);
     expect(startChild).toHaveBeenCalledOnce();
     expect(cancelChild).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(cancelChild).toHaveBeenCalledWith("parent", "child-1"));
   });
 
   it("keeps a pending continuation unsendable when its target starts running", async () => {
