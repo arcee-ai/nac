@@ -982,10 +982,10 @@ fn stalled_then_scripted_direct_response() -> (
 
 #[path = "tests/catalog.rs"]
 mod catalog;
-#[path = "tests/children_and_leases.rs"]
-mod children_and_leases;
 #[path = "tests/child_review_retry.rs"]
 mod child_review_retry;
+#[path = "tests/children_and_leases.rs"]
+mod children_and_leases;
 #[path = "tests/compaction.rs"]
 mod compaction;
 #[path = "tests/configuration.rs"]

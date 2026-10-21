@@ -61,14 +61,24 @@ printf '%s\n' "$count" >"$count_file"
 EOF
 cat >"$fake_bin/npm" <<'EOF'
 #!/bin/sh
+printf '%s\n' "$$" >"${FAKE_VITE_LEADER:?}"
 if [ "${FAKE_VITE_FAIL:-0}" = 1 ]; then exit 23; fi
 sh -c 'trap "exit 0" TERM INT; while :; do sleep 1; done' &
 printf '%s\n' "$!" >"${FAKE_VITE_DESCENDANT:?}"
 trap 'exit 0' TERM INT
 while :; do sleep 1; done
 EOF
+cat >"$fake_bin/sleep" <<'EOF'
+#!/bin/sh
+if [ -n "${FAKE_SLEEP_LOG:-}" ]; then
+  pgid=$(/bin/ps -o pgid= -p "$$")
+  printf '%s %s %s\n' "$$" "$PPID" "$pgid" >>"$FAKE_SLEEP_LOG"
+fi
+exec /bin/sleep "$@"
+EOF
 cat >"$TMP/backend" <<'EOF'
 #!/bin/sh
+printf '%s\n' "$$" >"${FAKE_BACKEND_LEADER:?}"
 printf '%s\n' "$*" >"${FAKE_BACKEND_ARGS:?}"
 sh -c 'trap "exit 0" TERM INT; while :; do sleep 1; done' &
 printf '%s\n' "$!" >"${FAKE_BACKEND_DESCENDANT:?}"
@@ -76,15 +86,18 @@ if [ "${FAKE_BACKEND_FAIL:-0}" = 1 ]; then exit 17; fi
 trap 'exit 0' TERM INT
 while :; do sleep 1; done
 EOF
-chmod +x "$fake_bin/cargo" "$fake_bin/curl" "$fake_bin/npm" "$TMP/backend"
+chmod +x "$fake_bin/cargo" "$fake_bin/curl" "$fake_bin/npm" "$fake_bin/sleep" "$TMP/backend"
 
 run_supervisor() {
   local label=$1
   local curl_count="$TMP/$label-curl-count"
   FAKE_CURL_COUNT_FILE="$curl_count" \
+  FAKE_BACKEND_LEADER="$TMP/$label-backend-leader" \
   FAKE_BACKEND_DESCENDANT="$TMP/$label-backend-child" \
   FAKE_BACKEND_ARGS="$TMP/$label-backend-args" \
+  FAKE_VITE_LEADER="$TMP/$label-vite-leader" \
   FAKE_VITE_DESCENDANT="$TMP/$label-vite-child" \
+  FAKE_SLEEP_LOG="$TMP/$label-sleep-groups" \
   NAC_DEV_SERVER_BIN="$TMP/backend" \
   DEV_BIND=127.0.0.1:43210 DEV_OPEN=0 PATH="$fake_bin:$PATH" \
     "$ROOT/start_dev.sh" >"$TMP/$label.log" 2>&1 &
@@ -93,12 +106,33 @@ run_supervisor() {
 
 run_supervisor interrupt
 for _ in $(seq 1 100); do
-  [[ -f "$TMP/interrupt-backend-child" && -f "$TMP/interrupt-vite-child" ]] && break
+  [[ -f "$TMP/interrupt-backend-leader" && -f "$TMP/interrupt-backend-child" && \
+     -f "$TMP/interrupt-vite-leader" && -f "$TMP/interrupt-vite-child" ]] && break
   kill -0 "$SUPERVISOR_PID" 2>/dev/null || fail "supervisor exited before becoming ready"
   sleep 0.05
 done
-[[ -f "$TMP/interrupt-backend-child" && -f "$TMP/interrupt-vite-child" ]] || fail "fake descendants were not started"
+[[ -f "$TMP/interrupt-backend-leader" && -f "$TMP/interrupt-backend-child" && \
+   -f "$TMP/interrupt-vite-leader" && -f "$TMP/interrupt-vite-child" ]] || \
+  fail "fake process trees were not started"
 grep -F -- '--bind 127.0.0.1:43210' "$TMP/interrupt-backend-args" >/dev/null || fail "DEV_BIND did not reach nac-web"
+backend_leader=$(cat "$TMP/interrupt-backend-leader")
+vite_leader=$(cat "$TMP/interrupt-vite-leader")
+backend_pgid=$(/bin/ps -o pgid= -p "$backend_leader")
+vite_pgid=$(/bin/ps -o pgid= -p "$vite_leader")
+[[ "$backend_pgid" -eq "$backend_leader" ]] || fail "backend does not lead its process group"
+[[ "$vite_pgid" -eq "$vite_leader" ]] || fail "Vite does not lead its process group"
+supervisor_pgid=$(/bin/ps -o pgid= -p "$SUPERVISOR_PID")
+poll_pgid=""
+for _ in $(seq 1 100); do
+  if [[ -f "$TMP/interrupt-sleep-groups" ]]; then
+    poll_pgid=$(awk -v parent="$SUPERVISOR_PID" '$2 == parent { print $3; exit }' \
+      "$TMP/interrupt-sleep-groups")
+    [[ -n "$poll_pgid" ]] && break
+  fi
+  sleep 0.05
+done
+[[ -n "$poll_pgid" ]] || fail "supervisor polling sleep was not observed"
+[[ "$poll_pgid" -eq "$supervisor_pgid" ]] || fail "supervisor polling unexpectedly used monitor mode"
 backend_child=$(cat "$TMP/interrupt-backend-child")
 vite_child=$(cat "$TMP/interrupt-vite-child")
 kill -TERM "$SUPERVISOR_PID"

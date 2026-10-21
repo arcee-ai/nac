@@ -218,6 +218,15 @@ fn classify_model_configuration_error(error: anyhow::Error) -> anyhow::Error {
     }
 }
 
+/// Whether the connection, rather than the provider, failed a credential refresh.
+fn is_transient_transport(error: &anyhow::Error) -> bool {
+    error.chain().any(|source| {
+        source
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|error| error.is_connect() || error.is_timeout())
+    })
+}
+
 fn classify_stored_arcee_auth_error(error: anyhow::Error) -> anyhow::Error {
     if error
         .downcast_ref::<arcee::StoredArceeAuthConfigurationError>()

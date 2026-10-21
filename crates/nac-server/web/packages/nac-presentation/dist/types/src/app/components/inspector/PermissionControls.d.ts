@@ -5,7 +5,10 @@ interface PermissionControlsProps {
     label?: string;
     autoApprovalAvailable?: boolean;
     requesterLabel?: string;
+    /** Child retries use its owning primary; mode remains inherited. */
+    retryParentSessionId?: string;
+    poll?: boolean;
 }
 /** Direct-session permission prompt and remembered-grant manager. */
-export declare function PermissionControls({ sessionId, behavior, label, autoApprovalAvailable, requesterLabel, }: PermissionControlsProps): import("react").JSX.Element | null;
+export declare function PermissionControls({ sessionId, behavior, label, autoApprovalAvailable, requesterLabel, retryParentSessionId, poll, }: PermissionControlsProps): import("react").JSX.Element | null;
 export {};

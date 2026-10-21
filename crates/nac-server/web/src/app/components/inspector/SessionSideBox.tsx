@@ -5,6 +5,8 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
+  HorizontalTabsItem,
+  HorizontalTabsItemSize,
   Icon,
   IconName,
   ProgressLoader,
@@ -155,19 +157,19 @@ export function SessionSideBox({
   return (
     <div
       className={cn(
-        "flex flex-col min-h-0 h-full overflow-hidden bg-elevation-level-1",
-        expanded ? null : "border-l border-muted",
+        "flex flex-col min-h-0 h-full overflow-hidden bg-elevation-ground",
+        expanded ? null : "border-l border-tertiary",
       )}
     >
       <div
         className={cn(
-          "flex items-center gap-4 pl-3 pr-2 py-2 shrink-0 bg-elevation-level-1 relative border-b border-muted",
+          "flex items-center gap-4 pl-2 pr-2 py-2 shrink-0 bg-elevation-ground relative border-b border-muted",
           // Room for the Modal's Close when this box is the fullscreen body.
           expanded ? "pr-10" : null,
         )}
       >
         <SideBoxProgress sessionId={sessionId} />
-        <div className="flex flex-1 min-w-0 items-center gap-3" role="tablist">
+        <div className="flex flex-1 min-w-0 items-center gap-2" role="tablist">
           {widePanels.map((name) => {
             const selected = active === name;
             const badge = panelBadgeCount(
@@ -177,15 +179,13 @@ export function SessionSideBox({
             );
             return (
               <span key={name} className="relative shrink-0">
-                <button
-                  type="button"
+                <HorizontalTabsItem
+                  size={HorizontalTabsItemSize.Medium}
+                  active={selected}
+                  iconName={PANEL_ICON[name]}
                   role="tab"
                   aria-selected={selected}
                   aria-label={SESSION_PANEL_LABEL[name]}
-                  className={cn(
-                    "btn btn-medium btn-icon-left !rounded-full",
-                    selected ? "btn-secondary-highlighted" : "btn-ghost",
-                  )}
                   onClick={() => {
                     // A tablet shows one column at a time, and a new panel opens on
                     // its selected row; a desktop split ignores the flag entirely.
@@ -193,9 +193,8 @@ export function SessionSideBox({
                     onPanelChange(name);
                   }}
                 >
-                  <Icon iconName={PANEL_ICON[name]} />
                   {SESSION_PANEL_LABEL[name]}
-                </button>
+                </HorizontalTabsItem>
                 {badge > 0 ? <PanelCountBadge count={badge} /> : null}
               </span>
             );

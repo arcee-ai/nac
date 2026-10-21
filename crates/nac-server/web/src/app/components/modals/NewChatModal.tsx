@@ -366,7 +366,7 @@ function NewChatForm({
         </p>
       ) : inheritancePending ? (
         <div className="flex items-center gap-2 py-6 text-micro text-basic-muted" role="status">
-          <Loader size={LoaderSize.Micro} />
+          <Loader size={LoaderSize.XSmall} />
           Loading the project's model settings…
         </div>
       ) : (

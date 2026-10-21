@@ -1,6 +1,6 @@
 import type React from "react";
 import { cn } from "../../lib/cn";
-import Label, { type HoverHintConfig } from "../label";
+import Label, { LabelSize, type HoverHintConfig } from "../label";
 
 export interface InputWrapperProps {
   label?: React.ReactNode;
@@ -8,6 +8,8 @@ export interface InputWrapperProps {
   validation?: boolean;
   validationText?: string;
   hintText?: string;
+  /** Large fields use a 14px caption. Compact fields use 12px. */
+  caption?: "large" | "compact";
   /** Info glyph beside the label, for the explanation that will not fit inline. */
   hoverHint?: HoverHintConfig;
   className?: string;
@@ -21,35 +23,48 @@ const InputWrapper: React.FC<InputWrapperProps> = ({
   validation,
   validationText,
   hintText,
+  caption,
   hoverHint,
   className,
   children,
-}) => (
-  <div className={cn("flex text-left flex-col gap-1", className)}>
-    {label ? (
-      <div className="flex gap-2 items-center">
-        <Label validation={validation} hoverHint={hoverHint} tone="primary" className="flex-1">
-          {label}
-        </Label>
-        {required ? (
-          <div
-            className={cn(
-              "text-micro shrink-0",
-              validation ? "text-error-secondary" : "text-basic-tertiary",
-            )}
+}) => {
+  const labelSize = caption === "compact" ? LabelSize.Micro : LabelSize.Small;
+  const captionClass =
+    caption === "compact" ? "label-micro" : caption === "large" ? "label-small" : "text-micro";
+
+  return (
+    <div className={cn("flex text-left flex-col gap-1", className)}>
+      {label ? (
+        <div className="flex items-baseline gap-1 min-w-0">
+          <Label
+            validation={validation}
+            hoverHint={hoverHint}
+            tone="primary"
+            size={labelSize}
+            className="min-w-0"
           >
-            * Required
-          </div>
-        ) : null}
-      </div>
-    ) : null}
-    {children}
-    {validation && validationText ? (
-      <p className="pt-1 text-error-primary text-micro">{validationText}</p>
-    ) : !validation && hintText ? (
-      <p className="pt-1 text-basic-muted text-micro">{hintText}</p>
-    ) : null}
-  </div>
-);
+            {label}
+          </Label>
+          {required ? (
+            <span
+              className={cn(
+                "label-small shrink-0",
+                validation ? "text-error-primary" : "text-basic-primary",
+              )}
+            >
+              *
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {children}
+      {validation && validationText ? (
+        <p className={cn(captionClass, "text-error-primary")}>{validationText}</p>
+      ) : !validation && hintText ? (
+        <p className="text-micro text-basic-muted">{hintText}</p>
+      ) : null}
+    </div>
+  );
+};
 
 export default InputWrapper;

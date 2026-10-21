@@ -3,7 +3,8 @@
 import { render, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { RunFailureNotice, TranscriptRecoveryNotice } from "@/app/components/inspector/Transcript";
+import { RunFailureNotice } from "@/app/components/inspector/RunFailureRecovery";
+import { TranscriptRecoveryNotice } from "@/app/components/inspector/Transcript";
 import { failureRecoveryAffordance } from "@/app/lib/runFailure";
 import type { RunFailure, SessionGoalRecord } from "@/app/types/api";
 
@@ -184,5 +185,39 @@ describe("RunFailureNotice", () => {
     expect(liveAlert.textContent).toContain(
       "Resume it when you want another bounded retry sequence.",
     );
+  });
+});
+
+describe("failureRecoveryAffordance for a refused login", () => {
+  const failure: RunFailure = {
+    kind: "authentication",
+    phase: "request",
+    transient: false,
+    attempt_count: 1,
+    summary: "Not signed in to Arcee. Sign in to continue.",
+    diagnostic: "Arcee auth is not configured.",
+    recovery_action: "settings",
+  };
+
+  it("offers a sign-in on a backend that signs in", () => {
+    expect(failureRecoveryAffordance(failure, null, true, "needed")).toBe("sign_in");
+  });
+
+  it("offers the retry once the sign-in has succeeded", () => {
+    expect(failureRecoveryAffordance(failure, null, true, "restored")).toBe("regenerate");
+    expect(failureRecoveryAffordance(failure, null, false, "restored")).toBeNull();
+  });
+
+  it("resumes a blocked goal rather than rewinding it once the sign-in has succeeded", () => {
+    const goal = { status: "blocked" } as SessionGoalRecord;
+
+    expect(failureRecoveryAffordance(failure, goal, true, "restored")).toBe("resume_goal");
+  });
+
+  it("keeps settings for a key or a configuration failure", () => {
+    expect(failureRecoveryAffordance(failure, null, true)).toBe("settings");
+    expect(
+      failureRecoveryAffordance({ ...failure, kind: "configuration" }, null, true, "needed"),
+    ).toBe("settings");
   });
 });

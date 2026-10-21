@@ -6,6 +6,8 @@ export interface InputWrapperProps {
     validation?: boolean;
     validationText?: string;
     hintText?: string;
+    /** Large fields use a 14px caption. Compact fields use 12px. */
+    caption?: "large" | "compact";
     /** Info glyph beside the label, for the explanation that will not fit inline. */
     hoverHint?: HoverHintConfig;
     className?: string;

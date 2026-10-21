@@ -1,11 +1,13 @@
 import type React from "react";
-/** Pixel sizes, mirroring the ArceeFM LoaderSize enum. */
+/** Pixel sizes from the Figma Loader component (xs through 4xl). */
 export declare enum LoaderSize {
-    XSmall = 12,
-    Micro = 16,
+    XSmall = 16,
     Small = 20,
     Medium = 24,
+    MediumLarge = 28,
     Large = 32,
+    X2Large = 36,
+    X3Large = 40,
     XLarge = 48
 }
 /** CSS color for the spinning glyph; the icon path renders with currentColor. */

@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import { Button, ButtonContent, ButtonSize, ButtonVariant, StickyButton } from "@/app/atoms";
 
 /**
- * A footer action: a sticky bar button on mobile, a large button on desktop
- * (where the neutral action renders as a ghost button).
+ * A footer action: a sticky pill on mobile, a large button on desktop.
+ * The variant is the one the caller asked for on both sizes.
  */
 export function FooterButton({
   isMobile,
@@ -42,7 +42,7 @@ export function FooterButton({
   return (
     <Button
       size={ButtonSize.Large}
-      variant={variant === ButtonVariant.Secondary ? ButtonVariant.Ghost : variant}
+      variant={variant}
       content={content}
       className={className}
       disabled={disabled}

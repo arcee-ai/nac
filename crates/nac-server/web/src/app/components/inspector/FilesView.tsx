@@ -366,7 +366,7 @@ function PaneHeader({ path, trailing }: { path: string; trailing: React.ReactNod
 
   return (
     <div
-      className="flex items-center gap-2 h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-1"
+      className="flex items-center gap-2 h-10 px-4 shrink-0 border-b border-muted bg-elevation-ground"
       title={path}
     >
       <div className="flex flex-1 items-center gap-[6px] min-w-0">

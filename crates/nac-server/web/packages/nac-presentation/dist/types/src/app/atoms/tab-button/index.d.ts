@@ -11,6 +11,7 @@ export declare enum TabButtonVariant {
     Destructive = "btn-ghost-destructive"
 }
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+    ref?: React.Ref<HTMLButtonElement>;
     size?: TabButtonSize;
     variant?: TabButtonVariant;
     children: React.ReactNode;

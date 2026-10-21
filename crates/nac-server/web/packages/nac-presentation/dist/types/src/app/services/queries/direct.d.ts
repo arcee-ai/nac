@@ -1,5 +1,5 @@
 import type { CreateGoalRequest, InboxDelivery, PermissionApprovalMode, PermissionReply, StartManagedOrchestratorRequest, StartTraditionalChildRequest, UpdateGoalRequest } from "../../types/api";
-export declare function useSessionPermissions(sessionId: string, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
+export declare function useSessionPermissions(sessionId: string, enabled: boolean, poll?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     approval_mode: import("../../types/openapi.generated").components["schemas"]["PermissionApprovalMode"];
     authorizable_review_ids?: string[];
     grants: import("../../types/openapi.generated").components["schemas"]["PermissionGrantRecord"][];
@@ -31,6 +31,7 @@ export declare function useAuthorizePermissionReviewRetry(): import("@tanstack/r
 }, Error, {
     sessionId: string;
     reviewId: string;
+    parentSessionId?: string;
 }, unknown>;
 export declare function useSetPermissionApprovalMode(): import("@tanstack/react-query").UseMutationResult<void, Error, {
     sessionId: string;

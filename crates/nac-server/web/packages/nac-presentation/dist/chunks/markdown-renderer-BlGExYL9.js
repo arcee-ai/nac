@@ -1,5 +1,5 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-B0aSnxlc.js";
-import { Dr as r, Ii as i, Li as a, Pi as o, Zr as s, cr as c, d as l, i as u, jr as d, lr as f, t as p, u as m, ur as h } from "./PerfProfiler--keA1uN_.js";
+import { $r as r, Bi as i, Li as a, Nr as o, d as s, dr as c, i as l, kr as u, lr as d, t as f, u as p, ur as m, zi as h } from "./PerfProfiler-C699epDa.js";
 import { a as g, i as _, n as v, o as y, s as b } from "./space-separated-tokens-DZK_KzBN.js";
 import { n as x, t as S } from "./lib-BzcGLYKi.js";
 import { a as C, c as w, d as T, f as E, i as D, l as O, m as k, n as A, o as j, p as M, r as N, s as ee, t as P, u as F, v as te, y as I } from "./micromark-factory-space-DFzJv7G6.js";
@@ -6648,7 +6648,7 @@ function ol(e) {
 	})), al.set(e, t)), t;
 }
 function sl(e) {
-	return a(e) ? e : i(e) ? String(e) : Array.isArray(e) ? e.map(sl).join("") : ne(e) ? sl(e.props.children) : "";
+	return i(e) ? e : h(e) ? String(e) : Array.isArray(e) ? e.map(sl).join("") : ne(e) ? sl(e.props.children) : "";
 }
 function cl(e) {
 	if (!ne(e)) return "plaintext";
@@ -6657,11 +6657,11 @@ function cl(e) {
 }
 function ll({ children: e }) {
 	let t = sl(e).replace(/\n$/, ""), n = cl(e);
-	return /* @__PURE__ */ z(f, {
+	return /* @__PURE__ */ z(m, {
 		code: t,
 		language: n === "plaintext" ? void 0 : n,
 		title: n,
-		size: h.Small,
+		size: c.Small,
 		copyable: !0,
 		expandable: !0,
 		className: "my-6"
@@ -6679,12 +6679,12 @@ function ul(e) {
 	return `${e.length.toString(36)}-${(t >>> 0).toString(36)}`;
 }
 function dl({ href: e, children: t, ...n }) {
-	let { selectRevision: i, selectFileListing: a, selectFile: o, revealSidePanel: d } = s().stores.sessionLayoutStore, { api: f } = s(), p = oe(), h = ae(), g = r(), _ = u(), v = ie(), y = l(h.pathname), b = y ? v.getQueryData(c.sessionSnapshot(y)) : void 0, x = rl(e, [
+	let { selectRevision: i, selectFileListing: a, selectFile: o, revealSidePanel: c } = r().stores.sessionLayoutStore, { api: f } = r(), m = oe(), h = ae(), g = u(), _ = l(), v = ie(), y = s(h.pathname), b = y ? v.getQueryData(d.sessionSnapshot(y)) : void 0, x = rl(e, [
 		b?.workspace?.host_root,
 		b?.metadata.workspace_host_path,
 		b?.metadata.cwd
 	]), S = (e) => {
-		y && (i(null), a("tree"), o(e), d(g), p(m.session(y, "files")));
+		y && (i(null), a("tree"), o(e), c(g), m(p.session(y, "files")));
 	};
 	return x.kind === "workspace" && y ? /* @__PURE__ */ z("a", {
 		...n,
@@ -6718,7 +6718,7 @@ function fl(e) {
 			children: /* @__PURE__ */ z("table", { ...e })
 		}),
 		style: ({ children: e }) => {
-			let t = a(e) ? e : "";
+			let t = i(e) ? e : "";
 			return t ? /* @__PURE__ */ z("style", {
 				href: `mathjax-${ul(t)}`,
 				precedence: "mathjax",
@@ -6776,18 +6776,18 @@ function hl({ source: e, streaming: t }) {
 	}) : i;
 }
 function gl({ source: e, components: t }) {
-	let n = s(), r = re(ol(n.assets?.mathjaxFontUrl)), i = d(), o = n.assets ? {
+	let n = r(), a = re(ol(n.assets?.mathjaxFontUrl)), s = o(), c = n.assets ? {
 		...t,
 		style: ({ children: e }) => {
-			let t = a(e) ? e : "";
-			return t && n.id !== void 0 ? /* @__PURE__ */ z("style", { children: Bc(t, n.id, i) }) : null;
+			let t = i(e) ? e : "";
+			return t && n.id !== void 0 ? /* @__PURE__ */ z("style", { children: Bc(t, n.id, s) }) : null;
 		}
 	} : t;
 	return /* @__PURE__ */ z(Da, {
-		remarkPlugins: r.remark,
-		rehypePlugins: r.rehype,
+		remarkPlugins: a.remark,
+		rehypePlugins: a.rehype,
 		urlTransform: el,
-		components: o,
+		components: c,
 		children: e
 	});
 }
@@ -6797,7 +6797,7 @@ var _l = R(function({ source: e }) {
 		streaming: !0
 	});
 }), vl = R(function({ children: e, streaming: t = !1 }) {
-	return o("Markdown"), /* @__PURE__ */ z(p, {
+	return a("Markdown"), /* @__PURE__ */ z(f, {
 		id: "markdown",
 		children: t ? Rc(e).map((e, t) => /* @__PURE__ */ z(_l, { source: e }, t)) : /* @__PURE__ */ z(hl, {
 			source: e,

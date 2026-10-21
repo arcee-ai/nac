@@ -517,3 +517,40 @@ fn codex_status_and_logout_ignore_legacy_shaped_arcee_auth_json() {
     assert_eq!(std::fs::read(&auth_path).unwrap(), before);
     assert!(!canonical_path.exists());
 }
+
+#[tokio::test]
+async fn arcee_run_without_a_stored_login_fails_as_authentication() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let env = IsolatedModelEnv::new("arcee-logged-out-run", None, None, None);
+    let auth_path = env.home.join("arcee_auth.json");
+    write_test_credential(
+        &auth_path,
+        stored_arcee_auth("token-test", "https://api.arcee.ai"),
+    );
+    let client = ModelClient::from_effective_settings(effective_settings(
+        BackendKind::ArceeAuth,
+        "https://api.arcee.ai/api/v1",
+        None,
+    ))
+    .expect("a stored login builds the client");
+    std::fs::remove_file(&auth_path).unwrap();
+
+    let error = client
+        .send_turn(Vec::new(), Vec::new())
+        .await
+        .expect_err("a run without a stored login must not reach the provider");
+
+    let failure = error
+        .downcast_ref::<crate::run_failure::RunFailure>()
+        .expect("the run failure is structured");
+    assert_eq!(
+        failure.kind,
+        crate::run_failure::RunFailureKind::Authentication
+    );
+    assert!(!failure.transient);
+    assert_eq!(
+        failure.summary,
+        "Not signed in to Arcee. Sign in to continue."
+    );
+    assert!(failure.diagnostic.contains("Arcee auth is not configured"));
+}

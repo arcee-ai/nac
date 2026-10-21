@@ -28,11 +28,16 @@ const StickyButton: React.FC<StickyButtonProps> & {
   ...props
 }) => {
   const stretches = className.includes("flex-grow") || className.includes("flex-1");
+  const tertiary = variant.startsWith("btn-tertiary");
+  // Primary is its own fill and carries no elevation shadow. Tertiary stays a
+  // 24px text control. Every other variant sits on the level-3 pill.
+  const elevated = !variant.startsWith("btn-primary") && !tertiary;
 
   return (
     <div
       className={cn(
-        "bg-elevation-level-3 shadow-2xl rounded-full overflow-hidden h-10",
+        elevated && "h-10 rounded-full bg-elevation-level-3 shadow-xl",
+        !elevated && !tertiary && "h-10 rounded-full",
         stretches ? "flex w-full" : "inline-flex w-fit",
         className,
       )}

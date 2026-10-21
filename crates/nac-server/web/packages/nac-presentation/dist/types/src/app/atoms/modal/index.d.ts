@@ -2,7 +2,8 @@ import React from "react";
 import { IconName } from "../icon";
 export declare enum ModalSize {
     Small = "max-w-[400px]",
-    Medium = "max-w-[560px]",
+    /** Figma ModalBox default width. */
+    Medium = "max-w-[604px]",
     Wide = "max-w-[600px]",
     Large = "max-w-[760px]"
 }
@@ -22,7 +23,7 @@ interface ModalProps {
     headerActions?: React.ReactNode;
     size?: ModalSize;
     closeOnOverlay?: boolean;
-    /** Full-bleed chrome: header and footer span the card, only the body scrolls. */
+    /** Stretch the body over a card the caller sizes; it still grows with its content. */
     flush?: boolean;
     /**
      * Grow the card to fill the viewport instead of hugging its content. Desktop

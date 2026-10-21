@@ -82,6 +82,8 @@ function mount(state: PermissionStateResponse, requesterLabel?: string) {
   );
 }
 
+vi.spyOn(api, "listTraditionalChildren").mockResolvedValue([]);
+
 beforeEach(() => {
   fakes.authorizeChildPermissionReviewRetry.mockReset().mockResolvedValue(undefined);
   fakes.getPermissions.mockReset().mockResolvedValue({ requests: [], grants: [] });
@@ -331,7 +333,9 @@ describe("direct permission controls", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Approve for me enabled — open permissions" }),
     );
-    expect(screen.getByRole("status").textContent).toContain("Service availability not checked");
+    expect(screen.getByRole("status", { name: "Review service status" }).textContent).toContain(
+      "Service availability not checked",
+    );
     expect(document.body.textContent).toContain("Ineligible requests still ask you");
     expect(document.body.textContent).toContain("it does not open a manual prompt");
     const history = screen.getByRole("region", { name: "Automatic reviews" });

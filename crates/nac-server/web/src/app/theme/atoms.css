@@ -218,26 +218,26 @@
 }
 
 .btn-secondary-highlighted {
-  color: var(--color-text-btn-secondary-highlighted);
+  color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-secondary-highlighted);
   box-shadow: var(--shadow-convex);
 }
 .btn-secondary-highlighted:hover {
-  color: var(--color-text-btn-secondary-highlighted-hovered);
+  color: var(--color-text-btn-secondary-hovered);
   background-color: var(--color-bg-btn-secondary-highlighted-hovered);
 }
 .btn-secondary-highlighted:active {
-  color: var(--color-text-btn-secondary-highlighted-pressed);
+  color: var(--color-text-btn-secondary-pressed);
   background-color: var(--color-bg-btn-secondary-highlighted-pressed);
 }
 .btn-secondary-highlighted.btn-disabled {
   box-shadow: none;
-  color: var(--color-text-btn-secondary-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-secondary-highlighted-disabled);
 }
 .btn-secondary-highlighted.btn-disabled:hover,
 .btn-secondary-highlighted.btn-disabled:active {
-  color: var(--color-text-btn-secondary-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-secondary-highlighted-disabled);
 }
 
@@ -266,24 +266,24 @@
 }
 
 .btn-ghost {
-  color: var(--color-text-btn-ghost);
+  color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-ghost);
 }
 .btn-ghost:hover {
-  color: var(--color-text-btn-ghost-hovered);
+  color: var(--color-text-btn-secondary-hovered);
   background-color: var(--color-bg-btn-ghost-hovered);
 }
 .btn-ghost:active {
-  color: var(--color-text-btn-ghost-pressed);
+  color: var(--color-text-btn-secondary-pressed);
   background-color: var(--color-bg-btn-ghost-pressed);
 }
 .btn-ghost.btn-disabled {
-  color: var(--color-text-btn-ghost-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-disabled);
 }
 .btn-ghost.btn-disabled:hover,
 .btn-ghost.btn-disabled:active {
-  color: var(--color-text-btn-ghost-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-disabled);
 }
 
@@ -332,24 +332,24 @@
 }
 
 .btn-ghost-highlighted {
-  color: var(--color-text-btn-ghost-highlighted);
+  color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-ghost-highlighted);
 }
 .btn-ghost-highlighted:hover {
-  color: var(--color-text-btn-ghost-highlighted-hovered);
+  color: var(--color-text-btn-secondary-hovered);
   background-color: var(--color-bg-btn-ghost-highlighted-hovered);
 }
 .btn-ghost-highlighted:active {
-  color: var(--color-text-btn-ghost-highlighted-pressed);
+  color: var(--color-text-btn-secondary-pressed);
   background-color: var(--color-bg-btn-ghost-highlighted-pressed);
 }
 .btn-ghost-highlighted.btn-disabled {
-  color: var(--color-text-btn-ghost-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-highlighted-disabled);
 }
 .btn-ghost-highlighted.btn-disabled:hover,
 .btn-ghost-highlighted.btn-disabled:active {
-  color: var(--color-text-btn-ghost-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-highlighted-disabled);
 }
 
@@ -479,28 +479,28 @@
   fill: var(--color-fill-btn-secondary-disabled);
 }
 .btn-secondary-highlighted .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted);
+  fill: var(--color-fill-btn-secondary);
 }
 .btn-secondary-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-hovered);
+  fill: var(--color-fill-btn-secondary-hovered);
 }
 .btn-secondary-highlighted:active .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-pressed);
+  fill: var(--color-fill-btn-secondary-pressed);
 }
 .btn-secondary-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-disabled);
+  fill: var(--color-fill-btn-secondary-disabled);
 }
 .btn-ghost-highlighted .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted);
+  fill: var(--color-fill-btn-secondary);
 }
 .btn-ghost-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-hovered);
+  fill: var(--color-fill-btn-secondary-hovered);
 }
 .btn-ghost-highlighted:active .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-pressed);
+  fill: var(--color-fill-btn-secondary-pressed);
 }
 .btn-ghost-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-disabled);
+  fill: var(--color-fill-btn-secondary-disabled);
 }
 .btn-secondary-accent .icon path,
 .btn-secondary-accent-highlighted .icon path,
@@ -558,7 +558,7 @@
 }
 .input:focus,
 .input:focus-visible {
-  outline: 2px solid var(--color-bg-accent-inverse);
+  outline: 2px solid var(--color-border-primary);
   outline-offset: -2px;
 }
 .input:disabled {
@@ -567,25 +567,30 @@
   opacity: 0.75;
 }
 .input-validation,
-.input-validation:hover {
+.input-validation:hover,
+.input-validation:focus,
+.input-validation:focus-visible {
   outline: 2px solid var(--color-border-error-primary);
-  outline-offset: -2px;
-}
-.input-validation:focus {
-  outline: 2px solid var(--color-bg-accent-inverse);
   outline-offset: -2px;
 }
 .input-small {
   height: 24px;
   font-size: 0.75rem;
+  line-height: 1rem;
 }
 .input-medium {
   height: 36px;
   font-size: 0.875rem;
+  line-height: 1.25rem;
 }
 .input-large {
   height: 48px;
   font-size: 1rem;
+  line-height: 1.5rem;
+}
+/* Search at the large size insets its glyph 6px, then leaves 12px before the text. */
+.input-large.input-pad-search {
+  padding-left: 42px;
 }
 .input-wrapper .btn {
   position: absolute;
@@ -599,34 +604,56 @@
 }
 
 /* ============================ STICKY ============================ */
-/* Sticky controls are a 40px pill floating on its own elevated wrapper, which
-   owns the radius and the shadow. The inner control therefore has to give up
-   the height, radius and shadow that `.btn` / `.input` hardcode above — and
-   since this file is unlayered, Tailwind utilities cannot do that (see the
-   note under TABS). Selectors mirror the specificity of the rules they
-   override and rely on coming later in the source. */
+/* Sticky controls are a 40px pill. Non-primary variants float on an elevation
+   level-3 wrapper that owns Shadow-xl. The inner control gives up the height,
+   radius and shadow that `.btn` / `.input` hardcode above — and since this
+   file is unlayered, Tailwind utilities cannot do that (see the note under
+   TABS). Selectors mirror the specificity of the rules they override and rely
+   on coming later in the source. */
 .btn-sticky {
   height: 40px;
+  gap: 4px;
   border-radius: 9999px;
   box-shadow: none;
 }
+.btn-sticky:focus-visible {
+  outline: 2px solid var(--color-border-focus-outline);
+  outline-offset: 2px;
+}
 .btn-sticky.btn-large.btn-icon {
   height: 40px;
-  padding: 0 8px;
+  padding: 8px;
 }
 .btn-sticky.btn-large.btn-icon-left {
   height: 40px;
-  padding-left: 8px;
-  padding-right: 16px;
+  padding: 8px 16px 8px 8px;
 }
 .btn-sticky.btn-large.btn-icon-right {
   height: 40px;
-  padding-left: 16px;
-  padding-right: 8px;
+  padding: 8px 8px 8px 16px;
 }
 .btn-sticky.btn-large.btn-text {
   height: 40px;
-  padding: 0 16px;
+  padding: 8px 16px;
+}
+.btn-sticky.btn-large.btn-tertiary,
+.btn-sticky.btn-large.btn-tertiary-destructive,
+.btn-sticky.btn-large.btn-tertiary-accent,
+.btn-sticky.btn-large.btn-tertiary.btn-icon,
+.btn-sticky.btn-large.btn-tertiary.btn-icon-left,
+.btn-sticky.btn-large.btn-tertiary.btn-icon-right,
+.btn-sticky.btn-large.btn-tertiary.btn-text,
+.btn-sticky.btn-large.btn-tertiary-destructive.btn-icon,
+.btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-left,
+.btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-right,
+.btn-sticky.btn-large.btn-tertiary-destructive.btn-text,
+.btn-sticky.btn-large.btn-tertiary-accent.btn-icon,
+.btn-sticky.btn-large.btn-tertiary-accent.btn-icon-left,
+.btn-sticky.btn-large.btn-tertiary-accent.btn-icon-right,
+.btn-sticky.btn-large.btn-tertiary-accent.btn-text {
+  height: 24px;
+  border-radius: 8px;
+  padding: 0;
 }
 
 .input-sticky {
@@ -673,19 +700,89 @@
   gap: 12px;
 }
 
-/* The underline, the corners and the active label colour have to be declared
-   here rather than as utility classes on the element. This file is imported
-   outside any cascade layer while Tailwind's utilities sit in `@layer
-   utilities`, and unlayered rules beat layered ones no matter how specific the
-   layered one is — so `.btn`'s `border: none`, its 4px radius and each
-   variant's `color` silently win over `border-primary`, `rounded-t-lg` and
-   `text-basic-primary`. */
+/* The 2px underline sits inside the box, so an inset shadow keeps the label
+   centered. A real border would shrink the content box and shift it up. */
 .horizontal-tab-item {
-  border-bottom: 2px solid transparent;
-  border-radius: 8px 8px 0 0;
+  border-radius: 4px;
+  box-shadow: inset 0 -2px 0 0 transparent;
 }
 .horizontal-tab-item-active {
-  border-bottom-color: var(--color-border-primary);
+  box-shadow: inset 0 -2px 0 0 var(--color-border-primary);
+}
+.horizontal-tab-item-active .icon path {
+  fill: var(--color-fill-btn-secondary-highlighted);
+}
+.horizontal-tab-item-active:hover .icon path {
+  fill: var(--color-fill-btn-secondary-hovered);
+}
+.horizontal-tab-item-active:active .icon path {
+  fill: var(--color-fill-btn-secondary-pressed);
+}
+.horizontal-tab-item-active.btn-disabled .icon path {
+  fill: var(--color-fill-btn-secondary-disabled);
+}
+.horizontal-tab-item-active.btn-disabled {
+  box-shadow: inset 0 -2px 0 0 var(--color-border-tertiary);
+}
+.horizontal-tab-item:focus-visible {
+  outline: 2px solid var(--color-border-focus-outline);
+  outline-offset: 2px;
+}
+.horizontal-tab-item-icon-left.btn-small {
+  height: 24px;
+  padding: 0 12px 0 6px;
+}
+.horizontal-tab-item-icon-right.btn-small {
+  height: 24px;
+  padding: 0 6px 0 12px;
+}
+.horizontal-tab-item-full.btn-small,
+.horizontal-tab-item-icon.btn-small {
+  height: 24px;
+}
+.horizontal-tab-item-full.btn-small {
+  padding: 0 6px;
+}
+.horizontal-tab-item-icon.btn-small {
+  padding: 0 4px;
+}
+.horizontal-tab-item-text.btn-small {
+  height: 24px;
+  padding: 0 12px;
+}
+.horizontal-tab-item-icon-left.btn-medium {
+  height: 36px;
+  padding: 0 16px 0 8px;
+}
+.horizontal-tab-item-icon-right.btn-medium {
+  height: 36px;
+  padding: 0 8px 0 16px;
+}
+.horizontal-tab-item-full.btn-medium,
+.horizontal-tab-item-icon.btn-medium {
+  height: 36px;
+  padding: 0 8px;
+}
+.horizontal-tab-item-text.btn-medium {
+  height: 36px;
+  padding: 0 16px;
+}
+.horizontal-tab-item-icon-left.btn-large {
+  height: 48px;
+  padding: 0 24px 0 12px;
+}
+.horizontal-tab-item-icon-right.btn-large {
+  height: 48px;
+  padding: 0 12px 0 24px;
+}
+.horizontal-tab-item-full.btn-large,
+.horizontal-tab-item-icon.btn-large {
+  height: 48px;
+  padding: 0 12px;
+}
+.horizontal-tab-item-text.btn-large {
+  height: 48px;
+  padding: 0 24px;
 }
 
 /* Same unlayered-wins reasoning as the tabs above: the strip lives next to
@@ -698,6 +795,210 @@
 }
 .chat-session-tab-active {
   border-bottom-color: var(--color-border-primary);
+}
+
+/* File input meta uses the code face at the Figma mono size. The shared
+   `.code` rule sets a different tracking, so this stays separate. */
+.file-input-meta {
+  font-family: "IBMPlexMono", source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  letter-spacing: -0.6px;
+}
+.file-input-hint {
+  font-family: Inter, sans-serif;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 400;
+}
+.file-input {
+  border: none;
+  box-shadow: inset 0 0 0 1px var(--color-border-muted);
+}
+.file-input[data-invalid="true"] {
+  box-shadow: inset 0 0 0 1px var(--color-border-btn-destructive);
+}
+.file-input-row {
+  padding: 4px 6px;
+}
+
+/* Badge type is Tag-label from Figma: Medium 10/12, no tracking. The shared
+   `.tag-label` rule is semibold with wider tracking, so the badge stays separate. */
+.badge {
+  font-family: Inter, sans-serif;
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.badge-filled {
+  padding: 3px 7px;
+}
+
+/* Avatar type follows the Figma size scale. The 1px stroke sits inside the box. */
+.avatar {
+  box-sizing: border-box;
+  border-style: solid;
+  border-width: 1px;
+  padding: 1px;
+  font-family: Inter, sans-serif;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.avatar-xs,
+.avatar-sm {
+  font-size: 10px;
+  line-height: 12px;
+  text-transform: uppercase;
+}
+.avatar-md {
+  font-size: 12px;
+  line-height: 16px;
+}
+.avatar-lg {
+  font-size: 14px;
+  line-height: 20px;
+}
+.avatar-xl {
+  font-size: 16px;
+  line-height: 24px;
+}
+.avatar-2xl {
+  font-size: 18px;
+  line-height: 24px;
+}
+.avatar-3xl {
+  font-size: 20px;
+  line-height: 28px;
+}
+.avatar-4xl {
+  font-size: 24px;
+  line-height: 32px;
+}
+
+/* The radio dot uses fill tokens. Those are not background utilities. */
+.radio-mark {
+  background-color: var(--color-fill-basic-primary);
+}
+.group:hover .radio-mark {
+  background-color: var(--color-fill-basic-secondary);
+}
+.group:active .radio-mark {
+  background-color: var(--color-fill-basic-tertiary);
+}
+.radio-mark-disabled {
+  background-color: var(--color-fill-basic-muted);
+}
+
+/* Range track is 4px. The knob is 12px on desktop and 20px on the phone. */
+.range-input {
+  height: 12px;
+  outline: none;
+}
+.range-input:focus-visible {
+  outline: 2px solid var(--color-border-focus-outline);
+  outline-offset: 2px;
+}
+.range-knob {
+  width: 12px;
+  height: 12px;
+  box-shadow: var(--shadow-range-knob);
+}
+@media (max-width: 767.98px) {
+  .range-input {
+    height: 20px;
+  }
+  .range-knob {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* ============================ MODAL ============================ */
+/* Figma Fade-from-top / Fade-from-bottom: elevation ground, solid through
+   25% from the top and from 75% at the bottom. */
+.fade-from-top {
+  background-image: linear-gradient(
+    to bottom,
+    var(--color-bg-elevation-ground) 25%,
+    var(--color-bg-elevation-ground-transparent) 100%
+  );
+}
+.fade-from-bottom {
+  background-image: linear-gradient(
+    to bottom,
+    var(--color-bg-elevation-ground-transparent) 0%,
+    var(--color-bg-elevation-ground) 75%
+  );
+}
+/* Desktop footer actions are Figma's large buttons (48px, 16/24, padding 24).
+   Sticky buttons already carry their own size, so they are left alone. */
+.modal-footer .btn.btn-text:not(.btn-sticky),
+.modal-footer .btn.btn-icon-left:not(.btn-sticky),
+.modal-footer .btn.btn-icon-right:not(.btn-sticky) {
+  height: 48px;
+  padding: 0 24px;
+  gap: 8px;
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+.modal-footer .btn.btn-icon:not(.btn-sticky) {
+  height: 48px;
+  padding: 0 12px;
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+/* Phone footer actions are 40px pills. Primary is a flat fill. Everything
+   else sits on elevation level-3 with Shadow-xl, including tertiary. */
+.modal-footer-mobile .btn.btn-text:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-icon:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-icon-left:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-icon-right:not(.btn-sticky) {
+  height: 40px;
+  border-radius: 9999px;
+  padding: 8px 16px;
+  gap: 8px;
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+.modal-footer-mobile .btn.btn-primary:not(.btn-sticky) {
+  box-shadow: none;
+}
+.modal-footer-mobile .btn.btn-secondary:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-secondary-highlighted:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-secondary-destructive:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-secondary-accent:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-secondary-accent-highlighted:not(.btn-sticky) {
+  box-shadow: var(--shadow-xl);
+}
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary.btn-text,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary.btn-icon,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary.btn-icon-left,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary.btn-icon-right,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-destructive.btn-text,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-destructive.btn-icon,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-left,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-right,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-text,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-icon,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-icon-left,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-icon-right {
+  height: 40px;
+  border-radius: 9999px;
+  padding: 8px 16px;
+  background-color: var(--color-bg-elevation-level-3);
+  box-shadow: var(--shadow-xl);
+}
+.modal-footer-mobile .btn.btn-ghost:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-ghost-destructive:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-ghost-accent:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-tertiary:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-tertiary-destructive:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-tertiary-accent:not(.btn-sticky) {
+  background-color: var(--color-bg-elevation-level-3);
+  box-shadow: var(--shadow-xl);
 }
 
 /* ============================ TOOLTIP ============================ */

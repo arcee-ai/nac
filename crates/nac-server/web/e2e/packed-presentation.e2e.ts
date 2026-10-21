@@ -90,7 +90,7 @@ for (const mobile of [false, true]) {
         };
       });
       expect(nativeStyles.font).toContain("NACPresentationInter");
-      expect(nativeStyles.background).toBe("rgb(15, 16, 16)");
+      expect(nativeStyles.background).toBe("rgb(5, 5, 5)");
       expect(nativeStyles.brand).toBe("#008c8c");
       harness.provider.enqueue(
         "packed-math",

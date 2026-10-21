@@ -4,7 +4,7 @@ import { cn } from "@/app/lib/cn";
 
 /** Green tick, spinner or key, depending on how the key checked out. */
 export function KeyStatus({ status }: { status: Validation["status"] }) {
-  if (status === "validating") return <Loader size={LoaderSize.Micro} />;
+  if (status === "validating") return <Loader size={LoaderSize.XSmall} />;
   if (status === "ready") {
     return <Icon iconName={IconName.CheckCircle} size={16} className="text-success-primary" />;
   }

@@ -316,7 +316,7 @@ function LogScroller({
     <div
       ref={scrollRef}
       className={cn(
-        "flex flex-col flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0 bg-elevation-level-0-5",
+        "flex flex-col flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0 bg-elevation-ground",
         className,
       )}
       onScroll={() => {
@@ -714,7 +714,7 @@ function Detail({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 min-w-0">
-      <div className="flex items-center gap-2 h-14 px-4 shrink-0 border-b border-muted bg-elevation-level-1">
+      <div className="flex items-center gap-2 h-14 px-4 shrink-0 border-b border-muted bg-elevation-ground">
         <div className="flex flex-col flex-1 min-w-0 justify-center">
           <div className="flex items-center gap-3 min-w-0">
             <span
@@ -1029,7 +1029,7 @@ export function ThreadsView({
                           className="shrink-0 [&>path]:!fill-basic-muted"
                         />
                       ) : running ? (
-                        <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
+                        <Loader size={LoaderSize.XSmall} variant={LoaderVariant.Neutral} />
                       ) : cancelled ? (
                         <Icon
                           iconName={IconName.Close}

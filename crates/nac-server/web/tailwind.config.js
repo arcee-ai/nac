@@ -130,11 +130,6 @@ const config = {
         "elevation-sublevel-variant-A": "var(--color-bg-elevation-sublevel-variant-A)",
         "elevation-sublevel-variant-B": "var(--color-bg-elevation-sublevel-variant-B)",
 
-        "code-input-content": "var(--color-bg-code-input-content)",
-        "code-input-content-integration": "var(--color-bg-code-input-content-integration)",
-        "code-input-line-numbers": "var(--color-bg-code-input-line-numbers)",
-        "code-input-header": "var(--color-bg-code-input-header)",
-
         "error-primary": "var(--color-bg-error-primary)",
         "error-secondary": "var(--color-bg-error-secondary)",
         "error-tertiary": "var(--color-bg-error-tertiary)",
@@ -164,8 +159,6 @@ const config = {
         "success-secondary": "var(--color-bg-success-secondary)",
         "success-tertiary": "var(--color-bg-success-tertiary)",
         "success-inverse": "var(--color-bg-success-inverse)",
-
-        scrollbar: "var(--color-bg-scrollbar)",
       },
       textColor: {
         "accent-primary": "var(--color-text-accent-primary)",
@@ -178,11 +171,6 @@ const config = {
         "basic-tertiary": "var(--color-text-basic-tertiary)",
         "basic-muted": "var(--color-text-basic-muted)",
 
-        "basic-primary-inverse": "var(--color-text-basic-primary-inverse)",
-        "basic-secondary-inverse": "var(--color-text-basic-secondary-inverse)",
-        "basic-tertiary-inverse": "var(--color-text-basic-tertiary-inverse)",
-        "basic-muted-inverse": "var(--color-text-basic-muted-inverse)",
-
         "btn-primary": "var(--color-text-btn-primary)",
         "btn-primary-disabled": "var(--color-text-btn-primary-disabled)",
         "btn-accent": "var(--color-text-btn-accent)",
@@ -193,10 +181,6 @@ const config = {
         "btn-secondary-hovered": "var(--color-text-btn-secondary-hovered)",
         "btn-secondary-pressed": "var(--color-text-btn-secondary-pressed)",
         "btn-secondary-disabled": "var(--color-text-btn-secondary-disabled)",
-        "btn-ghost": "var(--color-text-btn-ghost)",
-        "btn-ghost-hovered": "var(--color-text-btn-ghost-hovered)",
-        "btn-ghost-pressed": "var(--color-text-btn-ghost-pressed)",
-        "btn-ghost-disabled": "var(--color-text-btn-ghost-disabled)",
         "btn-destructive": "var(--color-text-btn-destructive)",
         "btn-destructive-hovered": "var(--color-text-btn-destructive-hovered)",
         "btn-destructive-pressed": "var(--color-text-btn-destructive-pressed)",
@@ -227,8 +211,6 @@ const config = {
         "tertiary-inverse": "var(--color-text-tertiary-inverse)",
         "muted-inverse": "var(--color-text-muted-inverse)",
 
-        notification: "var(--color-text-notification)",
-
         "success-primary": "var(--color-text-success-primary)",
         "success-secondary": "var(--color-text-success-secondary)",
         "success-tertiary": "var(--color-text-success-tertiary)",
@@ -244,9 +226,7 @@ const config = {
         secondary: "var(--color-border-secondary)",
         tertiary: "var(--color-border-tertiary)",
         muted: "var(--color-border-muted)",
-
-        "code-input": "var(--color-border-code-input)",
-        "code-input-hovered": "var(--color-border-code-input-hovered)",
+        card: "var(--color-border-card)",
 
         "danger-primary": "var(--color-border-danger-primary)",
         "danger-secondary": "var(--color-border-danger-secondary)",
@@ -319,8 +299,6 @@ const config = {
         "tertiary-inversed": "var(--color-fill-tertiary-inversed)",
         "muted-inversed": "var(--color-fill-muted-inversed)",
 
-        notification: "var(--color-fill-notification)",
-
         "success-primary": "var(--color-fill-success-primary)",
         "success-secondary": "var(--color-fill-success-secondary)",
         "success-tertiary": "var(--color-fill-success-tertiary)",
@@ -346,8 +324,6 @@ const config = {
       },
       boxShadow: {
         none: "none",
-        xs: "var(--shadow-xs)",
-        sm: "var(--shadow-sm)",
         md: "var(--shadow-md)",
         lg: "var(--shadow-lg)",
         xl: "var(--shadow-xl)",
@@ -355,7 +331,6 @@ const config = {
         "3xl": "var(--shadow-3xl)",
         convex: "var(--shadow-convex)",
         concave: "var(--shadow-concave)",
-        "left-sidebar-closed": "var(--left-sidebar-closed)",
         "left-sidebar-open": "var(--left-sidebar-open)",
       },
       screens: {

@@ -17,12 +17,10 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { useDelegatedPermissionStream } from "@/app/hooks/useSessionStream";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useStartTraditionalChild, useTraditionalChildren } from "@/app/services/queries";
-import type { SessionBehavior, TraditionalChildRecord } from "@/app/types/api";
-import { PermissionControls } from "@/app/components/inspector/PermissionControls";
+import type { SessionBehavior } from "@/app/types/api";
 
 interface ChildControlsProps {
   sessionId: string;
@@ -31,22 +29,6 @@ interface ChildControlsProps {
   showTrigger?: boolean;
   /** Increments to open the dialog from outside the trigger. */
   openRequest?: number;
-}
-
-function ChildPermissionBridge({ child }: { child: TraditionalChildRecord }) {
-  const running = child.status === "running";
-  useDelegatedPermissionStream(child.child_session_id, running);
-  return (
-    <PermissionControls
-      sessionId={child.child_session_id}
-      behavior="direct"
-      label={`Permissions for ${child.description}`}
-      autoApprovalAvailable={false}
-      retryParentSessionId={child.parent_session_id}
-      poll={running}
-      requesterLabel={`child agent “${child.description}”`}
-    />
-  );
 }
 
 /** Direct-primary controls for durable traditional child coding sessions. */
@@ -105,9 +87,6 @@ export function ChildControls({
   };
   return (
     <>
-      {children.map((child) => (
-        <ChildPermissionBridge key={child.child_session_id} child={child} />
-      ))}
       {showTrigger ? (
         <Tooltip title="Launch coding agent" position={TooltipPosition.TopCenter}>
           <Button
