@@ -9,6 +9,7 @@ const workflow = name => YAML.parse(readFileSync(`.github/workflows/${name}.yml`
 
 test('one loaded build binds the same immutable ID to smoke and scanning', () => {
   const jobs = workflow('managed-image').jobs;
+  assert.equal(jobs.result.name, 'Managed checks complete');
   const steps = jobs['build-smoke'].steps;
   const builds = steps.filter(s => s.uses?.startsWith('docker/build-push-action@'));
   assert.equal(builds.length, 1);

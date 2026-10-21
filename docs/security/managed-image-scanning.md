@@ -18,7 +18,7 @@ expiring exception contract and landing/rerun procedure. Image scanning consumes
 that validator directly. A candidate policy change fails; an empty policy grants
 no exceptions. An exception's exact context is `managed-image`. Package identities
 are Grype's `<artifact.type>:<artifact.name>` (such as `deb:openssl` or
-`binary:node`), or `Go:stdlib` / `PyPI:uv` for explicit runtime checks. Source
+`binary:node`), or `Go:stdlib`, `Go:toolchain`, or `PyPI:uv` for explicit runtime checks. Source
 lockfile exceptions cannot suppress image findings. Every exception still needs
 its advisory, package, context, reason, owner, linked issue, and UTC expiry.
 
@@ -42,13 +42,13 @@ probed version with its Node.js CPE; Grype enables CPE matching.
 
 Syft's [binary catalog](https://oss.anchore.com/docs/capabilities/binary/) documents
 Node detection, but does not document uv detection. The gate therefore queries
-OSV explicitly for `Go:stdlib` and `PyPI:uv` at their probed versions, retaining
+OSV explicitly for `Go:stdlib`, `Go:toolchain`, and `PyPI:uv` at their probed versions, retaining
 both request and response. Upstream documents [PyPI distribution of uv](https://docs.astral.sh/uv/getting-started/installation/#pypi).
 This maps the upstream uv release version to the PyPI
 release of the same application; it is bounded application-advisory coverage,
 not a claim that every statically linked uv dependency has been inventoried.
-Go's bundled stdlib is checked even when Syft does not detect the installed Go
-compiler. Full image package matching remains active alongside these checks.
+Go's bundled stdlib and compiler/toolchain advisories are both checked at the
+probed Go version, even when Syft does not detect the installed compiler. Full image package matching remains active alongside these checks.
 OSV may have no severity for Go advisories; those matches block as Unknown.
 Neither tool can establish absence of undisclosed vulnerabilities.
 
@@ -70,9 +70,11 @@ Keep SBOM, all raw findings (including lower severities), policy dispositions,
 runtime versions/advisories, image inspection/identity, tool/DB metadata, and
 result together. `bundle.json` hashes the unchanged SBOM/runtime/identity/coverage
 inputs for later rescans. Retain artifacts for 14 days; daily selection must use
-only successful trusted `dev` push runs from `.github/workflows/stable-release.yml`
-with the expected per-SHA artifact. PR, manual, other-workflow, failed, expired,
-and incomplete evidence cannot qualify. After a qualified image has been retained,
+only completed trusted `dev` push runs from `.github/workflows/stable-release.yml`
+with successful `managed / build-smoke` and `managed / Managed checks complete`
+jobs and the expected per-SHA artifact. An unrelated source/test failure does not
+hide valid image evidence. PR, manual, other-workflow, failed managed producer,
+expired, and incomplete evidence cannot qualify. After a qualified image has been retained,
 new daily advisory findings fail/report without needing a new image build.
 A new scan result is useful even when vulnerabilities block: preserve evidence
 with an always-run artifact upload and visibly fail/report the job.
@@ -114,9 +116,12 @@ python3 scripts/security/image_qualify.py --output <new-fixture-evidence> \
 
 Live fixtures scan real checksum-verified Node executables and minimal dpkg
 records with the real pinned tools/current DB; they never execute the vulnerable
-Node executable. Both vulnerable OS and Node must yield blocking advisories;
-the safe fixture must pass. New advisories can make the safe fixture fail; review
-and update its version/digest rather than weakening the assertion. These fixtures
+Node executable. The vulnerable OS/Node and Go stdlib/toolchain/uv controls must match their
+specific known blocking advisories; fixed controls must not match those same
+advisories. Other newly published fixture advisories are retained and reported
+as fixture drift, so old test binaries cannot block an already-fixed candidate.
+The actual image gate still evaluates every finding at the full severity threshold;
+control scoping never suppresses candidate findings or scanner/network failures. These fixtures
 do not replace real managed image inventory/smoke evidence.
 
 Before production gate activation, collect a fresh actual image baseline and

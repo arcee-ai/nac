@@ -34,3 +34,18 @@ test('an unchanged SBOM finding added by a new DB blocks the next evaluation', (
   assert.equal(evaluateImage([], policy, options).blocking.length, 0);
   assert.equal(evaluateImage([finding], policy, options).blocking.length, 1);
 });
+
+test('toolchain advisory remains blocking and cannot borrow a stdlib/source exception', () => {
+  const toolchain = { ...finding, package: 'Go:toolchain', advisory: 'GO-2026-6601', severity: 'Unknown' };
+  assert.equal(evaluateImage([toolchain], policy, options).blocking.length, 1);
+  for (const entry of [{ ...exception, advisory: toolchain.advisory, package: 'Go:stdlib' },
+    { ...exception, advisory: toolchain.advisory, package: 'Go:toolchain', context: 'Cargo.lock' }]) {
+    assert.equal(evaluateImage([toolchain], { ...policy, exceptions: [entry] }, options).blocking.length, 1);
+  }
+});
+
+test('safe deterministic result passes while every future candidate advisory remains blocking', () => {
+  assert.equal(evaluateImage([], policy, options).blocking.length, 0);
+  const future = { ...finding, package: 'Go:toolchain', advisory: 'GO-future', severity: 'Unknown' };
+  assert.equal(evaluateImage([future], policy, options).blocking.length, 1);
+});

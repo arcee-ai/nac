@@ -112,7 +112,7 @@ def inventory(sbom, raw, image):
                         for c in p.get("cpes", [])) for p in nodes), "Node advisory CPE missing")
     return {"versions": versions, "os_release": actual_distro, "os_packages": len(packages),
             "node_artifact_ids": [p["id"] for p in nodes],
-            "go": "explicit Go stdlib OSV query", "uv": "explicit PyPI uv OSV query"}
+            "go": "explicit Go stdlib and toolchain OSV queries", "uv": "explicit PyPI uv OSV query"}
 
 
 def grype_findings(report, sbom):

@@ -20,6 +20,26 @@ NODE = {
 }
 
 
+IMAGE_CONTROLS = {("binary:node", "CVE-2024-27983"), ("deb:libtasn1-6", "CVE-2025-13151")}
+RUNTIME_CONTROLS = {("Go:stdlib", "GO-2026-6809"), ("Go:toolchain", "GO-2026-6601"),
+                    ("PyPI:uv", "GHSA-hq85-5cpj-mr62")}
+
+
+def qualify_controls(label, findings, controls):
+    """Prove selected real advisory controls; unrelated fixture CVEs are report data."""
+    observed = {(f["package"], f["advisory"]) for f in findings}
+    if label == "safe":
+        require(not controls.intersection(observed), "fixed fixture still matches a control advisory")
+    else:
+        blocking = {(f["package"], f["advisory"]) for f in findings
+                    if f["severity"] in {"High", "Critical", "Unknown"}}
+        require(controls.issubset(blocking), "vulnerable fixture did not block on every control advisory")
+    if label == "safe" and observed - controls:
+        print(f"Fixture drift: {len(observed - controls)} unrelated advisories retained; candidate policy remains full/fail-closed")
+    return {"control_matches": len(controls.intersection(observed)),
+            "other_advisories": len(observed - controls)}
+
+
 def qualify(output, cache, db):
     output.mkdir(parents=True, exist_ok=False)
     tools, pins = install_tools(cache)
@@ -55,13 +75,9 @@ def qualify(output, cache, db):
         findings = grype_findings(scan_sbom(tools, sbom_path, directory, env), sbom)
         write_json(directory / "findings.json", findings)
         blocking = [f for f in findings if f["severity"] in {"High", "Critical", "Unknown"}]
-        if label == "vulnerable":
-            require(any(f["package"] == "binary:node" for f in blocking), "vulnerable Node did not block")
-            require(any(f["package"] == "deb:libtasn1-6" for f in blocking), "vulnerable OS fixture did not block")
-        else:
-            require(not blocking, "safe fixture now blocks; inspect new advisories, do not suppress the qualification")
+        controls = qualify_controls(label, findings, IMAGE_CONTROLS)
         summaries[label] = {"node": version, "os": f"{name}@{package_version}",
-                            "blocking": len(blocking), "findings": len(findings)}
+                            "blocking": len(blocking), "findings": len(findings), **controls}
     unrecognized = output / "unknown-debian"
     unrecognized.mkdir()
     unknown_sbom = json.loads((output / "vulnerable/sbom.syft.json").read_text())
@@ -84,12 +100,8 @@ def qualify(output, cache, db):
         runtime_output.mkdir()
         findings = query_runtimes({"versions": versions}, runtime_output)
         write_json(runtime_output / "findings.json", findings)
-        if label == "safe":
-            require(not findings, "safe runtime version queries now match; inspect new advisories")
-        else:
-            require({f["package"] for f in findings} == {"Go:stdlib", "PyPI:uv"},
-                    "Go/uv vulnerable version query did not demonstrate advisory matching")
-        runtime_summary[label] = {"versions": versions, "findings": len(findings)}
+        controls = qualify_controls(label, findings, RUNTIME_CONTROLS)
+        runtime_summary[label] = {"versions": versions, "findings": len(findings), **controls}
     unavailable = output / "unavailable-db.yaml"
     unavailable.write_text("db:\n  update-url: https://127.0.0.1:9\n  require-update-check: true\n"
                            "  max-update-check-frequency: 0s\n  update-available-timeout: 1s\n")

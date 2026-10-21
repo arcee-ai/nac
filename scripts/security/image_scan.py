@@ -124,13 +124,14 @@ match:
 
 def query_runtimes(coverage, output):
     findings = []
-    for runtime, ecosystem, name in [("go", "Go", "stdlib"), ("uv", "PyPI", "uv")]:
+    for runtime, ecosystem, name in [("go", "Go", "stdlib"), ("go", "Go", "toolchain"), ("uv", "PyPI", "uv")]:
         version = coverage["versions"][runtime]
         query = {"package": {"ecosystem": ecosystem, "name": name}, "version": version}
         started = dt.datetime.now(dt.timezone.utc).isoformat()
         response = json.loads(download("https://api.osv.dev/v1/query", 10 * 1024 * 1024,
                                        json.dumps(query).encode()))
-        write_json(output / f"{runtime}-advisories.json", {"query": query, "response": response,
+        evidence_name = "go-toolchain" if name == "toolchain" else runtime
+        write_json(output / f"{evidence_name}-advisories.json", {"query": query, "response": response,
                    "queried_at": started})
         findings += osv_findings(response, name, ecosystem, version)
     return findings

@@ -15,6 +15,7 @@ import image_inventory as inv
 import image_scan as scan
 import image_rescan as rescan
 import image_prepublication as publication
+import image_qualify as qualification
 
 IMAGE = "sha256:" + "1" * 64
 NOW = dt.datetime(2026, 10, 21, 12, tzinfo=dt.timezone.utc)
@@ -173,21 +174,67 @@ class DriverTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, "network unavailable"):
                 scan.query_runtimes({"versions": {"go": "1.27.0", "uv": "0.12.1"}}, self.root)
 
+    def test_go_toolchain_advisory_blocks_when_stdlib_is_clean(self):
+        def response(url, limit, data):
+            query = json.loads(data)
+            if query["package"]["name"] == "toolchain":
+                return json.dumps({"vulns": [{"id": "GO-2026-6601", "affected": [
+                    {"package": {"name": "toolchain", "ecosystem": "Go"}}]}]}).encode()
+            return b"{}"
+        with patch.object(scan, "download", side_effect=response):
+            findings = scan.query_runtimes({"versions": {"go": "1.27.0", "uv": "0.12.1"}}, self.root)
+        self.assertEqual([(f["package"], f["advisory"], f["severity"]) for f in findings],
+                         [("Go:toolchain", "GO-2026-6601", "Unknown")])
+        self.assertEqual(json.loads((self.root / "go-toolchain-advisories.json").read_text())["query"]["version"], "1.27.0")
+
+    def test_toolchain_query_failure_cannot_reuse_clean_stdlib_result(self):
+        for failure in (OSError("toolchain network failed"), b'{"error":"unavailable"}'):
+            def response(url, limit, data):
+                if json.loads(data)["package"]["name"] == "toolchain":
+                    if isinstance(failure, Exception):
+                        raise failure
+                    return failure
+                return b"{}"
+            with self.subTest(failure=failure), patch.object(scan, "download", side_effect=response):
+                with self.assertRaises((OSError, ValueError)):
+                    scan.query_runtimes({"versions": {"go": "1.27.0", "uv": "0.12.1"}}, self.root)
+
+    def test_new_fixture_advisory_is_reported_without_replacing_candidate_policy(self):
+        control = {("Go:toolchain", "GO-2026-6601")}
+        new = {"package": "Go:toolchain", "advisory": "GO-future", "severity": "Unknown"}
+        self.assertEqual(qualification.qualify_controls("safe", [new], control)["other_advisories"], 1)
+        known = dict(new, advisory="GO-2026-6601")
+        with self.assertRaises(ValueError):
+            qualification.qualify_controls("safe", [known], control)
+        with self.assertRaises(ValueError):
+            qualification.qualify_controls("vulnerable", [new], control)
+        self.assertEqual(qualification.qualify_controls("vulnerable", [known], control)["control_matches"], 1)
+
     def test_daily_selection_rejects_pr_expired_and_foreign_evidence(self):
         run = {"id": 12, "event": "push", "head_branch": "dev", "status": "completed",
                "conclusion": "success", "path": rescan.PRODUCER, "head_sha": "a" * 40, "created_at": "2026-10-21T06:00:00Z",
                "head_repository": {"full_name": "arcee-ai/nac"}}
         artifact = {"name": "managed-image-security-" + "a" * 40, "expired": False}
-        self.assertEqual(rescan.select_run([run], {12: [artifact]}, NOW)[0], run)
+        jobs = {12: [{"name": name, "status": "completed", "conclusion": "success"}
+                     for name in rescan.PRODUCER_JOBS]}
+        self.assertEqual(rescan.select_run([run], {12: [artifact]}, jobs, NOW)[0], run)
+        # An unrelated source/test failure must not prevent rescanning a verified image.
+        self.assertEqual(rescan.select_run([dict(run, conclusion="failure")], {12: [artifact]}, jobs, NOW)[0]["id"], 12)
+        for outcome in ("failure", "skipped", "cancelled", None):
+            bad_jobs = {12: [dict(job, conclusion=outcome) for job in jobs[12]]}
+            with self.assertRaises(ValueError):
+                rescan.select_run([run], {12: [artifact]}, bad_jobs, NOW)
+        with self.assertRaises(ValueError):
+            rescan.select_run([run], {12: [artifact]}, {}, NOW)
         for replacement in ({"event": "pull_request"}, {"event": "workflow_dispatch"},
                             {"path": ".github/workflows/managed-image.yml"},
-                            {"conclusion": "failure"}, {"head_branch": "other"},
+                            {"conclusion": "cancelled"}, {"head_branch": "other"},
                             {"created_at": "2026-10-01T00:00:00Z"},
                             {"head_repository": {"full_name": "fork/nac"}}):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):
-                rescan.select_run([dict(run, **replacement)], {12: [artifact]}, NOW)
+                rescan.select_run([dict(run, **replacement)], {12: [artifact]}, jobs, NOW)
         with self.assertRaises(ValueError):
-            rescan.select_run([run], {12: [dict(artifact, expired=True)]}, NOW)
+            rescan.select_run([run], {12: [dict(artifact, expired=True)]}, jobs, NOW)
 
     def test_failed_security_prevents_publication_gate_receipt(self):
         args = argparse.Namespace(image=IMAGE, source_revision="a" * 40,
