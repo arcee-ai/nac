@@ -80,7 +80,7 @@ jobs:
       - name: Install Node LTS
         uses: actions/setup-node@v4
         with:
-          node-version: 24.20.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: |
             crates/nac-server/web/package-lock.json
