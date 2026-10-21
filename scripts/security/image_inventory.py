@@ -1,0 +1,133 @@
+"""Strict managed-image inventory/scan evidence validation (no policy exceptions)."""
+import base64
+import datetime as dt
+import hashlib
+import json
+import re
+
+
+class EvidenceError(ValueError):
+    pass
+
+
+def require(condition, message):
+    if not condition:
+        raise EvidenceError(message)
+
+
+def sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def timestamp(value):
+    require(isinstance(value, str), "missing UTC timestamp")
+    parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    require(parsed.tzinfo is not None, "timestamp needs timezone")
+    return parsed
+
+
+def database(status, now):
+    require(isinstance(status, dict) and status.get("error") is None, "database error")
+    require(status.get("valid") is True, "database unavailable/invalid")
+    age = (now - timestamp(status.get("built"))).total_seconds()
+    require(0 <= age <= 86400, f"database built age outside 0..24h: {age}")
+    require(status.get("schemaVersion") and status.get("path"), "database metadata missing")
+    return {"built": status["built"], "age_seconds": age, "schema": status["schemaVersion"]}
+
+
+def runtimes(raw):
+    require(isinstance(raw, dict) and set(raw) == {"node", "go", "uv", "dpkg", "nac"},
+            "incomplete runtime probe")
+    versions = {}
+    patterns = {"node": r"v(\d+\.\d+\.\d+)",
+                "go": r"go version go(\d+\.\d+\.\d+) linux/amd64",
+                "uv": r"uv (\d+\.\d+\.\d+)(?: \([^\n]+\))?"}
+    for name, pattern in patterns.items():
+        match = re.fullmatch(pattern, raw[name].strip())
+        require(match is not None, f"missing/unrecognized {name} runtime: {raw[name]!r}")
+        versions[name] = match[1]
+    packages = []
+    for line in raw["dpkg"].splitlines():
+        fields = line.split("\t")
+        require(len(fields) == 2 and all(fields), "malformed dpkg inventory")
+        packages.append(tuple(fields))
+    require(packages, "empty OS package inventory")
+    return versions, packages
+
+
+def inventory(sbom, raw, image):
+    require(sbom.get("descriptor", {}).get("name") == "syft", "not Syft JSON")
+    source = sbom.get("source", {})
+    require(source.get("type") == "image", "SBOM is not an image inventory")
+    metadata = source.get("metadata", {})
+    if metadata.get("imageID") != image:
+        # Containerd's loaded image ID can be the OCI manifest digest. Syft
+        # normalizes that manifest but retains the exact requested ID and config.
+        require(metadata.get("userInput") == image, "SBOM image identity mismatch")
+        config = base64.b64decode(metadata.get("config", ""), validate=True)
+        require(config and "sha256:" + hashlib.sha256(config).hexdigest() == metadata.get("imageID"),
+                "SBOM config identity mismatch")
+    artifacts = sbom.get("artifacts")
+    require(isinstance(artifacts, list) and artifacts, "empty/missing Syft inventory")
+    require(sbom.get("distro", {}).get("id") == "debian", "unrecognized OS inventory")
+    versions, packages = runtimes(raw)
+    debs = {(p.get("name"), p.get("version")) for p in artifacts if p.get("type") == "deb"}
+    for name, version in packages:
+        require((name.split(":")[0], version) in debs, f"OS package not inventoried: {name}@{version}")
+    nodes = [p for p in artifacts if p.get("name") == "node" and
+             p.get("version", "").lstrip("v") == versions["node"]]
+    require(nodes, "Node binary missing/mismatched in Syft inventory")
+    require(any(any("a:nodejs:node.js:" in (c if isinstance(c, str) else c.get("cpe", ""))
+                        for c in p.get("cpes", [])) for p in nodes), "Node advisory CPE missing")
+    return {"versions": versions, "os_packages": len(packages),
+            "node_artifact_ids": [p["id"] for p in nodes],
+            "go": "explicit Go stdlib OSV query", "uv": "explicit PyPI uv OSV query"}
+
+
+def grype_findings(report, sbom):
+    require(isinstance(report, dict) and isinstance(report.get("matches"), list),
+            "malformed scanner results")
+    require(report.get("descriptor", {}).get("name") == "grype", "not Grype results")
+    known = {p["id"] for p in sbom["artifacts"]}
+    findings = []
+    for match in report["matches"]:
+        package, vuln = match["artifact"], match["vulnerability"]
+        require(package.get("id") in known, "scanner returned unknown package")
+        severity = vuln.get("severity")
+        require(severity in {"Negligible", "Low", "Medium", "High", "Critical", "Unknown"},
+                "unrecognized finding severity")
+        findings.append({"advisory": vuln["id"],
+                         "package": f"{package['type']}:{package['name']}",
+                         "context": "managed-image", "version": package["version"],
+                         "severity": severity, "source": "grype",
+                         "fixed": vuln.get("fix", {}).get("versions", [])})
+    return findings
+
+
+def osv_findings(response, name, ecosystem, version):
+    require(isinstance(response, dict) and set(response).issubset({"vulns"}),
+            "malformed advisory response")
+    vulns = response.get("vulns", [])  # OSV's documented no-match response is {}.
+    require(isinstance(vulns, list), "malformed advisory list")
+    findings = []
+    for vuln in vulns:
+        require(vuln.get("id") and isinstance(vuln.get("affected"), list), "malformed advisory")
+        require(any(a.get("package", {}).get("name") == name and
+                    a["package"].get("ecosystem") == ecosystem for a in vuln["affected"]),
+                "advisory package mismatch")
+        if vuln.get("withdrawn"):
+            continue
+        severity = vuln.get("database_specific", {}).get("severity", "UNKNOWN").upper()
+        severity = {"MODERATE": "Medium", "LOW": "Low", "HIGH": "High",
+                    "CRITICAL": "Critical", "UNKNOWN": "Unknown"}.get(severity)
+        require(severity is not None, "unrecognized advisory severity")
+        findings.append({"advisory": vuln["id"], "package": f"{ecosystem}:{name}",
+                         "context": "managed-image", "version": version,
+                         "severity": severity, "source": "osv-runtime", "fixed": [
+                             e["fixed"] for a in vuln["affected"] for r in a.get("ranges", [])
+                             for e in r.get("events", []) if "fixed" in e]})
+    return findings
+
+
+def write_json(path, document):
+    path.write_text(json.dumps(document, indent=2) + "\n")
