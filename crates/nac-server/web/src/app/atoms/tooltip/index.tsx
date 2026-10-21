@@ -42,7 +42,7 @@ const TooltipBox: React.FC<TooltipBoxProps> = ({
         className={cn(
           isMobile ? "label-medium" : "label-micro",
           "flex-grow",
-          inverted ? "text-basic-primary-inverse" : "text-basic-primary",
+          inverted ? "text-primary-inverse" : "text-basic-primary",
         )}
       >
         {title}
@@ -57,7 +57,7 @@ const TooltipBox: React.FC<TooltipBoxProps> = ({
       <div
         className={cn(
           "w-fit h-fit",
-          inverted ? "text-micro text-basic-secondary-inverse" : "text-medium text-basic-secondary",
+          inverted ? "text-micro text-secondary-inverse" : "text-medium text-basic-secondary",
         )}
       >
         {description}

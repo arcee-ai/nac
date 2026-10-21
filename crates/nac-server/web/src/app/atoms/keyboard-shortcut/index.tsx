@@ -30,7 +30,7 @@ const KeyboardShortcut: React.FC<KeyboardShortcutProps> = ({
           className={cn(
             "inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-[3px] border tag-label",
             inversed
-              ? "text-basic-secondary-inverse border-tertiary-inversed"
+              ? "text-secondary-inverse border-tertiary-inversed"
               : "text-basic-secondary border-secondary bg-input",
           )}
         >

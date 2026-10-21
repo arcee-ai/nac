@@ -40,7 +40,7 @@ const Avatar: React.FC<AvatarProps> & { Size: typeof AvatarSize } = ({
     <div
       className={cn(
         "flex items-center justify-center shrink-0 rounded-full overflow-hidden",
-        "font-semibold text-basic-primary-inverse shadow-convex",
+        "font-semibold text-primary-inverse shadow-convex",
         size,
         className,
       )}
