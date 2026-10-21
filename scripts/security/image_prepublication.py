@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fresh smoke/security gate for an exact local publication candidate; never publishes."""
+"""Fresh dev-smoke/security gate for an exact local candidate; never publishes."""
 import argparse
 import json
 import os

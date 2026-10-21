@@ -16,7 +16,11 @@ def require(condition, message):
 
 
 def sha256(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def timestamp(value):
@@ -125,9 +129,32 @@ def osv_findings(response, name, ecosystem, version):
                          "context": "managed-image", "version": version,
                          "severity": severity, "source": "osv-runtime", "fixed": [
                              e["fixed"] for a in vuln["affected"] for r in a.get("ranges", [])
-                             for e in r.get("events", []) if "fixed" in e]})
+                             for e in r.get("events", []) if "fixed" in e
+                             and a.get("package", {}).get("name") == name
+                             and a["package"].get("ecosystem") == ecosystem]})
     return findings
 
 
 def write_json(path, document):
     path.write_text(json.dumps(document, indent=2) + "\n")
+
+
+def write_report(path, result, image):
+    blocking, excepted, reporting = (result[key] for key in ("blocking", "excepted", "reporting"))
+    rows = ["# Managed image security", "", f"Image: `{image}`", "",
+            f"Blocking: {len(blocking)}; excepted: {len(excepted)}; lower severity: {len(reporting)}.", "",
+            "| Disposition | Advisory | Package | Installed | Severity | Fixed versions |",
+            "| --- | --- | --- | --- | --- | --- |"]
+    total = [("BLOCK", f) for f in blocking] + [("excepted", f) for f in excepted] + [("report", f) for f in reporting]
+    def cell(value):
+        return str(value).replace("|", "\\|").replace("\n", " ")
+    for disposition, finding in total[:200]:
+        values = [disposition, finding["advisory"], finding["package"], finding["version"],
+                  finding["severity"], ", ".join(finding.get("fixed", [])) or "none published"]
+        rows.append("| " + " | ".join(cell(value) for value in values) + " |")
+    if len(total) > 200:
+        rows += ["", "Table limited to 200 rows; all findings remain in findings.json/policy-result.json."]
+    rows += ["", "Remediate the exact installed package/runtime, or land a separately reviewed narrow expiring",
+             "exception through the shared source-security policy. Infrastructure/inventory failures cannot",
+             "be excepted. Daily scans do not revoke older PR results; rerun stale candidates.", ""]
+    path.write_text("\n".join(rows))

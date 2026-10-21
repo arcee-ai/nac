@@ -15,7 +15,7 @@ import tempfile
 import urllib.request
 
 from image_inventory import (database, grype_findings, inventory,
-                             osv_findings, require, sha256, write_json)
+                             osv_findings, require, sha256, write_json, write_report)
 
 ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("image-tools.json")
@@ -213,6 +213,7 @@ def run(args):
         report = scan_sbom(tools, output / "sbom.syft.json", output, env)
         findings = grype_findings(report, sbom) + query_runtimes(coverage, output)
         result = evaluate(findings, args.trusted_policy, args.candidate_policy, output)
+        write_report(output / "report.md", result, args.image)
         write_json(output / "result.json", {"status": "blocked" if result["blocking"] else "passed",
                    "image": args.image, "scanned_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                    "blocking": len(result["blocking"]), "findings": len(findings)})

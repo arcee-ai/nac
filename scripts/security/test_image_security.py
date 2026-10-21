@@ -122,6 +122,28 @@ class DriverTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "hash mismatch"):
             scan.load_bundle(self.root, output)
 
+    def test_scanner_or_database_error_never_writes_a_pass(self):
+        for failure in ("scanner failed", "database unavailable", "database too old"):
+            bundle = self.root / failure.replace(" ", "-")
+            bundle.mkdir()
+            runtime = dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")
+            for name, value in [("sbom.syft.json", SBOM), ("runtime.json", runtime),
+                                ("identity.json", {"image": IMAGE, "source_revision": "a" * 40}), ("coverage.json", {})]:
+                inv.write_json(bundle / name, value)
+            scan.bundle_manifest(bundle, IMAGE)
+            args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=bundle,
+                                      output=bundle / "rescan", tool_cache=self.root, db_cache=self.root)
+            with patch.object(scan, "install_tools", return_value=({}, {})), patch.object(
+                    scan, "scan_sbom", side_effect=ValueError(failure)), patch.object(scan, "evaluate") as policy:
+                self.assertEqual(scan.run(args), 2)
+            policy.assert_not_called()
+            self.assertEqual(json.loads((args.output / "result.json").read_text())["status"], "error")
+
+    def test_runtime_network_failure_is_not_a_safe_empty_response(self):
+        with patch.object(scan, "download", side_effect=OSError("network unavailable")):
+            with self.assertRaisesRegex(OSError, "network unavailable"):
+                scan.query_runtimes({"versions": {"go": "1.27.0", "uv": "0.12.1"}}, self.root)
+
     def test_daily_selection_rejects_pr_expired_and_foreign_evidence(self):
         run = {"id": 12, "event": "push", "head_branch": "dev", "status": "completed",
                "conclusion": "failure", "head_sha": "a" * 40, "created_at": "2026-10-21T06:00:00Z",

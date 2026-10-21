@@ -120,3 +120,50 @@ ALL-447 remains Eric's dependency/runtime remediation, not an automatically
 approved exception or an authorization to overlap his changes. Keep unresolved
 runtime coverage and external publication qualification visible; never describe
 an incomplete scan or an unqualified baseline as clean.
+
+## Private beta publisher adoption prerequisite
+
+Read-only inspection on 2026-10-21 found `managed-nac-controller` clean at
+`8f9b0caab2e0add6ffc2b547c413f7752dc1eddc`. Its
+`.github/workflows/nac-runtime-container.yml` is the actual private publisher.
+It builds once into an isolated local registry, selects the linux/amd64 manifest,
+pulls that digest, runs an adapted copy of NAC smoke with beta and exact release
+identity/schema assertions, and later promotes a verified OCI transit bundle to
+ECR. The NAC workflow/helper alone does **not** enforce that existing publisher.
+Changing that repository or exercising ECR publication requires separate scope.
+
+The source-owned scanner supports that beta path: it checks the actual NAC
+binary revision and runtime inventory without assuming a `dev` build track.
+Keep the controller's beta smoke and its exact build ID/source/version/schema
+and image-label assertions. Resolve `docker image inspect "$VERIFIED_IMAGE"`
+to the local immutable `.Id`, run its existing beta smoke on that ID, then call:
+
+```sh
+python3 .build/nac/scripts/security/image_scan.py \
+  --image "$local_image_id" --source-revision "$SOURCE_SHA" \
+  --trusted-policy "$trusted_policy" \
+  --candidate-policy .build/nac/.github/security/exceptions.json \
+  --output image-security-evidence
+```
+
+This must run in the unprivileged `verify-image` lane after the existing beta
+smoke, before the transit bundle is accepted. Bind its image inspection
+`repo_digests`/platform to `VERIFIED_IMAGE` and the controller's selected manifest;
+retain its SBOM/runtime/identity bundle and findings with the checksummed transit
+evidence. The local `image_prepublication.py` convenience wrapper reruns the
+unmodified **dev** smoke and must not replace the controller's beta smoke.
+
+The publisher supports `new`, recovered `transit`, and already-existing release
+paths. Add an unprivileged fresh rescan of the retained security bundle for every
+path before publication/promotion, binding the result to the exact manifest,
+source, current trusted policy, and measured DB/runtime-advisory timestamps.
+Require that result before ECR writes/accepted-release evidence, and preserve the
+controller's rule that the credentialed publication job does not execute NAC or
+untrusted transit code. An old accepted SBOM or old green source check does not
+substitute for this fresh gate. No extra image build is needed.
+
+Controller adoption, transit/recovery-path negative qualification, and actual
+publication blocking remain external acceptance gaps until that separately
+reviewed controller change lands and is qualified. This PR neither activates
+private enforcement nor claims a failed publication scan can be bypassed through
+Allison's PR-only merge override.

@@ -28,8 +28,8 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if test -f image-rescan-evidence/rescan/result.json; then
-            cat image-rescan-evidence/rescan/result.json >> "$GITHUB_STEP_SUMMARY"
+          if test -f image-rescan-evidence/rescan/report.md; then
+            cat image-rescan-evidence/rescan/report.md >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'Image rescan did not produce a complete result; inspect failed steps.' >> "$GITHUB_STEP_SUMMARY"
           fi
