@@ -148,6 +148,27 @@ test("workflow wiring preserves the aggregate, exact jobs, coverage and unprivil
   assert.match(managed, /needs: \[prepare, contract, quality, build-smoke\]/);
 });
 
+test("overlapping caller runs cannot replace pending managed work and pushes have one producer", () => {
+  const managed = fs.readFileSync(".github/workflows/managed-image.yml", "utf8");
+  const stable = fs.readFileSync(".github/workflows/stable-release.yml", "utf8");
+  const triggers = managed.split("\npermissions:")[0];
+  assert.match(triggers, /workflow_call:/);
+  assert.match(triggers, /workflow_dispatch:/);
+  assert.doesNotMatch(triggers, /\n  (push|pull_request):/);
+  assert.match(stable.split("\npermissions:")[0], /push:\n    branches: \[main, dev\]/);
+  assert.match(stable, /uses: \.\/\.github\/workflows\/managed-image.yml/);
+  const group = managed.match(/group: (.*)/)[1];
+  assert.equal(group, "managed-image-${{ github.run_id }}-${{ github.run_attempt }}");
+  const calls = [101, 102, 103].map((id) =>
+    group.replace("${{ github.run_id }}", String(id)).replace("${{ github.run_attempt }}", "1"),
+  );
+  assert.equal(new Set(calls).size, 3, "same-ref callers must never share a pending slot");
+  assert.notEqual(
+    calls[0],
+    group.replace("${{ github.run_id }}", "101").replace("${{ github.run_attempt }}", "2"),
+  );
+});
+
 test("review request metadata operation verifies owners and excludes the author including bot PRs", () => {
   assert.equal(
     fs.readFileSync(".github/CODEOWNERS", "utf8"),

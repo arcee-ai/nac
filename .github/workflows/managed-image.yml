@@ -7,25 +7,13 @@ on:
         description: Immutable candidate from the caller's preparation job
         required: true
         type: string
-  push:
-    branches: [main, dev]
-    paths:
-      - .github/workflows/managed-image.yml
-      - .dockerignore
-      - docker/managed/**
-      - scripts/smoke-managed-image.sh
-      - scripts/test-managed-image-contract.sh
-      - Cargo.toml
-      - Cargo.lock
-      - version.txt
-      - crates/**
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: managed-image-${{ github.workflow }}-${{ github.ref }}
+  group: managed-image-${{ github.run_id }}-${{ github.run_attempt }}
   cancel-in-progress: false
 
 jobs:

@@ -28,7 +28,13 @@ new candidate after the base advances; a prior head's green check is insufficien
 Managed work applies when any changed path is under `.github/`, `crates/`,
 `docker/managed/` or `scripts/`, or is Cargo.toml, Cargo.lock, Makefile,
 .dockerignore or version.txt. NUL-delimited Git output preserves unusual names
-and renames/deletions. Non-PR runs conservatively enable managed work.
+and renames/deletions. Non-PR runs conservatively enable managed work. The
+stable-release workflow is the sole main/dev push producer; managed-image has
+only reusable-call and manual
+triggers. Each managed call has a unique run/attempt concurrency identity, so
+three overlapping updates cannot replace a pending call. Downstream trusted
+image rescans must select successful **stable-release.yml dev-push** artifacts,
+never PR, manual-dispatch or standalone managed workflow artifacts.
 
 | Change example | Core/web/release/build | Managed | Required result |
 | --- | --- | --- | --- |

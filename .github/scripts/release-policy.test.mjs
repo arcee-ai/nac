@@ -200,7 +200,7 @@ test("release please is explicitly a dev-targeted root simple release", () => {
   assert.doesNotMatch(stableWorkflow, /^\s*release:/m);
   assert.doesNotMatch(stableWorkflow, /^\s*schedule:/m);
   assert.doesNotMatch(stableWorkflow, /nightly|rc-release|event\.release|inputs\.release_tag/i);
-  assert.equal(managedWorkflow.match(/- version\.txt/g)?.length, 1);
+  assert.doesNotMatch(managedWorkflow.split("\npermissions:")[0], /\n  push:/);
   assert.match(managedWorkflow, /workflow_call:/);
 
   const verifyNewLane = rollout.indexOf("contents/.github/workflows/stable-release.yml?ref=dev");
