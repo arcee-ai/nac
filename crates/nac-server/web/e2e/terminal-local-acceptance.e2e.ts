@@ -17,6 +17,50 @@ declare class ClipboardEvent {
     options: { clipboardData: DataTransfer; bubbles: boolean; cancelable: boolean },
   );
 }
+// Playwright intentionally leaves Node-side browser element interfaces empty.
+// These declarations describe only actual browser members used by this fixture;
+// they emit no JavaScript and do not manufacture input or renderer events.
+interface FixtureKeyEvent {
+  isTrusted: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+  key: string;
+  target: unknown;
+}
+interface FixtureDocument {
+  activeElement: HTMLElement | SVGElement | null;
+  addEventListener(
+    type: "keydown",
+    listener: (event: FixtureKeyEvent) => void,
+    capture: boolean,
+  ): void;
+  removeEventListener(
+    type: "keydown",
+    listener: (event: FixtureKeyEvent) => void,
+    capture: boolean,
+  ): void;
+}
+declare global {
+  interface HTMLElement {
+    textContent: string | null;
+    ownerDocument: FixtureDocument;
+    closest(selector: string): HTMLElement | SVGElement | null;
+    contains(element: HTMLElement | SVGElement | null): boolean;
+    dispatchEvent(event: ClipboardEvent): boolean;
+    scrollWidth: number;
+  }
+  interface SVGElement {
+    textContent: string | null;
+    ownerDocument: FixtureDocument;
+    closest(selector: string): HTMLElement | SVGElement | null;
+    contains(element: HTMLElement | SVGElement | null): boolean;
+    dispatchEvent(event: ClipboardEvent): boolean;
+    scrollWidth: number;
+  }
+}
+declare const location: { hash: string };
+
 interface RenderedMarkerTiming {
   domMs: number;
   renderedMs: number;
@@ -63,7 +107,7 @@ async function focus(pane: Locator) {
 /**
  * Arm the actual visual DOM renderer before input. The screen-reader mirror is
  * intentionally throttled by xterm and assertion polling is not a render clock.
- * Record DOM arrival plus the next animation-frame paint opportunity in-browser.
+ * Start at the trusted Ctrl-C keydown; record DOM arrival and the next paint opportunity.
  */
 async function armRenderedMarker(pane: Locator, marker: string) {
   await pane.locator(".xterm-rows").evaluate((rows, marker) => {
@@ -80,9 +124,33 @@ async function armRenderedMarker(pane: Locator, marker: string) {
     void result.catch(() => {});
     let settled = false;
     let frame: number | undefined;
-    let startedAt = 0;
+    let startedAt: number | undefined;
+    const document = rows.ownerDocument;
+    const interrupted = (event: {
+      isTrusted: boolean;
+      ctrlKey: boolean;
+      altKey: boolean;
+      metaKey: boolean;
+      key: string;
+      target: unknown;
+    }) => {
+      if (
+        settled ||
+        startedAt !== undefined ||
+        !event.isTrusted ||
+        !event.ctrlKey ||
+        event.altKey ||
+        event.metaKey ||
+        event.key.toLowerCase() !== "c" ||
+        event.target !== document.activeElement ||
+        !rows.closest(".xterm")?.contains(document.activeElement)
+      )
+        return;
+      startedAt = performance.now();
+    };
     const release = () => {
       observer.disconnect();
+      document.removeEventListener("keydown", interrupted, true);
       clearTimeout(deadline);
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
@@ -94,6 +162,11 @@ async function armRenderedMarker(pane: Locator, marker: string) {
     };
     const observer = new MutationObserver(() => {
       if (settled || frame !== undefined || !rows.textContent?.includes(marker)) return;
+      if (startedAt === undefined) {
+        fail("Terminal interruption marker arrived before trusted Ctrl-C");
+        return;
+      }
+      const start = startedAt;
       const domAt = performance.now();
       observer.disconnect();
       frame = requestAnimationFrame(() => {
@@ -101,11 +174,13 @@ async function armRenderedMarker(pane: Locator, marker: string) {
         const renderedAt = performance.now();
         settled = true;
         release();
-        resolve({ domMs: domAt - startedAt, renderedMs: renderedAt - startedAt });
+        resolve({ domMs: domAt - start, renderedMs: renderedAt - start });
       });
     });
     observer.observe(rows, { childList: true, characterData: true, subtree: true });
-    startedAt = performance.now();
+    document.addEventListener("keydown", interrupted, true);
+    // One existing 10-second watchdog covers arming, key delivery and rendering.
+    // The measured interval starts only at the actual trusted interrupt event.
     const deadline = setTimeout(
       () => fail("Terminal visual marker did not arrive within 10 seconds"),
       10_000,
@@ -436,7 +511,11 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   await fs.writeFile(
     path.join(root, "noise.py"),
     [
-      "import os,time",
+      "import os,time,signal",
+      "def interrupted(_signum,_frame):",
+      " os.write(1,b'\\r\\nNOISE-INTERRUPTED\\r\\n')",
+      " raise SystemExit(130)",
+      "signal.signal(signal.SIGINT, interrupted)",
       "os.write(1,b'\\x1b[2J\\x1b[HSELECT-WHILE-OUTPUT\\r\\n')",
       "for i in range(240):",
       " width=max(1,os.get_terminal_size(1).columns-6)",
@@ -511,7 +590,6 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     await focus(pane);
     await armRenderedMarker(pane, "NOISE-INTERRUPTED");
     await page.keyboard.press("Control+c");
-    await command(page, "printf '" + octal("NOISE-INTERRUPTED\n") + "'");
     const timing = await page.evaluate(() => {
       if (!window.terminalRenderedMarker)
         throw new Error("Terminal render measurement was not armed");
@@ -524,6 +602,10 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     await expect(accessible).toContainText("NOISE-INTERRUPTED");
     expect(measurements.interruptToRenderedMarkerMs).toBeLessThan(1500);
     expect(measurements.resizeMs).toBeLessThan(1500);
+    // A separate fresh command proves the same shell remains usable; its typing
+    // and output do not contribute to the interruption/render measurement.
+    await command(page, "printf '" + octal("SHELL-AFTER-INTERRUPT\n") + "'");
+    await expect(accessible).toContainText("SHELL-AFTER-INTERRUPT");
     const closeAt = performance.now();
     await pane.getByRole("button", { name: "Close shell", exact: true }).click();
     await expect
