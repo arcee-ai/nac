@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
 import {
   managedApplicable,
   requiredJobs,
@@ -42,6 +45,35 @@ test("event/path matrix explicitly selects managed work without filtering the re
     requireComplete(successful("skipped"), "false", sha);
   }
   assert.equal(managedApplicable(["README.md", "Cargo.toml"]), true);
+});
+
+test("real Git renames out of managed inputs cannot skip the managed graph", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nac-pr-rename-"));
+  const git = (...args) => execFileSync("git", args, { cwd: directory, encoding: "utf8" });
+  try {
+    git("init", "-q");
+    git("config", "user.name", "NAC policy test");
+    git("config", "user.email", "policy@example.invalid");
+    fs.writeFileSync(path.join(directory, ".dockerignore"), "target/\n");
+    git("add", ".dockerignore");
+    git("commit", "-qm", "managed input");
+    const base = git("rev-parse", "HEAD").trim();
+    fs.mkdirSync(path.join(directory, "docs"));
+    git("mv", ".dockerignore", "docs/dockerignore.md");
+    git("commit", "-qm", "move outside managed paths");
+    const workflow = fs.readFileSync(".github/workflows/stable-release.yml", "utf8");
+    const flags = workflow
+      .match(/git diff (.*) "\$BASE_SHA" HEAD > "\$RUNNER_TEMP\/pr-paths"/)[1]
+      .split(" ");
+    const paths = git("diff", ...flags, base, "HEAD")
+      .split("\0")
+      .filter(Boolean);
+    assert.ok(paths.includes(".dockerignore"));
+    assert.ok(paths.includes("docs/dockerignore.md"));
+    assert.equal(managedApplicable(paths), true);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("every failed, cancelled, pending, missing or unexpectedly skipped job fails closed", () => {

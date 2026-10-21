@@ -70,7 +70,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "$EVENT_NAME" = pull_request ]; then
-            git diff --name-only -z "$BASE_SHA" HEAD > "$RUNNER_TEMP/pr-paths"
+            git diff --no-renames --name-only -z "$BASE_SHA" HEAD > "$RUNNER_TEMP/pr-paths"
             node .github/scripts/pr-checks.mjs applicability "$RUNNER_TEMP/pr-paths" >> "$GITHUB_OUTPUT"
           else
             echo 'managed_applicable=true' >> "$GITHUB_OUTPUT"
