@@ -875,12 +875,6 @@ async fn a_target_changed_during_review_is_not_executed() {
     let store_path = root.join("store.db");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session-a");
-    crate::store::record_review_intent(
-        &crate::store::open_runtime_connection(&store_path).unwrap(),
-        "session-a",
-        "count it",
-    )
-    .unwrap();
 
     let broker = Arc::new(crate::permissions::PermissionBroker::new(
         store_path.clone(),
@@ -903,6 +897,12 @@ async fn a_target_changed_during_review_is_not_executed() {
         .set_approval_mode(crate::permissions::PermissionApprovalMode::Review)
         .await
         .unwrap();
+    crate::store::record_review_intent(
+        &crate::store::open_runtime_connection(&store_path).unwrap(),
+        "session-a",
+        "count it",
+    )
+    .unwrap();
 
     let calls = Arc::new(AtomicUsize::new(0));
     let registry = ToolRegistry::builder()
@@ -937,7 +937,11 @@ async fn a_target_changed_during_review_is_not_executed() {
         symlink(workspace.join("second"), workspace.join("current")).unwrap();
         release.send(()).unwrap();
     };
-    let (result, ()) = tokio::join!(invoke, swap);
+    let (result, ()) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(invoke, swap)
+    })
+    .await
+    .expect("review must start with fresh human intent and finish after the target swap");
 
     assert!(result.is_error, "{}", result.content);
     assert!(
