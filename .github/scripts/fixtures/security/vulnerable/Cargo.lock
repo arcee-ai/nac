@@ -1,0 +1,7 @@
+# Scanner fixture only: known affected rustls, never installed or executed.
+version = 4
+
+[[package]]
+name = "rustls"
+version = "0.23.41"
+source = "registry+https://github.com/rust-lang/crates.io-index"
