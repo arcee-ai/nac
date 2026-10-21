@@ -369,7 +369,7 @@ export function McpServerForm({
         ) : null}
         <FooterButton
           isMobile={isMobile}
-          variant={ButtonVariant.Secondary}
+          variant={ButtonVariant.Tertiary}
           onClick={() => closeRef.current()}
         >
           Cancel

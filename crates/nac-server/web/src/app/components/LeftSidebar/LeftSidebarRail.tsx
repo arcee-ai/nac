@@ -64,7 +64,7 @@ export function LeftSidebarRail({
           <Icon iconName={IconName.Gear} />
         </RailButton>
         <RailButton label="Managed host" onClick={commands.openManaged}>
-          <Icon iconName={IconName.Server} />
+          <Icon iconName={IconName.Controls} />
         </RailButton>
       </div>
     </div>

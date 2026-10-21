@@ -71,7 +71,7 @@ export function HistoryView({
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-auto p-2 gap-1 bg-elevation-level-1 [&>*]:shrink-0">
+    <div className="flex flex-col flex-1 min-h-0 overflow-auto p-2 gap-1 bg-elevation-ground [&>*]:shrink-0">
       <Row
         title="Working tree"
         subtitle="The files as they are right now"

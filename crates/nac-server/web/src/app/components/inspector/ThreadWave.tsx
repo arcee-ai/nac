@@ -79,7 +79,7 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
       className={cn(
         "shrink-0 h-[84px] max-w-full overflow-hidden rounded-[4px]",
         isMobile ? "w-[172px]" : "w-[220px]",
-        running || pending ? "bg-elevation-level-2" : "bg-elevation-level-1",
+        "bg-elevation-ground",
       )}
     >
       <button

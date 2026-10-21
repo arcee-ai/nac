@@ -10,6 +10,7 @@ import { useIsMobile } from "../../hooks/useMediaQuery";
 import { createModalId, useModalStack } from "../../hooks/useModalStack";
 import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
+import StickyButton from "../button/StickyButton";
 import CoverBackground from "../cover-background";
 import Icon, { IconName } from "../icon";
 
@@ -19,21 +20,18 @@ const FOCUSABLE =
 /** Kept in step with the mobile slide transition. */
 const MOBILE_EXIT_MS = 300;
 
-// TopBar's "HeaderSurface" turned upside down: the phone footer floats over the
-// scrolling body, so it fades the content passing underneath the same way the
-// bar fades what scrolls below it. Stacked twice for the same opacity.
-const GROUND_FADE_UP =
-  "linear-gradient(to top, var(--color-bg-elevation-level-1), var(--color-bg-elevation-ground-transparent))";
-const MOBILE_FOOTER_SURFACE = {
-  backgroundImage: `${GROUND_FADE_UP}, ${GROUND_FADE_UP}`,
-};
-
-/** Clearance the scrolling body leaves for the footer floating over it. */
-const MOBILE_FOOTER_CLEARANCE = "pb-[88px]";
+/** Clearance the body leaves for the phone header floating over it. */
+const MOBILE_HEADER_CLEARANCE = "pt-14";
+/**
+ * Clearance the body leaves for the phone footer floating over it (64px plus
+ * the body's own 16px). A full-bleed `bodyClassName` such as `p-0` drops it.
+ */
+const MOBILE_FOOTER_CLEARANCE = "pb-20";
 
 export enum ModalSize {
   Small = "max-w-[400px]",
-  Medium = "max-w-[560px]",
+  /** Figma ModalBox default width. */
+  Medium = "max-w-[604px]",
   Wide = "max-w-[600px]",
   Large = "max-w-[760px]",
 }
@@ -54,7 +52,7 @@ interface ModalProps {
   headerActions?: React.ReactNode;
   size?: ModalSize;
   closeOnOverlay?: boolean;
-  /** Full-bleed chrome: header and footer span the card, only the body scrolls. */
+  /** Stretch the body over a card the caller sizes; it still grows with its content. */
   flush?: boolean;
   /**
    * Grow the card to fill the viewport instead of hugging its content. Desktop
@@ -248,37 +246,42 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
 
   if (!mounted) return null;
 
-  // A phone gets the same full-bleed chrome as `flush`, because a padded card
-  // makes no sense once the dialog covers the whole screen.
-  const chrome = flush || isMobile;
   const onTop = modalStack.length === 0 || modalStack[modalStack.length - 1]?.id === token;
   // On a phone the scrim never dismisses — only the back/close control does.
   const overlayCloses = closeOnOverlay && !isMobile;
 
-  const closeButton = (iconName: IconName, leading: boolean) => (
-    <Button
-      variant={ButtonVariant.Ghost}
-      size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-      content={ButtonContent.Icon}
-      className={cn(
-        "shrink-0",
-        iconName === IconName.Close && "btn-icon-rotate",
-        !chrome && !leading && "-mr-1",
-      )}
-      aria-label="Close"
-      onClick={onClose}
-    >
-      <Icon iconName={iconName} />
-    </Button>
-  );
+  const closeButton = (iconName: IconName) =>
+    isMobile ? (
+      <StickyButton
+        variant={ButtonVariant.Ghost}
+        content={ButtonContent.Icon}
+        className="shrink-0"
+        aria-label="Close"
+        onClick={onClose}
+      >
+        <Icon iconName={iconName} />
+      </StickyButton>
+    ) : (
+      <Button
+        variant={ButtonVariant.Ghost}
+        size={ButtonSize.Medium}
+        content={ButtonContent.Icon}
+        className={cn("shrink-0", iconName === IconName.Close && "btn-icon-rotate")}
+        aria-label="Close"
+        onClick={onClose}
+      >
+        <Icon iconName={iconName} />
+      </Button>
+    );
 
   // A phone panel is the viewport already, so `fullScreen` has nothing left to
   // ask for there — and it must not reshape the chrome either, or the dialog
   // would look unlike every other one on the phone.
   const isFullScreen = fullScreen && !isMobile;
   // On a phone the close affordance leads the header, the way a back button
-  // does.
-  const closeLeads = isMobile;
+  // does. A subheader stays in flow so the body starts below it; a title-only
+  // header floats and the body scrolls underneath the fade.
+  const floatingHeader = isMobile && !subheader;
   // Chromeless still needs a way out once it covers the screen; regular chrome
   // already puts Close in the header row.
   const chromelessClose = chromeless && (isFullScreen || isMobile) && onClose && !hideClose;
@@ -286,37 +289,37 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   const headerRow = (
     <div
       className={cn(
-        "flex items-start justify-between gap-2 md:gap-4",
-        chrome && "items-center px-4 py-3",
-        isMobile && "min-h-[64px] h-[64px] max-h-[64px] px-3",
+        "flex items-center",
+        subheader ? "min-h-14" : "h-full",
+        isMobile ? "gap-4 py-1 pl-1 pr-4" : "gap-2 py-1 pl-4 pr-1",
       )}
     >
-      {closeLeads && onClose ? closeButton(mobileCloseIcon, true) : null}
-      <div
-        className={cn("flex-1 min-w-0 text-basic-primary", chrome ? "header-md" : "header-medium")}
-      >
-        {title}
-      </div>
+      {isMobile && onClose ? closeButton(mobileCloseIcon) : null}
+      <div className="header-md flex min-w-0 flex-1 items-center text-basic-primary">{title}</div>
       {headerActions ? (
-        <div className="flex items-center gap-1 shrink-0">{headerActions}</div>
+        <div className="flex shrink-0 items-center gap-1">{headerActions}</div>
       ) : null}
-      {!closeLeads && onClose ? closeButton(IconName.Close, false) : null}
+      {!isMobile && onClose ? closeButton(IconName.Close) : null}
     </div>
   );
 
   const header =
     !chromeless && (title || subheader || headerActions || onClose) ? (
-      chrome ? (
-        <div className="shrink-0 border-b border-muted">
-          {headerRow}
-          {subheader ? <div className="px-4 pb-3">{subheader}</div> : null}
-        </div>
-      ) : (
-        <>
-          {headerRow}
-          {subheader ? <div className="shrink-0">{subheader}</div> : null}
-        </>
-      )
+      <header
+        className={cn(
+          "flex flex-col",
+          isMobile
+            ? cn(
+                "fade-from-top z-10",
+                subheader ? "shrink-0" : "h-14",
+                floatingHeader ? "absolute inset-x-0 top-0" : "shrink-0",
+              )
+            : cn("shrink-0 border-b border-muted", subheader ? "min-h-14" : "h-14"),
+        )}
+      >
+        {headerRow}
+        {subheader ? <div className="px-4 pb-3">{subheader}</div> : null}
+      </header>
     ) : null;
 
   const mobileTransform = open
@@ -330,17 +333,17 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       <CoverBackground
         open={open && (!isMobile || !offscreen)}
         zIndex={100}
-        opacity={0.55}
-        blur={0}
+        opacity={0.25}
+        blur={1}
         className={isMobile ? "!duration-300" : undefined}
         onClick={overlayCloses ? onClose : undefined}
       />
       <div
         className={cn(
-          "fixed inset-0 z-[100] flex pointer-events-none",
+          "pointer-events-none fixed inset-0 z-[100] flex",
           // A phone panel is the viewport itself, so it never gets the inset
           // the desktop card sits in.
-          !isMobile && (isFullScreen ? "p-2" : "items-center justify-center p-4"),
+          !isMobile && "items-center justify-center p-4",
         )}
       >
         <div
@@ -351,25 +354,20 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           tabIndex={-1}
           data-modal-open={open ? "true" : undefined}
           className={cn(
-            "relative flex flex-col shadow-2xl pointer-events-auto outline-none",
+            "pointer-events-auto relative flex flex-col outline-none",
             isMobile
               ? cn(
                   "rounded-none transition-transform duration-300 ease-in-out",
                   offscreen && open ? "translate-x-full" : mobileTransform,
-                  !chromeless && "bg-elevation-level-1",
+                  !chromeless && "bg-elevation-ground",
                 )
               : cn(
                   "fade w-full",
                   size,
                   chromeless
                     ? "shadow-none"
-                    : flush
-                      ? "rounded-[16px] max-h-[calc(100vh-2rem)] overflow-hidden bg-elevation-level-1 border border-muted"
-                      : "gap-4 rounded-[8px] p-5 bg-elevation-level-1 border border-muted",
-                  // Fill the padded viewport (8px inset via parent `p-2`).
-                  isFullScreen &&
-                    "max-w-none w-full h-full min-w-0 min-h-0 max-h-none overflow-hidden",
-                  isFullScreen && !chromeless && "rounded-[8px]",
+                    : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-2xl bg-elevation-level-2 shadow-xl",
+                  isFullScreen && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden",
                 ),
             className,
             // Callers size the desktop card through `className`
@@ -378,42 +376,49 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
             // its own sizing has to win: it comes after `className`, which is
             // where tailwind-merge resolves the conflict, and the min/max pair
             // clamps anything the caller adds on top.
-            isMobile && "w-full h-[100dvh] min-w-full min-h-[100dvh] max-w-full max-h-[100dvh]",
+            isMobile && "h-[100dvh] max-h-[100dvh] min-h-[100dvh] w-full min-w-full max-w-full",
           )}
         >
           {chromelessClose ? (
-            <div className="absolute top-1 right-2 z-10">{closeButton(IconName.Close, false)}</div>
+            <div className="absolute top-1 right-2 z-10">{closeButton(IconName.Close)}</div>
           ) : null}
           {header}
           <div
             className={cn(
-              chromeless
-                ? "flex flex-col flex-1 min-h-0 w-full"
-                : cn(
-                    "paragraph-medium text-basic-secondary",
-                    chrome && "flex-1 min-h-0 overflow-auto px-4 py-6",
-                    isFullScreen && "flex-1 min-h-0 w-full",
-                    isMobile && footer && MOBILE_FOOTER_CLEARANCE,
-                  ),
-              bodyClassName,
+              "flex w-full min-h-0 flex-auto flex-col overflow-auto",
+              floatingHeader && !chromeless && MOBILE_HEADER_CLEARANCE,
             )}
           >
-            {children}
-          </div>
-          {footer ? (
             <div
               className={cn(
-                "flex justify-end gap-2",
-                chrome && "items-center p-4 shrink-0",
-                chrome && !isMobile && "border-t border-muted",
-                // Floats over the body rather than taking a row of its own, so
-                // the fade below shows the content it is covering.
-                isMobile && "modal-footer-mobile absolute inset-x-0 bottom-0 z-10",
+                chromeless
+                  ? "flex min-h-0 w-full flex-1 flex-col"
+                  : "paragraph-medium flex flex-col p-4 text-basic-secondary",
+                // A phone or full-screen body is pinned to the visible height so
+                // `h-full` children can scroll themselves; it scrolls too, so
+                // taller content keeps the padding and footer clearance below it.
+                // A flush card body fills the card but grows with its content,
+                // so the wrapper scrolls it; panes that scroll themselves pass
+                // `min-h-0` or `overflow-hidden` to stay pinned.
+                isMobile || isFullScreen ? "min-h-0 flex-1 overflow-auto" : flush && "flex-1",
+                isMobile && footer && MOBILE_FOOTER_CLEARANCE,
+                bodyClassName,
               )}
-              style={isMobile ? MOBILE_FOOTER_SURFACE : undefined}
+            >
+              {children}
+            </div>
+          </div>
+          {footer ? (
+            <footer
+              className={cn(
+                "modal-footer flex items-center justify-end",
+                isMobile
+                  ? "modal-footer-mobile fade-from-bottom absolute inset-x-0 bottom-0 z-10 gap-3 p-3"
+                  : "shrink-0 gap-2 border-t border-muted p-4",
+              )}
             >
               {footer}
-            </div>
+            </footer>
           ) : null}
         </div>
       </div>

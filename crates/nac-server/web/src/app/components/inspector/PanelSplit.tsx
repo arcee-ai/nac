@@ -134,9 +134,7 @@ export function PanelSplit({
     // second dialog stacked on top of it.
     return (
       <>
-        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-0-5">
-          {children}
-        </div>
+        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
         <Modal
           open={showList}
           onClose={() => showSidePanelList(false)}
@@ -169,7 +167,7 @@ export function PanelSplit({
         {/* The list is a screen of its own here, so the row above the detail is
             what leads back to it. */}
         {!showList ? (
-          <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-level-1">
+          <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground">
             <span className="min-w-0 truncate label-small text-basic-primary">{title}</span>
             {titleAction}
             <span className="flex-1" />
@@ -187,16 +185,14 @@ export function PanelSplit({
           </div>
         ) : null}
         {showList ? (
-          <div className="flex flex-col flex-1 min-h-0 bg-elevation-level-1">
+          <div className="flex flex-col flex-1 min-h-0 bg-elevation-ground">
             {listToolbar}
             <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-1 [&>*]:shrink-0">
               {list}
             </div>
           </div>
         ) : (
-          <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-0-5">
-            {children}
-          </div>
+          <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
         )}
       </div>
     );
@@ -205,7 +201,7 @@ export function PanelSplit({
   return (
     <div ref={containerRef} className="flex flex-1 min-h-0 w-full">
       <div
-        className="relative flex flex-col shrink-0 min-h-0 border-r border-muted bg-elevation-level-1"
+        className="relative flex flex-col shrink-0 min-h-0 border-r border-muted bg-elevation-ground"
         style={{ width: listWidth }}
       >
         {listToolbar}
@@ -234,7 +230,7 @@ export function PanelSplit({
           }}
         />
       </div>
-      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-level-1">{children}</div>
+      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
     </div>
   );
 }

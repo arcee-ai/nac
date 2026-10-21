@@ -104,6 +104,7 @@ function PathPicker({
       size={ModalSize.Wide}
       flush
       className="h-[560px]"
+      bodyClassName="min-h-0"
       footer={
         <>
           {onClear ? (
