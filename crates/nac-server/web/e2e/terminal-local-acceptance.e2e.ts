@@ -29,7 +29,7 @@ interface FixtureKeyEvent {
   target: unknown;
 }
 interface FixtureDocument {
-  activeElement: HTMLElement | SVGElement | null;
+  activeElement: FixtureElement | null;
   addEventListener(
     type: "keydown",
     listener: (event: FixtureKeyEvent) => void,
@@ -41,23 +41,12 @@ interface FixtureDocument {
     capture: boolean,
   ): void;
 }
-declare global {
-  interface HTMLElement {
-    textContent: string | null;
-    ownerDocument: FixtureDocument;
-    closest(selector: string): HTMLElement | SVGElement | null;
-    contains(element: HTMLElement | SVGElement | null): boolean;
-    dispatchEvent(event: ClipboardEvent): boolean;
-    scrollWidth: number;
-  }
-  interface SVGElement {
-    textContent: string | null;
-    ownerDocument: FixtureDocument;
-    closest(selector: string): HTMLElement | SVGElement | null;
-    contains(element: HTMLElement | SVGElement | null): boolean;
-    dispatchEvent(event: ClipboardEvent): boolean;
-    scrollWidth: number;
-  }
+interface FixtureElement {
+  textContent: string | null;
+  ownerDocument: FixtureDocument;
+  closest(selector: string): FixtureElement | null;
+  contains(element: FixtureElement | null): boolean;
+  dispatchEvent(event: ClipboardEvent): boolean;
 }
 declare const location: { hash: string };
 
@@ -112,7 +101,7 @@ async function focus(pane: Locator) {
 async function armRenderedMarker(pane: Locator, marker: string) {
   await pane.locator(".xterm-rows").evaluate((rows, marker) => {
     window.terminalRenderedMarker?.dispose();
-    if (rows.textContent?.includes(marker))
+    if ((rows as FixtureElement).textContent?.includes(marker))
       throw new Error("Terminal latency marker must be absent before measurement");
     let resolve!: (timing: RenderedMarkerTiming) => void;
     let reject!: (error: Error) => void;
@@ -125,7 +114,7 @@ async function armRenderedMarker(pane: Locator, marker: string) {
     let settled = false;
     let frame: number | undefined;
     let startedAt: number | undefined;
-    const document = rows.ownerDocument;
+    const document = (rows as FixtureElement).ownerDocument;
     const interrupted = (event: {
       isTrusted: boolean;
       ctrlKey: boolean;
@@ -143,7 +132,7 @@ async function armRenderedMarker(pane: Locator, marker: string) {
         event.metaKey ||
         event.key.toLowerCase() !== "c" ||
         event.target !== document.activeElement ||
-        !rows.closest(".xterm")?.contains(document.activeElement)
+        !(rows as FixtureElement).closest(".xterm")?.contains(document.activeElement)
       )
         return;
       startedAt = performance.now();
@@ -161,7 +150,7 @@ async function armRenderedMarker(pane: Locator, marker: string) {
       reject(new Error(message));
     };
     const observer = new MutationObserver(() => {
-      if (settled || frame !== undefined || !rows.textContent?.includes(marker)) return;
+      if (settled || frame !== undefined || !(rows as FixtureElement).textContent?.includes(marker)) return;
       if (startedAt === undefined) {
         fail("Terminal interruption marker arrived before trusted Ctrl-C");
         return;
@@ -206,7 +195,7 @@ async function copyRow(page: Page, pane: Locator, line: string, cols: number, ro
   await page.mouse.up();
   return pane.locator(".xterm-helper-textarea").evaluate((textarea) => {
     const data = new DataTransfer();
-    textarea.dispatchEvent(
+    (textarea as FixtureElement).dispatchEvent(
       new ClipboardEvent("copy", { clipboardData: data, bubbles: true, cancelable: true }),
     );
     return data.getData("text/plain");
@@ -283,7 +272,7 @@ test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste retu
     await pane.locator(".xterm-helper-textarea").evaluate((textarea) => {
       const data = new DataTransfer();
       data.setData("text/plain", "Ω中\nliteral paste");
-      textarea.dispatchEvent(
+      (textarea as FixtureElement).dispatchEvent(
         new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
       );
     });
