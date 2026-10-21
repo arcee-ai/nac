@@ -37,6 +37,8 @@ export interface SubagentChatInputBoxProps {
   onBackgroundChange: (background: boolean) => void;
   status?: TraditionalChildStatus | null;
   busy?: boolean;
+  /** The draft is already in flight: it cannot be sent again, but a running target can be stopped. */
+  sending?: boolean;
   permission?: ReactNode;
 }
 
@@ -55,10 +57,12 @@ export function SubagentChatInputBox({
   onBackgroundChange,
   status = null,
   busy = false,
+  sending = false,
   permission,
 }: SubagentChatInputBoxProps) {
   const field = useRef<HTMLTextAreaElement>(null);
   const filled = value.trim().length > 0;
+  const sendable = filled && !sending;
   const placeholder = running ? "Steer a message" : "Send a message";
   const badge = !running && status ? STATUS_BADGE[status] : undefined;
   const runLabel = running
@@ -79,8 +83,8 @@ export function SubagentChatInputBox({
       className="flex w-full flex-col gap-4 rounded-[8px] bg-elevation-level-2 p-4 shadow-2xl"
       onSubmit={(event) => {
         event.preventDefault();
-        if (running && !filled) onStop();
-        else if (filled) onSubmit();
+        if (running && !sendable) onStop();
+        else if (sendable) onSubmit();
       }}
     >
       <div className="relative flex items-end overflow-hidden rounded-[4px] bg-input py-2 pr-12 pl-2">
@@ -90,13 +94,13 @@ export function SubagentChatInputBox({
           value={value}
           placeholder={placeholder}
           aria-label={placeholder}
-          disabled={busy}
+          disabled={busy || sending}
           className="max-h-40 min-h-5 w-full resize-none bg-transparent px-1 text-small text-input outline-none placeholder:text-input-placeholder"
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key !== "Enter" || event.shiftKey) return;
             event.preventDefault();
-            if (filled && !busy) onSubmit();
+            if (sendable && !busy) onSubmit();
           }}
         />
         <Button
@@ -105,10 +109,10 @@ export function SubagentChatInputBox({
           variant={ButtonVariant.Primary}
           content={ButtonContent.Icon}
           className="absolute right-0 bottom-0"
-          disabled={busy || (!running && !filled)}
-          aria-label={running ? (filled ? "Steer" : "Stop") : "Send"}
+          disabled={busy || (!running && !sendable)}
+          aria-label={running ? (sendable ? "Steer" : "Stop") : "Send"}
         >
-          <Icon iconName={running && !filled ? IconName.Stop : IconName.ArrowTop} />
+          <Icon iconName={running && !sendable ? IconName.Stop : IconName.ArrowTop} />
         </Button>
       </div>
       <div className="flex items-center gap-2.5 h-6">
@@ -116,7 +120,7 @@ export function SubagentChatInputBox({
           {running ? null : (
             <Switch
               checked={background}
-              disabled={busy}
+              disabled={busy || sending}
               aria-label="Run in the background"
               onChange={onBackgroundChange}
             />

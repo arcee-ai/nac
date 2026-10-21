@@ -148,9 +148,46 @@ for (const [name, viewport, mobile] of [
     await expect(page.getByText("Older child", { exact: true }).first()).toBeVisible();
     await expect(draft).toHaveValue("E2E_PANEL_CONTINUATION continue from the panel");
 
+    // Hold the foreground start's reply so the sent draft stays in flight across a round trip.
+    const starts: string[] = [];
+    let release = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route(`**/sessions/${parentId}/children`, async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      starts.push(route.request().postData() ?? "");
+      const response = await route.fetch();
+      await released;
+      await route.fulfill({ response });
+    });
+
     // A plain click also proves nothing, such as the phone's tab bar, covers the button.
     await composer.getByRole("button", { name: "Send", exact: true }).click();
+    await expect.poll(() => starts.length).toBe(1);
+    await page.getByRole("button", { name: "Open", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/session/${olderId}/`));
+    if (mobile) {
+      const panel = page.getByRole("dialog");
+      await panel.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(panel).toHaveCount(0);
+    }
+    // The child's own page shares the in-flight claim, so it cannot resend the draft either.
+    const childDraft = page.getByRole("textbox", { name: /a message$/ });
+    await expect(childDraft).toHaveValue("E2E_PANEL_CONTINUATION continue from the panel");
+    await expect(childDraft).toBeDisabled();
+    await page.getByRole("button", { name: "Parent chat" }).click();
+    await showSubagents(page, mobile);
+    const inFlight = composer.getByRole("textbox", { name: /a message$/ });
+    await expect(inFlight).toHaveValue("E2E_PANEL_CONTINUATION continue from the panel");
+    await expect(inFlight).toBeDisabled();
+    await expect(composer.getByRole("button", { name: "Steer", exact: true })).toHaveCount(0);
+    // Once the held run has finished, the panel offers Send, still unusable for this draft.
+    await expect(composer.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
+    expect(starts).toHaveLength(1);
+
+    release();
     await expect(draft).toHaveValue("");
+    await expect(draft).toBeEnabled();
+    expect(starts).toHaveLength(1);
     await expect
       .poll(async () => {
         const response = await request.get(`${harness.baseUrl}/sessions/${parentId}/children`);

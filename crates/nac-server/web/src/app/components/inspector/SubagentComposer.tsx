@@ -51,19 +51,18 @@ export function SubagentComposer({
   // Stored by durable target so status remounts and transcript trips keep the draft.
   const drafts = useNativeRuntime().stores.promptDraftStore;
   const draft = drafts.useDraft(target.id);
+  // Held in the runtime store, so a remount cannot make an in-flight draft sendable again.
+  const sending = drafts.useSubmitting(target.id);
   const [background, setBackground] = useState(target.background);
   const running = target.status === "running";
-  const busy =
-    startChild.isPending ||
-    startOrchestrator.isPending ||
-    cancelChild.isPending ||
-    cancelOrchestrator.isPending;
+  const busy = cancelChild.isPending || cancelOrchestrator.isPending;
 
   const submit = async () => {
-    const prompt = draft.text.trim();
+    const submitted = drafts.get(target.id);
+    const prompt = submitted.text.trim();
     if (!prompt) return;
-    // A foreground start answers only after its run, so clear now; the running remount must not resend.
-    const cleared = drafts.update(target.id, "");
+    const finish = drafts.claimSubmission(target.id);
+    if (!finish) return;
     try {
       if (target.mode === "orchestrator") {
         await startOrchestrator.mutateAsync({
@@ -87,10 +86,11 @@ export function SubagentComposer({
           },
         });
       }
+      drafts.acknowledge(target.id, submitted);
     } catch (error) {
-      // Give the failed text back unless something new was typed meanwhile.
-      if (drafts.get(target.id) === cleared) drafts.update(target.id, draft.text);
       toast.error(`Unable to update the subagent: ${errorMessage(toRunError(error))}`);
+    } finally {
+      finish();
     }
   };
 
@@ -123,6 +123,7 @@ export function SubagentComposer({
       onBackgroundChange={setBackground}
       status={target.status}
       busy={busy}
+      sending={sending}
       permission={
         showPermissions ? (
           <PermissionControls
