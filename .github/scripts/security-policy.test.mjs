@@ -70,3 +70,16 @@ test("exceptions are revalidated at evaluation time", () => {
     /expired/u,
   );
 });
+
+test("reviewed rationale punctuation and remediation URL queries are free text, while identities remain exact", () => {
+  const entry = {
+    ...exception,
+    reason: "Is this exploitable? Only the reviewed *fixture* is accepted.",
+    linked_issue: "https://linear.app/example/issue/TEST-1?view=security&owner=fixture",
+  };
+  assert.equal(evaluateFindings([entry], policy(entry), { now }).excepted.length, 1);
+  for (const field of ["advisory", "package", "context"]) {
+    assert.throws(() => validatePolicy(policy({ ...entry, [field]: `${entry[field]}?` }), { now }));
+    assert.throws(() => validatePolicy(policy({ ...entry, [field]: `${entry[field]}*` }), { now }));
+  }
+});

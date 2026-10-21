@@ -35,7 +35,13 @@ export function validatePolicy(document, { now = new Date() } = {}) {
   const seen = new Set();
   for (const entry of document.exceptions) {
     object(entry, fields, "exception");
-    for (const field of fields) identity(entry[field], `exception.${field}`);
+    for (const field of fields) {
+      if (typeof entry[field] !== "string" || !entry[field].trim()) {
+        throw new Error(`exception.${field}: expected a nonempty string`);
+      }
+    }
+    for (const field of ["advisory", "package", "context"])
+      identity(entry[field], `exception.${field}`);
     if (!/^[^:\s]+:.+$/u.test(entry.package))
       throw new Error("exception.package: use ecosystem:name");
     const issue = new URL(entry.linked_issue);

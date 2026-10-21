@@ -33,6 +33,19 @@ test("only the exact scanned release plan is published without a second mutable 
   assert.deepEqual(mock.calls, [{ releases: [release], pr: release.pullRequest }]);
 });
 
+test("an older blocked pending release does not prevent publishing the separately scanned PR", async () => {
+  const release = candidate();
+  const older = {
+    ...candidate(),
+    sha: "b".repeat(40),
+    pullRequest: { sha: "b".repeat(40), number: 41 },
+    tag: { toString: () => "v0.1.4" },
+  };
+  const mock = manifest([older, release]);
+  assert.deepEqual(await publishScannedRelease(mock, identity), ["created"]);
+  assert.deepEqual(mock.calls, [{ releases: [release], pr: release.pullRequest }]);
+});
+
 test("unscanned, missing, multiple, wrong-PR/version/path and force-tag releases fail before side effects", async () => {
   for (const candidates of [
     [],
@@ -93,6 +106,7 @@ test("locked Release Please preserves exact merge SHA, version, notes, and publi
     async *pullRequestIterator(branch, state) {
       assert.equal(branch, "dev");
       assert.equal(state, "MERGED");
+      yield { ...pr, sha: "b".repeat(40), number: 41, title: "chore(dev): release 0.1.4" };
       yield pr;
     },
     async createRelease(release, options) {
@@ -127,4 +141,6 @@ test("locked Release Please preserves exact merge SHA, version, notes, and publi
     calls.find((call) => call.add),
     { add: ["autorelease: tagged"], number: 42 },
   );
+  assert.equal(calls.filter((call) => call.release).length, 1);
+  assert.ok(calls.filter((call) => call.remove || call.add).every((call) => call.number === 42));
 });

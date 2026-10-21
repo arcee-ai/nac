@@ -15,9 +15,11 @@ export async function publishScannedRelease(manifest, { sha, prNumber, version }
   ) {
     throw new Error("invalid scanned release identity");
   }
-  const candidates = await manifest.buildReleases();
+  const candidates = (await manifest.buildReleases()).filter(
+    (candidate) => candidate.pullRequest?.number === prNumber,
+  );
   if (candidates.length !== 1)
-    throw new Error("expected exactly one pending release; inspect pending release PRs");
+    throw new Error("expected exactly one pending release for the scanned PR");
   const candidate = candidates[0];
   if (
     candidate.sha !== sha ||

@@ -108,10 +108,13 @@ rerun stale candidates before manual merges and inspect the current security
 report; this implementation does not promise a hard database-freshness bound.
 Tag/GitHub Release creation in `release-please.yml` first scans the merged
 release PR's immutable SHA. The locked Release Please library then builds a
-publication plan and rejects missing/multiple pending candidates, a different
+publication plan for only the scanned PR and rejects missing/ambiguous matching candidates, a different
 PR/SHA/version/path, or force-tag behavior before side effects. It publishes
 that validated plan directly, preserving release notes and publication labels;
 it does not rediscover a newer candidate between validation and creation.
+An older release blocked by its own immutable scan remains unpublished and
+retains its pending label; it does not block publication of a later separately
+scanned release PR. The guard never tags or relabels that older unscanned plan.
 `stable-release.yml` separately rescans the exact tag candidate before binary
 upload. Preparing a release PR remains a non-publishing operation.
 Do not enable production required contexts until the merged workflows emit
