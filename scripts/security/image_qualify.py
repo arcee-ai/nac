@@ -10,7 +10,7 @@ import sys
 import tarfile
 
 from image_inventory import grype_findings, require, write_json
-from image_scan import command, download, install_tools, scanner_environment, scan_sbom
+from image_scan import command, download, install_tools, scanner_environment, scan_sbom, query_runtimes
 
 # Official nodejs.org SHASUMS256.txt, checked 2026-10-21. Extract only the
 # executable; we never execute the deliberately vulnerable fixture binary.
@@ -62,8 +62,32 @@ def qualify(output, cache, db):
             require(not blocking, "safe fixture now blocks; inspect new advisories, do not suppress the qualification")
         summaries[label] = {"node": version, "os": f"{name}@{package_version}",
                             "blocking": len(blocking), "findings": len(findings)}
+    runtime_summary = {}
+    for label, versions in [("vulnerable", {"go": "1.27.0", "uv": "0.12.1"}),
+                            ("safe", {"go": "1.27.3", "uv": "0.13.4"})]:
+        runtime_output = output / f"{label}-runtime-queries"
+        runtime_output.mkdir()
+        findings = query_runtimes({"versions": versions}, runtime_output)
+        write_json(runtime_output / "findings.json", findings)
+        if label == "safe":
+            require(not findings, "safe runtime version queries now match; inspect new advisories")
+        else:
+            require({f["package"] for f in findings} == {"Go:stdlib", "PyPI:uv"},
+                    "Go/uv vulnerable version query did not demonstrate advisory matching")
+        runtime_summary[label] = {"versions": versions, "findings": len(findings)}
+    unavailable = output / "unavailable-db.yaml"
+    unavailable.write_text("db:\n  update-url: https://127.0.0.1:9\n  require-update-check: true\n"
+                           "  max-update-check-frequency: 0s\n  update-available-timeout: 1s\n")
+    try:
+        command([tools["grype"], "db", "update", "--config", unavailable], env=env,
+                output=output / "unavailable-db.txt", timeout=20)
+    except ValueError as error:
+        require("unable to update vulnerability database" in str(error), "unexpected DB-negative failure")
+    else:
+        raise ValueError("DB network failure did not fail closed")
     write_json(output / "qualification.json", {"qualified_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-               "fixtures": summaries, "scope": "real Node binary detection and live OS/Node advisory matching"})
+               "fixtures": summaries, "runtime_version_queries": runtime_summary,
+               "db_network_failure": "rejected with a cached young DB", "scope": "real Node binary detection and live OS/Node advisory matching"})
 
 
 if __name__ == "__main__":

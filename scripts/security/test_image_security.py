@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Behavioral negative tests; live tool/advisory qualification is a separate lane."""
 import argparse
+import base64
+import hashlib
 import copy
 import datetime as dt
 import json
@@ -46,6 +48,16 @@ class InventoryTests(unittest.TestCase):
                 inv.inventory(broken, RUNTIME, IMAGE)
         with self.assertRaises(ValueError):
             inv.inventory(SBOM, RUNTIME, "sha256:" + "2" * 64)
+
+    def test_containerd_identity_is_bound_to_requested_id_and_verified_config(self):
+        sbom = copy.deepcopy(SBOM)
+        config = b'{"architecture":"amd64","os":"linux"}'
+        sbom["source"]["metadata"] = {"userInput": IMAGE, "config": base64.b64encode(config).decode(),
+                                           "imageID": "sha256:" + hashlib.sha256(config).hexdigest()}
+        inv.inventory(sbom, RUNTIME, IMAGE)
+        sbom["source"]["metadata"]["config"] = base64.b64encode(b"different").decode()
+        with self.assertRaisesRegex(ValueError, "config identity mismatch"):
+            inv.inventory(sbom, RUNTIME, IMAGE)
 
     def test_node_requires_actual_version_and_advisory_identifier(self):
         for field, value in [("version", "1.0.0"), ("cpes", [])]:

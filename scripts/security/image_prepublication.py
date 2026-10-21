@@ -16,8 +16,10 @@ def gate(args):
     require(re.fullmatch(r"sha256:[0-9a-f]{64}", args.image), "publication requires an immutable local image ID")
     # The same identity is passed to every container operation. No second build,
     # mutable tag lookup, release publication, or registry push occurs here.
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    smoke_log = args.output.parent / (args.output.name + "-smoke.txt")
     env = dict(os.environ, MANAGED_IMAGE=args.image, MANAGED_IMAGE_SKIP_BUILD="1", CONTAINER_RUNTIME="docker")
-    command(["sh", ROOT / "scripts/smoke-managed-image.sh"], env=env, timeout=600)
+    command(["sh", ROOT / "scripts/smoke-managed-image.sh"], env=env, output=smoke_log, timeout=600)
     result = subprocess.run(["python3", str(ROOT / "scripts/security/image_scan.py"),
                              "--image", args.image, "--source-revision", args.source_revision,
                              "--trusted-policy", str(args.trusted_policy),
