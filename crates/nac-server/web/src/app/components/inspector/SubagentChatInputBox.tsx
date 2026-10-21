@@ -37,8 +37,8 @@ export interface SubagentChatInputBoxProps {
   onBackgroundChange: (background: boolean) => void;
   status?: TraditionalChildStatus | null;
   busy?: boolean;
-  /** The draft is already in flight: it cannot be sent again, but a running target can be stopped. */
-  sending?: boolean;
+  /** A start is still pending: nothing more is sent until the target is running. */
+  starting?: boolean;
   permission?: ReactNode;
 }
 
@@ -57,12 +57,12 @@ export function SubagentChatInputBox({
   onBackgroundChange,
   status = null,
   busy = false,
-  sending = false,
+  starting = false,
   permission,
 }: SubagentChatInputBoxProps) {
   const field = useRef<HTMLTextAreaElement>(null);
   const filled = value.trim().length > 0;
-  const sendable = filled && !sending;
+  const sendable = filled && (running || !starting);
   const placeholder = running ? "Steer a message" : "Send a message";
   const badge = !running && status ? STATUS_BADGE[status] : undefined;
   const runLabel = running
@@ -95,7 +95,7 @@ export function SubagentChatInputBox({
           value={value}
           placeholder={placeholder}
           aria-label={placeholder}
-          disabled={busy || sending}
+          disabled={busy}
           className="max-h-40 min-h-5 w-full resize-none bg-transparent px-1 text-small text-input outline-none placeholder:text-input-placeholder"
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
@@ -111,6 +111,10 @@ export function SubagentChatInputBox({
           content={ButtonContent.Icon}
           className="absolute right-0 bottom-0"
           disabled={busy || (!running && !sendable)}
+          onClick={(event) => {
+            // The second click of a double-clicked Steer lands on Stop; it must not cancel the run.
+            if (event.detail > 1 && running && !sendable) event.preventDefault();
+          }}
           aria-label={running ? (sendable ? "Steer" : "Stop") : "Send"}
         >
           <Icon iconName={running && !sendable ? IconName.Stop : IconName.ArrowTop} />
@@ -121,7 +125,7 @@ export function SubagentChatInputBox({
           {running ? null : (
             <Switch
               checked={background}
-              disabled={busy || sending}
+              disabled={busy || starting}
               aria-label="Run in the background"
               onChange={onBackgroundChange}
             />

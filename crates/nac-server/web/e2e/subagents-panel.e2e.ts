@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 
 import { createSession, expect, showSubagents, startForegroundChild, test } from "./harness";
+import { ScriptGate } from "./scripted-provider";
 
 /** The narrow list: a dialog of its own on a phone, the panel's own column on a tablet. */
 function subagentList(page: Page, mobile: boolean) {
@@ -95,10 +96,32 @@ for (const [name, viewport, mobile] of [
         { kind: "text", text: `${token.toLowerCase()} completed` },
       );
     }
+    // The continued run stops at a tool call until released, so the foreground start stays pending.
+    const running = new ScriptGate();
     harness.provider.enqueue(
       "panel-continuation",
       { token: "E2E_PANEL_CONTINUATION" },
+      {
+        kind: "function_call",
+        name: "unknown_alpha",
+        callId: "panel-continuation-1",
+        arguments: {},
+        stream: true,
+      },
+      running,
+    );
+    harness.provider.enqueue(
+      "panel-continuation-done",
+      {
+        functionOutputCallId: "panel-continuation-1",
+        afterStep: "panel-continuation",
+      },
       { kind: "text", text: "panel continuation completed", stream: "request" },
+    );
+    harness.provider.enqueue(
+      "panel-steer",
+      { token: "E2E_PANEL_STEER" },
+      { kind: "text", text: "panel steer completed", stream: "request" },
     );
     const parentId = await createSession(request, harness, "direct");
     const older = await startForegroundChild(
@@ -148,21 +171,20 @@ for (const [name, viewport, mobile] of [
     await expect(page.getByText("Older child", { exact: true }).first()).toBeVisible();
     await expect(draft).toHaveValue("E2E_PANEL_CONTINUATION continue from the panel");
 
-    // Hold the foreground start's reply so the sent draft stays in flight across a round trip.
     const starts: string[] = [];
-    let release = () => {};
-    const released = new Promise<void>((resolve) => (release = resolve));
+    const replies: number[] = [];
     await page.route(`**/sessions/${parentId}/children`, async (route) => {
       if (route.request().method() !== "POST") return route.fallback();
       starts.push(route.request().postData() ?? "");
       const response = await route.fetch();
-      await released;
+      replies.push(response.status());
       await route.fulfill({ response });
     });
 
     // A plain click also proves nothing, such as the phone's tab bar, covers the button.
     await composer.getByRole("button", { name: "Send", exact: true }).click();
-    await expect.poll(() => starts.length).toBe(1);
+    await running.accepted;
+    // The sent message left the field; the running child's composers take the next one.
     await page.getByRole("button", { name: "Open", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${olderId}/`));
     if (mobile) {
@@ -170,24 +192,31 @@ for (const [name, viewport, mobile] of [
       await panel.getByRole("button", { name: "Close", exact: true }).click();
       await expect(panel).toHaveCount(0);
     }
-    // The child's own page shares the in-flight claim, so it cannot resend the draft either.
-    const childDraft = page.getByRole("textbox", { name: /a message$/ });
-    await expect(childDraft).toHaveValue("E2E_PANEL_CONTINUATION continue from the panel");
-    await expect(childDraft).toBeDisabled();
+    const childDraft = page.getByRole("textbox", { name: "Steer a message" });
+    await expect(childDraft).toHaveValue("");
+    await expect(childDraft).toBeEnabled();
     await page.getByRole("button", { name: "Parent chat" }).click();
     await showSubagents(page, mobile);
-    const inFlight = composer.getByRole("textbox", { name: /a message$/ });
-    await expect(inFlight).toHaveValue("E2E_PANEL_CONTINUATION continue from the panel");
-    await expect(inFlight).toBeDisabled();
-    await expect(composer.getByRole("button", { name: "Steer", exact: true })).toHaveCount(0);
-    // Once the held run has finished, the panel offers Send, still unusable for this draft.
-    await expect(composer.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
-    expect(starts).toHaveLength(1);
+    // A running composer has no background switch; its Steer field is the only one on the page.
+    const steer = page.getByRole("textbox", { name: "Steer a message" });
+    await expect(steer).toHaveValue("");
+    await expect(steer).toBeEnabled();
+    await steer.fill("E2E_PANEL_STEER check the cache too");
+    await page.getByRole("button", { name: "Steer", exact: true }).click();
+    await expect.poll(() => starts.length).toBe(2);
+    expect(starts.map((body) => (JSON.parse(body) as { prompt: string }).prompt)).toEqual([
+      "E2E_PANEL_CONTINUATION continue from the panel",
+      "E2E_PANEL_STEER check the cache too",
+    ]);
+    expect(
+      starts.map((body) => (JSON.parse(body) as { child_session_id: string }).child_session_id),
+    ).toEqual([olderId, olderId]);
 
-    release();
-    await expect(draft).toHaveValue("");
-    await expect(draft).toBeEnabled();
-    expect(starts).toHaveLength(1);
+    running.release();
+    await harness.provider.waitForRequestCount(5);
+    await expect(composer.getByRole("textbox", { name: "Send a message" })).toHaveValue("");
+    expect(starts).toHaveLength(2);
+    await expect.poll(() => replies).toEqual([201, 201]);
     await expect
       .poll(async () => {
         const response = await request.get(`${harness.baseUrl}/sessions/${parentId}/children`);
@@ -206,7 +235,8 @@ for (const [name, viewport, mobile] of [
       })
       .toEqual(
         expect.arrayContaining([
-          { id: olderId, parent: parentId, generation: 2, status: "completed" },
+          // The server runs the steer once the held turn ends, as the next generation.
+          { id: olderId, parent: parentId, generation: 3, status: "completed" },
         ]),
       );
     const listed = (await (

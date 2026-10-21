@@ -123,10 +123,6 @@ function draftBox(name: "Steer a message" | "Send a message") {
   return screen.getByRole("textbox", { name }) as HTMLTextAreaElement;
 }
 
-function anyDraftBox() {
-  return screen.getByRole("textbox", { name: /a message$/ }) as HTMLTextAreaElement;
-}
-
 function deferred<T>() {
   let resolve = (_: T) => {};
   let reject = (_: Error) => {};
@@ -275,13 +271,22 @@ it("keeps the selected subagent and its draft when another one updates", async (
 
   act(() => {
     client.setQueryData(queryKeys.traditionalChildren("parent"), [
-      { ...child, report: "Still going.", updated_at: "2026-08-26T00:00:00Z", version: 4 },
+      {
+        ...child,
+        report: "Still going.",
+        updated_at: "2026-08-26T00:00:00Z",
+        version: 4,
+      },
     ]);
   });
 
   await waitFor(() =>
     expect(
-      (screen.getByRole("textbox", { name: "Send a message" }) as HTMLTextAreaElement).value,
+      (
+        screen.getByRole("textbox", {
+          name: "Send a message",
+        }) as HTMLTextAreaElement
+      ).value,
     ).toBe("Half-written follow-up"),
   );
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -316,7 +321,9 @@ describe("selection and drafts", () => {
     const client = mount("direct");
     client.setQueryData(queryKeys.traditionalChildren("parent"), [child, second]);
     fireEvent.click(await screen.findByRole("button", { name: "Audit the cache" }));
-    fireEvent.change(draftBox("Send a message"), { target: { value: "Rerun the cache audit" } });
+    fireEvent.change(draftBox("Send a message"), {
+      target: { value: "Rerun the cache audit" },
+    });
 
     act(() => client.remount());
 
@@ -325,7 +332,10 @@ describe("selection and drafts", () => {
     await waitFor(() =>
       expect(startChild).toHaveBeenCalledWith(
         "parent",
-        expect.objectContaining({ child_session_id: "child-2", prompt: "Rerun the cache audit" }),
+        expect.objectContaining({
+          child_session_id: "child-2",
+          prompt: "Rerun the cache audit",
+        }),
       ),
     );
   });
@@ -333,7 +343,9 @@ describe("selection and drafts", () => {
   it("brings back a managed orchestrator and its draft after leaving for a transcript", () => {
     const client = mount("direct-with-orchestrator");
     fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-    fireEvent.change(draftBox("Send a message"), { target: { value: "Next audit pass" } });
+    fireEvent.change(draftBox("Send a message"), {
+      target: { value: "Next audit pass" },
+    });
 
     act(() => client.remount());
 
@@ -343,7 +355,9 @@ describe("selection and drafts", () => {
 
   it("keeps the draft when the selected subagent finishes and the composer remounts", async () => {
     const client = mount("direct");
-    fireEvent.change(draftBox("Steer a message"), { target: { value: "Also check grants" } });
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "Also check grants" },
+    });
 
     act(() => {
       client.setQueryData(queryKeys.traditionalChildren("parent"), [
@@ -356,57 +370,73 @@ describe("selection and drafts", () => {
     expect(draftBox("Send a message").value).toBe("Also check grants");
   });
 
-  it("keeps a steer in flight unsendable across a transcript round trip, then clears it", async () => {
+  it("takes a sent steer out of the field and never replays it across a transcript round trip", async () => {
     const reply = deferred<TraditionalChildRecord>();
-    startChild.mockReturnValue(reply.promise);
+    startChild.mockReturnValueOnce(reply.promise);
     const client = mount("direct");
-    fireEvent.change(draftBox("Steer a message"), { target: { value: "Check the grant" } });
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "Check the grant" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
+    expect(draftBox("Steer a message").value).toBe("");
 
     act(() => client.remount());
 
-    // The draft is back, but it belongs to the open request: no Steer, only Stop.
-    expect(draftBox("Steer a message").value).toBe("Check the grant");
-    expect(draftBox("Steer a message").disabled).toBe(true);
-    expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
+    // The field is free for the next message while the first is still pending.
+    expect(draftBox("Steer a message").value).toBe("");
+    expect(draftBox("Steer a message").disabled).toBe(false);
     fireEvent.keyDown(draftBox("Steer a message"), { key: "Enter" });
-    fireEvent.submit(draftBox("Steer a message").form!);
-    await waitFor(() => expect(cancelChild).toHaveBeenCalledOnce());
     expect(startChild).toHaveBeenCalledOnce();
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "Also check the cache" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+    await waitFor(() => expect(startChild).toHaveBeenCalledTimes(2));
+    expect(startChild.mock.calls.map(([, payload]) => payload.prompt)).toEqual([
+      "Check the grant",
+      "Also check the cache",
+    ]);
 
     await act(async () => reply.resolve(child));
-    // The stop reply may already have marked the child cancelled, which relabels the box.
-    expect(anyDraftBox().value).toBe("");
-    expect(anyDraftBox().disabled).toBe(false);
+    expect(startChild).toHaveBeenCalledTimes(2);
+    expect(draftBox("Steer a message").value).toBe("");
   });
 
-  it("does not stop a subagent when Steer is clicked twice", async () => {
+  it("does not stop a subagent when Steer is double-clicked", async () => {
     const reply = deferred<TraditionalChildRecord>();
     startChild.mockReturnValue(reply.promise);
     mount("direct");
-    fireEvent.change(draftBox("Steer a message"), { target: { value: "Check the grant" } });
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "Check the grant" },
+    });
     const button = screen.getByRole("button", { name: "Steer" });
-    fireEvent.click(button);
-    fireEvent.click(button);
-    fireEvent.submit(draftBox("Steer a message").form!);
+    fireEvent.click(button, { detail: 1 });
+    // The same button is Stop by the second click of the double-click.
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }), {
+      detail: 2,
+    });
     await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
-
-    // The button that turned into Stop stays inert until this composer's steer settles.
-    expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty("disabled", true);
     expect(cancelChild).not.toHaveBeenCalled();
 
+    // A separate click stops the run while the steer is still pending.
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }), {
+      detail: 1,
+    });
+    await waitFor(() => expect(cancelChild).toHaveBeenCalledWith("parent", "child-1"));
     await act(async () => reply.resolve(child));
     expect(startChild).toHaveBeenCalledOnce();
-    expect(cancelChild).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-    await waitFor(() => expect(cancelChild).toHaveBeenCalledWith("parent", "child-1"));
   });
 
-  it("keeps a pending continuation unsendable when its target starts running", async () => {
-    const finished = { ...child, status: "completed" as const, report: "Done.", version: 4 };
+  it("holds a second continuation until the target runs, then lets the next message steer", async () => {
+    const finished = {
+      ...child,
+      status: "completed" as const,
+      report: "Done.",
+      version: 4,
+    };
     const reply = deferred<TraditionalChildRecord>();
-    startChild.mockReturnValue(reply.promise);
+    startChild.mockReturnValueOnce(reply.promise);
     const client = mount("direct");
     client.setQueryData(queryKeys.traditionalChildren("parent"), [finished]);
     fireEvent.change(await waitFor(() => draftBox("Send a message")), {
@@ -415,58 +445,77 @@ describe("selection and drafts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
 
+    // Not running yet: a second start would race the first.
+    fireEvent.change(draftBox("Send a message"), {
+      target: { value: "And the cache" },
+    });
+    expect(screen.getByRole("button", { name: "Send" })).toHaveProperty("disabled", true);
+    fireEvent.keyDown(draftBox("Send a message"), { key: "Enter" });
+    expect(startChild).toHaveBeenCalledOnce();
+
     act(() => {
       client.setQueryData(queryKeys.traditionalChildren("parent"), [
-        { ...finished, status: "running", version: 5 },
+        { ...finished, status: "running", generation: 3, version: 5 },
       ]);
     });
-    // A fresh composer for the running status: the foreground run can still be stopped.
+    // A fresh composer for the newer run keeps the next message and lets it steer.
     const box = await waitFor(() => draftBox("Steer a message"));
-    expect(box.value).toBe("Run it again");
-    fireEvent.keyDown(box, { key: "Enter" });
-    expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
+    expect(box.value).toBe("And the cache");
+    expect(box.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+    await waitFor(() => expect(startChild).toHaveBeenCalledTimes(2));
+    expect(startChild.mock.calls.map(([, payload]) => payload.prompt)).toEqual([
+      "Run it again",
+      "And the cache",
+    ]);
     expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty("disabled", false);
-    expect(startChild).toHaveBeenCalledOnce();
 
     await act(async () => reply.resolve({ ...finished, status: "completed", generation: 3 }));
-    expect(anyDraftBox().value).toBe("");
-    expect(startChild).toHaveBeenCalledOnce();
+    expect(startChild).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps a pending orchestrator continuation unsendable across a round trip, status change and switch", async () => {
+  it("lets a pending orchestrator continuation be steered across a round trip, status change and switch", async () => {
     const reply = deferred<ManagedOrchestratorRecord>();
-    startOrchestrator.mockReturnValue(reply.promise);
+    startOrchestrator.mockReturnValueOnce(reply.promise);
     const client = mount("direct-with-orchestrator");
     fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-    fireEvent.change(draftBox("Send a message"), { target: { value: "Next audit pass" } });
+    fireEvent.change(draftBox("Send a message"), {
+      target: { value: "Next audit pass" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(startOrchestrator).toHaveBeenCalledOnce());
 
     act(() => client.remount());
 
-    expect(draftBox("Send a message").value).toBe("Next audit pass");
+    expect(draftBox("Send a message").value).toBe("");
+    fireEvent.change(draftBox("Send a message"), {
+      target: { value: "Check the pins" },
+    });
     expect(screen.getByRole("button", { name: "Send" })).toHaveProperty("disabled", true);
-    fireEvent.keyDown(draftBox("Send a message"), { key: "Enter" });
 
-    // Its status remount and a trip to another subagent leave it in flight too.
     act(() => {
       client.setQueryData(queryKeys.managedOrchestrators("parent"), [
-        { ...orchestrator, status: "running", version: 3 },
+        { ...orchestrator, status: "running", generation: 2, version: 3 },
       ]);
     });
-    const box = await waitFor(() => draftBox("Steer a message"));
-    expect(box.value).toBe("Next audit pass");
-    expect(box.disabled).toBe(true);
-    expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty("disabled", false);
+    await waitFor(() => draftBox("Steer a message"));
     fireEvent.click(screen.getByRole("button", { name: "Review permissions" }));
     fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-    expect(draftBox("Steer a message").disabled).toBe(true);
-    expect(startOrchestrator).toHaveBeenCalledOnce();
+    expect(draftBox("Steer a message").value).toBe("Check the pins");
+    expect(draftBox("Steer a message").disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+    await waitFor(() => expect(startOrchestrator).toHaveBeenCalledTimes(2));
+    expect(startOrchestrator.mock.calls.map(([, payload]) => payload.prompt)).toEqual([
+      "Next audit pass",
+      "Check the pins",
+    ]);
+    expect(
+      startOrchestrator.mock.calls.every(([, p]) => p.orchestrator_session_id === "orchestrator-1"),
+    ).toBe(true);
+    expect(startChild).not.toHaveBeenCalled();
 
     await act(async () => reply.resolve(orchestrator));
-    expect(anyDraftBox().value).toBe("");
-    expect(startOrchestrator).toHaveBeenCalledOnce();
+    expect(startOrchestrator).toHaveBeenCalledTimes(2);
   });
 
   it("lets another subagent send while one request is pending, without replaying it", async () => {
@@ -475,13 +524,17 @@ describe("selection and drafts", () => {
     startChild.mockReturnValueOnce(reply.promise);
     const client = mount("direct");
     client.setQueryData(queryKeys.traditionalChildren("parent"), [child, second]);
-    fireEvent.change(draftBox("Steer a message"), { target: { value: "Check the grant" } });
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "Check the grant" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
 
     fireEvent.click(await screen.findByRole("button", { name: "Audit the cache" }));
     expect(draftBox("Send a message").value).toBe("");
-    fireEvent.change(draftBox("Send a message"), { target: { value: "Rerun the cache audit" } });
+    fireEvent.change(draftBox("Send a message"), {
+      target: { value: "Rerun the cache audit" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(startChild).toHaveBeenCalledTimes(2));
     expect(startChild.mock.calls.map(([, payload]) => payload.child_session_id)).toEqual([
@@ -490,18 +543,18 @@ describe("selection and drafts", () => {
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Review permissions" }));
-    expect(draftBox("Steer a message").value).toBe("Check the grant");
-    expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
-    await act(async () => reply.resolve(child));
     expect(draftBox("Steer a message").value).toBe("");
+    await act(async () => reply.resolve(child));
     expect(startChild).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps a failed draft, releases it, and sends it again only on an explicit retry", async () => {
+  it("puts a failed message back and sends it again only on an explicit retry", async () => {
     const reply = deferred<TraditionalChildRecord>();
     startChild.mockReturnValueOnce(reply.promise);
     const client = mount("direct");
-    fireEvent.change(draftBox("Steer a message"), { target: { value: "Check the grant" } });
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "Check the grant" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
     act(() => client.remount());
@@ -509,18 +562,48 @@ describe("selection and drafts", () => {
     await act(async () => reply.reject(new Error("busy")));
 
     expect(draftBox("Steer a message").value).toBe("Check the grant");
-    expect(draftBox("Steer a message").disabled).toBe(false);
     expect(startChild).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() => expect(startChild).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(draftBox("Steer a message").value).toBe(""));
   });
 
+  it("keeps a message written while a send is pending, whichever way the send ends", async () => {
+    const accepted = deferred<TraditionalChildRecord>();
+    const rejected = deferred<TraditionalChildRecord>();
+    startChild.mockReturnValueOnce(accepted.promise).mockReturnValueOnce(rejected.promise);
+    mount("direct");
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "First" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "Second" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+    await waitFor(() => expect(startChild).toHaveBeenCalledTimes(2));
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "Unsent" },
+    });
+
+    await act(async () => accepted.resolve(child));
+    expect(draftBox("Steer a message").value).toBe("Unsent");
+    await act(async () => rejected.reject(new Error("busy")));
+    expect(draftBox("Steer a message").value).toBe("Second\n\nUnsent");
+    expect(startChild).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps a selection and a draft per parent", async () => {
     listChildren.mockImplementation(async (parent) =>
       parent === "parent"
         ? [child, second]
-        : [{ ...second, child_session_id: "child-3", parent_session_id: "other" }],
+        : [
+            {
+              ...second,
+              child_session_id: "child-3",
+              parent_session_id: "other",
+            },
+          ],
     );
     const client = mount("direct");
     act(() => {
@@ -530,7 +613,9 @@ describe("selection and drafts", () => {
       ]);
     });
     fireEvent.click(await screen.findByRole("button", { name: "Audit the cache" }));
-    fireEvent.change(draftBox("Send a message"), { target: { value: "For child two" } });
+    fireEvent.change(draftBox("Send a message"), {
+      target: { value: "For child two" },
+    });
 
     act(() => client.show("other"));
     expect(draftBox("Send a message").value).toBe("");
@@ -547,11 +632,15 @@ describe("selection and drafts", () => {
     const refresh = (next: TraditionalChildRecord[]) => {
       listed = next;
       return act(() =>
-        client.refetchQueries({ queryKey: queryKeys.traditionalChildren("parent") }),
+        client.refetchQueries({
+          queryKey: queryKeys.traditionalChildren("parent"),
+        }),
       );
     };
     fireEvent.click(await screen.findByRole("button", { name: "Audit the cache" }));
-    fireEvent.change(draftBox("Send a message"), { target: { value: "Only for child two" } });
+    fireEvent.change(draftBox("Send a message"), {
+      target: { value: "Only for child two" },
+    });
 
     await refresh([child]);
 
@@ -559,7 +648,9 @@ describe("selection and drafts", () => {
       expect(screen.queryByRole("button", { name: "Audit the cache" })).toBeNull(),
     );
     expect(draftBox("Steer a message").value).toBe("");
-    fireEvent.change(draftBox("Steer a message"), { target: { value: "For child one" } });
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "For child one" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
     expect(startChild.mock.calls[0][1]).toMatchObject({
@@ -576,7 +667,9 @@ describe("selection and drafts", () => {
   it("never shows or sends a policy-hidden orchestrator's draft as a child's", async () => {
     const client = mount("direct-with-orchestrator");
     fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-    fireEvent.change(draftBox("Send a message"), { target: { value: "Orchestrator only" } });
+    fireEvent.change(draftBox("Send a message"), {
+      target: { value: "Orchestrator only" },
+    });
 
     act(() => client.show("parent", false));
 
@@ -594,15 +687,29 @@ describe("selection and drafts", () => {
     listChildren.mockResolvedValue([second]);
     listOrchestrators.mockResolvedValue([running]);
     startOrchestrator.mockResolvedValue(running);
-    startChild.mockResolvedValue({ ...second, status: "running", generation: 3 });
+    startChild.mockResolvedValue({
+      ...second,
+      status: "running",
+      generation: 3,
+    });
     const client = mount("direct-with-orchestrator", false);
     client.setQueryData(queryKeys.traditionalChildren("parent"), [second]);
     client.setQueryData(queryKeys.managedOrchestrators("parent"), [
-      { ...orchestrator, status: "running", updated_at: "2026-08-26T00:00:00Z" },
+      {
+        ...orchestrator,
+        status: "running",
+        updated_at: "2026-08-26T00:00:00Z",
+      },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Run the compatibility audit" }));
-    fireEvent.change(draftBox("Steer a message"), { target: { value: "Narrow the audit" } });
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Run the compatibility audit",
+      }),
+    );
+    fireEvent.change(draftBox("Steer a message"), {
+      target: { value: "Narrow the audit" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() =>
       expect(startOrchestrator).toHaveBeenCalledWith("parent", {
@@ -618,7 +725,9 @@ describe("selection and drafts", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Audit the cache" }));
-    fireEvent.change(draftBox("Send a message"), { target: { value: "Generation two" } });
+    fireEvent.change(draftBox("Send a message"), {
+      target: { value: "Generation two" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() =>
       expect(startChild).toHaveBeenCalledWith("parent", {
@@ -633,8 +742,11 @@ describe("selection and drafts", () => {
     // The accepted generation is running, so the cleared field may already say Steer.
     await waitFor(() =>
       expect(
-        (screen.getByRole("textbox", { name: /^(Send|Steer) a message$/ }) as HTMLTextAreaElement)
-          .value,
+        (
+          screen.getByRole("textbox", {
+            name: /^(Send|Steer) a message$/,
+          }) as HTMLTextAreaElement
+        ).value,
       ).toBe(""),
     );
   });
@@ -665,7 +777,11 @@ describe("load state in the narrow list", () => {
   it("keeps loaded rows when a later poll fails", async () => {
     const client = mount("direct");
     listChildren.mockRejectedValue(new Error("503"));
-    await act(() => client.refetchQueries({ queryKey: queryKeys.traditionalChildren("parent") }));
+    await act(() =>
+      client.refetchQueries({
+        queryKey: queryKeys.traditionalChildren("parent"),
+      }),
+    );
 
     expect(client.getQueryState(queryKeys.traditionalChildren("parent"))?.status).toBe("error");
     expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy();

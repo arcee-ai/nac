@@ -51,21 +51,21 @@ export function SubagentComposer({
   // Stored by durable target so status remounts and transcript trips keep the draft.
   const drafts = useNativeRuntime().stores.promptDraftStore;
   const draft = drafts.useDraft(target.id);
-  // Held in the runtime store, so a remount cannot make an in-flight draft sendable again.
-  const sending = drafts.useSubmitting(target.id);
+  // Held in the runtime store, so a remount cannot start the same target twice.
+  const starting = drafts.useSubmitting(target.id);
   const [background, setBackground] = useState(target.background);
   const running = target.status === "running";
-  // Inert until its own send settles, so a second click on the Steer-turned-Stop button can't cancel.
-  const [sentHere, setSentHere] = useState(false);
-  const busy = (sending && sentHere) || cancelChild.isPending || cancelOrchestrator.isPending;
+  const busy = cancelChild.isPending || cancelOrchestrator.isPending;
 
   const submit = async () => {
     const submitted = drafts.get(target.id);
     const prompt = submitted.text.trim();
     if (!prompt) return;
+    // A start waits for the target; a running target takes further steering meanwhile.
     const finish = drafts.claimSubmission(target.id);
-    if (!finish) return;
-    setSentHere(true);
+    if (!finish && !running) return;
+    // The sent message leaves the field, which becomes the draft for the next one.
+    drafts.update(target.id, "");
     try {
       if (target.mode === "orchestrator") {
         await startOrchestrator.mutateAsync({
@@ -89,12 +89,13 @@ export function SubagentComposer({
           },
         });
       }
-      drafts.acknowledge(target.id, submitted);
     } catch (error) {
+      // Put the unsent message back without dropping anything written since.
+      const newer = drafts.get(target.id).text;
+      drafts.update(target.id, newer.trim() ? `${submitted.text}\n\n${newer}` : submitted.text);
       toast.error(`Unable to update the subagent: ${errorMessage(toRunError(error))}`);
     } finally {
-      finish();
-      setSentHere(false);
+      finish?.();
     }
   };
 
@@ -127,7 +128,7 @@ export function SubagentComposer({
       onBackgroundChange={setBackground}
       status={target.status}
       busy={busy}
-      sending={sending}
+      starting={starting}
       permission={
         showPermissions ? (
           <PermissionControls
