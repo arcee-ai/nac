@@ -408,7 +408,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                 chrome && !isMobile && "border-t border-muted",
                 // Floats over the body rather than taking a row of its own, so
                 // the fade below shows the content it is covering.
-                isMobile && "absolute inset-x-0 bottom-0 z-10",
+                isMobile && "modal-footer-mobile absolute inset-x-0 bottom-0 z-10",
               )}
               style={isMobile ? MOBILE_FOOTER_SURFACE : undefined}
             >

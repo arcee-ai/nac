@@ -61,7 +61,7 @@ export function ManagedAuthCallout({
 
   const control = waiting ? (
     <div className="flex items-center gap-2">
-      <Loader size={LoaderSize.Micro} />
+      <Loader size={LoaderSize.XSmall} />
       {state.prompt.user_code ? (
         <>
           <span className="text-micro text-basic-muted">Code</span>

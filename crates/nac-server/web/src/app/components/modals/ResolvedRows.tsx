@@ -40,7 +40,7 @@ export function ResolvedRows({
   if (resolving) {
     return (
       <div className="flex items-center gap-2 py-1">
-        <Loader size={LoaderSize.Micro} />
+        <Loader size={LoaderSize.XSmall} />
         <span className="text-micro text-basic-muted">
           Checking the key and reading the model list…
         </span>

@@ -24,7 +24,7 @@ const ChatSessionLeadingMark: React.FC<ChatSessionLeadingMarkProps> = ({
   className = "",
 }) => {
   if (running) {
-    return <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} className="shrink-0" />;
+    return <Loader size={LoaderSize.XSmall} variant={LoaderVariant.Neutral} className="shrink-0" />;
   }
   const sourceTitle = forkedFromTitle?.trim();
   if (!sourceTitle) return null;

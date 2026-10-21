@@ -5735,11 +5735,11 @@ ec.Name = Xs;
 //#endregion
 //#region src/app/atoms/loader/index.tsx
 var tc = /* @__PURE__ */ function(e) {
-	return e[e.XSmall = 12] = "XSmall", e[e.Micro = 16] = "Micro", e[e.Small = 20] = "Small", e[e.Medium = 24] = "Medium", e[e.Large = 32] = "Large", e[e.XLarge = 48] = "XLarge", e;
+	return e[e.XSmall = 16] = "XSmall", e[e.Small = 20] = "Small", e[e.Medium = 24] = "Medium", e[e.MediumLarge = 28] = "MediumLarge", e[e.Large = 32] = "Large", e[e.X2Large = 36] = "X2Large", e[e.X3Large = 40] = "X3Large", e[e.XLarge = 48] = "XLarge", e;
 }({}), nc = /* @__PURE__ */ function(e) {
 	return e.Brand = "var(--color-fill-accent-primary)", e.Neutral = "var(--color-fill-basic-primary)", e.Destructive = "var(--color-fill-error-primary)", e.OnPrimary = "var(--color-fill-btn-primary)", e;
-}({}), rc = ({ size: e = 48, variant: t = "var(--color-fill-accent-primary)", className: n = "", ...r }) => /* @__PURE__ */ x("div", {
-	className: N("flex w-fit h-fit animate-spin loader", n),
+}({}), rc = ({ size: e = 48, variant: t = "var(--color-fill-basic-primary)", className: n = "", ...r }) => /* @__PURE__ */ x("div", {
+	className: N("loader flex size-fit", n),
 	...r,
 	children: /* @__PURE__ */ x(ec, {
 		iconName: Xs.Loader,
@@ -6724,7 +6724,7 @@ var Il = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([
 					children: C
 				}),
 				w ? /* @__PURE__ */ x("div", {
-					className: N("flex justify-end gap-2", ve && "items-center p-4 shrink-0", ve && !T && "border-t border-muted", T && "absolute inset-x-0 bottom-0 z-10"),
+					className: N("flex justify-end gap-2", ve && "items-center p-4 shrink-0", ve && !T && "border-t border-muted", T && "modal-footer-mobile absolute inset-x-0 bottom-0 z-10"),
 					style: T ? zl : void 0,
 					children: w
 				}) : null

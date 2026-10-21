@@ -132,6 +132,21 @@
   }
 }
 
+/* Figma Loader cycles three frames: 0°, -120°, +120°. */
+@keyframes loader-steps {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+.loader {
+  animation: loader-steps 0.9s steps(3, end) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .loader {
+    animation: none;
+  }
+}
+
 /* ---- chat loader (three bouncing dots) ---- */
 @keyframes chat-loader-bounce {
   0%,

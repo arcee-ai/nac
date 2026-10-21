@@ -1029,7 +1029,7 @@ export function ThreadsView({
                           className="shrink-0 [&>path]:!fill-basic-muted"
                         />
                       ) : running ? (
-                        <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
+                        <Loader size={LoaderSize.XSmall} variant={LoaderVariant.Neutral} />
                       ) : cancelled ? (
                         <Icon
                           iconName={IconName.Close}

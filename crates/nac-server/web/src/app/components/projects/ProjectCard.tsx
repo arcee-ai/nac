@@ -387,7 +387,7 @@ export function ProjectCard({
                 chat is its own run, so the spinner alone says it. */}
             {facts.running ? (
               facts.orphan ? (
-                <Loader size={LoaderSize.Micro} className="shrink-0" />
+                <Loader size={LoaderSize.XSmall} className="shrink-0" />
               ) : (
                 <div className="flex items-center gap-1 shrink-0">
                   <Loader size={LoaderSize.XSmall} />

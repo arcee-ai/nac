@@ -17,6 +17,7 @@ export enum TabButtonVariant {
 }
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  ref?: React.Ref<HTMLButtonElement>;
   size?: TabButtonSize;
   variant?: TabButtonVariant;
   children: React.ReactNode;
