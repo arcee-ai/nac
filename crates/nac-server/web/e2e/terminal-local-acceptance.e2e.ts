@@ -448,6 +448,11 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   await pane.getByRole("button", { name: "New shell", exact: true }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
+  // The first history refresh removes its empty-state paragraph and moves the
+  // terminal grid. Settle that real layout transition before pressure/geometry
+  // measurement; otherwise a cached pointer y can target the next visual row.
+  const recent = pane.getByRole("combobox", { name: "Recent activity", exact: true });
+  await expect(recent.locator("option").filter({ hasText: "Human shell" })).toHaveCount(1);
   const pages: Array<{ bytes: number; gap: boolean; retained: number }> = [];
   const pending = new Set<Promise<void>>();
   page.on("response", (response) => {

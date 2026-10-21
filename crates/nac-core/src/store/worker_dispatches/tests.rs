@@ -429,6 +429,10 @@ fn schema_31_upgrade_preserves_existing_worker_receipt() {
         "ALTER TABLE worker_dispatches DROP COLUMN history_start_id; ALTER TABLE worker_dispatches DROP COLUMN history_boundary_id; PRAGMA user_version = 31;",
     )
     .unwrap();
+    let predecessor: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(predecessor, 31);
     drop(conn);
     initialize(&path).unwrap();
     assert_eq!(
@@ -444,6 +448,9 @@ fn schema_31_upgrade_preserves_existing_worker_receipt() {
         )
         .unwrap();
     assert_eq!(history, None);
-    assert_eq!(schema_version(), 36);
+    let upgraded: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(upgraded, schema_version());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
