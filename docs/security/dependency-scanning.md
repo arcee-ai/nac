@@ -17,6 +17,17 @@ unexpected scanner versions/statuses, scanner diagnostics, malformed reports,
 and network/database failures fail the gate. No package installation or build
 scripts are run during scanning. The scanner is invoked with call analysis off.
 
+OSV classifies npm bundled entries without `resolved` URLs as `LOCAL`, which
+it inventories without vulnerability matching. The wrapper proves each such
+entry's exact name/version from `inBundle` and its registry-resolved parent's
+explicit `bundleDependencies` and integrity. It generates a small CycloneDX
+inventory containing only those entries and scans it with the same pinned OSV
+and explicit central configuration. The supplemental inventory must match
+exactly, and findings keep the original lockfile context and hash. Raw SBOM
+and scanner results are retained. Unproven local or unsupported origins fail
+closed; neither a nonzero package count nor `LOCAL` inventory alone proves
+complete vulnerability matching.
+
 The reusable `source-security.yml` accepts full 40-character `candidate-sha`
 and `trusted-policy-sha` inputs. The caller must supply the actual PR base SHA
 as trusted policy for PRs, and the exact reviewed candidate for publication.

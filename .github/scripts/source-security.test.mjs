@@ -65,7 +65,7 @@ function workspace(t) {
     const cargo = input.endsWith('Cargo.lock');
     const vulnerable = fs.readFileSync(input,'utf8').includes(cargo ? 'rustls' : 'handlebars');
     const package = { name: cargo ? (vulnerable ? 'rustls' : 'itoa') : (vulnerable ? 'handlebars' : 'is-number'),
-      version: '1.0.0', ecosystem: cargo ? 'crates.io' : 'npm' };
+      version: '1.0.0', ecosystem: cargo ? 'crates.io' : 'npm', purl: 'pkg:'+(cargo ? 'cargo/itoa' : 'npm/is-number')+'@1.0.0' };
     const vulnerabilities = vulnerable ? [{ id: 'TEST-ADVISORY', affected: [{ package, ranges: [{ events: [{ fixed: '2.0.0' }] }] }] }] : [];
     const result = {results:[{source:{type:'lockfile', path:input}, packages:[{package,vulnerabilities}]}]};
     if (options.empty) result.results[0].packages = [];

@@ -6,6 +6,12 @@ All three inputs completed without scanner errors; 57 blocking advisory records,
 zero exceptions. Aliased advisories can produce separate records; these are not
 57 distinct CVEs. This snapshot is evidence, never a suppression or clean bill.
 
+The initial scan inventoried five bundled web npm entries as `LOCAL` without
+querying them. The repaired wrapper supplements those exact proven registry
+bundle identities through OSV's CycloneDX path. The complete rerun retains the
+same 57 blocking records at 2026-10-21T21:12:26.267Z, with five additional package identities queried,
+zero infrastructure/coverage errors, and unchanged original input hashes.
+
 | Input | Packages | SHA-256 |
 | --- | --- | --- |
 | Cargo.lock | 405 | 0be8cdb1d2f4c768e4cc1459385217824820af7961fab3e82552f99c299dff7f |

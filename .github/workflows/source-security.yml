@@ -44,7 +44,8 @@ jobs:
       - name: Test candidate security contracts and live safe/vulnerable fixtures
         run: |
           OSV_SCANNER="$RUNNER_TEMP/osv-scanner" node --test \
-            candidate/.github/scripts/security-policy.test.mjs candidate/.github/scripts/source-security.test.mjs
+            candidate/.github/scripts/security-policy.test.mjs candidate/.github/scripts/source-security.test.mjs \
+            candidate/.github/scripts/source-security-bundles.test.mjs
       - name: Verify exact release publication contract with the locked library
         run: |
           npm --prefix candidate/.github/scripts ci --ignore-scripts

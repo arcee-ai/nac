@@ -45,7 +45,7 @@ export function loadTrustedPolicy(root, trustedRoot, options) {
   return trusted;
 }
 
-export function parseResults(document, context, inputPath) {
+export function parseResults(document, context, inputPath, sourceType = "lockfile") {
   if (
     !document ||
     !Array.isArray(document.results) ||
@@ -55,7 +55,7 @@ export function parseResults(document, context, inputPath) {
     throw new Error(`invalid/incomplete OSV report for ${context}`);
   const source = document.results[0];
   if (
-    source.source?.type !== "lockfile" ||
+    source.source?.type !== sourceType ||
     resolve(source.source.path) !== resolve(inputPath) ||
     !Array.isArray(source.packages) ||
     !source.packages.length
@@ -69,6 +69,7 @@ export function parseResults(document, context, inputPath) {
     if (
       !pkg?.name ||
       !pkg.version ||
+      typeof pkg.purl !== "string" ||
       pkg.ecosystem !== ecosystem ||
       (entry.vulnerabilities !== undefined && !Array.isArray(entry.vulnerabilities))
     ) {
@@ -97,7 +98,57 @@ export function parseResults(document, context, inputPath) {
       });
     }
   }
-  return { findings, packages: source.packages.length };
+  return {
+    findings,
+    packages: source.packages.length,
+    inventory: source.packages.map((entry) => entry.package),
+  };
+}
+
+function localPackages(inventory) {
+  return inventory.filter((pkg) => {
+    const source = new URLSearchParams(pkg.purl.split("?")[1]).get("source");
+    if (source && !["LOCAL", "PUBLIC_REGISTRY"].includes(source))
+      throw new Error(`unsupported package origin: ${pkg.purl}`);
+    return source === "LOCAL";
+  });
+}
+
+export function bundledComponents(inputPath, inventory) {
+  const lock = JSON.parse(readFileSync(inputPath, "utf8"));
+  if (lock.lockfileVersion !== 3 || !lock.packages)
+    throw new Error("expected npm v3 package inventory");
+  return inventory.map((pkg) => {
+    const matches = Object.entries(lock.packages).filter(
+      ([path, entry]) =>
+        path.endsWith(`/node_modules/${pkg.name}`) &&
+        entry.version === pkg.version &&
+        entry.inBundle === true &&
+        !entry.resolved,
+    );
+    const proven = matches.some(([path]) => {
+      const parent = lock.packages[path.slice(0, path.lastIndexOf("/node_modules/"))];
+      if (
+        !parent?.resolved ||
+        !parent.integrity ||
+        !Array.isArray(parent.bundleDependencies) ||
+        !parent.bundleDependencies.includes(pkg.name)
+      )
+        return false;
+      const url = new URL(parent.resolved);
+      return url.protocol === "https:" && url.hostname === "registry.npmjs.org";
+    });
+    if (!proven)
+      throw new Error(
+        `unmatched LOCAL package has no locked registry bundle proof: ${pkg.name}@${pkg.version}`,
+      );
+    return {
+      type: "library",
+      name: pkg.name,
+      version: pkg.version,
+      purl: `pkg:npm/${pkg.name.split("/").map(encodeURIComponent).join("/")}@${encodeURIComponent(pkg.version)}`,
+    };
+  });
 }
 
 function run(scanner, args) {
@@ -109,6 +160,40 @@ function run(scanner, args) {
   if (result.error || result.signal)
     throw new Error(`scanner infrastructure failure: ${result.error?.message || result.signal}`);
   return result;
+}
+
+function scanInput(scanner, inputPath, configPath, rawPath, context, sourceType = "lockfile") {
+  rmSync(rawPath, { force: true });
+  const result = run(scanner, [
+    "scan",
+    "source",
+    "--lockfile",
+    inputPath,
+    "--config",
+    configPath,
+    "--all-packages",
+    "--all-vulns",
+    "--no-call-analysis=go,rust",
+    "--verbosity=error",
+    "--format=json",
+    "--output-file",
+    rawPath,
+  ]);
+  writeFileSync(rawPath.replace(/\.json$/u, ".log"), result.stdout + result.stderr);
+  if (result.status !== 0 && result.status !== 1)
+    throw new Error(`OSV failed (${result.status}): ${context}`);
+  // Findings can take precedence over logged errors in OSV's exit-code handling.
+  if ((result.stderr + result.stdout).trim())
+    throw new Error(`OSV emitted error diagnostics: ${context}`);
+  const parsed = parseResults(
+    JSON.parse(readFileSync(rawPath, "utf8")),
+    context,
+    inputPath,
+    sourceType,
+  );
+  if ((result.status === 1) !== parsed.findings.length > 0)
+    throw new Error(`OSV status/report mismatch: ${context}`);
+  return parsed;
 }
 
 export function scanSources({ root, trustedRoot, output, scanner, now }) {
@@ -131,38 +216,39 @@ export function scanSources({ root, trustedRoot, output, scanner, now }) {
       try {
         const inputPath = file(root, context);
         const rawPath = resolve(output, `osv-${index}.json`);
-        rmSync(rawPath, { force: true });
-        const result = run(scanner, [
-          "scan",
-          "source",
-          "--lockfile",
-          inputPath,
-          "--config",
-          file(trustedRoot, CONFIG),
-          "--all-packages",
-          "--all-vulns",
-          "--no-call-analysis=go,rust",
-          "--verbosity=error",
-          "--format=json",
-          "--output-file",
-          rawPath,
-        ]);
-        writeFileSync(resolve(output, `osv-${index}.log`), result.stdout + result.stderr);
-        // OSV uses 1 for findings, other statuses for infrastructure/configuration errors.
-        if (result.status !== 0 && result.status !== 1)
-          throw new Error(`OSV failed (${result.status}): ${context}`);
-        // OSV's findings exit can take precedence over logged errors. With error-only
-        // verbosity and file output, any diagnostic output means the scan is incomplete.
-        if ((result.stderr + result.stdout).trim())
-          throw new Error(`OSV emitted error diagnostics: ${context}`);
-        const parsed = parseResults(JSON.parse(readFileSync(rawPath, "utf8")), context, inputPath);
-        if ((result.status === 1) !== parsed.findings.length > 0) {
-          throw new Error(`OSV status/report mismatch: ${context}`);
+        const configPath = file(trustedRoot, CONFIG);
+        const parsed = scanInput(scanner, inputPath, configPath, rawPath, context);
+        const unmatched = localPackages(parsed.inventory);
+        if (unmatched.length) {
+          if (context === INPUTS[0]) throw new Error("unsupported LOCAL Rust packages");
+          const components = bundledComponents(inputPath, unmatched);
+          const sbomPath = resolve(output, `bundled-${index}.cdx.json`);
+          writeFileSync(
+            sbomPath,
+            JSON.stringify({ bomFormat: "CycloneDX", specVersion: "1.6", version: 1, components }),
+          );
+          const supplement = scanInput(
+            scanner,
+            sbomPath,
+            configPath,
+            resolve(output, `osv-bundled-${index}.json`),
+            context,
+            "sbom",
+          );
+          const key = (pkg) => `${pkg.name}@${pkg.version}`;
+          if (
+            localPackages(supplement.inventory).length ||
+            supplement.inventory.map(key).sort().join() !== unmatched.map(key).sort().join()
+          ) {
+            throw new Error("bundled supplemental inventory does not match the locked packages");
+          }
+          parsed.findings.push(...supplement.findings);
         }
         const evaluated = evaluateFindings(parsed.findings, policy, { now });
         report.inputs.push({
           context,
           packages: parsed.packages,
+          supplemental_packages: unmatched.length,
           sha256: createHash("sha256").update(readFileSync(inputPath)).digest("hex"),
         });
         report.blocking.push(...evaluated.blocking);
