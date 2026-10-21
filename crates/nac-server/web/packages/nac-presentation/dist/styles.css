@@ -1280,10 +1280,6 @@
     max-height: 520px;
   }
 
-[data-nac-runtime]:is(.max-h-\[calc\(100dvh-2rem\)\]), [data-nac-runtime] .max-h-\[calc\(100dvh-2rem\)\] {
-    max-height: calc(100dvh - 2rem);
-  }
-
 [data-nac-runtime]:is(.max-h-\[calc\(100vh-2rem\)\]), [data-nac-runtime] .max-h-\[calc\(100vh-2rem\)\] {
     max-height: calc(100vh - 2rem);
   }
@@ -3011,8 +3007,8 @@
     padding-bottom: calc(var(--spacing) * 8);
   }
 
-[data-nac-runtime]:is(.pb-16), [data-nac-runtime] .pb-16 {
-    padding-bottom: calc(var(--spacing) * 16);
+[data-nac-runtime]:is(.pb-20), [data-nac-runtime] .pb-20 {
+    padding-bottom: calc(var(--spacing) * 20);
   }
 
 [data-nac-runtime]:is(.pb-\[2px\]), [data-nac-runtime] .pb-\[2px\] {

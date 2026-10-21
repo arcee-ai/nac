@@ -5736,11 +5736,7 @@ ec.Name = Xs;
 //#region src/app/atoms/loader/index.tsx
 var tc = /* @__PURE__ */ function(e) {
 	return e[e.XSmall = 16] = "XSmall", e[e.Small = 20] = "Small", e[e.Medium = 24] = "Medium", e[e.MediumLarge = 28] = "MediumLarge", e[e.Large = 32] = "Large", e[e.X2Large = 36] = "X2Large", e[e.X3Large = 40] = "X3Large", e[e.XLarge = 48] = "XLarge", e;
-}({});
-(function(e) {
-	e.Micro = 16;
-})(tc ||= {});
-var nc = /* @__PURE__ */ function(e) {
+}({}), nc = /* @__PURE__ */ function(e) {
 	return e.Brand = "var(--color-fill-accent-primary)", e.Neutral = "var(--color-fill-basic-primary)", e.Destructive = "var(--color-fill-error-primary)", e.OnPrimary = "var(--color-fill-btn-primary)", e;
 }({}), rc = ({ size: e = 48, variant: t = "var(--color-fill-basic-primary)", className: n = "", ...r }) => /* @__PURE__ */ x("div", {
 	className: N("loader flex size-fit", n),
@@ -6615,7 +6611,7 @@ async function Il(e, t) {
 }
 //#endregion
 //#region src/app/atoms/modal/index.tsx
-var Ll = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex=\"-1\"])", Rl = 300, zl = "pt-14", Bl = "pb-16", Vl = /* @__PURE__ */ function(e) {
+var Ll = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex=\"-1\"])", Rl = 300, zl = "pt-14", Bl = "pb-20", Vl = /* @__PURE__ */ function(e) {
 	return e.Small = "max-w-[400px]", e.Medium = "max-w-[604px]", e.Wide = "max-w-[600px]", e.Large = "max-w-[760px]", e;
 }({}), Hl = ({ open: e, onClose: t, onNavigate: n, title: r, subheader: i, headerActions: o, size: s = "max-w-[604px]", closeOnOverlay: u = !0, flush: d = !1, fullScreen: f = !1, chromeless: p = !1, mobileCloseIcon: m = Xs.Left, hideClose: h = !1, keepOnNavigate: g = !1, className: _ = "", bodyClassName: v = "", children: C, footer: w }) => {
 	let te = Oc(), ne = kc(), re = Ac(), ie = c(t);
@@ -6740,7 +6736,7 @@ var Ll = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([
 			"aria-label": typeof r == "string" ? r : void 0,
 			tabIndex: -1,
 			"data-modal-open": e ? "true" : void 0,
-			className: N("pointer-events-auto relative flex flex-col outline-none", T ? N("rounded-none transition-transform duration-300 ease-in-out", ge && e ? "translate-x-full" : Ee, !p && "bg-elevation-ground") : N("fade w-full", s, p ? "shadow-none" : "max-h-[calc(100dvh-2rem)] overflow-hidden rounded-2xl bg-elevation-level-2 shadow-xl", xe && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden"), _, T && "h-[100dvh] max-h-[100dvh] min-h-[100dvh] w-full min-w-full max-w-full"),
+			className: N("pointer-events-auto relative flex flex-col outline-none", T ? N("rounded-none transition-transform duration-300 ease-in-out", ge && e ? "translate-x-full" : Ee, !p && "bg-elevation-ground") : N("fade w-full", s, p ? "shadow-none" : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-2xl bg-elevation-level-2 shadow-xl", xe && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden"), _, T && "h-[100dvh] max-h-[100dvh] min-h-[100dvh] w-full min-w-full max-w-full"),
 			children: [
 				Ce ? /* @__PURE__ */ x("div", {
 					className: "absolute top-1 right-2 z-10",
@@ -6748,9 +6744,9 @@ var Ll = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([
 				}) : null,
 				Te,
 				/* @__PURE__ */ x("div", {
-					className: N("flex w-full min-h-0 flex-auto flex-col overflow-y-auto", Se && !p && zl, T && w && Bl),
+					className: N("flex w-full min-h-0 flex-auto flex-col overflow-auto", Se && !p && zl),
 					children: /* @__PURE__ */ x("div", {
-						className: N(p ? "flex min-h-0 w-full flex-1 flex-col" : "paragraph-medium flex flex-col p-4 text-basic-secondary", (T || xe || d) && "min-h-0 flex-1", v),
+						className: N(p ? "flex min-h-0 w-full flex-1 flex-col" : "paragraph-medium flex flex-col p-4 text-basic-secondary", T || xe ? "min-h-0 flex-1 overflow-auto" : d && "flex-1", T && w && Bl, v),
 						children: C
 					})
 				}),

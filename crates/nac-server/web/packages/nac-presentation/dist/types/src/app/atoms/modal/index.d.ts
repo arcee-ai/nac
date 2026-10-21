@@ -23,7 +23,7 @@ interface ModalProps {
     headerActions?: React.ReactNode;
     size?: ModalSize;
     closeOnOverlay?: boolean;
-    /** Full-bleed chrome: header and footer span the card, only the body scrolls. */
+    /** Stretch the body over a card the caller sizes; it still grows with its content. */
     flush?: boolean;
     /**
      * Grow the card to fill the viewport instead of hugging its content. Desktop

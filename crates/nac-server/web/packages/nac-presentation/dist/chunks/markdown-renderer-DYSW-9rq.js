@@ -1,5 +1,5 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-B0aSnxlc.js";
-import { Ii as r, Mr as i, Or as a, Qr as o, Ri as s, cr as c, d as l, i as u, lr as d, t as f, u as p, ur as m, zi as h } from "./PerfProfiler-DlZXkanU.js";
+import { Ii as r, Mr as i, Or as a, Qr as o, Ri as s, cr as c, d as l, i as u, lr as d, t as f, u as p, ur as m, zi as h } from "./PerfProfiler-CXQpNaxw.js";
 import { a as g, i as _, n as v, o as y, s as b } from "./space-separated-tokens-DZK_KzBN.js";
 import { n as x, t as S } from "./lib-BzcGLYKi.js";
 import { a as C, c as w, d as T, f as E, i as D, l as O, m as k, n as A, o as j, p as M, r as N, s as ee, t as P, u as F, v as te, y as I } from "./micromark-factory-space-DFzJv7G6.js";
