@@ -45,6 +45,11 @@ jobs:
         run: |
           OSV_SCANNER="$RUNNER_TEMP/osv-scanner" node --test \
             candidate/.github/scripts/security-policy.test.mjs candidate/.github/scripts/source-security.test.mjs
+      - name: Verify exact release publication contract with the locked library
+        run: |
+          npm --prefix candidate/.github/scripts ci --ignore-scripts
+          cd candidate
+          node --test .github/scripts/source-release.test.mjs .github/scripts/source-security-workflow.test.mjs
       - name: Scan the complete candidate graph with reviewed base policy
         env:
           CANDIDATE_SHA: ${{ inputs.candidate-sha }}

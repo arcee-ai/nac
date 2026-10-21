@@ -95,6 +95,14 @@ the default branch; qualification must verify that deployed scheduling works.
 A daily failure cannot revoke an earlier green PR result. Maintainers must
 rerun stale candidates before manual merges and inspect the current security
 report; this implementation does not promise a hard database-freshness bound.
+Tag/GitHub Release creation in `release-please.yml` first scans the merged
+release PR's immutable SHA. The locked Release Please library then builds a
+publication plan and rejects missing/multiple pending candidates, a different
+PR/SHA/version/path, or force-tag behavior before side effects. It publishes
+that validated plan directly, preserving release notes and publication labels;
+it does not rediscover a newer candidate between validation and creation.
+`stable-release.yml` separately rescans the exact tag candidate before binary
+upload. Preparing a release PR remains a non-publishing operation.
 Do not enable production required contexts until the merged workflows emit
 them and safe/vulnerable fixtures plus ordinary merge-blocking qualification
 have passed. Existing repository protections and Allison's PR-only override

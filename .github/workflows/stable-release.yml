@@ -333,10 +333,17 @@ jobs:
     with:
       source_sha: ${{ needs.prepare.outputs.sha }}
 
+  source-security:
+    needs: prepare
+    uses: ./.github/workflows/source-security.yml
+    with:
+      candidate-sha: ${{ needs.prepare.outputs.sha }}
+      trusted-policy-sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || needs.prepare.outputs.sha }}
+
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed]
+    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed, source-security]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -357,7 +364,7 @@ jobs:
       needs.prepare.outputs.run == 'true' &&
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
-    needs: [prepare, test, build, required-pr-checks]
+    needs: [prepare, test, build, required-pr-checks, source-security]
     runs-on: ubuntu-latest
     permissions:
       contents: write
