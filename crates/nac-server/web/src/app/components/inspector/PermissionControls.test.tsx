@@ -14,6 +14,7 @@ import type { PermissionStateResponse } from "@/app/types/api";
 const SESSION_ID = "direct-session";
 
 const fakes = {
+  authorizeChildPermissionReviewRetry: vi.fn(),
   authorizePermissionReviewRetry: vi.fn(),
   getPermissions: vi.fn(),
   replyPermission: vi.fn(),
@@ -31,6 +32,10 @@ vi.spyOn(api, "deletePermissionGrant").mockImplementation((...args) =>
 );
 vi.spyOn(api, "authorizePermissionReviewRetry").mockImplementation((...args) =>
   fakes.authorizePermissionReviewRetry(...args),
+);
+
+vi.spyOn(api, "authorizeChildPermissionReviewRetry").mockImplementation((...args) =>
+  fakes.authorizeChildPermissionReviewRetry(...args),
 );
 
 function pendingState(): PermissionStateResponse {
@@ -78,6 +83,7 @@ function mount(state: PermissionStateResponse, requesterLabel?: string) {
 }
 
 beforeEach(() => {
+  fakes.authorizeChildPermissionReviewRetry.mockReset().mockResolvedValue(undefined);
   fakes.getPermissions.mockReset().mockResolvedValue({ requests: [], grants: [] });
   fakes.replyPermission.mockReset().mockResolvedValue(undefined);
   fakes.setPermissionApprovalMode.mockReset().mockResolvedValue(undefined);
@@ -418,54 +424,73 @@ describe("direct permission controls", () => {
     );
   });
 
-  it("does not offer an always-failing retry in a child control", () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-    client.setQueryData(queryKeys.sessionPermissions("child-review"), {
-      approval_mode: "review",
-      requests: [],
-      grants: [],
-      reviews: [
-        {
-          id: "child-block",
-          session_id: "child-review",
-          tool: "exec_command",
-          backend: "local",
-          resources: [{ action: "execute", resource: "command:[git][push]", display: "git push" }],
-          user_authorized_retry: false,
-          outcome: "rejected",
-          code: "review_rejected",
-          reviewer: "jev:typesafe/jev-1.13",
-          created_at_epoch_ms: 1,
-        },
-      ],
-      authorizable_review_ids: ["child-block"],
-    } satisfies PermissionStateResponse);
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <ToastProvider>
-            <PermissionControls
-              sessionId="child-review"
-              behavior="direct"
-              label="Permissions for Review persistence"
-              autoApprovalAvailable={false}
-            />
-          </ToastProvider>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Permissions for Review persistence — Approve for me inherited; open permissions",
-      }),
-    );
-    const retry = screen.getByRole("button", { name: "Authorize retry" }) as HTMLButtonElement;
-    expect(retry.disabled).toBe(true);
-    expect(document.body.textContent).toContain("Retry is available only in the primary session");
-    expect(screen.queryByRole("button", { name: "Switch to Manual" })).toBeNull();
-  });
+  it.each([undefined, "parent-session"])(
+    "routes child retries through its parent when available (%s)",
+    async (parentSessionId) => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      client.setQueryData(queryKeys.sessionPermissions("child-review"), {
+        approval_mode: "review",
+        requests: [],
+        grants: [],
+        reviews: [
+          {
+            id: "child-block",
+            session_id: "child-review",
+            tool: "exec_command",
+            backend: "local",
+            resources: [
+              { action: "execute", resource: "command:[git][push]", display: "git push" },
+            ],
+            user_authorized_retry: false,
+            outcome: "rejected",
+            code: "review_rejected",
+            reviewer: "jev:typesafe/jev-1.13",
+            created_at_epoch_ms: 1,
+          },
+        ],
+        authorizable_review_ids: ["child-block"],
+      } satisfies PermissionStateResponse);
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <ToastProvider>
+              <PermissionControls
+                sessionId="child-review"
+                retryParentSessionId={parentSessionId}
+                behavior="direct"
+                label="Permissions for Review persistence"
+                autoApprovalAvailable={false}
+              />
+            </ToastProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Permissions for Review persistence — Approve for me inherited; open permissions",
+        }),
+      );
+      const retry = screen.getByRole("button", { name: "Authorize retry" }) as HTMLButtonElement;
+      expect(retry.disabled).toBe(!parentSessionId);
+      if (parentSessionId) {
+        fireEvent.click(retry);
+        await waitFor(() =>
+          expect(fakes.authorizeChildPermissionReviewRetry).toHaveBeenCalledWith(
+            parentSessionId,
+            "child-review",
+            "child-block",
+          ),
+        );
+        expect(fakes.authorizePermissionReviewRetry).not.toHaveBeenCalled();
+      } else {
+        expect(document.body.textContent).toContain("Open the child's parent to authorize a retry");
+      }
+      expect(screen.queryByRole("button", { name: "Switch to Manual" })).toBeNull();
+      expect(fakes.setPermissionApprovalMode).not.toHaveBeenCalled();
+    },
+  );
 
   it("reconciles a mode change made through another server process", async () => {
     const manual = pendingState();

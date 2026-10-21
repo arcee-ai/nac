@@ -544,6 +544,12 @@ export function createNacApi(nacClient: NacClient) {
         `${sessionPath(id)}/permissions/reviews/${encodeURIComponent(reviewId)}/authorize-retry`,
       ),
 
+    authorizeChildPermissionReviewRetry: (parentId: string, childId: string, reviewId: string) =>
+      request<PermissionReview>(
+        "POST",
+        `${sessionPath(parentId)}/children/${encodeURIComponent(childId)}/permissions/reviews/${encodeURIComponent(reviewId)}/authorize-retry`,
+      ),
+
     setPermissionApprovalMode: (id: string, mode: PermissionApprovalMode) =>
       request<void>("PUT", `${sessionPath(id)}/permissions/mode`, {
         body: { mode },

@@ -200,3 +200,39 @@ changes to intent, confinement, the rubric or thresholds, and run a real
 session through both a routine approval and a blocked action. Record the code
 revision, environment and result; an older corpus pass does not establish that
 the current deployment is ready.
+
+### Operator reviewer experiments
+
+New permission brokers use the existing Jev reviewer by default. For an
+explicit operator experiment, `NAC_PERMISSION_REVIEW_PROFILE` accepts only
+`clef-scope-v6`. Unset the variable to keep legacy Jev; an
+empty, unknown or non-Unicode value disables automatic review with a fixed
+configuration error. Selection is snapshotted when each broker is constructed.
+Changing the environment does not mutate an existing broker's profile.
+
+The fixed training-selected profile remains an experiment. Training results
+and passing finite fixtures alone do not qualify deployment; evaluate the
+frozen model, rubric and numeric gates on fresh cases before enabling an
+environment. Prior rejected profiles are not enabled by this setting.
+
+The Clef profile binds the model, exact additional scope question, numeric
+gates and history identity. Legacy Jev remains unchanged. Clef requires safe
+probability at least 0.80 on every backend, routine category probability at
+least 0.60, explicit confidence at least 0.40, and scope probability at least
+0.70. Every gate must pass;
+scope never compensates for failed safety/risk gates. Scope answers must have
+type `noul` and a finite probability in [0, 1]; missing or malformed answers
+are unavailable. All existing category/distribution validation and rejection
+semantics remain effective. Legacy Jev's rubric and response contract do not
+require the new scope answer.
+
+Selection uses normal approved-origin Arcee authentication and model access.
+It does not expose a project/session/UI setting, add models to the catalog,
+change deterministic policy or eligibility, create remembered grants, change
+canonical resource binding, or select a different execution backend.
+
+The committed synthetic cases and captured Clef responses under
+`crates/nac-core/src/model/testdata/` run through production scoring in ordinary
+Rust tests. Their README records the frozen profile, comparison results and
+limits. This offline replay detects scoring drift; it does not make a new
+network request or establish current deployment readiness.

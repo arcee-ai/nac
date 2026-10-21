@@ -228,6 +228,10 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
         "POST",
         "/sessions/{session_id}/permissions/reviews/{review_id}/authorize-retry",
     ),
+    (
+        "POST",
+        "/sessions/{session_id}/children/{child_session_id}/permissions/reviews/{review_id}/authorize-retry",
+    ),
     ("POST", "/sessions/{session_id}/permissions/{request_id}"),
     ("POST", "/sessions/{session_id}/fork"),
     ("POST", "/sessions/{session_id}/regenerate"),

@@ -49,6 +49,7 @@ mod chatgpt_codex;
 mod client;
 mod history;
 mod jev;
+mod permission_reviewer;
 mod providers;
 mod pseudo_tool_calls;
 mod redact;
@@ -57,6 +58,7 @@ mod responses;
 mod responses_stream;
 #[cfg(feature = "review-fixture")]
 mod review_fixture;
+mod reviewer_policy;
 mod sse;
 mod stream;
 #[cfg(test)]
@@ -85,15 +87,16 @@ pub use jev::{smoke_test_jev_reviewer, JevReviewer, ARCEE_REVIEW_CREDENTIAL_REQU
 #[cfg(feature = "review-fixture")]
 pub use review_fixture::ScriptedReviewer;
 
-/// The automatic reviewer for new permission brokers: Jev, unless a
-/// `review-fixture` build is running a scripted browser journey.
+/// The automatic reviewer for new permission brokers: legacy Jev by default.
+/// Operator-only experimental profile selection is snapshotted here; a
+/// `review-fixture` build may run a scripted browser journey instead.
 pub(crate) fn default_permission_reviewer(
 ) -> std::sync::Arc<dyn crate::permissions::PermissionReviewer> {
     #[cfg(feature = "review-fixture")]
     if let Some(reviewer) = ScriptedReviewer::from_environment() {
         return std::sync::Arc::new(reviewer);
     }
-    std::sync::Arc::new(JevReviewer::default())
+    permission_reviewer::from_environment()
 }
 pub use providers::{
     list_managed_provider_models, list_provider_models, list_provider_models_with_http_policy,
@@ -511,3 +514,6 @@ use responses::*;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod reviewer_fixtures;

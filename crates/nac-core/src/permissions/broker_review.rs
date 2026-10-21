@@ -59,7 +59,19 @@ impl PermissionBroker {
 
     /// Resets the per-run review limits. Called at the start of each run.
     pub(crate) fn begin_review_run(&self) {
-        self.review_memory().begin_run();
+        let retired = self.review_memory().begin_run();
+        drop(tokio::spawn(async move { retired.settle().await }));
+    }
+
+    pub(super) fn review_run_stop(&self) -> super::review::ReviewRunPermit {
+        self.review_memory().run.stop_signal()
+    }
+
+    pub(super) async fn review_stopped_outcome(
+        stop: &super::review::ReviewRunPermit,
+    ) -> AuthorizationOutcome {
+        stop.settle().await;
+        AuthorizationOutcome::Denied(blocked_message(PermissionReviewCode::ReviewStopped, None))
     }
 
     /// Returns why automatic review stopped the current run, once.
@@ -126,23 +138,27 @@ impl PermissionBroker {
         resources: &[PermissionResource],
         context: &crate::tools::kernel::ToolCallContext,
         cancellation: &crate::tools::ThreadCancellation,
+        review_stop: &super::review::ReviewRunPermit,
         mode_revision: i64,
     ) -> Option<AuthorizationOutcome> {
+        // The stop gate applies before any ineligible request can return to
+        // manual approval, including broad execution on Local and SSH.
+        if review_stop.is_closed() {
+            return Some(Self::review_stopped_outcome(review_stop).await);
+        }
         let source = self
             .review_backend
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         // Classifying a sandbox reads its workspace.
-        let backend = tokio::task::spawn_blocking(move || source.current())
+        let initial_source = source.clone();
+        let backend = tokio::task::spawn_blocking(move || initial_source.current())
             .await
             .ok()?;
         review_eligibility(resources, backend).ok()?;
-        if self.review_memory().run.stopped() {
-            return Some(AuthorizationOutcome::Denied(blocked_message(
-                PermissionReviewCode::ReviewStopped,
-                None,
-            )));
+        if review_stop.is_closed() {
+            return Some(Self::review_stopped_outcome(review_stop).await);
         }
         // Without the person's messages the reviewer cannot judge scope, so
         // the request keeps the manual path: no person has typed input for
@@ -154,6 +170,9 @@ impl PermissionBroker {
         else {
             return None;
         };
+        if review_stop.is_closed() {
+            return Some(Self::review_stopped_outcome(review_stop).await);
+        }
         let fingerprint = invocation_fingerprint(tool, resources);
         let provider = self
             .command_environment
@@ -168,6 +187,9 @@ impl PermissionBroker {
                 .ok()?;
         let mut request =
             review_request(tool, resources, backend, &intent, false, &secrets).ok()?;
+        if review_stop.is_closed() {
+            return Some(Self::review_stopped_outcome(review_stop).await);
+        }
         // A retry authorization is taken only once a review that carries it
         // is certain to run. It is spent only by a verdict that settles the
         // action; otherwise it goes back with its original expiry.
@@ -207,6 +229,15 @@ impl PermissionBroker {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let started = Instant::now();
+        if review_stop.is_closed() {
+            self.review_memory().forget(&review.id);
+            let outcome = Self::review_stopped_outcome(review_stop).await;
+            self.emit_async(crate::events::SessionEvent::PermissionReviewed {
+                review: Box::new(review),
+            })
+            .await;
+            return Some(outcome);
+        }
         let verdict = match reviewer {
             None => Err(ReviewUnavailable::new(
                 PermissionReviewFailureReason::ServiceUnavailable,
@@ -215,6 +246,14 @@ impl PermissionBroker {
             Some(reviewer) => {
                 tokio::select! {
                     biased;
+                    () = review_stop.cancelled() => {
+                        self.review_memory().forget(&review.id);
+                        let outcome = Self::review_stopped_outcome(review_stop).await;
+                        self.emit_async(crate::events::SessionEvent::PermissionReviewed {
+                            review: Box::new(review),
+                        }).await;
+                        return Some(outcome);
+                    }
                     () = cancellation.cancelled() => {
                         review.outcome = Some(PermissionReviewOutcome::Unavailable);
                         review.code = Some(PermissionReviewCode::ReviewUnavailable);
@@ -238,6 +277,14 @@ impl PermissionBroker {
             }
         };
         review.duration_ms = Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+        // The writable workspace can gain Git metadata while the reviewer
+        // waits. The verdict applies only to the confinement it was shown.
+        let current_backend = tokio::task::spawn_blocking(move || source.current())
+            .await
+            .ok();
+        let backend_changed = current_backend != Some(backend)
+            || current_backend
+                .is_none_or(|current| review_eligibility(resources, current).is_err());
         // A verdict only answers the mode it was requested under. If the user
         // changed the answer policy while the reviewer ran, even to another
         // mode and back, discard it and let the current mode decide; a
@@ -253,6 +300,20 @@ impl PermissionBroker {
                 .await;
                 return None;
             }
+        }
+        if backend_changed {
+            self.review_memory().forget(&review.id);
+            if review_stop.is_closed() {
+                review_stop.settle().await;
+            }
+            self.emit_async(crate::events::SessionEvent::PermissionReviewed {
+                review: Box::new(review),
+            })
+            .await;
+            return Some(AuthorizationOutcome::Denied(
+                "the execution boundary changed during automatic review; the operation was not executed; retry the tool call"
+                    .to_string(),
+            ));
         }
         let (outcome, code, category) = match verdict {
             Ok(ReviewVerdict::ApproveOnce) => (PermissionReviewOutcome::Approved, None, None),
@@ -279,19 +340,42 @@ impl PermissionBroker {
         review.outcome = Some(outcome);
         review.code = code;
         review.category = category;
-        {
+        let stopped = {
             let mut memory = self.review_memory();
-            memory.run.record(outcome);
-            memory.record(&review);
-            if matches!(
-                outcome,
-                PermissionReviewOutcome::Rejected | PermissionReviewOutcome::Uncertain
-            ) {
-                memory.remember_blocked(BlockedReview {
-                    review: review.clone(),
-                    fingerprint,
-                });
+            // This check and outcome accounting share the run-state lock, so
+            // a sibling that already stopped this run wins over a late verdict.
+            if review_stop.is_closed() {
+                memory.forget(&review.id);
+                true
+            } else {
+                memory.run.record(outcome);
+                memory.record(&review);
+                if matches!(
+                    outcome,
+                    PermissionReviewOutcome::Rejected | PermissionReviewOutcome::Uncertain
+                ) {
+                    memory.remember_blocked(BlockedReview {
+                        review: review.clone(),
+                        fingerprint,
+                    });
+                }
+                false
             }
+        };
+        if stopped {
+            let outcome = Self::review_stopped_outcome(review_stop).await;
+            review.outcome = None;
+            review.code = None;
+            review.category = None;
+            review.failure_reason = None;
+            self.emit_async(crate::events::SessionEvent::PermissionReviewed {
+                review: Box::new(review),
+            })
+            .await;
+            return Some(outcome);
+        }
+        if review_stop.is_closed() {
+            review_stop.settle().await;
         }
         self.emit_async(crate::events::SessionEvent::PermissionReviewed {
             review: Box::new(review.clone()),
@@ -304,6 +388,7 @@ impl PermissionBroker {
             None if cancellation.is_cancelled() => AuthorizationOutcome::Denied(
                 "run was cancelled before authorization completed".to_string(),
             ),
+            None if review_stop.is_closed() => Self::review_stopped_outcome(review_stop).await,
             None => {
                 authorization.spend();
                 AuthorizationOutcome::Allowed

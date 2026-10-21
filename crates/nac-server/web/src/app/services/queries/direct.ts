@@ -18,14 +18,14 @@ import type {
   UpdateGoalRequest,
 } from "@/app/types/api";
 
-export function useSessionPermissions(sessionId: string, enabled: boolean) {
+export function useSessionPermissions(sessionId: string, enabled: boolean, poll = true) {
   const { api } = useNativeRuntime();
 
   return useQuery<PermissionStateResponse>({
     queryKey: queryKeys.sessionPermissions(sessionId),
     queryFn: ({ signal }) => api.getPermissions(sessionId, signal),
     enabled,
-    refetchInterval: enabled ? 1_000 : false,
+    refetchInterval: enabled && poll ? 1_000 : false,
     staleTime: 0,
     retry: false,
   });
@@ -57,10 +57,29 @@ export function useAuthorizePermissionReviewRetry() {
 
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ sessionId, reviewId }: { sessionId: string; reviewId: string }) =>
-      api.authorizePermissionReviewRetry(sessionId, reviewId),
+    mutationFn: ({
+      sessionId,
+      reviewId,
+      parentSessionId,
+    }: {
+      sessionId: string;
+      reviewId: string;
+      parentSessionId?: string;
+    }) =>
+      parentSessionId
+        ? api.authorizeChildPermissionReviewRetry(parentSessionId, sessionId, reviewId)
+        : api.authorizePermissionReviewRetry(sessionId, reviewId),
     onSuccess: (_data, variables) =>
-      client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
+      Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
+        ...(variables.parentSessionId
+          ? [
+              client.invalidateQueries({
+                queryKey: queryKeys.traditionalChildren(variables.parentSessionId),
+              }),
+            ]
+          : []),
+      ]),
   });
 }
 

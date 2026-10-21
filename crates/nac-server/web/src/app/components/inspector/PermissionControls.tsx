@@ -67,6 +67,10 @@ interface PermissionControlsProps {
   label?: string;
   autoApprovalAvailable?: boolean;
   requesterLabel?: string;
+  /** Child retries are routed through its owning primary; mode remains inherited. */
+  retryParentSessionId?: string;
+  /** Terminal children need review recourse without continuous polling. */
+  poll?: boolean;
 }
 
 function requestIdentity(requests: PermissionRequest[]): string {
@@ -112,9 +116,11 @@ export function PermissionControls({
   label = "Permissions",
   autoApprovalAvailable = true,
   requesterLabel,
+  retryParentSessionId,
+  poll = true,
 }: PermissionControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const permissions = useSessionPermissions(sessionId, direct);
+  const permissions = useSessionPermissions(sessionId, direct, poll);
   const replyPermission = useReplyPermission();
   const setApprovalMode = useSetPermissionApprovalMode();
   const deleteGrant = useDeletePermissionGrant();
@@ -124,11 +130,10 @@ export function PermissionControls({
   const grants = permissions.data?.grants ?? [];
   const reviews = permissions.data?.reviews ?? [];
   const authorizableReviews = new Set(permissions.data?.authorizable_review_ids ?? []);
-  // Retries are delivered through the primary session's own inbox; a child
-  // agent's blocked action cannot be retried from here.
-  const retryUnavailable = autoApprovalAvailable
-    ? undefined
-    : "Retry is available only in the primary session. Switch the parent to Manual to approve this child's actions.";
+  const retryUnavailable =
+    autoApprovalAvailable || retryParentSessionId
+      ? undefined
+      : "Open the child's parent to authorize a retry or switch the parent to Manual.";
   const approvalMode = permissions.data?.approval_mode ?? "manual";
   const autoApprove = approvalMode === "auto_approve";
   const reviewMode = approvalMode === "review";
@@ -205,7 +210,11 @@ export function PermissionControls({
     if (authorizingReview) return;
     setAuthorizingReview(review.id);
     try {
-      await authorizeRetry.mutateAsync({ sessionId, reviewId: review.id });
+      await authorizeRetry.mutateAsync({
+        sessionId,
+        reviewId: review.id,
+        parentSessionId: retryParentSessionId,
+      });
       toast.success("Retry authorized. The agent will retry it, and it is reviewed again.");
     } catch (error) {
       toast.error(`Unable to authorize retry: ${errorMessage(toRunError(error))}`);

@@ -115,11 +115,16 @@ describe("traditional child controls", () => {
     );
   });
 
-  it("keeps the control launch-only while preserving running permission bridges", async () => {
-    mount([child()]);
-    expect(screen.getByRole("button", { name: "Permissions for Review persistence" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Launch coding agent" }));
-    expect(screen.getByRole("dialog").textContent).not.toContain("generation 1");
-    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-  });
+  it.each(["running", "completed", "cancelled", "failed"] as const)(
+    "preserves child permission recourse for %s children",
+    async (status) => {
+      mount([child(status)]);
+      expect(
+        screen.getByRole("button", { name: "Permissions for Review persistence" }),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Launch coding agent" }));
+      expect(screen.getByRole("dialog").textContent).not.toContain("generation 1");
+      expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    },
+  );
 });

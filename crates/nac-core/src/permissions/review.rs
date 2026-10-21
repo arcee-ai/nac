@@ -633,6 +633,40 @@ pub fn retry_authorization_message(review: &PermissionReview) -> String {
     )
 }
 
+/// A captured run capability is permanently closed on stop or retirement.
+/// A successor receives a new capability; old futures cannot adopt it.
+#[derive(Clone, Default)]
+pub(crate) struct ReviewRunPermit {
+    wake: crate::tools::ThreadCancellation,
+    grants: Arc<crate::store::PermissionGrantCommitFence>,
+}
+
+impl ReviewRunPermit {
+    pub(crate) fn close(&self) {
+        self.grants.close();
+        self.wake.cancel();
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.grants.is_closed()
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        self.wake.cancelled().await;
+    }
+
+    pub(crate) fn grant_fence(&self) -> Arc<crate::store::PermissionGrantCommitFence> {
+        Arc::clone(&self.grants)
+    }
+
+    pub(crate) async fn settle(&self) {
+        let fence = Arc::clone(&self.grants);
+        if let Err(error) = tokio::task::spawn_blocking(move || fence.settle()).await {
+            eprintln!("nac: stopped permission grant settlement failed: {error}");
+        }
+    }
+}
+
 /// Per-run review limits. Counts span all variants of a request, which is
 /// what catches near-variant retries after a rejection.
 #[derive(Default)]
@@ -641,14 +675,24 @@ pub(crate) struct ReviewRunState {
     window: VecDeque<bool>,
     consecutive_unavailable: usize,
     stop: Option<String>,
+    // This run owns its own latched wake-up; taking the diagnostic cannot
+    // reopen authorization, and a successor run gets an independent signal.
+    stop_signal: ReviewRunPermit,
 }
 
 impl ReviewRunState {
     pub(crate) fn stopped(&self) -> bool {
-        self.stop.is_some()
+        self.stop_signal.is_closed()
+    }
+
+    pub(crate) fn stop_signal(&self) -> ReviewRunPermit {
+        self.stop_signal.clone()
     }
 
     pub(crate) fn record(&mut self, outcome: PermissionReviewOutcome) {
+        if self.stopped() {
+            return;
+        }
         let blocked = matches!(
             outcome,
             PermissionReviewOutcome::Rejected | PermissionReviewOutcome::Uncertain
@@ -688,6 +732,9 @@ impl ReviewRunState {
                     .to_string(),
             );
         }
+        if self.stop.is_some() {
+            self.stop_signal.close();
+        }
     }
 
     pub(crate) fn take_stop(&mut self) -> Option<String> {
@@ -719,8 +766,13 @@ pub(crate) struct ReviewMemory {
 pub(crate) struct RetryAuthorization((BlockedReview, Instant));
 
 impl ReviewMemory {
-    pub(crate) fn begin_run(&mut self) {
+    pub(crate) fn begin_run(&mut self) -> ReviewRunPermit {
+        // A waiter admitted under an earlier run cannot inherit its successor
+        // run's fresh budget or receive a late manual approval.
+        self.run.stop_signal.close();
+        let retired = self.run.stop_signal();
         self.run = ReviewRunState::default();
+        retired
     }
 
     /// Records a review as started or updates it with its outcome.

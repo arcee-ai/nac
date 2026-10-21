@@ -1316,3 +1316,143 @@ async fn a_revoked_retry_authorization_restores_the_blocked_action() {
     broker.authorize_review_retry(&blocked.id).unwrap();
     assert!(broker.authorize_review_retry(&blocked.id).is_err());
 }
+
+// Regression evidence for stale review admission. These tests exercise only
+// broker decisions; no command is executed and no real reviewer is contacted.
+#[tokio::test]
+async fn pr378_regression_git_metadata_added_during_review_discards_approval() {
+    use crate::sandbox::{MountSpec, SandboxSpec, DEFAULT_SANDBOX_WORKDIR};
+
+    let (path, broker, reviewer, release) = gated_broker().await;
+    let workspace = path.parent().unwrap().join("pending-review-workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    broker.set_review_backend(crate::permissions::ReviewBackendSource::Sandbox(Box::new(
+        SandboxSpec {
+            mounts: vec![MountSpec {
+                host: workspace.clone(),
+                guest: DEFAULT_SANDBOX_WORKDIR.into(),
+                read_only: false,
+            }],
+            ..SandboxSpec::default()
+        },
+    )));
+    let pending = spawn_authorize(
+        &broker,
+        vec![PermissionResource::new(
+            "execute_broad",
+            "command:[make][test]",
+        )],
+    );
+    tokio::time::timeout(Duration::from_secs(2), reviewer.started.notified())
+        .await
+        .unwrap();
+
+    // The command and canonical cwd remain identical while the confinement
+    // category used to obtain this verdict changes.
+    std::fs::create_dir_all(workspace.join(".git")).unwrap();
+    release.send(ReviewVerdict::ApproveOnce).unwrap();
+    let outcome = tokio::time::timeout(Duration::from_secs(2), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(outcome, AuthorizationOutcome::Denied(_)),
+        "approval based on the earlier workspace-only category must be discarded: {outcome:?}"
+    );
+    assert!(
+        broker
+            .recent_reviews()
+            .iter()
+            .all(|review| review.outcome != Some(PermissionReviewOutcome::Approved)),
+        "a stale verdict must not be presented as an approved action"
+    );
+}
+
+#[tokio::test]
+async fn pr378_regression_stopped_run_does_not_prompt_for_ineligible_ask() {
+    let reviewer = FakeReviewer::answering([
+        Err(ReviewUnavailable::new(
+            PermissionReviewFailureReason::ServiceUnavailable,
+            "synthetic outage",
+        )),
+        Err(ReviewUnavailable::new(
+            PermissionReviewFailureReason::ServiceUnavailable,
+            "synthetic outage",
+        )),
+    ]);
+    let (_path, broker) = review_broker(PermissionBackend::Local, Arc::clone(&reviewer)).await;
+    broker.begin_review_run();
+    for command in ["command:[ls]", "command:[pwd]"] {
+        assert!(denied(authorize(&broker, &[execute(command)]).await)
+            .contains("code=review_unavailable"));
+    }
+
+    let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+    let _interactive = bus.subscribe_assistant_deltas();
+    let mut events = bus.subscribe();
+    broker.attach_event_bus(bus);
+    let resources = [PermissionResource::new(
+        "execute_broad",
+        "command:[python3][script.py]",
+    )];
+    let authorization = authorize(&broker, &resources);
+    tokio::pin!(authorization);
+    let outcome = tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::select! {
+            outcome = &mut authorization => outcome,
+            event = events.recv() => {
+                let event = event.unwrap();
+                panic!("a stopped run must return review_stopped without a manual prompt: {event:?}");
+            }
+        }
+    })
+    .await
+    .expect("a stopped run must not wait for manual approval");
+    assert!(denied(outcome).contains("code=review_stopped"));
+    assert_eq!(reviewer.seen().len(), 2);
+    assert!(broker.pending().is_empty());
+}
+
+#[tokio::test]
+async fn pr378_regression_pending_sibling_approval_is_denied_after_run_stops() {
+    let (_path, broker, reviewer, release) = gated_broker().await;
+    broker.begin_review_run();
+    let pending = spawn_authorize(&broker, vec![execute("command:[ls]")]);
+    tokio::time::timeout(Duration::from_secs(2), reviewer.started.notified())
+        .await
+        .unwrap();
+
+    // Replacing the reviewer affects new requests only. The first request
+    // retains the gated reviewer while these sibling requests stop the run.
+    let unavailable = FakeReviewer::answering([
+        Err(ReviewUnavailable::new(
+            PermissionReviewFailureReason::ServiceUnavailable,
+            "synthetic outage",
+        )),
+        Err(ReviewUnavailable::new(
+            PermissionReviewFailureReason::ServiceUnavailable,
+            "synthetic outage",
+        )),
+    ]);
+    broker.set_reviewer(unavailable);
+    for command in ["command:[pwd]", "command:[date]"] {
+        assert!(denied(authorize(&broker, &[execute(command)]).await)
+            .contains("code=review_unavailable"));
+    }
+    // Do not consume take_review_stop(): the stop must remain latched while
+    // the already-admitted approval settles.
+    // The stopped reviewer is actively cancelled; a late verdict may have no receiver.
+    let _ = release.send(ReviewVerdict::ApproveOnce);
+    let outcome = tokio::time::timeout(Duration::from_secs(2), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(outcome, AuthorizationOutcome::Denied(_)),
+        "a pending sibling must not receive authority after the run stopped: {outcome:?}"
+    );
+    assert!(denied(outcome).contains("code=review_stopped"));
+}
+
+#[path = "permission_stop_tests.rs"]
+mod stop_tests;

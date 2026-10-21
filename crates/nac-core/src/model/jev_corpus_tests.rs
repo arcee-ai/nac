@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
+use super::super::reviewer_fixtures::FixtureWorkspace;
 use super::*;
 use crate::permissions::{
     review_eligibility, review_request, ExactSecrets, PermissionBackend, PermissionEffect,
@@ -199,14 +200,13 @@ async fn live_jev_corpus() {
         panic!("{message}");
     }
     let workspace = Path::new("/workspace");
-    let execution = crate::sandbox::ExecutionBackend::Local {
-        workspace_cwd: workspace.to_path_buf(),
-    };
+    let fixture_workspace = FixtureWorkspace::new();
     let secrets = ExactSecrets::current(None).expect("local redaction secrets load");
     let mut tally = Tally::default();
     let mut rows = Vec::new();
 
     for fixture in CORPUS {
+        let execution = fixture_workspace.execution(backend_label(fixture.backend));
         let resources = crate::permissions::shell_resources(fixture.command, workspace, &execution);
         let decision = PermissionPolicy::for_backend(fixture.backend, []).evaluate(&resources, &[]);
         let route = if decision.effect != PermissionEffect::Ask {
@@ -348,12 +348,11 @@ async fn live_jev_corpus() {
 #[test]
 fn corpus_fixtures_route_as_labeled() {
     let workspace = Path::new("/workspace");
-    let execution = crate::sandbox::ExecutionBackend::Local {
-        workspace_cwd: workspace.to_path_buf(),
-    };
+    let fixture_workspace = FixtureWorkspace::new();
     let secrets = ExactSecrets::default();
     let mut mismatches = Vec::new();
     for fixture in CORPUS {
+        let execution = fixture_workspace.execution(backend_label(fixture.backend));
         let resources = crate::permissions::shell_resources(fixture.command, workspace, &execution);
         assert!(!resources.is_empty(), "{}", fixture.name);
         let decision = PermissionPolicy::for_backend(fixture.backend, []).evaluate(&resources, &[]);

@@ -277,3 +277,72 @@ async fn live_jev_smoke() {
         ),
     }
 }
+
+/// Exercise the factory-selected production profile/authentication path with a
+/// synthetic projected request. This never invokes the described shell command.
+#[tokio::test]
+#[ignore = "requires explicit clef-scope-v6 selection and isolated dev2 credentials"]
+async fn live_production_clef_scope_profile_smoke() {
+    assert!(
+        std::env::var("NAC_PERMISSION_REVIEW_PROFILE").as_deref() == Ok("clef-scope-v6"),
+        "explicit clef-scope-v6 operator selection is required"
+    );
+    let credentials = resolve_credentials().expect("isolated Arcee credentials are required");
+    assert!(!credentials.is_empty());
+    assert!(
+        credentials.iter().all(|credential| {
+            decisions_url(credential.base_url())
+                .is_ok_and(|url| url == "https://api2.apps.dev.arcee.ai/api/alpha/decisions")
+        }),
+        "smoke credentials must all resolve to the approved dev2 origin"
+    );
+    let reviewer = crate::model::default_permission_reviewer();
+    assert_eq!(
+        reviewer.identity(),
+        "decisions:cloudflare/clef:clef-scope-v6"
+    );
+    assert!(
+        reviewer.check_available().is_ok(),
+        "selected profile is unavailable"
+    );
+    let backend = crate::sandbox::ExecutionBackend::Local {
+        workspace_cwd: "/workspace".into(),
+    };
+    let resources =
+        crate::permissions::shell_resources("ls", std::path::Path::new("/workspace"), &backend);
+    let permission_backend = crate::permissions::PermissionBackend::Local;
+    assert_eq!(
+        crate::permissions::PermissionPolicy::for_backend(permission_backend, [])
+            .evaluate(&resources, &[])
+            .effect,
+        crate::permissions::PermissionEffect::Ask
+    );
+    assert!(crate::permissions::review_eligibility(&resources, permission_backend).is_ok());
+    let secrets =
+        crate::permissions::ExactSecrets::current(None).expect("redaction inputs unavailable");
+    let request = crate::permissions::review_request(
+        "exec_command",
+        &resources,
+        permission_backend,
+        &["List the visible immediate entries in the workspace once.".to_owned()],
+        false,
+        &secrets,
+    )
+    .expect("synthetic reviewer projection failed");
+    let started = Instant::now();
+    // The broker owns this deadline in real invocations. A direct trait smoke
+    // supplies the same bound explicitly, including auth and refresh work.
+    let result = tokio::time::timeout(REVIEW_DEADLINE, reviewer.review(&request))
+        .await
+        .expect("synthetic profile smoke exceeded the broker review deadline");
+    let verdict = match result {
+        Ok(verdict) => verdict,
+        Err(error) => panic!("synthetic profile smoke unavailable: {:?}", error.reason),
+    };
+    eprintln!(
+        "production profile smoke: reviewer={} verdict={verdict:?} latency_ms={}",
+        reviewer.identity(),
+        started.elapsed().as_millis()
+    );
+    assert_eq!(verdict, ReviewVerdict::ApproveOnce);
+}

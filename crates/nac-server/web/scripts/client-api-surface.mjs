@@ -134,6 +134,8 @@ export const clientApiSurface = {
   "PUT /sessions/{session_id}/permissions/mode": "api.setPermissionApprovalMode",
   "POST /sessions/{session_id}/permissions/reviews/{review_id}/authorize-retry":
     "api.authorizePermissionReviewRetry",
+  "POST /sessions/{session_id}/children/{child_session_id}/permissions/reviews/{review_id}/authorize-retry":
+    "api.authorizeChildPermissionReviewRetry",
   "POST /sessions/{session_id}/permissions/{request_id}": "api.replyPermission",
   "PUT /sessions/{session_id}/presentation": "api.updatePresentation",
   "POST /sessions/{session_id}/regenerate": "api.regenerateRun",

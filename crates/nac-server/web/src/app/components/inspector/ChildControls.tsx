@@ -36,13 +36,14 @@ interface ChildControlsProps {
 function ChildPermissionBridge({ child }: { child: TraditionalChildRecord }) {
   const running = child.status === "running";
   useDelegatedPermissionStream(child.child_session_id, running);
-  if (!running) return null;
   return (
     <PermissionControls
       sessionId={child.child_session_id}
       behavior="direct"
       label={`Permissions for ${child.description}`}
       autoApprovalAvailable={false}
+      retryParentSessionId={child.parent_session_id}
+      poll={running}
       requesterLabel={`child agent “${child.description}”`}
     />
   );

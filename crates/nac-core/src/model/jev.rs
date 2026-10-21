@@ -11,11 +11,15 @@ use anyhow::{anyhow, Result};
 use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
 
+use super::reviewer_policy::{self, ReviewProfile};
 use super::{arcee, backend, BackendKind, ARCEE_AUTH_CANONICAL_BASE_URL};
 use crate::permissions::{
-    PermissionReviewFailureReason, PermissionReviewer, ReviewCategory, ReviewRequest,
-    ReviewUnavailable, ReviewVerdict, REVIEW_DEADLINE,
+    PermissionReviewFailureReason, PermissionReviewer, ReviewRequest, ReviewUnavailable,
+    ReviewVerdict, REVIEW_DEADLINE,
 };
+
+#[cfg(test)]
+use crate::permissions::ReviewCategory;
 
 /// Shown when Approve for me is selected without an Arcee credential.
 pub const ARCEE_REVIEW_CREDENTIAL_REQUIRED: &str =
@@ -29,22 +33,6 @@ const ARCEE_API_KEY_ENV: &str = "ARCEE_API_KEY";
 const REVIEW_BASE_URL_ENV: &str = "NAC_REVIEW_ARCEE_BASE_URL";
 const DECISIONS_PATH: &str = "/api/alpha/decisions";
 const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(14);
-
-/// An approval needs both a confident yes and a confident routine category;
-/// a confident non-routine category rejects.
-///
-/// A Podman sandbox whose only writable host mounts are the workspace and
-/// its Git metadata ("podman", not "podman_with_host_mounts") takes lower
-/// approval thresholds. They were set from a live corpus run
-/// (jev_corpus_tests.rs) in which Jev scored routine Podman builds and tests
-/// at safe 0.55-0.78 and every should-block command at safe 0.48 or below
-/// with routine 0.36 or below. Re-check them whenever the Jev model changes.
-const ALLOW_MIN: f64 = 0.85;
-const ROUTINE_MIN: f64 = 0.80;
-const PODMAN_ALLOW_MIN: f64 = 0.55;
-const PODMAN_ROUTINE_MIN: f64 = 0.60;
-const REJECT_CATEGORY_MIN: f64 = 0.60;
-const REJECT_NOUL_MAX: f64 = 0.20;
 
 #[derive(Clone, Debug)]
 pub struct JevReviewer {
@@ -105,7 +93,7 @@ fn decisions_url(base_url: &str) -> Result<String> {
     ))
 }
 
-fn rubric() -> Value {
+pub(super) fn rubric() -> Value {
     json!({
         "safe_to_allow_once": {
             "type": "noul",
@@ -130,95 +118,13 @@ fn rubric() -> Value {
     })
 }
 
-/// Applies the decision rule to a parsed Decisions response. Anything that
-/// does not match the expected shape is malformed and never an approval.
+/// Compatibility helper for existing legacy parser and corpus tests.
+#[cfg(test)]
 fn decide(
     response: &Value,
     backend: &str,
 ) -> std::result::Result<ReviewVerdict, ReviewUnavailable> {
-    let malformed = |detail: &str| {
-        ReviewUnavailable::new(
-            PermissionReviewFailureReason::InvalidResponse,
-            format!("malformed Decisions response: {detail}"),
-        )
-    };
-    let answers = response
-        .get("answers")
-        .and_then(Value::as_object)
-        .ok_or_else(|| malformed("missing answers"))?;
-    let safe = answers
-        .get("safe_to_allow_once")
-        .filter(|answer| answer.get("type").and_then(Value::as_str) == Some("noul"))
-        .and_then(|answer| answer.get("noul"))
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
-        .ok_or_else(|| malformed("safe_to_allow_once"))?;
-    let risk = answers
-        .get("risk")
-        .filter(|answer| answer.get("type").and_then(Value::as_str) == Some("choice"))
-        .ok_or_else(|| malformed("risk"))?;
-    let category = risk
-        .get("choice")
-        .and_then(Value::as_str)
-        .and_then(ReviewCategory::parse)
-        .ok_or_else(|| malformed("risk choice"))?;
-    let probability = |value: &Value, field: &str| {
-        value
-            .as_f64()
-            .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
-            .ok_or_else(|| malformed(field))
-    };
-    let mut confidence = None;
-    if let Some(probabilities) = risk.get("probabilities").filter(|value| !value.is_null()) {
-        // The whole distribution must be well formed, not just the chosen
-        // entry: known categories only, each a probability, together at
-        // most one, with the chosen category the most likely.
-        let probabilities = probabilities
-            .as_object()
-            .filter(|map| !map.is_empty())
-            .ok_or_else(|| malformed("risk probabilities"))?;
-        let mut total = 0.0;
-        let mut best = (None, -1.0);
-        for (key, value) in probabilities {
-            let key =
-                ReviewCategory::parse(key).ok_or_else(|| malformed("risk probability key"))?;
-            let value = probability(value, "risk probability")?;
-            total += value;
-            if value > best.1 {
-                best = (Some(key), value);
-            }
-        }
-        if total > 1.05 {
-            return Err(malformed("risk probabilities sum to more than one"));
-        }
-        let chosen = probabilities
-            .get(category.as_str())
-            .ok_or_else(|| malformed("risk probabilities omit the choice"))
-            .and_then(|value| probability(value, "risk probability"))?;
-        if best.0 != Some(category) && best.1 > chosen {
-            return Err(malformed("risk choice is not the most likely category"));
-        }
-        confidence = Some(chosen);
-    }
-    if let Some(value) = risk.get("confidence").filter(|value| !value.is_null()) {
-        let value = probability(value, "risk confidence")?;
-        confidence = Some(confidence.map_or(value, |chosen: f64| chosen.min(value)));
-    }
-    let confidence = confidence.unwrap_or(0.0);
-
-    let (allow_min, routine_min) = if backend == "podman" {
-        (PODMAN_ALLOW_MIN, PODMAN_ROUTINE_MIN)
-    } else {
-        (ALLOW_MIN, ROUTINE_MIN)
-    };
-    if category == ReviewCategory::Routine && safe >= allow_min && confidence >= routine_min {
-        return Ok(ReviewVerdict::ApproveOnce);
-    }
-    let rejecting_category = !matches!(category, ReviewCategory::Routine | ReviewCategory::Unclear);
-    if rejecting_category && (confidence >= REJECT_CATEGORY_MIN || safe <= REJECT_NOUL_MAX) {
-        return Ok(ReviewVerdict::Reject(category));
-    }
-    Ok(ReviewVerdict::Uncertain(Some(category)))
+    reviewer_policy::decide(ReviewProfile::JevLegacy, response, backend)
 }
 
 /// Token and cost accounting reported by Decisions, when present.
@@ -345,6 +251,28 @@ impl JevReviewer {
         &self,
         request: &ReviewRequest,
     ) -> std::result::Result<(ReviewVerdict, DecisionsUsage), ReviewUnavailable> {
+        self.review_inner_with_profile(request, ReviewProfile::JevLegacy)
+            .await
+    }
+
+    pub(super) fn for_profile(profile: ReviewProfile) -> Self {
+        Self {
+            model: profile.model().to_owned(),
+        }
+    }
+
+    pub(super) async fn review_inner_with_profile(
+        &self,
+        request: &ReviewRequest,
+        profile: ReviewProfile,
+    ) -> std::result::Result<(ReviewVerdict, DecisionsUsage), ReviewUnavailable> {
+        // Model/profile binding is checked before credential access or network.
+        if profile != ReviewProfile::JevLegacy && self.model != profile.model() {
+            return Err(ReviewUnavailable::new(
+                PermissionReviewFailureReason::ModelUnavailable,
+                "reviewer model does not match the selected profile",
+            ));
+        }
         // Credential discovery reads files; keep it off the async workers.
         let credentials = tokio::task::spawn_blocking(resolve_credentials)
             .await
@@ -372,12 +300,12 @@ impl JevReviewer {
         let body = json!({
             "model": self.model,
             "state": state,
-            "questions": rubric(),
+            "questions": reviewer_policy::questions(profile, rubric())?,
         });
         let mut last = None;
         for credential in &credentials {
             match self
-                .review_with(&client, credential, &body, request.backend)
+                .review_with_profile(&client, credential, &body, request.backend, profile)
                 .await
             {
                 Ok(result) => return Ok(result),
@@ -393,12 +321,25 @@ impl JevReviewer {
 
     /// One review with one credential. A credential failure lets the caller
     /// try the next credential; any other failure is final.
+    #[cfg(test)]
     async fn review_with(
         &self,
         client: &reqwest::Client,
         credential: &Credential,
         body: &Value,
         backend: &str,
+    ) -> std::result::Result<(ReviewVerdict, DecisionsUsage), ReviewFailure> {
+        self.review_with_profile(client, credential, body, backend, ReviewProfile::JevLegacy)
+            .await
+    }
+
+    async fn review_with_profile(
+        &self,
+        client: &reqwest::Client,
+        credential: &Credential,
+        body: &Value,
+        backend: &str,
+        profile: ReviewProfile,
     ) -> std::result::Result<(ReviewVerdict, DecisionsUsage), ReviewFailure> {
         let url = decisions_url(credential.base_url()).map_err(|error| {
             ReviewFailure::Credential(format!("Arcee endpoint rejected: {error}"))
@@ -417,7 +358,7 @@ impl JevReviewer {
         loop {
             match self.attempt(client, &url, &bearer, body).await {
                 Ok(response) => {
-                    return decide(&response, backend)
+                    return reviewer_policy::decide(profile, &response, backend)
                         .map(|verdict| (verdict, usage(&response)))
                         .map_err(ReviewFailure::Other)
                 }
@@ -508,3 +449,7 @@ mod tests;
 #[cfg(test)]
 #[path = "jev_corpus_tests.rs"]
 mod corpus_tests;
+
+#[cfg(test)]
+#[path = "reviewer_calibration_tests.rs"]
+mod calibration;

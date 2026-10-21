@@ -211,15 +211,12 @@ struct PendingPermissionGuard {
 }
 
 struct PermissionWaiterLiveness {
-    live: Arc<StdMutex<bool>>,
+    live: Arc<crate::store::PermissionGrantWaiter>,
 }
 
 impl Drop for PermissionWaiterLiveness {
     fn drop(&mut self) {
-        *self
-            .live
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
+        self.live.abort();
     }
 }
 

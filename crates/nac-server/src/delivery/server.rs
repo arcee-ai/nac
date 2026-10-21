@@ -803,6 +803,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         ))
         .routes(routes!(delivery::delegation::get_traditional_child))
         .routes(routes!(delivery::delegation::cancel_traditional_child))
+        .routes(routes!(delivery::delegation::authorize_child_permission_review_retry))
         .routes(routes!(
             delivery::delegation::list_managed_orchestrators,
             delivery::delegation::start_managed_orchestrator
