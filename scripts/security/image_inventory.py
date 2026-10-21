@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import json
 import re
+import shlex
 
 
 class EvidenceError(ValueError):
@@ -40,7 +41,7 @@ def database(status, now):
 
 
 def runtimes(raw):
-    require(isinstance(raw, dict) and set(raw) == {"node", "go", "uv", "dpkg", "nac"},
+    require(isinstance(raw, dict) and set(raw) == {"node", "go", "uv", "dpkg", "nac", "os_release"},
             "incomplete runtime probe")
     versions = {}
     patterns = {"node": r"v(\d+\.\d+\.\d+)",
@@ -59,6 +60,28 @@ def runtimes(raw):
     return versions, packages
 
 
+def supported_debian(name, version):
+    require(name == "debian" and isinstance(version, str) and
+            re.fullmatch(r"12(?:\.\d+)?", version) is not None,
+            "unrecognized/unsupported Debian release; OS advisory coverage is incomplete")
+
+
+def os_release(raw):
+    require(isinstance(raw, str), "missing actual Debian OS release probe")
+    values = {}
+    for line in raw.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key in {"ID", "VERSION_ID", "VERSION_CODENAME"}:
+            require(key not in values, f"duplicate OS release field: {key}")
+            parsed = shlex.split(value)
+            require(len(parsed) == 1, f"malformed OS release field: {key}")
+            values[key] = parsed[0]
+    supported_debian(values.get("ID"), values.get("VERSION_ID"))
+    require(values.get("VERSION_ID") == "12" and values.get("VERSION_CODENAME") == "bookworm",
+            "actual Debian OS release does not match supported bookworm image")
+    return values
+
+
 def inventory(sbom, raw, image):
     require(sbom.get("descriptor", {}).get("name") == "syft", "not Syft JSON")
     source = sbom.get("source", {})
@@ -73,8 +96,12 @@ def inventory(sbom, raw, image):
                 "SBOM config identity mismatch")
     artifacts = sbom.get("artifacts")
     require(isinstance(artifacts, list) and artifacts, "empty/missing Syft inventory")
-    require(sbom.get("distro", {}).get("id") == "debian", "unrecognized OS inventory")
     versions, packages = runtimes(raw)
+    actual_distro = os_release(raw["os_release"])
+    distro = sbom.get("distro", {})
+    supported_debian(distro.get("id"), distro.get("versionID"))
+    require(distro.get("versionCodename") == actual_distro["VERSION_CODENAME"],
+            "SBOM Debian release differs from actual image OS release")
     debs = {(p.get("name"), p.get("version")) for p in artifacts if p.get("type") == "deb"}
     for name, version in packages:
         require((name.split(":")[0], version) in debs, f"OS package not inventoried: {name}@{version}")
@@ -83,7 +110,7 @@ def inventory(sbom, raw, image):
     require(nodes, "Node binary missing/mismatched in Syft inventory")
     require(any(any("a:nodejs:node.js:" in (c if isinstance(c, str) else c.get("cpe", ""))
                         for c in p.get("cpes", [])) for p in nodes), "Node advisory CPE missing")
-    return {"versions": versions, "os_packages": len(packages),
+    return {"versions": versions, "os_release": actual_distro, "os_packages": len(packages),
             "node_artifact_ids": [p["id"] for p in nodes],
             "go": "explicit Go stdlib OSV query", "uv": "explicit PyPI uv OSV query"}
 
@@ -92,6 +119,8 @@ def grype_findings(report, sbom):
     require(isinstance(report, dict) and isinstance(report.get("matches"), list),
             "malformed scanner results")
     require(report.get("descriptor", {}).get("name") == "grype", "not Grype results")
+    distro = report.get("distro", {})
+    supported_debian(distro.get("name"), distro.get("version"))
     known = {p["id"] for p in sbom["artifacts"]}
     findings = []
     for match in report["matches"]:

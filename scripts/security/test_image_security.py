@@ -18,10 +18,10 @@ import image_prepublication as publication
 
 IMAGE = "sha256:" + "1" * 64
 NOW = dt.datetime(2026, 10, 21, 12, tzinfo=dt.timezone.utc)
-RUNTIME = {"nac": "nac-web 0.1.0 (abcdef123456)", "node": "v24.22.1", "go": "go version go1.27.3 linux/amd64",
+RUNTIME = {"os_release": 'ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n', "nac": "nac-web 0.1.0 (abcdef123456)", "node": "v24.22.1", "go": "go version go1.27.3 linux/amd64",
            "uv": "uv 0.13.4 (abc 2026-10-20)", "dpkg": "base-files\t12.4+deb12u12"}
 SBOM = {"descriptor": {"name": "syft"}, "source": {"type": "image", "metadata": {"imageID": IMAGE}},
-        "distro": {"id": "debian"}, "artifacts": [
+        "distro": {"id": "debian", "versionID": "12", "versionCodename": "bookworm"}, "artifacts": [
             {"id": "os", "name": "base-files", "version": "12.4+deb12u12", "type": "deb"},
             {"id": "node", "name": "node", "version": "24.22.1", "type": "binary",
              "cpes": [{"cpe": "cpe:2.3:a:nodejs:node.js:24.22.1:*:*:*:*:*:*:*"}]}]}
@@ -48,6 +48,23 @@ class InventoryTests(unittest.TestCase):
                 inv.inventory(broken, RUNTIME, IMAGE)
         with self.assertRaises(ValueError):
             inv.inventory(SBOM, RUNTIME, "sha256:" + "2" * 64)
+
+    def test_unrecognized_or_mismatched_actual_os_release_fails(self):
+        for release in ('ID=debian\nVERSION_ID=unknown\nVERSION_CODENAME=bookworm',
+                        'ID=debian\nVERSION_ID=13\nVERSION_CODENAME=trixie',
+                        'ID=ubuntu\nVERSION_ID=12\nVERSION_CODENAME=bookworm', ''):
+            with self.subTest(release=release), self.assertRaises(ValueError):
+                inv.inventory(SBOM, dict(RUNTIME, os_release=release), IMAGE)
+        for distro in ({"id": "debian", "versionID": "unknown"},
+                       {"id": "debian", "versionID": "13", "versionCodename": "trixie"}):
+            with self.subTest(distro=distro), self.assertRaises(ValueError):
+                inv.inventory(dict(SBOM, distro=distro), RUNTIME, IMAGE)
+
+    def test_unrecognized_grype_distro_is_incomplete_even_with_no_matches(self):
+        report = {"descriptor": {"name": "grype"}, "matches": [],
+                  "distro": {"name": "debian", "version": "unknown"}}
+        with self.assertRaisesRegex(ValueError, "Debian"):
+            inv.grype_findings(report, SBOM)
 
     def test_containerd_identity_is_bound_to_requested_id_and_verified_config(self):
         sbom = copy.deepcopy(SBOM)
@@ -81,7 +98,7 @@ class InventoryTests(unittest.TestCase):
         matches = [{"artifact": SBOM["artifacts"][1], "vulnerability": {
                     "id": f"CVE-{severity}", "severity": severity, "fix": {"versions": ["25.0.0"]}}}
                    for severity in ("Low", "Medium", "High", "Critical", "Unknown")]
-        findings = inv.grype_findings({"descriptor": {"name": "grype"}, "matches": matches}, SBOM)
+        findings = inv.grype_findings({"descriptor": {"name": "grype"}, "distro": {"name": "debian", "version": "12"}, "matches": matches}, SBOM)
         self.assertEqual(len(findings), 5)
         self.assertEqual(findings[0]["context"], "managed-image")
         self.assertEqual(findings[0]["package"], "binary:node")
@@ -158,11 +175,13 @@ class DriverTests(unittest.TestCase):
 
     def test_daily_selection_rejects_pr_expired_and_foreign_evidence(self):
         run = {"id": 12, "event": "push", "head_branch": "dev", "status": "completed",
-               "conclusion": "failure", "head_sha": "a" * 40, "created_at": "2026-10-21T06:00:00Z",
+               "conclusion": "success", "path": rescan.PRODUCER, "head_sha": "a" * 40, "created_at": "2026-10-21T06:00:00Z",
                "head_repository": {"full_name": "arcee-ai/nac"}}
         artifact = {"name": "managed-image-security-" + "a" * 40, "expired": False}
         self.assertEqual(rescan.select_run([run], {12: [artifact]}, NOW)[0], run)
-        for replacement in ({"event": "pull_request"}, {"head_branch": "other"},
+        for replacement in ({"event": "pull_request"}, {"event": "workflow_dispatch"},
+                            {"path": ".github/workflows/managed-image.yml"},
+                            {"conclusion": "failure"}, {"head_branch": "other"},
                             {"created_at": "2026-10-01T00:00:00Z"},
                             {"head_repository": {"full_name": "fork/nac"}}):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):

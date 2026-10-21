@@ -9,11 +9,13 @@ import subprocess
 from image_inventory import require, timestamp, write_json
 from image_scan import ROOT, command
 
+PRODUCER = ".github/workflows/stable-release.yml"
+
 
 def select_run(runs, artifacts_by_run, now):
     for run in runs:
         if (run.get("event") != "push" or run.get("head_branch") != "dev" or
-            run.get("status") != "completed" or run.get("conclusion") not in {"success", "failure"} or
+            run.get("status") != "completed" or run.get("conclusion") != "success" or run.get("path") != PRODUCER or
             run.get("head_repository", {}).get("full_name") != "arcee-ai/nac"):
             continue
         age = (now - timestamp(run["created_at"])).total_seconds()

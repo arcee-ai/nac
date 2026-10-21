@@ -30,7 +30,10 @@ exception, or blanket OS exception is used.
 
 ## Inventory and advisory coverage
 
-Syft inventories the full image, including Debian's dpkg database. Every package
+Syft inventories the full image, including Debian's dpkg database. The actual
+`/etc/os-release` probe must identify Debian 12/bookworm, the Syft release must
+match it, and Grype must report that recognized Debian release. Unknown release
+metadata fails even if Grype exits successfully with zero findings. Every package
 reported by the image's dpkg probe must occur at the actual version in the SBOM.
 The gate executes fixed absolute Node, Go, and uv paths inside the exact image,
 with no network, no capabilities, a read-only root, and a bounded process count.
@@ -40,7 +43,8 @@ probed version with its Node.js CPE; Grype enables CPE matching.
 Syft's [binary catalog](https://oss.anchore.com/docs/capabilities/binary/) documents
 Node detection, but does not document uv detection. The gate therefore queries
 OSV explicitly for `Go:stdlib` and `PyPI:uv` at their probed versions, retaining
-both request and response. This maps the upstream uv release version to the PyPI
+both request and response. Upstream documents [PyPI distribution of uv](https://docs.astral.sh/uv/getting-started/installation/#pypi).
+This maps the upstream uv release version to the PyPI
 release of the same application; it is bounded application-advisory coverage,
 not a claim that every statically linked uv dependency has been inventoried.
 Go's bundled stdlib is checked even when Syft does not detect the installed Go
@@ -66,9 +70,10 @@ Keep SBOM, all raw findings (including lower severities), policy dispositions,
 runtime versions/advisories, image inspection/identity, tool/DB metadata, and
 result together. `bundle.json` hashes the unchanged SBOM/runtime/identity/coverage
 inputs for later rescans. Retain artifacts for 14 days; daily selection must use
-only completed trusted `dev` push runs with the expected per-SHA artifact, never
-a pull-request artifact. A failed security result remains eligible so new daily
-reports continue tracking the same red baseline; incomplete bundles fail validation.
+only successful trusted `dev` push runs from `.github/workflows/stable-release.yml`
+with the expected per-SHA artifact. PR, manual, other-workflow, failed, expired,
+and incomplete evidence cannot qualify. After a qualified image has been retained,
+new daily advisory findings fail/report without needing a new image build.
 A new scan result is useful even when vulnerabilities block: preserve evidence
 with an always-run artifact upload and visibly fail/report the job.
 

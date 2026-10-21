@@ -21,12 +21,15 @@ ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("image-tools.json")
 PROBE = r"""
 import json, subprocess
+from pathlib import Path
 commands = {"node": ["/usr/local/bin/node", "--version"],
             "go": ["/usr/local/go/bin/go", "version"],
             "uv": ["/usr/local/bin/uv", "--version"],
             "nac": ["/usr/local/bin/nac-web", "--version"],
             "dpkg": ["dpkg-query", "-W", "-f=${binary:Package}\t${Version}\n"]}
-print(json.dumps({k: subprocess.check_output(v, text=True).strip() for k,v in commands.items()}))
+evidence = {k: subprocess.check_output(v, text=True).strip() for k,v in commands.items()}
+evidence["os_release"] = Path("/etc/os-release").read_text()
+print(json.dumps(evidence))
 """
 
 

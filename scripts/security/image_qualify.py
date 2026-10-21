@@ -62,6 +62,21 @@ def qualify(output, cache, db):
             require(not blocking, "safe fixture now blocks; inspect new advisories, do not suppress the qualification")
         summaries[label] = {"node": version, "os": f"{name}@{package_version}",
                             "blocking": len(blocking), "findings": len(findings)}
+    unrecognized = output / "unknown-debian"
+    unrecognized.mkdir()
+    unknown_sbom = json.loads((output / "vulnerable/sbom.syft.json").read_text())
+    unknown_sbom["artifacts"] = [p for p in unknown_sbom["artifacts"] if p["type"] == "deb"]
+    unknown_sbom["distro"] = {"id": "debian", "version": "unknown", "versionID": "unknown"}
+    write_json(unrecognized / "sbom.syft.json", unknown_sbom)
+    unknown_report = scan_sbom(tools, unrecognized / "sbom.syft.json", unrecognized, env)
+    try:
+        grype_findings(unknown_report, unknown_sbom)
+    except ValueError as error:
+        require("Debian release" in str(error), "unexpected unrecognized-release failure")
+    else:
+        raise ValueError("unknown Debian release did not fail closed")
+    write_json(unrecognized / "rejection.json", {"gate": "rejected unknown Debian release",
+               "scanner_matches": len(unknown_report["matches"])})
     runtime_summary = {}
     for label, versions in [("vulnerable", {"go": "1.27.0", "uv": "0.12.1"}),
                             ("safe", {"go": "1.27.3", "uv": "0.13.4"})]:
@@ -87,7 +102,8 @@ def qualify(output, cache, db):
         raise ValueError("DB network failure did not fail closed")
     write_json(output / "qualification.json", {"qualified_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                "fixtures": summaries, "runtime_version_queries": runtime_summary,
-               "db_network_failure": "rejected with a cached young DB", "scope": "real Node binary detection and live OS/Node advisory matching"})
+               "db_network_failure": "rejected with a cached young DB",
+               "unknown_debian_release": "rejected independently of scanner exit/match count", "scope": "real Node binary detection and live OS/Node advisory matching"})
 
 
 if __name__ == "__main__":
