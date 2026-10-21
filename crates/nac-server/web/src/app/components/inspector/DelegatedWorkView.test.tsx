@@ -411,7 +411,7 @@ describe("selection and drafts", () => {
     expect(startChild).toHaveBeenCalledOnce();
   });
 
-  it("keeps a pending orchestrator continuation unsendable across a transcript round trip", async () => {
+  it("keeps a pending orchestrator continuation unsendable across a round trip, status change and switch", async () => {
     const reply = deferred<ManagedOrchestratorRecord>();
     startOrchestrator.mockReturnValue(reply.promise);
     const client = mount("direct-with-orchestrator");
@@ -425,10 +425,26 @@ describe("selection and drafts", () => {
     expect(draftBox("Send a message").value).toBe("Next audit pass");
     expect(screen.getByRole("button", { name: "Send" })).toHaveProperty("disabled", true);
     fireEvent.keyDown(draftBox("Send a message"), { key: "Enter" });
+
+    // Its status remount and a trip to another subagent leave it in flight too.
+    act(() => {
+      client.setQueryData(queryKeys.managedOrchestrators("parent"), [
+        { ...orchestrator, status: "running", version: 3 },
+      ]);
+    });
+    const box = await waitFor(() => draftBox("Steer a message"));
+    expect(box.value).toBe("Next audit pass");
+    expect(box.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("button", { name: "Review permissions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
+    expect(draftBox("Steer a message").disabled).toBe(true);
     expect(startOrchestrator).toHaveBeenCalledOnce();
 
     await act(async () => reply.resolve(orchestrator));
-    expect(draftBox("Send a message").value).toBe("");
+    expect(anyDraftBox().value).toBe("");
+    expect(startOrchestrator).toHaveBeenCalledOnce();
   });
 
   it("lets another subagent send while one request is pending, without replaying it", async () => {
