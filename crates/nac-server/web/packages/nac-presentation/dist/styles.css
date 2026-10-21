@@ -85,9 +85,6 @@
       "Segoe UI Symbol", "Noto Color Emoji";
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
       "Courier New", monospace;
-    --color-indigo-300: oklch(78.5% .115 274.713);
-    --color-indigo-400: oklch(67.3% .182 276.935);
-    --color-indigo-800: oklch(39.8% .195 277.366);
     --spacing: .25rem;
     --text-xs: .75rem;
     --text-xs--line-height: calc(1 / .75);
@@ -95,8 +92,6 @@
     --text-sm--line-height: calc(1.25 / .875);
     --text-base: 1rem;
     --text-base--line-height: calc(1.5 / 1);
-    --text-lg: 1.125rem;
-    --text-lg--line-height: calc(1.75 / 1.125);
     --text-xl: 1.25rem;
     --text-xl--line-height: calc(1.75 / 1.25);
     --font-weight-normal: 400;
@@ -863,10 +858,6 @@
     margin-top: calc(var(--spacing) * 4);
   }
 
-[data-nac-runtime]:is(.mt-\[1px\]), [data-nac-runtime] .mt-\[1px\] {
-    margin-top: 1px;
-  }
-
 [data-nac-runtime]:is(.mt-\[2px\]), [data-nac-runtime] .mt-\[2px\] {
     margin-top: 2px;
   }
@@ -1429,16 +1420,8 @@
     width: calc(var(--spacing) * 8);
   }
 
-[data-nac-runtime]:is(.w-9), [data-nac-runtime] .w-9 {
-    width: calc(var(--spacing) * 9);
-  }
-
 [data-nac-runtime]:is(.w-10), [data-nac-runtime] .w-10 {
     width: calc(var(--spacing) * 10);
-  }
-
-[data-nac-runtime]:is(.w-11), [data-nac-runtime] .w-11 {
-    width: calc(var(--spacing) * 11);
   }
 
 [data-nac-runtime]:is(.w-12), [data-nac-runtime] .w-12 {
@@ -1752,11 +1735,6 @@
     translate: var(--nac-presentation-tw-translate-x) var(--nac-presentation-tw-translate-y);
   }
 
-[data-nac-runtime]:is(.translate-x-5), [data-nac-runtime] .translate-x-5 {
-    --nac-presentation-tw-translate-x: calc(var(--spacing) * 5);
-    translate: var(--nac-presentation-tw-translate-x) var(--nac-presentation-tw-translate-y);
-  }
-
 [data-nac-runtime]:is(.translate-x-\[-30px\]), [data-nac-runtime] .translate-x-\[-30px\] {
     --nac-presentation-tw-translate-x: -30px;
     translate: var(--nac-presentation-tw-translate-x) var(--nac-presentation-tw-translate-y);
@@ -1878,10 +1856,6 @@
 
 [data-nac-runtime]:is(.animate-spin), [data-nac-runtime] .animate-spin {
     animation: var(--animate-spin);
-  }
-
-[data-nac-runtime]:is(.cursor-auto), [data-nac-runtime] .cursor-auto {
-    cursor: auto;
   }
 
 [data-nac-runtime]:is(.cursor-col-resize), [data-nac-runtime] .cursor-col-resize {
@@ -2438,10 +2412,6 @@
     border-color: var(--color-border-accent-primary);
   }
 
-[data-nac-runtime]:is(.border-danger-muted), [data-nac-runtime] .border-danger-muted {
-    border-color: var(--color-border-danger-muted);
-  }
-
 [data-nac-runtime]:is(.border-danger-primary), [data-nac-runtime] .border-danger-primary {
     border-color: var(--color-border-danger-primary);
   }
@@ -2460,14 +2430,6 @@
 
 [data-nac-runtime]:is(.border-error-secondary), [data-nac-runtime] .border-error-secondary {
     border-color: var(--color-border-error-secondary);
-  }
-
-[data-nac-runtime]:is(.border-indigo-300), [data-nac-runtime] .border-indigo-300 {
-    border-color: var(--color-indigo-300);
-  }
-
-[data-nac-runtime]:is(.border-info-muted), [data-nac-runtime] .border-info-muted {
-    border-color: var(--color-border-info-muted);
   }
 
 [data-nac-runtime]:is(.border-info-primary), [data-nac-runtime] .border-info-primary {
@@ -2492,10 +2454,6 @@
 
 [data-nac-runtime]:is(.border-secondary-inversed), [data-nac-runtime] .border-secondary-inversed {
     border-color: var(--color-border-secondary-inversed);
-  }
-
-[data-nac-runtime]:is(.border-success-muted), [data-nac-runtime] .border-success-muted {
-    border-color: var(--color-border-success-muted);
   }
 
 [data-nac-runtime]:is(.border-success-primary), [data-nac-runtime] .border-success-primary {
@@ -2582,10 +2540,6 @@
     background-color: var(--color-bg-danger-secondary);
   }
 
-[data-nac-runtime]:is(.bg-danger-tertiary), [data-nac-runtime] .bg-danger-tertiary {
-    background-color: var(--color-bg-danger-tertiary);
-  }
-
 [data-nac-runtime]:is(.bg-divider-muted), [data-nac-runtime] .bg-divider-muted {
     background-color: var(--color-bg-divider-muted);
   }
@@ -2648,10 +2602,6 @@
 
 [data-nac-runtime]:is(.bg-error-tertiary), [data-nac-runtime] .bg-error-tertiary {
     background-color: var(--color-bg-error-tertiary);
-  }
-
-[data-nac-runtime]:is(.bg-indigo-400), [data-nac-runtime] .bg-indigo-400 {
-    background-color: var(--color-indigo-400);
   }
 
 [data-nac-runtime]:is(.bg-info-inverse), [data-nac-runtime] .bg-info-inverse {
@@ -2734,10 +2684,6 @@
 
 [data-nac-runtime]:is(.bg-success-secondary), [data-nac-runtime] .bg-success-secondary {
     background-color: var(--color-bg-success-secondary);
-  }
-
-[data-nac-runtime]:is(.bg-success-tertiary), [data-nac-runtime] .bg-success-tertiary {
-    background-color: var(--color-bg-success-tertiary);
   }
 
 [data-nac-runtime]:is(.bg-transparent), [data-nac-runtime] .bg-transparent {
@@ -2885,10 +2831,6 @@
     padding-inline: calc(var(--spacing) * 8);
   }
 
-[data-nac-runtime]:is(.px-\[8px\]), [data-nac-runtime] .px-\[8px\] {
-    padding-inline: 8px;
-  }
-
 [data-nac-runtime]:is(.\!py-0\.5), [data-nac-runtime] .\!py-0\.5 {
     padding-block: calc(var(--spacing) * .5) !important;
   }
@@ -2931,10 +2873,6 @@
 
 [data-nac-runtime]:is(.py-\[2px\]), [data-nac-runtime] .py-\[2px\] {
     padding-block: 2px;
-  }
-
-[data-nac-runtime]:is(.py-\[3px\]), [data-nac-runtime] .py-\[3px\] {
-    padding-block: 3px;
   }
 
 [data-nac-runtime]:is(.pt-0), [data-nac-runtime] .pt-0 {
@@ -3021,10 +2959,6 @@
     padding-right: calc(var(--spacing) * 6);
   }
 
-[data-nac-runtime]:is(.pr-7), [data-nac-runtime] .pr-7 {
-    padding-right: calc(var(--spacing) * 7);
-  }
-
 [data-nac-runtime]:is(.pr-9), [data-nac-runtime] .pr-9 {
     padding-right: calc(var(--spacing) * 9);
   }
@@ -3033,16 +2967,8 @@
     padding-right: calc(var(--spacing) * 10);
   }
 
-[data-nac-runtime]:is(.pr-11), [data-nac-runtime] .pr-11 {
-    padding-right: calc(var(--spacing) * 11);
-  }
-
 [data-nac-runtime]:is(.pr-12), [data-nac-runtime] .pr-12 {
     padding-right: calc(var(--spacing) * 12);
-  }
-
-[data-nac-runtime]:is(.pr-14), [data-nac-runtime] .pr-14 {
-    padding-right: calc(var(--spacing) * 14);
   }
 
 [data-nac-runtime]:is(.pr-\[40px\]), [data-nac-runtime] .pr-\[40px\] {
@@ -3180,11 +3106,6 @@
 [data-nac-runtime]:is(.text-base), [data-nac-runtime] .text-base {
     font-size: var(--text-base);
     line-height: var(--nac-presentation-tw-leading, var(--text-base--line-height));
-  }
-
-[data-nac-runtime]:is(.text-lg), [data-nac-runtime] .text-lg {
-    font-size: var(--text-lg);
-    line-height: var(--nac-presentation-tw-leading, var(--text-lg--line-height));
   }
 
 [data-nac-runtime]:is(.text-sm), [data-nac-runtime] .text-sm {
@@ -3368,14 +3289,6 @@
 
 [data-nac-runtime]:is(.text-error-primary), [data-nac-runtime] .text-error-primary {
     color: var(--color-text-error-primary);
-  }
-
-[data-nac-runtime]:is(.text-error-secondary), [data-nac-runtime] .text-error-secondary {
-    color: var(--color-text-error-secondary);
-  }
-
-[data-nac-runtime]:is(.text-indigo-800), [data-nac-runtime] .text-indigo-800 {
-    color: var(--color-indigo-800);
   }
 
 [data-nac-runtime]:is(.text-info-primary), [data-nac-runtime] .text-info-primary {
@@ -3571,11 +3484,6 @@
 
 [data-nac-runtime]:is(.shadow-lg), [data-nac-runtime] .shadow-lg {
     --nac-presentation-tw-shadow: var(--shadow-lg);
-    box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
-  }
-
-[data-nac-runtime]:is(.shadow-md), [data-nac-runtime] .shadow-md {
-    --nac-presentation-tw-shadow: var(--shadow-md);
     box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
   }
 
@@ -3842,16 +3750,6 @@
     opacity: 1;
   }
 
-[data-nac-runtime]:is(.group-focus-visible\:outline:is(:where(.group):focus-visible *)), [data-nac-runtime] .group-focus-visible\:outline:is(:where(.group):focus-visible *) {
-    outline-style: var(--nac-presentation-tw-outline-style);
-    outline-width: 1px;
-  }
-
-[data-nac-runtime]:is(.group-focus-visible\:outline-2:is(:where(.group):focus-visible *)), [data-nac-runtime] .group-focus-visible\:outline-2:is(:where(.group):focus-visible *) {
-    outline-style: var(--nac-presentation-tw-outline-style);
-    outline-width: 2px;
-  }
-
 [data-nac-runtime]:is(.group-active\:bg-btn-ghost-pressed:is(:where(.group):active *)), [data-nac-runtime] .group-active\:bg-btn-ghost-pressed:is(:where(.group):active *) {
     background-color: var(--color-bg-btn-ghost-pressed);
   }
@@ -3880,16 +3778,6 @@
     opacity: 1;
   }
 
-[data-nac-runtime]:is(.peer-focus-visible\:outline:is(:where(.peer):focus-visible ~ *)), [data-nac-runtime] .peer-focus-visible\:outline:is(:where(.peer):focus-visible ~ *) {
-    outline-style: var(--nac-presentation-tw-outline-style);
-    outline-width: 1px;
-  }
-
-[data-nac-runtime]:is(.peer-focus-visible\:outline-2:is(:where(.peer):focus-visible ~ *)), [data-nac-runtime] .peer-focus-visible\:outline-2:is(:where(.peer):focus-visible ~ *) {
-    outline-style: var(--nac-presentation-tw-outline-style);
-    outline-width: 2px;
-  }
-
 [data-nac-runtime] .placeholder\:whitespace-nowrap::placeholder {
     white-space: nowrap;
   }
@@ -3899,10 +3787,6 @@
   }
 
 @media (hover: hover) {
-    [data-nac-runtime]:is(.hover\:border-tertiary:hover), [data-nac-runtime] .hover\:border-tertiary:hover {
-      border-color: var(--color-border-tertiary);
-    }
-
     [data-nac-runtime]:is(.hover\:bg-btn-ghost-accent-highlighted-hovered:hover), [data-nac-runtime] .hover\:bg-btn-ghost-accent-highlighted-hovered:hover {
       background-color: var(--color-bg-btn-ghost-accent-highlighted-hovered);
     }
@@ -3913,14 +3797,6 @@
 
     [data-nac-runtime]:is(.hover\:bg-btn-ghost-hovered:hover), [data-nac-runtime] .hover\:bg-btn-ghost-hovered:hover {
       background-color: var(--color-bg-btn-ghost-hovered);
-    }
-
-    [data-nac-runtime]:is(.hover\:bg-btn-secondary-accent-hovered:hover), [data-nac-runtime] .hover\:bg-btn-secondary-accent-hovered:hover {
-      background-color: var(--color-bg-btn-secondary-accent-hovered);
-    }
-
-    [data-nac-runtime]:is(.hover\:bg-btn-secondary-hovered:hover), [data-nac-runtime] .hover\:bg-btn-secondary-hovered:hover {
-      background-color: var(--color-bg-btn-secondary-hovered);
     }
 
     [data-nac-runtime]:is(.hover\:bg-elevation-level-1:hover), [data-nac-runtime] .hover\:bg-elevation-level-1:hover {
