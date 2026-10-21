@@ -178,9 +178,10 @@
   /* fill / Buttons */
   --color-fill-btn-primary: var(--gray-900);
   --color-fill-btn-primary-disabled: var(--gray-500);
+  /* Accent and destructive icons follow their label ramps under Text / Buttons. */
   --color-fill-btn-accent: var(--brand-300);
-  --color-fill-btn-accent-hovered: var(--brand-400);
-  --color-fill-btn-accent-pressed: var(--brand-450);
+  --color-fill-btn-accent-hovered: var(--brand-200);
+  --color-fill-btn-accent-pressed: var(--brand-100);
   --color-fill-btn-accent-muted: var(--brand-trans-500);
 
   --color-fill-btn-secondary: var(--gray-200);
@@ -190,8 +191,8 @@
   --color-fill-btn-secondary-disabled: var(--white-trans-300);
 
   --color-fill-btn-destructive: var(--red-300);
-  --color-fill-btn-destructive-hovered: var(--red-400);
-  --color-fill-btn-destructive-pressed: var(--red-500);
+  --color-fill-btn-destructive-hovered: var(--red-200);
+  --color-fill-btn-destructive-pressed: var(--red-100);
   --color-fill-btn-destructive-disabled: var(--red-trans-400);
 
   /* fill / Danger */
@@ -239,9 +240,12 @@
   /* Text / Buttons */
   --color-text-btn-primary: var(--black);
   --color-text-btn-primary-disabled: var(--gray-500);
+  /* Accent and destructive labels lighten on hover and press. The Telos pressed
+     accent and hovered and pressed destructive reds fall below 4.5:1 on the
+     tinted fills. */
   --color-text-btn-accent: var(--brand-300);
-  --color-text-btn-accent-hovered: var(--brand-400);
-  --color-text-btn-accent-pressed: var(--brand-450);
+  --color-text-btn-accent-hovered: var(--brand-200);
+  --color-text-btn-accent-pressed: var(--brand-100);
   --color-text-btn-accent-disabled: var(--brand-trans-500);
 
   --color-text-btn-secondary: var(--gray-150);
@@ -250,8 +254,8 @@
   --color-text-btn-secondary-disabled: var(--white-trans-400);
 
   --color-text-btn-destructive: var(--red-300);
-  --color-text-btn-destructive-hovered: var(--red-400);
-  --color-text-btn-destructive-pressed: var(--red-500);
+  --color-text-btn-destructive-hovered: var(--red-200);
+  --color-text-btn-destructive-pressed: var(--red-100);
   --color-text-btn-destructive-disabled: var(--red-trans-400);
 
   /* Text / Danger */
