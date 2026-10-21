@@ -381,6 +381,27 @@ describe("selection and drafts", () => {
     expect(anyDraftBox().disabled).toBe(false);
   });
 
+  it("does not stop a subagent when Steer is clicked twice", async () => {
+    const reply = deferred<TraditionalChildRecord>();
+    startChild.mockReturnValue(reply.promise);
+    mount("direct");
+    fireEvent.change(draftBox("Steer a message"), { target: { value: "Check the grant" } });
+    const button = screen.getByRole("button", { name: "Steer" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    fireEvent.submit(draftBox("Steer a message").form!);
+    await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
+
+    // The button that turned into Stop stays inert until this composer's steer settles.
+    expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty("disabled", true);
+    expect(cancelChild).not.toHaveBeenCalled();
+
+    await act(async () => reply.resolve(child));
+    expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty("disabled", false);
+    expect(startChild).toHaveBeenCalledOnce();
+    expect(cancelChild).not.toHaveBeenCalled();
+  });
+
   it("keeps a pending continuation unsendable when its target starts running", async () => {
     const finished = { ...child, status: "completed" as const, report: "Done.", version: 4 };
     const reply = deferred<TraditionalChildRecord>();

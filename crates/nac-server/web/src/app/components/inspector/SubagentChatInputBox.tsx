@@ -83,6 +83,7 @@ export function SubagentChatInputBox({
       className="flex w-full flex-col gap-4 rounded-[8px] bg-elevation-level-2 p-4 shadow-2xl"
       onSubmit={(event) => {
         event.preventDefault();
+        if (busy) return;
         if (running && !sendable) onStop();
         else if (sendable) onSubmit();
       }}

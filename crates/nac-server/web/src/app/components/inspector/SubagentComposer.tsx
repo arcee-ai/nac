@@ -55,7 +55,9 @@ export function SubagentComposer({
   const sending = drafts.useSubmitting(target.id);
   const [background, setBackground] = useState(target.background);
   const running = target.status === "running";
-  const busy = cancelChild.isPending || cancelOrchestrator.isPending;
+  // Inert until its own send settles, so a second click on the Steer-turned-Stop button can't cancel.
+  const [sentHere, setSentHere] = useState(false);
+  const busy = (sending && sentHere) || cancelChild.isPending || cancelOrchestrator.isPending;
 
   const submit = async () => {
     const submitted = drafts.get(target.id);
@@ -63,6 +65,7 @@ export function SubagentComposer({
     if (!prompt) return;
     const finish = drafts.claimSubmission(target.id);
     if (!finish) return;
+    setSentHere(true);
     try {
       if (target.mode === "orchestrator") {
         await startOrchestrator.mutateAsync({
@@ -91,6 +94,7 @@ export function SubagentComposer({
       toast.error(`Unable to update the subagent: ${errorMessage(toRunError(error))}`);
     } finally {
       finish();
+      setSentHere(false);
     }
   };
 
