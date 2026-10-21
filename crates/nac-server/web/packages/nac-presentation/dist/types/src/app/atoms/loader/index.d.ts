@@ -10,10 +10,6 @@ export declare enum LoaderSize {
     X3Large = 40,
     XLarge = 48
 }
-/** 16px, same as {@link LoaderSize.XSmall}. Existing call sites use this name. */
-export declare namespace LoaderSize {
-    const Micro = XSmall;
-}
 /** CSS color for the spinning glyph; the icon path renders with currentColor. */
 export declare enum LoaderVariant {
     Brand = "var(--color-fill-accent-primary)",

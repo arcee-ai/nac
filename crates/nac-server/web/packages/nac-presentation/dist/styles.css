@@ -4615,7 +4615,8 @@
     0 0 0 1px #3036360a;
   --shadow-convex: 0 -1px 0 0 #3036360f inset, 0 0 0 1px #3036361a inset;
   --shadow-concave: 0 1px 0 0 #3036360f inset, 0 0 0 1px #3036361a inset;
-  --left-sidebar-open: 2px 0 16px 0 #01505014, 1px 0 0 0 #4768680f;
+  --shadow-range-knob: 0 1px 2px 0 #12243433, 0 0 1px 1px #0000001a;
+  --left-sidebar-open: 2px 0 16px 0 #30363614, 1px 0 0 0 #3036360f;
 }
 
 [data-nac-runtime]:is(.dark), [data-nac-runtime] .dark {
@@ -4842,8 +4843,9 @@
     0 14px 46px 0 #00000080, 0 1px 0 0 #ffffff08 inset;
   --shadow-convex: 0 0 0 1px #ffffff1a inset, 0 1px 0 0 #ffffff08 inset;
   --shadow-concave: 0 0 0 1px #ffffff1a inset, 0 -1px 0 0 #ffffff08 inset;
-  --left-sidebar-open: -1px 0 0 0 #ffffff0f inset, 0 9px 36px 0 #0b141473,
-    0 3px 10px 0 #0b141473;
+  --shadow-range-knob: 0 1px 2px 0 #12243433, 0 0 1px 1px #0000001a;
+  --left-sidebar-open: -1px 0 0 0 #ffffff0f inset, 0 9px 36px 0 #00000073,
+    0 3px 10px 0 #00000073;
 }
 
 [data-nac-runtime]:is(.title), [data-nac-runtime] .title {
@@ -6123,7 +6125,7 @@
 [data-nac-runtime]:is(.range-knob), [data-nac-runtime] .range-knob {
   width: 12px;
   height: 12px;
-  box-shadow: 0 1px 2px #12243433, 0 0 1px 1px #0000001a;
+  box-shadow: var(--shadow-range-knob);
 }
 
 @media (max-width: 767.98px) {
