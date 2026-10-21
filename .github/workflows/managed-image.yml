@@ -137,7 +137,8 @@ jobs:
         run: |
           python3 scripts/security/image_qualify.py --output image-security-fixtures \
             --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db"
-      - name: Scan the same tested image with reviewed policy
+      - name: Inventory the exact tested image
+        id: inventory
         if: ${{ !cancelled() && steps.image.outputs.id != '' && steps.smoke.outcome == 'success' }}
         env:
           IMAGE_ID: ${{ steps.image.outputs.id }}
@@ -145,13 +146,23 @@ jobs:
         run: |
           python3 scripts/security/image_scan.py --image "$IMAGE_ID" --source-revision "$SOURCE_SHA" \
             --trusted-policy trusted-image-policy/.github/security/exceptions.json \
-            --candidate-policy .github/security/exceptions.json --output image-security-evidence \
+            --candidate-policy .github/security/exceptions.json --output image-security-evidence/inventory --inventory-only \
+            --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db"
+      - name: Scan the same tested image with reviewed policy
+        if: ${{ !cancelled() && steps.image.outputs.id != '' && steps.inventory.outcome == 'success' }}
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.id }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          python3 scripts/security/image_scan.py --bundle image-security-evidence/inventory --image "$IMAGE_ID" --source-revision "$SOURCE_SHA" \
+            --trusted-policy trusted-image-policy/.github/security/exceptions.json \
+            --candidate-policy .github/security/exceptions.json --output image-security-evidence/security \
             --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db"
       - name: Report exact-image security findings
         if: always()
         run: |
-          if test -f image-security-evidence/report.md; then
-            cat image-security-evidence/report.md >> "$GITHUB_STEP_SUMMARY"
+          if test -f image-security-evidence/security/report.md; then
+            cat image-security-evidence/security/report.md >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'Image security incomplete: inspect failed inventory/tool/database/fixture steps.' >> "$GITHUB_STEP_SUMMARY"
           fi

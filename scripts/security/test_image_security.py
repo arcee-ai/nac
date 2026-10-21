@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import image_inventory as inv
@@ -215,26 +216,146 @@ class DriverTests(unittest.TestCase):
                "conclusion": "success", "path": rescan.PRODUCER, "head_sha": "a" * 40, "created_at": "2026-10-21T06:00:00Z",
                "head_repository": {"full_name": "arcee-ai/nac"}}
         artifact = {"name": "managed-image-security-" + "a" * 40, "expired": False}
-        jobs = {12: [{"name": name, "status": "completed", "conclusion": "success"}
-                     for name in rescan.PRODUCER_JOBS]}
+        jobs = {12: [{"name": rescan.INVENTORY_JOB, "status": "completed", "conclusion": "failure",
+                      "steps": [{"name": rescan.INVENTORY_STEP, "status": "completed", "conclusion": "success"}]}]}
         self.assertEqual(rescan.select_run([run], {12: [artifact]}, jobs, NOW)[0], run)
-        # An unrelated source/test failure must not prevent rescanning a verified image.
+        # Neither a red security verdict nor unrelated workflow failure hides the inventory.
         self.assertEqual(rescan.select_run([dict(run, conclusion="failure")], {12: [artifact]}, jobs, NOW)[0]["id"], 12)
+        self.assertEqual(rescan.select_run([dict(run, status="in_progress")], {12: [artifact]}, jobs, NOW)[0]["id"], 12)
         for outcome in ("failure", "skipped", "cancelled", None):
-            bad_jobs = {12: [dict(job, conclusion=outcome) for job in jobs[12]]}
+            bad_jobs = {12: [dict(jobs[12][0], steps=[{"name": rescan.INVENTORY_STEP,
+                                                   "status": "completed", "conclusion": outcome}])]}
             with self.assertRaises(ValueError):
                 rescan.select_run([run], {12: [artifact]}, bad_jobs, NOW)
         with self.assertRaises(ValueError):
             rescan.select_run([run], {12: [artifact]}, {}, NOW)
         for replacement in ({"event": "pull_request"}, {"event": "workflow_dispatch"},
                             {"path": ".github/workflows/managed-image.yml"},
-                            {"conclusion": "cancelled"}, {"head_branch": "other"},
+                            {"head_branch": "other"},
                             {"created_at": "2026-10-01T00:00:00Z"},
                             {"head_repository": {"full_name": "fork/nac"}}):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):
                 rescan.select_run([dict(run, **replacement)], {12: [artifact]}, jobs, NOW)
         with self.assertRaises(ValueError):
             rescan.select_run([run], {12: [dict(artifact, expired=True)]}, jobs, NOW)
+
+    def test_latest_red_inventory_cannot_fall_back_to_older_green(self):
+        newest = {"id": 2, "event": "push", "head_branch": "dev", "path": rescan.PRODUCER,
+                  "conclusion": "failure", "created_at": "2026-10-21T08:00:00Z", "head_sha": "a" * 40,
+                  "head_repository": {"full_name": "arcee-ai/nac"}}
+        old = dict(newest, id=1, conclusion="success", head_sha="b" * 40)
+        job = {"name": rescan.INVENTORY_JOB, "status": "completed", "conclusion": "failure", "steps": [
+            {"name": rescan.INVENTORY_STEP, "status": "completed", "conclusion": "success"}]}
+        jobs = {2: [job], 1: [dict(job, conclusion="success")]}
+        artifacts = {2: [{"name": "managed-image-security-" + "a" * 40, "expired": False}],
+                     1: [{"name": "managed-image-security-" + "b" * 40, "expired": False}]}
+        self.assertEqual(rescan.select_run([newest, old], artifacts, jobs, NOW)[0]["id"], 2)
+        for invalid in ([], [dict(artifacts[2][0], expired=True)]):
+            with self.assertRaises(ValueError):
+                rescan.select_run([newest, old], dict(artifacts, **{}) | {2: invalid}, jobs, NOW)
+        # A fresh evaluation of the selected image must still retain/block its advisory.
+        findings = inv.osv_findings({"vulns": [{"id": "GO-2026-6601", "affected": [
+            {"package": {"name": "toolchain", "ecosystem": "Go"}}]}]}, "toolchain", "Go", "1.27.0")
+        self.assertEqual(findings[0]["severity"], "Unknown")
+
+    def test_daily_selected_red_bundle_is_freshly_evaluated_and_corruption_cannot_fall_back(self):
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        newest = {"id": 2, "event": "push", "head_branch": "dev", "path": rescan.PRODUCER,
+                  "conclusion": "failure", "created_at": now, "head_sha": "a" * 40,
+                  "head_repository": {"full_name": "arcee-ai/nac"}}
+        job = {"name": rescan.INVENTORY_JOB, "status": "completed", "conclusion": "failure", "steps": [
+            {"name": rescan.INVENTORY_STEP, "status": "completed", "conclusion": "success"}]}
+        requests = []
+        for corruption in (None, "missing", "tampered"):
+            output = self.root / str(corruption)
+            def api(argv):
+                requests.append(argv)
+                endpoint = str(argv[2])
+                if argv[:3] == ["gh", "run", "download"]:
+                    bundle = Path(argv[-1]) / "inventory"
+                    bundle.mkdir(parents=True)
+                    if corruption != "missing":
+                        for name, value in [("sbom.syft.json", SBOM),
+                                            ("runtime.json", dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")),
+                                            ("identity.json", {"image": IMAGE, "source_revision": "a" * 40}),
+                                            ("coverage.json", {})]:
+                            inv.write_json(bundle / name, value)
+                        scan.bundle_manifest(bundle, IMAGE)
+                        if corruption == "tampered":
+                            (bundle / "runtime.json").write_text("{}")
+                    return ""
+                if "/jobs?" in endpoint:
+                    return json.dumps({"jobs": [job]})
+                if "/artifacts?" in endpoint:
+                    return json.dumps({"artifacts": [{"name": "managed-image-security-" + "a" * 40,
+                                                     "expired": False}]})
+                return json.dumps({"workflow_runs": [newest, dict(newest, id=1, head_sha="b" * 40)]})
+            def fresh_scan(argv):
+                args = argparse.Namespace(image=IMAGE, source_revision="a" * 40,
+                    bundle=output / "retained/inventory", output=output / "rescan",
+                    tool_cache=self.root, db_cache=self.root,
+                    trusted_policy=scan.ROOT / ".github/security/exceptions.json",
+                    candidate_policy=scan.ROOT / ".github/security/exceptions.json")
+                return SimpleNamespace(returncode=scan.run(args))
+            report = {"descriptor": {"name": "grype"}, "distro": {"name": "debian", "version": "12"}, "matches": []}
+            finding = {"package": "Go:toolchain", "advisory": "GO-2026-6601", "version": "1.27.0",
+                       "severity": "Unknown", "context": "managed-image"}
+            with patch.object(rescan, "command", side_effect=api), patch.object(
+                    rescan, "subprocess", SimpleNamespace(run=fresh_scan)), patch.object(
+                    scan, "install_tools", return_value=({}, {})), patch.object(
+                    scan, "scan_sbom", return_value=report) as scanner, patch.object(
+                    scan, "query_runtimes", return_value=[finding]) as runtime:
+                if corruption == "missing":
+                    with self.assertRaises(FileNotFoundError):
+                        rescan.rescan(output)
+                else:
+                    self.assertEqual(rescan.rescan(output), 1 if corruption is None else 2)
+                if corruption is None:
+                    scanner.assert_called_once()
+                    runtime.assert_called_once()
+                    self.assertEqual(json.loads((output / "rescan/result.json").read_text())["status"], "blocked")
+                else:
+                    scanner.assert_not_called()
+            self.assertFalse(any("/runs/1/" in str(call) or call[:4] == ["gh", "run", "download", "1"]
+                                 for call in requests))
+
+    def test_inventory_success_is_not_a_security_or_publication_pass(self):
+        inventory = self.root / "inventory"
+        args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=None, inventory_only=True,
+                                  output=inventory, tool_cache=self.root, db_cache=self.root)
+        raw = dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")
+        def inventory_command(argv, *, output=None, **kwargs):
+            if argv[:3] == ["docker", "image", "inspect"]:
+                result = json.dumps([{"Id": IMAGE, "Architecture": "amd64", "Os": "linux"}])
+            elif argv[:2] == ["docker", "run"]:
+                result = json.dumps(raw)
+            elif argv[0] == "syft":
+                inv.write_json(inventory / "sbom.syft.json", SBOM)
+                result = ""
+            else:
+                result = "unix:///fixture.sock"
+            if output:
+                output.write_text(result)
+            return result
+        with patch.object(scan, "command", side_effect=inventory_command), patch.object(
+                scan, "install_tools", return_value=({"syft": "syft"}, {})), patch.object(scan, "scan_sbom") as advisory:
+            self.assertEqual(scan.run(args), 0)
+        advisory.assert_not_called()
+        self.assertEqual(json.loads((inventory / "result.json").read_text())["status"], "inventoried")
+        publication_args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, output=inventory,
+                                              trusted_policy=self.root / "policy", candidate_policy=self.root / "policy")
+        with patch.object(publication, "command"), patch.object(publication.subprocess, "run") as child:
+            child.return_value.returncode = 0
+            with self.assertRaisesRegex(ValueError, "publication evidence mismatch"):
+                publication.gate(publication_args)
+        self.assertFalse((inventory / "publication-gate.json").exists())
+        # Later scanner installation failure leaves the trusted raw inventory intact.
+        args.bundle, args.inventory_only, args.output = inventory, False, self.root / "security"
+        with patch.object(scan, "install_tools", side_effect=OSError("scanner unavailable")):
+            self.assertEqual(scan.run(args), 2)
+        self.assertTrue((inventory / "bundle.json").is_file())
+        self.assertTrue((args.output / "bundle.json").is_file())
+        self.assertEqual(json.loads((args.output / "result.json").read_text())["status"], "error")
 
     def test_failed_security_prevents_publication_gate_receipt(self):
         args = argparse.Namespace(image=IMAGE, source_revision="a" * 40,

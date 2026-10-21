@@ -24,10 +24,20 @@ test('one loaded build binds the same immutable ID to smoke and scanning', () =>
   assert.equal(scan.env.IMAGE_ID, smoke.env.MANAGED_IMAGE);
   assert.ok(scan.run.includes('--image "$IMAGE_ID"'));
   assert.ok(scan.run.includes('--source-revision "$SOURCE_SHA"'));
-  assert.ok(steps.indexOf(scan) > steps.indexOf(smoke));
+  const inventory = steps.find(s => s.id === 'inventory');
+  assert.equal(inventory.name, 'Inventory the exact tested image');
+  assert.ok(inventory.run.includes('--inventory-only'));
+  assert.ok(inventory.run.includes('--output image-security-evidence/inventory'));
+  assert.ok(scan.run.includes('--bundle image-security-evidence/inventory'));
+  assert.ok(scan.run.includes('--output image-security-evidence/security'));
+  assert.ok(!scan.run.includes('--inventory-only'));
+  assert.ok(scan.if.includes("steps.inventory.outcome == 'success'"));
+  assert.ok(steps.indexOf(inventory) > steps.indexOf(smoke));
+  assert.ok(steps.indexOf(scan) > steps.indexOf(inventory));
   assert.ok(!steps.some(s => s['continue-on-error']));
   const artifact = steps.find(s => s.with?.name === 'managed-image-security-${{ needs.prepare.outputs.sha }}');
   assert.equal(artifact.if, 'always()');
+  assert.equal(artifact.with.path, 'image-security-evidence/');
   assert.equal(artifact.with['retention-days'], 14);
 });
 

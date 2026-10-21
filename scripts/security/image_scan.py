@@ -52,8 +52,11 @@ def download(url, limit=150 * 1024 * 1024, data=None):
     return result
 
 
-def install_tools(cache):
+def install_tools(cache, names=None):
     pins = json.loads(PINS.read_text())
+    require(names is None or set(names).issubset(pins), "unknown requested scanner tool")
+    if names is not None:
+        pins = {name: pin for name, pin in pins.items() if name in names}
     system = platform.system().lower()
     machine = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64"}.get(platform.machine())
     host = f"{system}_{machine}"
@@ -178,6 +181,8 @@ def run(args):
                 "source revision must be a full Git commit SHA")
         require(re.fullmatch(r"sha256:[0-9a-f]{64}", args.image) is not None,
                 "use an immutable loaded image ID (sha256:...), never a tag")
+        inventory_only = getattr(args, "inventory_only", False)
+        require(not (inventory_only and args.bundle), "inventory-only requires the actual loaded image")
         if args.bundle:
             identity = load_bundle(args.bundle.resolve(), output)
             require(identity["image"] == args.image, "rescan image differs from retained candidate")
@@ -195,8 +200,10 @@ def run(args):
                            "--entrypoint=/usr/bin/python3", args.image, "-c", PROBE],
                           output=output / "runtime.json", timeout=120)
             json.loads(raw)
-        tools, pins = install_tools(args.tool_cache.resolve())
-        write_json(output / "tools.json", pins)
+        tools, pins = {}, {}
+        if not args.bundle:
+            tools, pins = install_tools(args.tool_cache.resolve(), names={"syft"})
+            write_json(output / "tools.json", pins)
         env = scanner_environment(args.db_cache)
         if not args.bundle and "DOCKER_HOST" not in env:
             env["DOCKER_HOST"] = command(["docker", "context", "inspect", "--format",
@@ -214,6 +221,14 @@ def run(args):
         coverage = inventory(sbom, raw_runtime, args.image)
         write_json(output / "coverage.json", coverage)
         bundle_manifest(output, args.image)
+        if inventory_only:
+            write_json(output / "result.json", {"status": "inventoried", "image": args.image,
+                       "source_revision": args.source_revision, "security_verdict": False})
+            return 0  # Validated input production, never a security pass.
+        scanner_tools, scanner_pins = install_tools(args.tool_cache.resolve(), names={"grype"})
+        tools.update(scanner_tools)
+        pins.update(scanner_pins)
+        write_json(output / "tools.json", pins)
         report = scan_sbom(tools, output / "sbom.syft.json", output, env)
         findings = grype_findings(report, sbom) + query_runtimes(coverage, output)
         result = evaluate(findings, args.trusted_policy, args.candidate_policy, output)
@@ -235,6 +250,8 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--trusted-policy", required=True, type=Path)
     parser.add_argument("--candidate-policy", required=True, type=Path)
+    parser.add_argument("--inventory-only", action="store_true",
+                        help="produce validated inputs only; never a security verdict")
     parser.add_argument("--bundle", type=Path, help="rescan retained SBOM/probes without rebuilding")
     parser.add_argument("--tool-cache", type=Path, default=Path(tempfile.gettempdir()) / "nac-image-tools")
     parser.add_argument("--db-cache", type=Path, default=Path(tempfile.gettempdir()) / "nac-image-db")

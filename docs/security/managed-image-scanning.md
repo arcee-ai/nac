@@ -66,18 +66,30 @@ measured age, source, and local digest. Download time is not DB freshness.
 
 ## Evidence and rescanning
 
-Keep SBOM, all raw findings (including lower severities), policy dispositions,
+The workflow first runs `--inventory-only` on the tested immutable image. This
+validates the actual runtime probes and one Syft inventory, writes the hashed
+bundle, and records `status: inventoried` with `security_verdict: false`. A
+separate required security step consumes that bundle with the full fresh scan;
+inventory success cannot satisfy the aggregate gate or publication receipt.
+
+The per-SHA artifact retains `inventory/` independently of `security/`, so a later
+scanner installation, DB, or advisory failure cannot discard the validated raw
+inputs. Keep all raw findings (including lower severities), policy dispositions,
 runtime versions/advisories, image inspection/identity, tool/DB metadata, and
 result together. `bundle.json` hashes the unchanged SBOM/runtime/identity/coverage
-inputs for later rescans. Retain artifacts for 14 days; daily selection must use
-only completed trusted `dev` push runs from `.github/workflows/stable-release.yml`
-with successful `managed / build-smoke` and `managed / Managed checks complete`
-jobs and the expected per-SHA artifact. An unrelated source/test failure does not
-hide valid image evidence. PR, manual, other-workflow, failed managed producer,
-expired, and incomplete evidence cannot qualify. After a qualified image has been retained,
-new daily advisory findings fail/report without needing a new image build.
-A new scan result is useful even when vulnerabilities block: preserve evidence
-with an always-run artifact upload and visibly fail/report the job.
+inputs for later rescans. Artifact upload always runs, with 14-day retention.
+
+Daily selection uses only trusted `dev` push runs from
+`.github/workflows/stable-release.yml` and the exact completed
+`managed / build-smoke` job's successful `Inventory the exact tested image`
+step. The security verdict and unrelated workflow results can be red. Select the
+newest qualifying inventory, then require its unique expected per-SHA artifact,
+`inventory/` layout, source identity, and input hashes. Missing, expired,
+unavailable, or corrupt selected evidence fails; it never falls back to an older
+green image. PR, manual, foreign, expired, and failed/skipped/cancelled inventory
+steps cannot qualify. Fresh findings against a retained red image remain red
+without a new image build. Preserve findings/errors and visibly fail/report the
+fresh scan.
 
 ```sh
 python3 scripts/security/image_scan.py --bundle <trusted-retained-bundle> \
