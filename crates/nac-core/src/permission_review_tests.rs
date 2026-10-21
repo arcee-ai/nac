@@ -126,13 +126,13 @@ async fn review_broker(
     reviewer: Arc<FakeReviewer>,
 ) -> (PathBuf, Arc<PermissionBroker>) {
     let path = store_with_session("session-a");
-    // Review needs accepted human scope; tests that care set their own.
-    record_intent(&path, "session-a", "work on the project");
     let broker = broker(&path, "session-a", backend, [], reviewer);
     broker
         .set_approval_mode(PermissionApprovalMode::Review)
         .await
         .unwrap();
+    // Review scope starts with human delivery after the mode is enabled.
+    record_intent(&path, "session-a", "work on the project");
     (path, broker)
 }
 
@@ -702,7 +702,6 @@ async fn cancellation_during_review_denies() {
         }
     }
     let path = store_with_session("session-a");
-    record_intent(&path, "session-a", "work on the project");
     let broker = Arc::new(PermissionBroker::new(
         path.clone(),
         "session-a".to_string(),
@@ -715,6 +714,7 @@ async fn cancellation_during_review_denies() {
         .set_approval_mode(PermissionApprovalMode::Review)
         .await
         .unwrap();
+    record_intent(&path, "session-a", "work on the project");
     let cancellation = crate::tools::ThreadCancellation::default();
     let task = {
         let broker = Arc::clone(&broker);
@@ -792,7 +792,6 @@ async fn gated_broker() -> (
     tokio::sync::oneshot::Sender<ReviewVerdict>,
 ) {
     let path = store_with_session("session-a");
-    record_intent(&path, "session-a", "work on the project");
     let broker = Arc::new(PermissionBroker::new(
         path.clone(),
         "session-a".to_string(),
@@ -806,6 +805,7 @@ async fn gated_broker() -> (
         .set_approval_mode(PermissionApprovalMode::Review)
         .await
         .unwrap();
+    record_intent(&path, "session-a", "work on the project");
     (path, broker, reviewer, release)
 }
 
@@ -1456,3 +1456,6 @@ async fn pr378_regression_pending_sibling_approval_is_denied_after_run_stops() {
 
 #[path = "permission_stop_tests.rs"]
 mod stop_tests;
+
+#[path = "permission_intent_tests.rs"]
+mod intent_tests;

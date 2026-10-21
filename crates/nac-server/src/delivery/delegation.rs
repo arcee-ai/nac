@@ -69,6 +69,7 @@ pub(crate) async fn start_traditional_child(
         profile: request.profile,
         description: request.description,
         prompt: request.prompt,
+        origin: nac_core::store::InputOrigin::Person,
         child_session_id: request.child_session_id,
         background: request.background,
     };

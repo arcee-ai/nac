@@ -1074,6 +1074,12 @@ impl TranscriptLogWriter {
             .map(|(_, entry, message)| (entry.idx, message.clone()))
             .collect();
         let recovery = if let Some((position, expected_idx, found_idx)) = boundary {
+            if decoded_rows[position..]
+                .iter()
+                .any(|(_, _, message)| matches!(message, Message::User { .. }))
+            {
+                super::review_intent::invalidate_review_intent(&transaction, session_id)?;
+            }
             for (id, _, _) in &decoded_rows[position..] {
                 transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
             }
@@ -1108,7 +1114,7 @@ impl TranscriptLogWriter {
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let row_ids = {
+        let (row_ids, removed_user) = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
                  FROM thread_events
@@ -1120,6 +1126,7 @@ impl TranscriptLogWriter {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                 })?;
             let mut row_ids = Vec::new();
+            let mut removed_user = false;
             for row in rows {
                 let (id, event_json) = row?;
                 let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
@@ -1128,13 +1135,17 @@ impl TranscriptLogWriter {
                     )
                 })?;
                 if entry.idx >= from_idx {
+                    removed_user |= entry.kind == TranscriptMessageKind::User;
                     row_ids.push(id);
                 }
             }
-            row_ids
+            (row_ids, removed_user)
         };
         for id in &row_ids {
             transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
+        }
+        if removed_user {
+            super::review_intent::invalidate_review_intent(&transaction, session_id)?;
         }
         if !row_ids.is_empty() {
             refresh_session_summary(&transaction, session_id)?;
@@ -1169,7 +1180,7 @@ impl TranscriptLogWriter {
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let row_ids = {
+        let (row_ids, removed_user) = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
                  FROM thread_events
@@ -1181,6 +1192,7 @@ impl TranscriptLogWriter {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                 })?;
             let mut row_ids = Vec::new();
+            let mut removed_user = false;
             for row in rows {
                 let (id, event_json) = row?;
                 let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
@@ -1189,11 +1201,29 @@ impl TranscriptLogWriter {
                     )
                 })?;
                 if entry.idx >= from_idx {
+                    removed_user |= entry.kind == TranscriptMessageKind::User;
                     row_ids.push(id);
                 }
             }
-            row_ids
+            (row_ids, removed_user)
         };
+        let previous_json: String = transaction.query_row(
+            "SELECT messages_json FROM sessions WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )?;
+        let previous: Vec<Message> = serde_json::from_str(&previous_json)
+            .context("failed to parse previous transcript snapshot")?;
+        let changed_user = previous.iter().enumerate().any(|(idx, message)| {
+            if let Message::User { content } = message {
+                !matches!(messages.get(idx), Some(Message::User { content: kept }) if content == kept)
+            } else {
+                false
+            }
+        });
+        if removed_user || changed_user {
+            super::review_intent::invalidate_review_intent(&transaction, session_id)?;
+        }
         let updated = transaction.execute(
             "UPDATE sessions SET messages_json = ?1 WHERE session_id = ?2",
             params![messages_json, session_id],

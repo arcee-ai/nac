@@ -219,13 +219,17 @@ impl SessionService {
         &self,
         expanded_prompt: String,
         execution_mode: crate::store::TraditionalChildExecutionMode,
+        origin: crate::store::InputOrigin,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
+        let review_intent =
+            (origin == crate::store::InputOrigin::Person).then(|| expanded_prompt.clone());
         self.try_submit_prompt_inner(
             None,
             expanded_prompt,
             None,
             RunAdmissionKind {
                 child_execution_mode: Some(execution_mode),
+                review_intent,
                 ..RunAdmissionKind::default()
             },
         )

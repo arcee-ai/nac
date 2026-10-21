@@ -383,7 +383,7 @@ fn mentions_credential(resource: &str) -> bool {
 }
 
 fn credential_path(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
     let name = lower.rsplit('/').next().unwrap_or(&lower);
     (name.starts_with(".env") && name != ".env.example")
         || matches!(
@@ -400,6 +400,19 @@ fn credential_path(path: &str) -> bool {
                 | "id_dsa"
                 | "auth.json"
                 | "arcee_auth.json"
+                | "credentials.toml"
+                | "credentials.tfrc.json"
+                | ".pgpass"
+                | ".vault-token"
+                | ".terraformrc"
+                | ".boto"
+                | ".authinfo"
+                | ".authinfo.gpg"
+                | ".bash_history"
+                | ".zsh_history"
+                | ".python_history"
+                | ".mysql_history"
+                | ".psql_history"
         )
         || name.ends_with(".pem")
         || name.ends_with(".key")
@@ -411,12 +424,19 @@ fn credential_path(path: &str) -> bool {
             "/.gnupg/",
             "/.kube/",
             "/.docker/",
+            "/.azure/",
+            "/.password-store/",
+            "/.config/hub/",
             "/.config/gcloud/",
             "/.config/gh/",
             "/.config/nac/",
         ]
         .iter()
         .any(|segment| format!("/{}/", lower.trim_matches('/')).contains(segment))
+        || (lower.starts_with("/proc/") && lower.ends_with("/environ"))
+        || lower.starts_with("/run/secrets/")
+        || lower.starts_with("/var/run/secrets/")
+        || matches!(lower.as_str(), "/etc/shadow" | "/etc/gshadow")
 }
 
 /// Replaces credential-shaped values. Returns whether anything was replaced.

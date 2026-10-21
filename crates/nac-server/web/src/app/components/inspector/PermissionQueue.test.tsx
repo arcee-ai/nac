@@ -199,6 +199,9 @@ describe("parent permission queue", () => {
       expect(screen.getByRole("region", { name: "Requested access" }).textContent).toContain(
         "Requested by child agent “second” (second)",
       );
+      expect(screen.getByRole("dialog").textContent).toContain(
+        "read-second requested by child agent “second” is paused before execution.",
+      );
       expect(screen.getByRole("region", { name: "Requested access" }).textContent).toContain(
         "/outside/second",
       );

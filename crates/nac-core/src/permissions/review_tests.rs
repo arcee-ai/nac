@@ -593,3 +593,67 @@ fn a_blocked_review_stays_listed_after_newer_reviews_fill_recent() {
     memory.authorize_retry("blocked").unwrap();
     assert!(memory.recent().iter().all(|review| review.id != "blocked"));
 }
+
+#[test]
+fn known_credential_locations_and_process_environments_are_never_reviewed() {
+    for path in [
+        "/home/u/.cargo/credentials.toml",
+        "/home/u/.cargo/credentials",
+        "/home/u/.pgpass",
+        "/home/u/.vault-token",
+        "/home/u/.azure",
+        "/home/u/.azure/accessTokens.json",
+        "/home/u/.terraform.d/credentials.tfrc.json",
+        "/home/u/.terraformrc",
+        "/home/u/.config/hub",
+        "/home/u/.config/hub/credentials.yml",
+        "/home/u/.bash_history",
+        "/home/u/.zsh_history",
+        "/home/u/.python_history",
+        "/home/u/.mysql_history",
+        "/home/u/.psql_history",
+        "/home/u/.password-store/service.gpg",
+        "/home/u/.authinfo.gpg",
+        "/proc/self/environ",
+        "/proc/thread-self/environ",
+        "/proc/123/task/456/environ",
+        "/run/secrets/service-token",
+        "/var/run/secrets/kubernetes.io/serviceaccount/token",
+        "/etc/shadow",
+        r"C:\Users\u\.azure\accessTokens.json",
+    ] {
+        for backend in [
+            PermissionBackend::Local,
+            PermissionBackend::Ssh,
+            PermissionBackend::Podman,
+        ] {
+            for action in ["read", "external_directory", "execute_path"] {
+                assert!(
+                    review_eligibility(&[resource(action, path)], backend).is_err(),
+                    "{action} {path}"
+                );
+            }
+            let command = format!("command:[cat][{path}]");
+            assert!(
+                review_eligibility(&[resource("execute", &command)], backend).is_err(),
+                "{command}"
+            );
+        }
+    }
+    for path in [
+        "/home/u/.editorconfig",
+        "/home/u/.prettierrc",
+        "/home/u/.config/my-editor/settings.json",
+        "/work/project/.github/workflows/test.yml",
+        "/usr/include/ordinary.h",
+    ] {
+        assert!(
+            review_eligibility(
+                &[resource("read", path), resource("external_directory", path)],
+                PermissionBackend::Local
+            )
+            .is_ok(),
+            "{path}"
+        );
+    }
+}

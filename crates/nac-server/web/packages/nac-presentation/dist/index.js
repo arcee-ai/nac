@@ -14021,7 +14021,7 @@ function Wh({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 			size: or.Wide,
 			flush: !0,
 			title: se ? "Permission required" : "Permissions",
-			subheader: se ? `${se.tool} requested by ${i ?? "this session"} is paused before execution.` : w ? b ? "Automatic approval is inherited from the parent session; change it from the parent." : `${ge} is inherited from the parent session; change it from the parent.` : b ? "Automatic approval is active for this session and its owned child agents." : x ? "Approve for me is enabled for this session and its owned child agents. This setting does not guarantee that the review service is available." : "Remembered access for this session.",
+			subheader: se ? `${se.tool} requested by ${ce} is paused before execution.` : w ? b ? "Automatic approval is inherited from the parent session; change it from the parent." : `${ge} is inherited from the parent session; change it from the parent.` : b ? "Automatic approval is active for this session and its owned child agents." : x ? "Approve for me is enabled for this session and its owned child agents. This setting does not guarantee that the review service is available." : "Remembered access for this session.",
 			footer: se ? /* @__PURE__ */ X("div", {
 				className: "flex w-full flex-wrap justify-end gap-2",
 				children: [

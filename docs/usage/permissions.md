@@ -115,8 +115,9 @@ the tool, canonical resources, backend and, as intent, the messages a person
 typed to the session tree through the app or the HTTP API (prompts, queued
 messages and steering), oldest first. Messages accumulate across runs, so a
 later prompt such as "continue" does not lift an earlier restriction such as
-"do not push". Turning Approve for me off clears them; after turning it on
-again, reviews use the messages typed from then on. Each message becomes
+"do not push". Entering or leaving Approve for me clears them; reviews use
+messages typed after it is enabled. Selecting the current mode again preserves
+its accumulated scope. Each message becomes
 intent in the same store write that hands it to the model, so a queued
 message counts only once its run starts, and one cancelled before then never
 counts. Text that NAC, the agent, a child, an orchestrator or an MCP client
@@ -127,7 +128,11 @@ yet (for example in a session driven only over MCP), when the messages
 exceed 20 or 8,000 characters (turn Approve for me off and on to start
 over), or when any of them carries a credential-shaped value or a stored or
 managed secret. Messages are never shortened or partly dropped, since that
-could hide a restriction. An operation that needed redaction is not reviewed
+could hide a restriction. Reverting or editing and resending a user message
+invalidates review scope for its session tree, including traditional children;
+requests keep the manual prompt until Approve for me is turned off and on and
+the person provides fresh intent. The stored text cannot safely identify only
+the surviving human messages. An operation that needed redaction is not reviewed
 either. Tool output, files and the transcript are never sent. ArceeFM
 records requests as it does other inference requests unless the
 organization has zero data retention.

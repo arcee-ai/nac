@@ -16,6 +16,7 @@ pub(crate) struct StartTraditionalChild {
     pub(crate) profile: String,
     pub(crate) description: String,
     pub(crate) prompt: String,
+    pub(crate) origin: nac_core::store::InputOrigin,
     pub(crate) child_session_id: Option<String>,
     pub(crate) background: bool,
 }
@@ -83,6 +84,7 @@ impl<'a> DelegationApplication<'a> {
                     profile: command.profile,
                     description: command.description,
                     prompt: command.prompt,
+                    origin: command.origin,
                     execution_mode: if command.background {
                         TraditionalChildExecutionMode::Background
                     } else {

@@ -1164,3 +1164,235 @@ fn all_106_expected_three_found_four_is_rejected_atomically() {
     );
     assert_eq!(writer.read_from("session-a", 0).unwrap().len(), 3);
 }
+
+#[test]
+fn user_history_truncation_invalidates_root_intent_atomically_and_persistently() {
+    use crate::sessions::ReviewIntent::{Accepted, Unavailable};
+    for snapshot in [false, true] {
+        let path = temp_store_path(if snapshot {
+            "intent_blob_revert"
+        } else {
+            "intent_log_revert"
+        });
+        initialize(&path).unwrap();
+        for id in ["root", "child", "unrelated"] {
+            crate::store::insert_test_session(&path, id);
+        }
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute("UPDATE sessions SET behavior = 'direct'", [])
+            .unwrap();
+        create_traditional_child_relationship(
+            &path,
+            "root",
+            "child",
+            GENERAL_CHILD_PROFILE,
+            "child",
+        )
+        .unwrap();
+        crate::sessions::update_permission_approval_mode(
+            &path,
+            "root",
+            crate::permissions::PermissionApprovalMode::Review,
+        )
+        .unwrap();
+        let connection = open_runtime_connection(&path).unwrap();
+        record_review_intent(&connection, "root", "do not push").unwrap();
+        record_review_intent(&connection, "unrelated", "unrelated scope").unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        let user = Message::User {
+            content: "publish the release".into(),
+        };
+        if snapshot {
+            set_snapshot_messages(&path, "child", std::slice::from_ref(&user));
+        }
+        writer
+            .append_person_run_prompt(
+                "child",
+                u64::from(snapshot),
+                &user,
+                "run-a",
+                "publish the release",
+            )
+            .unwrap();
+        let load = |id| crate::sessions::load_permission_review_intent(&path, id).unwrap();
+        assert_eq!(
+            load("child"),
+            Accepted(vec!["do not push".into(), "publish the release".into()])
+        );
+        assert_eq!(writer.delete_from("child", 99).unwrap(), 0);
+        let before =
+            crate::sessions::load_effective_permission_approval_state(&path, "root").unwrap();
+        if snapshot {
+            writer
+                .replace_snapshot_and_delete_from("child", &[])
+                .unwrap();
+        } else {
+            writer.delete_from("child", 0).unwrap();
+        }
+        let after =
+            crate::sessions::load_effective_permission_approval_state(&path, "child").unwrap();
+        assert_eq!(after.0, before.0);
+        assert_eq!(after.1, before.1);
+        assert!(
+            after.2 > before.2,
+            "a sibling verdict must lose its old intent revision"
+        );
+        assert_eq!(load("root"), Unavailable);
+        assert_eq!(load("child"), Unavailable);
+        assert_eq!(load("unrelated"), Accepted(vec!["unrelated scope".into()]));
+        record_review_intent(&connection, "child", "continue").unwrap();
+        assert_eq!(load("root"), Unavailable);
+        drop(connection);
+        drop(writer);
+        let reopened = TranscriptLogWriter::new(&path).unwrap();
+        assert!(reopened.read_from("child", 0).unwrap().is_empty());
+        assert_eq!(
+            load("child"),
+            Unavailable,
+            "invalidation survives reopening the store"
+        );
+        if snapshot {
+            let blob: String = open_runtime_connection(&path)
+                .unwrap()
+                .query_row(
+                    "SELECT messages_json FROM sessions WHERE session_id = 'child'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(blob, "[]");
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[test]
+fn intent_invalidation_failure_rolls_back_log_and_snapshot_truncation() {
+    use crate::sessions::ReviewIntent::Accepted;
+    for snapshot in [false, true] {
+        let path = temp_store_path("intent_revert_rollback");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        let user = Message::User {
+            content: "publish the release".into(),
+        };
+        if snapshot {
+            set_snapshot_messages(&path, "session", std::slice::from_ref(&user));
+        }
+        writer
+            .append_person_run_prompt(
+                "session",
+                u64::from(snapshot),
+                &user,
+                "run-a",
+                "publish the release",
+            )
+            .unwrap();
+        let connection = open_runtime_connection(&path).unwrap();
+        connection.execute_batch("CREATE TRIGGER reject_intent_invalidation BEFORE UPDATE OF permission_review_intent ON sessions BEGIN SELECT RAISE(ABORT, 'test invalidation rejected'); END;").unwrap();
+        let revision =
+            crate::sessions::load_effective_permission_approval_state(&path, "session").unwrap();
+        let result = if snapshot {
+            writer.replace_snapshot_and_delete_from("session", &[])
+        } else {
+            writer.delete_from("session", 0)
+        };
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("test invalidation rejected"));
+        assert_eq!(writer.read_from("session", 0).unwrap().len(), 1);
+        assert_eq!(
+            crate::sessions::load_permission_review_intent(&path, "session").unwrap(),
+            Accepted(vec!["publish the release".into()])
+        );
+        assert_eq!(
+            crate::sessions::load_effective_permission_approval_state(&path, "session").unwrap(),
+            revision
+        );
+        if snapshot {
+            let blob: String = connection
+                .query_row(
+                    "SELECT messages_json FROM sessions WHERE session_id = 'session'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(blob, serde_json::to_string(&vec![user]).unwrap());
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[test]
+fn tool_only_history_repair_preserves_review_intent() {
+    use crate::sessions::ReviewIntent::Accepted;
+    let path = temp_store_path("intent_tool_repair");
+    initialize(&path).unwrap();
+    crate::store::insert_test_session(&path, "session");
+    let connection = open_runtime_connection(&path).unwrap();
+    record_review_intent(&connection, "session", "fix tests; do not push").unwrap();
+    let writer = TranscriptLogWriter::new(&path).unwrap();
+    writer
+        .append(
+            "session",
+            0,
+            &Message::Tool {
+                tool_call_id: "call-a".into(),
+                content: "orphaned".into(),
+            },
+        )
+        .unwrap();
+    writer.delete_from("session", 0).unwrap();
+    assert_eq!(
+        crate::sessions::load_permission_review_intent(&path, "session").unwrap(),
+        Accepted(vec!["fix tests; do not push".into()])
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn gap_repair_invalidates_intent_only_when_it_discards_user_history() {
+    use crate::sessions::ReviewIntent::{Accepted, Unavailable};
+    for removed_user in [false, true] {
+        let path = temp_store_path("intent_gap_repair");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        let connection = open_runtime_connection(&path).unwrap();
+        record_review_intent(&connection, "session", "publish the release").unwrap();
+        let orphan = if removed_user {
+            Message::User {
+                content: "publish the release".into(),
+            }
+        } else {
+            Message::Tool {
+                tool_call_id: "call-a".into(),
+                content: "orphaned".into(),
+            }
+        };
+        append_thread_event(
+            &path,
+            "session",
+            ORCHESTRATOR_STEERING_TARGET,
+            &encode_transcript_log_entry(1, &orphan).unwrap(),
+        )
+        .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        assert!(writer
+            .read_tail_repairing_gap("session", 0)
+            .unwrap()
+            .1
+            .is_some());
+        assert_eq!(
+            crate::sessions::load_permission_review_intent(&path, "session").unwrap(),
+            if removed_user {
+                Unavailable
+            } else {
+                Accepted(vec!["publish the release".into()])
+            }
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}

@@ -685,7 +685,7 @@ pub(crate) fn load_permission_review_intent(
         Some(crate::store::StoredReviewIntent::Messages(messages)) => {
             super::ReviewIntent::Accepted(messages)
         }
-        Some(crate::store::StoredReviewIntent::Overflowed) => super::ReviewIntent::Unavailable,
+        Some(crate::store::StoredReviewIntent::Overflowed | crate::store::StoredReviewIntent::Invalidated) => super::ReviewIntent::Unavailable,
     })
 }
 command LoadPermissionReviewIntentCommand {
@@ -836,15 +836,16 @@ pub(crate) fn compare_and_update_permission_approval_state(
     // Only enabling approve-all claims waiters; selecting review leaves
     // requests that are already waiting with the human.
     let increment = i64::from(mode == crate::permissions::PermissionApprovalMode::AutoApprove);
-    // Turning Approve for me off clears the person's accumulated messages,
-    // so turning it on again starts a fresh review scope with the next ones.
+    // Entering or leaving Approve for me starts a fresh scope. Manual-period
+    // history must not overflow or supply authority when review is enabled.
+    // Reselecting the same reviewer preserves its existing restrictions.
     let updated = tx.execute(
         "UPDATE sessions
          SET permission_approval_mode = ?1,
              permission_reviewer = ?2,
              permission_auto_approve_generation = permission_auto_approve_generation + ?3,
              permission_review_intent = CASE
-                 WHEN permission_reviewer = 'auto_review' AND ?2 <> 'auto_review' THEN NULL
+                 WHEN permission_reviewer <> ?2 THEN NULL
                  ELSE permission_review_intent
              END
          WHERE session_id = ?4 AND permission_approval_revision = ?5",

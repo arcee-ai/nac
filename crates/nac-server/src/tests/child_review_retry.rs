@@ -234,6 +234,7 @@ async fn child_retry_steers_local_active_generation_without_changing_mode() {
         .try_submit_traditional_child_prompt(
             "wait for steering".into(),
             TraditionalChildExecutionMode::Foreground,
+            nac_core::store::InputOrigin::Automation,
         )
         .unwrap();
     let active = service.active_run().unwrap();

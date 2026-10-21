@@ -339,6 +339,7 @@ impl SessionService {
         &self,
         delivery: crate::store::InboxDelivery,
         content: &str,
+        origin: crate::store::InputOrigin,
     ) -> Result<crate::store::SessionInboxRecord> {
         self.require_direct_behavior()?;
         let session_id = self
@@ -353,7 +354,8 @@ impl SessionService {
         if child.is_none() {
             return Err(anyhow::anyhow!("traditional child was not found"));
         }
-        self.enqueue_direct_input_unchecked(delivery, content, None, None)
+        let review_intent = (origin == crate::store::InputOrigin::Person).then_some(content);
+        self.enqueue_direct_input_unchecked(delivery, content, None, review_intent)
             .await
     }
 

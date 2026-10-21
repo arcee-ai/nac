@@ -135,8 +135,19 @@ impl nac_core::traditional_children::TraditionalChildController
                         .enqueue_traditional_child_input(
                             nac_core::store::InboxDelivery::Steer,
                             &request.prompt,
+                            request.origin,
                         )
                         .await?;
+                } else if request.origin == nac_core::store::InputOrigin::Person {
+                    nac_core::store::create_person_session_inbox_item(
+                        &manager.inner.store_path,
+                        &child_session_id,
+                        nac_core::store::InboxDelivery::Steer,
+                        &request.prompt,
+                        relation.run_id.as_deref(),
+                        None,
+                        &request.prompt,
+                    )?;
                 } else {
                     nac_core::store::create_session_inbox_item(
                         &manager.inner.store_path,
@@ -150,7 +161,11 @@ impl nac_core::traditional_children::TraditionalChildController
                 return Ok(relation);
             }
             service
-                .try_submit_traditional_child_prompt(request.prompt, request.execution_mode)
+                .try_submit_traditional_child_prompt(
+                    request.prompt,
+                    request.execution_mode,
+                    request.origin,
+                )
                 .map_err(anyhow::Error::new)?;
             nac_core::store::load_traditional_child(&manager.inner.store_path, &child_session_id)?
                 .ok_or_else(|| anyhow!("traditional child disappeared after run admission"))

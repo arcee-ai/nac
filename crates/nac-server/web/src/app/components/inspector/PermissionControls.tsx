@@ -301,7 +301,7 @@ export function PermissionControls({
         title={active ? "Permission required" : "Permissions"}
         subheader={
           active
-            ? `${active.tool} requested by ${requesterLabel ?? "this session"} is paused before execution.`
+            ? `${active.tool} requested by ${requester} is paused before execution.`
             : inheritedAutoApproval
               ? autoApprove
                 ? "Automatic approval is inherited from the parent session; change it from the parent."
