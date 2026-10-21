@@ -150,7 +150,8 @@ async function armRenderedMarker(pane: Locator, marker: string) {
       reject(new Error(message));
     };
     const observer = new MutationObserver(() => {
-      if (settled || frame !== undefined || !(rows as FixtureElement).textContent?.includes(marker)) return;
+      if (settled || frame !== undefined || !(rows as FixtureElement).textContent?.includes(marker))
+        return;
       if (startedAt === undefined) {
         fail("Terminal interruption marker arrived before trusted Ctrl-C");
         return;
