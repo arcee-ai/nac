@@ -63,5 +63,9 @@
     "typescript-eslint": "^8.65.0",
     "vite": "^8.2.0",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "^0.9.12",
+    "tinypool": "~2.1.2"
   }
 }
