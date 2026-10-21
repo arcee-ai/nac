@@ -487,6 +487,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
     let path = temp_store_path("v16_behavior");
     initialize(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
+    crate::store::native_source_reservation::remove_schema_for_legacy_fixture(&legacy).unwrap();
     insert_legacy_session(&legacy, "legacy-session");
     legacy
         .execute_batch(
@@ -511,7 +512,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 34);
+    assert_eq!(STORE_SCHEMA_VERSION, 38);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -563,6 +564,7 @@ fn v24_store_adds_manual_session_permission_approval_mode() {
     let path = temp_store_path("v24_permission_approval_mode");
     initialize(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
+    crate::store::native_source_reservation::remove_schema_for_legacy_fixture(&legacy).unwrap();
     insert_legacy_session(&legacy, "legacy-session");
     legacy
         .execute_batch(
@@ -614,6 +616,7 @@ fn v25_store_adds_permission_approval_transition_revision() {
     let path = temp_store_path("v25_permission_approval_revision");
     initialize(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
+    crate::store::native_source_reservation::remove_schema_for_legacy_fixture(&legacy).unwrap();
     insert_legacy_session(&legacy, "legacy-session");
     legacy
         .execute(
@@ -658,6 +661,8 @@ fn v25_managed_store_adds_the_complete_permission_mode_schema() {
     let path = temp_store_path("v25_managed_permission_composition");
     initialize(&path).unwrap();
     let predecessor = Connection::open(&path).unwrap();
+    crate::store::native_source_reservation::remove_schema_for_legacy_fixture(&predecessor)
+        .unwrap();
     insert_legacy_session(&predecessor, "managed-v25-session");
     predecessor
         .execute_batch(
@@ -1338,6 +1343,7 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     let path = temp_store_path("v2");
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
+    crate::store::native_source_reservation::remove_schema_for_legacy_fixture(&conn).unwrap();
     insert_legacy_session(&conn, "owned");
     conn.execute(
         "INSERT INTO thread_events

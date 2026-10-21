@@ -34,10 +34,33 @@ pub fn retain_managed_probe_identity(
     Ok(lease)
 }
 
+/// Observe whether the exact running replacement is durably recorded. This is
+/// metadata, not admission. A previously accepted owner cannot become an
+/// initial configured owner merely because its durable record disappeared.
+pub fn observe_managed_probe_acceptance(
+    path: &Path,
+    running: &super::ManagedAcceptedIdentity,
+) -> Result<bool> {
+    let snapshot = observe_snapshot(path, Some(running))?;
+    let accepted = snapshot.accepted_identity.is_some();
+    anyhow::ensure!(
+        accepted || running.operation_id.is_empty(),
+        "managed accepted replacement identity is no longer recorded"
+    );
+    Ok(accepted)
+}
+
 fn observe(
     path: &Path,
     running: Option<&super::ManagedAcceptedIdentity>,
 ) -> Result<ManagedMaintenanceState> {
+    Ok(observe_snapshot(path, running)?.state)
+}
+
+fn observe_snapshot(
+    path: &Path,
+    running: Option<&super::ManagedAcceptedIdentity>,
+) -> Result<super::ManagedMaintenanceSnapshot> {
     let mut conn = open_probe_read_connection(path)?;
     let transaction = conn.transaction()?;
     let _: i64 =
@@ -49,7 +72,7 @@ fn observe(
         super::managed_maintenance::validate_accepted_identity(&snapshot, running)?;
     }
     transaction.commit()?;
-    Ok(snapshot.state)
+    Ok(snapshot)
 }
 
 #[cfg(test)]

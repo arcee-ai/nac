@@ -20,7 +20,10 @@ use nac_core::{
     },
     upgrade::{run_upgrade, UpgradeRequest},
 };
-use nac_server::{serve_with_policy, BindPolicy, ServerOptions, SessionManager};
+use nac_server::{
+    serve_with_policy_and_managed_facts, BindPolicy, ManagedFactListenerOptions, ServerOptions,
+    SessionManager,
+};
 
 const MCP_OAUTH_CALLBACK_ORIGIN_ENV: &str = "NAC_MCP_OAUTH_CALLBACK_ORIGIN";
 
@@ -128,6 +131,11 @@ struct ServerCli {
     /// changing local defaults.
     #[arg(long)]
     managed_config: Option<PathBuf>,
+
+    /// Explicit private D-pinned fact listener configuration (version 1).
+    /// Selects mediated plaintext; requires a managed host. Disabled by default.
+    #[arg(long)]
+    managed_fact_listener_config: Option<PathBuf>,
 
     /// Public origin used for MCP OAuth callbacks, for example
     /// https://nac.example.com. Required with a remote bind outside Managed NAC.
@@ -594,7 +602,7 @@ async fn run_server(cli: ServerCli, invocation_name: &str) -> Result<()> {
         .managed_config
         .or_else(|| std::env::var_os("NAC_MANAGED_CONFIG").map(PathBuf::from));
     bind_policy.validate(bind)?;
-    if !bind.ip().is_loopback() {
+    if !bind.ip().is_loopback() && cli.managed_fact_listener_config.is_none() {
         eprintln!("warning: every client that can reach {bind} receives full control of nac-web");
     }
     let launch_cwd = std::env::current_dir()?;
@@ -619,6 +627,14 @@ async fn run_server(cli: ServerCli, invocation_name: &str) -> Result<()> {
             // SAFETY: startup is single-threaded here, before the server or workers spawn.
             unsafe { std::env::set_var(MCP_OAUTH_CALLBACK_ORIGIN_ENV, origin) };
         }
+    }
+    let fact_listener = cli
+        .managed_fact_listener_config
+        .as_deref()
+        .map(ManagedFactListenerOptions::load)
+        .transpose()?;
+    if fact_listener.is_some() && managed_host.is_none() {
+        anyhow::bail!("managed fact listener requires explicit managed host configuration");
     }
     configure_telemetry(managed_host.as_ref());
     let manager = SessionManager::new(ServerOptions {
@@ -645,7 +661,7 @@ async fn run_server(cli: ServerCli, invocation_name: &str) -> Result<()> {
     // Open the browser only after bind succeeds — otherwise the first load can
     // hit connection-refused while the socket is still closed. Post-login
     // dashboard launch goes through this same path.
-    serve_with_policy(bind, bind_policy, manager, |bound| {
+    serve_with_policy_and_managed_facts(bind, bind_policy, manager, fact_listener, |bound| {
         let url = dashboard_url(bound);
         eprintln!("{invocation_name} listening on {url}");
         eprintln!(
@@ -1442,6 +1458,16 @@ thread_timeout_secs = 7200
     fn managed_configuration_is_explicit_and_ordinary_server_cli_remains_unmanaged() {
         let ordinary = parse_server(&["nac-web"]);
         assert!(ordinary.managed_config.is_none());
+        assert!(ordinary.managed_fact_listener_config.is_none());
+        let explicit = parse_server(&[
+            "nac-web",
+            "--managed-fact-listener-config",
+            "/etc/nac/facts.json",
+        ]);
+        assert_eq!(
+            explicit.managed_fact_listener_config.as_deref(),
+            Some(Path::new("/etc/nac/facts.json"))
+        );
 
         let managed = parse_server(&["nac-web", "--managed-config", "/etc/nac/managed.toml"]);
         assert_eq!(

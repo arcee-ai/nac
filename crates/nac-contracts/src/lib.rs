@@ -10,8 +10,13 @@ use std::pin::Pin;
 
 mod command_output_redaction;
 mod command_pipe_redaction;
+mod protected_import;
 pub use command_output_redaction::{CommandOutputRedactor, RedactedCommandPlainText};
 pub use command_pipe_redaction::CommandPipeRedactor;
+pub use protected_import::{
+    ImportProofKind, LifecycleAuditCheckSha256, NativeImportedCheckSha256, ProtectedImportPhase,
+    SourceBootstrapCheckSha256,
+};
 
 /// Canonical public NAC product version sourced from the repository root.
 ///

@@ -48,6 +48,7 @@ mod chat_stream;
 mod chatgpt_codex;
 mod client;
 mod history;
+mod managed_host_key;
 mod providers;
 mod pseudo_tool_calls;
 mod redact;
@@ -69,6 +70,10 @@ pub use arcee_bootstrap::{
     validate_managed_arcee_authorization_for_issuer, ManagedArceeBootstrapOutcome,
     MANAGED_ARCEE_BOOTSTRAP_PATH,
 };
+#[cfg(test)]
+pub use managed_host_key::InitialHostKeyCustody;
+pub use managed_host_key::{ManagedHostKeyBinding, ManagedHostKeyStore, TrustedManagedHostKey};
+
 pub use backend::{validate_backend_api_key_env, validate_model_reasoning_effort};
 pub(crate) use catalog::resolve as resolve_model_metadata;
 pub use catalog::{
