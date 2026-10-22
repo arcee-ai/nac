@@ -177,6 +177,39 @@ test('main and manual reusable calls keep their verified policy pin when canonic
   }
 });
 
+test('default ancestry reader projects large compare responses before Node capture', t => {
+  const f = fixture(t);
+  const current = 'd'.repeat(40);
+  const bin = join(f.root, 'bin');
+  mkdirSync(bin);
+  const endpoint = `repos/example/fixture/compare/${f.policySha}...${current}`;
+  const comparison = { url: `https://api.github.com/${endpoint}`, status: 'ahead', ahead_by: 1,
+    behind_by: 0, base_commit: { sha: f.policySha }, merge_base_commit: { sha: f.policySha } };
+  // Model gh's response projection at its subprocess boundary: without --jq,
+  // ordinary large file patches exceed execFileSync's 1 MiB capture limit.
+  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const comparison = ${JSON.stringify(comparison)};
+if (args[1].includes('/git/ref/heads/dev')) {
+  process.stdout.write(JSON.stringify({ref:'refs/heads/dev',
+    url:'https://api.github.com/repos/example/fixture/git/refs/heads/dev',
+    object:{type:'commit',sha:'${current}',url:'https://api.github.com/repos/example/fixture/git/commits/${current}'}}));
+} else if (args[1] === '${endpoint}') {
+  process.stdout.write(JSON.stringify(args.includes('--jq') ? comparison :
+    {...comparison,files:[{patch:'x'.repeat(2 * 1024 * 1024)}]}));
+} else process.exit(1);
+`, { mode: 0o755 });
+  writeFileSync(f.environment.GITHUB_EVENT_PATH, JSON.stringify({
+    ref: 'refs/heads/main', repository: { full_name: 'example/fixture' },
+  }));
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('./image-policy.mjs', import.meta.url)),
+    'select', f.candidateSha], { encoding: 'utf8', env: { ...f.environment,
+      PATH: `${bin}:${process.env.PATH}`, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main',
+      REQUESTED_POLICY_MODE: 'ordinary', REQUESTED_POLICY_SHA: f.policySha } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, `mode=ordinary\npolicy_sha=${f.policySha}\n`);
+});
+
 test('missing, spoofed and differently bound receipts never fall back to tag policy', t => {
   const f = fixture(t, { candidate: granted(entry) });
   for (const receipt of [undefined, {}, { ...f.receipt, sha: 'a'.repeat(40) },

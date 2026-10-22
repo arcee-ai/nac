@@ -23,7 +23,9 @@ export function selectImagePolicyInputs(candidateSha, {
     // between prepare jobs must not invalidate that immutable policy snapshot.
     const endpoint = `repos/${environment.GITHUB_REPOSITORY}/compare/${requestedSha}...${selected.policy_sha}`;
     const comparison = readCompare ? readCompare(endpoint) : JSON.parse(execFileSync(
-      'gh', ['api', endpoint], { encoding: 'utf8', timeout: 30_000 },
+      'gh', ['api', endpoint, '--jq',
+        '{url,status,ahead_by,behind_by,base_commit:{sha:.base_commit.sha},merge_base_commit:{sha:.merge_base_commit.sha}}'],
+      { encoding: 'utf8', timeout: 30_000 },
     ));
     if (comparison?.url !== `https://api.github.com/${endpoint}` ||
         comparison.base_commit?.sha !== requestedSha ||
