@@ -5,6 +5,7 @@ import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
 import { UserTerminalConnection } from "../packages/nac-client/dist/userTerminalConnection.js";
 import { createDirectSession, expect, test } from "./harness";
+import { completionMarkerObserver } from "./terminal-completion-marker";
 
 for (const mobile of [false, true]) {
   test(`embedded terminal pane ${mobile ? "mobile" : "desktop"} uses the session shell`, async ({
@@ -131,29 +132,19 @@ test("embedded pane resets and replays an actual retention gap", async ({
   // This independent observer consumes only actual source bytes. The SDK owns
   // its reset/ACK sequence; a bounded byte tail is not a browser/render oracle.
   // Detaching it does not advance the UI's later observer, which still starts at 0.
-  let tail = Buffer.alloc(0);
+  const producer = completionMarkerObserver(Buffer.from("GAP-OK"));
   let completedEnd: bigint;
-  const observed = new UserTerminalConnection(
-    api,
-    session,
-    terminal.terminal_id,
-    {
-      async reset() {
-        tail = Buffer.alloc(0);
-      },
-      async write(bytes) {
-        tail = Buffer.concat([tail, Buffer.from(bytes)]).subarray(-128);
-      },
-    },
-    { pageLimit: 32 * 1024, waitMs: 1000 },
-  );
+  const observed = new UserTerminalConnection(api, session, terminal.terminal_id, producer, {
+    pageLimit: 32 * 1024,
+    waitMs: 1000,
+  });
   const completion = AbortSignal.timeout(10_000);
   try {
     await observed.attach(completion);
     let frame;
     do {
       frame = await observed.readNext(completion);
-    } while (!frame.caught_up || !tail.includes(Buffer.from("GAP-OK")));
+    } while (!frame.caught_up || !producer.sawMarker);
     // && emits this un-echoed literal marker only after the original full head
     // command succeeds. A fresh observer below proves the gap independently
     // of whether this producer-completion observer happened to keep up.
