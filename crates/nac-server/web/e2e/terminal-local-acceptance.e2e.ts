@@ -510,7 +510,9 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       })
       .toBe(true);
     measurements.resizeMs = performance.now() - resizedAt;
-    await focus(pane);
+    // Copy and viewport resize preserve native input focus. Re-clicking the
+    // moving toolbar adds automation backoff while noisy output accumulates.
+    await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
     await armRenderedMarker(pane, "NOISE-INTERRUPTED");
     await page.keyboard.press("Control+c");
     await command(page, "printf '" + octal("NOISE-INTERRUPTED\n") + "'");
