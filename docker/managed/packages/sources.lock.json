@@ -30,7 +30,10 @@
       }
     ],
     "upstream_name": "krb5",
-    "project_url": "https://web.mit.edu/kerberos/"
+    "project_url": "https://web.mit.edu/kerberos/",
+    "supplier_packages": {
+      "krb5-libs": "1.22.2-r5"
+    }
   },
   "curl": {
     "version": "8.23.0",
@@ -41,7 +44,11 @@
     "patches": [],
     "upstream_name": "curl",
     "project_url": "https://curl.se/",
-    "upstream_fixes": []
+    "upstream_fixes": [],
+    "supplier_packages": {
+      "curl": "8.23.0-r1",
+      "libcurl-openssl4": "8.23.0-r1"
+    }
   },
   "downloads": {
     "krb5.tar.gz": {
@@ -116,7 +123,13 @@
       }
     ],
     "upstream_name": "gcc",
-    "project_url": "https://gcc.gnu.org/"
+    "project_url": "https://gcc.gnu.org/",
+    "supplier_packages": {
+      "gcc": "16.2.0-r1",
+      "libgcc": "16.2.0-r1",
+      "libstdc++": "16.2.0-r1",
+      "libstdc++-dev": "16.2.0-r1"
+    }
   },
   "sasl": {
     "version": "2.1.28",
@@ -141,6 +154,9 @@
         "status": "accepted downstream maintainer correction; equivalent upstream proposal remains closed unmerged",
         "proposal_reference": "f79bfeb393fc0f1f9a614b35f50e2e72fde8f6e2"
       }
-    ]
+    ],
+    "supplier_packages": {
+      "cyrus-sasl-heimdal-libs": "2.1.28-r58"
+    }
   }
 }

@@ -31,6 +31,14 @@ verification; retained archive control identities match the installed
 APK database and bind the payload SHA256. CMU's SASL acknowledgement and GCC's runtime exception texts are
 retained explicitly.
 
+The trusted runtime install pins the supplier predecessors, including GCC's
+compiler, runtime libraries and development headers. Immediately before owned
+package admission, `check-supplier-packages.py` compares the actual APK database
+with every source owner's `supplier_packages` inventory. Missing, duplicate or
+different versions fail the build. `supplier-predecessors.json` retains the
+observed versions and database SHA256; a rolling repository update requires an
+explicit baseline/source review instead of silently downgrading the runtime.
+
 The final image contains:
 
 - `/usr/share/nac/package-provenance/*.json`: each owned package's source, patch,

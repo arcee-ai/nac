@@ -24,7 +24,11 @@ require_literal() {
 
 require_literal "$dockerfile" 'FROM --platform=linux/amd64 cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b'
 require_literal "$dockerfile" 'apk --no-network --repositories-file /dev/null add --no-cache --allow-untrusted ./*.apk'
-require_literal "$dockerfile" 'curl=8.23.0-r1 fd findutils git gzip jq libssh2 openssl-dev=3.6.5-r5 make'
+require_literal "$dockerfile" 'curl=8.23.0-r1 libcurl-openssl4=8.23.0-r1 fd findutils git gzip jq libssh2 openssl-dev=3.6.5-r5 make'
+require_literal "$dockerfile" 'gcc=16.2.0-r1 libgcc=16.2.0-r1 libstdc++=16.2.0-r1 libstdc++-dev=16.2.0-r1'
+require_literal "$dockerfile" 'krb5-libs=1.22.2-r5 cyrus-sasl-heimdal-libs=2.1.28-r58'
+require_literal "$dockerfile" 'python3 check-supplier-packages.py sources.lock.json > supplier-predecessors.json'
+python3 "$repo_root/docker/managed/packages/test_supplier_packages.py"
 require_literal "$dockerfile" 'sha256sum -c packages.sha256'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'python3 - < "$repo_root/scripts/smoke-managed-runtime.py"'
 require_literal "$dockerfile" 'useradd --uid 10001 --gid 10001'
