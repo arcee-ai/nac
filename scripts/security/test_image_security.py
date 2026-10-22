@@ -31,6 +31,25 @@ DB = {"valid": True, "built": "2026-10-21T06:00:00Z", "schemaVersion": "v6.1.10"
 
 
 class InventoryTests(unittest.TestCase):
+    def test_supported_release_inventory_and_scanner_must_agree(self):
+        for version, codename in [("12", "bookworm"), ("13", "trixie")]:
+            with self.subTest(version=version):
+                sbom = copy.deepcopy(SBOM)
+                sbom["distro"] = {"id": "debian", "versionID": version,
+                                 "versionCodename": codename}
+                runtime = dict(RUNTIME, os_release=f"ID=debian\nVERSION_ID={version}\nVERSION_CODENAME={codename}\n")
+                self.assertEqual(inv.inventory(sbom, runtime, IMAGE)["os_release"]["VERSION_ID"], version)
+                report = {"descriptor": {"name": "grype"}, "matches": [],
+                          "distro": {"name": "debian", "version": version + ".7"}}
+                self.assertEqual(inv.grype_findings(report, sbom), [])
+                other = "12" if version == "13" else "13"
+                report["distro"]["version"] = other
+                with self.assertRaisesRegex(ValueError, "differs"):
+                    inv.grype_findings(report, sbom)
+                sbom["distro"]["versionID"] = other
+                with self.assertRaisesRegex(ValueError, "differs"):
+                    inv.inventory(sbom, runtime, IMAGE)
+
     def test_complete_inventory(self):
         result = inv.inventory(SBOM, RUNTIME, IMAGE)
         self.assertEqual(result["versions"]["uv"], "0.13.4")
@@ -53,6 +72,8 @@ class InventoryTests(unittest.TestCase):
 
     def test_unrecognized_or_mismatched_actual_os_release_fails(self):
         for release in ('ID=debian\nVERSION_ID=unknown\nVERSION_CODENAME=bookworm',
+                        'ID=debian\nVERSION_ID=14\nVERSION_CODENAME=forky',
+                        'ID=debian\nVERSION_ID=13\nVERSION_CODENAME=bookworm',
                         'ID=debian\nVERSION_ID=13\nVERSION_CODENAME=trixie',
                         'ID=ubuntu\nVERSION_ID=12\nVERSION_CODENAME=bookworm', ''):
             with self.subTest(release=release), self.assertRaises(ValueError):

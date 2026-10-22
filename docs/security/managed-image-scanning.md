@@ -51,8 +51,9 @@ exception, or blanket OS exception is used.
 ## Inventory and advisory coverage
 
 Syft inventories the full image, including Debian's dpkg database. The actual
-`/etc/os-release` probe must identify Debian 12/bookworm, the Syft release must
-match it, and Grype must report that recognized Debian release. Unknown release
+`/etc/os-release` probe must identify Debian 13/trixie (or Debian 12/bookworm
+for retained historical inventories), the Syft release and codename must
+match it, and Grype must report the same recognized Debian release. Unknown release
 metadata fails even if Grype exits successfully with zero findings. Every package
 reported by the image's dpkg probe must occur at the actual version in the SBOM.
 The gate executes fixed absolute Node, Go, and uv paths inside the exact image,

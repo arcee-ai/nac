@@ -56,6 +56,8 @@ def qualify(output, cache, db):
             node = bundle.extractfile(f"node-v{version}-linux-x64/bin/node").read()
         (root / "usr/local/bin/node").write_bytes(node)
         (root / "etc").mkdir()
+        # Keep the known Bookworm advisory controls stable. Current Trixie
+        # coverage is exercised by inventory tests and the exact native image.
         (root / "etc/os-release").write_text('ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n')
         (root / "var/lib/dpkg").mkdir(parents=True)
         # Minimal dpkg records are parser/advisory fixtures, not real image inventories.

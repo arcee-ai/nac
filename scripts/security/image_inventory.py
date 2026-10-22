@@ -61,9 +61,10 @@ def runtimes(raw):
 
 
 def supported_debian(name, version):
-    require(name == "debian" and isinstance(version, str) and
-            re.fullmatch(r"12(?:\.\d+)?", version) is not None,
+    match = re.fullmatch(r"(12|13)(?:\.\d+)?", version) if isinstance(version, str) else None
+    require(name == "debian" and match is not None,
             "unrecognized/unsupported Debian release; OS advisory coverage is incomplete")
+    return match[1]
 
 
 def os_release(raw):
@@ -76,9 +77,10 @@ def os_release(raw):
             parsed = shlex.split(value)
             require(len(parsed) == 1, f"malformed OS release field: {key}")
             values[key] = parsed[0]
-    supported_debian(values.get("ID"), values.get("VERSION_ID"))
-    require(values.get("VERSION_ID") == "12" and values.get("VERSION_CODENAME") == "bookworm",
-            "actual Debian OS release does not match supported bookworm image")
+    major = supported_debian(values.get("ID"), values.get("VERSION_ID"))
+    require(values.get("VERSION_ID") == major and
+            values.get("VERSION_CODENAME") == {"12": "bookworm", "13": "trixie"}[major],
+            "actual Debian OS release does not match a supported image")
     return values
 
 
@@ -99,8 +101,9 @@ def inventory(sbom, raw, image):
     versions, packages = runtimes(raw)
     actual_distro = os_release(raw["os_release"])
     distro = sbom.get("distro", {})
-    supported_debian(distro.get("id"), distro.get("versionID"))
-    require(distro.get("versionCodename") == actual_distro["VERSION_CODENAME"],
+    major = supported_debian(distro.get("id"), distro.get("versionID"))
+    require(major == actual_distro["VERSION_ID"] and
+            distro.get("versionCodename") == actual_distro["VERSION_CODENAME"],
             "SBOM Debian release differs from actual image OS release")
     debs = {(p.get("name"), p.get("version")) for p in artifacts if p.get("type") == "deb"}
     for name, version in packages:
@@ -120,7 +123,10 @@ def grype_findings(report, sbom):
             "malformed scanner results")
     require(report.get("descriptor", {}).get("name") == "grype", "not Grype results")
     distro = report.get("distro", {})
-    supported_debian(distro.get("name"), distro.get("version"))
+    major = supported_debian(distro.get("name"), distro.get("version"))
+    require(major == supported_debian(sbom.get("distro", {}).get("id"),
+                                      sbom.get("distro", {}).get("versionID")),
+            "Grype Debian release differs from the inventoried image")
     known = {p["id"] for p in sbom["artifacts"]}
     findings = []
     for match in report["matches"]:
