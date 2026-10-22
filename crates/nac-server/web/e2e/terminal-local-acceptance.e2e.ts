@@ -448,6 +448,13 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   await pane.getByRole("button", { name: "New shell", exact: true }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
+  // The first history refresh removes its empty-state row and resizes the terminal.
+  // Complete that setup before exercising selection under noisy output.
+  await expect(
+    pane
+      .getByRole("region", { name: "Recent terminal activity" })
+      .locator(`option[value="${terminal}"]`),
+  ).toHaveCount(1);
   const pages: Array<{ bytes: number; gap: boolean; retained: number }> = [];
   const pending = new Set<Promise<void>>();
   page.on("response", (response) => {
