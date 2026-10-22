@@ -130,6 +130,8 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/go.tar.gz -C /usr/local \
     && rm /tmp/go.tar.gz \
+    && XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local /usr/local/go/bin/go telemetry off \
+    && test "$(XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local /usr/local/go/bin/go env GOTELEMETRY)" = off \
     && test "$(XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local GOPATH=/tmp/nac-lfs-build /usr/local/go/bin/go mod download -json \
         "github.com/git-lfs/git-lfs/v3@v${GIT_LFS_VERSION}" | jq -r .Sum)" = "$GIT_LFS_MODULE_SUM" \
     && XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local CGO_ENABLED=0 GOPATH=/tmp/nac-lfs-build GOCACHE=/tmp/nac-lfs-cache \
@@ -186,7 +188,9 @@ RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint /usr
     && node --version \
     && npm --version \
     && corepack --version \
-    && XDG_CONFIG_HOME=/tmp/nac-go-check go version \
+    && XDG_CONFIG_HOME=/tmp/nac-go-check GOTOOLCHAIN=local go telemetry off \
+    && test "$(XDG_CONFIG_HOME=/tmp/nac-go-check GOTOOLCHAIN=local go env GOTELEMETRY)" = off \
+    && XDG_CONFIG_HOME=/tmp/nac-go-check GOTOOLCHAIN=local go version \
     && rm -rf /tmp/nac-go-check \
     && uv --version \
     && test "$(stat -c '%u:%g' /home/nac)" = 10001:10001 \
