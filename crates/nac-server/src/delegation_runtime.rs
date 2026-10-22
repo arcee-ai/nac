@@ -8,6 +8,27 @@ use nac_core::{
     store::{ManagedOrchestratorRecord, ManagedOrchestratorStatus},
 };
 
+/// A foreground wait found its generation replaced by a later one, such as a queued steer.
+#[derive(Debug)]
+pub(crate) struct GenerationSuperseded<R> {
+    pub(crate) kind: &'static str,
+    pub(crate) generation: u64,
+    pub(crate) current: R,
+    pub(crate) current_generation: u64,
+}
+
+impl<R> std::fmt::Display for GenerationSuperseded<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} generation {} was superseded by {}",
+            self.kind, self.generation, self.current_generation
+        )
+    }
+}
+
+impl<R: std::fmt::Debug> std::error::Error for GenerationSuperseded<R> {}
+
 pub(crate) fn managed_run_failure_status(
     failure: Option<&RunFailure>,
 ) -> ManagedOrchestratorStatus {
@@ -174,10 +195,13 @@ impl nac_core::traditional_children::TraditionalChildController
                     anyhow!("traditional child session '{child_session_id}' was not found")
                 })?;
                 if child.generation != generation {
-                    return Err(anyhow!(
-                        "traditional child generation {generation} was superseded by {}",
-                        child.generation
-                    ));
+                    return Err(GenerationSuperseded {
+                        kind: "traditional child",
+                        generation,
+                        current_generation: child.generation,
+                        current: child,
+                    }
+                    .into());
                 }
                 if child.status.is_terminal() {
                     return Ok(child);

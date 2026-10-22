@@ -154,6 +154,86 @@ async fn traditional_child_http_api_runs_foreground_then_delivers_background_com
 }
 
 #[tokio::test]
+async fn foreground_child_request_succeeds_when_a_queued_steer_supersedes_its_generation() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("traditional_child_superseded_wait");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("traditional-child-superseded-key"));
+    let (base_url, requests, arrived, release) =
+        scripted_direct_responses_holding(&["first pass done", "continuation done"], 1);
+    seed_direct_session_with_base_url(&root, "direct", base_url);
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
+    let post = |body: String| {
+        app.clone().oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/direct/children")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+    };
+
+    let first = post(
+        r#"{"profile":"general","description":"steered child","prompt":"first pass","background":false}"#
+            .to_string(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first: TraditionalChildRecord =
+        serde_json::from_slice(&response_body(first).await).unwrap();
+    let continued = tokio::spawn(post(format!(
+        r#"{{"profile":"general","description":"steered child","prompt":"continue","child_session_id":"{}","background":false}}"#,
+        first.child_session_id
+    )));
+    tokio::task::spawn_blocking(move || {
+        arrived.recv_timeout(Duration::from_secs(5)).unwrap();
+    })
+    .await
+    .unwrap();
+
+    // A steer queued during generation 2 starts generation 3 before this request sees 2 end.
+    rusqlite::Connection::open(root.join("store.db"))
+        .unwrap()
+        .execute(
+            "UPDATE traditional_children SET generation = 3 WHERE child_session_id = ?1",
+            rusqlite::params![&first.child_session_id],
+        )
+        .unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(5), continued)
+        .await
+        .expect("the superseded request should settle")
+        .unwrap()
+        .unwrap();
+    let status = reply.status();
+    let body = response_body(reply).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let child: TraditionalChildRecord = serde_json::from_slice(&body).unwrap();
+    assert_eq!(child.child_session_id, first.child_session_id);
+    assert_eq!(child.generation, 3);
+    release.send(()).unwrap();
+    tokio::task::spawn_blocking(move || {
+        for index in 0..2 {
+            assert_eq!(
+                requests.recv_timeout(Duration::from_secs(5)).unwrap(),
+                index
+            );
+        }
+    })
+    .await
+    .unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn traditional_child_cancel_endpoint_propagates_to_active_generation() {
     let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("traditional_child_cancel");
@@ -831,6 +911,53 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
         "managed orchestrator was not found"
     );
     assert!(!orchestrator_cancel_error.message.contains(&orchestrator));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn foreground_orchestrator_wait_counts_only_supersession_as_run() {
+    let root = temp_root("managed_superseded_wait");
+    seed_direct_with_orchestrator_session_with_base_url(
+        &root,
+        "delegating",
+        "https://api.openai.com/v1".to_string(),
+    );
+    let manager = test_manager(&root);
+    let orchestrator = manager
+        .create_managed_orchestrator_session("delegating", "steered orchestrator")
+        .await
+        .unwrap();
+    let store_path = root.join("store.db");
+    let relation = nac_core::store::begin_managed_orchestrator_run(
+        &store_path,
+        &orchestrator,
+        "first-run",
+        ManagedOrchestratorExecutionMode::Foreground,
+    )
+    .unwrap();
+    rusqlite::Connection::open(&store_path)
+        .unwrap()
+        .execute(
+            "UPDATE managed_orchestrators SET generation = generation + 1 \
+             WHERE orchestrator_session_id = ?1",
+            rusqlite::params![&orchestrator],
+        )
+        .unwrap();
+
+    let superseded = manager
+        .monitor_managed_orchestrator(&orchestrator, relation.generation)
+        .await
+        .or_else(crate::application::delegation::superseded_as_run::<ManagedOrchestratorRecord>)
+        .unwrap();
+    assert_eq!(superseded.orchestrator_session_id, orchestrator);
+    assert_eq!(superseded.generation, relation.generation + 1);
+
+    let missing = manager
+        .monitor_managed_orchestrator("missing-orchestrator", 1)
+        .await
+        .or_else(crate::application::delegation::superseded_as_run::<ManagedOrchestratorRecord>)
+        .unwrap_err();
+    assert!(missing.to_string().contains("was not found"), "{missing}");
     let _ = std::fs::remove_dir_all(root);
 }
 

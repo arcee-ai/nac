@@ -12,6 +12,15 @@ use std::time::Duration;
 
 use crate::SessionManager;
 
+/// A foreground request whose generation a queued steer superseded was run, so it did not fail.
+pub(crate) fn superseded_as_run<R: std::fmt::Debug + Send + Sync + 'static>(
+    error: anyhow::Error,
+) -> Result<R> {
+    error
+        .downcast::<delegation_runtime::GenerationSuperseded<R>>()
+        .map(|superseded| superseded.current)
+}
+
 pub(crate) struct StartTraditionalChild {
     pub(crate) profile: String,
     pub(crate) description: String,
@@ -97,6 +106,7 @@ impl<'a> DelegationApplication<'a> {
             controller
                 .wait(&child.child_session_id, child.generation)
                 .await
+                .or_else(superseded_as_run)
         }
     }
 
@@ -172,6 +182,7 @@ impl<'a> DelegationApplication<'a> {
                     orchestrator.generation,
                 )
                 .await
+                .or_else(superseded_as_run)
         }
     }
 
@@ -254,10 +265,13 @@ impl SessionManager {
                     )
                 })?;
             if record.generation != generation {
-                return Err(anyhow!(
-                    "managed orchestrator generation {generation} was superseded by {}",
-                    record.generation
-                ));
+                return Err(delegation_runtime::GenerationSuperseded {
+                    kind: "managed orchestrator",
+                    generation,
+                    current_generation: record.generation,
+                    current: record,
+                }
+                .into());
             }
             if record.status.is_terminal() {
                 return Ok(record);

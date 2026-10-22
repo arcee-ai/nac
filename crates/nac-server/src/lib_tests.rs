@@ -884,6 +884,34 @@ fn scripted_direct_response() -> (String, std::sync::mpsc::Receiver<()>) {
 }
 
 fn scripted_direct_responses(responses: &[&str]) -> (String, std::sync::mpsc::Receiver<usize>) {
+    serve_direct_responses(responses, None)
+}
+
+/// Like `scripted_direct_responses`, but reply `held` waits for the release after it arrives.
+fn scripted_direct_responses_holding(
+    responses: &[&str],
+    held: usize,
+) -> (
+    String,
+    std::sync::mpsc::Receiver<usize>,
+    std::sync::mpsc::Receiver<()>,
+    std::sync::mpsc::Sender<()>,
+) {
+    let (arrived_sender, arrived_receiver) = std::sync::mpsc::channel();
+    let (release_sender, release_receiver) = std::sync::mpsc::channel();
+    let (base_url, requests) =
+        serve_direct_responses(responses, Some((held, arrived_sender, release_receiver)));
+    (base_url, requests, arrived_receiver, release_sender)
+}
+
+fn serve_direct_responses(
+    responses: &[&str],
+    hold: Option<(
+        usize,
+        std::sync::mpsc::Sender<()>,
+        std::sync::mpsc::Receiver<()>,
+    )>,
+) -> (String, std::sync::mpsc::Receiver<usize>) {
     use std::io::{Read, Write};
 
     let listener =
@@ -921,6 +949,10 @@ fn scripted_direct_responses(responses: &[&str]) -> (String, std::sync::mpsc::Re
                 let read = socket.read(&mut buffer).unwrap();
                 assert!(read > 0, "direct model request body ended early");
                 request.extend_from_slice(&buffer[..read]);
+            }
+            if let Some((_, arrived, release)) = hold.as_ref().filter(|(held, ..)| *held == index) {
+                arrived.send(()).unwrap();
+                release.recv().unwrap();
             }
             let body = serde_json::json!({
                 "status": "completed",
