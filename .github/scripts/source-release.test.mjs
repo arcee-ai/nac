@@ -153,6 +153,28 @@ test("unavailable published-release inventory fails before publication", async (
   }
 });
 
+test("duplicate recovery does not swallow unrelated errors or duplicate objects", async () => {
+  const require = createRequire(import.meta.url);
+  const { DuplicateReleaseError } = require("release-please/build/src/errors");
+  for (const error of [
+    new Error("publication API unavailable"),
+    new DuplicateReleaseError(
+      Object.assign(new Error("unrelated duplicate"), { status: 422 }),
+      "v0.1.5",
+    ),
+  ]) {
+    const mock = manifest([candidate()], [{ tagName: "v0.1.5", sha }]);
+    mock.createReleasesForPullRequest = async () => {
+      throw error;
+    };
+    await assert.rejects(
+      publishScannedRelease(mock, identity, mock.github),
+      (caught) => caught === error,
+    );
+    assert.deepEqual(mock.calls, []);
+  }
+});
+
 test("locked Release Please preserves exact merge SHA, version, notes, and publication labels", async () => {
   const require = createRequire(import.meta.url);
   const { Manifest } = require("release-please");
@@ -248,10 +270,7 @@ test("locked Release Please preserves exact merge SHA, version, notes, and publi
   assert.ok(calls.every((call) => !call.remove && !call.add));
   failComment = false;
   calls.length = 0;
-  await assert.rejects(
-    publishScannedRelease(realManifest, identity, github),
-    DuplicateReleaseError,
-  );
+  assert.deepEqual(await publishScannedRelease(realManifest, identity, github), []);
   assert.equal(calls.filter((call) => call.release).length, 0);
   assert.equal(released.length, 2);
   assert.deepEqual(
@@ -274,10 +293,7 @@ test("locked Release Please preserves exact merge SHA, version, notes, and publi
   // if that API would otherwise accept an older new release.
   released.push({ tagName: "v0.1.6" });
   calls.length = 0;
-  await assert.rejects(
-    publishScannedRelease(realManifest, identity, github),
-    DuplicateReleaseError,
-  );
+  assert.deepEqual(await publishScannedRelease(realManifest, identity, github), []);
   assert.equal(calls.filter((call) => call.release).length, 0);
   assert.deepEqual(
     calls.filter((call) => call.remove || call.add),

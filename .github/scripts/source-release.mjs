@@ -61,16 +61,24 @@ export async function publishScannedRelease(manifest, { sha, prNumber, version }
     const { DuplicateReleaseError } = createRequire(import.meta.url)(
       "release-please/build/src/errors",
     );
+    const duplicate = new DuplicateReleaseError(
+      Object.assign(new Error("verified release already exists"), { status: 422 }),
+      `v${version}`,
+    );
     const recovery = Object.create(manifest);
     recovery.createRelease = async (release) => {
       if (release !== candidate || release.sha !== sha || release.tag.toString() !== `v${version}`)
         throw new Error("duplicate recovery differs from the scanned candidate");
-      throw new DuplicateReleaseError(
-        Object.assign(new Error("verified release already exists"), { status: 422 }),
-        `v${version}`,
-      );
+      throw duplicate;
     };
-    return recovery.createReleasesForPullRequest([candidate], candidate.pullRequest);
+    try {
+      return await recovery.createReleasesForPullRequest([candidate], candidate.pullRequest);
+    } catch (error) {
+      // The pinned handler rethrows this object only after successful label
+      // repair. Every API error and unrelated duplicate must still fail.
+      if (error !== duplicate) throw error;
+      return [];
+    }
   }
   if (newerTag) {
     throw new Error(`scanned version ${version} is not newer than published ${newerTag}`);
