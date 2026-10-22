@@ -19,19 +19,26 @@ const { buildStrategy } = require("release-please/build/src/factory");
 const { parseConventionalCommits } = require("release-please/build/src/commit");
 const { Version } = require("release-please/build/src/version");
 
-test("pinned Release Please parses the checked-in config and calculates versions", async () => {
+async function readProductManifest(root = process.cwd()) {
   const github = {
     repository: { owner: "arcee-ai", repo: "nac", defaultBranch: "dev" },
     async getFileJson(file, branch) {
       assert.equal(branch, "dev");
-      return JSON.parse(fs.readFileSync(file, "utf8"));
+      return JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
     },
   };
   const manifest = await Manifest.fromManifest(github, "dev");
+  const productVersion = fs.readFileSync(path.join(root, "version.txt"), "utf8").trim();
+  parseVersion(productVersion);
+  assert.equal(manifest.releasedVersions["."].toString(), productVersion);
+  return { github, manifest };
+}
+
+test("pinned Release Please parses the checked-in config and calculates versions", async () => {
+  const { github, manifest } = await readProductManifest();
   const config = manifest.repositoryConfig["."];
   assert.equal(config.releaseType, "simple");
   assert.equal(config.bumpMinorPreMajor, true);
-  assert.equal(manifest.releasedVersions["."].toString(), "0.1.4");
   assert.deepEqual(manifest.labels, ["autorelease: pending"]);
   assert.notEqual(manifest.skipLabeling, true);
   const strategy = await buildStrategy({ github, path: ".", targetBranch: "dev", ...config });
@@ -50,6 +57,26 @@ test("pinned Release Please parses the checked-in config and calculates versions
     "0.2.0",
   );
   assert.equal(await next("1.2.3", ["feat!: replace wire shape"]), "2.0.0");
+});
+
+test("pinned manifest follows non-bootstrap product versions and rejects mismatched identity", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nac-release-version-"));
+  try {
+    fs.copyFileSync("release-please-config.json", path.join(root, "release-please-config.json"));
+    for (const version of ["0.1.5", "1.2.3"]) {
+      fs.writeFileSync(
+        path.join(root, ".release-please-manifest.json"),
+        JSON.stringify({ ".": version }),
+      );
+      fs.writeFileSync(path.join(root, "version.txt"), `${version}\n`);
+      const { manifest } = await readProductManifest(root);
+      assert.equal(manifest.releasedVersions["."].toString(), version);
+    }
+    fs.writeFileSync(path.join(root, "version.txt"), "1.2.4\n");
+    await assert.rejects(readProductManifest(root), { code: "ERR_ASSERTION" });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("stable validation binds the canonical tag to root product identity", () => {
