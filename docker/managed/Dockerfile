@@ -53,6 +53,7 @@ ARG GH_VERSION=2.103.0
 ARG GH_SHA256=fdd768eb70f6409f80fcfa9f3a1c0adf0fc98d827ab3ce0bed2ac22762c5d786
 ARG GIT_LFS_VERSION=3.8.0
 ARG GIT_LFS_MODULE_SUM=h1:D0WiUyq5J3ZOv/9bvCcPToHqHF+WIQQKF5BK8bxlc5o=
+ARG GIT_LFS_REVISION=aece9221f8c09221a14395d964806b956289bc07
 ARG NPM_VERSION=11.21.1
 ARG NPM_SHA256=dd77c48eb845f4856c2cdba347cfb52bd877a2655a1ea48ff0c4796e3df9dd7b
 ARG UV_VERSION=0.13.4
@@ -67,6 +68,8 @@ ENV LANG=C.UTF-8 \
     GOPATH=/home/nac/go \
     TMPDIR=/tmp \
     PATH=/usr/local/cargo/bin:/usr/local/go/bin:/home/nac/go/bin:/home/nac/.cargo/bin:/home/nac/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+COPY docker/managed/git-lfs/go.mod docker/managed/git-lfs/go.sum /tmp/nac-lfs-dependencies/
 
 RUN test "$(dpkg --print-architecture)" = amd64 \
     && apt-get update \
@@ -116,22 +119,42 @@ RUN test "$(dpkg --print-architecture)" = amd64 \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/gh.tar.gz \
         "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
     && echo "${GH_SHA256}  /tmp/gh.tar.gz" | sha256sum -c - \
-    && tar -xzf /tmp/gh.tar.gz -C /usr/local --strip-components=1 \
-    && rm /tmp/gh.tar.gz \
+    && mkdir /tmp/nac-gh \
+    && tar -xzf /tmp/gh.tar.gz -C /tmp/nac-gh --strip-components=1 \
+    && install -m 0755 /tmp/nac-gh/bin/gh /usr/local/bin/gh \
+    && cp -R /tmp/nac-gh/share/. /usr/local/share/ \
+    && install -d /usr/local/share/licenses/gh \
+    && cp /tmp/nac-gh/LICENSE /usr/local/share/licenses/gh/LICENSE \
+    && rm -rf /tmp/nac-gh /tmp/gh.tar.gz \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/go.tar.gz \
         "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
     && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/go.tar.gz -C /usr/local \
     && rm /tmp/go.tar.gz \
-    && test "$(GOTOOLCHAIN=local GOPATH=/tmp/nac-lfs-build /usr/local/go/bin/go mod download -json \
+    && test "$(XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local GOPATH=/tmp/nac-lfs-build /usr/local/go/bin/go mod download -json \
         "github.com/git-lfs/git-lfs/v3@v${GIT_LFS_VERSION}" | jq -r .Sum)" = "$GIT_LFS_MODULE_SUM" \
-    && GOTOOLCHAIN=local CGO_ENABLED=0 GOPATH=/tmp/nac-lfs-build \
-        GOCACHE=/tmp/nac-lfs-cache GOBIN=/usr/local/bin \
-        /usr/local/go/bin/go install "github.com/git-lfs/git-lfs/v3@v${GIT_LFS_VERSION}" \
+    && XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local CGO_ENABLED=0 GOPATH=/tmp/nac-lfs-build GOCACHE=/tmp/nac-lfs-cache \
+        /usr/local/go/bin/go -C "/tmp/nac-lfs-build/pkg/mod/github.com/git-lfs/git-lfs/v3@v${GIT_LFS_VERSION}" \
+        build -mod=readonly -modfile=/tmp/nac-lfs-dependencies/go.mod -trimpath \
+        -ldflags "-X github.com/git-lfs/git-lfs/v3/config.GitCommit=${GIT_LFS_REVISION}" \
+        -o /usr/local/bin/git-lfs . \
     && install -d /usr/local/share/licenses/git-lfs \
     && cp "/tmp/nac-lfs-build/pkg/mod/github.com/git-lfs/git-lfs/v3@v${GIT_LFS_VERSION}/LICENSE.md" \
         /usr/local/share/licenses/git-lfs/LICENSE.md \
-    && rm -rf /tmp/nac-lfs-build /tmp/nac-lfs-cache \
+    && XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local GOPATH=/tmp/nac-lfs-build \
+        /usr/local/go/bin/go -C "/tmp/nac-lfs-build/pkg/mod/github.com/git-lfs/git-lfs/v3@v${GIT_LFS_VERSION}" \
+        list -mod=readonly -modfile=/tmp/nac-lfs-dependencies/go.mod -m -json all > /tmp/nac-lfs-modules.json \
+    && jq -r 'select(.Dir != null) | [.Path, .Dir] | @tsv' /tmp/nac-lfs-modules.json > /tmp/nac-lfs-notices \
+    && test -s /tmp/nac-lfs-notices \
+    && while IFS="$(printf '\t')" read -r module module_dir; do \
+        notice_dir="/usr/local/share/licenses/git-lfs/modules/$module"; \
+        mkdir -p "$notice_dir"; \
+        for notice in LICENSE LICENSE.md LICENSE.txt COPYING NOTICE PATENTS AUTHORS; do \
+            if [ -f "$module_dir/$notice" ]; then cp "$module_dir/$notice" "$notice_dir/$notice"; fi; \
+        done; \
+    done < /tmp/nac-lfs-notices \
+    && rm /tmp/nac-lfs-notices /tmp/nac-lfs-modules.json \
+    && rm -rf /tmp/nac-lfs-build /tmp/nac-lfs-cache /tmp/nac-lfs-dependencies /tmp/nac-lfs-config \
     && git lfs install --system --skip-repo \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/uv.tar.gz \
         "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
@@ -140,6 +163,7 @@ RUN test "$(dpkg --print-architecture)" = amd64 \
     && rm /tmp/uv.tar.gz \
     && groupadd --gid 10001 nac \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/nac --shell /bin/bash nac \
+    && install -d -o 10001 -g 10001 -m 0755 /home/nac \
     && install -d -o 10001 -g 10001 -m 0700 /var/lib/nac \
     && install -d -o 10001 -g 10001 -m 0755 /repositories /run/nac /run/secrets/nac \
     && install -d -o 10001 -g 10001 -m 0755 /etc/nac \
@@ -162,8 +186,10 @@ RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint /usr
     && node --version \
     && npm --version \
     && corepack --version \
-    && go version \
-    && uv --version
+    && XDG_CONFIG_HOME=/tmp/nac-go-check go version \
+    && rm -rf /tmp/nac-go-check \
+    && uv --version \
+    && test "$(stat -c '%u:%g' /home/nac)" = 10001:10001
 
 # Keep LFS filters outside HOME, which is replaced by a persistent mount.
 # The system installation above remains available after dropping privileges.

@@ -57,7 +57,15 @@ directories, tools, readiness and signal/persistence contracts.
   Go 1.27.3: the official Linux LFS binary still embeds Go 1.27.0. Verify the
   module checksum through Go's checksum database and the explicit pinned sum;
   retain its license, remove build caches, and keep system LFS filters outside
-  the persistent HOME. No source fork or vendored implementation enters NAC.
+  the persistent HOME. The approved dependency-only build overlay in
+  `docker/managed/git-lfs/go.mod` and `go.sum` selects x/net 0.60.0 and its
+  required x/crypto 0.57.0, x/text 0.42.0, x/sys 0.48.0 and x/sync 0.23.0;
+  these retain the Go Authors' BSD-3-Clause terms. Generate changes with Go
+  tooling against the checksum-verified upstream release and build with
+  `-mod=readonly`; never run floating `go get` in the image build. Application
+  source remains at revision `aece9221f8c09221a14395d964806b956289bc07`.
+  Remove the overlay when a supported upstream LFS release includes the fixed
+  dependencies. No application-code fork or vendored implementation enters NAC.
 
 Evidence: [Debian stable](https://www.debian.org/releases/),
 [Go releases](https://go.dev/dl/),
