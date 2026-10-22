@@ -123,6 +123,13 @@ it does not rediscover a newer candidate between validation and creation.
 An older release blocked by its own immutable scan remains unpublished and
 retains its pending label; it does not block publication of a later separately
 scanned release PR. The guard never tags or relabels that older unscanned plan.
+Before publication it reads all published releases and requires the scanned
+stable version to be greater than every published stable version. Recovery of
+an older or equal version is rejected before release creation or label changes,
+so it cannot move GitHub's Latest release backward. An unavailable release
+inventory also blocks publication; drafts and prerelease tags are not stable
+versions. Release preparation/publication runs retain their shared concurrency
+group so a later NAC publication cannot race this check.
 `stable-release.yml` separately rescans the exact tag candidate before binary
 upload. Both publication scans may use a later, separately reviewed policy from
 canonical `dev`, pinned once before evaluation. This permits recovery when a new
@@ -144,14 +151,15 @@ them and safe/vulnerable fixtures plus ordinary merge-blocking qualification
 have passed. Existing repository protections and Allison's PR-only override
 remain separate from the scanner.
 
-Eric's ALL-447 dependency/runtime remediation landed in PR #399 and is inherited
-without alteration. This gate adds no dependency, asset, or runtime upgrades.
-The fresh [baseline](dependency-scanning-baseline.md) retains nine residual
-records; separate research/remediation belongs to ALL-462. Remediation or
-human-reviewed exact expiring exceptions remain prerequisites for security-green
-publication and enforcement qualification. A deliberate human PR-only merge
-override can land the tooling while the baseline is red; it does not clear
-publication scans or qualify production activation.
+Eric's ALL-447 dependency/runtime remediation landed in PR #399. This gate adds
+no dependency, asset, or runtime upgrades.
+Prerequisite ALL-462 / PR #400 remediates the inherited source graph before this
+gate. The [baseline evidence](dependency-scanning-baseline.md) records all three
+remediated inputs passing with zero blocking findings, scanner/coverage errors,
+or exceptions; the nine-record and 57-record inventories are historical.
+Current-head CI must scan its exact candidate independently. Neither this source
+result nor a deliberate human PR-only merge override qualifies image security,
+production activation, or deployed schedule/prepublication acceptance.
 
 ## Local verification
 

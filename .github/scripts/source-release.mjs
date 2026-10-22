@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 // Release Please normally rediscovers all pending releases when publishing.
 // Keep its existing release/label behavior, but publish only a validated plan
 // bound to the one immutable merge candidate scanned by the prerequisite job.
-export async function publishScannedRelease(manifest, { sha, prNumber, version }) {
+export async function publishScannedRelease(manifest, { sha, prNumber, version }, github) {
   if (
     !/^[a-f0-9]{40}$/u.test(sha || "") ||
     !Number.isSafeInteger(prNumber) ||
@@ -33,6 +33,18 @@ export async function publishScannedRelease(manifest, { sha, prNumber, version }
       "Release Please candidate differs from scanned PR/SHA/version or would force a tag",
     );
   }
+  // A recovered older plan must not replace a newer stable release as Latest.
+  // Inspect all published versions: API creation order is not version order.
+  const scanned = version.split(".").map(BigInt);
+  for await (const release of github.releaseIterator()) {
+    const stable = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(release.tagName || "");
+    if (release.draft || !stable) continue;
+    const published = stable.slice(1).map(BigInt);
+    const difference = scanned.findIndex((part, index) => part !== published[index]);
+    if (difference === -1 || scanned[difference] < published[difference]) {
+      throw new Error(`scanned version ${version} is not newer than published ${release.tagName}`);
+    }
+  }
   return manifest.createReleasesForPullRequest([candidate], candidate.pullRequest);
 }
 
@@ -44,9 +56,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     throw new Error("repository identity and release token are required");
   const github = await GitHub.create({ owner, repo, token: process.env.GH_TOKEN });
   const manifest = await Manifest.fromManifest(github, "dev");
-  await publishScannedRelease(manifest, {
-    sha: process.env.SCANNED_SHA,
-    prNumber: Number(process.env.RELEASE_PR_NUMBER),
-    version: readFileSync("version.txt", "utf8").trim(),
-  });
+  await publishScannedRelease(
+    manifest,
+    {
+      sha: process.env.SCANNED_SHA,
+      prNumber: Number(process.env.RELEASE_PR_NUMBER),
+      version: readFileSync("version.txt", "utf8").trim(),
+    },
+    github,
+  );
 }

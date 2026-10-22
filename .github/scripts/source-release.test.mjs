@@ -12,10 +12,15 @@ const candidate = () => ({
   path: ".",
   tag: { toString: () => "v0.1.5" },
 });
-function manifest(candidates) {
+function manifest(candidates, published = []) {
   const calls = [];
   return {
     calls,
+    github: {
+      async *releaseIterator() {
+        yield* published;
+      },
+    },
     async buildReleases() {
       return candidates;
     },
@@ -29,7 +34,7 @@ function manifest(candidates) {
 test("only the exact scanned release plan is published without a second mutable discovery", async () => {
   const release = candidate();
   const mock = manifest([release]);
-  assert.deepEqual(await publishScannedRelease(mock, identity), ["created"]);
+  assert.deepEqual(await publishScannedRelease(mock, identity, mock.github), ["created"]);
   assert.deepEqual(mock.calls, [{ releases: [release], pr: release.pullRequest }]);
 });
 
@@ -42,7 +47,7 @@ test("an older blocked pending release does not prevent publishing the separatel
     tag: { toString: () => "v0.1.4" },
   };
   const mock = manifest([older, release]);
-  assert.deepEqual(await publishScannedRelease(mock, identity), ["created"]);
+  assert.deepEqual(await publishScannedRelease(mock, identity, mock.github), ["created"]);
   assert.deepEqual(mock.calls, [{ releases: [release], pr: release.pullRequest }]);
 });
 
@@ -58,7 +63,7 @@ test("unscanned, missing, multiple, wrong-PR/version/path and force-tag releases
     [{ ...candidate(), forceTag: true }],
   ]) {
     const mock = manifest(candidates);
-    await assert.rejects(publishScannedRelease(mock, identity));
+    await assert.rejects(publishScannedRelease(mock, identity, mock.github));
     assert.deepEqual(mock.calls, []);
   }
 });
@@ -73,9 +78,47 @@ test("malformed source identities cannot publish", async () => {
     { version: "latest" },
   ]) {
     const mock = manifest([candidate()]);
-    await assert.rejects(publishScannedRelease(mock, { ...identity, ...patch }));
+    await assert.rejects(publishScannedRelease(mock, { ...identity, ...patch }, mock.github));
     assert.deepEqual(mock.calls, []);
   }
+});
+
+test("recovery refuses equal or newer published stable versions without publishing or changing labels", async () => {
+  for (const tagName of ["v0.1.5", "v0.1.6", "v0.2.0", "v1.0.0", "v0.1.10"]) {
+    const mock = manifest([candidate()], [{ tagName: "v0.1.4" }, { tagName }]);
+    await assert.rejects(
+      publishScannedRelease(mock, identity, mock.github),
+      /not newer than published/u,
+    );
+    assert.deepEqual(mock.calls, []);
+  }
+});
+
+test("numeric release order permits a newer stable plan and ignores drafts and prereleases", async () => {
+  const mock = manifest(
+    [candidate()],
+    [
+      { tagName: "v0.1.4" },
+      { tagName: "v0.0.99" },
+      { tagName: "v0.2.0", draft: true },
+      { tagName: "v9.0.0-rc.1" },
+    ],
+  );
+  assert.deepEqual(await publishScannedRelease(mock, identity, mock.github), ["created"]);
+  assert.equal(mock.calls.length, 1);
+});
+
+test("unavailable published-release inventory fails before publication", async () => {
+  const mock = manifest([candidate()]);
+  mock.github.releaseIterator = async function* () {
+    yield { tagName: "v0.1.4" };
+    throw new Error("release inventory unavailable");
+  };
+  await assert.rejects(
+    publishScannedRelease(mock, identity, mock.github),
+    /release inventory unavailable/u,
+  );
+  assert.deepEqual(mock.calls, []);
 });
 
 test("locked Release Please preserves exact merge SHA, version, notes, and publication labels", async () => {
@@ -97,11 +140,15 @@ test("locked Release Please preserves exact merge SHA, version, notes, and publi
     files: [],
   };
   const calls = [];
+  const released = [{ tagName: "v0.1.4" }];
   const github = {
     repository: { owner: "arcee-ai", repo: "nac", defaultBranch: "dev" },
     async getFileJson(file, branch) {
       assert.equal(branch, "dev");
       return JSON.parse(readFileSync(file, "utf8"));
+    },
+    async *releaseIterator() {
+      yield* released;
     },
     async *pullRequestIterator(branch, state) {
       assert.equal(branch, "dev");
@@ -127,7 +174,7 @@ test("locked Release Please preserves exact merge SHA, version, notes, and publi
     },
   };
   const realManifest = await Manifest.fromManifest(github, "dev");
-  const published = await publishScannedRelease(realManifest, identity);
+  const published = await publishScannedRelease(realManifest, identity, github);
   assert.equal(published[0].version, "0.1.5");
   assert.equal(published[0].prNumber, 42);
   assert.equal(calls[0].release.sha, sha);
@@ -143,4 +190,13 @@ test("locked Release Please preserves exact merge SHA, version, notes, and publi
   );
   assert.equal(calls.filter((call) => call.release).length, 1);
   assert.ok(calls.filter((call) => call.remove || call.add).every((call) => call.number === 42));
+  // A newer release shipped while this older PR remained pending. Its recovery
+  // must not call Release Please's publishing or label-changing operations.
+  released.push({ tagName: "v0.1.6" });
+  calls.length = 0;
+  await assert.rejects(
+    publishScannedRelease(realManifest, identity, github),
+    /not newer than published v0.1.6/u,
+  );
+  assert.deepEqual(calls, []);
 });
