@@ -1042,3 +1042,6 @@ mod terminal_control;
 
 #[path = "tests/http_transport.rs"]
 mod http_transport;
+
+#[path = "tests/managed_create_shutdown.rs"]
+mod managed_create_shutdown;

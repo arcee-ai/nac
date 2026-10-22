@@ -267,6 +267,13 @@ pub fn validate_model_base_url_with_policy(
     Ok(())
 }
 
+/// Credential selector DATA only. Exact absence never consults ambient keys;
+/// neither variant authenticates a credential, creates a client or grants use.
+pub(crate) enum ApiKeySelector {
+    ConventionalIfAbsent(Option<String>),
+    Exact(Option<String>),
+}
+
 impl EffectiveModelSettings {
     // This is the single validation gate for the complete model tuple; keeping
     // its inputs explicit makes accidental defaulting at callers visible.
@@ -279,7 +286,7 @@ impl EffectiveModelSettings {
         model: Option<String>,
         base_url: Option<String>,
         reasoning_effort: Option<ReasoningEffort>,
-        api_key_env: Option<String>,
+        api_key_selector: ApiKeySelector,
         extra_headers: std::collections::BTreeMap<String, String>,
         resolved: Option<catalog::ModelMetadata>,
         allow_insecure_http: bool,
@@ -296,7 +303,12 @@ impl EffectiveModelSettings {
         // variable when it exists in the environment (the value is read at
         // client construction; the selected NAME is persisted into the
         // session). Managed backends never auto-select.
-        let api_key_env = api_key_env.or_else(|| backend::auto_select_api_key_env(backend));
+        let api_key_env = match api_key_selector {
+            ApiKeySelector::ConventionalIfAbsent(value) => {
+                value.or_else(|| backend::auto_select_api_key_env(backend))
+            }
+            ApiKeySelector::Exact(value) => value,
+        };
         let resolved = resolved.unwrap_or_else(|| catalog::resolve(backend, &model));
         super::backend::validate_model_reasoning_effort_with_map(
             backend,
@@ -316,6 +328,45 @@ impl EffectiveModelSettings {
             extra_headers,
             resolved,
         })
+    }
+
+    /// Validate a complete tuple already resolved from a retained catalog.
+    /// Explicit endpoint, metadata and selector prevent any global fallback or
+    /// ambient credential lookup in the shared validation gate.
+    #[cfg(unix)]
+    pub(crate) fn validate_captured(self) -> Result<Self> {
+        Self::from_optional_with_resolved(
+            Some(self.backend),
+            Some(self.model),
+            Some(self.base_url),
+            self.reasoning_effort,
+            ApiKeySelector::Exact(self.api_key_env),
+            self.extra_headers,
+            Some(self.resolved),
+            self.allow_insecure_http,
+        )?
+        .with_trusted_api_key_file(self.trusted_api_key_file)
+    }
+
+    pub(crate) fn from_optional_with_selector(
+        backend: Option<BackendKind>,
+        model: Option<String>,
+        base_url: Option<String>,
+        reasoning_effort: Option<ReasoningEffort>,
+        api_key_selector: ApiKeySelector,
+        extra_headers: std::collections::BTreeMap<String, String>,
+        allow_insecure_http: bool,
+    ) -> Result<Self> {
+        Self::from_optional_with_resolved(
+            backend,
+            model,
+            base_url,
+            reasoning_effort,
+            api_key_selector,
+            extra_headers,
+            None,
+            allow_insecure_http,
+        )
     }
 
     pub(crate) fn with_trusted_api_key_file(
@@ -352,7 +403,7 @@ impl EffectiveModelSettings {
             model,
             base_url,
             reasoning_effort,
-            api_key_env,
+            ApiKeySelector::ConventionalIfAbsent(api_key_env),
             extra_headers,
             None,
             false,
@@ -373,7 +424,7 @@ impl EffectiveModelSettings {
             model,
             base_url,
             reasoning_effort,
-            api_key_env,
+            ApiKeySelector::ConventionalIfAbsent(api_key_env),
             extra_headers,
             None,
             allow_insecure_http,
@@ -401,7 +452,7 @@ impl EffectiveModelSettings {
             Some(model),
             Some(base_url),
             reasoning_effort,
-            api_key_env,
+            ApiKeySelector::ConventionalIfAbsent(api_key_env),
             extra_headers,
             Some(resolved),
             allow_insecure_http,

@@ -11,6 +11,9 @@ mod configuration;
 mod github;
 mod github_credential_store;
 mod managed_control_assertion;
+mod protected_import_assertion;
+mod protected_import_claims;
+mod protected_import_sequence;
 mod readiness;
 
 pub use clone_process::{ManagedChildProcessLease, ManagedChildProcessObserver};
@@ -34,4 +37,10 @@ pub use managed_control_assertion::{
     ManagedControlAction, ManagedControlAssertion, ManagedControlAssertionError,
     ManagedControlRequest, ManagedControlTarget, ManagedControlVerifier,
 };
+pub use protected_import_assertion::{
+    ImportExpectedBinding, ImportOriginalContext, ImportProofError, ImportProofExpectation,
+    ImportProofVerifier, VerifiedImportProof,
+};
+pub use protected_import_claims::ImportProofClaims;
+pub use protected_import_sequence::{ImportChannelContext, ImportProofSequence};
 pub use readiness::{host_checks, ReadinessCheck};

@@ -94,7 +94,7 @@ impl ManagedFactListenerOptions {
     }
 }
 
-fn decode_pin(text: &str) -> Result<[u8; 32]> {
+pub(super) fn decode_pin(text: &str) -> Result<[u8; 32]> {
     if text.len() != 64
         || !text
             .bytes()
@@ -112,7 +112,7 @@ fn decode_pin(text: &str) -> Result<[u8; 32]> {
     Ok(pin)
 }
 
-fn read_input(path: &Path, private: bool) -> Result<Vec<u8>> {
+pub(super) fn read_input(path: &Path, private: bool) -> Result<Vec<u8>> {
     if !path.is_absolute() {
         bail!("managed fact configuration and DER paths must be absolute");
     }

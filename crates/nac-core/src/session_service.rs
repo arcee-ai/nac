@@ -33,6 +33,16 @@ use crate::view::{
 use crate::workspace::GitTarget;
 
 mod admission;
+mod admitted_publication;
+#[cfg(feature = "test-support")]
+pub use admitted_publication::fixtures as admitted_publication_fixtures;
+#[cfg(unix)]
+pub(crate) use admitted_publication::PreparedCreatePublication;
+pub use admitted_publication::{
+    AdmittedSessionPublication, SessionPublicationKind, SessionPublicationRetirement,
+};
+#[cfg(unix)]
+pub use admitted_publication::{RecordedCreatePublication, RecordedCreateTerminal};
 mod attachment;
 mod cancellation;
 mod creation;
@@ -40,6 +50,8 @@ mod direct_interaction;
 mod frontend_projection;
 mod manual_compaction;
 mod operation_state;
+mod protected_preparation;
+pub use protected_preparation::{ProtectedPreparationInput, ProtectedPreparationRefusal};
 mod recovery;
 mod settlement;
 mod shell_command_types;
@@ -607,6 +619,9 @@ impl FrontendSnapshotAfterWorkspaceGate {
 
 #[derive(Clone)]
 pub struct SessionService {
+    /// Only a genuine protected runtime builder may install this original owner.
+    /// Ordinary construction cannot satisfy the private CREATE issuer.
+    protected_create_context: Option<Arc<crate::runtime::ProtectedExecutionContext>>,
     agent: Arc<Mutex<Agent>>,
     goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
     metadata: Arc<SessionMetadata>,

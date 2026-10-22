@@ -31,7 +31,7 @@ impl Fixture {
             source_id: Uuid::new_v4(),
             source_generation: 1,
             canonical_effect_sha256: [1; 32],
-            creation_snapshot_sha256: creation_snapshot_sha256(snapshot).unwrap(),
+            creation_snapshot_sha256: Some(creation_snapshot_sha256(snapshot).unwrap()),
             session_id: snapshot.session_id.clone(),
             project_id: snapshot.project_id.clone(),
             sources: vec![SourceVersion {

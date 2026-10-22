@@ -40,6 +40,11 @@ harness.
 - `clone_process.rs` — supervised Git execution, cancellation, bounded progress,
   token masking, and remote identity validation.
 - `readiness.rs` — provider-independent readiness facts.
+- `protected_import_assertion.rs` and `protected_import_sequence.rs` verify
+  enrolled signatures, immutable scope and exact eight-phase crypto lineage.
+  These objects grant no source/current-primary loan, custody, ACK or runtime.
+  The separately typed server ISSUE owner retains its actual TLS channel and
+  selected verifier before verification; detached-v2 remains unselected.
 - `lib.rs` — intentionally small explicit facade over private modules.
 
 `github.rs` is a deliberate 851-line exception: one auditable provider client

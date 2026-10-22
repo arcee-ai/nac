@@ -14,6 +14,7 @@ async fn command(label: &str) -> (CreateSessionWithSnapshot, PathBuf) {
                 crate::runtime::PreparedSessionResources::for_test(None),
             ))),
             after_commit: None,
+            authority: None,
         },
         path,
     )

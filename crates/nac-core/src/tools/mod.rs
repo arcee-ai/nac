@@ -391,6 +391,9 @@ pub async fn execute_tool_with_context(
     client: &crate::model::ModelClient,
     context: &kernel::ToolCallContext,
 ) -> ToolResult {
+    if let Err(error) = runtime.check_ordinary_dispatch() {
+        return error;
+    }
     if !runtime.allows_tool(name) {
         return ToolResult::text(
             format!("Error: unknown tool '{name}' is not available to this agent"),
@@ -473,6 +476,8 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
         event_sink: EventSink::none(),
         backend,
+        #[cfg(unix)]
+        protected_context: None,
         mcp: None,
         mcp_tools: Arc::new(HashMap::new()),
         skills: None,

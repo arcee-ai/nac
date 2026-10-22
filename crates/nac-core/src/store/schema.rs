@@ -7,6 +7,9 @@ mod managed_tables;
 mod migration_status;
 mod model_configurations;
 #[cfg(test)]
+#[path = "schema/prepared_snapshot_migration_tests.rs"]
+mod prepared_snapshot_migration_tests;
+#[cfg(test)]
 mod protected_enrollment_tests;
 mod transaction_observation;
 mod transcript_tables;
@@ -49,6 +52,8 @@ mod future_schema_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 39 adds append-only actual prepared-snapshot binding after protected reads.
+// 38 adds same-store Native source revision and reservation ordering.
 // 37 adds distinct initial source-consume/private-start and proof-lineage history.
 // 36 adds protected enrollment uncertainty and immutable audit history on the
 // actual v34 union. Divergent, unshipped historical v35 is not an upgrade input.
@@ -80,7 +85,11 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 38;
+const STORE_SCHEMA_VERSION: i64 = 40;
+
+#[cfg(test)]
+#[path = "schema/create_cleanup_migration_tests.rs"]
+mod create_cleanup_migration_tests;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -784,8 +793,8 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 36 | 37
-        | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 36 | 37 | 38
+        | 39 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -982,6 +991,12 @@ fn open_connection_with_hooks(
     }
     if schema_version < 38 {
         super::native_source_reservation::create_tables(&transaction)?;
+    }
+    if schema_version < 39 {
+        super::native_source_reservation::create_prepared_snapshot_table(&transaction)?;
+    }
+    if schema_version < 40 {
+        super::native_create_cleanup::create_table(&transaction)?;
     }
     verify_auxiliary_foreign_keys(&transaction)?;
 

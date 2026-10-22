@@ -1,149 +1,51 @@
-//! Separate, opt-in runtime transport. A verified TLS peer is not operation authority.
-//!
-//! The operator supplies serving identity, a client CA and an exact D service leaf
-//! certificate pin. No machine secret, browser grant or bearer signer belongs here.
-
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-
-use anyhow::{bail, Context, Result};
+//! Thin HTTP adaptation of the original enrolled TLS resource owner.
+//! A peer is authenticated carriage; Core still owns operation admission.
+use anyhow::{Context, Result};
 use axum::{extract::connect_info::Connected, serve::IncomingStream, Router};
-use sha2::{Digest, Sha256};
-use tokio::{
-    net::{TcpListener, TcpStream},
-    task::JoinSet,
-};
-use tokio_rustls::{
-    rustls::{
-        self,
-        pki_types::{CertificateDer, PrivateKeyDer},
-    },
-    server::TlsStream,
-    TlsAcceptor,
-};
+pub use nac_runtime_auth::RuntimeTlsIdentity;
+use nac_runtime_auth::{AuthenticatedPeer, AuthenticatedStream, RuntimeTlsAcceptor};
+use std::net::SocketAddr;
 
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_HANDSHAKES: usize = 32;
-
-/// Explicit construction capability; absent configuration creates no listener.
-/// DER bytes are loaded by trusted composition, never selected by an HTTP request.
-pub struct RuntimeTlsIdentity {
-    pub serving_chain: Vec<CertificateDer<'static>>,
-    pub serving_key: PrivateKeyDer<'static>,
-    pub client_ca: CertificateDer<'static>,
-    pub d_service_leaf_sha256: [u8; 32],
-}
-
-impl RuntimeTlsIdentity {
-    fn acceptor(self) -> Result<TlsAcceptor> {
-        if self.d_service_leaf_sha256 == [0; 32] || self.serving_chain.is_empty() {
-            bail!("runtime TLS identity is incomplete");
-        }
-        let mut roots = rustls::RootCertStore::empty();
-        roots
-            .add(self.client_ca)
-            .context("runtime client CA is invalid")?;
-        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-        let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
-            Arc::new(roots),
-            Arc::clone(&provider),
-        )
-        .build()
-        .context("runtime client verification configuration failed")?;
-        let mut config = rustls::ServerConfig::builder_with_provider(provider)
-            .with_protocol_versions(&[&rustls::version::TLS13])?
-            .with_client_cert_verifier(verifier)
-            .with_single_cert(self.serving_chain, self.serving_key)
-            .context("runtime serving identity is invalid")?;
-        config.alpn_protocols = vec![b"http/1.1".to_vec()];
-        Ok(TlsAcceptor::from(Arc::new(config)))
-    }
-}
-
-/// Only this listener can manufacture the peer marker used by admission.
+/// Only the original accepted stream produces this weak peer view. Its Drop,
+/// EOF, failure and serving retirement are observed by the same opaque owner.
 #[derive(Clone, Debug)]
-pub(crate) struct AuthenticatedRuntimePeer {
-    leaf_sha256: [u8; 32],
+pub(crate) struct AuthenticatedRuntimePeer(AuthenticatedPeer);
+impl AuthenticatedRuntimePeer {
+    pub(super) fn original(&self) -> &AuthenticatedPeer {
+        &self.0
+    }
 }
-
 impl Connected<IncomingStream<'_, RuntimeTlsListener>> for AuthenticatedRuntimePeer {
-    #[expect(
-        clippy::expect_used,
-        reason = "the listener returns only CA-verified TLS streams with the configured nonzero leaf pin"
-    )]
     fn connect_info(stream: IncomingStream<'_, RuntimeTlsListener>) -> Self {
-        let leaf = stream
-            .io()
-            .get_ref()
-            .1
-            .peer_certificates()
-            .and_then(|chain| chain.first())
-            .expect("listener accepts only verified pinned peers");
-        Self {
-            leaf_sha256: Sha256::digest(leaf.as_ref()).into(),
-        }
+        Self(stream.io().peer())
     }
 }
 
-/// Bounded concurrent TLS handshakes keep a stalled unauthenticated connection
-/// from holding the accept loop. Failed handshakes never reach an HTTP handler.
-pub struct RuntimeTlsListener {
-    listener: TcpListener,
-    acceptor: TlsAcceptor,
-    pin: [u8; 32],
-    handshakes: JoinSet<Option<(TlsStream<TcpStream>, SocketAddr)>>,
-}
-
+/// Same private listener, original CA/pin/handshake limits and no raw stream
+/// extraction. Ordinary enrollment cannot issue CREATE or cleanup ACK.
+pub struct RuntimeTlsListener(RuntimeTlsAcceptor);
 impl RuntimeTlsListener {
     pub async fn bind(addr: SocketAddr, identity: RuntimeTlsIdentity) -> Result<Self> {
-        let pin = identity.d_service_leaf_sha256;
-        // Validate identity before binding; an invalid configuration fails startup.
-        let acceptor = identity.acceptor()?;
-        let listener = TcpListener::bind(addr)
-            .await
-            .context("runtime TLS bind failed")?;
-        Ok(Self {
-            listener,
-            acceptor,
-            pin,
-            handshakes: JoinSet::new(),
-        })
+        RuntimeTlsAcceptor::bind(addr, identity).await.map(Self)
     }
-
+    pub(crate) async fn bind_create_issuer(
+        addr: SocketAddr,
+        identity: RuntimeTlsIdentity,
+    ) -> Result<Self> {
+        RuntimeTlsAcceptor::bind_create_issuer(addr, identity)
+            .await
+            .map(Self)
+    }
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
-        self.listener.local_addr()
+        self.0.local_addr()
     }
 }
-
 impl axum::serve::Listener for RuntimeTlsListener {
-    type Io = TlsStream<TcpStream>;
+    type Io = AuthenticatedStream;
     type Addr = SocketAddr;
-
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        loop {
-            tokio::select! {
-                result = self.handshakes.join_next(), if !self.handshakes.is_empty() => {
-                    if let Some(Ok(Some(accepted))) = result { return accepted; }
-                }
-                result = self.listener.accept(), if self.handshakes.len() < MAX_HANDSHAKES => {
-                    match result {
-                        Ok((socket, address)) => {
-                            let acceptor = self.acceptor.clone();
-                            let pin = self.pin;
-                            self.handshakes.spawn(async move {
-                                let stream = tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(socket))
-                                    .await.ok()?.ok()?;
-                                let leaf = stream.get_ref().1.peer_certificates()?.first()?;
-                                let actual: [u8; 32] = Sha256::digest(leaf.as_ref()).into();
-                                (actual == pin).then_some((stream, address))
-                            });
-                        }
-                        Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
-                    }
-                }
-            }
-        }
+        self.0.accept().await
     }
-
     fn local_addr(&self) -> std::io::Result<Self::Addr> {
         self.local_addr()
     }
@@ -157,7 +59,7 @@ pub fn denied_runtime_router(native: Router) -> Router {
             let _authenticated_peer = request
                 .extensions()
                 .get::<axum::extract::ConnectInfo<AuthenticatedRuntimePeer>>()
-                .map(|peer| peer.0.leaf_sha256);
+                .and_then(|peer| peer.0.original().issuer().ok());
             axum::http::StatusCode::UNAUTHORIZED
         },
     ))

@@ -1,11 +1,14 @@
 [workspace]
 members = [
+    "crates/nac-native-execution",
+    "crates/nac-capacity-policy",
     "crates/nac-catalog-gen",
     "crates/nac-contracts",
     "crates/nac-core",
     "crates/nac-credential-store",
     "crates/nac-managed",
     "crates/nac-process",
+    "crates/nac-runtime-auth",
     "crates/nac-server",
 ]
 resolver = "2"

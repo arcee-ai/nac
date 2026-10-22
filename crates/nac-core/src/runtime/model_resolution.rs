@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::ApiKeySelector;
 
 /// Merge explicit new-session model options over `config.toml` settings.
 ///
@@ -8,6 +9,78 @@ use super::*;
 pub fn effective_model_settings(
     model: &ModelOptions,
     config: &NacConfig,
+) -> Result<EffectiveModelSettings> {
+    effective_model_settings_with_selector(
+        model,
+        config,
+        ApiKeySelector::ConventionalIfAbsent(model.api_key_env.snapshot_value()),
+    )
+}
+
+/// CREATE source resolution preserves explicit cleared credential selection.
+/// This is DATA, not authority to use a host key or another credential. The
+/// genuine builder must retain and independently verify that actual owner.
+pub(super) fn effective_create_model_settings(
+    model: &ModelOptions,
+    config: &NacConfig,
+) -> Result<EffectiveModelSettings> {
+    let selector = match &model.api_key_env {
+        OptionalModelOption::Clear => ApiKeySelector::Exact(None),
+        _ => ApiKeySelector::ConventionalIfAbsent(model.api_key_env.snapshot_value()),
+    };
+    effective_model_settings_with_selector(model, config, selector)
+}
+
+#[cfg(unix)]
+pub(super) fn effective_create_model_settings_from_catalog(
+    model: &ModelOptions,
+    config: &NacConfig,
+    catalog: &crate::model::ModelCatalog,
+) -> Result<EffectiveModelSettings> {
+    let model_id = model
+        .api_model
+        .clone()
+        .or_else(|| config.model.model.clone())
+        .ok_or_else(|| anyhow::anyhow!("CREATE model unavailable"))?;
+    let backend = model
+        .backend
+        .or_else(|| catalog.provider_for_model(&model_id))
+        .ok_or_else(|| anyhow::anyhow!("CREATE backend unavailable"))?;
+    let base_url = model
+        .api_base_url
+        .clone()
+        .or_else(|| {
+            model
+                .backend
+                .and_then(managed_backend_base_url)
+                .map(str::to_string)
+        })
+        .or_else(|| catalog.default_base_url(backend))
+        .or_else(|| managed_backend_base_url(backend).map(str::to_string))
+        .ok_or_else(|| anyhow::anyhow!("CREATE endpoint unavailable"))?;
+    EffectiveModelSettings {
+        backend,
+        model: model_id.clone(),
+        base_url,
+        allow_insecure_http: model.allow_insecure_http,
+        reasoning_effort: model
+            .reasoning_effort
+            .resolve(config.model.reasoning_effort),
+        api_key_env: model.api_key_env.snapshot_value(),
+        trusted_api_key_file: model.trusted_api_key_file.clone(),
+        extra_headers: model
+            .extra_headers
+            .clone()
+            .unwrap_or_else(|| config.model.extra_headers.clone()),
+        resolved: catalog.resolve(backend, &model_id),
+    }
+    .validate_captured()
+}
+
+fn effective_model_settings_with_selector(
+    model: &ModelOptions,
+    config: &NacConfig,
+    selector: ApiKeySelector,
 ) -> Result<EffectiveModelSettings> {
     let model_id = model
         .api_model
@@ -33,16 +106,14 @@ pub fn effective_model_settings(
     // api_key_env chain: request/override → (conventional-var
     // auto-selection inside `from_optional`) → managed = None → guided
     // error. No config tier.
-    let api_key_env = model.api_key_env.snapshot_value();
-
-    EffectiveModelSettings::from_optional_with_http_policy(
+    EffectiveModelSettings::from_optional_with_selector(
         backend,
         model_id,
         base_url,
         model
             .reasoning_effort
             .resolve(config.model.reasoning_effort),
-        api_key_env,
+        selector,
         model
             .extra_headers
             .clone()

@@ -16,6 +16,8 @@ managed-fault-fixture = []
 openapi = ["dep:utoipa", "nac-contracts/openapi"]
 
 [dependencies]
+nac-runtime-auth = { path = "../nac-runtime-auth" }
+nac-capacity-policy = { path = "../nac-capacity-policy" }
 nac-contracts = { path = "../nac-contracts" }
 nac-credential-store = { path = "../nac-credential-store" }
 nac-process = { path = "../nac-process" }

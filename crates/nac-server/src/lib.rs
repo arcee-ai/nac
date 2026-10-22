@@ -19,11 +19,16 @@ mod mcp_catalog_api;
 mod mcp_runtime_api;
 mod orchestration;
 mod revert;
+pub use application::initial_enrollment::InitialEnrollmentContext;
 pub use application::managed_locations::{
     ManagedDirectoryIdentity, ManagedLocationBinding, ManagedLocationFact,
     ManagedLocationFactError, ManagedLocationResolution, ManagedLocationSelector,
     ManagedProjectLocationIdentity,
 };
+pub use delivery::import_authority_transport::{
+    ImportAuthorityTransportOptions, IMPORT_AUTHORITY_PURPOSE,
+};
+pub use delivery::initial_import_issue::InitialImportIssueExchange;
 pub(crate) use managed_control::running_target as managed_running_target;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -333,6 +338,10 @@ struct SessionManagerInner {
     managed_model: Option<application::managed::ManagedModelProfile>,
     managed_clones: Option<nac_managed::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
+    create_transfers: application::create_transfer::CreateTransferRegistry,
+    #[cfg(target_os = "linux")]
+    create_attempts: application::managed_create_attempts::ManagedCreateAttempts,
+    publication_tasks: application::publication_tasks::PublicationTasks,
     terminal_observations: application::terminal_observation::TerminalObservationHub,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
@@ -589,6 +598,11 @@ impl SessionManager {
                 managed_model,
                 managed_clones,
                 active_sessions: RwLock::new(HashMap::new()),
+                create_transfers: application::create_transfer::CreateTransferRegistry::default(),
+                #[cfg(target_os = "linux")]
+                create_attempts:
+                    application::managed_create_attempts::ManagedCreateAttempts::default(),
+                publication_tasks: application::publication_tasks::PublicationTasks::default(),
                 terminal_observations:
                     application::terminal_observation::TerminalObservationHub::default(),
 

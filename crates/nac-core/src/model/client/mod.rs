@@ -5,6 +5,11 @@ use super::responses_stream::ResponsesStreamFold;
 use super::sse::{read_sse_response_with_extra_headers, with_source_chain, StreamFold};
 use super::*;
 use anyhow::Context;
+#[cfg(unix)]
+#[path = "protected_model.rs"]
+mod protected_model;
+#[cfg(unix)]
+use protected_model::HostKeyModelGuard;
 
 fn read_trusted_api_key_file(path: &std::path::Path) -> Result<String> {
     let value = nac_credential_store::read_mounted_credential_string(path)
@@ -216,11 +221,13 @@ async fn read_response_body(
     })
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ModelClient {
     client: Client,
     base_url: String,
     api_key: String,
+    #[cfg(unix)]
+    protected_host_key: Option<std::sync::Arc<HostKeyModelGuard>>,
     pub model: String,
     backend: BackendKind,
     reasoning_effort: Option<ReasoningEffort>,
@@ -238,6 +245,17 @@ pub struct ModelClient {
     /// Catalog metadata resolved with the effective settings; drives
     /// per-response cost, effort wire translation, and api-axis dispatch.
     resolved_model: ModelMetadata,
+}
+
+impl std::fmt::Debug for ModelClient {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ModelClient")
+            .field("backend", &self.backend)
+            .field("model", &self.model)
+            .field("reasoning_effort", &self.reasoning_effort)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ModelClient {
@@ -295,6 +313,8 @@ impl ModelClient {
             client,
             base_url: settings.base_url,
             api_key,
+            #[cfg(unix)]
+            protected_host_key: None,
             model: settings.model,
             backend,
             reasoning_effort: settings.reasoning_effort,
@@ -334,6 +354,28 @@ impl ModelClient {
     /// With no sink every backend keeps its plain buffered request: streaming is
     /// only worth its extra per-chunk parsing when somebody is watching.
     pub async fn send_turn_streaming(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        on_delta: DeltaSink<'_>,
+    ) -> Result<ModelTurnResponse> {
+        #[cfg(unix)]
+        if let Some(guard) = &self.protected_host_key {
+            return tokio::select! {
+                biased;
+                _ = guard.context().invalidated() => anyhow::bail!("protected model runtime ended"),
+                response = async {
+                    guard.check_current_async().await?;
+                    let response = self.send_turn_inner(messages, tools, on_delta).await?;
+                    guard.check_current_async().await?;
+                    Ok(response)
+                } => response,
+            };
+        }
+        self.send_turn_inner(messages, tools, on_delta).await
+    }
+
+    async fn send_turn_inner(
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
@@ -890,6 +932,16 @@ impl ModelClient {
         };
 
         for attempt in 0..10 {
+            #[cfg(unix)]
+            if let Some(guard) = &self.protected_host_key {
+                guard
+                    .check_current_async()
+                    .await
+                    .map_err(|_| ModelHttpError {
+                        status: None,
+                        message: "protected model authority unavailable".into(),
+                    })?;
+            }
             let mut request = self.client.post(url);
             if !self.extra_headers_override_content_type() {
                 request = request.header("Content-Type", "application/json");
@@ -1136,6 +1188,8 @@ impl ModelClient {
             client: no_redirect_model_client().expect("build no-redirect test model client"),
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "test_dummy_key".to_string(),
+            #[cfg(unix)]
+            protected_host_key: None,
             model: "gpt-5.5".to_string(),
             backend: BackendKind::OpenAiResponses,
             reasoning_effort: Some(ReasoningEffort::Xhigh),

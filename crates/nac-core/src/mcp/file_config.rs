@@ -16,6 +16,12 @@ use toml_edit::{DocumentMut, InlineTable, Item, Table};
 
 use super::*;
 
+#[cfg(unix)]
+#[path = "file_config/source.rs"]
+mod source;
+#[cfg(unix)]
+pub(crate) use source::RetainedMcpConfiguration;
+
 pub const MCP_TRANSPORT_STDIO: &str = "stdio";
 pub const MCP_TRANSPORT_STREAMABLE_HTTP: &str = "streamable_http";
 
@@ -113,6 +119,8 @@ pub fn acquire_mcp_configuration_write_lease(
             "failed to create config directory: {error}"
         ))
     })?;
+    #[cfg(unix)]
+    source::initialize_write_fence(path)?;
     let lock_path = path.with_extension("toml.lock");
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true);
@@ -633,6 +641,17 @@ fn unresolved_transaction_error(path: &Path, temp: &Path) -> McpServerConfigurat
 }
 
 fn recover_pending_transaction_locked(path: &Path) -> ConfigurationResult<()> {
+    if read_transaction(path)?.is_none() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    let _source_write = source::begin_write(path)?;
+    recover_pending_transaction_fenced(path)
+}
+
+// The legacy write-lease entry above and write_document below retain the
+// actual exclusive source fence for every recovery mutation in this owner.
+fn recover_pending_transaction_fenced(path: &Path) -> ConfigurationResult<()> {
     let Some(mut transaction) = read_transaction(path)? else {
         return Ok(());
     };
@@ -899,7 +918,9 @@ fn write_document(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(io_error)?;
     }
-    recover_pending_transaction_locked(path)?;
+    #[cfg(unix)]
+    let _source_write = source::begin_write(path)?;
+    recover_pending_transaction_fenced(path)?;
     let temp = path.with_extension(format!("toml.{}.tmp", uuid::Uuid::new_v4()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);

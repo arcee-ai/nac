@@ -20,6 +20,8 @@ mod dag;
 mod failed_tool_round;
 pub(crate) mod preview;
 mod prompt_rendering;
+#[cfg(unix)]
+mod protected_construction;
 mod tool_exec;
 mod transcript_commit;
 mod transcript_state;
@@ -205,8 +207,20 @@ struct TranscriptLogSink {
     store_path: PathBuf,
 }
 
+enum AgentConstruction {
+    Ordinary,
+    #[cfg(unix)]
+    Protected(Arc<crate::runtime::ProtectedExecutionContext>),
+}
 impl Agent {
     pub fn with_config(client: ModelClient, config: AgentConfig) -> Result<Self> {
+        Self::construct(client, config, AgentConstruction::Ordinary)
+    }
+    fn construct(
+        client: ModelClient,
+        config: AgentConfig,
+        construction: AgentConstruction,
+    ) -> Result<Self> {
         let client = client.with_prompt_cache_key(config.session_id.clone());
         let cwd = config.working_directory.clone();
         let thread_timeout_secs = config.thread_timeout_secs;
@@ -354,12 +368,21 @@ impl Agent {
         });
         let workspace_lease_identity =
             crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
-        let backend = crate::sandbox::select_execution_backend(
-            config.ssh,
-            config.sandbox,
-            &config.workspace_cwd,
-            &local_paths,
-        )?;
+        #[cfg(unix)]
+        let protected_context = match &construction {
+            AgentConstruction::Ordinary => None,
+            AgentConstruction::Protected(context) => Some(Arc::clone(context)),
+        };
+        let backend = match construction {
+            AgentConstruction::Ordinary => crate::sandbox::select_execution_backend(
+                config.ssh,
+                config.sandbox,
+                &config.workspace_cwd,
+                &local_paths,
+            )?,
+            #[cfg(unix)]
+            AgentConstruction::Protected(context) => Arc::clone(context.selected_backend()),
+        };
         let terminal_manager = match config.mode {
             AgentMode::Worker => crate::terminal::TerminalManager::for_worker_with_limits(
                 config.command_output_limits,
@@ -412,6 +435,8 @@ impl Agent {
                 event_sink: config.event_sink.clone(),
                 worker_executable: config.worker_executable,
                 backend,
+                #[cfg(unix)]
+                protected_context,
                 mcp: config.mcp.clone(),
                 mcp_tools: Arc::new(HashMap::new()),
                 skills: config.skills,
@@ -471,6 +496,9 @@ impl Agent {
 
     /// Build one immutable capability view for the next model request and tool round.
     fn refresh_model_request_capabilities(&mut self) -> Result<Vec<ToolDefinition>> {
+        self.tool_runtime
+            .check_ordinary_dispatch()
+            .map_err(|_| anyhow!("agent tool dispatch unavailable"))?;
         let credential = self.native_web_capabilities.resolve_credential()?;
         Ok(self.install_capabilities(credential))
     }
@@ -558,6 +586,13 @@ impl Agent {
 
     /// Verify the execution backend before model traffic.
     pub async fn ensure_backend_ready(&self) -> Result<()> {
+        #[cfg(unix)]
+        if let Some(context) = &self.tool_runtime.protected_context {
+            context.check_stage(crate::runtime::ProtectedExecutionStage::Activate)?;
+            self.tool_runtime
+                .check_ordinary_dispatch()
+                .map_err(|_| anyhow!("agent tool dispatch unavailable"))?;
+        }
         self.tool_runtime.backend.ensure_ready().await
     }
 

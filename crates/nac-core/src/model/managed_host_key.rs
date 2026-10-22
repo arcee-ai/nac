@@ -10,13 +10,23 @@ use nac_credential_store::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// Initial import custody has no production issuer in this passive source
-// closure. Keep its existing in-crate controls without exposing a product API.
-#[cfg(test)]
 #[path = "managed_host_key_initial_custody.rs"]
 mod initial_custody;
-#[cfg(test)]
+pub(crate) use initial_custody::InitialCustodyInvalidator;
 pub use initial_custody::InitialHostKeyCustody;
+#[cfg(any(test, feature = "test-support"))]
+#[path = "managed_host_key_synthetic_fixture.rs"]
+mod synthetic_fixture;
+#[cfg(any(test, feature = "test-support"))]
+pub use synthetic_fixture::SyntheticInitialCustodyFixture;
+
+#[cfg(unix)]
+#[path = "managed_host_key_bootstrap_slot.rs"]
+mod bootstrap_slot;
+#[cfg(unix)]
+pub use bootstrap_slot::{
+    InitialBootstrapSlot, InitialBootstrapSlotBinding, InitialBootstrapSlotRefusal,
+};
 
 const RECORD_VERSION: u32 = 1;
 const MAX_CONSUMED_IDS: usize = 4096;

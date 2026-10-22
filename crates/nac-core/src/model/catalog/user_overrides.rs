@@ -29,7 +29,7 @@ use super::{
 };
 use crate::model::BackendKind;
 use serde::Deserialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const USER_OVERRIDES_FILE_NAME: &str = "models.json";
 
@@ -112,7 +112,16 @@ pub(super) fn apply_user_overrides(
             return;
         }
     };
-    let file: UserOverridesFile = match serde_json::from_str(&raw) {
+    apply_user_overrides_raw(catalog, path, &raw, warnings);
+}
+
+pub(super) fn apply_user_overrides_raw(
+    catalog: &mut ModelCatalog,
+    path: PathBuf,
+    raw: &str,
+    warnings: &mut Vec<CatalogWarning>,
+) {
+    let file: UserOverridesFile = match serde_json::from_str(raw) {
         Ok(file) => file,
         Err(error) => {
             warnings.push(CatalogWarning::UserOverridesMalformed {

@@ -1,7 +1,11 @@
 //! Private native filesystem facts. These observations never authorize a human,
 //! issue public references, select a backend, or admit an operation.
 use serde::{Deserialize, Serialize};
-use std::{fs::File, path::PathBuf};
+use std::{
+    fs::File,
+    path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use crate::{filesystem, SessionManager};
 
@@ -110,6 +114,7 @@ pub struct ManagedLocationResolution {
     fact: ManagedLocationFact,
     _repository: File,
     directory: File,
+    denied: AtomicBool,
 }
 
 impl ManagedLocationResolution {
@@ -118,6 +123,45 @@ impl ManagedLocationResolution {
     }
     pub fn directory_handle(&self) -> &File {
         &self.directory
+    }
+
+    /// Revalidate the SAME retained objects and original names before a
+    /// preparation boundary. Call outside SQLite/credential locks: this opens
+    /// filesystem names and is not a bounded in-memory authority check.
+    /// A mismatch permanently denies this resolution, including after an old
+    /// directory is moved back. It does not grant authority or freeze contents,
+    /// project/model rows, credentials, mount topology or later filesystem work.
+    pub fn check_directories_current(&self) -> Result<(), ManagedLocationFactError> {
+        let check = (|| {
+            if self.denied.load(Ordering::Acquire) {
+                return Err(ManagedLocationFactError::Changed);
+            }
+            if directory_identity(&self._repository)? != self.fact.repository_identity
+                || directory_identity(&self.directory)? != self.fact.directory_identity
+            {
+                return Err(ManagedLocationFactError::Changed);
+            }
+            let root = filesystem::open_absolute_directory(&self.fact.repository_root)
+                .map_err(|_| ManagedLocationFactError::Changed)?;
+            let relative = self
+                .fact
+                .canonical_cwd
+                .strip_prefix(&self.fact.repository_root)
+                .map_err(|_| ManagedLocationFactError::Changed)?;
+            let directory = filesystem::open_directory_beneath(&root, relative)
+                .map_err(|_| ManagedLocationFactError::Changed)?;
+            if directory_identity(&root)? != self.fact.repository_identity
+                || directory_identity(&directory)? != self.fact.directory_identity
+                || self.denied.load(Ordering::Acquire)
+            {
+                return Err(ManagedLocationFactError::Changed);
+            }
+            Ok(())
+        })();
+        if check.is_err() {
+            self.denied.store(true, Ordering::Release);
+        }
+        check
     }
 }
 
@@ -284,6 +328,7 @@ impl SessionManager {
             fact,
             _repository: root,
             directory,
+            denied: AtomicBool::new(false),
         })
     }
 }

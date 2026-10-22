@@ -15,6 +15,8 @@ fn test_model_client(
     extra_headers: std::collections::BTreeMap<String, String>,
 ) -> ModelClient {
     ModelClient {
+        #[cfg(unix)]
+        protected_host_key: None,
         client: no_redirect_model_client().unwrap(),
         base_url,
         api_key: "selected-provider-credential".to_string(),

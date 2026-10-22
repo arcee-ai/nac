@@ -1,9 +1,16 @@
 //! Dedicated synthetic test certificates/keys only. No runtime constructor loads
 //! these fixtures; actual serving credentials and exact D peer pin are explicit.
 use super::*;
+use sha2::{Digest, Sha256};
+use std::{sync::Arc, time::Duration};
+use tokio::net::TcpStream;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::oneshot,
+};
+use tokio_rustls::rustls::{
+    self,
+    pki_types::{CertificateDer, PrivateKeyDer},
 };
 use tokio_rustls::{rustls::pki_types::ServerName, TlsConnector};
 

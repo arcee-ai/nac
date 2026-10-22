@@ -1,8 +1,12 @@
 use super::*;
 
 impl SessionService {
-    pub fn from_orchestrator_run_config(
+    pub fn from_orchestrator_run_config(run_config: OrchestratorRunConfig) -> SessionServiceParts {
+        Self::construct_from_run_config(run_config, None)
+    }
+    pub(in crate::session_service) fn construct_from_run_config(
         mut run_config: OrchestratorRunConfig,
+        protected_create_context: Option<Arc<crate::runtime::ProtectedExecutionContext>>,
     ) -> SessionServiceParts {
         let behavior = run_config.session.behavior();
         let store_path = run_config.session.store_path();
@@ -110,6 +114,7 @@ impl SessionService {
             .ok()
             .map(|(runtime, _)| runtime);
         let service = Self {
+            protected_create_context,
             agent: Arc::new(Mutex::new(run_config.agent)),
             goal_runtime,
             metadata: Arc::new(metadata.clone()),

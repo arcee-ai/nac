@@ -63,7 +63,7 @@ impl From<rusqlite::Error> for ProjectStoreError {
 
 type ProjectResult<T> = std::result::Result<T, ProjectStoreError>;
 
-const PROJECT_COLUMNS: &str = "project_id, name, description, cwd, ssh_host, ssh_port,
+pub(super) const PROJECT_COLUMNS: &str = "project_id, name, description, cwd, ssh_host, ssh_port,
      ssh_identity_file, default_model_config_id, created_at, updated_at,
      pinned, sort_order, presentation_version";
 
@@ -189,7 +189,10 @@ fn validated_project(project: NewProject) -> ProjectResult<ProjectRecord> {
     })
 }
 
-fn row_to_project_at(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<ProjectRecord> {
+pub(super) fn row_to_project_at(
+    row: &rusqlite::Row<'_>,
+    offset: usize,
+) -> rusqlite::Result<ProjectRecord> {
     let cwd: String = row.get(offset + 3)?;
     Ok(ProjectRecord {
         project_id: row.get(offset)?,

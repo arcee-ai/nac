@@ -1,5 +1,13 @@
 //! Process-tree supervision shared by terminal, worker, and managed Git adapters.
 
+#[cfg(unix)]
+mod native_pipe;
+#[cfg(unix)]
+pub use native_pipe::{NativePipe, NativePipeOwner, NativePipeSpawnFailure};
+#[cfg(target_os = "linux")]
+mod native_pty_io;
+#[cfg(target_os = "linux")]
+pub use native_pty_io::{NativePty, NativePtyInput, NativePtyOutput, NativePtyProcess};
 mod native_pty;
 #[cfg(all(
     any(test, feature = "test-support"),
@@ -1551,3 +1559,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+
+#[cfg(unix)]
+pub mod peer_channel;

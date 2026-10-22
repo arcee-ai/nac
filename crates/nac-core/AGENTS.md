@@ -45,6 +45,11 @@ listed responsibility closed; a new concern requires a real submodule/port:
   repeated-failure identity, transcript preparation, compaction algorithms,
   previews, and tests live beside it; do not return those policies or add
   session persistence/delivery mapping to the loop.
+  `agent/protected_construction.rs` supplies the actual retained context and
+  preselected backend to this same constructor. The paired private service
+  constructor checks the exact original source snapshot before initial service
+  composition; neither exposes a post-build context setter. Ordinary tool
+  dispatch stays refused for that context until protected adapters are joined.
 - `telemetry.rs` owns the bounded observation vocabulary, content-free correlation,
   global recorder seam and store/runtime observation guards. Export queue/accounting
   and resource sampling remain private sibling modules; do not add transport DTOs,
@@ -56,6 +61,11 @@ listed responsibility closed; a new concern requires a real submodule/port:
   `model/catalog/overlay.rs` each keep one provider/protocol or catalog-overlay
   policy auditable with its exact authentication, streaming, redaction, retry,
   validation, and response decoding. New providers get their own owner.
+  `model/client/protected_model.rs` owns the private protected builder's actual
+  imported-key client construction and retained key/runtime checks. It must not
+  resolve environment, mounted-file or stored-login fallback credentials.
+  Completed import association is historical; it never supplies Ready or a
+  runtime deadline. The genuine factory owns independent runtime eligibility.
 - `sandbox/podman.rs` keeps container creation authority, cidfile/token records,
   reconciliation, command wrappers, cleanup retries, and backend lifecycle in
   one safety owner. Do not put authorization policy or generic process control
@@ -63,6 +73,32 @@ listed responsibility closed; a new concern requires a real submodule/port:
 - `mcp/file_config.rs` keeps revision-checked TOML editing, publication journal,
   locking, recovery, validation, and probe-facing records together. MCP
   transport invocation belongs elsewhere.
+  `mcp/file_config/source.rs` owns retained original configuration descriptors
+  and the shared-source/exclusive-publication fence; it cannot issue CREATE,
+  runtime, credential or terminal authority.
+  `configuration_source_files.rs` is the private no-follow descriptor mechanism
+  shared by that participant and `model/catalog/source.rs`. The catalog owner
+  retains all four original layers and a shared home-directory publication
+  fence; the common cache writer takes its exclusive side before output. Neither
+  participant issues admission; captured catalog resolution remains DATA.
+  `runtime/create_global_source.rs` captures configured HOME/NAC_HOME once at
+  trusted startup and retains their original namespace resources, including
+  absence. Per-preparation views remain resources only, carry the original
+  cutoff and are consumed by source resolution. AGENTS/skills content IO and
+  MCP process/network mounts still require independent actual qualification.
+- `model/managed_host_key_bootstrap_slot.rs` retains the actual startup
+  NAC_HOME descriptor and a common credential reservation before provider
+  issuance. It does not grant eligibility or create a provider key. The explicit
+  initial-import continuation requires the same source-held Arc and an unchanged
+  provisional binding, adding only the settled provider key ID. Short key IO
+  excludes SQL; cancellation/unknown outcomes retain durable quarantine.
+  `runtime/post_import_runtime.rs` owns the separate explicit operator runtime
+  clock after actual eight-phase completion. It retains the same custody,
+  completion and startup roots before checks, with a one-shot latch on custody;
+  repeated wrappers cannot renew it. Its negative handles and original import
+  invalidator wake the same supervisor. This resource owner grants no CREATE,
+  Ready, backend substitution or execution. Private model scope cancellation
+  leaves other sessions' shared key valid; actual key/IO failures revoke it.
 - `terminal/session.rs` keeps one PTY adapter's construction, child/slave/master
   ownership, collector lifetime, input-root binding, geometry and explicit cleanup
   together. These fields share the same incarnation and reaping gate. Controller
