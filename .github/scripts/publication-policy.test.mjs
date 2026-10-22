@@ -231,7 +231,7 @@ test("manual CI pins canonical dev instead of trusting branch-authored exception
       selectPolicyInputs(w.candidateSha, { ...environment, GITHUB_EVENT_NAME: name }, w.readRef),
     );
   }
-  for (const ref of ["refs/heads/dev", "refs/heads/main"]) {
+  for (const ref of ["refs/heads/dev"]) {
     w.saveEvent({ ...w.event, ref });
     assert.deepEqual(
       selectPolicyInputs(w.candidateSha, {
@@ -242,6 +242,61 @@ test("manual CI pins canonical dev instead of trusting branch-authored exception
       { mode: "ordinary", policy_sha: w.candidateSha },
     );
   }
+});
+
+test("main pushes cannot authorize their own exception policy", (t) => {
+  const w = fixture(t, { candidatePolicy: policy(entry), trustedPolicy: empty });
+  w.saveEvent({ ...w.event, ref: "refs/heads/main" });
+  const environment = { ...w.environment, GITHUB_REF: "refs/heads/main" };
+  const before = w.reads();
+  assert.deepEqual(selectPolicyInputs(w.candidateSha, environment, w.readRef), {
+    mode: "ordinary",
+    policy_sha: w.policySha,
+  });
+  assert.equal(w.reads(), before + 1);
+  assert.throws(
+    () => loadTrustedPolicy(w.candidateRoot, w.trustedRoot, { now }),
+    /differs from trusted base/u,
+  );
+  assert.throws(
+    () =>
+      selectPolicyInputs(w.candidateSha, environment, () => {
+        throw new Error("policy unavailable");
+      }),
+    /unavailable/u,
+  );
+  assert.throws(
+    () =>
+      resolvePublicationPolicy({ candidateSha: w.candidateSha, environment, readRef: w.readRef }),
+    /unavailable to/u,
+  );
+  w.saveEvent({ ...w.event, ref: "refs/heads/feature" });
+  assert.throws(
+    () => selectPolicyInputs(w.candidateSha, environment, w.readRef),
+    /invalid branch event/u,
+  );
+});
+
+test("main re-evaluation cannot reuse an exception revoked on canonical dev", (t) => {
+  const w = fixture(t, { candidatePolicy: policy(entry), trustedPolicy: policy(entry) });
+  w.saveEvent({ ...w.event, ref: "refs/heads/main" });
+  const environment = { ...w.environment, GITHUB_REF: "refs/heads/main" };
+  assert.equal(selectPolicyInputs(w.candidateSha, environment, w.readRef).policy_sha, w.policySha);
+  const prior = loadTrustedPolicy(w.candidateRoot, w.trustedRoot, { now });
+  assert.equal(evaluateFindings([entry], prior, { now }).excepted.length, 1);
+
+  writeFileSync(join(w.trustedRoot, POLICY), JSON.stringify(empty));
+  git(w.trustedRoot, "add", POLICY);
+  git(w.trustedRoot, "commit", "--quiet", "-m", "revoke reviewed fixture grant");
+  const revokedSha = git(w.trustedRoot, "rev-parse", "HEAD");
+  w.response.object.sha = revokedSha;
+  w.response.object.url = `https://api.github.com/repos/example/fixture/git/commits/${revokedSha}`;
+  assert.equal(selectPolicyInputs(w.candidateSha, environment, w.readRef).policy_sha, revokedSha);
+  assert.throws(
+    () => loadTrustedPolicy(w.candidateRoot, w.trustedRoot, { now }),
+    /differs from trusted base/u,
+  );
+  assert.equal(git(w.candidateRoot, "rev-parse", "HEAD"), w.candidateSha);
 });
 
 test("merged release PR publication is bound to the exact same-repository merge candidate", (t) => {

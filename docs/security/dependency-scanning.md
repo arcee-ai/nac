@@ -33,9 +33,10 @@ Its default ordinary mode also requires a full `trusted-policy-sha`; PR callers
 must supply the actual PR base SHA. Publication mode rejects a caller-selected
 policy SHA and resolves this repository's canonical `refs/heads/dev` through
 GitHub once, retaining the exact policy commit and event/run receipt.
-Manual CI also pins canonical `dev` once, retaining ordinary policy equality;
-an unreviewed branch cannot authorize its own exceptions by dispatching CI.
-Only pushes to `dev`/`main` may use their own policy as already-landed inputs.
+Manual CI and `main` pushes also pin canonical `dev` once, retaining ordinary
+policy equality; an unreviewed branch cannot authorize its own exceptions by
+dispatching CI or pushing its head to `main`. Only pushes to reviewed `dev`
+may use their own policy as already-landed inputs.
 It checks out candidate and trusted policy independently with read-only
 permissions and no persisted Git credentials. Candidate code implements the
 scan; policy and OSV configuration always come from the trusted checkout.

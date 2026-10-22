@@ -91,8 +91,11 @@ export function selectPolicyInputs(candidateSha, environment = process.env, read
     ["refs/heads/dev", "refs/heads/main"].includes(environment.GITHUB_REF)
   ) {
     if (event.ref !== environment.GITHUB_REF || event.deleted === true)
-      throw new Error("invalid protected branch event");
-    sha = candidateSha;
+      throw new Error("invalid branch event");
+    sha =
+      environment.GITHUB_REF === "refs/heads/dev"
+        ? candidateSha
+        : canonicalDev(repository, readRef);
   } else
     throw new Error("ordinary policy requires a PR base, canonical dev, or protected branch push");
   if (!SHA.test(sha || "")) throw new Error("missing ordinary trusted base SHA");
