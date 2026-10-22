@@ -91,13 +91,13 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && apk upgrade --no-cache \
     && apk add --no-cache \
         bash binutils build-base ca-certificates-bundle cmake coreutils \
-        curl=8.23.0-r1 fd findutils git gzip jq openssl-dev=3.6.5-r5 make \
+        curl=8.23.0-r1 fd findutils git gzip jq libssh2 openssl-dev=3.6.5-r5 make \
         openssh-client pkgconf procps python-3.13=3.13.16_git20261016-r1 \
         py3-pip=26.2.2-r0 ripgrep rsync gnutar tini unzip xz zip shadow perl util-linux libxml2 py3-setuptools \
         zlib=1.3.2.1_rc20260921-r0 \
     && cd /usr/share/nac/runtime-package-build \
     && sha256sum -c packages.sha256 \
-    && apk add --no-cache --allow-untrusted ./*.apk \
+    && apk --no-network --repositories-file /dev/null add --no-cache --allow-untrusted ./*.apk \
     && test -x /usr/bin/fd \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/node.tar.xz \
         "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \

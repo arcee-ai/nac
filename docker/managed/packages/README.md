@@ -25,8 +25,9 @@ Allison accepted upstream RTMP, SMB/SMBS and TLS-SRP removals on October 22, 202
 SPDX, verbatim notices and source/installed-file hashes. It uses the existing
 Python standard library and APKv2 format; it is not a new package manager.
 The local APKs are unsigned build products admitted only from the same image
-build after archive/source checks. Supplier installation retains normal trusted
-repository verification; retained archive control identities match the installed
+build after archive/source checks, with networking and repositories disabled.
+Supplier providers are installed first through normal trusted repository
+verification; retained archive control identities match the installed
 APK database and bind the payload SHA256. CMU's SASL acknowledgement and GCC's runtime exception texts are
 retained explicitly.
 

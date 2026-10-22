@@ -23,7 +23,8 @@ require_literal() {
 }
 
 require_literal "$dockerfile" 'FROM --platform=linux/amd64 cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b'
-require_literal "$dockerfile" 'apk add --no-cache --allow-untrusted ./*.apk'
+require_literal "$dockerfile" 'apk --no-network --repositories-file /dev/null add --no-cache --allow-untrusted ./*.apk'
+require_literal "$dockerfile" 'curl=8.23.0-r1 fd findutils git gzip jq libssh2 openssl-dev=3.6.5-r5 make'
 require_literal "$dockerfile" 'sha256sum -c packages.sha256'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'python3 - < "$repo_root/scripts/smoke-managed-runtime.py"'
 require_literal "$dockerfile" 'useradd --uid 10001 --gid 10001'

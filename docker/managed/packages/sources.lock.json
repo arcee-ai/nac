@@ -72,10 +72,6 @@
       "url": "https://github.com/gcc-mirror/gcc/commit/aaa8351f4d2e636f9680a1f0a8ebc2f0a60611e6.patch",
       "sha256": "6bd11207cafce8e595a83726936f5ecc29906fa2e8426076b91a46813997327c"
     },
-    "sasl-proposed.patch": {
-      "url": "https://github.com/cyrusimap/cyrus-sasl/commit/f79bfeb393fc0f1f9a614b35f50e2e72fde8f6e2.patch",
-      "sha256": "112e741e6f65653b194839676bd66818a9403f02a2c7422bfd1e1d5d10cb67a4"
-    },
     "gcc-COPYING3": {
       "url": "https://raw.githubusercontent.com/gcc-mirror/gcc/78d4ac73dd391005b895a6148cd9831e28e1208b/COPYING3",
       "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
