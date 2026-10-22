@@ -23,6 +23,9 @@ def archive(root):
             info = tar.gettarinfo(str(path), arcname=name)
             info.uid = info.gid = info.mtime = 0
             info.uname = info.gname = "root"
+            if path.is_symlink():
+                info.pax_headers["APK-TOOLS.checksum.SHA1"] = hashlib.sha1(
+                    str(path.readlink()).encode()).hexdigest()
             if path.is_file() and not path.is_symlink():
                 info.pax_headers["APK-TOOLS.checksum.SHA1"] = digest(path, "sha1")
                 with path.open("rb") as source:
@@ -120,8 +123,13 @@ def package(name, owner, root, output, lock):
         info = tarfile.TarInfo(".PKGINFO")
         info.size, info.mode = len(value), 0o644
         tar.addfile(info, io.BytesIO(value))
+        # Only the final APK data segment has tar end markers. A control
+        # trailer would make APK stop before reading the following payload.
+        control_size = tar.offset
     apk = output / f"{name}-{version}.apk"
-    apk.write_bytes(gzip.compress(control.getvalue(), mtime=0) + payload)
+    apk.write_bytes(gzip.compress(control.getvalue()[:control_size], mtime=0) + payload)
+    subprocess.run(["apk", "--no-network", "--repositories-file", "/dev/null",
+                    "verify", "--allow-untrusted", str(apk)], check=True)
     print(apk, digest(apk), flush=True)
 
 
