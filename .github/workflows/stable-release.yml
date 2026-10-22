@@ -68,6 +68,7 @@ jobs:
       - name: Select ordinary base policy or publication-only resolution
         id: source-policy
         env:
+          GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}
         run: node .github/scripts/publication-policy.mjs select "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
 

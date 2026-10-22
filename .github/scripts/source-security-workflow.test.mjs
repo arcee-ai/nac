@@ -25,6 +25,7 @@ test("PR and exact tag candidate source scans are direct mandatory aggregate/pub
   );
   const selection = stable.jobs.prepare.steps.find((step) => step.id === "source-policy");
   assert.match(selection.run, /publication-policy\.mjs select/u);
+  assert.equal(selection.env.GH_TOKEN, "${{ github.token }}");
   assert.equal(
     selection.env.CANDIDATE_SHA,
     "${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}",

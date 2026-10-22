@@ -74,6 +74,8 @@ function fixture(
   const candidateSha = git(candidateRoot, "rev-parse", "HEAD");
   if (annotated) git(candidateRoot, "tag", "-a", "v0.1.5", "-m", "fixture tag");
   else git(candidateRoot, "tag", "v0.1.5");
+  if (typeof trustedPolicy === "function")
+    trustedPolicy = trustedPolicy({ candidateRoot, directory });
   if (missingPolicy) rmSync(join(candidateRoot, POLICY));
   else
     writeFileSync(
@@ -199,6 +201,47 @@ test("ordinary PR, manual, daily, foreign and non-release merged events cannot o
       }),
     /repository identity/u,
   );
+});
+
+test("manual CI pins canonical dev instead of trusting branch-authored exceptions", (t) => {
+  const w = fixture(t, { candidatePolicy: policy(entry), trustedPolicy: empty });
+  const environment = {
+    ...w.environment,
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/feature",
+  };
+  assert.deepEqual(selectPolicyInputs(w.candidateSha, environment, w.readRef), {
+    mode: "ordinary",
+    policy_sha: w.policySha,
+  });
+  assert.notEqual(w.policySha, w.candidateSha);
+  assert.throws(
+    () => loadTrustedPolicy(w.candidateRoot, w.trustedRoot, { now }),
+    /differs from trusted base/u,
+  );
+  assert.throws(
+    () =>
+      selectPolicyInputs(w.candidateSha, environment, () => {
+        throw new Error("policy unavailable");
+      }),
+    /unavailable/u,
+  );
+  for (const name of ["schedule", "unknown", "push"]) {
+    assert.throws(() =>
+      selectPolicyInputs(w.candidateSha, { ...environment, GITHUB_EVENT_NAME: name }, w.readRef),
+    );
+  }
+  for (const ref of ["refs/heads/dev", "refs/heads/main"]) {
+    w.saveEvent({ ...w.event, ref });
+    assert.deepEqual(
+      selectPolicyInputs(w.candidateSha, {
+        ...environment,
+        GITHUB_EVENT_NAME: "push",
+        GITHUB_REF: ref,
+      }),
+      { mode: "ordinary", policy_sha: w.candidateSha },
+    );
+  }
 });
 
 test("merged release PR publication is bound to the exact same-repository merge candidate", (t) => {
@@ -380,10 +423,30 @@ test(
     skip: !process.env.OSV_SCANNER && "requires verified pinned OSV_SCANNER",
   },
   (t) => {
-    const exceptions = ["GHSA-8r5x-fm3f-whwj", "GHSA-p8wg-vrv2-v86f", "GHSA-xw65-4hp5-5hc7"].map(
-      (advisory) => ({ ...entry, advisory, package: "npm:handlebars" }),
-    );
-    const w = fixture(t, { vulnerable: true, trustedPolicy: { schema_version: 1, exceptions } });
+    let baseline;
+    const w = fixture(t, {
+      vulnerable: true,
+      trustedPolicy: ({ candidateRoot, directory }) => {
+        baseline = scanSources({
+          root: candidateRoot,
+          trustedRoot: candidateRoot,
+          output: join(directory, "baseline"),
+          scanner: resolve(process.env.OSV_SCANNER),
+          now,
+        });
+        assert.deepEqual(baseline.errors, []);
+        assert.ok(baseline.blocking.length > 0);
+        // Fixture-only policy derives exact identities from this live database;
+        // advisory additions/withdrawals do not freeze the test to today's IDs.
+        const identities = new Map(
+          baseline.blocking.map(({ advisory, package: pkg, context }) => [
+            JSON.stringify([advisory, pkg, context]),
+            { ...entry, advisory, package: pkg, context },
+          ]),
+        );
+        return { schema_version: 1, exceptions: [...identities.values()] };
+      },
+    });
     const args = {
       root: w.candidateRoot,
       trustedRoot: w.trustedRoot,
@@ -399,7 +462,8 @@ test(
     });
     assert.equal(report.passed, true, JSON.stringify(report));
     assert.deepEqual(report.errors, []);
-    assert.equal(report.excepted.length, 3);
+    assert.equal(report.excepted.length, baseline.blocking.length);
+    assert.deepEqual(report.blocking, []);
     assert.equal(report.policy_source.sha, w.policySha);
     assert.equal(git(w.candidateRoot, "rev-parse", "HEAD"), w.candidateSha);
   },

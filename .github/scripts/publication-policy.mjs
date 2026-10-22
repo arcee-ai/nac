@@ -75,15 +75,26 @@ function publicationIdentity(candidateSha, environment) {
   };
 }
 
-export function selectPolicyInputs(candidateSha, environment = process.env) {
+export function selectPolicyInputs(candidateSha, environment = process.env, readRef) {
   if (!SHA.test(candidateSha || "")) throw new Error("invalid source candidate");
-  const { event } = eventContext(environment);
+  const { event, repository } = eventContext(environment);
   if (environment.GITHUB_EVENT_NAME === "push" && STABLE_TAG.test(environment.GITHUB_REF || "")) {
     publicationIdentity(candidateSha, environment);
     return { mode: "publication", policy_sha: "" };
   }
-  const sha =
-    environment.GITHUB_EVENT_NAME === "pull_request" ? event.pull_request?.base?.sha : candidateSha;
+  let sha;
+  if (environment.GITHUB_EVENT_NAME === "pull_request") sha = event.pull_request?.base?.sha;
+  else if (environment.GITHUB_EVENT_NAME === "workflow_dispatch")
+    sha = canonicalDev(repository, readRef);
+  else if (
+    environment.GITHUB_EVENT_NAME === "push" &&
+    ["refs/heads/dev", "refs/heads/main"].includes(environment.GITHUB_REF)
+  ) {
+    if (event.ref !== environment.GITHUB_REF || event.deleted === true)
+      throw new Error("invalid protected branch event");
+    sha = candidateSha;
+  } else
+    throw new Error("ordinary policy requires a PR base, canonical dev, or protected branch push");
   if (!SHA.test(sha || "")) throw new Error("missing ordinary trusted base SHA");
   return { mode: "ordinary", policy_sha: sha };
 }
@@ -97,21 +108,30 @@ export function resolvePublicationPolicy({
   if (requestedPolicySha)
     throw new Error("publication callers cannot select a trusted policy commit");
   const identity = publicationIdentity(candidateSha, environment);
-  const endpoint = `repos/${identity.repository}/git/ref/heads/dev`;
+  return {
+    schema_version: 1,
+    ...identity,
+    ref: POLICY_REF,
+    sha: canonicalDev(identity.repository, readRef),
+  };
+}
+
+function canonicalDev(repository, readRef) {
+  const endpoint = `repos/${repository}/git/ref/heads/dev`;
   const response = readRef
     ? readRef(endpoint)
     : JSON.parse(execFileSync("gh", ["api", endpoint], { encoding: "utf8", timeout: 30_000 }));
   if (
     response?.ref !== POLICY_REF ||
-    response.url !== `https://api.github.com/repos/${identity.repository}/git/refs/heads/dev` ||
+    response.url !== `https://api.github.com/repos/${repository}/git/refs/heads/dev` ||
     response.object?.type !== "commit" ||
     !SHA.test(response.object.sha || "") ||
     response.object.url !==
-      `https://api.github.com/repos/${identity.repository}/git/commits/${response.object.sha}`
+      `https://api.github.com/repos/${repository}/git/commits/${response.object.sha}`
   ) {
     throw new Error("canonical reviewed-dev policy ref/commit identity mismatch");
   }
-  return { schema_version: 1, ...identity, ref: POLICY_REF, sha: response.object.sha };
+  return response.object.sha;
 }
 
 function git(root, ...args) {
