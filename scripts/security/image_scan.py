@@ -19,6 +19,11 @@ from image_inventory import (database, grype_findings, inventory, managed_go_pin
 
 ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("image-tools.json")
+SYFT_CONFIG = """check-for-app-update: false
+exclude: []
+golang:
+  capture-symbols: all
+"""
 PROBE = r"""
 import json, subprocess
 from pathlib import Path
@@ -234,7 +239,7 @@ def run(args):
                                          "{{.Endpoints.docker.Host}}"]).strip()
         if not args.bundle:
             syft_config = output / "syft.yaml"
-            syft_config.write_text("check-for-app-update: false\nexclude: []\n")
+            syft_config.write_text(SYFT_CONFIG)
             command([tools["syft"], "scan", f"docker:{args.image}", "--config", syft_config,
                      "-o", f"syft-json={output / 'sbom.syft.json'}"], env=env,
                     output=output / "syft.txt", timeout=1800)

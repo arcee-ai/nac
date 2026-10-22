@@ -10,7 +10,8 @@ import sys
 import tarfile
 
 from image_inventory import grype_findings, require, write_json
-from image_scan import command, download, install_tools, scanner_environment, scan_sbom, query_runtimes
+from image_scan import (SYFT_CONFIG, command, download, install_tools, scanner_environment,
+                        scan_sbom, query_runtimes)
 
 # Official nodejs.org SHASUMS256.txt, checked 2026-10-21. Extract only the
 # executable; we never execute the deliberately vulnerable fixture binary.
@@ -68,7 +69,7 @@ def qualify(output, cache, db):
             f"Package: {name}\nStatus: install ok installed\nArchitecture: amd64\nVersion: {package_version}\n\n")
         sbom_path = directory / "sbom.syft.json"
         config = directory / "syft.yaml"
-        config.write_text("check-for-app-update: false\nexclude: []\n")
+        config.write_text(SYFT_CONFIG)
         command([tools["syft"], "scan", f"dir:{root.resolve()}", "--config", config,
                  "-o", f"syft-json={sbom_path.resolve()}"], env=env, output=directory / "syft.txt")
         sbom = json.loads(sbom_path.read_text())

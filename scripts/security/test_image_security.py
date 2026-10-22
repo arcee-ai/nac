@@ -175,6 +175,23 @@ class InventoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             inv.grype_findings({}, SBOM)
 
+    def test_go_symbols_never_create_a_local_advisory_ignore(self):
+        sbom = copy.deepcopy(SBOM)
+        crypto = {"id": "crypto", "name": "golang.org/x/crypto", "version": "v0.58.0",
+                  "type": "go-module", "metadata": {"symbols": {
+                      "golang.org/x/crypto/ssh": ["ParseAuthorizedKey"]}}}
+        sbom["artifacts"].append(crypto)
+        # Applicability belongs to the pinned Grype matcher. If it returns a
+        # finding, NAC retains it even when symbol metadata names another package.
+        report = {"descriptor": {"name": "grype"},
+                  "distro": {"name": "debian", "version": "12"}, "matches": [{
+                      "artifact": crypto, "vulnerability": {
+                          "id": "GO-2026-5932", "severity": "Unknown", "fix": {"versions": []}}}]}
+        findings = inv.grype_findings(report, sbom)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["advisory"], "GO-2026-5932")
+        self.assertEqual(findings[0]["severity"], "Unknown")
+
     def test_supplemental_advisory_matching_and_unknown_severity(self):
         self.assertEqual(inv.osv_findings({}, "uv", "PyPI", "0.13.4"), [])
         vuln = {"id": "GHSA-fixture", "affected": [{"package": {"name": "uv", "ecosystem": "PyPI"}}]}
@@ -438,13 +455,18 @@ class DriverTests(unittest.TestCase):
         args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=None, inventory_only=True,
                                   output=inventory, tool_cache=self.root, db_cache=self.root)
         raw = dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")
+        raw_sbom = copy.deepcopy(SBOM)
+        raw_sbom["artifacts"][2]["metadata"]["symbols"] = {
+            "github.com/cli/cli/v2/cmd/gh": ["main"]}
         def inventory_command(argv, *, output=None, **kwargs):
             if argv[:3] == ["docker", "image", "inspect"]:
                 result = json.dumps([{"Id": IMAGE, "Architecture": "amd64", "Os": "linux"}])
             elif argv[:2] == ["docker", "run"]:
                 result = json.dumps(raw)
             elif argv[0] == "syft":
-                inv.write_json(inventory / "sbom.syft.json", SBOM)
+                config = Path(argv[argv.index("--config") + 1]).read_text()
+                self.assertIn("\ngolang:\n  capture-symbols: all\n", config)
+                inv.write_json(inventory / "sbom.syft.json", raw_sbom)
                 result = ""
             elif argv[:4] == ["git", "-C", scan.ROOT, "show"]:
                 self.assertEqual(argv[4], "a" * 40 + ":docker/managed/Dockerfile")
@@ -460,6 +482,7 @@ class DriverTests(unittest.TestCase):
         advisory.assert_not_called()
         self.assertEqual(json.loads((inventory / "result.json").read_text())["status"], "inventoried")
         self.assertEqual(json.loads((inventory / "identity.json").read_text())["go_application_pins"], PINS)
+        self.assertEqual(json.loads((inventory / "sbom.syft.json").read_text()), raw_sbom)
         publication_args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, output=inventory,
                                               trusted_policy=self.root / "policy", candidate_policy=self.root / "policy")
         with patch.object(publication, "command"), patch.object(publication.subprocess, "run") as child:
@@ -473,6 +496,7 @@ class DriverTests(unittest.TestCase):
             self.assertEqual(scan.run(args), 2)
         self.assertTrue((inventory / "bundle.json").is_file())
         self.assertTrue((args.output / "bundle.json").is_file())
+        self.assertEqual(json.loads((args.output / "sbom.syft.json").read_text()), raw_sbom)
         self.assertEqual(json.loads((args.output / "result.json").read_text())["status"], "error")
 
     def test_failed_security_prevents_publication_gate_receipt(self):

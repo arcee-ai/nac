@@ -71,6 +71,17 @@ retained pins, even when its checkout has newer tools or lacks the old commit;
 it never substitutes today's Dockerfile. Missing source pins or altered bundle
 bytes fail closed.
 
+Syft captures function/package symbols for every Go module and the standard
+library (`golang.capture-symbols: all`). The pinned Grype matcher uses that
+binary evidence to apply advisory import/symbol scope, as its direct-image
+provider does by default. Raw modules, versions and symbol metadata remain in
+the retained SBOM; NAC never removes a returned match based on its own package
+or advisory allowlist. Missing symbol evidence falls back to module-level
+matching in Grype, and malformed SBOM decoding is an error. Existing inventories
+without symbols retain that conservative behavior; only fresh cataloging of the
+actual binaries can add symbol evidence. Application and runtime OSV queries
+remain mandatory alongside the full Grype scan.
+
 Go 1.27 omits linker settings from this trimmed build's metadata, so the source revision
 comes from the executable's existing version command, not inferred SBOM fields.
 Git LFS is rebuilt with a dependency overlay, so its Go main-module version
