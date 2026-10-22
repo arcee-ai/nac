@@ -258,7 +258,7 @@ def write_report(path, result, image):
     blocking, excepted, reporting = (result[key] for key in ("blocking", "excepted", "reporting"))
     rows = ["# Managed image security", "", f"Image: `{image}`", "",
             f"Blocking: {len(blocking)}; excepted: {len(excepted)}; lower severity: {len(reporting)}.", "",
-            "| Disposition | Advisory | Package | Installed | Severity | Fixed versions |",
+            "| Disposition | Advisory | Package | Version | Severity | Fixed versions |",
             "| --- | --- | --- | --- | --- | --- |"]
     total = [("BLOCK", f) for f in blocking] + [("excepted", f) for f in excepted] + [("report", f) for f in reporting]
     def cell(value):

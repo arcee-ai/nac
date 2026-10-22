@@ -76,6 +76,24 @@ results and their unavailable fixtures must remain explicit. An apparent-zero
 stock Wolfi probe previously missed known Kerberos identity matches; it is not
 accepted evidence for the corrected image. Full actual-image qualification and
 bounded review of the supported corrections remain necessary.
+
+Owned APKs also undergo two additive advisory searches using their verified
+upstream versions, independently of NAC's APK revision. Canonical NVD CPEs cover
+MIT Kerberos 5, curl, GCC and Cyrus SASL. Separate Wolfi source-package PURL queries
+use the unqualified upstream version, with no NAC `-rN`, so a local revision
+cannot inherit a supplier patch revision's fixed/not-affected status. These are
+conservative advisory-search coordinates, not installed package records; the
+actual raw Syft inventory and full distro scan remain unchanged. All three
+passes must use the same fresh database. Missing identities, failed queries or
+changed databases fail closed, including retained-bundle rescans.
+
+Both additional raw reports and all returned findings are retained and evaluated
+by the full policy. Backported fixes and component-specific false positives can
+remain blocking; provenance alone never clears them. In particular, an upstream
+version without a supplier revision can match advisories fixed in that supplier's
+`-r0`. These queries do not claim every advisory feed is complete. New feed data
+may require additional remediation or a separately reviewed policy decision.
+
 The gate executes fixed absolute Node, Go, uv, gh, and Git LFS paths inside the exact image,
 with no network, no capabilities, a read-only root, and a bounded process count.
 Unknown/missing version output is an error. Node must appear in Syft at the

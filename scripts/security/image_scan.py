@@ -17,6 +17,7 @@ import urllib.request
 from image_inventory import (database, grype_findings, inventory, managed_go_pins,
                              osv_findings, require, sha256, write_json, write_report)
 from image_packages import PACKAGE_PROBE, package_integrity, source_package_pins
+from image_upstreams import upstream_findings, upstream_targets, wolfi_upstream_targets
 
 ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("image-tools.json")
@@ -112,8 +113,8 @@ def scanner_environment(db_cache):
     return env
 
 
-def scan_sbom(tools, sbom, output, env):
-    config = output / "grype.yaml"
+def scan_sbom(tools, sbom, output, env, *, target=None, prefix=""):
+    config = output / f"{prefix}grype.yaml"
     config.write_text("""check-for-app-update: false
 only-fixed: false
 only-notfixed: false
@@ -132,20 +133,41 @@ match:
 """)
     # Update must succeed even when an existing database is young enough.
     command([tools["grype"], "db", "update", "--config", config], env=env,
-            output=output / "db-update.txt")
+            output=output / f"{prefix}db-update.txt")
     raw = command([tools["grype"], "db", "status", "-o", "json", "--config", config],
-                  env=env, output=output / "db.json")
+                  env=env, output=output / f"{prefix}db.json")
     status = json.loads(raw)
     before = database(status, dt.datetime.now(dt.timezone.utc))
     db_path = Path(status["path"])
     before["sha256"] = sha256(db_path)
-    command([tools["grype"], f"sbom:{sbom.resolve()}", "--config", config, "-o", "json"],
-            env=env, output=output / "grype.json")
+    command([tools["grype"], target or f"sbom:{sbom.resolve()}", "--config", config, "-o", "json"],
+            env=env, output=output / f"{prefix}grype.json")
     require(sha256(db_path) == before["sha256"], "database changed during scan")
     # Measure again at the end; a scan crossing the freshness boundary fails.
     before.update(database(status, dt.datetime.now(dt.timezone.utc)))
-    write_json(output / "db-evidence.json", before)
-    return json.loads((output / "grype.json").read_text())
+    write_json(output / f"{prefix}db-evidence.json", before)
+    return json.loads((output / f"{prefix}grype.json").read_text())
+
+
+def scan_owned_upstreams(tools, coverage, output, env):
+    targets = upstream_targets(coverage)
+    if not targets:
+        return []
+    findings = []
+    baseline = json.loads((output / "db-evidence.json").read_text())
+    for scheme, inputs in (("cpes", targets), ("purl", wolfi_upstream_targets(targets))):
+        prefix = f"owned-upstream-{scheme}-"
+        path = output / f"{prefix}inputs.txt"
+        path.write_text("\n".join(inputs.values()) + "\n")
+        write_json(output / f"{prefix}identities.json", inputs)
+        report = scan_sbom(tools, path, output, env, target=f"{scheme}:{path.resolve()}", prefix=prefix)
+        actual = json.loads((output / f"{prefix}db-evidence.json").read_text())
+        require(all(actual[k] == baseline[k] for k in ("sha256", "schema", "built")),
+                "database changed between image and upstream scans; repeat complete scan")
+        require(report.get("source") == {"type": "sbom-file", "target": str(path.resolve())},
+                "upstream scanner source differs from requested advisory input")
+        findings += upstream_findings(report, inputs, wolfi=scheme == "purl")
+    return findings
 
 
 def query_runtimes(coverage, output):
@@ -283,7 +305,8 @@ def run(args):
         pins.update(scanner_pins)
         write_json(output / "tools.json", pins)
         report = scan_sbom(tools, output / "sbom.syft.json", output, env)
-        findings = grype_findings(report, sbom) + query_runtimes(coverage, output)
+        findings = (grype_findings(report, sbom) + query_runtimes(coverage, output) +
+                    scan_owned_upstreams(tools, coverage, output, env))
         result = evaluate(findings, args.trusted_policy, args.candidate_policy, output,
                           publication_policy=getattr(args, "publication_policy", None),
                           source_revision=args.source_revision)

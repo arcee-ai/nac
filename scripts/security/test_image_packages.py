@@ -150,15 +150,20 @@ class PackageIntegrityTests(unittest.TestCase):
             scan.bundle_manifest(root, IMAGE)
             policy = root / "policy.json"
             policy.write_text('{"schema_version":1,"exceptions":[]}')
-            for matches, expected in (([], 0), ([{"artifact": artifacts[0], "vulnerability": {
-                "id": "CVE-retained-control", "severity": "High", "fix": {"versions": []}}}], 1)):
+            upstream_match = {"advisory": "CVE-upstream-control", "package": "upstream:mit/kerberos_5",
+                "context": "managed-image", "version": "1.22.2", "severity": "High",
+                "source": "grype-upstream", "fixed": []}
+            for index, (matches, extra, expected) in enumerate((([], [], 0), ([{"artifact": artifacts[0],
+                "vulnerability": {"id": "CVE-retained-control", "severity": "High", "fix": {"versions": []}}}], [], 1),
+                ([], [upstream_match], 1))):
                 args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=root,
-                    output=root / f"scan-{expected}", tool_cache=root, db_cache=root,
+                    output=root / f"scan-{index}", tool_cache=root, db_cache=root,
                     trusted_policy=policy, candidate_policy=policy)
                 report = {"descriptor": {"name": "grype"}, "distro": {"name": "wolfi", "version": "20230201"},
                           "matches": matches}
                 with patch.object(scan, "install_tools", return_value=({}, {})), patch.object(
                     scan, "scan_sbom", return_value=report), patch.object(scan, "query_runtimes", return_value=[]), patch.object(
+                    scan, "scan_owned_upstreams", return_value=extra), patch.object(
                     scan, "command", wraps=scan.command) as child:
                     self.assertEqual(scan.run(args), expected)
                 self.assertTrue(all(str(call.args[0][0]) != "git" for call in child.call_args_list))
@@ -166,6 +171,8 @@ class PackageIntegrityTests(unittest.TestCase):
                 if matches:
                     self.assertEqual(json.loads((args.output / "findings.json").read_text())[0]["advisory"],
                                      "CVE-retained-control")
+                if extra:
+                    self.assertEqual(json.loads((args.output / "findings.json").read_text()), extra)
 
 
 if __name__ == "__main__":

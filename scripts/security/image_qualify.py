@@ -10,6 +10,7 @@ import sys
 import tarfile
 
 from image_inventory import grype_findings, require, write_json
+from image_upstreams import upstream_findings
 from image_scan import (SYFT_CONFIG, command, download, install_tools, scanner_environment,
                         scan_sbom, query_runtimes)
 
@@ -74,6 +75,31 @@ def qualify_wolfi(output, tools, env):
                 for d in m.get("matchDetails", [])) for m in report["matches"]),
                 "Wolfi advisory namespace did not match the vulnerable APK control")
         summaries[label] = {"version": version, "findings": len(findings), **controls}
+    return summaries
+
+
+def qualify_upstreams(output, tools, env):
+    summaries = {}
+    fixtures = [
+        ("cpes", "cpe:2.3:a:cyrusimap:cyrus-sasl:{}:*:*:*:*:*:*:*", "2.1.27", "2.1.28",
+         ("upstream:cyrusimap/cyrus-sasl", "CVE-2022-24407")),
+        ("purl", "pkg:apk/wolfi/openssl@{}?distro=wolfi-20230201", "3.0.6", "3.0.8",
+         ("upstream-wolfi:openssl", "CVE-2022-3602"))]
+    for scheme, template, vulnerable, safe, control in fixtures:
+        summaries[scheme] = {}
+        for label, version in (("vulnerable", vulnerable), ("safe", safe)):
+            directory = output / f"upstream-{scheme}-{label}"
+            directory.mkdir()
+            path = directory / "inputs.txt"
+            targets = {"fixture": template.format(version)}
+            path.write_text(targets["fixture"] + "\n")
+            report = scan_sbom(tools, path, directory, env, target=f"{scheme}:{path.resolve()}")
+            require(report.get("source") == {"type": "sbom-file", "target": str(path.resolve())},
+                    "upstream fixture source mismatch")
+            findings = upstream_findings(report, targets, wolfi=scheme == "purl")
+            write_json(directory / "findings.json", findings)
+            summaries[scheme][label] = {"version": version, "findings": len(findings),
+                                       **qualify_controls(label, findings, {control})}
     return summaries
 
 
@@ -154,6 +180,7 @@ def qualify(output, cache, db):
         raise ValueError("DB network failure did not fail closed")
     write_json(output / "qualification.json", {"qualified_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                "fixtures": summaries, "wolfi_apk": qualify_wolfi(output, tools, env),
+               "owned_upstream_queries": qualify_upstreams(output, tools, env),
                "runtime_version_queries": runtime_summary,
                "db_network_failure": "rejected with a cached young DB",
                "unknown_debian_release": "rejected independently of scanner exit/match count", "scope": "real Node binary detection and live OS/Node advisory matching"})
