@@ -44,6 +44,12 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
 - `src/delivery/managed_fact_listener.rs` — explicit operator input validation
   and private pinned-peer listener construction. The existing shared readiness
   and shutdown owner remains in `server.rs`; ordinary routes never mount facts.
+- `src/delivery/initial_import_issue.rs` retains the original pinned pre-import
+  reader and its verifier from the same selected transport configuration.
+  Crypto runs in retained blocking work; cancellation denies the same channel
+  and explicit cleanup joins its actual tasks. Verified ISSUE evidence is not
+  a consumed/current original-primary loan, Core Source or startup authority.
+  No detached-v2 relay, Ready conversion or production import is selected.
 - `src/application/session_observation/` and the private delivery observation
   receiver own passive cached-session/source projection. They never attach,
   wake, create, reserve sources, or reinterpret legacy CREATE revision bytes.

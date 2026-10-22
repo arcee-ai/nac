@@ -12,6 +12,7 @@ pub(crate) mod create_terminal;
 pub(crate) mod create_transfer;
 pub(crate) mod credentials;
 pub(crate) mod delegation;
+pub(crate) mod initial_enrollment;
 pub(crate) mod managed;
 #[cfg(target_os = "linux")]
 pub(crate) mod managed_create_attempts;

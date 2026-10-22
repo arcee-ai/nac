@@ -54,14 +54,21 @@ pub(crate) fn load_managed_monitor_record(
         ));
     }
     #[cfg(test)]
-    if INJECTED_MANAGED_MONITOR_FAILURES
-        .fetch_update(
-            std::sync::atomic::Ordering::SeqCst,
-            std::sync::atomic::Ordering::SeqCst,
-            |remaining| remaining.checked_sub(1),
-        )
-        .is_ok()
-    {
+    if {
+        use std::sync::atomic::Ordering::SeqCst;
+        let mut remaining = INJECTED_MANAGED_MONITOR_FAILURES.load(SeqCst);
+        loop {
+            let Some(next) = remaining.checked_sub(1) else {
+                break false;
+            };
+            match INJECTED_MANAGED_MONITOR_FAILURES
+                .compare_exchange_weak(remaining, next, SeqCst, SeqCst)
+            {
+                Ok(_) => break true,
+                Err(observed) => remaining = observed,
+            }
+        }
+    } {
         return Err(anyhow!(
             "injected deterministic managed orchestrator monitor failure"
         ));

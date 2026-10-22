@@ -1,0 +1,12 @@
+{
+  "version": "all121.root-synthetic-vectors.provenance.v1",
+  "source_revision": "138724cc5a980a3ab2d62b11b7f48b396df40562",
+  "source_tree": "130f979f0dbe9f36d1ff4461ff3a05f4870de650",
+  "command": "cargo test --locked -p afm-adapters managed_import_v2_root_synthetic_vector_emitter --lib -- --ignored --nocapture",
+  "exit": 0,
+  "generator_source_sha256": "33fcc7bc2014c24fe7c33bf15cfee2a52c6daa9d2ba2a932d26c1063dab1d10e",
+  "emitted_json_sha256": "10b6889e62e7fd0b37c5c3726cd641ae2238ff5c18c50b17f6df8aa1ee693022",
+  "vector_count": 8,
+  "synthetic_only": true,
+  "produced_at_utc": "2026-10-15T02:39:45.678656+00:00"
+}

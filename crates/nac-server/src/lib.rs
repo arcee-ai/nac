@@ -19,11 +19,16 @@ mod mcp_catalog_api;
 mod mcp_runtime_api;
 mod orchestration;
 mod revert;
+pub use application::initial_enrollment::InitialEnrollmentContext;
 pub use application::managed_locations::{
     ManagedDirectoryIdentity, ManagedLocationBinding, ManagedLocationFact,
     ManagedLocationFactError, ManagedLocationResolution, ManagedLocationSelector,
     ManagedProjectLocationIdentity,
 };
+pub use delivery::import_authority_transport::{
+    ImportAuthorityTransportOptions, IMPORT_AUTHORITY_PURPOSE,
+};
+pub use delivery::initial_import_issue::InitialImportIssueExchange;
 pub(crate) use managed_control::running_target as managed_running_target;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};

@@ -41,6 +41,7 @@ uuid = { workspace = true, features = ["v4"] }
 utoipa.workspace = true
 utoipa-axum = "0.2"
 utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum", "vendored"] }
+x509-parser = { version = "=0.18.1", default-features = false }
 
 [dev-dependencies]
 base64.workspace = true

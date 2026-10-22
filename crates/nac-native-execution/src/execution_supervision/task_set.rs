@@ -43,11 +43,21 @@ impl TaskSet {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        self.pending
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                count.checked_add(1)
-            })
-            .map_err(|_| anyhow::anyhow!("Native task ownership count exhausted"))?;
+        let mut count = self.pending.load(Ordering::Acquire);
+        loop {
+            let next = count
+                .checked_add(1)
+                .ok_or_else(|| anyhow::anyhow!("Native task ownership count exhausted"))?;
+            match self.pending.compare_exchange_weak(
+                count,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(observed) => count = observed,
+            }
+        }
         // Construction occurs BEFORE spawn. Tokio dropping an unpolled task
         // still drops its actual owned future before publishing task settlement.
         let owned = OwnedTask {
