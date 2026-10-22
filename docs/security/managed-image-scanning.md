@@ -64,8 +64,14 @@ probed version with its Node.js CPE; Grype enables CPE matching.
 gh and Git LFS must have their main Go modules inventoried at the installed
 binary paths. Known SBOM versions must match the actual executable versions.
 The actual application versions and Git LFS's full source revision must match
-the checksum-verified release/source pins in the managed Dockerfile. Go 1.27
-omits linker settings from this trimmed build's metadata, so the source revision
+the checksum-verified release/source pins in the image's exact source revision.
+Initial inventory reads that immutable commit's Dockerfile through Git, then
+retains the pins in the hash-bound identity evidence. A later rescan uses those
+retained pins, even when its checkout has newer tools or lacks the old commit;
+it never substitutes today's Dockerfile. Missing source pins or altered bundle
+bytes fail closed.
+
+Go 1.27 omits linker settings from this trimmed build's metadata, so the source revision
 comes from the executable's existing version command, not inferred SBOM fields.
 Git LFS is rebuilt with a dependency overlay, so its Go main-module version
 can be `UNKNOWN`/`(devel)` even though `git-lfs version` identifies the release.
@@ -110,8 +116,13 @@ validates the actual runtime probes and one Syft inventory, writes the hashed
 bundle, and records `status: inventoried` with `security_verdict: false`. A
 separate required security step consumes that bundle with the full fresh scan;
 inventory success cannot satisfy the aggregate gate or publication receipt.
-Older bundles without gh/Git LFS probes require fresh exact-image inventory;
-missing application coverage fails closed during rescans as well.
+Legacy bundles without gh/Git LFS probes or retained source pins remain errors.
+Requalification requires fresh inventory of the exact loaded supported image
+and its immutable source commit; neither current Dockerfile pins nor edited
+bundle metadata can upgrade legacy evidence. If that image/source is unavailable,
+the rescan remains an error until supported inventory is available. This legacy
+boundary is separate from rescanning a complete retained bundle after the
+checkout's tool pins advance, which does not require the old source object.
 
 The per-SHA artifact retains `inventory/` independently of `security/`, so a later
 scanner installation, DB, or advisory failure cannot discard the validated raw

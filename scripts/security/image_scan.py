@@ -14,7 +14,7 @@ import tarfile
 import tempfile
 import urllib.request
 
-from image_inventory import (database, grype_findings, inventory,
+from image_inventory import (database, grype_findings, inventory, managed_go_pins,
                              osv_findings, require, sha256, write_json, write_report)
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -215,7 +215,9 @@ def run(args):
             require(details[0]["Architecture"] == "amd64" and details[0]["Os"] == "linux",
                     "managed image must be linux/amd64")
             identity = {"image": args.image, "repo_digests": details[0].get("RepoDigests", []),
-                        "source_revision": args.source_revision, "inspected": details[0]}
+                        "source_revision": args.source_revision, "inspected": details[0],
+                        "go_application_pins": managed_go_pins(command([
+                            "git", "-C", ROOT, "show", f"{args.source_revision}:docker/managed/Dockerfile"]))}
             write_json(output / "identity.json", identity)
             raw = command(["docker", "run", "--rm", "--network=none", "--read-only",
                            "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=64",
@@ -240,7 +242,8 @@ def run(args):
         raw_runtime = json.loads((output / "runtime.json").read_text())
         require(raw_runtime.get("nac", "").strip().endswith(f"({args.source_revision[:12]})"),
                 "NAC binary source revision does not match candidate")
-        coverage = inventory(sbom, raw_runtime, args.image)
+        coverage = inventory(sbom, raw_runtime, args.image,
+                             expected_pins=identity.get("go_application_pins"))
         write_json(output / "coverage.json", coverage)
         bundle_manifest(output, args.image)
         if inventory_only:

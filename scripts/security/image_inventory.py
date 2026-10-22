@@ -3,7 +3,6 @@ import base64
 import datetime as dt
 import hashlib
 import json
-from pathlib import Path
 import re
 import shlex
 
@@ -87,20 +86,21 @@ def os_release(raw):
     return values
 
 
-def managed_go_pins():
-    dockerfile = Path(__file__).resolve().parents[2] / "docker/managed/Dockerfile"
-    source = dockerfile.read_text()
+GO_PIN_PATTERNS = {"GH_VERSION": r"\d+\.\d+\.\d+",
+                   "GIT_LFS_VERSION": r"\d+\.\d+\.\d+",
+                   "GIT_LFS_REVISION": r"[0-9a-f]{40}"}
+
+
+def managed_go_pins(source):
     pins = {}
-    for name, pattern in [("GH_VERSION", r"\d+\.\d+\.\d+"),
-                          ("GIT_LFS_VERSION", r"\d+\.\d+\.\d+"),
-                          ("GIT_LFS_REVISION", r"[0-9a-f]{40}")]:
+    for name, pattern in GO_PIN_PATTERNS.items():
         values = re.findall(rf"^ARG {name}=({pattern})$", source, re.MULTILINE)
         require(len(values) == 1, f"missing/ambiguous managed Go application pin: {name}")
         pins[name] = values[0]
     return pins
 
 
-def inventory(sbom, raw, image):
+def inventory(sbom, raw, image, *, expected_pins):
     require(sbom.get("descriptor", {}).get("name") == "syft", "not Syft JSON")
     source = sbom.get("source", {})
     require(source.get("type") == "image", "SBOM is not an image inventory")
@@ -130,7 +130,12 @@ def inventory(sbom, raw, image):
     require(any(any("a:nodejs:node.js:" in (c if isinstance(c, str) else c.get("cpe", ""))
                         for c in p.get("cpes", [])) for p in nodes), "Node advisory CPE missing")
     applications = {}
-    pins = managed_go_pins()
+    pins = expected_pins
+    require(isinstance(pins, dict) and set(pins) == set(GO_PIN_PATTERNS),
+            "missing/incomplete image-source Go application pins")
+    for name, pattern in GO_PIN_PATTERNS.items():
+        require(isinstance(pins[name], str) and re.fullmatch(pattern, pins[name]) is not None,
+                f"malformed image-source Go application pin: {name}")
     for runtime, module, binary in [("gh", "github.com/cli/cli/v2", "/usr/local/bin/gh"),
                                     ("git_lfs", "github.com/git-lfs/git-lfs/v3", "/usr/local/bin/git-lfs")]:
         modules = [p for p in artifacts if p.get("type") == "go-module" and p.get("name") == module

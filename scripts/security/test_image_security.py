@@ -34,6 +34,9 @@ SBOM = {"descriptor": {"name": "syft"}, "source": {"type": "image", "metadata": 
             {"id": "lfs", "name": "github.com/git-lfs/git-lfs/v3", "version": "UNKNOWN", "type": "go-module",
              "locations": [{"path": "/usr/local/bin/git-lfs"}], "metadata": {"mainModule": "github.com/git-lfs/git-lfs/v3"}}]}
 DB = {"valid": True, "built": "2026-10-21T06:00:00Z", "schemaVersion": "v6.1.10", "path": "/db"}
+PINS = {"GH_VERSION": "2.103.0", "GIT_LFS_VERSION": "3.8.0",
+        "GIT_LFS_REVISION": "aece9221f8c09221a14395d964806b956289bc07"}
+DOCKERFILE_PINS = "\n".join(f"ARG {name}={value}" for name, value in PINS.items())
 
 
 class InventoryTests(unittest.TestCase):
@@ -44,7 +47,7 @@ class InventoryTests(unittest.TestCase):
                 sbom["distro"] = {"id": "debian", "versionID": version,
                                  "versionCodename": codename}
                 runtime = dict(RUNTIME, os_release=f"ID=debian\nVERSION_ID={version}\nVERSION_CODENAME={codename}\n")
-                self.assertEqual(inv.inventory(sbom, runtime, IMAGE)["os_release"]["VERSION_ID"], version)
+                self.assertEqual(inv.inventory(sbom, runtime, IMAGE, expected_pins=PINS)["os_release"]["VERSION_ID"], version)
                 report = {"descriptor": {"name": "grype"}, "matches": [],
                           "distro": {"name": "debian", "version": version + ".7"}}
                 self.assertEqual(inv.grype_findings(report, sbom), [])
@@ -54,27 +57,34 @@ class InventoryTests(unittest.TestCase):
                     inv.grype_findings(report, sbom)
                 sbom["distro"]["versionID"] = other
                 with self.assertRaisesRegex(ValueError, "differs"):
-                    inv.inventory(sbom, runtime, IMAGE)
+                    inv.inventory(sbom, runtime, IMAGE, expected_pins=PINS)
 
     def test_complete_inventory(self):
-        result = inv.inventory(SBOM, RUNTIME, IMAGE)
+        result = inv.inventory(SBOM, RUNTIME, IMAGE, expected_pins=PINS)
         self.assertEqual(result["versions"]["uv"], "0.13.4")
         self.assertEqual(result["os_packages"], 1)
+
+    def test_source_pin_parser_rejects_missing_duplicate_and_malformed_pins(self):
+        self.assertEqual(inv.managed_go_pins(DOCKERFILE_PINS), PINS)
+        for source in ("", DOCKERFILE_PINS + "\nARG GH_VERSION=3.0.0",
+                       DOCKERFILE_PINS.replace(PINS["GIT_LFS_REVISION"], "short")):
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                inv.managed_go_pins(source)
 
     def test_missing_unknown_or_empty_runtime_fails(self):
         for runtime in ("node", "go", "uv", "gh", "git_lfs", "dpkg"):
             for value in ("", "unrecognized"):
                 with self.subTest(runtime=runtime, value=value), self.assertRaises(ValueError):
-                    inv.inventory(SBOM, dict(RUNTIME, **{runtime: value}), IMAGE)
+                    inv.inventory(SBOM, dict(RUNTIME, **{runtime: value}), IMAGE, expected_pins=PINS)
 
     def test_inventory_incomplete_or_wrong_image_fails(self):
         for field in ("artifacts", "distro", "source"):
             broken = copy.deepcopy(SBOM)
             broken.pop(field)
             with self.subTest(field=field), self.assertRaises(ValueError):
-                inv.inventory(broken, RUNTIME, IMAGE)
+                inv.inventory(broken, RUNTIME, IMAGE, expected_pins=PINS)
         with self.assertRaises(ValueError):
-            inv.inventory(SBOM, RUNTIME, "sha256:" + "2" * 64)
+            inv.inventory(SBOM, RUNTIME, "sha256:" + "2" * 64, expected_pins=PINS)
 
     def test_unrecognized_or_mismatched_actual_os_release_fails(self):
         for release in ('ID=debian\nVERSION_ID=unknown\nVERSION_CODENAME=bookworm',
@@ -83,11 +93,11 @@ class InventoryTests(unittest.TestCase):
                         'ID=debian\nVERSION_ID=13\nVERSION_CODENAME=trixie',
                         'ID=ubuntu\nVERSION_ID=12\nVERSION_CODENAME=bookworm', ''):
             with self.subTest(release=release), self.assertRaises(ValueError):
-                inv.inventory(SBOM, dict(RUNTIME, os_release=release), IMAGE)
+                inv.inventory(SBOM, dict(RUNTIME, os_release=release), IMAGE, expected_pins=PINS)
         for distro in ({"id": "debian", "versionID": "unknown"},
                        {"id": "debian", "versionID": "13", "versionCodename": "trixie"}):
             with self.subTest(distro=distro), self.assertRaises(ValueError):
-                inv.inventory(dict(SBOM, distro=distro), RUNTIME, IMAGE)
+                inv.inventory(dict(SBOM, distro=distro), RUNTIME, IMAGE, expected_pins=PINS)
 
     def test_unrecognized_grype_distro_is_incomplete_even_with_no_matches(self):
         report = {"descriptor": {"name": "grype"}, "matches": [],
@@ -100,24 +110,24 @@ class InventoryTests(unittest.TestCase):
         config = b'{"architecture":"amd64","os":"linux"}'
         sbom["source"]["metadata"] = {"userInput": IMAGE, "config": base64.b64encode(config).decode(),
                                            "imageID": "sha256:" + hashlib.sha256(config).hexdigest()}
-        inv.inventory(sbom, RUNTIME, IMAGE)
+        inv.inventory(sbom, RUNTIME, IMAGE, expected_pins=PINS)
         sbom["source"]["metadata"]["config"] = base64.b64encode(b"different").decode()
         with self.assertRaisesRegex(ValueError, "config identity mismatch"):
-            inv.inventory(sbom, RUNTIME, IMAGE)
+            inv.inventory(sbom, RUNTIME, IMAGE, expected_pins=PINS)
 
     def test_node_requires_actual_version_and_advisory_identifier(self):
         for field, value in [("version", "1.0.0"), ("cpes", [])]:
             broken = copy.deepcopy(SBOM)
             broken["artifacts"][1][field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):
-                inv.inventory(broken, RUNTIME, IMAGE)
+                inv.inventory(broken, RUNTIME, IMAGE, expected_pins=PINS)
 
     def test_every_installed_os_package_is_required(self):
         with self.assertRaisesRegex(ValueError, "OS package not inventoried"):
-            inv.inventory(SBOM, dict(RUNTIME, dpkg=RUNTIME["dpkg"] + "\nopenssl\t3.0.0"), IMAGE)
+            inv.inventory(SBOM, dict(RUNTIME, dpkg=RUNTIME["dpkg"] + "\nopenssl\t3.0.0"), IMAGE, expected_pins=PINS)
 
     def test_go_applications_require_actual_binary_main_modules_and_versions(self):
-        coverage = inv.inventory(SBOM, RUNTIME, IMAGE)
+        coverage = inv.inventory(SBOM, RUNTIME, IMAGE, expected_pins=PINS)
         self.assertEqual(coverage["go_applications"]["git_lfs"]["version"], "3.8.0")
         for index in (2, 3):
             for field, value in [("version", "v0.1.0"), ("locations", [{"path": "/tmp/unrelated"}]),
@@ -125,27 +135,27 @@ class InventoryTests(unittest.TestCase):
                 broken = copy.deepcopy(SBOM)
                 broken["artifacts"][index][field] = value
                 with self.subTest(index=index, field=field), self.assertRaises(ValueError):
-                    inv.inventory(broken, RUNTIME, IMAGE)
+                    inv.inventory(broken, RUNTIME, IMAGE, expected_pins=PINS)
             broken = copy.deepcopy(SBOM)
             broken["artifacts"].pop(index)
             with self.assertRaises(ValueError):
-                inv.inventory(broken, RUNTIME, IMAGE)
+                inv.inventory(broken, RUNTIME, IMAGE, expected_pins=PINS)
         broken = copy.deepcopy(SBOM)
         broken["artifacts"][2]["version"] = "UNKNOWN"
         with self.assertRaises(ValueError):
-            inv.inventory(broken, RUNTIME, IMAGE)
+            inv.inventory(broken, RUNTIME, IMAGE, expected_pins=PINS)
 
     def test_rebuilt_lfs_source_revision_and_app_releases_must_match_image_pins(self):
         for revision in ("short", "b" * 40):
             runtime = dict(RUNTIME, git_lfs=RUNTIME["git_lfs"].replace("aece9221f8c09221a14395d964806b956289bc07", revision))
             with self.subTest(revision=revision), self.assertRaises(ValueError):
-                inv.inventory(SBOM, runtime, IMAGE)
+                inv.inventory(SBOM, runtime, IMAGE, expected_pins=PINS)
         for runtime, version in (("gh", "2.103.0"), ("git_lfs", "3.8.0")):
             raw = dict(RUNTIME, **{runtime: RUNTIME[runtime].replace(version, "0.1.0")})
             sbom = copy.deepcopy(SBOM)
             sbom["artifacts"][2 if runtime == "gh" else 3]["version"] = "v0.1.0"
             with self.subTest(runtime=runtime), self.assertRaises(ValueError):
-                inv.inventory(sbom, raw, IMAGE)
+                inv.inventory(sbom, raw, IMAGE, expected_pins=PINS)
 
     def test_database_measures_build_time_not_download_time(self):
         self.assertEqual(inv.database(DB, NOW)["age_seconds"], 21600)
@@ -230,7 +240,8 @@ class DriverTests(unittest.TestCase):
             bundle.mkdir()
             runtime = dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")
             for name, value in [("sbom.syft.json", SBOM), ("runtime.json", runtime),
-                                ("identity.json", {"image": IMAGE, "source_revision": "a" * 40}), ("coverage.json", {})]:
+                                ("identity.json", {"image": IMAGE, "source_revision": "a" * 40,
+                                                   "go_application_pins": PINS}), ("coverage.json", {})]:
                 inv.write_json(bundle / name, value)
             scan.bundle_manifest(bundle, IMAGE)
             args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=bundle,
@@ -267,7 +278,7 @@ class DriverTests(unittest.TestCase):
                 return json.dumps({"vulns": [{"id": "GO-lfs-fixture", "affected": [
                     {"package": query["package"]}]}]}).encode()
             return b"{}"
-        coverage = inv.inventory(SBOM, RUNTIME, IMAGE)
+        coverage = inv.inventory(SBOM, RUNTIME, IMAGE, expected_pins=PINS)
         with patch.object(scan, "download", side_effect=response):
             findings = scan.query_runtimes(coverage, self.root)
         self.assertEqual([(f["package"], f["severity"]) for f in findings],
@@ -277,7 +288,7 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(scan.evaluate(findings, policy, policy, self.root)["blocking"], findings)
 
     def test_go_application_query_failure_never_reuses_other_clean_results(self):
-        coverage = inv.inventory(SBOM, RUNTIME, IMAGE)
+        coverage = inv.inventory(SBOM, RUNTIME, IMAGE, expected_pins=PINS)
         for module in ("github.com/cli/cli/v2", "github.com/git-lfs/git-lfs/v3"):
             for failure in (OSError("application network failed"), b'{"error":"unavailable"}'):
                 def response(url, limit, data):
@@ -379,7 +390,8 @@ class DriverTests(unittest.TestCase):
                     if corruption != "missing":
                         for name, value in [("sbom.syft.json", SBOM),
                                             ("runtime.json", dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")),
-                                            ("identity.json", {"image": IMAGE, "source_revision": "a" * 40}),
+                                            ("identity.json", {"image": IMAGE, "source_revision": "a" * 40,
+                                                               "go_application_pins": PINS}),
                                             ("coverage.json", {})]:
                             inv.write_json(bundle / name, value)
                         scan.bundle_manifest(bundle, IMAGE)
@@ -434,6 +446,9 @@ class DriverTests(unittest.TestCase):
             elif argv[0] == "syft":
                 inv.write_json(inventory / "sbom.syft.json", SBOM)
                 result = ""
+            elif argv[:4] == ["git", "-C", scan.ROOT, "show"]:
+                self.assertEqual(argv[4], "a" * 40 + ":docker/managed/Dockerfile")
+                result = DOCKERFILE_PINS
             else:
                 result = "unix:///fixture.sock"
             if output:
@@ -444,6 +459,7 @@ class DriverTests(unittest.TestCase):
             self.assertEqual(scan.run(args), 0)
         advisory.assert_not_called()
         self.assertEqual(json.loads((inventory / "result.json").read_text())["status"], "inventoried")
+        self.assertEqual(json.loads((inventory / "identity.json").read_text())["go_application_pins"], PINS)
         publication_args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, output=inventory,
                                               trusted_policy=self.root / "policy", candidate_policy=self.root / "policy")
         with patch.object(publication, "command"), patch.object(publication.subprocess, "run") as child:
@@ -473,6 +489,68 @@ class DriverTests(unittest.TestCase):
             self.assertIn("--publication-policy", security.call_args.args[0])
             self.assertIn(str(args.publication_policy), security.call_args.args[0])
         self.assertFalse((args.output / "publication-gate.json").exists())
+
+    def test_retained_image_pins_survive_checkout_upgrade_and_still_bind_actual_binary(self):
+        bundle = self.root / "bundle"
+        bundle.mkdir()
+        identity = {"image": IMAGE, "source_revision": "a" * 40, "go_application_pins": PINS}
+        for name, value in [("sbom.syft.json", SBOM), ("runtime.json", dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")),
+                            ("identity.json", identity), ("coverage.json", {})]:
+            inv.write_json(bundle / name, value)
+        scan.bundle_manifest(bundle, IMAGE)
+        args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=bundle,
+                                  output=self.root / "rescan", tool_cache=self.root, db_cache=self.root,
+                                  trusted_policy=self.root / "policy", candidate_policy=self.root / "policy")
+        # A rescan must not read current checkout pins or require the old source
+        # commit to exist in today's shallow checkout.
+        upgraded = dict(PINS, GH_VERSION="3.0.0", GIT_LFS_VERSION="4.0.0", GIT_LFS_REVISION="b" * 40)
+        with patch.object(inv, "managed_go_pins", return_value=upgraded), patch.object(
+                scan, "managed_go_pins", side_effect=AssertionError("current checkout read")), patch.object(
+                scan, "install_tools", return_value=({}, {})), patch.object(scan, "scan_sbom", return_value={}), patch.object(
+                scan, "grype_findings", return_value=[]), patch.object(scan, "query_runtimes", return_value=[]), patch.object(
+                scan, "evaluate", return_value={"blocking": [], "excepted": [], "reporting": []}):
+            self.assertEqual(scan.run(args), 0)
+        retained = json.loads((args.output / "identity.json").read_text())
+        self.assertEqual(retained["go_application_pins"], PINS)
+        with self.assertRaises(ValueError):
+            inv.inventory(SBOM, RUNTIME, IMAGE, expected_pins=upgraded)
+        for pins in (None, {}, dict(PINS, GIT_LFS_REVISION="short")):
+            with self.subTest(pins=pins), self.assertRaises(ValueError):
+                inv.inventory(SBOM, RUNTIME, IMAGE, expected_pins=pins)
+        (bundle / "identity.json").write_text(json.dumps(dict(identity, go_application_pins=upgraded)))
+        args.output = self.root / "tampered"
+        self.assertEqual(scan.run(args), 2)
+
+    def test_initial_inventory_cannot_fall_back_when_exact_source_pins_are_unavailable(self):
+        args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=None, inventory_only=True,
+                                  output=self.root / "initial", tool_cache=self.root, db_cache=self.root)
+        def source_unavailable(argv, **kwargs):
+            if argv[:3] == ["docker", "image", "inspect"]:
+                return json.dumps([{"Id": IMAGE, "Architecture": "amd64", "Os": "linux"}])
+            self.assertEqual(argv[:4], ["git", "-C", scan.ROOT, "show"])
+            self.assertEqual(argv[4], "a" * 40 + ":docker/managed/Dockerfile")
+            raise ValueError("exact source unavailable")
+        with patch.object(scan, "command", side_effect=source_unavailable), patch.object(scan, "install_tools") as install:
+            self.assertEqual(scan.run(args), 2)
+        install.assert_not_called()
+        self.assertEqual(json.loads((args.output / "result.json").read_text())["status"], "error")
+
+    def test_legacy_bundle_without_source_pins_is_error_not_current_pin_fallback(self):
+        bundle = self.root / "legacy"
+        bundle.mkdir()
+        for name, value in [("sbom.syft.json", SBOM), ("runtime.json", dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")),
+                            ("identity.json", {"image": IMAGE, "source_revision": "a" * 40}), ("coverage.json", {})]:
+            inv.write_json(bundle / name, value)
+        scan.bundle_manifest(bundle, IMAGE)  # Valid old hashes, not tampered bytes.
+        args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=bundle,
+                                  output=self.root / "legacy-rescan", tool_cache=self.root, db_cache=self.root)
+        with patch.object(scan, "managed_go_pins", side_effect=AssertionError("current pin fallback")), patch.object(
+                scan, "query_runtimes") as query:
+            self.assertEqual(scan.run(args), 2)
+        query.assert_not_called()
+        result = json.loads((args.output / "result.json").read_text())
+        self.assertEqual(result["status"], "error")
+        self.assertIn("missing/incomplete image-source", result["error"])
 
     def test_floating_input_fails_before_docker_or_network(self):
         args = argparse.Namespace(image="nac:latest", source_revision="a" * 40, output=self.root / "evidence")
