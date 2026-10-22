@@ -193,13 +193,18 @@ jobs:
           if [[ "$POLICY_MODE" = publication ]]; then
             extra+=(--publication-policy "$GITHUB_WORKSPACE/image-security-evidence/policy/publication-policy.json")
           fi
+          scan_status=0
           python3 scripts/security/image_scan.py --bundle image-security-evidence/inventory --image "$IMAGE_ID" --source-revision "$SOURCE_SHA" \
             --trusted-policy trusted-image-policy/.github/security/exceptions.json \
             --candidate-policy .github/security/exceptions.json --output image-security-evidence/security \
-            --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db" "${extra[@]}"
+            --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db" "${extra[@]}" || scan_status=$?
+          python3 scripts/security/image_ci_report.py --scan-output image-security-evidence/security \
+            --scanner-exit "$scan_status" --image "$IMAGE_ID" --source-revision "$SOURCE_SHA"
       - name: Report exact-image security findings
         if: always()
         run: |
+          echo '### Image findings are advisory; enforcement is deferred' >> "$GITHUB_STEP_SUMMARY"
+          echo 'CI success does not establish image security clearance. Full findings remain below.' >> "$GITHUB_STEP_SUMMARY"
           if test -f image-security-evidence/security/report.md; then
             cat image-security-evidence/security/report.md >> "$GITHUB_STEP_SUMMARY"
           else

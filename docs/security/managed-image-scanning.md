@@ -1,5 +1,22 @@
 # Managed image security
 
+## Current rollout: advisory image findings
+
+Image vulnerability enforcement is deliberately deferred. Repository CI and the
+daily rescan retain the complete findings and their `blocked` security verdict,
+but a completed scan with findings does not fail those reporting workflows.
+Their green status establishes implementation/build/smoke/reporting checks, not
+image security clearance. Scanner, inventory, tool, database, qualification and
+evidence errors still fail CI; no `continue-on-error` or exception is added.
+
+Source dependency enforcement remains required. The strict scanner and local
+prepublication helper still reject image blockers. The private controller's
+publisher is unchanged and has not adopted this gate. Activating image
+enforcement, resolving the retained image findings and publisher integration
+are later work under ALL-452/ALL-461; do not infer them from these PRs passing.
+
+## Strict scanner contract
+
 The image gate inventories the same immutable loaded linux/amd64 image used by
 managed smoke tests. It never builds, pulls a floating image tag, or publishes.
 Resolve the loaded image once with `docker image inspect --format '{{.Id}}'`;
@@ -43,7 +60,7 @@ prepublication helper forwards it only to that scanner, whose eligible-event
 validation still applies. It does not implement the private beta publisher's
 separate adoption and identity contract described below.
 
-High/Critical findings block even without a fix. Lower severities remain in the
+The strict scanner returns a blocked verdict for High/Critical findings even without a fix. Lower severities remain in the
 report. Unknown severity blocks conservatively because it cannot be established
 below High. Tool, network, DB, input, configuration, and inventory errors return
 failure separately from vulnerability blocking. No `only-fixed`, blanket runtime
@@ -162,8 +179,10 @@ measured age, source, and local digest. Download time is not DB freshness.
 The workflow first runs `--inventory-only` on the tested immutable image. This
 validates the actual runtime probes and one Syft inventory, writes the hashed
 bundle, and records `status: inventoried` with `security_verdict: false`. A
-separate required security step consumes that bundle with the full fresh scan;
-inventory success cannot satisfy the aggregate gate or publication receipt.
+separate required reporting step consumes that bundle with the full fresh scan.
+Inventory alone cannot satisfy that reporting step. A completed blocked scan can
+satisfy the deferred-enforcement CI stage, but cannot produce a security pass or
+publication receipt.
 Legacy bundles without gh/Git LFS probes or retained source pins remain errors.
 Requalification requires fresh inventory of the exact loaded supported image
 and its immutable source commit; neither current Dockerfile pins nor edited
@@ -187,9 +206,9 @@ newest qualifying inventory, then require its unique expected per-SHA artifact,
 `inventory/` layout, source identity, and input hashes. Missing, expired,
 unavailable, or corrupt selected evidence fails; it never falls back to an older
 green image. PR, manual, foreign, expired, and failed/skipped/cancelled inventory
-steps cannot qualify. Fresh findings against a retained red image remain red
-without a new image build. Preserve findings/errors and visibly fail/report the
-fresh scan.
+steps cannot qualify. Fresh findings against a retained blocked image remain
+blocked in its security verdict without a new image build. The deferred stage
+reports that verdict; incomplete scans and evidence errors still fail CI.
 
 ```sh
 python3 scripts/security/image_scan.py --bundle <trusted-retained-bundle> \
@@ -244,8 +263,9 @@ package versions, changed installed bytes and mismatched source/archive evidence
 Before production gate activation, collect a fresh actual image baseline and
 remediate findings or land explicitly reviewed narrow expiring exceptions.
 ALL-447 is Eric's merged remediation. ALL-462 owns the subsequently approved
-dependency/runtime and Wolfi corrections before the source and image gates.
-Neither ticket automatically approves exceptions. Keep unresolved
+dependency/runtime and Wolfi corrections retained in this stack. Source
+enforcement is enabled after its zero-finding baseline; image enforcement and
+the remaining image remediation are deferred. Neither ticket automatically approves exceptions. Keep unresolved
 runtime coverage and external publication qualification visible; never describe
 an incomplete scan or an unqualified baseline as clean.
 

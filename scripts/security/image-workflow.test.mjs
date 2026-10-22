@@ -32,6 +32,9 @@ test('one loaded build binds the same immutable ID to smoke and scanning', () =>
   assert.ok(inventory.run.includes('--output image-security-evidence/inventory'));
   assert.ok(scan.run.includes('--bundle image-security-evidence/inventory'));
   assert.ok(scan.run.includes('--output image-security-evidence/security'));
+  assert.ok(scan.run.includes('|| scan_status=$?'));
+  assert.ok(scan.run.includes('image_ci_report.py --scan-output image-security-evidence/security'));
+  assert.ok(scan.run.includes('--scanner-exit "$scan_status" --image "$IMAGE_ID" --source-revision "$SOURCE_SHA"'));
   assert.ok(!scan.run.includes('--inventory-only'));
   assert.ok(scan.if.includes("steps.inventory.outcome == 'success'"));
   assert.ok(steps.indexOf(inventory) > steps.indexOf(smoke));
@@ -98,6 +101,7 @@ test('daily rescan uses trusted dev and retains failing reports', () => {
   assert.equal(daily.jobs.rescan.steps[0].with.ref, 'dev');
   const steps = daily.jobs.rescan.steps;
   assert.ok(steps.some(s => s.run?.includes('image_rescan.py')));
+  assert.ok(steps.some(s => s.run?.includes('image_ci_report.py --scan-output image-rescan-evidence/rescan')));
   assert.equal(steps.at(-1).if, 'always()');
   assert.equal(steps.at(-1).with['retention-days'], 14);
   assert.ok(!steps.some(s => s['continue-on-error']));

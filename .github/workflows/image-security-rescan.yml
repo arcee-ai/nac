@@ -23,11 +23,16 @@ jobs:
       - name: Rescan retained unchanged managed image inventory
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/security/image_rescan.py --output image-rescan-evidence
+        run: |
+          scan_status=0
+          python3 scripts/security/image_rescan.py --output image-rescan-evidence || scan_status=$?
+          python3 scripts/security/image_ci_report.py --scan-output image-rescan-evidence/rescan \
+            --scanner-exit "$scan_status"
       - name: Report current unchanged-image security result
         if: always()
         shell: bash
         run: |
+          echo '### Image findings are advisory; enforcement is deferred' >> "$GITHUB_STEP_SUMMARY"
           if test -f image-rescan-evidence/rescan/report.md; then
             cat image-rescan-evidence/rescan/report.md >> "$GITHUB_STEP_SUMMARY"
           else
