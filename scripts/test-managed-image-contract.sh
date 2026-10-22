@@ -29,7 +29,7 @@ require_literal "$dockerfile" 'ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bi
 require_literal "$dockerfile" 'RUST_VERSION=1.98.0'
 require_literal "$dockerfile" 'NODE_VERSION=24.22.1'
 require_literal "$dockerfile" 'GO_VERSION=1.27.0'
-require_literal "$dockerfile" 'UV_VERSION=0.12.1'
+require_literal "$dockerfile" 'UV_VERSION=0.13.4'
 require_literal "$dockerfile" 'ARG NAC_BUILD_TRACK=dev'
 require_literal "$dockerfile" 'ARG NAC_BUILD_ID'
 require_literal "$dockerfile" 'ARG NAC_SOURCE_REVISION'
