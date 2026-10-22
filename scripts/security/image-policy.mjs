@@ -1,5 +1,6 @@
 // ALL-451 owns reviewed policy authority/matching; this adapter binds image context and severity.
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validatePolicy, evaluateFindings } from '../../.github/scripts/security-policy.mjs';
@@ -7,14 +8,31 @@ import { loadTrustedPolicy, POLICY } from '../../.github/scripts/source-security
 import { selectPolicyInputs } from '../../.github/scripts/publication-policy.mjs';
 
 export function selectImagePolicyInputs(candidateSha, {
-  requestedMode = '', requestedSha = '', environment = process.env, readRef,
+  requestedMode = '', requestedSha = '', environment = process.env, readRef, readCompare,
 } = {}) {
   const selected = selectPolicyInputs(candidateSha, environment, readRef);
   if (requestedMode && requestedMode !== selected.mode) {
     throw new Error('image caller policy mode differs from eligible event');
   }
   if (requestedSha && requestedSha !== selected.policy_sha) {
-    throw new Error('image caller cannot select a different trusted policy revision');
+    const pinnedDev = selected.mode === 'ordinary' && /^[a-f0-9]{40}$/.test(requestedSha) &&
+      (environment.GITHUB_EVENT_NAME === 'workflow_dispatch' ||
+       environment.GITHUB_EVENT_NAME === 'push' && environment.GITHUB_REF === 'refs/heads/main');
+    if (!pinnedDev) throw new Error('image caller cannot select a different trusted policy revision');
+    // A reusable call retains its already selected dev commit. Dev advancing
+    // between prepare jobs must not invalidate that immutable policy snapshot.
+    const endpoint = `repos/${environment.GITHUB_REPOSITORY}/compare/${requestedSha}...${selected.policy_sha}`;
+    const comparison = readCompare ? readCompare(endpoint) : JSON.parse(execFileSync(
+      'gh', ['api', endpoint], { encoding: 'utf8', timeout: 30_000 },
+    ));
+    if (comparison?.url !== `https://api.github.com/${endpoint}` ||
+        comparison.base_commit?.sha !== requestedSha ||
+        comparison.merge_base_commit?.sha !== requestedSha ||
+        comparison.status !== 'ahead' || comparison.behind_by !== 0 ||
+        !Number.isSafeInteger(comparison.ahead_by) || comparison.ahead_by < 1) {
+      throw new Error('image caller policy pin is not a canonical dev ancestor');
+    }
+    return { ...selected, policy_sha: requestedSha };
   }
   return selected;
 }

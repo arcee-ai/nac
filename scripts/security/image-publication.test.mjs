@@ -141,6 +141,42 @@ test('caller-selected publication revisions and mismatched ordinary pins are rej
     readRef: () => ({}) }), /canonical reviewed-dev/);
 });
 
+test('main and manual reusable calls keep their verified policy pin when canonical dev advances', t => {
+  const f = fixture(t);
+  const current = 'd'.repeat(40);
+  for (const name of ['push', 'workflow_dispatch']) {
+    writeFileSync(f.environment.GITHUB_EVENT_PATH, JSON.stringify({
+      ref: 'refs/heads/main', repository: { full_name: 'example/fixture' },
+    }));
+    const environment = { ...f.environment, GITHUB_EVENT_NAME: name, GITHUB_REF: 'refs/heads/main' };
+    let reads = 0;
+    const readRef = () => {
+      reads++;
+      return { ref: 'refs/heads/dev', url: 'https://api.github.com/repos/example/fixture/git/refs/heads/dev',
+        object: { type: 'commit', sha: current,
+          url: `https://api.github.com/repos/example/fixture/git/commits/${current}` } };
+    };
+    const endpoint = `repos/example/fixture/compare/${f.policySha}...${current}`;
+    const comparison = { url: `https://api.github.com/${endpoint}`, status: 'ahead', ahead_by: 1,
+      behind_by: 0, base_commit: { sha: f.policySha }, merge_base_commit: { sha: f.policySha } };
+    const options = { environment, readRef, requestedMode: 'ordinary', requestedSha: f.policySha,
+      readCompare: actual => { assert.equal(actual, endpoint); return comparison; } };
+    assert.deepEqual(selectImagePolicyInputs(f.candidateSha, options),
+      { mode: 'ordinary', policy_sha: f.policySha });
+    assert.equal(reads, 1);
+    assert.deepEqual(selectImagePolicyInputs(f.candidateSha, { environment, readRef }),
+      { mode: 'ordinary', policy_sha: current });
+    for (const patch of [{ status: 'diverged' }, { behind_by: 1 }, { ahead_by: 0 },
+      { merge_base_commit: { sha: f.candidateSha } }, { base_commit: { sha: current } },
+      { url: 'https://api.github.com/repos/other/repo/compare/x...y' }]) {
+      assert.throws(() => selectImagePolicyInputs(f.candidateSha,
+        { ...options, readCompare: () => ({ ...comparison, ...patch }) }), /canonical dev ancestor/);
+    }
+    assert.throws(() => selectImagePolicyInputs(f.candidateSha,
+      { ...options, readCompare: () => { throw new Error('comparison unavailable'); } }), /unavailable/);
+  }
+});
+
 test('missing, spoofed and differently bound receipts never fall back to tag policy', t => {
   const f = fixture(t, { candidate: granted(entry) });
   for (const receipt of [undefined, {}, { ...f.receipt, sha: 'a'.repeat(40) },

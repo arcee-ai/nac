@@ -49,7 +49,10 @@ Only that validated mode uses the effective reviewed policy instead of historica
 tag grants: revoked grants stop applying and later reviewed recovery grants can
 apply without rebuilding or changing the immutable candidate. Ordinary PR policy
 equality remains strict. Standalone manual checks and main pushes select canonical
-dev rather than trusting the selected branch's policy. Missing, malformed,
+dev rather than trusting the selected branch's policy. Reusable calls retain the
+caller's already selected immutable dev policy if dev advances between prepare
+jobs, after verifying that pin is an ancestor of the canonical dev commit.
+This does not grant publication authority or relax PR-base equality. Missing, malformed,
 expired, spoofed or unavailable publication policy fails closed, with no fallback
 to tag policy.
 The receipt and effective policy digest are retained with security evidence.
