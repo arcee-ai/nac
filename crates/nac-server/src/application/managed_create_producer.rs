@@ -83,7 +83,10 @@ impl ManagedCreateProducerOutput {
                 && native.configuration_sha256 == request.configuration_sha256,
             "Managed CREATE original producer binding differs"
         );
-        let parts = self.parts.take().expect("original checked pending output");
+        let parts = self
+            .parts
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("original checked pending output unavailable"))?;
         // Existing method installs original serving transfer custody before
         // spawn/await. It alone performs persistence/cache/lifecycle publication
         // and issues the terminal half; this caller reconstructs no terminal.

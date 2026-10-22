@@ -127,9 +127,11 @@ impl CreateTransferOwner {
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("actual runtime absent"))?,
             );
+            #[cfg(not(test))]
+            let CreateTransferRequest::Managed(request) = &self.managed_request;
+            #[cfg(test)]
             let request = match &self.managed_request {
                 CreateTransferRequest::Managed(request) => request,
-                #[cfg(test)]
                 CreateTransferRequest::SyntheticUnbound => {
                     anyhow::bail!("genuine Core terminal requires original managed request")
                 }

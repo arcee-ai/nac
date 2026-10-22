@@ -48,7 +48,8 @@ impl ManagedCreateAttempts {
         location: PreparedLocationCustody,
         execution: Arc<NativeCreateResources>,
     ) -> Arc<ManagedCreateAttempt> {
-        let shared: Arc<dyn PreparationResourceCustody> = execution.clone();
+        let shared: Arc<dyn PreparationResourceCustody> =
+            Arc::<NativeCreateResources>::clone(&execution);
         let resources = ManagedCreateResources::retain(location, shared);
         let core = self
             .core

@@ -194,7 +194,8 @@ impl QualifiedCreateTerminal {
             }
         };
         loop {
-            match *receiver.borrow_and_update() {
+            let observed = *receiver.borrow_and_update();
+            match observed {
                 Some(true) => {
                     // Cleanup may have committed after transport loss. Keep
                     // that outcome, but never publish 204 on an ended exchange.

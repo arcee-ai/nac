@@ -8,6 +8,37 @@ struct Fixture {
     completion: Arc<CompletedInitialImport>,
     roots: Arc<CreateGlobalSourceRoots>,
 }
+
+#[test]
+fn concurrent_create_generations_are_unique_and_stop_at_signed_storage_limit() {
+    let f = Fixture::new();
+    let owner = f.start();
+    let workers: Vec<_> = (0..8)
+        .map(|_| {
+            let owner = Arc::clone(&owner);
+            std::thread::spawn(move || {
+                (0..64)
+                    .map(|_| owner.next_create_generation().unwrap())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    let mut generations: Vec<_> = workers
+        .into_iter()
+        .flat_map(|worker| worker.join().unwrap())
+        .collect();
+    generations.sort_unstable();
+    assert_eq!(generations, (1..=512).collect::<Vec<_>>());
+    owner
+        .create_generation
+        .store(i64::MAX as u64 - 1, Ordering::Release);
+    assert_eq!(owner.next_create_generation().unwrap(), i64::MAX as u64);
+    assert!(owner.next_create_generation().is_err());
+    assert_eq!(
+        owner.create_generation.load(Ordering::Acquire),
+        i64::MAX as u64
+    );
+}
 impl Fixture {
     fn new() -> Self {
         let (imported, custody, completion, roots) = ModelImportFixture::new_with_global_roots();

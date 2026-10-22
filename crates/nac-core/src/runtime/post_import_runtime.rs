@@ -249,14 +249,22 @@ impl PostImportRuntimeHost {
     /// Local allocation sequence, not AFM source lineage, PID or a kernel proof.
     pub(in crate::runtime) fn next_create_generation(&self) -> Result<u64> {
         self.check_denial()?;
-        self.create_generation
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |previous| {
-                previous
-                    .checked_add(1)
-                    .filter(|next| *next <= i64::MAX as u64)
-            })
-            .map(|previous| previous + 1)
-            .map_err(|_| unavailable())
+        let mut previous = self.create_generation.load(Ordering::Acquire);
+        loop {
+            let next = previous
+                .checked_add(1)
+                .filter(|next| *next <= i64::MAX as u64)
+                .ok_or_else(unavailable)?;
+            match self.create_generation.compare_exchange_weak(
+                previous,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Ok(next),
+                Err(observed) => previous = observed,
+            }
+        }
     }
     pub(in crate::runtime) fn create_material(&self) -> Result<CreateHostMaterial<'_>> {
         self.check_current()?;
