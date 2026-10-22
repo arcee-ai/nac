@@ -16,6 +16,7 @@ import urllib.request
 
 from image_inventory import (database, grype_findings, inventory, managed_go_pins,
                              osv_findings, require, sha256, write_json, write_report)
+from image_packages import PACKAGE_PROBE, package_integrity, source_package_pins
 
 ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("image-tools.json")
@@ -32,12 +33,27 @@ commands = {"node": ["/usr/local/bin/node", "--version"],
             "uv": ["/usr/local/bin/uv", "--version"],
             "gh": ["/usr/local/bin/gh", "--version"],
             "git_lfs": ["/usr/local/bin/git-lfs", "version"],
-            "nac": ["/usr/local/bin/nac-web", "--version"],
-            "dpkg": ["dpkg-query", "-W", "-f=${binary:Package}\t${Version}\n"]}
+            "nac": ["/usr/local/bin/nac-web", "--version"]}
 evidence = {k: subprocess.check_output(v, text=True).strip() for k,v in commands.items()}
 evidence["os_release"] = Path("/etc/os-release").read_text()
-print(json.dumps(evidence))
-"""
+if Path("/usr/lib/apk/db/installed").is_file():
+    packages = []
+    for record in Path("/usr/lib/apk/db/installed").read_text().strip().split("\n\n"):
+        fields = {}
+        for line in record.splitlines():
+            key, sep, value = line.partition(":")
+            if key in {"P", "V", "A", "o"}:
+                if not sep or key in fields or not value:
+                    raise ValueError("malformed actual APK database")
+                fields[key] = value
+        if set(fields) != {"P", "V", "A", "o"} or fields["A"] not in {"x86_64", "noarch"}:
+            raise ValueError("missing/unsupported actual APK package metadata")
+        packages.append("\t".join(fields[k] for k in ("P", "V", "o", "A")))
+    evidence["apk"] = "\n".join(packages)
+else:
+    evidence["dpkg"] = subprocess.check_output(
+        ["dpkg-query", "-W", "-f=${binary:Package}\t${Version}\n"], text=True).strip()
+""" + PACKAGE_PROBE + "\nprint(json.dumps(evidence))\n"
 
 
 def command(args, *, env=None, output=None, timeout=600):
@@ -219,10 +235,14 @@ def run(args):
             require(len(details) == 1 and details[0]["Id"] == args.image, "loaded image identity mismatch")
             require(details[0]["Architecture"] == "amd64" and details[0]["Os"] == "linux",
                     "managed image must be linux/amd64")
+            def read_source(path):
+                return command(["git", "-C", ROOT, "show", f"{args.source_revision}:{path}"])
+
+            dockerfile = read_source("docker/managed/Dockerfile")
             identity = {"image": args.image, "repo_digests": details[0].get("RepoDigests", []),
                         "source_revision": args.source_revision, "inspected": details[0],
-                        "go_application_pins": managed_go_pins(command([
-                            "git", "-C", ROOT, "show", f"{args.source_revision}:docker/managed/Dockerfile"]))}
+                        "go_application_pins": managed_go_pins(dockerfile),
+                        "runtime_package_pins": source_package_pins(dockerfile, read_source)}
             write_json(output / "identity.json", identity)
             raw = command(["docker", "run", "--rm", "--network=none", "--read-only",
                            "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=64",
@@ -249,6 +269,9 @@ def run(args):
                 "NAC binary source revision does not match candidate")
         coverage = inventory(sbom, raw_runtime, args.image,
                              expected_pins=identity.get("go_application_pins"))
+        if coverage["os_release"]["ID"] == "wolfi":
+            coverage["owned_runtime_packages"] = package_integrity(
+                raw_runtime.get("owned_packages"), identity.get("runtime_package_pins"), sbom["artifacts"])
         write_json(output / "coverage.json", coverage)
         bundle_manifest(output, args.image)
         if inventory_only:

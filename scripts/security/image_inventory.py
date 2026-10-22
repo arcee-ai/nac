@@ -41,7 +41,9 @@ def database(status, now):
 
 
 def runtimes(raw):
-    require(isinstance(raw, dict) and set(raw) == {"node", "go", "uv", "gh", "git_lfs", "dpkg", "nac", "os_release"},
+    common = {"node", "go", "uv", "gh", "git_lfs", "nac", "os_release"}
+    require(isinstance(raw, dict) and set(raw) in (
+        common | {"dpkg"}, common | {"apk"}, common | {"apk", "owned_packages"}),
             "incomplete runtime probe")
     versions = {}
     patterns = {"node": r"v(\d+\.\d+\.\d+)",
@@ -54,11 +56,14 @@ def runtimes(raw):
         require(match is not None, f"missing/unrecognized {name} runtime: {raw[name]!r}")
         versions[name] = match[1]
     packages = []
-    for line in raw["dpkg"].splitlines():
+    manager = "apk" if "apk" in raw else "dpkg"
+    require(isinstance(raw[manager], str), "malformed OS package inventory")
+    for line in raw[manager].splitlines():
         fields = line.split("\t")
-        require(len(fields) == 2 and all(fields), "malformed dpkg inventory")
-        packages.append(tuple(fields))
+        require(len(fields) == (4 if manager == "apk" else 2) and all(fields), f"malformed {manager} inventory")
+        packages.append(tuple(fields[:2]))
     require(packages, "empty OS package inventory")
+    require(len({name for name, _ in packages}) == len(packages), "duplicate OS package inventory")
     return versions, packages
 
 
@@ -69,8 +74,15 @@ def supported_debian(name, version):
     return match[1]
 
 
+def supported_distro(name, version):
+    if name == "wolfi":
+        require(version == "20230201", "unrecognized/unsupported Wolfi release; OS advisory coverage is incomplete")
+        return name, version
+    return "debian", supported_debian(name, version)
+
+
 def os_release(raw):
-    require(isinstance(raw, str), "missing actual Debian OS release probe")
+    require(isinstance(raw, str), "missing actual OS release probe")
     values = {}
     for line in raw.splitlines():
         key, separator, value = line.partition("=")
@@ -79,10 +91,13 @@ def os_release(raw):
             parsed = shlex.split(value)
             require(len(parsed) == 1, f"malformed OS release field: {key}")
             values[key] = parsed[0]
-    major = supported_debian(values.get("ID"), values.get("VERSION_ID"))
-    require(values.get("VERSION_ID") == major and
-            values.get("VERSION_CODENAME") == {"12": "bookworm", "13": "trixie"}[major],
-            "actual Debian OS release does not match a supported image")
+    name, version = supported_distro(values.get("ID"), values.get("VERSION_ID"))
+    if name == "debian":
+        require(values.get("VERSION_ID") == version and
+                values.get("VERSION_CODENAME") == {"12": "bookworm", "13": "trixie"}[version],
+                "actual Debian OS release does not match a supported image")
+    else:
+        require("VERSION_CODENAME" not in values, "unexpected Wolfi codename")
     return values
 
 
@@ -117,13 +132,28 @@ def inventory(sbom, raw, image, *, expected_pins):
     versions, packages = runtimes(raw)
     actual_distro = os_release(raw["os_release"])
     distro = sbom.get("distro", {})
-    major = supported_debian(distro.get("id"), distro.get("versionID"))
-    require(major == actual_distro["VERSION_ID"] and
-            distro.get("versionCodename") == actual_distro["VERSION_CODENAME"],
-            "SBOM Debian release differs from actual image OS release")
-    debs = {(p.get("name"), p.get("version")) for p in artifacts if p.get("type") == "deb"}
+    name, version = supported_distro(distro.get("id"), distro.get("versionID"))
+    require((name, version) == (actual_distro["ID"], actual_distro["VERSION_ID"]) and
+            distro.get("versionCodename") == actual_distro.get("VERSION_CODENAME"),
+            "SBOM OS release differs from actual image OS release")
+    manager, package_type = ("apk", "apk") if name == "wolfi" else ("dpkg", "deb")
+    require(manager in raw, "OS package manager differs from actual release")
+    installed = {(p.get("name"), p.get("version")) for p in artifacts if p.get("type") == package_type}
     for name, version in packages:
-        require((name.split(":")[0], version) in debs, f"OS package not inventoried: {name}@{version}")
+        require((name.split(":")[0], version) in installed, f"OS package not inventoried: {name}@{version}")
+    require(installed == {(name.split(":")[0], version) for name, version in packages},
+            "SBOM contains OS packages absent from actual package database")
+    if manager == "apk":
+        actual = {line.split("\t")[0]: line.split("\t") for line in raw["apk"].splitlines()}
+        for package in artifacts:
+            if package.get("type") != "apk":
+                continue
+            name, version, origin, architecture = actual[package["name"]]
+            metadata = package.get("metadata", {})
+            require(architecture in {"x86_64", "noarch"} and
+                    metadata.get("package") == name and metadata.get("version") == version and
+                    metadata.get("originPackage") == origin and metadata.get("architecture") == architecture,
+                    f"APK source/architecture metadata differs from actual database: {name}")
     nodes = [p for p in artifacts if p.get("name") == "node" and
              p.get("version", "").lstrip("v") == versions["node"]]
     require(nodes, "Node binary missing/mismatched in Syft inventory")
@@ -173,10 +203,10 @@ def grype_findings(report, sbom):
             "malformed scanner results")
     require(report.get("descriptor", {}).get("name") == "grype", "not Grype results")
     distro = report.get("distro", {})
-    major = supported_debian(distro.get("name"), distro.get("version"))
-    require(major == supported_debian(sbom.get("distro", {}).get("id"),
-                                      sbom.get("distro", {}).get("versionID")),
-            "Grype Debian release differs from the inventoried image")
+    release = supported_distro(distro.get("name"), distro.get("version"))
+    require(release == supported_distro(sbom.get("distro", {}).get("id"),
+                                        sbom.get("distro", {}).get("versionID")),
+            "Grype OS release differs from the inventoried image")
     known = {p["id"] for p in sbom["artifacts"]}
     findings = []
     for match in report["matches"]:

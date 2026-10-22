@@ -51,12 +51,31 @@ exception, or blanket OS exception is used.
 
 ## Inventory and advisory coverage
 
-Syft inventories the full image, including Debian's dpkg database. The actual
-`/etc/os-release` probe must identify Debian 13/trixie (or Debian 12/bookworm
-for retained historical inventories), the Syft release and codename must
-match it, and Grype must report the same recognized Debian release. Unknown release
-metadata fails even if Grype exits successfully with zero findings. Every package
-reported by the image's dpkg probe must occur at the actual version in the SBOM.
+Syft inventories the full image, including its actual package database. The
+`/etc/os-release` probe, Syft inventory and Grype result must agree on recognized
+Wolfi `20230201`, or Debian 12/bookworm or 13/trixie for historical inventories.
+Unknown or mismatched release metadata fails even with zero findings. Actual
+package names and versions must equal the SBOM package inventory. Wolfi APK
+source-package and architecture metadata must also equal its installed database;
+Alpine metadata cannot substitute for Wolfi advisory coverage.
+
+Source-built runtime packages additionally require retained source-lock, supplier,
+upstream version, downstream package revision, patch and archive hashes, and
+installed payload records. A passive probe reads their actual files and symlink
+targets in the read-only image. The driver compares them with the records and
+immutable image-source pins before admitting inventory. Missing records, an old
+stock package, altered installed bytes, mismatched source or archive hashes fail
+closed independently of a scanner's zero count. Pins remain in the hash-bound
+bundle, so later rescans never substitute today's package recipes. Historical
+Wolfi probes without these inputs require fresh exact-image qualification.
+
+This is source/package/file integrity evidence, not an advisory applicability
+verdict. It does not invoke affected library behavior, fabricate a fixed upstream
+release, rewrite the raw SBOM or remove any returned finding. Source-build test
+results and their unavailable fixtures must remain explicit. An apparent-zero
+stock Wolfi probe previously missed known Kerberos identity matches; it is not
+accepted evidence for the corrected image. Full actual-image qualification and
+bounded review of the supported corrections remain necessary.
 The gate executes fixed absolute Node, Go, uv, gh, and Git LFS paths inside the exact image,
 with no network, no capabilities, a read-only root, and a bounded process count.
 Unknown/missing version output is an error. Node must appear in Syft at the
@@ -189,7 +208,7 @@ python3 scripts/security/image_qualify.py --output <new-fixture-evidence> \
   --tool-cache <cache> --db-cache <database-cache>
 ```
 
-Live fixtures scan real checksum-verified Node executables and minimal dpkg
+Live fixtures scan real checksum-verified Node executables and minimal dpkg/APK
 records with the real pinned tools/current DB; they never execute the vulnerable
 Node executable. The vulnerable OS/Node and Go stdlib/toolchain/uv controls must match their
 specific known blocking advisories; fixed controls must not match those same
@@ -198,11 +217,17 @@ as fixture drift, so old test binaries cannot block an already-fixed candidate.
 The actual image gate still evaluates every finding at the full severity threshold;
 control scoping never suppresses candidate findings or scanner/network failures. These fixtures
 do not replace real managed image inventory/smoke evidence.
+The Wolfi APK control independently verifies the `wolfi:distro:wolfi:rolling`
+advisory namespace and a selected OpenSSL vulnerable/fixed boundary. Other
+advisories in those old fixtures remain retained; they are not exceptions for the
+actual candidate. Passive package controls also reject missing provenance, old
+package versions, changed installed bytes and mismatched source/archive evidence.
 
 Before production gate activation, collect a fresh actual image baseline and
 remediate findings or land explicitly reviewed narrow expiring exceptions.
-ALL-447 remains Eric's dependency/runtime remediation, not an automatically
-approved exception or an authorization to overlap his changes. Keep unresolved
+ALL-447 is Eric's merged remediation. ALL-462 owns the subsequently approved
+dependency/runtime and Wolfi corrections before the source and image gates.
+Neither ticket automatically approves exceptions. Keep unresolved
 runtime coverage and external publication qualification visible; never describe
 an incomplete scan or an unqualified baseline as clean.
 

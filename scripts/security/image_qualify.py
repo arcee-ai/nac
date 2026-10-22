@@ -26,6 +26,7 @@ RUNTIME_CONTROLS = {("Go:stdlib", "GO-2026-6809"), ("Go:toolchain", "GO-2026-660
                     ("Go:github.com/git-lfs/git-lfs/v3", "GO-2025-3390"),
                     ("Go:github.com/cli/cli/v2", "GO-2024-3269"),
                     ("PyPI:uv", "GHSA-hq85-5cpj-mr62")}
+WOLFI_CONTROLS = {("apk:openssl", "CVE-2022-3602")}
 
 
 def qualify_controls(label, findings, controls):
@@ -41,6 +42,39 @@ def qualify_controls(label, findings, controls):
         print(f"Fixture drift: {len(observed - controls)} unrelated advisories retained; candidate policy remains full/fail-closed")
     return {"control_matches": len(controls.intersection(observed)),
             "other_advisories": len(observed - controls)}
+
+
+def qualify_wolfi(output, tools, env):
+    summaries = {}
+    for label, version in (("vulnerable", "3.0.6-r0"), ("safe", "3.0.7-r0")):
+        directory = output / ("wolfi-" + label)
+        root = directory / "root"
+        (root / "etc").mkdir(parents=True)
+        (root / "etc/os-release").write_text('ID=wolfi\nVERSION_ID="20230201"\n')
+        (root / "usr/lib/apk/db").mkdir(parents=True)
+        # Parser/advisory fixtures, not a claim to contain an installed binary.
+        # The real image separately requires exact equality with its APK DB.
+        (root / "usr/lib/apk/db/installed").write_text(
+            f"P:openssl\nV:{version}\nA:x86_64\no:openssl\nT:OpenSSL control\nL:Apache-2.0\n\n")
+        config = directory / "syft.yaml"
+        config.write_text(SYFT_CONFIG)
+        sbom_path = directory / "sbom.syft.json"
+        command([tools["syft"], "scan", f"dir:{root.resolve()}", "--config", config,
+                 "-o", f"syft-json={sbom_path.resolve()}"], env=env, output=directory / "syft.txt")
+        sbom = json.loads(sbom_path.read_text())
+        require(any(p["name"] == "openssl" and p["version"] == version and p["type"] == "apk"
+                    for p in sbom["artifacts"]), "Wolfi APK fixture not detected by Syft")
+        report = scan_sbom(tools, sbom_path, directory, env)
+        findings = grype_findings(report, sbom)
+        write_json(directory / "findings.json", findings)
+        controls = qualify_controls(label, findings, WOLFI_CONTROLS)
+        if label == "vulnerable":
+            require(any(m["vulnerability"]["id"] == "CVE-2022-3602" and any(
+                d.get("searchedBy", {}).get("namespace") == "wolfi:distro:wolfi:rolling"
+                for d in m.get("matchDetails", [])) for m in report["matches"]),
+                "Wolfi advisory namespace did not match the vulnerable APK control")
+        summaries[label] = {"version": version, "findings": len(findings), **controls}
+    return summaries
 
 
 def qualify(output, cache, db):
@@ -119,7 +153,8 @@ def qualify(output, cache, db):
     else:
         raise ValueError("DB network failure did not fail closed")
     write_json(output / "qualification.json", {"qualified_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-               "fixtures": summaries, "runtime_version_queries": runtime_summary,
+               "fixtures": summaries, "wolfi_apk": qualify_wolfi(output, tools, env),
+               "runtime_version_queries": runtime_summary,
                "db_network_failure": "rejected with a cached young DB",
                "unknown_debian_release": "rejected independently of scanner exit/match count", "scope": "real Node binary detection and live OS/Node advisory matching"})
 

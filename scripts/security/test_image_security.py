@@ -40,6 +40,42 @@ DOCKERFILE_PINS = "\n".join(f"ARG {name}={value}" for name, value in PINS.items(
 
 
 class InventoryTests(unittest.TestCase):
+    def test_wolfi_apk_actual_inventory_and_scanner_must_agree(self):
+        sbom = copy.deepcopy(SBOM)
+        sbom["distro"] = {"id": "wolfi", "versionID": "20230201"}
+        sbom["artifacts"][0] = {"id": "os", "name": "wolfi-baselayout", "version": "20230201-r32", "type": "apk",
+                                  "metadata": {"package": "wolfi-baselayout", "version": "20230201-r32",
+                                               "originPackage": "wolfi-baselayout", "architecture": "x86_64"}}
+        runtime = dict(RUNTIME, os_release='ID=wolfi\nVERSION_ID="20230201"\n')
+        runtime["apk"] = "wolfi-baselayout\t20230201-r32\twolfi-baselayout\tx86_64"
+        del runtime["dpkg"]
+        self.assertEqual(inv.inventory(sbom, runtime, IMAGE, expected_pins=PINS)["os_packages"], 1)
+        report = {"descriptor": {"name": "grype"}, "matches": [],
+                  "distro": {"name": "wolfi", "version": "20230201"}}
+        self.assertEqual(inv.grype_findings(report, sbom), [])
+        for name, value in (("name", "alpine"), ("version", "unknown"), ("version", "20230202")):
+            with self.subTest(name=name, value=value), self.assertRaises(ValueError):
+                inv.grype_findings(dict(report, distro=dict(report["distro"], **{name: value})), sbom)
+        for change in ({"dpkg": runtime["apk"]}, {"apk": runtime["apk"] + "\nkrb5-libs\t1.22.2-r5\tkrb5\tx86_64"},
+                       {"apk": runtime["apk"] + "\n" + runtime["apk"]},
+                       {"os_release": 'ID=wolfi\nVERSION_ID="unknown"\n'},
+                       {"os_release": 'ID=debian\nVERSION_ID=13\nVERSION_CODENAME=trixie\n'}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                inv.inventory(sbom, dict(runtime, **change), IMAGE, expected_pins=PINS)
+        for field, value in (("version", "20230201-r31"), ("type", "deb")):
+            broken = copy.deepcopy(sbom)
+            broken["artifacts"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                inv.inventory(broken, runtime, IMAGE, expected_pins=PINS)
+        for field, value in (("originPackage", "unrelated"), ("architecture", "aarch64")):
+            broken = copy.deepcopy(sbom)
+            broken["artifacts"][0]["metadata"][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "metadata differs"):
+                inv.inventory(broken, runtime, IMAGE, expected_pins=PINS)
+        sbom["artifacts"].append({"id": "extra", "name": "krb5-libs", "version": "1.22.2-r5", "type": "apk"})
+        with self.assertRaisesRegex(ValueError, "absent from actual"):
+            inv.inventory(sbom, runtime, IMAGE, expected_pins=PINS)
+
     def test_supported_release_inventory_and_scanner_must_agree(self):
         for version, codename in [("12", "bookworm"), ("13", "trixie")]:
             with self.subTest(version=version):
