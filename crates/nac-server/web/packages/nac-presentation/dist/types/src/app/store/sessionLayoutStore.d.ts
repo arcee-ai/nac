@@ -1,11 +1,7 @@
 interface SessionLayoutState {
     /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
     collapsed: boolean;
-    /**
-     * Whether the next collapsed change should tween. A launch from the composer
-     * opens a collapsed panel in place, so the chat column does not replay its
-     * layout for half a second.
-     */
+    /** Whether the next collapsed change should tween; restoring a project's stored rail does not. */
     sidePanelAnimate: boolean;
     /**
      * Project the collapsed preference belongs to. Null until the open session's
@@ -36,17 +32,12 @@ interface SessionLayoutState {
     selectedThreadRunning: boolean;
     /** Workset the chat last pointed the Worksets panel at. */
     selectedWorkset: string | null;
+    /** Open Subagents row per parent, kept so returning from a transcript reopens it. */
+    selectedSubagents: ReadonlyMap<string, string>;
     /** Revision the panels are looking at, or null for the live working tree. */
     selectedRevision: number | null;
     /** File the Files panel is showing. */
     selectedFile: string | null;
-    /**
-     * Subagents tab opened on a blank launch, from the parent composer's spawn
-     * menu or from New Agent / New Orchestrator in the list.
-     */
-    subagentLaunch: "agent" | "orchestrator" | null;
-    /** Bumps every time a blank subagent launch is requested, so the composer can take focus again. */
-    subagentLaunchRequest: number;
     /** Folders flipped away from their default open state, by path. */
     toggledFolders: ReadonlySet<string>;
     /**
@@ -70,13 +61,12 @@ export declare function createSessionLayoutStore(storage?: Pick<Storage, "getIte
     selectThread: (selectedThread: string | null, selectedThreadEpisode?: string | null) => void;
     setSelectedThreadRunning: (selectedThreadRunning: boolean) => void;
     selectWorkset: (selectedWorkset: string | null) => void;
+    selectSubagent: (parentSessionId: string, key: string) => void;
     selectRevision: (selectedRevision: number | null) => void;
     selectFile: (selectedFile: string | null) => void;
     toggleFolder: (path: string) => void;
     selectFileListing: (fileListing: FileListing) => void;
-    openSubagentLaunch: (subagentLaunch: "agent" | "orchestrator") => void;
     setSidePanelAnimate: (sidePanelAnimate: boolean) => void;
-    clearSubagentLaunch: () => void;
     resetSessionSelection: () => void;
     useSidePanelCollapsed: () => boolean;
     useSidePanelAnimate: () => boolean;
@@ -86,12 +76,11 @@ export declare function createSessionLayoutStore(storage?: Pick<Storage, "getIte
     useSelectedThreadEpisode: () => string | null;
     useSelectedThreadRunning: () => boolean;
     useSelectedWorkset: () => string | null;
+    useSelectedSubagent: (parentSessionId: string) => string | null;
     useSelectedRevision: () => number | null;
     useSelectedFile: () => string | null;
     useToggledFolders: () => ReadonlySet<string>;
     useFileListing: () => FileListing;
-    useSubagentLaunch: () => "orchestrator" | "agent" | null;
-    useSubagentLaunchRequest: () => number;
 };
-export declare const release: () => void, sessionLayoutStore: import("../lib/store").Store<SessionLayoutState>, bindSidePanelProject: (projectId: string) => void, unbindSidePanelProject: () => void, toggleSidePanelExpanded: () => void, toggleSidePanelCollapsed: () => void, showSidePanelList: (panelList: boolean) => void, toggleSidePanelList: () => void, revealSidePanel: (asDialog?: boolean) => void, selectThread: (selectedThread: string | null, selectedThreadEpisode?: string | null) => void, setSelectedThreadRunning: (selectedThreadRunning: boolean) => void, selectWorkset: (selectedWorkset: string | null) => void, selectRevision: (selectedRevision: number | null) => void, selectFile: (selectedFile: string | null) => void, toggleFolder: (path: string) => void, selectFileListing: (fileListing: FileListing) => void, openSubagentLaunch: (subagentLaunch: "agent" | "orchestrator") => void, setSidePanelAnimate: (sidePanelAnimate: boolean) => void, clearSubagentLaunch: () => void, resetSessionSelection: () => void, useSidePanelCollapsed: () => boolean, useSidePanelAnimate: () => boolean, useSidePanelExpanded: () => boolean, useSidePanelList: () => boolean, useSelectedThread: () => string | null, useSelectedThreadEpisode: () => string | null, useSelectedThreadRunning: () => boolean, useSelectedWorkset: () => string | null, useSelectedRevision: () => number | null, useSelectedFile: () => string | null, useToggledFolders: () => ReadonlySet<string>, useFileListing: () => FileListing, useSubagentLaunch: () => "orchestrator" | "agent" | null, useSubagentLaunchRequest: () => number;
+export declare const release: () => void, sessionLayoutStore: import("../lib/store").Store<SessionLayoutState>, bindSidePanelProject: (projectId: string) => void, unbindSidePanelProject: () => void, toggleSidePanelExpanded: () => void, toggleSidePanelCollapsed: () => void, showSidePanelList: (panelList: boolean) => void, toggleSidePanelList: () => void, revealSidePanel: (asDialog?: boolean) => void, selectThread: (selectedThread: string | null, selectedThreadEpisode?: string | null) => void, setSelectedThreadRunning: (selectedThreadRunning: boolean) => void, selectWorkset: (selectedWorkset: string | null) => void, selectSubagent: (parentSessionId: string, key: string) => void, selectRevision: (selectedRevision: number | null) => void, selectFile: (selectedFile: string | null) => void, toggleFolder: (path: string) => void, selectFileListing: (fileListing: FileListing) => void, setSidePanelAnimate: (sidePanelAnimate: boolean) => void, resetSessionSelection: () => void, useSidePanelCollapsed: () => boolean, useSidePanelAnimate: () => boolean, useSidePanelExpanded: () => boolean, useSidePanelList: () => boolean, useSelectedThread: () => string | null, useSelectedThreadEpisode: () => string | null, useSelectedThreadRunning: () => boolean, useSelectedWorkset: () => string | null, useSelectedSubagent: (parentSessionId: string) => string | null, useSelectedRevision: () => number | null, useSelectedFile: () => string | null, useToggledFolders: () => ReadonlySet<string>, useFileListing: () => FileListing;
 export {};
