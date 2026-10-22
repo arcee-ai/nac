@@ -670,7 +670,7 @@ fn embedded_frontend_router() -> Router {
 }
 
 fn documented_api() -> OpenApiRouter<SessionManager> {
-    OpenApiRouter::with_openapi(ApiDoc::openapi())
+    let mut documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
         .routes(routes!(ui_configuration::get_ui_configuration))
         .routes(routes!(managed_status::healthz_handler))
@@ -885,7 +885,39 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::user_terminals::pull))
         .routes(routes!(delivery::user_terminals::detach))
         .routes(routes!(delivery::user_terminals::input))
-        .routes(routes!(delivery::user_terminals::resize))
+        .routes(routes!(delivery::user_terminals::resize));
+    // Utoipa 6 omits empty descriptions. OpenAPI 3.1 requires a description
+    // on every Response Object, including annotations that only declare a body.
+    // Normalize the shared live/export document, never the generated JSON.
+    for path in documented.get_openapi_mut().paths.paths.values_mut() {
+        for operation in [
+            &mut path.get,
+            &mut path.put,
+            &mut path.post,
+            &mut path.delete,
+            &mut path.options,
+            &mut path.head,
+            &mut path.patch,
+            &mut path.trace,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for (status, response) in &mut operation.responses.responses {
+                if let utoipa::openapi::RefOr::T(response) = response {
+                    if response.description.is_empty() {
+                        response.description =
+                            axum::http::StatusCode::from_bytes(status.as_bytes())
+                                .ok()
+                                .and_then(|status| status.canonical_reason())
+                                .unwrap_or("Response")
+                                .to_owned();
+                    }
+                }
+            }
+        }
+    }
+    documented
 }
 
 /// Return the exact OpenAPI document assembled for the running HTTP router.

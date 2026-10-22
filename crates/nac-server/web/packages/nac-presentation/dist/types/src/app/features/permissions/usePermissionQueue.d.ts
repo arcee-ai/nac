@@ -11,7 +11,7 @@ export declare function usePermissionQueue(sessionId: string, enabled: boolean, 
         completion_inbox_id: number | null;
         created_at: string;
         description: string;
-        execution_mode: null | import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode: import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure: string | null;
         generation: number;
         nesting_depth: number;
@@ -31,7 +31,7 @@ export declare function usePermissionQueue(sessionId: string, enabled: boolean, 
         completion_inbox_id: number | null;
         created_at: string;
         description: string;
-        execution_mode: null | import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode: import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure: string | null;
         generation: number;
         nesting_depth: number;

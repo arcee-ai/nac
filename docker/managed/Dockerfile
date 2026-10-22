@@ -2,7 +2,7 @@
 
 # Managed NAC v0 is intentionally linux/amd64-only. The platform-specific
 # Debian manifest prevents an accidental cross-architecture publication.
-FROM --platform=linux/amd64 debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867 AS build
+FROM --platform=linux/amd64 debian:trixie-slim@sha256:4876fdea29cac1a33a3195f1eb1952feb1fca7dd6dd00be3e2f1879cf20d34d2 AS build
 
 ARG RUST_VERSION=1.98.0
 ARG RUSTUP_VERSION=1.29.0
@@ -43,14 +43,20 @@ RUN NAC_BUILD_TRACK="${NAC_BUILD_TRACK}" \
     NAC_SOURCE_REVISION="${NAC_SOURCE_REVISION}" \
     cargo build --release --locked -p nac-server --bin nac-web
 
-FROM --platform=linux/amd64 debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867 AS runtime
+FROM --platform=linux/amd64 debian:trixie-slim@sha256:4876fdea29cac1a33a3195f1eb1952feb1fca7dd6dd00be3e2f1879cf20d34d2 AS runtime
 
 ARG NODE_VERSION=24.22.1
 ARG NODE_SHA256=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
-ARG GO_VERSION=1.27.0
-ARG GO_SHA256=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
-ARG UV_VERSION=0.12.1
-ARG UV_SHA256=90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb
+ARG GO_VERSION=1.27.3
+ARG GO_SHA256=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+ARG GH_VERSION=2.103.0
+ARG GH_SHA256=fdd768eb70f6409f80fcfa9f3a1c0adf0fc98d827ab3ce0bed2ac22762c5d786
+ARG GIT_LFS_VERSION=3.8.0
+ARG GIT_LFS_MODULE_SUM=h1:D0WiUyq5J3ZOv/9bvCcPToHqHF+WIQQKF5BK8bxlc5o=
+ARG NPM_VERSION=11.21.1
+ARG NPM_SHA256=dd77c48eb845f4856c2cdba347cfb52bd877a2655a1ea48ff0c4796e3df9dd7b
+ARG UV_VERSION=0.13.4
+ARG UV_SHA256=2b428396f12572d4429cf210ca234dd599a33b3af0958a4d5ed569d63e3f344f
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -74,9 +80,7 @@ RUN test "$(dpkg --print-architecture)" = amd64 \
         curl \
         fd-find \
         findutils \
-        gh \
         git \
-        git-lfs \
         gzip \
         jq \
         libssl-dev \
@@ -95,19 +99,40 @@ RUN test "$(dpkg --print-architecture)" = amd64 \
         xz-utils \
         zip \
     && rm -rf /var/lib/apt/lists/* \
-    && git lfs install --system --skip-repo \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/node.tar.xz \
         "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
     && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
     && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
     && rm /tmp/node.tar.xz \
+    && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/npm.tgz \
+        "https://registry.npmjs.org/npm/-/npm-${NPM_VERSION}.tgz" \
+    && echo "${NPM_SHA256}  /tmp/npm.tgz" | sha256sum -c - \
+    && rm -rf /usr/local/lib/node_modules/npm \
+    && mkdir -p /usr/local/lib/node_modules/npm \
+    && tar -xzf /tmp/npm.tgz -C /usr/local/lib/node_modules/npm --strip-components=1 \
+    && rm /tmp/npm.tgz \
     && corepack enable \
+    && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/gh.tar.gz \
+        "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+    && echo "${GH_SHA256}  /tmp/gh.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/gh.tar.gz -C /usr/local --strip-components=1 \
+    && rm /tmp/gh.tar.gz \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/go.tar.gz \
         "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
     && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/go.tar.gz -C /usr/local \
     && rm /tmp/go.tar.gz \
+    && test "$(GOTOOLCHAIN=local GOPATH=/tmp/nac-lfs-build /usr/local/go/bin/go mod download -json \
+        "github.com/git-lfs/git-lfs/v3@v${GIT_LFS_VERSION}" | jq -r .Sum)" = "$GIT_LFS_MODULE_SUM" \
+    && GOTOOLCHAIN=local CGO_ENABLED=0 GOPATH=/tmp/nac-lfs-build \
+        GOCACHE=/tmp/nac-lfs-cache GOBIN=/usr/local/bin \
+        /usr/local/go/bin/go install "github.com/git-lfs/git-lfs/v3@v${GIT_LFS_VERSION}" \
+    && install -d /usr/local/share/licenses/git-lfs \
+    && cp "/tmp/nac-lfs-build/pkg/mod/github.com/git-lfs/git-lfs/v3@v${GIT_LFS_VERSION}/LICENSE.md" \
+        /usr/local/share/licenses/git-lfs/LICENSE.md \
+    && rm -rf /tmp/nac-lfs-build /tmp/nac-lfs-cache \
+    && git lfs install --system --skip-repo \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/uv.tar.gz \
         "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
     && echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c - \

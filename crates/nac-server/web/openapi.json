@@ -669,7 +669,7 @@
         "operationId": "get_managed_github",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -679,7 +679,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -689,7 +689,7 @@
             }
           },
           "500": {
-            "description": "",
+            "description": "Internal Server Error",
             "content": {
               "application/json": {
                 "schema": {
@@ -707,7 +707,7 @@
         "operationId": "delete_managed_github",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -717,7 +717,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -747,7 +747,7 @@
         },
         "responses": {
           "202": {
-            "description": "",
+            "description": "Accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -757,7 +757,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Bad Request",
             "content": {
               "application/json": {
                 "schema": {
@@ -767,7 +767,7 @@
             }
           },
           "401": {
-            "description": "",
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -777,7 +777,7 @@
             }
           },
           "403": {
-            "description": "",
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -787,7 +787,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -797,7 +797,7 @@
             }
           },
           "409": {
-            "description": "",
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -807,7 +807,7 @@
             }
           },
           "502": {
-            "description": "",
+            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
@@ -837,7 +837,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -847,7 +847,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Bad Request",
             "content": {
               "application/json": {
                 "schema": {
@@ -857,7 +857,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -885,7 +885,7 @@
         ],
         "responses": {
           "202": {
-            "description": "",
+            "description": "Accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -895,7 +895,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Bad Request",
             "content": {
               "application/json": {
                 "schema": {
@@ -905,7 +905,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -915,7 +915,7 @@
             }
           },
           "409": {
-            "description": "",
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -935,7 +935,7 @@
         "operationId": "get_managed_github_git_identity",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -945,7 +945,7 @@
             }
           },
           "401": {
-            "description": "",
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -955,7 +955,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -983,7 +983,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -993,7 +993,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Bad Request",
             "content": {
               "application/json": {
                 "schema": {
@@ -1003,7 +1003,7 @@
             }
           },
           "401": {
-            "description": "",
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -1013,7 +1013,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1033,7 +1033,7 @@
         "operationId": "post_managed_github_login",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -1043,7 +1043,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1053,7 +1053,7 @@
             }
           },
           "502": {
-            "description": "",
+            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
@@ -1083,7 +1083,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -1093,7 +1093,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1121,10 +1121,10 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "No Content"
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1144,7 +1144,7 @@
         "operationId": "get_managed_github_repositories",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -1154,7 +1154,7 @@
             }
           },
           "401": {
-            "description": "",
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -1164,7 +1164,7 @@
             }
           },
           "403": {
-            "description": "",
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -1174,7 +1174,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1184,7 +1184,7 @@
             }
           },
           "409": {
-            "description": "",
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -1194,7 +1194,7 @@
             }
           },
           "502": {
-            "description": "",
+            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
@@ -1232,7 +1232,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -1242,7 +1242,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Bad Request",
             "content": {
               "application/json": {
                 "schema": {
@@ -1252,7 +1252,7 @@
             }
           },
           "401": {
-            "description": "",
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -1262,7 +1262,7 @@
             }
           },
           "403": {
-            "description": "",
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -1272,7 +1272,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1282,7 +1282,7 @@
             }
           },
           "502": {
-            "description": "",
+            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
@@ -3128,10 +3128,10 @@
                 "schema": {
                   "oneOf": [
                     {
-                      "type": "null"
+                      "$ref": "#/components/schemas/SandboxActivity"
                     },
                     {
-                      "$ref": "#/components/schemas/SandboxActivity"
+                      "type": "null"
                     }
                   ]
                 }
@@ -5175,10 +5175,10 @@
                 "schema": {
                   "oneOf": [
                     {
-                      "type": "null"
+                      "$ref": "#/components/schemas/SessionGoalRecord"
                     },
                     {
-                      "$ref": "#/components/schemas/SessionGoalRecord"
+                      "type": "null"
                     }
                   ]
                 }
@@ -9441,10 +9441,10 @@
           "client_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionClientId"
               },
               {
-                "$ref": "#/components/schemas/SessionClientId"
+                "type": "null"
               }
             ]
           },
@@ -9470,10 +9470,10 @@
           "client_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionClientId"
               },
               {
-                "$ref": "#/components/schemas/SessionClientId"
+                "type": "null"
               }
             ]
           },
@@ -9491,10 +9491,10 @@
           "submitted_user_message": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SubmittedUserMessageSnapshot"
               },
               {
-                "$ref": "#/components/schemas/SubmittedUserMessageSnapshot"
+                "type": "null"
               }
             ]
           }
@@ -9643,20 +9643,20 @@
               "command_status": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/CommandStatus"
                   },
                   {
-                    "$ref": "#/components/schemas/CommandStatus"
+                    "type": "null"
                   }
                 ]
               },
               "completion_status": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/ToolCompletionStatus"
                   },
                   {
-                    "$ref": "#/components/schemas/ToolCompletionStatus"
+                    "type": "null"
                   }
                 ]
               },
@@ -10044,10 +10044,10 @@
               "usage": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/TokenUsage"
                   },
                   {
-                    "$ref": "#/components/schemas/TokenUsage"
+                    "type": "null"
                   }
                 ]
               }
@@ -10078,10 +10078,10 @@
               "usage": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/TokenUsage"
                   },
                   {
-                    "$ref": "#/components/schemas/TokenUsage"
+                    "type": "null"
                   }
                 ]
               }
@@ -10634,10 +10634,10 @@
           "authorization_metadata": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpOAuthAuthorizationMetadataRequest"
               },
               {
-                "$ref": "#/components/schemas/McpOAuthAuthorizationMetadataRequest"
+                "type": "null"
               }
             ]
           },
@@ -10660,10 +10660,10 @@
           "registration": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpOAuthRegistrationRequest"
               },
               {
-                "$ref": "#/components/schemas/McpOAuthRegistrationRequest"
+                "type": "null"
               }
             ]
           },
@@ -10870,10 +10870,10 @@
           "header_helper": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpHeaderHelperConfig"
               },
               {
-                "$ref": "#/components/schemas/McpHeaderHelperConfig"
+                "type": "null"
               }
             ]
           },
@@ -10986,10 +10986,10 @@
           "light_model": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LightModelSettings"
               },
               {
-                "$ref": "#/components/schemas/LightModelSettings"
+                "type": "null"
               }
             ]
           },
@@ -11010,10 +11010,10 @@
           "reasoning_effort": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ReasoningEffort"
               },
               {
-                "$ref": "#/components/schemas/ReasoningEffort"
+                "type": "null"
               }
             ]
           }
@@ -11481,21 +11481,21 @@
           "command": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ShellCommandSnapshot",
                 "description": "Canonical durable result/preview; private output artifact ids are omitted."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "execution": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ExecutionStatus"
               },
               {
-                "$ref": "#/components/schemas/ExecutionStatus"
+                "type": "null"
               }
             ]
           },
@@ -11506,11 +11506,11 @@
           "outcome": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/CommandStatus",
                 "description": "Pipe process result, independent of collector completion/error. PTY\nexit codes remain in the existing execution status; absent is unknown."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -12108,10 +12108,10 @@
           "terminal_selection": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TerminalSelectionEvidence"
               },
               {
-                "$ref": "#/components/schemas/TerminalSelectionEvidence"
+                "type": "null"
               }
             ]
           },
@@ -12214,11 +12214,11 @@
           "configured_reasoning_effort": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ReasoningEffort",
                 "description": "Configured reasoning effort, if any."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -12272,10 +12272,10 @@
           "backend": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/BackendKind"
               },
               {
-                "$ref": "#/components/schemas/BackendKind"
+                "type": "null"
               }
             ]
           },
@@ -12291,10 +12291,10 @@
           "reasoning_effort": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ReasoningEffort"
               },
               {
-                "$ref": "#/components/schemas/ReasoningEffort"
+                "type": "null"
               }
             ]
           }
@@ -12459,10 +12459,10 @@
           "project": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ProjectRecord"
               },
               {
-                "$ref": "#/components/schemas/ProjectRecord"
+                "type": "null"
               }
             ]
           },
@@ -12559,10 +12559,10 @@
           "maintenance": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ManagedMaintenanceSnapshot"
               },
               {
-                "$ref": "#/components/schemas/ManagedMaintenanceSnapshot"
+                "type": "null"
               }
             ]
           },
@@ -12655,10 +12655,10 @@
           "accepted_identity": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ManagedAcceptedIdentity"
               },
               {
-                "$ref": "#/components/schemas/ManagedAcceptedIdentity"
+                "type": "null"
               }
             ]
           },
@@ -12686,10 +12686,10 @@
           "target": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ManagedUpgradeTarget"
               },
               {
-                "$ref": "#/components/schemas/ManagedUpgradeTarget"
+                "type": "null"
               }
             ]
           },
@@ -12760,10 +12760,10 @@
           "execution_mode": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TraditionalChildExecutionMode"
               },
               {
-                "$ref": "#/components/schemas/TraditionalChildExecutionMode"
+                "type": "null"
               }
             ]
           },
@@ -12859,21 +12859,21 @@
           "active_run": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ActiveRunSnapshot"
               },
               {
-                "$ref": "#/components/schemas/ActiveRunSnapshot"
+                "type": "null"
               }
             ]
           },
           "lineage": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/SessionLineageSnapshot",
                 "description": "Delegated sessions remain addressable by id, but clients use lineage\nto keep them out of primary chat navigation and enforce ownership UI."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -12883,10 +12883,10 @@
           "workspace_diff": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/WorkspaceDiffTotals"
               },
               {
-                "$ref": "#/components/schemas/WorkspaceDiffTotals"
+                "type": "null"
               }
             ]
           }
@@ -13582,10 +13582,10 @@
           "header_helper": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpHeaderHelperConfig"
               },
               {
-                "$ref": "#/components/schemas/McpHeaderHelperConfig"
+                "type": "null"
               }
             ]
           },
@@ -13718,11 +13718,11 @@
               "model_origin": {
                 "oneOf": [
                   {
-                    "type": "null"
-                  },
-                  {
                     "$ref": "#/components/schemas/ModelOrigin",
                     "description": "The model that produced this message (S5). Stamped at the\ntranscript push site; `None` on pre-S5 (legacy) messages, which\nthe wire normalization treats as same-model. Drives the\nsame-model reasoning-replay gate in `model::normalize_history`."
+                  },
+                  {
+                    "type": "null"
                   }
                 ]
               },
@@ -13939,11 +13939,11 @@
           "light_model": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LightModelSettings",
                 "description": "Light worker model; `None` keeps single-model behavior."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -14504,11 +14504,11 @@
           "connection": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ProviderConnection",
                 "description": "The currently selected server-owned account route, if usable. This is\nthe sole routing source for unified selectors; it contains no secret."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -14713,11 +14713,11 @@
           "light_model": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LightModelSettings",
                 "description": "Light worker model; `None` keeps single-model dispatch."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -15150,10 +15150,10 @@
               "backend": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/BackendKind"
                   },
                   {
-                    "$ref": "#/components/schemas/BackendKind"
+                    "type": "null"
                   }
                 ]
               },
@@ -15169,10 +15169,10 @@
               "reasoning_effort": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/ReasoningEffort"
                   },
                   {
-                    "$ref": "#/components/schemas/ReasoningEffort"
+                    "type": "null"
                   }
                 ]
               }
@@ -15419,10 +15419,10 @@
           "reasoning_effort": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ReasoningEffort"
               },
               {
-                "$ref": "#/components/schemas/ReasoningEffort"
+                "type": "null"
               }
             ]
           }
@@ -15434,10 +15434,10 @@
           "cumulative_token_usage": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TokenUsage"
               },
               {
-                "$ref": "#/components/schemas/TokenUsage"
+                "type": "null"
               }
             ]
           },
@@ -15452,10 +15452,10 @@
           "last_token_usage": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TokenUsage"
               },
               {
-                "$ref": "#/components/schemas/TokenUsage"
+                "type": "null"
               }
             ]
           },
@@ -15489,10 +15489,10 @@
             "items": {
               "oneOf": [
                 {
-                  "type": "null"
+                  "$ref": "#/components/schemas/TokenUsage"
                 },
                 {
-                  "$ref": "#/components/schemas/TokenUsage"
+                  "type": "null"
                 }
               ]
             }
@@ -15500,11 +15500,11 @@
           "unattributed_token_usage": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TokenUsage",
                 "description": "Cumulative usage from runs that produced no visible response."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -15822,10 +15822,10 @@
               "submitted_user_message": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/SubmittedUserMessageSnapshot"
                   },
                   {
-                    "$ref": "#/components/schemas/SubmittedUserMessageSnapshot"
+                    "type": "null"
                   }
                 ]
               },
@@ -15873,10 +15873,10 @@
               "failure": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/RunFailure"
                   },
                   {
-                    "$ref": "#/components/schemas/RunFailure"
+                    "type": "null"
                   }
                 ]
               },
@@ -16079,10 +16079,10 @@
           "client_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionClientId"
               },
               {
-                "$ref": "#/components/schemas/SessionClientId"
+                "type": "null"
               }
             ]
           },
@@ -16095,10 +16095,10 @@
           "run_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionRunId"
               },
               {
-                "$ref": "#/components/schemas/SessionRunId"
+                "type": "null"
               }
             ]
           },
@@ -16180,20 +16180,20 @@
           "active_compaction": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ActiveCompactionSnapshot"
               },
               {
-                "$ref": "#/components/schemas/ActiveCompactionSnapshot"
+                "type": "null"
               }
             ]
           },
           "active_run": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ActiveRunSnapshot"
               },
               {
-                "$ref": "#/components/schemas/ActiveRunSnapshot"
+                "type": "null"
               }
             ]
           },
@@ -16250,10 +16250,10 @@
           "run_failure": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/RunFailure"
               },
               {
-                "$ref": "#/components/schemas/RunFailure"
+                "type": "null"
               }
             ]
           },
@@ -16392,10 +16392,10 @@
           "last_failure": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/RunFailure"
               },
               {
-                "$ref": "#/components/schemas/RunFailure"
+                "type": "null"
               }
             ]
           },
@@ -16582,30 +16582,30 @@
               "lineage": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/SessionLineageSnapshot"
                   },
                   {
-                    "$ref": "#/components/schemas/SessionLineageSnapshot"
+                    "type": "null"
                   }
                 ]
               },
               "message_cycle": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/MessageCycleMetadata"
                   },
                   {
-                    "$ref": "#/components/schemas/MessageCycleMetadata"
+                    "type": "null"
                   }
                 ]
               },
               "message_page": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/MessagePageMetadata"
                   },
                   {
-                    "$ref": "#/components/schemas/MessagePageMetadata"
+                    "type": "null"
                   }
                 ]
               },
@@ -16650,11 +16650,11 @@
           "forked_from": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/SessionForkOrigin",
                 "description": "Present when this chat was forked from another session."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -17249,10 +17249,10 @@
           "client_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionClientId"
               },
               {
-                "$ref": "#/components/schemas/SessionClientId"
+                "type": "null"
               }
             ]
           },
@@ -17270,11 +17270,11 @@
           "terminal_selection": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TerminalSelectionEvidence",
                 "description": "Read-only projection carried by the identified inbox admission, before\ncanonical transcript hydration catches up. Legacy/ordinary input omits it."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -17451,10 +17451,10 @@
           "evidence": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TerminalSelectionEvidence"
               },
               {
-                "$ref": "#/components/schemas/TerminalSelectionEvidence"
+                "type": "null"
               }
             ]
           },
@@ -17824,10 +17824,10 @@
           "header_helper": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/UpdateMcpHeaderHelperRequest"
               },
               {
-                "$ref": "#/components/schemas/UpdateMcpHeaderHelperRequest"
+                "type": "null"
               }
             ]
           },
@@ -17860,10 +17860,10 @@
           "protocol": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpProtocolSelection"
               },
               {
-                "$ref": "#/components/schemas/McpProtocolSelection"
+                "type": "null"
               }
             ]
           },
@@ -17918,10 +17918,10 @@
           "probe": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpProbeResult"
               },
               {
-                "$ref": "#/components/schemas/McpProbeResult"
+                "type": "null"
               }
             ]
           },
@@ -17989,10 +17989,10 @@
           "thread_event_boundary": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionEventBoundary"
               },
               {
-                "$ref": "#/components/schemas/SessionEventBoundary"
+                "type": "null"
               }
             ]
           }
@@ -18372,10 +18372,10 @@
           "execution_mode": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TraditionalChildExecutionMode"
               },
               {
-                "$ref": "#/components/schemas/TraditionalChildExecutionMode"
+                "type": "null"
               }
             ]
           },
@@ -18558,10 +18558,10 @@
           "status": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/GoalStatus"
               },
               {
-                "$ref": "#/components/schemas/GoalStatus"
+                "type": "null"
               }
             ]
           },
@@ -18669,7 +18669,8 @@
             "$ref": "#/components/schemas/RequestField_bool_bool"
           },
           "env": {
-            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_Option_String"
+            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_Option_String",
+            "writeOnly": true
           },
           "env_headers": {
             "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_String"
@@ -18684,7 +18685,8 @@
             "$ref": "#/components/schemas/RequestField_UpdateMcpHeaderHelperRequest_UpdateMcpHeaderHelperRequest"
           },
           "headers": {
-            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_Option_String"
+            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_Option_String",
+            "writeOnly": true
           },
           "library_id": {
             "$ref": "#/components/schemas/RequestField_String_String"
@@ -18719,7 +18721,8 @@
             "$ref": "#/components/schemas/RequestField_bool_bool"
           },
           "api_key": {
-            "$ref": "#/components/schemas/RequestField_String_String"
+            "$ref": "#/components/schemas/RequestField_String_String",
+            "writeOnly": true
           },
           "backend": {
             "$ref": "#/components/schemas/RequestField_BackendKind_BackendKind"
