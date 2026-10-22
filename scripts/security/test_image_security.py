@@ -141,6 +141,19 @@ class DriverTests(unittest.TestCase):
         self.assertNotIn("GRYPE_ONLY_FIXED", environment)
         self.assertNotIn("SYFT_EXCLUDE", environment)
 
+    def test_missing_or_malformed_publication_receipt_cannot_fall_back(self):
+        trusted = self.root / "trusted.json"
+        trusted.write_text('{"schema_version":1,"exceptions":[]}')
+        receipt = self.root / "publication-policy.json"
+        for contents in (None, "not json"):
+            if contents is not None:
+                receipt.write_text(contents)
+            with self.subTest(contents=contents), patch.object(scan, "command") as child:
+                with self.assertRaises((ValueError, FileNotFoundError)):
+                    scan.evaluate([], trusted, trusted, self.root, publication_policy=receipt,
+                                  source_revision="a" * 40)
+                child.assert_not_called()
+
     def test_unchanged_bundle_is_bound_to_exact_bytes(self):
         for name, value in [("sbom.syft.json", SBOM), ("runtime.json", RUNTIME),
                             ("identity.json", {"image": IMAGE}), ("coverage.json", {})]:
@@ -360,6 +373,7 @@ class DriverTests(unittest.TestCase):
     def test_failed_security_prevents_publication_gate_receipt(self):
         args = argparse.Namespace(image=IMAGE, source_revision="a" * 40,
                                   trusted_policy=self.root / "trusted", candidate_policy=self.root / "candidate",
+                                  publication_policy=self.root / "publication-policy.json",
                                   output=self.root / "evidence")
         with patch.object(publication, "command") as smoke, patch.object(publication.subprocess, "run") as security:
             security.return_value.returncode = 1
@@ -367,6 +381,8 @@ class DriverTests(unittest.TestCase):
                 publication.gate(args)
             self.assertEqual(smoke.call_args.kwargs["env"]["MANAGED_IMAGE"], IMAGE)
             self.assertEqual(smoke.call_args.kwargs["env"]["MANAGED_IMAGE_SKIP_BUILD"], "1")
+            self.assertIn("--publication-policy", security.call_args.args[0])
+            self.assertIn(str(args.publication_policy), security.call_args.args[0])
         self.assertFalse((args.output / "publication-gate.json").exists())
 
     def test_floating_input_fails_before_docker_or_network(self):

@@ -15,12 +15,32 @@ python3 scripts/security/image_scan.py \
 The policy path must come from a separately obtained trusted base checkout, not
 from candidate code. The source-security layer owns the shared reviewed,
 expiring exception contract and landing/rerun procedure. Image scanning consumes
-that validator directly. A candidate policy change fails; an empty policy grants
+that validator directly. An ordinary candidate policy change fails; an empty policy grants
 no exceptions. An exception's exact context is `managed-image`. Package identities
 are Grype's `<artifact.type>:<artifact.name>` (such as `deb:openssl` or
 `binary:node`), or `Go:stdlib`, `Go:toolchain`, or `PyPI:uv` for explicit runtime checks. Source
 lockfile exceptions cannot suppress image findings. Every exception still needs
 its advisory, package, context, reason, owner, linked issue, and UTC expiry.
+
+Eligible stable-tag publication uses the source-owned canonical reviewed-dev
+resolver and its pinned receipt. The full candidate and trusted checkouts retain
+all three lockfiles for the generic validator. The image adapter verifies the
+receipt against the scanned image's source revision, event/tag, repository, run,
+independent policy pin, ancestry and tracked policy bytes before using grants.
+Only that validated mode uses the effective reviewed policy instead of historical
+tag grants: revoked grants stop applying and later reviewed recovery grants can
+apply without rebuilding or changing the immutable candidate. Ordinary PR policy
+equality remains strict. Standalone manual checks and main pushes select canonical
+dev rather than trusting the selected branch's policy. Missing, malformed,
+expired, spoofed or unavailable publication policy fails closed, with no fallback
+to tag policy.
+The receipt and effective policy digest are retained with security evidence.
+
+The workflow passes `--publication-policy <receipt.json>` to the same full scan;
+this is not an option to choose a policy revision or skip scanning. The local
+prepublication helper forwards it only to that scanner, whose eligible-event
+validation still applies. It does not implement the private beta publisher's
+separate adoption and identity contract described below.
 
 High/Critical findings block even without a fix. Lower severities remain in the
 report. Unknown severity blocks conservatively because it cannot be established

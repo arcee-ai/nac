@@ -140,14 +140,30 @@ def query_runtimes(coverage, output):
     return findings
 
 
-def evaluate(findings, trusted_policy, candidate_policy, output):
-    require(trusted_policy.is_file() and candidate_policy.is_file(), "exception policy missing")
-    require(trusted_policy.read_bytes() == candidate_policy.read_bytes(),
-            "candidate changes exception policy; land reviewed policy separately then rerun")
-    write_json(output / "policy-input.json", {"sha256": sha256(trusted_policy)})
+def evaluate(findings, trusted_policy, candidate_policy, output, *, publication_policy=None,
+             source_revision=None, candidate_root=None):
+    require(trusted_policy.is_file(), "exception policy missing")
+    extra = []
+    metadata = {"sha256": sha256(trusted_policy)}
+    if publication_policy is None:
+        require(candidate_policy.is_file(), "exception policy missing")
+        require(trusted_policy.read_bytes() == candidate_policy.read_bytes(),
+                "candidate changes exception policy; land reviewed policy separately then rerun")
+    else:
+        require(publication_policy.is_file(), "publication policy receipt missing")
+        # The Node adapter validates the shared source receipt before using any
+        # grant, including exact candidate source, eligible event, run and pin.
+        extra = ["--publication-policy", publication_policy.resolve(),
+                 (candidate_root or ROOT).resolve(), trusted_policy.resolve().parents[2],
+                 source_revision or "", candidate_policy.resolve()]
+        metadata["publication_receipt_sha256"] = sha256(publication_policy)
+        receipt_bytes = publication_policy.read_bytes()
+        json.loads(receipt_bytes)
+        (output / "publication-policy.json").write_bytes(receipt_bytes)
+    write_json(output / "policy-input.json", metadata)
     write_json(output / "findings.json", findings)
-    command(["node", ROOT / "scripts/security/image-policy.mjs", trusted_policy,
-             output / "findings.json", output / "policy-result.json"])
+    command(["node", ROOT / "scripts/security/image-policy.mjs", trusted_policy.resolve(),
+             output / "findings.json", output / "policy-result.json", *extra])
     result = json.loads((output / "policy-result.json").read_text())
     require(isinstance(result.get("blocking"), list), "invalid shared policy result")
     return result
@@ -231,7 +247,9 @@ def run(args):
         write_json(output / "tools.json", pins)
         report = scan_sbom(tools, output / "sbom.syft.json", output, env)
         findings = grype_findings(report, sbom) + query_runtimes(coverage, output)
-        result = evaluate(findings, args.trusted_policy, args.candidate_policy, output)
+        result = evaluate(findings, args.trusted_policy, args.candidate_policy, output,
+                          publication_policy=getattr(args, "publication_policy", None),
+                          source_revision=args.source_revision)
         write_report(output / "report.md", result, args.image)
         write_json(output / "result.json", {"status": "blocked" if result["blocking"] else "passed",
                    "image": args.image, "scanned_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -250,6 +268,8 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--trusted-policy", required=True, type=Path)
     parser.add_argument("--candidate-policy", required=True, type=Path)
+    parser.add_argument("--publication-policy", type=Path,
+                        help="eligible publication's canonical reviewed-dev policy receipt")
     parser.add_argument("--inventory-only", action="store_true",
                         help="produce validated inputs only; never a security verdict")
     parser.add_argument("--bundle", type=Path, help="rescan retained SBOM/probes without rebuilding")

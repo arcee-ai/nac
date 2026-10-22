@@ -25,6 +25,8 @@ test('one loaded build binds the same immutable ID to smoke and scanning', () =>
   assert.ok(scan.run.includes('--image "$IMAGE_ID"'));
   assert.ok(scan.run.includes('--source-revision "$SOURCE_SHA"'));
   const inventory = steps.find(s => s.id === 'inventory');
+  assert.equal(inventory.env.IMAGE_ID, scan.env.IMAGE_ID);
+  assert.equal(inventory.env.SOURCE_SHA, scan.env.SOURCE_SHA);
   assert.equal(inventory.name, 'Inventory the exact tested image');
   assert.ok(inventory.run.includes('--inventory-only'));
   assert.ok(inventory.run.includes('--output image-security-evidence/inventory'));
@@ -45,9 +47,34 @@ test('image policy checkout uses the trusted base and occurs after the image bui
   const steps = workflow('managed-image').jobs['build-smoke'].steps;
   const trusted = steps.find(s => s.with?.path === 'trusted-image-policy');
   assert.equal(trusted.with.ref,
-    "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || needs.prepare.outputs.sha }}");
+    '${{ steps.publication-policy.outputs.sha || needs.prepare.outputs.policy_sha }}');
   assert.equal(trusted.with['persist-credentials'], false);
+  assert.equal(trusted.with['fetch-depth'], 0);
   assert.ok(steps.indexOf(trusted) > steps.findIndex(s => s.id === 'build-image'));
+});
+
+test('publication uses the source-owned canonical receipt while ordinary events keep their selected pin', () => {
+  const managed = workflow('managed-image');
+  const stable = workflow('stable-release');
+  assert.equal(stable.jobs.managed.with.policy_mode, '${{ needs.prepare.outputs.source_policy_mode }}');
+  assert.equal(stable.jobs.managed.with.trusted_policy_sha, '${{ needs.prepare.outputs.source_policy_sha }}');
+  const prepare = managed.jobs.prepare;
+  const select = prepare.steps.find(s => s.id === 'policy');
+  assert.ok(select.run.includes('image-policy.mjs select'));
+  assert.equal(select.env.REQUESTED_POLICY_MODE, '${{ inputs.policy_mode }}');
+  assert.equal(select.env.REQUESTED_POLICY_SHA, '${{ inputs.trusted_policy_sha }}');
+  assert.equal(prepare.outputs.policy_mode, '${{ steps.policy.outputs.mode }}');
+  const steps = managed.jobs['build-smoke'].steps;
+  assert.equal(steps[0].with['fetch-depth'], 0);
+  const pin = steps.find(s => s.id === 'publication-policy');
+  assert.equal(pin.if, "needs.prepare.outputs.policy_mode == 'publication'");
+  assert.ok(pin.run.includes('.github/scripts/publication-policy.mjs resolve'));
+  assert.equal(pin.env.REQUESTED_POLICY_SHA, '${{ needs.prepare.outputs.policy_sha }}');
+  const scan = steps.find(s => s.name === 'Scan the same tested image with reviewed policy');
+  assert.equal(scan.env.NAC_PUBLICATION_POLICY_SHA, '${{ steps.publication-policy.outputs.sha }}');
+  assert.ok(scan.run.includes('--publication-policy'));
+  assert.ok(scan.run.includes('"${extra[@]}"'));
+  assert.ok(!steps.find(s => s.id === 'inventory').run.includes('--publication-policy'));
 });
 
 test('failed image work cannot make the managed or overall aggregate green', () => {

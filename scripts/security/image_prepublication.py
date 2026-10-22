@@ -20,10 +20,13 @@ def gate(args):
     smoke_log = args.output.parent / (args.output.name + "-smoke.txt")
     env = dict(os.environ, MANAGED_IMAGE=args.image, MANAGED_IMAGE_SKIP_BUILD="1", CONTAINER_RUNTIME="docker")
     command(["sh", ROOT / "scripts/smoke-managed-image.sh"], env=env, output=smoke_log, timeout=600)
+    extra = []
+    if getattr(args, "publication_policy", None) is not None:
+        extra = ["--publication-policy", str(args.publication_policy)]
     result = subprocess.run(["python3", str(ROOT / "scripts/security/image_scan.py"),
                              "--image", args.image, "--source-revision", args.source_revision,
                              "--trusted-policy", str(args.trusted_policy),
-                             "--candidate-policy", str(args.candidate_policy), "--output", str(args.output)])
+                             "--candidate-policy", str(args.candidate_policy), "--output", str(args.output), *extra])
     require(result.returncode == 0, "publication blocked by failed/incomplete image security")
     evidence = json.loads((args.output / "result.json").read_text())
     require(evidence["status"] == "passed" and evidence["image"] == args.image, "publication evidence mismatch")
@@ -39,6 +42,7 @@ if __name__ == "__main__":
     parser.add_argument("--source-revision", required=True)
     parser.add_argument("--trusted-policy", required=True, type=Path)
     parser.add_argument("--candidate-policy", required=True, type=Path)
+    parser.add_argument("--publication-policy", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     try:
