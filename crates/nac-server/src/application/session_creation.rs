@@ -168,25 +168,21 @@ fn apply_sibling_model_defaults(
     );
 }
 
+#[path = "session_creation/project_first_chat.rs"]
+mod project_first_chat;
+pub(super) use project_first_chat::select_primary_project_session_id;
+
 fn newest_primary_project_session_id(
     manager: &SessionManager,
     project_id: &str,
     behavior: Option<sessions::SessionBehavior>,
 ) -> Result<Option<String>> {
-    let mut candidates = sessions::list_sessions(&manager.inner.store_path)?
-        .into_iter()
-        .filter(|summary| {
-            summary.project_id.as_deref() == Some(project_id)
-                && behavior.is_none_or(|behavior| summary.behavior == behavior)
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| right.created_at.cmp(&left.created_at));
-    for candidate in candidates {
-        if manager.session_lineage(&candidate.session_id)?.is_none() {
-            return Ok(Some(candidate.session_id));
-        }
-    }
-    Ok(None)
+    select_primary_project_session_id(
+        sessions::list_sessions(&manager.inner.store_path)?,
+        project_id,
+        behavior,
+        |id| Ok(manager.session_lineage(id)?.is_some()),
+    )
 }
 
 /// Marks credential names this server generated for a saved configuration, so

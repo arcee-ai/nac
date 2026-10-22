@@ -51,6 +51,29 @@ coordinated_command! {
     port internal;
 }
 
+/// Read the exact committed request without acquiring an operation lease,
+/// reconciling recovery, or exposing the private request fingerprint. Absence
+/// is an observation, never proof that an uncertain submission may be retried.
+pub fn observe_shell_command(
+    path: &Path,
+    session_id: &str,
+    request_id: &str,
+) -> Result<Option<ShellCommandSnapshot>> {
+    anyhow::ensure!(
+        !request_id.is_empty() && request_id.len() <= 128,
+        "request_id must contain between 1 and 128 bytes"
+    );
+    let row = lookup_shell_command(path, session_id, request_id)?;
+    row.map(|(_, snapshot)| {
+        anyhow::ensure!(
+            snapshot.request_id == request_id && !snapshot.operation_id.is_empty(),
+            "command journal identity mismatch"
+        );
+        Ok(snapshot)
+    })
+    .transpose()
+}
+
 coordinated_command! {
     /// Bounded observation of the committed journal. This never acquires an
     /// operation lease or reconciles an abandoned accepted/started command.

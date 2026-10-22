@@ -1,5 +1,79 @@
 use super::*;
 
+const OVERLOAD_CHILD_ENV: &str = "NAC_TEST_CREATION_OVERLOAD_CHILD";
+const OVERLOAD_CASE: &str =
+    "tests::session_creation_overload::rejected_creation_projection_does_not_leave_a_durable_session";
+
+struct CallerRelease(Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>);
+
+impl CallerRelease {
+    fn release(&self) {
+        let (lock, condition) = &*self.0;
+        *lock.lock().unwrap_or_else(|error| error.into_inner()) = true;
+        condition.notify_all();
+    }
+}
+
+impl Drop for CallerRelease {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+async fn overload_child(mode: &str) -> (std::process::ExitStatus, String) {
+    // A separate process owns the unchanged global caller pool. Parent tests
+    // keep running concurrently and cannot consume this case's 128 permits.
+    let root = temp_root(&format!("creation_overload_child_{}", uuid::Uuid::new_v4()));
+    let log_path = root.join("output.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", OVERLOAD_CASE, "--nocapture"])
+        .env(OVERLOAD_CHILD_ENV, mode)
+        .stdin(std::process::Stdio::null())
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    // This is a supervisor bound for a broken fixture, not an extension of
+    // the five-second candidate assertion inside the actual overload case.
+    let result = tokio::time::timeout(Duration::from_secs(60), child.wait()).await;
+    let timed_out = result.is_err();
+    let status = match result {
+        Ok(status) => status.unwrap(),
+        Err(_) => {
+            child.kill().await.unwrap();
+            child.wait().await.unwrap()
+        }
+    };
+    let output = std::fs::read_to_string(log_path).unwrap();
+    eprintln!("overload child mode={mode} status={status}:\n{output}");
+    std::fs::remove_dir_all(root).unwrap();
+    assert!(!timed_out, "overload child exceeded supervisor bound");
+    (status, output)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn overload_child_panic_releases_callers_without_poisoning_parent() {
+    let (status, output) = overload_child("panic-after-entry").await;
+    assert!(!status.success(), "intentional child panic was hidden");
+    assert!(output.contains("intentional overload fixture panic"));
+    assert!(output.contains("overload fixture joined all 128 callers"));
+    assert!(output.contains("test result: FAILED"));
+    assert!(!output.contains("test result: ok"));
+    // The child deliberately panics while holding this same logical lock.
+    // Its poisoning and runtime teardown must stay inside the child process.
+    drop(SERVER_MODEL_ENV_LOCK.lock().unwrap());
+}
+
+#[tokio::test]
+async fn overload_admission_does_not_require_all_blocking_workers_to_start() {
+    let (status, output) = overload_child("queued-callers").await;
+    assert!(status.success(), "queued-caller fixture failed: {output}");
+    assert!(output.contains("overload fixture joined all 128 callers"));
+    assert!(output.contains("test result: ok. 1 passed"));
+}
+
 async fn pause_creation(
     manager: &SessionManager,
     root: &std::path::Path,
@@ -34,8 +108,39 @@ async fn pause_creation(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn rejected_creation_projection_does_not_leave_a_durable_session() {
+    let Some(mode) = std::env::var_os(OVERLOAD_CHILD_ENV) else {
+        let (status, output) = overload_child("run").await;
+        assert!(status.success(), "overload child failed: {status}");
+        assert!(output.contains("test result: ok. 1 passed"));
+        assert!(!output.contains("test result: FAILED"));
+        return;
+    };
+    if mode == "queued-callers" {
+        // Exercise all 128 admissions with most closures queued rather than
+        // assuming a matching number of available blocking worker threads.
+        std::thread::spawn(|| {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(4)
+                .max_blocking_threads(2)
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(projection_overload_case(false));
+        })
+        .join()
+        .unwrap();
+        return;
+    }
+    assert!(mode == "run" || mode == "panic-after-entry");
+    projection_overload_case(mode == "panic-after-entry").await;
+}
+
+async fn projection_overload_case(panic_after_admission: bool) {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("creation_projection_overload");
+    let root = temp_root(&format!(
+        "creation_projection_overload_{}",
+        std::process::id()
+    ));
     let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("test-only-key"));
     let manager = owned_test_manager(&root).unwrap();
     let gate = Arc::new(application::session_creation::CreationProjectionGate::default());
@@ -64,34 +169,50 @@ async fn rejected_creation_projection_does_not_leave_a_durable_session() {
     // Occupy the real bounded caller adapter only after runtime construction.
     // The response read must then either succeed or reject without a session row.
     let release = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
-    let (entered, observed) = std::sync::mpsc::channel();
+    let release_guard = CallerRelease(Arc::clone(&release));
+    let exercise_release = CallerRelease(Arc::clone(&release));
     let mut callers = Vec::new();
     for _ in 0..128 {
         let release = Arc::clone(&release);
-        let entered = entered.clone();
         callers.push(nac_core::store::spawn_blocking_store_caller(move || {
-            entered.send(()).unwrap();
             let (lock, condition) = &*release;
             let guard = lock.lock().unwrap();
             drop(condition.wait_while(guard, |released| !*released).unwrap());
         }));
     }
-    for _ in 0..128 {
-        observed.recv_timeout(Duration::from_secs(5)).unwrap();
-    }
-    gate.resume.notify_one();
-    let response = tokio::time::timeout(Duration::from_secs(5), creation)
-        .await
-        .unwrap()
-        .unwrap();
-    let status = response.status();
-    let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    let (lock, condition) = &*release;
-    *lock.lock().unwrap() = true;
-    condition.notify_all();
+    // Admission owns each permit synchronously, before a closure is scheduled.
+    // Rejection is already finished; admitted closures cannot finish until the
+    // release gate opens. All 128 may occupy capacity while most remain queued.
+    let all_admitted = callers.iter().all(|caller| !caller.is_finished());
+    // Capture assertion panics so every admitted caller is released and joined
+    // before propagating failure. The guard also releases on cancellation.
+    let exercise = tokio::spawn(async move {
+        let _release_guard = exercise_release;
+        assert!(all_admitted, "all 128 callers must be admitted");
+        assert!(!panic_after_admission, "intentional overload fixture panic");
+        gate.resume.notify_one();
+        let response = tokio::time::timeout(Duration::from_secs(5), creation)
+            .await
+            .unwrap()
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        (status, body)
+    })
+    .await;
+    release_guard.release();
+    let mut caller_errors = Vec::new();
     for caller in callers {
-        caller.await.unwrap();
+        if let Err(error) = caller.await {
+            caller_errors.push(error);
+        }
     }
+    assert!(
+        caller_errors.is_empty(),
+        "caller failures: {caller_errors:?}"
+    );
+    eprintln!("overload fixture joined all 128 callers");
+    let (status, body) = exercise.unwrap();
     let durable = sessions::list_sessions(&manager.inner.store_path).unwrap();
     let acknowledged = if status == StatusCode::CREATED {
         vec![

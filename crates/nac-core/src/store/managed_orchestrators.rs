@@ -75,7 +75,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ManagedOrchestrato
     })
 }
 
-fn load_with_connection(
+pub(super) fn load_with_connection(
     connection: &rusqlite::Connection,
     orchestrator_session_id: &str,
 ) -> Result<Option<ManagedOrchestratorRecord>> {

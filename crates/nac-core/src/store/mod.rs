@@ -10,10 +10,25 @@ pub(crate) use blocking_caller::call_legacy_store;
 pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 #[macro_use]
 pub(crate) mod coordinated_commands;
+mod existing_session_source;
+mod initial_import;
+mod managed_enrollment;
 mod managed_maintenance;
 mod managed_orchestrators;
 mod managed_probe;
+pub use existing_session_source::{
+    observe_existing_session_source, observe_project_first_chat_candidates, ExistingSessionSource,
+    ProjectFirstChatCandidates,
+};
 mod model_configurations;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "actual lifecycle/resource factory is not installed"
+    )
+)]
+pub(crate) mod native_source_reservation;
 pub(crate) mod orchestrator_compaction;
 mod permission_grants;
 mod projects;
@@ -24,10 +39,10 @@ mod session_forks;
 mod session_goals;
 mod session_inbox;
 mod shell_commands;
-pub use shell_commands::recent_shell_commands;
 pub(crate) use shell_commands::{
     accept_shell_command, list_shell_commands, lookup_shell_command, start_shell_command,
 };
+pub use shell_commands::{observe_shell_command, recent_shell_commands};
 mod ssh_configurations;
 mod steering;
 mod terminal_cleanups;
@@ -48,11 +63,21 @@ pub(crate) use worker_dispatches::{
 };
 
 pub use coordinator::{PersistenceAdmissionError, PersistenceStats, StoreCoordinator};
+pub use initial_import::{
+    begin_initial_import_grant, read_initial_import_grant, record_initial_import_phase,
+    terminate_initial_import_grant, InitialImportProofRecord, InitialImportSnapshot,
+    InitialImportState,
+};
+pub use managed_enrollment::{
+    begin_enrollment_attempt, finish_enrollment_attempt, read_enrollment_attempt,
+    terminate_enrollment_attempt, AuthorityChannelLifetimeId, EnrollmentAttempt, EnrollmentPhase,
+    EnrollmentSnapshot,
+};
 pub use managed_maintenance::*;
 pub use managed_orchestrators::*;
 pub use managed_probe::{
-    observe_managed_probe_store, observe_managed_probe_store_for_identity,
-    retain_managed_probe_identity,
+    observe_managed_probe_acceptance, observe_managed_probe_store,
+    observe_managed_probe_store_for_identity, retain_managed_probe_identity,
 };
 pub use model_configurations::*;
 pub use permission_grants::*;

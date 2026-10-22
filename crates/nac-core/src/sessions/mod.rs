@@ -12,6 +12,7 @@ use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
 
 mod codec;
+pub(crate) use codec::serialize_sandbox as serialize_source_sandbox;
 mod db;
 mod operation_lease;
 mod snapshot;

@@ -5,6 +5,7 @@ fn v28_store_adds_insecure_http_opt_in_with_fail_closed_defaults() {
     let path = temp_store_path("v28_insecure_http");
     initialize(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
+    crate::store::native_source_reservation::remove_schema_for_legacy_fixture(&legacy).unwrap();
     insert_legacy_session(&legacy, "legacy-session");
     legacy
         .execute(

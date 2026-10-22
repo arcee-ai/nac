@@ -42,6 +42,14 @@ workspace revisions, recovery markers, and cross-process coordination.
 ## Starting points
 
 - `schema.rs` / `schema_tests.rs` — migrations and complete schema contract.
+- `existing_session_source.rs` — bounded initialized-read-only snapshots of
+  actual persisted project/session counters and canonical candidate summaries.
+  It must not initialize/migrate, reserve sources, or choose a different cold
+  session. Higher layers repeat selection and cached-owner currentness.
+- `initial_import.rs` and `native_source_*` — schema37 retained import history
+  and schema38 source revision/reservation ledger. Rows are observations, never
+  import, preparation, runtime, or cleanup authority. Ordinary initialization
+  owns transactional migrations; passive source reads require existing schema.
 - `managed_probe.rs` — committed store/maintenance readiness observations that
   remain available while durable write admission is saturated.
 - `transcript.rs`, `thread_events.rs`, `threads.rs`, `worksets.rs` — durable

@@ -170,7 +170,7 @@ fn row_to_child(row: &rusqlite::Row<'_>) -> rusqlite::Result<TraditionalChildRec
     })
 }
 
-fn load_child_with_connection(
+pub(super) fn load_child_with_connection(
     connection: &rusqlite::Connection,
     child_session_id: &str,
 ) -> Result<Option<TraditionalChildRecord>> {

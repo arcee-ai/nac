@@ -2,6 +2,74 @@ use super::*;
 use crate::session_service::ExecutionOutputAvailability;
 
 #[tokio::test]
+async fn passive_snapshot_does_not_reconcile_abandoned_commands() {
+    let (parts, path) =
+        test_direct_active_service("passive_snapshot", "session", ModelClient::new_for_test());
+    let lease = Arc::new(sessions::SessionOperationLease::try_acquire(&path, "session").unwrap());
+    let command = ShellCommandSnapshot {
+        request_id: "passive-orphan".into(),
+        operation_id: Uuid::new_v4().to_string(),
+        command: "touch passive-must-not-execute".into(),
+        timeout_ms: 30_000,
+        state: ShellCommandState::Accepted,
+        accepted_at_epoch_ms: 1,
+        finished_at_epoch_ms: None,
+        exit_code: None,
+        stdout: String::new(),
+        stderr: String::new(),
+        diagnostic: None,
+        output_id: None,
+        transcript_index: None,
+    };
+    crate::store::accept_shell_command(&path, "session", "digest", &command, &lease).unwrap();
+    drop(lease);
+    let pending = crate::store::create_session_inbox_item(
+        &path,
+        "session",
+        crate::store::InboxDelivery::Queue,
+        "must remain queued during observation",
+        None,
+        None,
+    )
+    .unwrap();
+    let events_before = parts.service.recent_events(None, 0).0;
+    for _ in 0..3 {
+        let snapshot = parts
+            .service
+            .observe_frontend_snapshot_with_options(FrontendSnapshotLoadOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(snapshot.snapshot.shell_commands, vec![command.clone()]);
+        assert!(!parts.service.has_active_operation());
+        assert_eq!(parts.service.recent_events(None, 0).0, events_before);
+        let inbox = crate::store::list_session_inbox(&path, "session").unwrap();
+        assert!(
+            inbox
+                .iter()
+                .any(|item| item.id == pending.id
+                    && item.status == crate::store::InboxStatus::Pending)
+        );
+    }
+    assert_eq!(
+        crate::store::lookup_shell_command(&path, "session", "passive-orphan")
+            .unwrap()
+            .unwrap()
+            .1,
+        command
+    );
+    assert!(crate::store::TranscriptLogWriter::new(&path)
+        .unwrap()
+        .read_from("session", 0)
+        .unwrap()
+        .is_empty());
+    assert!(!path
+        .parent()
+        .unwrap()
+        .join("workspace/passive-must-not-execute")
+        .exists());
+}
+
+#[tokio::test]
 async fn history_does_not_reconcile_abandoned_command_or_append_transcript() {
     let (parts, path) =
         test_direct_active_service("history_orphan", "session", ModelClient::new_for_test());

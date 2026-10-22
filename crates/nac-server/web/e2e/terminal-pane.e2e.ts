@@ -3,7 +3,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
+import { UserTerminalConnection } from "../packages/nac-client/dist/userTerminalConnection.js";
 import { createDirectSession, expect, test } from "./harness";
+import { completionMarkerObserver } from "./terminal-completion-marker";
 
 for (const mobile of [false, true]) {
   test(`embedded terminal pane ${mobile ? "mobile" : "desktop"} uses the session shell`, async ({
@@ -123,29 +125,74 @@ test("embedded pane resets and replays an actual retention gap", async ({
     protocol_version: 1,
     bytes: Array.from(
       new TextEncoder().encode(
-        "head -c 12582912 /dev/zero; printf '\\107\\101\\120\\055\\117\\113\\n'\r",
+        "head -c 12582912 /dev/zero && printf '\\107\\101\\120\\055\\117\\113\\n'\r",
       ),
     ),
   });
-  await expect
-    .poll(async () => {
-      const observer = await api.attachUserTerminal(session, terminal.terminal_id, {
-        protocol_version: 1,
-        page_limit: 128,
-      });
-      try {
-        const frame = await api.pullUserTerminal(
-          session,
-          terminal.terminal_id,
-          observer.observer_id,
-          { protocol_version: 1, acknowledge_reset: false, wait_ms: 0 },
-        );
-        return frame.gap;
-      } finally {
-        await api.detachUserTerminal(session, terminal.terminal_id, observer.observer_id);
-      }
-    })
-    .toBe(true);
+  // This independent observer consumes only actual source bytes. The SDK owns
+  // its reset/ACK sequence; a bounded byte tail is not a browser/render oracle.
+  // Detaching it does not advance the UI's later observer, which still starts at 0.
+  const producer = completionMarkerObserver(Buffer.from("GAP-OK"));
+  let completedEnd: bigint;
+  const observed = new UserTerminalConnection(api, session, terminal.terminal_id, producer, {
+    pageLimit: 32 * 1024,
+    waitMs: 1000,
+  });
+  const completion = AbortSignal.timeout(10_000);
+  try {
+    await observed.attach(completion);
+    let frame;
+    do {
+      frame = await observed.readNext(completion);
+    } while (!frame.caught_up || !producer.sawMarker);
+    // && emits this un-echoed literal marker only after the original full head
+    // command succeeds. A fresh observer below proves the gap independently
+    // of whether this producer-completion observer happened to keep up.
+    completedEnd = BigInt(frame.retained_end);
+    expect(BigInt(frame.retained_start)).toBeGreaterThan(0n);
+    expect(BigInt(frame.retained_end)).toBeGreaterThanOrEqual(12_582_912n);
+    expect(BigInt(frame.retained_end) - BigInt(frame.retained_start)).toBeLessThanOrEqual(
+      8n * 1024n * 1024n,
+    );
+    expect(frame.terminal.alive).toBe(true);
+    expect(frame.terminal.output_error).toBeNull();
+  } finally {
+    await observed.detach();
+  }
+  // The completed source now has a positive retained start. A DISTINCT observer
+  // starts from the protocol's original cursor 0, regardless of producer speed.
+  // Reuse the same deadline; there is no polling, reset acknowledgement or retry.
+  const gapObserver = await api.attachUserTerminal(
+    session,
+    terminal.terminal_id,
+    { protocol_version: 1, page_limit: 128 },
+    completion,
+  );
+  try {
+    const gap = await api.pullUserTerminal(
+      session,
+      terminal.terminal_id,
+      gapObserver.observer_id,
+      { protocol_version: 1, acknowledge_reset: false, wait_ms: 0 },
+      completion,
+    );
+    expect(gap.protocol_version).toBe(1);
+    expect(gap.observer_id).toBe(gapObserver.observer_id);
+    expect(gap.terminal.terminal_id).toBe(terminal.terminal_id);
+    expect(gap.gap).toBe(true);
+    expect(gap.requires_ack).toBe(true);
+    expect(gap.bytes).toHaveLength(0);
+    expect(gap.offset).toBe(gap.retained_start);
+    expect(gap.next_offset).toBe(gap.retained_start);
+    expect(BigInt(gap.retained_start)).toBeGreaterThan(0n);
+    expect(BigInt(gap.retained_end)).toBeGreaterThanOrEqual(completedEnd);
+  } finally {
+    // Releasing this evidence seat does not claim that a renderer reset occurred.
+    // Cleanup is attempted even if the shared observation deadline has expired.
+    await api.detachUserTerminal(session, terminal.terminal_id, gapObserver.observer_id);
+  }
+  completion.throwIfAborted();
+  // Both evidence observers are detached. The UI owns a fresh from-zero replay.
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();

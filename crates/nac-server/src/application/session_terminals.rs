@@ -76,12 +76,9 @@ impl<'a> SessionTerminalApplication<'a> {
         &self,
         session_id: &str,
     ) -> Result<Option<Arc<SessionService>>, TerminalApplicationError> {
-        self.manager
-            .validate_operation_session(
-                session_id,
-                super::persistence::OperationSessionScope::Persisted,
-            )
-            .await?;
+        // The config row proves persisted existence under the lifecycle gate.
+        // Keep the pre-gate check to reject unknown IDs before allocating gates;
+        // do not turn a failed config/store read into absence or a cached owner.
         let config_version = self
             .manager
             .session_state()
@@ -369,3 +366,7 @@ impl SessionManager {
             .await
     }
 }
+
+#[cfg(test)]
+#[path = "session_terminals_tests.rs"]
+mod tests;

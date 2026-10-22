@@ -47,7 +47,7 @@ fn default_memory_mib() -> u32 {
     2048
 }
 
-pub(super) fn serialize_sandbox(spec: &SandboxSpec) -> Result<String> {
+pub(crate) fn serialize_sandbox(spec: &SandboxSpec) -> Result<String> {
     let persisted = PersistedSandboxSpec {
         backend: spec.backend.as_str().to_string(),
         image: spec.image.clone(),

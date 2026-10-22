@@ -1,6 +1,7 @@
 pub(crate) mod credentials;
 pub(crate) mod delegation;
 pub(crate) mod managed;
+pub(crate) mod managed_locations;
 pub(crate) mod model_catalog;
 pub(crate) mod model_configurations;
 pub(crate) mod persistence;
@@ -10,6 +11,7 @@ pub(crate) mod session_attachment;
 pub(crate) mod session_configuration;
 pub(crate) mod session_creation;
 pub(crate) mod session_lifecycle;
+pub(crate) mod session_observation;
 pub(crate) mod session_runs;
 pub(crate) mod session_terminals;
 pub(crate) mod sessions;
