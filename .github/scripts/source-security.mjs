@@ -4,6 +4,7 @@ import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { evaluateFindings, validatePolicy } from "./security-policy.mjs";
+import { validatePublicationPolicy } from "./publication-policy.mjs";
 
 export const INPUTS = [
   "Cargo.lock",
@@ -22,17 +23,26 @@ function file(root, path) {
   return full;
 }
 
-export function loadTrustedPolicy(root, trustedRoot, options) {
+export function loadTrustedPolicy(root, trustedRoot, options = {}) {
+  if (options.publicationPolicy) {
+    validatePublicationPolicy(options.publicationPolicy, {
+      candidateRoot: root,
+      trustedRoot,
+      environment: options.environment,
+    });
+  }
   // Neither PR-authored policy additions nor deletions can self-clear a finding.
   const trusted = validatePolicy(
     JSON.parse(readFileSync(file(trustedRoot, POLICY), "utf8")),
     options,
   );
-  const candidate = validatePolicy(JSON.parse(readFileSync(file(root, POLICY), "utf8")), options);
-  if (JSON.stringify(candidate) !== JSON.stringify(trusted)) {
-    throw new Error(
-      "candidate exception policy differs from trusted base; land separately reviewed policy, then rerun",
-    );
+  if (!options.publicationPolicy) {
+    const candidate = validatePolicy(JSON.parse(readFileSync(file(root, POLICY), "utf8")), options);
+    if (JSON.stringify(candidate) !== JSON.stringify(trusted)) {
+      throw new Error(
+        "candidate exception policy differs from trusted base; land separately reviewed policy, then rerun",
+      );
+    }
   }
   for (const checkout of [root, trustedRoot]) {
     const config = readFileSync(file(checkout, CONFIG), "utf8");
@@ -196,7 +206,15 @@ function scanInput(scanner, inputPath, configPath, rawPath, context, sourceType 
   return parsed;
 }
 
-export function scanSources({ root, trustedRoot, output, scanner, now }) {
+export function scanSources({
+  root,
+  trustedRoot,
+  output,
+  scanner,
+  now,
+  publicationPolicy,
+  environment,
+}) {
   mkdirSync(output, { recursive: true });
   const report = {
     scanner: "OSV-Scanner 2.7.0",
@@ -207,7 +225,8 @@ export function scanSources({ root, trustedRoot, output, scanner, now }) {
     errors: [],
   };
   try {
-    const policy = loadTrustedPolicy(root, trustedRoot, { now });
+    const policy = loadTrustedPolicy(root, trustedRoot, { now, publicationPolicy, environment });
+    if (publicationPolicy) report.policy_source = publicationPolicy;
     const version = run(scanner, ["--version"]);
     if (version.status !== 0 || !/^osv-scanner version: 2\.7\.0$/mu.test(version.stdout)) {
       throw new Error("expected pinned OSV-Scanner 2.7.0");
@@ -312,12 +331,14 @@ export function markdown(report) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const args = process.argv.slice(2);
-    if (args.length !== 4)
+    if (args.length !== 4 && !(args.length === 6 && args[4] === "--publication-policy"))
       throw new Error(
-        "usage: source-security.mjs CANDIDATE_ROOT TRUSTED_POLICY_ROOT REPORT_DIRECTORY SCANNER_BINARY",
+        "usage: source-security.mjs CANDIDATE_ROOT TRUSTED_POLICY_ROOT REPORT_DIRECTORY SCANNER_BINARY [--publication-policy RECEIPT]",
       );
-    const [root, trustedRoot, output, scanner] = args.map((path) => resolve(path));
-    const report = scanSources({ root, trustedRoot, output, scanner });
+    const [root, trustedRoot, output, scanner] = args.slice(0, 4).map((path) => resolve(path));
+    const publicationPolicy =
+      args.length === 6 ? JSON.parse(readFileSync(resolve(args[5]), "utf8")) : undefined;
+    const report = scanSources({ root, trustedRoot, output, scanner, publicationPolicy });
     console.log(markdown(report));
     process.exitCode = report.passed ? 0 : 1;
   } catch (error) {

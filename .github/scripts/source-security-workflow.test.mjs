@@ -17,7 +17,17 @@ test("PR and exact tag candidate source scans are direct mandatory aggregate/pub
   );
   assert.equal(
     stable.jobs["source-security"].with["trusted-policy-sha"],
-    "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || needs.prepare.outputs.sha }}",
+    "${{ needs.prepare.outputs.source_policy_sha }}",
+  );
+  assert.equal(
+    stable.jobs["source-security"].with["policy-mode"],
+    "${{ needs.prepare.outputs.source_policy_mode }}",
+  );
+  const selection = stable.jobs.prepare.steps.find((step) => step.id === "source-policy");
+  assert.match(selection.run, /publication-policy\.mjs select/u);
+  assert.equal(
+    selection.env.CANDIDATE_SHA,
+    "${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}",
   );
   assert.ok(stable.jobs["required-pr-checks"].needs.includes("source-security"));
   assert.ok(stable.jobs.publish.needs.includes("source-security"));
@@ -38,7 +48,8 @@ test("GitHub Release creation scans immutable merged SHA before minting a public
   assert.equal(scan.needs, "release-candidate");
   assert.equal(scan.uses, "./.github/workflows/source-security.yml");
   assert.equal(scan.with["candidate-sha"], "${{ needs.release-candidate.outputs.sha }}");
-  assert.equal(scan.with["trusted-policy-sha"], scan.with["candidate-sha"]);
+  assert.equal(scan.with["trusted-policy-sha"], undefined);
+  assert.equal(scan.with["policy-mode"], "publication");
   assert.equal(
     release["release-candidate"].steps[0].env.MERGE_SHA,
     "${{ github.event.pull_request.merge_commit_sha }}",
@@ -66,7 +77,7 @@ test("daily workflow binds current dev once and retains failing findings without
   assert.equal(source["continue-on-error"], undefined);
   assert.equal(
     source.steps.find((step) => step.with?.path === "trusted-policy").with.ref,
-    "${{ inputs.trusted-policy-sha }}",
+    "${{ steps.publication-policy.outputs.sha || inputs.trusted-policy-sha }}",
   );
   for (const step of source.steps) assert.equal(step["continue-on-error"], undefined);
   const report = source.steps.find(
@@ -74,4 +85,25 @@ test("daily workflow binds current dev once and retains failing findings without
   );
   assert.equal(report.if, "always()");
   assert.equal(source.steps.at(-1).if, "always()");
+});
+
+test("publication resolves and pins canonical policy before checkout without caller-selected revisions", () => {
+  const source = workflow("source-security");
+  assert.equal(source.on.workflow_call.inputs["policy-mode"].default, "ordinary");
+  const steps = source.jobs.scan.steps;
+  const resolver = steps.find((step) => step.id === "publication-policy");
+  assert.equal(resolver.if, "inputs.policy-mode == 'publication'");
+  assert.match(resolver.run, /publication-policy\.mjs resolve/u);
+  assert.equal(resolver.env.REQUESTED_POLICY_SHA, "${{ inputs.trusted-policy-sha }}");
+  assert.ok(
+    steps.indexOf(resolver) < steps.findIndex((step) => step.with?.path === "trusted-policy"),
+  );
+  const checkout = steps.find((step) => step.with?.path === "trusted-policy");
+  assert.equal(checkout.with["fetch-depth"], 0);
+  assert.equal(checkout.with["persist-credentials"], false);
+  const scan = steps.find((step) => step.env?.NAC_PUBLICATION_POLICY_SHA);
+  assert.equal(scan.env.NAC_PUBLICATION_POLICY_SHA, "${{ steps.publication-policy.outputs.sha }}");
+  assert.match(scan.run, /--publication-policy/u);
+  assert.match(steps[0].run, /publication\) test -z "\$POLICY_SHA"/u);
+  assert.equal(source.permissions.contents, "read");
 });

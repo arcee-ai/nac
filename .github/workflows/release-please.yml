@@ -109,7 +109,7 @@ jobs:
     uses: ./.github/workflows/source-security.yml
     with:
       candidate-sha: ${{ needs.release-candidate.outputs.sha }}
-      trusted-policy-sha: ${{ needs.release-candidate.outputs.sha }}
+      policy-mode: publication
 
   publish-approved-release:
     if: >-

@@ -28,9 +28,11 @@ and scanner results are retained. Unproven local or unsupported origins fail
 closed; neither a nonzero package count nor `LOCAL` inventory alone proves
 complete vulnerability matching.
 
-The reusable `source-security.yml` accepts full 40-character `candidate-sha`
-and `trusted-policy-sha` inputs. The caller must supply the actual PR base SHA
-as trusted policy for PRs, and the exact reviewed candidate for publication.
+The reusable `source-security.yml` accepts a full 40-character `candidate-sha`.
+Its default ordinary mode also requires a full `trusted-policy-sha`; PR callers
+must supply the actual PR base SHA. Publication mode rejects a caller-selected
+policy SHA and resolves this repository's canonical `refs/heads/dev` through
+GitHub once, retaining the exact policy commit and event/run receipt.
 It checks out candidate and trusted policy independently with read-only
 permissions and no persisted Git credentials. Candidate code implements the
 scan; policy and OSV configuration always come from the trusted checkout.
@@ -39,7 +41,8 @@ CI code changes remain subject to normal code-owner review.
 The run retains raw OSV JSON/error logs, a machine-readable decision report,
 input SHA-256 digests, and a concise Markdown findings table containing input,
 package, advisory, installed version and available fixes. Results and candidate/
-policy identities appear in the Actions summary and a 14-day artifact. A failure
+policy identities appear in the Actions summary and a 14-day artifact. Publication
+reports additionally retain the verified policy source receipt. A failure
 before report creation remains a failed gate with an explicit summary.
 
 ## Shared reviewed exceptions
@@ -75,7 +78,8 @@ The shared `.github/scripts/security-policy.mjs` exports
 `advisory`, `package`, `context`; other metadata is preserved. The latter
 returns `{blocking, excepted}` and attaches the matching policy entry to every
 excepted finding. It revalidates expiry at evaluation time. Callers must obtain
-policy from a trusted revision and reject candidate-policy changes; the module
+policy from a trusted revision and reject candidate-policy changes in ordinary
+and PR evaluation; the module
 does not infer trust from a filename or bless candidate-authored data.
 
 ### Landing and rerunning policy
@@ -116,7 +120,21 @@ An older release blocked by its own immutable scan remains unpublished and
 retains its pending label; it does not block publication of a later separately
 scanned release PR. The guard never tags or relabels that older unscanned plan.
 `stable-release.yml` separately rescans the exact tag candidate before binary
-upload. Preparing a release PR remains a non-publishing operation.
+upload. Both publication scans may use a later, separately reviewed policy from
+canonical `dev`, pinned once before evaluation. This permits recovery when a new
+advisory or an expired exception blocks an already-created immutable tag: land
+the reviewed policy change and rerun the publication workflow. The candidate
+and tag remain unchanged and receive a fresh full scan; only the pinned current
+policy is effective, and malformed or expired effective policy fails closed.
+
+Publication policy is available only to a stable tag push or the exact merged
+same-repository release PR. The resolver verifies the canonical API ref/object
+identity, checkout origins and commits, candidate ancestry in the policy commit,
+unchanged tracked scan/policy inputs, tag identity where applicable, and a receipt
+bound to the current event/run and independent resolver output. Ordinary PR,
+manual and daily events cannot select this mode. Missing or unavailable policy
+never falls back to candidate grants. PR equality and self-suppression protection
+remain required. Preparing a release PR remains a non-publishing operation.
 Do not enable production required contexts until the merged workflows emit
 them and safe/vulnerable fixtures plus ordinary merge-blocking qualification
 have passed. Existing repository protections and Allison's PR-only override
