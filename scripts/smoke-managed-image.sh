@@ -186,14 +186,18 @@ assert_bootstrap_required
 start_container with-bootstrap
 port=$(wait_until_ready)
 
-"$container_runtime" exec "$container_name" /bin/sh -ceu '
-    test "$(id -u):$(id -g)" = 10001:10001
-    ! command -v sudo >/dev/null 2>&1
+"$container_runtime" exec -i "$container_name" /bin/sh -seu <<'NAC_MANAGED_RUNTIME_ASSERTIONS'
+    assertion_failed() {
+        printf "%s\n" "managed image smoke: $1" >&2
+        exit 1
+    }
+    test "$(id -u):$(id -g)" = 10001:10001 || assertion_failed "runtime-uid-gid"
+    ! command -v sudo >/dev/null 2>&1 || assertion_failed "sudo-must-be-absent"
     for tool in bash git git-lfs gh ssh curl jq rg fd rsync make pkg-config cmake cc python3 uv node npm corepack rustc cargo rustfmt cargo-clippy go tar gzip xz zip unzip tini; do
-        command -v "$tool" >/dev/null
+        command -v "$tool" >/dev/null || assertion_failed "required-tool-$tool"
     done
-    rustc --version | grep -F "rustc 1.98.0" >/dev/null
-    node --version | grep -F "v24.22.1" >/dev/null
+    rustc --version | grep -F "rustc 1.98.0" >/dev/null || assertion_failed "rust-version"
+    node --version | grep -F "v24.22.1" >/dev/null || assertion_failed "node-version"
     go version | grep -F "go1.27.3" >/dev/null || {
         echo "managed image smoke: expected Go 1.27.3" >&2
         exit 1
@@ -202,22 +206,22 @@ port=$(wait_until_ready)
         echo "managed image smoke: expected uv 0.13.4" >&2
         exit 1
     }
-    test "$(printf "é" | wc -c)" -eq 2
+    test "$(printf "é" | wc -c)" -eq 2 || assertion_failed "utf8-byte-count"
     printf "%s\n" command-ok > /repositories/local-command-probe
-    test "$(cat /repositories/local-command-probe)" = command-ok
-    test "$(cat /var/lib/nac/restart-canary)" = durable
-    test "$(cat /repositories/restart-canary)" = durable
-    test "$(cat /home/nac/restart-canary)" = durable
-    test -f /run/secrets/nac/bootstrap.json
-    test ! -L /run/secrets/nac/bootstrap.json
-    test -f /var/lib/nac/arcee_auth.json
-    test -f /var/lib/nac/arcee_managed_bootstrap_receipt.json
-    jq -e '.client_id == "managed-nac" and .auth_issuer == "https://api.arcee.ai" and .managed_bootstrap.bootstrap_id == "4712bc5e-30d5-421a-b416-8291d9f7d8f9"' /var/lib/nac/arcee_auth.json >/dev/null
+    test "$(cat /repositories/local-command-probe)" = command-ok || assertion_failed "repository-command-probe"
+    test "$(cat /var/lib/nac/restart-canary)" = durable || assertion_failed "state-mount-canary"
+    test "$(cat /repositories/restart-canary)" = durable || assertion_failed "repository-mount-canary"
+    test "$(cat /home/nac/restart-canary)" = durable || assertion_failed "home-mount-canary"
+    test -f /run/secrets/nac/bootstrap.json || assertion_failed "bootstrap-mount-present"
+    test ! -L /run/secrets/nac/bootstrap.json || assertion_failed "bootstrap-mount-not-symlink"
+    test -f /var/lib/nac/arcee_auth.json || assertion_failed "bootstrap-auth-record"
+    test -f /var/lib/nac/arcee_managed_bootstrap_receipt.json || assertion_failed "bootstrap-receipt-record"
+    jq -e '.client_id == "managed-nac" and .auth_issuer == "https://api.arcee.ai" and .managed_bootstrap.bootstrap_id == "4712bc5e-30d5-421a-b416-8291d9f7d8f9"' /var/lib/nac/arcee_auth.json >/dev/null || assertion_failed "bootstrap-auth-identity"
     if printf "%s\n" overwritten > /run/secrets/nac/bootstrap.json 2>/dev/null; then
         echo "bootstrap mount unexpectedly accepted a write" >&2
         exit 1
     fi
-'
+NAC_MANAGED_RUNTIME_ASSERTIONS
 
 # Exercise clean/smudge and an actual LFS transfer as the managed user with the
 # read-only root and mounted HOME; binary presence alone misses setup failures.

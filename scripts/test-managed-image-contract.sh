@@ -81,6 +81,7 @@ require_literal "$repo_root/scripts/smoke-managed-image.sh" 'managed_control_bin
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'managed_control_jwks_file = \"/etc/nac/control-jwks.json\"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" '/run/secrets/nac/bootstrap.json'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assert_bootstrap_required'
+python3 "$repo_root/scripts/test-managed-smoke-payload.py"
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'smoke-managed-git-lfs.sh'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'python3 - < "$repo_root/scripts/smoke-managed-terminal.py"'
 require_literal "$terminal_smoke" 'os.getuid() == 10001 and os.getgid() == 10001'
