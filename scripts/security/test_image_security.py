@@ -21,12 +21,18 @@ import image_qualify as qualification
 IMAGE = "sha256:" + "1" * 64
 NOW = dt.datetime(2026, 10, 21, 12, tzinfo=dt.timezone.utc)
 RUNTIME = {"os_release": 'ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n', "nac": "nac-web 0.1.0 (abcdef123456)", "node": "v24.22.1", "go": "go version go1.27.3 linux/amd64",
+           "gh": "gh version 2.103.0 (2026-10-21)\nhttps://github.com/cli/cli/releases/tag/v2.103.0",
+           "git_lfs": "git-lfs/3.8.0 (GitHub; linux amd64; go 1.27.3; git aece9221f8c09221a14395d964806b956289bc07)",
            "uv": "uv 0.13.4 (abc 2026-10-20)", "dpkg": "base-files\t12.4+deb12u12"}
 SBOM = {"descriptor": {"name": "syft"}, "source": {"type": "image", "metadata": {"imageID": IMAGE}},
         "distro": {"id": "debian", "versionID": "12", "versionCodename": "bookworm"}, "artifacts": [
             {"id": "os", "name": "base-files", "version": "12.4+deb12u12", "type": "deb"},
             {"id": "node", "name": "node", "version": "24.22.1", "type": "binary",
-             "cpes": [{"cpe": "cpe:2.3:a:nodejs:node.js:24.22.1:*:*:*:*:*:*:*"}]}]}
+             "cpes": [{"cpe": "cpe:2.3:a:nodejs:node.js:24.22.1:*:*:*:*:*:*:*"}]},
+            {"id": "gh", "name": "github.com/cli/cli/v2", "version": "v2.103.0", "type": "go-module",
+             "locations": [{"path": "/usr/local/bin/gh"}], "metadata": {"mainModule": "github.com/cli/cli/v2"}},
+            {"id": "lfs", "name": "github.com/git-lfs/git-lfs/v3", "version": "UNKNOWN", "type": "go-module",
+             "locations": [{"path": "/usr/local/bin/git-lfs"}], "metadata": {"mainModule": "github.com/git-lfs/git-lfs/v3"}}]}
 DB = {"valid": True, "built": "2026-10-21T06:00:00Z", "schemaVersion": "v6.1.10", "path": "/db"}
 
 
@@ -56,7 +62,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(result["os_packages"], 1)
 
     def test_missing_unknown_or_empty_runtime_fails(self):
-        for runtime in ("node", "go", "uv", "dpkg"):
+        for runtime in ("node", "go", "uv", "gh", "git_lfs", "dpkg"):
             for value in ("", "unrecognized"):
                 with self.subTest(runtime=runtime, value=value), self.assertRaises(ValueError):
                     inv.inventory(SBOM, dict(RUNTIME, **{runtime: value}), IMAGE)
@@ -109,6 +115,37 @@ class InventoryTests(unittest.TestCase):
     def test_every_installed_os_package_is_required(self):
         with self.assertRaisesRegex(ValueError, "OS package not inventoried"):
             inv.inventory(SBOM, dict(RUNTIME, dpkg=RUNTIME["dpkg"] + "\nopenssl\t3.0.0"), IMAGE)
+
+    def test_go_applications_require_actual_binary_main_modules_and_versions(self):
+        coverage = inv.inventory(SBOM, RUNTIME, IMAGE)
+        self.assertEqual(coverage["go_applications"]["git_lfs"]["version"], "3.8.0")
+        for index in (2, 3):
+            for field, value in [("version", "v0.1.0"), ("locations", [{"path": "/tmp/unrelated"}]),
+                                 ("metadata", {"mainModule": "other"}), ("type", "binary")]:
+                broken = copy.deepcopy(SBOM)
+                broken["artifacts"][index][field] = value
+                with self.subTest(index=index, field=field), self.assertRaises(ValueError):
+                    inv.inventory(broken, RUNTIME, IMAGE)
+            broken = copy.deepcopy(SBOM)
+            broken["artifacts"].pop(index)
+            with self.assertRaises(ValueError):
+                inv.inventory(broken, RUNTIME, IMAGE)
+        broken = copy.deepcopy(SBOM)
+        broken["artifacts"][2]["version"] = "UNKNOWN"
+        with self.assertRaises(ValueError):
+            inv.inventory(broken, RUNTIME, IMAGE)
+
+    def test_rebuilt_lfs_source_revision_and_app_releases_must_match_image_pins(self):
+        for revision in ("short", "b" * 40):
+            runtime = dict(RUNTIME, git_lfs=RUNTIME["git_lfs"].replace("aece9221f8c09221a14395d964806b956289bc07", revision))
+            with self.subTest(revision=revision), self.assertRaises(ValueError):
+                inv.inventory(SBOM, runtime, IMAGE)
+        for runtime, version in (("gh", "2.103.0"), ("git_lfs", "3.8.0")):
+            raw = dict(RUNTIME, **{runtime: RUNTIME[runtime].replace(version, "0.1.0")})
+            sbom = copy.deepcopy(SBOM)
+            sbom["artifacts"][2 if runtime == "gh" else 3]["version"] = "v0.1.0"
+            with self.subTest(runtime=runtime), self.assertRaises(ValueError):
+                inv.inventory(sbom, raw, IMAGE)
 
     def test_database_measures_build_time_not_download_time(self):
         self.assertEqual(inv.database(DB, NOW)["age_seconds"], 21600)
@@ -217,10 +254,41 @@ class DriverTests(unittest.TestCase):
                     {"package": {"name": "toolchain", "ecosystem": "Go"}}]}]}).encode()
             return b"{}"
         with patch.object(scan, "download", side_effect=response):
-            findings = scan.query_runtimes({"versions": {"go": "1.27.0", "uv": "0.12.1"}}, self.root)
+            findings = scan.query_runtimes({"versions": {"go": "1.27.0", "uv": "0.12.1", "gh": "2.103.0", "git_lfs": "3.8.0"}}, self.root)
         self.assertEqual([(f["package"], f["advisory"], f["severity"]) for f in findings],
                          [("Go:toolchain", "GO-2026-6601", "Unknown")])
         self.assertEqual(json.loads((self.root / "go-toolchain-advisories.json").read_text())["query"]["version"], "1.27.0")
+
+    def test_rebuilt_lfs_advisory_blocks_despite_unknown_sbom_main_version(self):
+        def response(url, limit, data):
+            query = json.loads(data)
+            if query["package"]["name"] == "github.com/git-lfs/git-lfs/v3":
+                self.assertEqual(query["version"], "v3.8.0")
+                return json.dumps({"vulns": [{"id": "GO-lfs-fixture", "affected": [
+                    {"package": query["package"]}]}]}).encode()
+            return b"{}"
+        coverage = inv.inventory(SBOM, RUNTIME, IMAGE)
+        with patch.object(scan, "download", side_effect=response):
+            findings = scan.query_runtimes(coverage, self.root)
+        self.assertEqual([(f["package"], f["severity"]) for f in findings],
+                         [("Go:github.com/git-lfs/git-lfs/v3", "Unknown")])
+        policy = self.root / "policy.json"
+        policy.write_text('{"schema_version":1,"exceptions":[]}')
+        self.assertEqual(scan.evaluate(findings, policy, policy, self.root)["blocking"], findings)
+
+    def test_go_application_query_failure_never_reuses_other_clean_results(self):
+        coverage = inv.inventory(SBOM, RUNTIME, IMAGE)
+        for module in ("github.com/cli/cli/v2", "github.com/git-lfs/git-lfs/v3"):
+            for failure in (OSError("application network failed"), b'{"error":"unavailable"}'):
+                def response(url, limit, data):
+                    if json.loads(data)["package"]["name"] == module:
+                        if isinstance(failure, Exception):
+                            raise failure
+                        return failure
+                    return b"{}"
+                with self.subTest(module=module, failure=failure), patch.object(scan, "download", side_effect=response):
+                    with self.assertRaises((OSError, ValueError)):
+                        scan.query_runtimes(coverage, self.root)
 
     def test_toolchain_query_failure_cannot_reuse_clean_stdlib_result(self):
         for failure in (OSError("toolchain network failed"), b'{"error":"unavailable"}'):

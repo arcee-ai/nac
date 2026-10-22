@@ -3,6 +3,7 @@ import base64
 import datetime as dt
 import hashlib
 import json
+from pathlib import Path
 import re
 import shlex
 
@@ -41,12 +42,14 @@ def database(status, now):
 
 
 def runtimes(raw):
-    require(isinstance(raw, dict) and set(raw) == {"node", "go", "uv", "dpkg", "nac", "os_release"},
+    require(isinstance(raw, dict) and set(raw) == {"node", "go", "uv", "gh", "git_lfs", "dpkg", "nac", "os_release"},
             "incomplete runtime probe")
     versions = {}
     patterns = {"node": r"v(\d+\.\d+\.\d+)",
                 "go": r"go version go(\d+\.\d+\.\d+) linux/amd64",
-                "uv": r"uv (\d+\.\d+\.\d+)(?: \([^\n]+\))?"}
+                "uv": r"uv (\d+\.\d+\.\d+)(?: \([^\n]+\))?",
+                "gh": r"gh version (\d+\.\d+\.\d+) \(\d{4}-\d{2}-\d{2}\)(?:\nhttps://github.com/cli/cli/releases/tag/v\1)?",
+                "git_lfs": r"git-lfs/(\d+\.\d+\.\d+) \([^\n]+\)"}
     for name, pattern in patterns.items():
         match = re.fullmatch(pattern, raw[name].strip())
         require(match is not None, f"missing/unrecognized {name} runtime: {raw[name]!r}")
@@ -84,6 +87,19 @@ def os_release(raw):
     return values
 
 
+def managed_go_pins():
+    dockerfile = Path(__file__).resolve().parents[2] / "docker/managed/Dockerfile"
+    source = dockerfile.read_text()
+    pins = {}
+    for name, pattern in [("GH_VERSION", r"\d+\.\d+\.\d+"),
+                          ("GIT_LFS_VERSION", r"\d+\.\d+\.\d+"),
+                          ("GIT_LFS_REVISION", r"[0-9a-f]{40}")]:
+        values = re.findall(rf"^ARG {name}=({pattern})$", source, re.MULTILINE)
+        require(len(values) == 1, f"missing/ambiguous managed Go application pin: {name}")
+        pins[name] = values[0]
+    return pins
+
+
 def inventory(sbom, raw, image):
     require(sbom.get("descriptor", {}).get("name") == "syft", "not Syft JSON")
     source = sbom.get("source", {})
@@ -113,8 +129,37 @@ def inventory(sbom, raw, image):
     require(nodes, "Node binary missing/mismatched in Syft inventory")
     require(any(any("a:nodejs:node.js:" in (c if isinstance(c, str) else c.get("cpe", ""))
                         for c in p.get("cpes", [])) for p in nodes), "Node advisory CPE missing")
+    applications = {}
+    pins = managed_go_pins()
+    for runtime, module, binary in [("gh", "github.com/cli/cli/v2", "/usr/local/bin/gh"),
+                                    ("git_lfs", "github.com/git-lfs/git-lfs/v3", "/usr/local/bin/git-lfs")]:
+        modules = [p for p in artifacts if p.get("type") == "go-module" and p.get("name") == module
+                   and any(location.get("path") == binary for location in p.get("locations", []))]
+        require(modules, f"{runtime} Go binary missing from Syft inventory")
+        expected = versions[runtime]
+        require(expected == pins["GH_VERSION" if runtime == "gh" else "GIT_LFS_VERSION"],
+                f"{runtime} actual version differs from the managed image pin")
+        for package in modules:
+            version = package.get("version", "").removeprefix("v")
+            # go build with a dependency overlay cannot stamp the main module's
+            # release. Keep Syft's raw evidence; mandatory OSV queries below use
+            # the actual executable's release instead of guessing binary strings.
+            require(version == expected or runtime == "git_lfs" and version in {"UNKNOWN", "(devel)"},
+                    f"{runtime} Go artifact version differs from actual binary")
+            require(package.get("metadata", {}).get("mainModule") == module,
+                    f"{runtime} artifact is not its executable's main Go module")
+        applications[runtime] = {"module": module, "version": expected,
+                                 "artifact_ids": [p["id"] for p in modules],
+                                 "advisories": "explicit Go module OSV query plus Grype"}
+        if runtime == "git_lfs":
+            revision = re.search(r"; git ([0-9a-f]{40})\)$", raw[runtime].strip())
+            require(revision is not None, "Git LFS source revision missing from actual binary")
+            require(revision[1] == pins["GIT_LFS_REVISION"],
+                    "Git LFS actual source revision differs from the managed image pin")
+            applications[runtime]["source_revision"] = revision[1]
     return {"versions": versions, "os_release": actual_distro, "os_packages": len(packages),
             "node_artifact_ids": [p["id"] for p in nodes],
+            "go_applications": applications,
             "go": "explicit Go stdlib and toolchain OSV queries", "uv": "explicit PyPI uv OSV query"}
 
 

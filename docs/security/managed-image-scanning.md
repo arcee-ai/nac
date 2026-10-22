@@ -18,7 +18,8 @@ expiring exception contract and landing/rerun procedure. Image scanning consumes
 that validator directly. An ordinary candidate policy change fails; an empty policy grants
 no exceptions. An exception's exact context is `managed-image`. Package identities
 are Grype's `<artifact.type>:<artifact.name>` (such as `deb:openssl` or
-`binary:node`), or `Go:stdlib`, `Go:toolchain`, or `PyPI:uv` for explicit runtime checks. Source
+`binary:node`), or `Go:stdlib`, `Go:toolchain`, `Go:github.com/cli/cli/v2`,
+`Go:github.com/git-lfs/git-lfs/v3`, or `PyPI:uv` for explicit version queries. Source
 lockfile exceptions cannot suppress image findings. Every exception still needs
 its advisory, package, context, reason, owner, linked issue, and UTC expiry.
 
@@ -56,14 +57,27 @@ for retained historical inventories), the Syft release and codename must
 match it, and Grype must report the same recognized Debian release. Unknown release
 metadata fails even if Grype exits successfully with zero findings. Every package
 reported by the image's dpkg probe must occur at the actual version in the SBOM.
-The gate executes fixed absolute Node, Go, and uv paths inside the exact image,
+The gate executes fixed absolute Node, Go, uv, gh, and Git LFS paths inside the exact image,
 with no network, no capabilities, a read-only root, and a bounded process count.
 Unknown/missing version output is an error. Node must appear in Syft at the
 probed version with its Node.js CPE; Grype enables CPE matching.
+gh and Git LFS must have their main Go modules inventoried at the installed
+binary paths. Known SBOM versions must match the actual executable versions.
+The actual application versions and Git LFS's full source revision must match
+the checksum-verified release/source pins in the managed Dockerfile. Go 1.27
+omits linker settings from this trimmed build's metadata, so the source revision
+comes from the executable's existing version command, not inferred SBOM fields.
+Git LFS is rebuilt with a dependency overlay, so its Go main-module version
+can be `UNKNOWN`/`(devel)` even though `git-lfs version` identifies the release.
+The raw SBOM is retained unchanged. Mandatory OSV queries for both applications
+use their probed release versions; query failures cannot become clean results.
+This preserves application advisory coverage without guessing a version from
+arbitrary binary strings or relying on Grype to match an unknown main module.
 
 Syft's [binary catalog](https://oss.anchore.com/docs/capabilities/binary/) documents
 Node detection, but does not document uv detection. The gate therefore queries
-OSV explicitly for `Go:stdlib`, `Go:toolchain`, and `PyPI:uv` at their probed versions, retaining
+OSV explicitly for `Go:stdlib`, `Go:toolchain`, both Go application module paths,
+and `PyPI:uv` at their probed versions, retaining
 both request and response. Upstream documents [PyPI distribution of uv](https://docs.astral.sh/uv/getting-started/installation/#pypi).
 This maps the upstream uv release version to the PyPI
 release of the same application; it is bounded application-advisory coverage,
@@ -72,6 +86,10 @@ Go's bundled stdlib and compiler/toolchain advisories are both checked at the
 probed Go version, even when Syft does not detect the installed compiler. Full image package matching remains active alongside these checks.
 OSV may have no severity for Go advisories; those matches block as Unknown.
 Neither tool can establish absence of undisclosed vulnerabilities.
+Live qualification includes Git LFS 3.6.0/3.8.0 and gh 2.0.0/2.103.0 queries
+against known [GO-2025-3390](https://pkg.go.dev/vuln/GO-2025-3390) and
+[GO-2024-3269](https://pkg.go.dev/vuln/GO-2024-3269) vulnerable/fixed boundaries,
+alongside the runtime controls.
 
 `image-tools.json` pins Syft/Grype versions and release archive SHA-256 values.
 The installer verifies archive bytes on every use and extracts only the named
@@ -92,6 +110,8 @@ validates the actual runtime probes and one Syft inventory, writes the hashed
 bundle, and records `status: inventoried` with `security_verdict: false`. A
 separate required security step consumes that bundle with the full fresh scan;
 inventory success cannot satisfy the aggregate gate or publication receipt.
+Older bundles without gh/Git LFS probes require fresh exact-image inventory;
+missing application coverage fails closed during rescans as well.
 
 The per-SHA artifact retains `inventory/` independently of `security/`, so a later
 scanner installation, DB, or advisory failure cannot discard the validated raw

@@ -25,6 +25,8 @@ from pathlib import Path
 commands = {"node": ["/usr/local/bin/node", "--version"],
             "go": ["/usr/local/go/bin/go", "version"],
             "uv": ["/usr/local/bin/uv", "--version"],
+            "gh": ["/usr/local/bin/gh", "--version"],
+            "git_lfs": ["/usr/local/bin/git-lfs", "version"],
             "nac": ["/usr/local/bin/nac-web", "--version"],
             "dpkg": ["dpkg-query", "-W", "-f=${binary:Package}\t${Version}\n"]}
 evidence = {k: subprocess.check_output(v, text=True).strip() for k,v in commands.items()}
@@ -127,8 +129,12 @@ match:
 
 def query_runtimes(coverage, output):
     findings = []
-    for runtime, ecosystem, name in [("go", "Go", "stdlib"), ("go", "Go", "toolchain"), ("uv", "PyPI", "uv")]:
+    for runtime, ecosystem, name in [("go", "Go", "stdlib"), ("go", "Go", "toolchain"), ("uv", "PyPI", "uv"),
+                                      ("gh", "Go", "github.com/cli/cli/v2"),
+                                      ("git_lfs", "Go", "github.com/git-lfs/git-lfs/v3")]:
         version = coverage["versions"][runtime]
+        if runtime in {"gh", "git_lfs"}:
+            version = "v" + version  # Go application module versions use their canonical semver tag.
         query = {"package": {"ecosystem": ecosystem, "name": name}, "version": version}
         started = dt.datetime.now(dt.timezone.utc).isoformat()
         response = json.loads(download("https://api.osv.dev/v1/query", 10 * 1024 * 1024,

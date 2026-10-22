@@ -22,6 +22,8 @@ NODE = {
 
 IMAGE_CONTROLS = {("binary:node", "CVE-2024-27983"), ("deb:libtasn1-6", "CVE-2025-13151")}
 RUNTIME_CONTROLS = {("Go:stdlib", "GO-2026-6809"), ("Go:toolchain", "GO-2026-6601"),
+                    ("Go:github.com/git-lfs/git-lfs/v3", "GO-2025-3390"),
+                    ("Go:github.com/cli/cli/v2", "GO-2024-3269"),
                     ("PyPI:uv", "GHSA-hq85-5cpj-mr62")}
 
 
@@ -96,8 +98,9 @@ def qualify(output, cache, db):
     write_json(unrecognized / "rejection.json", {"gate": "rejected unknown Debian release",
                "scanner_matches": len(unknown_report["matches"])})
     runtime_summary = {}
-    for label, versions in [("vulnerable", {"go": "1.27.0", "uv": "0.12.1"}),
-                            ("safe", {"go": "1.27.3", "uv": "0.13.4"})]:
+    for label, versions in [("vulnerable", {"go": "1.27.0", "uv": "0.12.1", "git_lfs": "3.6.0"}),
+                            ("safe", {"go": "1.27.3", "uv": "0.13.4", "git_lfs": "3.8.0"})]:
+        versions["gh"] = "2.0.0" if label == "vulnerable" else "2.103.0"
         runtime_output = output / f"{label}-runtime-queries"
         runtime_output.mkdir()
         findings = query_runtimes({"versions": versions}, runtime_output)
