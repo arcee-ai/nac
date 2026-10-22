@@ -61,7 +61,7 @@ fn inherit_project_field<T>(field: &mut Field<T>, inherited: Field<T>) {
     }
 }
 
-fn apply_project_model_defaults(
+pub(super) fn apply_project_model_defaults(
     request: &mut SessionCreationCommand,
     defaults: ModelConfigurationRecord,
 ) {
@@ -232,7 +232,7 @@ pub(crate) struct SessionSandboxCommand {
 /// sandbox/SSH exclusion, runtime construction, resource ownership, and cache
 /// publication stay in one application transaction.
 pub(crate) struct SessionCreationApplication<'a> {
-    manager: &'a SessionManager,
+    pub(super) manager: &'a SessionManager,
 }
 
 #[cfg(test)]

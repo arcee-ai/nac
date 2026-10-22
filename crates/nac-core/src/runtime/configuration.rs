@@ -91,6 +91,12 @@ impl From<NonModelNacConfig> for NacConfig {
 }
 
 impl NacConfig {
+    /// Parse the SAME captured source bytes without loading, recovery or IO.
+    #[cfg(unix)]
+    pub(crate) fn from_captured_source(raw: &str) -> Result<Self> {
+        toml::from_str(raw).map_err(|_| anyhow::anyhow!("CREATE configuration source unavailable"))
+    }
+
     pub fn load() -> Result<Self> {
         let Some(path) = crate::paths::nac_config_path() else {
             return Ok(Self::default());

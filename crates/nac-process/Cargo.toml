@@ -12,5 +12,5 @@ test-support = []
 
 [dependencies]
 libc.workspace = true
-tokio = { workspace = true, features = ["macros", "process", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
 uuid = { workspace = true, features = ["v4"] }

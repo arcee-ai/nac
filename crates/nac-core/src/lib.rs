@@ -5,6 +5,8 @@ mod agent;
 mod agents_md;
 pub mod browser;
 pub mod commands;
+#[cfg(unix)]
+mod configuration_source_files;
 pub mod events;
 mod goals;
 pub mod light_model;
@@ -19,8 +21,9 @@ pub mod orchestration_control;
 pub mod model_configurations {
     pub use crate::store::{
         delete_model_configuration, insert_model_configuration, list_model_configurations,
-        load_model_configuration, update_model_configuration, ModelConfigurationRecord,
-        ModelConfigurationStoreError, NewModelConfiguration,
+        load_model_configuration, load_model_configuration_source, update_model_configuration,
+        ModelConfigurationRecord, ModelConfigurationSource, ModelConfigurationStoreError,
+        NewModelConfiguration,
     };
 }
 
@@ -28,8 +31,9 @@ pub mod model_configurations {
 pub mod projects {
     pub use crate::store::{
         assign_session_to_project, delete_project, insert_project, list_projects,
-        load_project_launch_context, reorder_projects, update_project, NewProject,
-        ProjectLaunchContext, ProjectPatch, ProjectRecord, ProjectStoreError,
+        load_project_launch_context, load_project_source, reorder_projects, update_project,
+        NewProject, ProjectLaunchContext, ProjectPatch, ProjectRecord, ProjectSource,
+        ProjectStoreError,
     };
 }
 

@@ -40,6 +40,8 @@ mod config;
 #[cfg(feature = "test-support")]
 mod conformance;
 mod file_config;
+#[cfg(unix)]
+pub(crate) use file_config::RetainedMcpConfiguration;
 mod invocation;
 mod library;
 mod lifecycle;

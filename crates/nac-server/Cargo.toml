@@ -17,6 +17,8 @@ path = "src/main.rs"
 managed-fault-fixture = ["nac-core/managed-fault-fixture"]
 
 [dependencies]
+nac-native-execution = { path = "../nac-native-execution" }
+nac-runtime-auth = { path = "../nac-runtime-auth" }
 nac-contracts = { path = "../nac-contracts" }
 nac-core = { path = "../nac-core", features = ["openapi"] }
 nac-managed = { path = "../nac-managed", features = ["openapi"] }

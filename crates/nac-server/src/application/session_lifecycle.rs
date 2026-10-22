@@ -47,6 +47,10 @@ impl<'a> SessionLifecycleApplication<'a> {
             .await?;
         let gate = self.manager.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
+        anyhow::ensure!(
+            !self.manager.inner.create_transfers.retains_session(session_id),
+            "session retains an original CREATE runtime or unknown outcome; authenticated cleanup is required"
+        );
         let _relationship_lease = sessions::SessionRelationshipLease::try_acquire(
             &self.manager.inner.store_path,
             session_id,

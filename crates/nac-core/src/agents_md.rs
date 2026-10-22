@@ -42,6 +42,28 @@ struct AgentsMdSettings {
 }
 
 impl AgentsMdBundle {
+    /// Pure data projection with existing precedence, defaults and truncation.
+    pub(crate) fn preparation_settings(raw: &str) -> (Vec<String>, usize) {
+        let config = toml::from_str::<AgentsMdConfigFile>(raw).unwrap_or_default();
+        (
+            config
+                .agents_md
+                .fallback_filenames
+                .or(config.project_doc_fallback_filenames)
+                .unwrap_or_default(),
+            config
+                .agents_md
+                .max_bytes
+                .or(config.project_doc_max_bytes)
+                .unwrap_or(AGENTS_MD_MAX_BYTES)
+                .max(1),
+        )
+    }
+    pub(crate) fn from_preparation_files(files: Vec<AgentsMdFile>, max_bytes: usize) -> Self {
+        Self {
+            files: truncate_files_to_limit(files, max_bytes),
+        }
+    }
     pub fn load(workspace_dir: Option<&Path>, paths: &PathContext) -> Result<Self> {
         let settings = load_settings(paths);
         let mut files = Vec::new();

@@ -1621,6 +1621,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nac-capacity-policy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "nac-contracts",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nac-catalog-gen"
 version = "0.1.0"
 dependencies = [
@@ -1660,10 +1674,12 @@ dependencies = [
  "ignore",
  "image",
  "libc",
+ "nac-capacity-policy",
  "nac-contracts",
  "nac-credential-store",
  "nac-managed",
  "nac-process",
+ "nac-runtime-auth",
  "openssh-sftp-client",
  "parking_lot",
  "portable-pty",
@@ -1718,11 +1734,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "nac-native-execution"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "nac-capacity-policy",
+ "nac-core",
+ "nac-process",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nac-process"
 version = "0.1.0"
 dependencies = [
  "libc",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "nac-runtime-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-rustls",
  "uuid",
 ]
 
@@ -1742,6 +1786,8 @@ dependencies = [
  "nac-contracts",
  "nac-core",
  "nac-managed",
+ "nac-native-execution",
+ "nac-runtime-auth",
  "ring",
  "rmcp",
  "rusqlite",

@@ -135,3 +135,45 @@ pub(crate) fn observe_reservation(
         command.execute(path)?
     }
 }
+
+struct BindSnapshot {
+    state: Arc<SourceState>,
+    session_id: String,
+    project_id: Option<String>,
+    digest: [u8; 32],
+}
+impl PersistenceCommand for BindSnapshot {
+    type Output = Result<()>;
+    fn correlation(&self) -> crate::telemetry::Correlation {
+        crate::telemetry::Correlation::session(Some(&self.session_id))
+    }
+    fn execute(self, path: &Path) -> Result<Self::Output> {
+        anyhow::ensure!(
+            std::fs::canonicalize(path)? == self.state.path,
+            "prepared snapshot store mismatch"
+        );
+        Ok(super::prepared_snapshot::bind(
+            &self.state,
+            &self.session_id,
+            self.project_id.as_deref(),
+            self.digest,
+        ))
+    }
+}
+pub(super) fn bind_snapshot(
+    source: &NativeSourceReservation,
+    snapshot: &crate::sessions::SessionSnapshot,
+) -> Result<()> {
+    let command = BindSnapshot {
+        state: Arc::clone(&source.state),
+        session_id: snapshot.session_id.clone(),
+        project_id: snapshot.project_id.clone(),
+        digest: creation_snapshot_sha256(snapshot)?,
+    };
+    if let Some(owner) = super::super::coordinator::owner_for(&source.path)? {
+        owner.check_blocking_context()?;
+        owner.submit(command)?.acknowledge_blocking()?
+    } else {
+        command.execute(&source.path)?
+    }
+}

@@ -36,6 +36,12 @@ mod overlay;
 #[cfg(test)]
 mod overlay_tests;
 mod seed;
+#[cfg(unix)]
+mod source;
+#[cfg(unix)]
+pub use source::CreateModelCatalogSource;
+#[cfg(all(test, unix))]
+mod source_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(test)]
@@ -286,6 +292,48 @@ impl ModelCatalog {
             }
         }
         (catalog, warnings)
+    }
+
+    #[cfg(unix)]
+    fn from_captured_layers(home: &Path, layers: [Option<&str>; 4]) -> Self {
+        let mut catalog = seed::seed_catalog();
+        data::merge_generated_baseline(&mut catalog);
+        // Preserve existing tolerant merge semantics, but never log private raw
+        // layer diagnostics from this protected source path.
+        let mut warnings = Vec::new();
+        if let Some(raw) = layers[1] {
+            overlay::merge_overlay_raw(
+                &mut catalog,
+                home.join("model-catalog/overlay.json"),
+                raw,
+                &mut warnings,
+            );
+        }
+        if let Some(raw) = layers[2] {
+            arcee_overlay::merge_arcee_overlay_raw(
+                &mut catalog,
+                home.join("model-catalog/arcee-overlay.json"),
+                raw,
+                &mut warnings,
+            );
+        }
+        if let Some(raw) = layers[3] {
+            anthropic_overlay::merge_anthropic_overlay_raw(
+                &mut catalog,
+                home.join("model-catalog/anthropic-overlay.json"),
+                raw,
+                &mut warnings,
+            );
+        }
+        if let Some(raw) = layers[0] {
+            user_overrides::apply_user_overrides_raw(
+                &mut catalog,
+                home.join("models.json"),
+                raw,
+                &mut warnings,
+            );
+        }
+        catalog
     }
 
     /// The provider's catalog endpoint default, when any applied layer

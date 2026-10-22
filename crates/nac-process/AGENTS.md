@@ -93,3 +93,10 @@ This crate owns no generated artifacts. Do not duplicate descendant traversal
 in terminals, workers, or managed Git; do not move authorization/sandbox
 decisions into the process guard; do not replace identity checks with raw PID
 assumptions.
+
+`peer_channel.rs` and `peer_channel/` retain the original consumed Unix socket
+and kernel peer lifetime for protected CREATE resources. Capture is Linux-only
+and fails closed elsewhere. The unique I/O/lifetime halves, original cutoff
+and independent non-consuming observer supply resource currentness only; they
+do not authenticate CREATE participants, grant isolation or settle cleanup.
+Keep descriptor/PID observation separate from original protocol admission.

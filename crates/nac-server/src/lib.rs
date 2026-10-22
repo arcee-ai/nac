@@ -333,6 +333,10 @@ struct SessionManagerInner {
     managed_model: Option<application::managed::ManagedModelProfile>,
     managed_clones: Option<nac_managed::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
+    create_transfers: application::create_transfer::CreateTransferRegistry,
+    #[cfg(target_os = "linux")]
+    create_attempts: application::managed_create_attempts::ManagedCreateAttempts,
+    publication_tasks: application::publication_tasks::PublicationTasks,
     terminal_observations: application::terminal_observation::TerminalObservationHub,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
@@ -589,6 +593,11 @@ impl SessionManager {
                 managed_model,
                 managed_clones,
                 active_sessions: RwLock::new(HashMap::new()),
+                create_transfers: application::create_transfer::CreateTransferRegistry::default(),
+                #[cfg(target_os = "linux")]
+                create_attempts:
+                    application::managed_create_attempts::ManagedCreateAttempts::default(),
+                publication_tasks: application::publication_tasks::PublicationTasks::default(),
                 terminal_observations:
                     application::terminal_observation::TerminalObservationHub::default(),
 

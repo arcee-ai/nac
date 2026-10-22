@@ -70,19 +70,33 @@ pub use arcee_bootstrap::{
     validate_managed_arcee_authorization_for_issuer, ManagedArceeBootstrapOutcome,
     MANAGED_ARCEE_BOOTSTRAP_PATH,
 };
-#[cfg(test)]
-pub use managed_host_key::InitialHostKeyCustody;
-pub use managed_host_key::{ManagedHostKeyBinding, ManagedHostKeyStore, TrustedManagedHostKey};
+pub(crate) use managed_host_key::InitialCustodyInvalidator;
+#[cfg(any(test, feature = "test-support"))]
+pub use managed_host_key::SyntheticInitialCustodyFixture;
+#[cfg(unix)]
+pub use managed_host_key::{
+    InitialBootstrapSlot, InitialBootstrapSlotBinding, InitialBootstrapSlotRefusal,
+};
+pub use managed_host_key::{
+    InitialHostKeyCustody, ManagedHostKeyBinding, ManagedHostKeyStore, TrustedManagedHostKey,
+};
 
 pub use backend::{validate_backend_api_key_env, validate_model_reasoning_effort};
 pub(crate) use catalog::resolve as resolve_model_metadata;
+#[cfg(unix)]
+pub use catalog::CreateModelCatalogSource;
+#[cfg(unix)]
+pub(crate) use catalog::ModelCatalog;
 pub use catalog::{
     api_listing, api_listing_for_invocation, provider_for_model, spawn_anthropic_model_refresh,
     spawn_arcee_model_refresh, spawn_overlay_refresh, AuthStatus, ModelListing, ProviderConnection,
 };
 pub(crate) use catalog::{
-    Compat, CompletionsThinkingFormat, CompletionsTokenLimit, ModelMetadata, ThinkingLevelMap,
+    ApiKind, Compat, CompletionsThinkingFormat, CompletionsTokenLimit, ModelMetadata,
+    ThinkingLevelMap,
 };
+#[cfg(test)]
+pub(crate) use catalog::{CostTier, ModelSource};
 pub use providers::{
     list_managed_provider_models, list_provider_models, list_provider_models_with_http_policy,
     provider_default_base_url, provider_uses_api_key, ProviderModel,
@@ -125,7 +139,7 @@ pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;
 pub(crate) use stream::{CoalescedDeltas, DeltaSink, ModelStreamDelta};
 pub(crate) use types::{
-    calculate_cost, AssistantTurn, ModelTurnResponse, TokenCostMicros, TokenUsage,
+    calculate_cost, ApiKeySelector, AssistantTurn, ModelTurnResponse, TokenCostMicros, TokenUsage,
 };
 pub use types::{
     managed_backend_base_url, resolve_model_base_url, resolve_model_base_url_with_policy,

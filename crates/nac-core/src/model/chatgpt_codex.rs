@@ -462,6 +462,8 @@ fn remove_codex_auth_file_for_logout(path: &Path) -> Result<bool> {
 }
 
 fn remove_auth_path(path: &Path) -> Result<bool> {
+    #[cfg(unix)]
+    let _reservation = nac_credential_store::credential_mutation_guard(path)?;
     match fs::remove_file(path) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -1478,6 +1480,8 @@ fn atomic_replace_auth_file(
         .parent()
         .ok_or_else(|| anyhow!("auth path {} has no parent directory", path.display()))?;
     fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    #[cfg(unix)]
+    let _reservation = nac_credential_store::credential_mutation_guard(path)?;
     validate_regular_destination(path)?;
 
     let file_name = path

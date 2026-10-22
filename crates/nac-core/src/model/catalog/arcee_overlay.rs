@@ -452,7 +452,16 @@ pub(super) fn merge_arcee_overlay(
             return;
         }
     };
-    let entries: Vec<ArceeOverlayEntry> = match serde_json::from_str(&raw) {
+    merge_arcee_overlay_raw(catalog, path, &raw, warnings);
+}
+
+pub(super) fn merge_arcee_overlay_raw(
+    catalog: &mut ModelCatalog,
+    path: PathBuf,
+    raw: &str,
+    warnings: &mut Vec<CatalogWarning>,
+) {
+    let entries: Vec<ArceeOverlayEntry> = match serde_json::from_str(raw) {
         Ok(entries) => entries,
         Err(error) => {
             warnings.push(CatalogWarning::ArceeOverlayCorrupt {

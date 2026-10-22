@@ -324,6 +324,9 @@ impl PreparedToolCall {
         services: ToolServices<'a>,
         context: &'a ToolCallContext,
     ) -> BoxFuture<'a, ToolResult> {
+        if let Err(error) = services.runtime.check_ordinary_dispatch() {
+            return Box::pin(async move { error });
+        }
         self.invocation.invoke(services, context)
     }
 
@@ -636,6 +639,9 @@ impl<T: NativeTool> NativeToolHandle<T> {
         services: ToolServices<'a>,
         context: &'a ToolCallContext,
     ) -> BoxFuture<'a, ToolResult> {
+        if let Err(error) = services.runtime.check_ordinary_dispatch() {
+            return Box::pin(async move { error });
+        }
         self.tool.execute(input, services, context)
     }
 }
@@ -690,6 +696,7 @@ impl ToolSnapshot {
         input: Value,
         services: ToolServices<'_>,
     ) -> Result<PreparedToolCall, ToolResult> {
+        services.runtime.check_ordinary_dispatch()?;
         let Some(entry) = self
             .entries
             .iter()

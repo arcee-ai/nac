@@ -804,6 +804,8 @@ fn logout_disposition(path: &Path) -> Result<bool> {
 }
 
 fn remove_auth_path(path: &Path) -> Result<bool> {
+    #[cfg(unix)]
+    let _reservation = nac_credential_store::credential_mutation_guard(path)?;
     match fs::remove_file(path) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),

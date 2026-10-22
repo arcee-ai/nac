@@ -16,6 +16,10 @@ pub struct ToolRuntime {
     pub active_threads: Arc<ActiveThreadRegistry>,
     pub event_sink: EventSink,
     pub backend: Arc<ExecutionBackend>,
+    /// Installed during genuine private Agent construction, never stamped onto
+    /// an ordinary runtime. It cannot authorize concrete host adapters.
+    #[cfg(unix)]
+    pub(crate) protected_context: Option<Arc<crate::runtime::ProtectedExecutionContext>>,
     pub mcp: Option<Arc<McpRegistry>>,
     pub(crate) mcp_tools: Arc<HashMap<String, McpToolCapture>>,
     pub skills: Option<Arc<SkillRegistry>>,
@@ -54,6 +58,16 @@ pub struct ToolRuntime {
 }
 
 impl ToolRuntime {
+    pub(crate) fn check_ordinary_dispatch(&self) -> Result<(), ToolResult> {
+        #[cfg(unix)]
+        if self.protected_context.is_some() {
+            // The protected consuming adapters must own dispatch. Until those
+            // adapters are installed, never fall through to concrete host IO,
+            // including resource projection/canonicalization before policy.
+            return Err(ToolResult::text("Tool execution is unavailable", true));
+        }
+        Ok(())
+    }
     pub(crate) fn model_tool_definitions(
         &mut self,
         base: &[ToolDefinition],

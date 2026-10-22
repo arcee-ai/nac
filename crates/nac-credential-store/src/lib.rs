@@ -10,6 +10,13 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+#[cfg(unix)]
+mod slot_gate;
+#[cfg(unix)]
+pub use slot_gate::{
+    credential_mutation_guard, CredentialMutationGuard, CredentialSlotReservation,
+    ReservedCredentialIo,
+};
 
 fn acquire_lock(path: &Path) -> Result<FileLock> {
     if let Some(parent) = path.parent() {
@@ -279,7 +286,23 @@ pub fn write_auth_string_to_path(path: &Path, raw: &str) -> Result<()> {
     atomic_replace_auth_file(path, |file| file.write_all(raw.as_bytes()))
 }
 
+/// Remove an owned empty private directory, accounting for its unused writer
+/// gate. Active reservations/quarantine and unrelated entries always refuse.
+/// The caller supplies existing directory ownership; this grants no cleanup.
+pub fn remove_empty_private_directory(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        slot_gate::remove_empty_private_directory(path)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::remove_dir(path).map_err(Into::into)
+    }
+}
+
 pub fn remove_auth_file_from_path(path: &Path) -> Result<bool> {
+    #[cfg(unix)]
+    let _reservation = credential_mutation_guard(path)?;
     validate_regular_destination(path)?;
     match fs::remove_file(path) {
         Ok(()) => {
@@ -305,6 +328,8 @@ fn atomic_replace_auth_file(
         .parent()
         .ok_or_else(|| anyhow!("auth path {} has no parent directory", path.display()))?;
     fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    #[cfg(unix)]
+    let _reservation = credential_mutation_guard(path)?;
     validate_regular_destination(path)?;
 
     let file_name = path
@@ -477,6 +502,8 @@ impl Drop for TempFileCleanup {
 
 pub struct FileLock {
     file: File,
+    #[cfg(unix)]
+    _reservation: Option<CredentialMutationGuard>,
 }
 
 impl FileLock {
@@ -500,18 +527,30 @@ impl FileLock {
     }
 
     pub fn acquire(path: &Path) -> Result<Self> {
+        #[cfg(unix)]
+        let reservation = credential_mutation_guard(path)?;
         let file = Self::open_lock_file(path)?;
         lock_file(&file).with_context(|| format!("failed to lock {}", path.display()))?;
-        Ok(Self { file })
+        Ok(Self {
+            file,
+            #[cfg(unix)]
+            _reservation: reservation,
+        })
     }
 
     /// Attempts to take the lock without blocking. Returns `Ok(None)` when the
     /// lock is already held (by another process or open file description), so
     /// async callers can poll instead of parking a worker thread.
     pub fn try_acquire(path: &Path) -> Result<Option<Self>> {
+        #[cfg(unix)]
+        let reservation = credential_mutation_guard(path)?;
         let file = Self::open_lock_file(path)?;
         match try_lock_file(&file) {
-            Ok(true) => Ok(Some(Self { file })),
+            Ok(true) => Ok(Some(Self {
+                file,
+                #[cfg(unix)]
+                _reservation: reservation,
+            })),
             Ok(false) => Ok(None),
             Err(error) => Err(anyhow::Error::new(error))
                 .with_context(|| format!("failed to lock {}", path.display())),
@@ -899,4 +938,26 @@ mod tests {
         assert!(error.to_string().contains("symlink auth lock"));
         assert_eq!(fs::read_to_string(target).unwrap(), "unchanged");
     }
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn bootstrap_reservation_excludes_direct_private_writer() {
+    let root = std::env::temp_dir().join(format!("nac-slot-red-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let gate = OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(root.join(".nac-bootstrap-slot.gate"))
+        .unwrap();
+    FileExt::lock_exclusive(&gate).unwrap();
+    let result = write_auth_string_to_path(&root.join("arcee_auth.json"), "fixture-only");
+    let refused = result.is_err();
+    drop(gate);
+    fs::remove_dir_all(root).unwrap();
+    assert!(
+        refused,
+        "ordinary private writer bypassed original slot fence"
+    );
 }

@@ -6,6 +6,50 @@ pub struct SkillRegistry {
 }
 
 impl SkillRegistry {
+    /// Consume captured source bytes with the same parser and first-wins
+    /// precedence. A pure data conversion, never runtime authority.
+    pub(crate) fn from_preparation_files(
+        files: Vec<(PathBuf, String, Vec<String>)>,
+    ) -> Result<Option<Arc<Self>>> {
+        let mut skills = HashMap::new();
+        let mut shadowed = std::collections::BTreeSet::new();
+        for (path, text, resources) in files {
+            let Some(parsed) = parse_skill_contents(&path, &text)? else {
+                continue;
+            };
+            if skills.contains_key(&parsed.name) {
+                shadowed.insert(parsed.name);
+                continue;
+            }
+            let skill_root_visible = path
+                .parent()
+                .ok_or_else(|| anyhow!("skill directory absent"))?
+                .to_owned();
+            if is_env_var_style_name(&parsed.name) {
+                eprintln!("Skill '{}' has an env-var-style name; writing '${}' in a prompt will expand this skill", parsed.name, parsed.name);
+            }
+            skills.insert(
+                parsed.name.clone(),
+                SkillRecord {
+                    name: parsed.name,
+                    description: parsed.description,
+                    compatibility: parsed.compatibility,
+                    skill_root_visible,
+                    body: parsed.body,
+                    resources,
+                },
+            );
+        }
+        for name in shadowed {
+            eprintln!("Skill '{name}' is shadowed by a higher-precedence definition");
+        }
+        if skills.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Arc::new(Self {
+            skills: Arc::new(skills),
+        })))
+    }
     pub fn load(
         workspace_dir: Option<&Path>,
         visibility: SkillPathVisibility,

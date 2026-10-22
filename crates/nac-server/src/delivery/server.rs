@@ -1253,10 +1253,19 @@ where
     // A failed private listener also stops the host; no partial serving state.
     // All listeners stop accepting before run cancellation and share the same
     // independent watchdog through HTTP/TLS drain and persistence quiescence.
+    let original_managed_shutdown_cutoff = std::time::Instant::now()
+        .checked_add(complete_shutdown_timeout)
+        .ok_or_else(|| anyhow!("managed shutdown bound overflow"))?;
+    #[cfg(target_os = "linux")]
+    shutdown_manager.inner.create_attempts.close();
+    shutdown_manager.inner.publication_tasks.close();
     let _ = graceful_tx.send(());
     let _ = control_graceful_tx.send(());
     let _ = fact_graceful_tx.send(());
     let (shutdown_complete_tx, shutdown_complete_rx) = std::sync::mpsc::channel();
+    // Keep the actual manager/store/attempt allocations on the independent
+    // watchdog too. Failure below must not retire their custody on return.
+    let watchdog_manager = shutdown_manager.clone();
     let watchdog = std::thread::Builder::new()
         .name("nac-shutdown-watchdog".to_string())
         .spawn(move || {
@@ -1266,6 +1275,7 @@ where
             {
                 forced_shutdown_after_timeout(complete_shutdown_timeout, force_shutdown);
             }
+            drop(watchdog_manager);
         })
         .context("failed to start shutdown watchdog")?;
 
@@ -1296,6 +1306,28 @@ where
     };
     // The private request bodies/fact jobs are fully drained before closing
     // their shared persistence scheduling capability.
+    // Accepted publication tasks keep their exact original handles through
+    // HTTP cancellation. Join them before native cleanup and persistence close.
+    let publication_result = shutdown_manager
+        .inner
+        .publication_tasks
+        .drain(original_managed_shutdown_cutoff)
+        .await;
+    #[cfg(target_os = "linux")]
+    let managed_create_result = shutdown_manager
+        .inner
+        .create_attempts
+        .drain(original_managed_shutdown_cutoff)
+        .await;
+    #[cfg(not(target_os = "linux"))]
+    let managed_create_result: Result<()> = Ok(());
+    if publication_result.is_err() || managed_create_result.is_err() {
+        // Do not close scheduling/pools under unresolved workers. Leave the
+        // completion sender alive and let the original watchdog enforce its
+        // original process-exit bound; never renew it or claim a clean drain.
+        let _ = tokio::task::spawn_blocking(move || watchdog.join()).await;
+        return publication_result.and(managed_create_result);
+    }
     shutdown_manager.quiesce_persistence_callers().await;
     shutdown_manager.drain_persistence().await?;
     let _ = tokio::task::spawn_blocking(|| {
@@ -1306,7 +1338,11 @@ where
     watchdog
         .join()
         .map_err(|_| anyhow!("shutdown watchdog panicked"))?;
-    public_result.and(fact_result).and(socket_policy_result)
+    public_result
+        .and(fact_result)
+        .and(socket_policy_result)
+        .and(publication_result)
+        .and(managed_create_result)
 }
 
 fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {

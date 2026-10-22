@@ -20,7 +20,10 @@ pub use existing_session_source::{
     observe_existing_session_source, observe_project_first_chat_candidates, ExistingSessionSource,
     ProjectFirstChatCandidates,
 };
+mod model_configuration_source;
 mod model_configurations;
+#[path = "native_create_cleanup.rs"]
+pub(crate) mod native_create_cleanup;
 #[cfg_attr(
     not(test),
     expect(
@@ -31,6 +34,7 @@ mod model_configurations;
 pub(crate) mod native_source_reservation;
 pub(crate) mod orchestrator_compaction;
 mod permission_grants;
+mod project_source;
 mod projects;
 mod render;
 mod run_recovery;
@@ -79,8 +83,10 @@ pub use managed_probe::{
     observe_managed_probe_acceptance, observe_managed_probe_store,
     observe_managed_probe_store_for_identity, retain_managed_probe_identity,
 };
+pub use model_configuration_source::*;
 pub use model_configurations::*;
 pub use permission_grants::*;
+pub use project_source::*;
 pub use projects::*;
 pub use render::*;
 pub(crate) use run_recovery::{

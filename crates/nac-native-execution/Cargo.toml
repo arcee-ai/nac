@@ -1,0 +1,22 @@
+[package]
+name = "nac-native-execution"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+nac-capacity-policy = { path = "../nac-capacity-policy" }
+nac-core = { path = "../nac-core" }
+nac-process = { path = "../nac-process" }
+anyhow.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+[dev-dependencies]
+nac-core = { path = "../nac-core", features = ["test-support"] }
+sha2.workspace = true

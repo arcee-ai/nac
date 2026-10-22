@@ -23,6 +23,8 @@ use crate::{
 #[path = "managed_host_observation.rs"]
 mod host_observation;
 pub use host_observation::{MANAGED_HOST_OBSERVATION_PATH, MANAGED_HOST_OBSERVATION_PURPOSE};
+#[path = "managed_session_create.rs"]
+mod session_create;
 #[path = "managed_session_observation.rs"]
 mod session_observation;
 pub use session_observation::{
@@ -151,6 +153,8 @@ fn router(manager: SessionManager) -> Router {
             MANAGED_SESSION_OBSERVATION_PATH,
             post(session_observation::handle),
         )
+        .route(session_create::PATH, post(session_create::handle))
+        .route(session_create::ACK_PATH, post(session_create::acknowledge))
         .with_state(manager)
         .layer(axum::Extension(
             super::ui_configuration::UiConfiguration::from_environment(),

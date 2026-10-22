@@ -33,6 +33,8 @@ struct Shared {
     snapshot: Mutex<NativePtySnapshot>,
     terminate: AtomicBool,
     started: AtomicBool,
+    cleanup_cutoff: Mutex<Option<tokio::time::Instant>>,
+    cutoff_changed: tokio::sync::Notify,
     on_change: Arc<dyn Fn() + Send + Sync>,
     pid: Option<u32>,
     #[cfg(any(test, feature = "test-support"))]
@@ -104,6 +106,24 @@ impl NativePtyOwner {
         owner
     }
 
+    /// Transfer the same fresh-session authority with a construction-time
+    /// cutoff. Expiry requests cleanup even if no control future is polled.
+    pub fn from_fresh_session_until(
+        child: Box<dyn NativePtyChild>,
+        on_change: Arc<dyn Fn() + Send + Sync>,
+        original_deadline: tokio::time::Instant,
+    ) -> Self {
+        let owner = Self::create(child, on_change);
+        *owner
+            .0
+             .0
+            .cleanup_cutoff
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(original_deadline);
+        start_worker(&owner.0 .0);
+        owner
+    }
+
     fn create(child: Box<dyn NativePtyChild>, on_change: Arc<dyn Fn() + Send + Sync>) -> Self {
         retry_workers();
         let shared = Arc::new(Shared {
@@ -117,6 +137,8 @@ impl NativePtyOwner {
             }),
             terminate: AtomicBool::new(false),
             started: AtomicBool::new(false),
+            cleanup_cutoff: Mutex::new(None),
+            cutoff_changed: tokio::sync::Notify::new(),
             on_change,
             #[cfg(any(test, feature = "test-support"))]
             inspection_failure: AtomicBool::new(false),
@@ -157,11 +179,61 @@ impl NativePtyOwner {
     /// A bounded request; cancellation or failure leaves the same authority
     /// available to retry. Process work never runs in the caller's map lock.
     pub async fn terminate(&self) -> io::Result<()> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        self.wait_for_cleanup(deadline).await
+    }
+
+    /// Retain the earliest supplied cutoff across cancellation, clones and
+    /// retries. Expiry reports incomplete cleanup; the exclusive worker keeps
+    /// child/descendant ownership and continues identity-safe cleanup.
+    pub async fn terminate_until(&self, original_deadline: tokio::time::Instant) -> io::Result<()> {
+        self.request_stop_until(original_deadline);
+        retry_workers();
+        self.wait_for_settlement(original_deadline).await
+    }
+
+    /// Synchronously request cleanup using the same retained process owner.
+    /// No future/runtime polling is required to record stop or tighten its
+    /// original cutoff. This is a request, never evidence of exit or settlement;
+    /// the exclusive worker retains unknown/failed cleanup for later retry.
+    pub fn request_stop_until(&self, original_deadline: tokio::time::Instant) {
+        {
+            let mut cutoff = self
+                .0
+                 .0
+                .cleanup_cutoff
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *cutoff = Some(cutoff.map_or(original_deadline, |old| old.min(original_deadline)));
+        }
+        self.0 .0.terminate.store(true, Ordering::SeqCst);
+        self.0 .0.cutoff_changed.notify_waiters();
+        start_worker(&self.0 .0);
+    }
+
+    async fn wait_for_cleanup(&self, requested_deadline: tokio::time::Instant) -> io::Result<()> {
         retry_workers();
         self.0 .0.terminate.store(true, Ordering::SeqCst);
         start_worker(&self.0 .0);
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        self.wait_for_settlement(requested_deadline).await
+    }
+
+    pub(crate) async fn wait_for_settlement(
+        &self,
+        requested_deadline: tokio::time::Instant,
+    ) -> io::Result<()> {
         loop {
+            let changed = self.0 .0.cutoff_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            // Re-read the shared cutoff so another handle can only tighten it.
+            let deadline = self
+                .0
+                 .0
+                .cleanup_cutoff
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .map_or(requested_deadline, |cutoff| cutoff.min(requested_deadline));
             let status = self.snapshot();
             if !status.cleanup_pending {
                 return Ok(());
@@ -171,7 +243,10 @@ impl NativePtyOwner {
                     "native PTY cleanup is still pending".to_string()
                 })));
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            tokio::select! {
+                _ = tokio::time::sleep_until(deadline.min(tokio::time::Instant::now() + Duration::from_millis(25))) => {},
+                _ = changed => {},
+            }
         }
     }
 }
@@ -242,6 +317,13 @@ fn supervise(shared: Arc<Shared>) {
     let mut leader_alive = true;
     loop {
         let mut error = None;
+        let cutoff = *shared
+            .cleanup_cutoff
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cutoff.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            shared.terminate.store(true, Ordering::SeqCst);
+        }
         #[cfg(any(test, feature = "test-support"))]
         if shared.inspection_failure.load(Ordering::SeqCst) {
             publish(
@@ -337,6 +419,13 @@ fn supervise(shared: Arc<Shared>) {
         };
         #[cfg(target_os = "macos")]
         let period = platform::aligned_delay(period);
+        let period = if shared.terminate.load(Ordering::SeqCst) {
+            period
+        } else {
+            cutoff.map_or(period, |deadline| {
+                period.min(deadline.saturating_duration_since(tokio::time::Instant::now()))
+            })
+        };
         std::thread::sleep(period);
     }
 }

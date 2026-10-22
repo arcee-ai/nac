@@ -124,7 +124,16 @@ pub(super) fn merge_overlay(
             return;
         }
     };
-    let doc: OverlayDoc = match serde_json::from_str(&raw) {
+    merge_overlay_raw(catalog, path, &raw, warnings);
+}
+
+pub(super) fn merge_overlay_raw(
+    catalog: &mut ModelCatalog,
+    path: PathBuf,
+    raw: &str,
+    warnings: &mut Vec<CatalogWarning>,
+) {
+    let doc: OverlayDoc = match serde_json::from_str(raw) {
         Ok(doc) => doc,
         Err(error) => {
             warnings.push(CatalogWarning::OverlayCorrupt {
@@ -946,6 +955,8 @@ pub(super) fn is_utc_iso8601(value: &str) -> bool {
 /// never a truncated overlay; readers only ever see complete files.
 pub(super) fn atomic_replace(path: &Path, contents: &str) -> io::Result<()> {
     use std::io::Write;
+    #[cfg(unix)]
+    let _source_fence = super::source::begin_publication(path)?;
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,

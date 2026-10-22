@@ -45,12 +45,53 @@ use crate::workspace::GitTarget;
 
 mod builders;
 mod configuration;
+#[cfg(unix)]
+mod create_configuration_source;
+#[cfg(unix)]
+pub use crate::model::CreateModelCatalogSource;
+#[cfg(unix)]
+pub use create_configuration_source::CreateConfigurationSource;
+#[cfg(unix)]
+mod create_global_source;
+#[cfg(unix)]
+pub use create_global_source::{CreateGlobalPreparationSource, CreateGlobalSourceRoots};
+#[cfg(unix)]
+mod create_guidance_source;
+#[cfg(unix)]
+mod create_participant;
+#[cfg(unix)]
+mod managed_create_attempt;
+#[cfg(unix)]
+mod protected_create_builder;
+#[cfg(unix)]
+pub use managed_create_attempt::{ManagedCreateRegistry, RegisteredManagedCreate};
 mod contracts;
+mod initial_import_admission;
+#[cfg(unix)]
+mod post_import_runtime;
+#[cfg(unix)]
+pub use post_import_runtime::{PostImportRuntimeDenial, PostImportRuntimeHost};
 mod model_resolution;
+mod preparation_resources;
 mod prepared_session;
+mod protected_create_source;
+mod protected_execution;
+mod protected_execution_io;
+mod protected_execution_resources;
 mod remote;
 mod resume;
 mod sandboxing;
+
+#[cfg(unix)]
+pub use protected_create_source::{
+    resolve_create_inputs_from_sources, resolve_create_inputs_with_global_source,
+};
+
+pub use protected_create_source::{
+    compute_create_source_digests, project_create_target_revision, resolve_create_inputs,
+    CreateCommandChoices, CreateSourceDigests, CreateSourceModel, CreateSourceTarget,
+    ResolvedCreateConfiguration, ResolvedCreateInputs,
+};
 
 pub use builders::{
     build_managed_worker_config, build_run_config, build_run_config_for_project,
@@ -68,6 +109,14 @@ pub use contracts::{
     OrchestratorRunConfig, ResumeModelOptions, ResumeOptions, ResumePickerRunConfig, RunOptions,
     RunState, SandboxOptions, SshOptions, StoreOptions, WorkerDispatchOptions,
 };
+#[cfg(test)]
+pub(crate) use initial_import_admission::tests::ModelImportFixture;
+pub use initial_import_admission::{
+    CompletedInitialImport, ImportedInitialCustody, InitialImportAttempt, InitialImportAuthority,
+    InitialImportAuthoritySnapshot, InitialImportCancelGuard, InitialImportCancellation,
+    InitialImportIoOutcome, InitialImportIoTerminal, InitialImportStartObservation,
+    InitialImportWork, InitialImportWorkBinding, InitialImportWorkResult,
+};
 use model_resolution::{
     default_config_cwd, managed_worker_effective_model_settings, worker_command_output_limits,
     worker_thread_timeout_secs,
@@ -76,7 +125,29 @@ pub use model_resolution::{
     effective_model_settings, effective_orchestrator_compaction_threshold,
     parse_extra_headers_json, resolve_store_path, resolve_store_path_for_track,
 };
+pub use preparation_resources::PreparationResourceCustody;
 pub use prepared_session::{PreparedSessionResources, PreparedSessionRunConfig};
+#[cfg(all(test, unix))]
+pub(crate) use protected_execution::create_owner::tests as create_owner_test_helpers;
+#[cfg(unix)]
+pub use protected_execution::create_owner::{
+    CreateFactoryOwner, CreatePublicationCustody, NativeCreateBinding, NativeCreateConstruction,
+    NativeCreateCurrentness,
+};
+pub use protected_execution::{
+    ProtectedExecutionBoundary, ProtectedExecutionCancellation, ProtectedExecutionContext,
+    ProtectedExecutionIdentity, ProtectedExecutionPermit, ProtectedExecutionStage,
+};
+pub use protected_execution_io::{
+    CompartmentCommand, CompartmentExit, CompartmentFileIoCommand, CompartmentFuture,
+    CompartmentOutput, CompartmentPipe, CompartmentProcess, CompartmentPty, CompartmentPtyProcess,
+    CompartmentPtySize, CompartmentReader, CompartmentWriter, ExecutionCompartmentTransport,
+};
+#[cfg(feature = "test-support")]
+pub use protected_execution_resources::fixtures as compartment_resource_fixtures;
+pub use protected_execution_resources::{
+    CompartmentResourceDeclaration, CompartmentStorageHold, ProtectedExecutionOutput,
+};
 pub use remote::browse_ssh_directory;
 use remote::{canonical_remote_session_cwd, remote_cwd_or_home, trim_ssh_host};
 pub use resume::{

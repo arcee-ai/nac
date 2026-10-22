@@ -11,9 +11,9 @@ use crate::sandbox::MountSpec;
 use crate::tools::ToolResult;
 
 const SKILL_FILENAME: &str = "SKILL.md";
-const MAX_SCAN_DEPTH: usize = 6;
-const MAX_SCAN_DIRS: usize = 2_000;
-const MAX_RESOURCE_ENTRIES: usize = 64;
+pub(crate) const MAX_SCAN_DEPTH: usize = 6;
+pub(crate) const MAX_SCAN_DIRS: usize = 2_000;
+pub(crate) const MAX_RESOURCE_ENTRIES: usize = 64;
 const PROJECT_NAC_SKILLS_GUEST_ROOT: &str = "/nac/skills/project/nac";
 const PROJECT_AGENTS_SKILLS_GUEST_ROOT: &str = "/nac/skills/project/agents";
 const USER_NAC_HOME_SKILLS_GUEST_ROOT: &str = "/nac/skills/user/nac-home";
@@ -28,6 +28,7 @@ mod tool;
 pub use registry::SkillRegistry;
 pub use tool::auto_mounts;
 
+pub(crate) use discovery::configured_global_sources;
 use discovery::*;
 use frontmatter::*;
 use resources::*;

@@ -202,6 +202,11 @@ fn file_servers_for_policy(
 }
 
 impl McpRegistry {
+    /// Parse the SAME retained config. No ambient reread or supervisor connect.
+    pub(crate) fn preparation_has_enabled_servers(raw: &str) -> Result<bool> {
+        let config = mcp_config_for_policy(raw, McpTransportPolicy::All)?;
+        Ok(config.mcp_servers.values().any(|server| server.enabled))
+    }
     #[cfg(test)]
     pub(crate) fn empty_for_test() -> Self {
         let sync = Arc::new(McpSyncState::new());

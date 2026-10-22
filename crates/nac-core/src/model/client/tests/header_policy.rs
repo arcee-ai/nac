@@ -82,6 +82,8 @@ async fn arcee_sensitive_extra_header_still_fails_before_connection() {
         .expect("make hostile endpoint nonblocking");
     let address = listener.local_addr().expect("hostile endpoint address");
     let client = ModelClient {
+        #[cfg(unix)]
+        protected_host_key: None,
         client: no_redirect_model_client().unwrap(),
         base_url: format!("http://{address}"),
         api_key: "stored-login-secret-must-not-leak".to_string(),

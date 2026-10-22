@@ -40,10 +40,19 @@ pub(crate) struct NativeSourceBinding {
     pub source_id: Uuid,
     pub source_generation: i64,
     pub canonical_effect_sha256: [u8; 32],
-    pub creation_snapshot_sha256: [u8; 32],
+    // Some is the existing prebound snapshot; None is explicit preparation
+    // without a prompt snapshot. Only the original owner may seal that later.
+    #[serde(deserialize_with = "required_snapshot_digest")]
+    pub creation_snapshot_sha256: Option<[u8; 32]>,
     pub session_id: String,
     pub project_id: Option<String>,
     pub sources: Vec<SourceVersion>,
+}
+
+fn required_snapshot_digest<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<[u8; 32]>, D::Error> {
+    Option::deserialize(deserializer)
 }
 
 /// Original in-process ownership is nonclone/nonserializable. The durable row
@@ -57,6 +66,7 @@ pub(crate) struct SourceState {
     process: u32,
     cutoff: Instant,
     denied: AtomicBool,
+    prepared_snapshot: std::sync::OnceLock<[u8; 32]>,
 }
 impl std::ops::Deref for NativeSourceReservation {
     type Target = SourceState;
@@ -79,7 +89,9 @@ impl NativeSourceBinding {
                 && !self.source_id.is_nil()
                 && self.source_generation >= 0
                 && self.canonical_effect_sha256 != [0; 32]
-                && self.creation_snapshot_sha256 != [0; 32]
+                && self
+                    .creation_snapshot_sha256
+                    .is_none_or(|digest| digest != [0; 32])
                 && !self.session_id.is_empty()
                 && self.session_id.len() <= 256
                 && !self.sources.is_empty()
@@ -120,7 +132,23 @@ pub(crate) fn source_revision(c: &Connection, kind: SourceKind, id: &str) -> Res
     .unwrap_or(0))
 }
 
+#[path = "native_prepared_snapshot.rs"]
+mod prepared_snapshot;
+pub(crate) use prepared_snapshot::create_table as create_prepared_snapshot_table;
+
 impl NativeSourceReservation {
+    /// Bind actual protected preparation once; resource-only, never admission.
+    /// Errors deny and retain the original source slots, including unknown commit.
+    pub(crate) fn bind_prepared_snapshot(
+        &self,
+        snapshot: &crate::sessions::SessionSnapshot,
+    ) -> Result<()> {
+        let result = commands::bind_snapshot(self, snapshot);
+        if result.is_err() {
+            self.deny();
+        }
+        result
+    }
     /// Called only by the future actual closed factory AFTER its upstream
     /// owners are retained. This local mechanism does not validate them.
     pub(crate) fn reserve(
@@ -220,11 +248,20 @@ impl NativeSourceReservation {
                 process: std::process::id(),
                 cutoff: original_cutoff,
                 denied: AtomicBool::new(false),
+                prepared_snapshot: std::sync::OnceLock::new(),
             }),
         })
     }
 }
 impl SourceState {
+    /// Bounded original-memory digest, not reconstruction from durable readback.
+    pub(crate) fn prepared_snapshot_sha256(&self) -> Result<[u8; 32]> {
+        self.check_denial()?;
+        self.binding
+            .creation_snapshot_sha256
+            .or_else(|| self.prepared_snapshot.get().copied())
+            .ok_or_else(|| anyhow!("actual protected snapshot not bound"))
+    }
     fn check(&self, c: &Connection, expected_state: &str) -> Result<()> {
         anyhow::ensure!(
             self.process == std::process::id(),
@@ -253,6 +290,7 @@ impl SourceState {
                 "SELECT revision FROM native_source_slots WHERE kind=?1 AND resource_id=?2 AND operation_id=?3",
                 params![s.kind.key(),s.resource_id,self.binding.operation_id.to_string()],|r|r.get::<_,i64>(0))?, "reserved native source revision changed");
         }
+        prepared_snapshot::check_persisted(self, c)?;
         Ok(())
     }
 
@@ -291,6 +329,19 @@ impl SourceState {
     }
     pub(crate) fn original_cutoff(&self) -> Instant {
         self.cutoff
+    }
+    pub(crate) fn original_process_is_current(&self) -> bool {
+        self.process == std::process::id()
+    }
+    pub(crate) fn check_recorded_prepared(&self, c: &Connection) -> Result<()> {
+        anyhow::ensure!(
+            self.original_process_is_current(),
+            "CREATE original process changed"
+        );
+        self.check(c, "prepared")
+    }
+    pub(crate) fn bound_store_path(&self) -> &Path {
+        &self.path
     }
     pub(crate) fn binding(&self) -> &NativeSourceBinding {
         &self.binding
@@ -363,7 +414,7 @@ impl SourceState {
                 && tx.path().is_some_and(|p| Path::new(p) == self.path)
                 && snapshot.session_id == self.binding.session_id
                 && snapshot.project_id == self.binding.project_id
-                && creation_snapshot_sha256(snapshot)? == self.binding.creation_snapshot_sha256,
+                && creation_snapshot_sha256(snapshot)? == self.prepared_snapshot_sha256()?,
             "native source creation scope mismatch"
         );
         anyhow::ensure!(
@@ -444,7 +495,7 @@ pub(crate) fn remove_schema_for_legacy_fixture(c: &Connection) -> Result<()> {
     for name in names {
         c.execute_batch(&format!("DROP TRIGGER {name}"))?;
     }
-    c.execute_batch("DROP TABLE native_source_slots; DROP TABLE native_source_reservations; DROP TABLE native_source_revisions;")?;
+    c.execute_batch("DROP TABLE IF EXISTS native_source_prepared_snapshots; DROP TABLE native_source_slots; DROP TABLE native_source_reservations; DROP TABLE native_source_revisions;")?;
     Ok(())
 }
 

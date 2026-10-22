@@ -17,7 +17,12 @@ pub(super) struct ParsedSkillFile {
 pub(super) fn parse_skill_file(path: &Path) -> Result<Option<ParsedSkillFile>> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("failed to read skill file '{}'", path.display()))?;
-    let Some((frontmatter_raw, body_raw)) = split_frontmatter(&raw) else {
+    parse_skill_contents(path, &raw)
+}
+
+/// Pure existing parser shared by original-FD preparation; no host IO here.
+pub(super) fn parse_skill_contents(path: &Path, raw: &str) -> Result<Option<ParsedSkillFile>> {
+    let Some((frontmatter_raw, body_raw)) = split_frontmatter(raw) else {
         eprintln!(
             "Skill file '{}' is missing YAML frontmatter and will be skipped",
             path.display()

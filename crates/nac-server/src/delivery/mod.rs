@@ -28,3 +28,5 @@ pub(crate) mod executions;
 pub(crate) mod terminal_control;
 
 mod presentation_bootstrap;
+
+pub(crate) mod public_session_creation;

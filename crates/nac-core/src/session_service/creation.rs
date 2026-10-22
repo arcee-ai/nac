@@ -10,6 +10,18 @@ impl SessionService {
         &self,
         resources: crate::runtime::PreparedSessionResources,
     ) -> Result<SessionFrontendSnapshot> {
+        self.persist_new_session_with_snapshot_checked(resources, None)
+            .await
+    }
+
+    pub(super) async fn persist_new_session_with_snapshot_checked(
+        &self,
+        resources: crate::runtime::PreparedSessionResources,
+        authority: Option<Arc<super::admitted_publication::PublicationAuthority>>,
+    ) -> Result<SessionFrontendSnapshot> {
+        if let Some(authority) = &authority {
+            authority.check_current()?;
+        }
         // Accepted blocking work outlives a dropped request. Its shared resource
         // guard must also outlive that request and disarm inside the commit
         // command, before acknowledgement can be lost.
@@ -30,6 +42,7 @@ impl SessionService {
                     snapshot,
                     response,
                     resources: operation_resources,
+                    authority,
                     #[cfg(test)]
                     after_commit: None,
                 };
@@ -64,6 +77,7 @@ struct CreateSessionWithSnapshot {
     snapshot: sessions::SessionSnapshot,
     response: SessionFrontendSnapshot,
     resources: Arc<StdMutex<Option<crate::runtime::PreparedSessionResources>>>,
+    authority: Option<Arc<super::admitted_publication::PublicationAuthority>>,
     #[cfg(test)]
     after_commit: Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>,
 }
@@ -78,11 +92,21 @@ impl PersistenceCommand for CreateSessionWithSnapshot {
     fn execute(mut self, path: &Path) -> Result<SessionFrontendSnapshot> {
         let correlation = self.correlation();
         crate::store::retry_busy_correlated(correlation, || {
+            if let Some(authority) = &self.authority {
+                authority.check_current()?;
+            }
             let mut connection = crate::store::open_connection(path)?;
             let transaction =
                 connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            sessions::insert_new_session_in_transaction(&transaction, path, &self.snapshot)?;
+            if let Some(authority) = &self.authority {
+                authority.insert_creation(&transaction, path, &self.snapshot)?;
+            } else {
+                sessions::insert_new_session_in_transaction(&transaction, path, &self.snapshot)?;
+            }
             self.response.sessions = view::list_sessions_with_connection(&transaction)?;
+            if let Some(authority) = &self.authority {
+                authority.check_current()?;
+            }
             transaction.commit()?;
             Ok(())
         })?;

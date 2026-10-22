@@ -1,10 +1,10 @@
 use super::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SkillSource {
-    pub(super) host_root: PathBuf,
-    pub(super) guest_root: PathBuf,
-    pub(super) precedence: u8,
+pub(crate) struct SkillSource {
+    pub(crate) host_root: PathBuf,
+    pub(crate) guest_root: PathBuf,
+    pub(crate) precedence: u8,
 }
 
 pub(super) fn discover_skill_sources(
@@ -27,21 +27,7 @@ pub(super) fn discover_skill_sources(
         });
     }
 
-    if let Some(nac_home) = paths.nac_home_dir() {
-        sources.push(SkillSource {
-            host_root: nac_home.join("skills"),
-            guest_root: PathBuf::from(USER_NAC_HOME_SKILLS_GUEST_ROOT),
-            precedence: 2,
-        });
-    }
-
-    if let Some(home) = paths.home_dir() {
-        sources.push(SkillSource {
-            host_root: home.join(".agents").join("skills"),
-            guest_root: PathBuf::from(USER_AGENTS_HOME_SKILLS_GUEST_ROOT),
-            precedence: 3,
-        });
-    }
+    sources.extend(configured_global_sources(paths));
 
     sources.sort_by_key(|source| source.precedence);
     let mut seen = std::collections::HashSet::new();
@@ -138,4 +124,27 @@ pub(super) fn join_path(base: &Path, suffix: &Path) -> PathBuf {
         }
     }
     out
+}
+
+/// The single global root mapping shared by ordinary discovery and retained
+/// startup/preparation sources. This resolves paths only and performs no IO.
+pub(crate) fn configured_global_sources(paths: &PathContext) -> Vec<SkillSource> {
+    let mut sources = Vec::new();
+    if let Some(nac_home) = paths.nac_home_dir() {
+        sources.push(SkillSource {
+            host_root: nac_home.join("skills"),
+            guest_root: PathBuf::from(USER_NAC_HOME_SKILLS_GUEST_ROOT),
+            precedence: 2,
+        });
+    }
+
+    if let Some(home) = paths.home_dir() {
+        sources.push(SkillSource {
+            host_root: home.join(".agents").join("skills"),
+            guest_root: PathBuf::from(USER_AGENTS_HOME_SKILLS_GUEST_ROOT),
+            precedence: 3,
+        });
+    }
+
+    sources
 }
