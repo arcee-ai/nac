@@ -126,8 +126,12 @@ scanned release PR. The guard never tags or relabels that older unscanned plan.
 Before publication it reads all published releases and requires the scanned
 stable version to be greater than every published stable version. Recovery of
 an older or equal version is rejected before release creation or label changes,
-so it cannot move GitHub's Latest release backward. An unavailable release
-inventory also blocks publication; drafts and prerelease tags are not stable
+so it cannot move GitHub's Latest release backward. An equal version is allowed
+only when its published tag and SHA match the exact scanned candidate, so the
+unchanged Release Please duplicate handler can finish labeling after a partial
+publication failure. That recovery issues no release-creation request, so it is
+safe even after a newer release ships. A genuinely new older release is still
+blocked. An unavailable release inventory also blocks publication; drafts and prerelease tags are not stable
 versions. Release preparation/publication runs retain their shared concurrency
 group so a later NAC publication cannot race this check.
 `stable-release.yml` separately rescans the exact tag candidate before binary

@@ -36,14 +36,44 @@ export async function publishScannedRelease(manifest, { sha, prNumber, version }
   // A recovered older plan must not replace a newer stable release as Latest.
   // Inspect all published versions: API creation order is not version order.
   const scanned = version.split(".").map(BigInt);
+  let exactPublished = false;
+  let newerTag;
   for await (const release of github.releaseIterator()) {
     const stable = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(release.tagName || "");
+    if (release.draft && release.tagName === `v${version}`)
+      throw new Error("cannot resume an unpublished draft release");
     if (release.draft || !stable) continue;
     const published = stable.slice(1).map(BigInt);
     const difference = scanned.findIndex((part, index) => part !== published[index]);
-    if (difference === -1 || scanned[difference] < published[difference]) {
+    // A retry may need Release Please's duplicate handler to finish labeling
+    // this exact already-created release after a comment/label API failure.
+    if (difference === -1 && release.tagName === `v${version}` && release.sha === sha) {
+      exactPublished = true;
+    } else if (difference === -1) {
       throw new Error(`scanned version ${version} is not newer than published ${release.tagName}`);
+    } else if (scanned[difference] < published[difference]) {
+      newerTag = release.tagName;
     }
+  }
+  if (exactPublished) {
+    // Preserve the pinned library's duplicate-label handling without issuing a
+    // create-release request, even if a newer release has shipped since then.
+    const { DuplicateReleaseError } = createRequire(import.meta.url)(
+      "release-please/build/src/errors",
+    );
+    const recovery = Object.create(manifest);
+    recovery.createRelease = async (release) => {
+      if (release !== candidate || release.sha !== sha || release.tag.toString() !== `v${version}`)
+        throw new Error("duplicate recovery differs from the scanned candidate");
+      throw new DuplicateReleaseError(
+        Object.assign(new Error("verified release already exists"), { status: 422 }),
+        `v${version}`,
+      );
+    };
+    return recovery.createReleasesForPullRequest([candidate], candidate.pullRequest);
+  }
+  if (newerTag) {
+    throw new Error(`scanned version ${version} is not newer than published ${newerTag}`);
   }
   return manifest.createReleasesForPullRequest([candidate], candidate.pullRequest);
 }
