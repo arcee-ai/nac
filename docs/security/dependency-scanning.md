@@ -122,10 +122,14 @@ them and safe/vulnerable fixtures plus ordinary merge-blocking qualification
 have passed. Existing repository protections and Allison's PR-only override
 remain separate from the scanner.
 
-Eric owns ALL-447 dependency/runtime remediation. This gate changes no package
-versions, lockfiles, generated assets, or managed runtime versions. The fresh
-[baseline](dependency-scanning-baseline.md) is deliberately red. Remediation or
-human-reviewed exact expiring exceptions are required before enforcement.
+Eric's ALL-447 dependency/runtime remediation landed in PR #399 and is inherited
+without alteration. This gate adds no dependency, asset, or runtime upgrades.
+The fresh [baseline](dependency-scanning-baseline.md) retains nine residual
+records; separate research/remediation belongs to ALL-462. Remediation or
+human-reviewed exact expiring exceptions remain prerequisites for security-green
+publication and enforcement qualification. A deliberate human PR-only merge
+override can land the tooling while the baseline is red; it does not clear
+publication scans or qualify production activation.
 
 ## Local verification
 
