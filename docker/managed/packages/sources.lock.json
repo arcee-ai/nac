@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "krb5": {
+    "version": "1.22.2",
+    "package_version": "1.22.2-r6",
+    "source_commit": "8570e77819563e036027e1da789d08ec9333ed4d",
+    "license": "MIT",
+    "archive": "krb5.tar.gz",
+    "patches": [
+      "krb5-autoconf.patch",
+      "krb5-c23.patch",
+      "krb5-negoex.patch",
+      "krb5-ticket-info.patch"
+    ],
+    "upstream_fixes": [
+      {
+        "advisories": [
+          "CVE-2026-40355",
+          "CVE-2026-40356"
+        ],
+        "commit": "2e75f0d9362fb979f5fc92829431a590a130929f",
+        "patch": "krb5-negoex.patch"
+      },
+      {
+        "advisories": [
+          "CVE-2026-107778"
+        ],
+        "commit": "62196e2b269159a5465f5b8d0ed7cf6f29c3282a",
+        "patch": "krb5-ticket-info.patch"
+      }
+    ],
+    "upstream_name": "krb5",
+    "project_url": "https://web.mit.edu/kerberos/"
+  },
+  "curl": {
+    "version": "8.23.0",
+    "package_version": "8.23.0-r2",
+    "source_commit": "3163ec065643ba20709f190111f42c3e1fe95273",
+    "license": "curl",
+    "archive": "curl.tar.xz",
+    "patches": [],
+    "upstream_name": "curl",
+    "project_url": "https://curl.se/",
+    "upstream_fixes": []
+  },
+  "downloads": {
+    "krb5.tar.gz": {
+      "url": "https://codeload.github.com/krb5/krb5/tar.gz/8570e77819563e036027e1da789d08ec9333ed4d",
+      "sha256": "27517e59d2759d61222a7321bcd18b92feb04fecc313750cb9075e9a9f1705dd"
+    },
+    "krb5-ticket-info.patch": {
+      "url": "https://github.com/krb5/krb5/commit/62196e2b269159a5465f5b8d0ed7cf6f29c3282a.patch",
+      "sha256": "5cacda3418777f7d3c890b302a09678dc3c7fdca2ecadfa362f28ad7f59954e8"
+    },
+    "krb5-negoex.patch": {
+      "url": "https://github.com/krb5/krb5/commit/2e75f0d9362fb979f5fc92829431a590a130929f.patch",
+      "sha256": "315459527894fd9ecf47a8654f910d9bf96594ad6bc4f7e13fab2ca8214d4e7e"
+    },
+    "krb5-autoconf.patch": {
+      "url": "https://github.com/krb5/krb5/commit/b7290e0cab5b7e39cd4aa7c098beb18a886d4a1d.patch",
+      "sha256": "b610016e2837bedbe9ebf7030ae1e40f7821d1ecb487af71c4a4cf867687f06f"
+    },
+    "krb5-c23.patch": {
+      "url": "https://github.com/krb5/krb5/commit/ad4dcf1856dadc4b352b5c8ff08e51c7290fb41f.patch",
+      "sha256": "de952714a74db2c65618abd0fa0fb70b0a836a2cd3390ac0ff77ecec2d8fd43e"
+    },
+    "curl.tar.xz": {
+      "url": "https://curl.se/download/curl-8.23.0.tar.xz",
+      "sha256": "8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5"
+    },
+    "gcc-uaf.patch": {
+      "url": "https://github.com/gcc-mirror/gcc/commit/aaa8351f4d2e636f9680a1f0a8ebc2f0a60611e6.patch",
+      "sha256": "6bd11207cafce8e595a83726936f5ecc29906fa2e8426076b91a46813997327c"
+    },
+    "sasl-proposed.patch": {
+      "url": "https://github.com/cyrusimap/cyrus-sasl/commit/f79bfeb393fc0f1f9a614b35f50e2e72fde8f6e2.patch",
+      "sha256": "112e741e6f65653b194839676bd66818a9403f02a2c7422bfd1e1d5d10cb67a4"
+    },
+    "gcc-COPYING3": {
+      "url": "https://raw.githubusercontent.com/gcc-mirror/gcc/78d4ac73dd391005b895a6148cd9831e28e1208b/COPYING3",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    "gcc-COPYING.RUNTIME": {
+      "url": "https://raw.githubusercontent.com/gcc-mirror/gcc/78d4ac73dd391005b895a6148cd9831e28e1208b/COPYING.RUNTIME",
+      "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+    },
+    "sasl-COPYING": {
+      "url": "https://raw.githubusercontent.com/cyrusimap/cyrus-sasl/7a6b45b177070198fed0682bea5fa87c18abb084/COPYING",
+      "sha256": "9d6e5d1632140a6c135b251260953650d17d87cd1124f87aaf72192aa4580d4b"
+    },
+    "libstdc++-dev-16.2.0-r1.apk": {
+      "url": "https://apk.cgr.dev/chainguard/x86_64/libstdc++-dev-16.2.0-r1.apk",
+      "sha256": "4d9473f5a34dc869b406cb4dafdeebe32c2955a8aed23d2e6e99ddadaed51c7d"
+    },
+    "sasl.tar.gz": {
+      "url": "https://codeload.github.com/cyrusimap/cyrus-sasl/tar.gz/7a6b45b177070198fed0682bea5fa87c18abb084",
+      "sha256": "5ca0cb386426ca644918947c54bbe6aacc2962bc38019d8a6befc454c0e174b8"
+    },
+    "sasl-debian.patch": {
+      "url": "https://sources.debian.org/data/main/c/cyrus-sasl2/2.1.28%2Bdfsg1-12/debian/patches/0043-CVE-2026-107161.patch",
+      "sha256": "dcca99138d67cf123d69ce4976a4f3444715a48311f63bf78b7b1eb8f9d5f82c"
+    }
+  },
+  "gcc_headers": {
+    "version": "16.2.0",
+    "package_version": "16.2.0-r2",
+    "source_commit": "78d4ac73dd391005b895a6148cd9831e28e1208b",
+    "license": "GPL-3.0-or-later WITH GCC-exception-3.1",
+    "archive": "libstdc++-dev-16.2.0-r1.apk",
+    "patches": [
+      "gcc-uaf.patch"
+    ],
+    "upstream_fixes": [
+      {
+        "advisories": [
+          "CVE-2026-102010"
+        ],
+        "commit": "aaa8351f4d2e636f9680a1f0a8ebc2f0a60611e6",
+        "patch": "gcc-uaf.patch"
+      }
+    ],
+    "upstream_name": "gcc",
+    "project_url": "https://gcc.gnu.org/"
+  },
+  "sasl": {
+    "version": "2.1.28",
+    "package_version": "2.1.28-r59",
+    "source_commit": "7a6b45b177070198fed0682bea5fa87c18abb084",
+    "license": "LicenseRef-CMU-SASL",
+    "archive": "sasl.tar.gz",
+    "patches": [
+      "sasl-debian.patch"
+    ],
+    "upstream_name": "cyrus-sasl",
+    "project_url": "https://www.cyrusimap.org/sasl/",
+    "upstream_fixes": [],
+    "downstream_fixes": [
+      {
+        "advisories": [
+          "CVE-2026-107161"
+        ],
+        "supplier": "Debian",
+        "source_package": "cyrus-sasl2 2.1.28+dfsg1-12",
+        "patch": "sasl-debian.patch",
+        "status": "accepted downstream maintainer correction; equivalent upstream proposal remains closed unmerged",
+        "proposal_reference": "f79bfeb393fc0f1f9a614b35f50e2e72fde8f6e2"
+      }
+    ]
+  }
+}

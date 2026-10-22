@@ -22,7 +22,10 @@ require_literal() {
     grep -F -- "$literal" "$file" >/dev/null || fail "missing '$literal' in ${file#"$repo_root"/}"
 }
 
-require_literal "$dockerfile" 'FROM --platform=linux/amd64 debian:trixie-slim@sha256:'
+require_literal "$dockerfile" 'FROM --platform=linux/amd64 cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b'
+require_literal "$dockerfile" 'apk add --no-cache --allow-untrusted ./*.apk'
+require_literal "$dockerfile" 'sha256sum -c packages.sha256'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'python3 - < "$repo_root/scripts/smoke-managed-runtime.py"'
 require_literal "$dockerfile" 'useradd --uid 10001 --gid 10001'
 require_literal "$dockerfile" 'USER 10001:10001'
 require_literal "$dockerfile" 'ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/nac-managed-entrypoint"]'
@@ -36,7 +39,7 @@ require_literal "$dockerfile" 'ARG NAC_BUILD_TRACK=dev'
 require_literal "$dockerfile" 'ARG NAC_BUILD_ID'
 require_literal "$dockerfile" 'ARG NAC_SOURCE_REVISION'
 require_literal "$dockerfile" 'corepack enable'
-require_literal "$dockerfile" 'fd-find'
+require_literal "$dockerfile" 'test -x /usr/bin/fd'
 require_literal "$dockerfile" 'GIT_LFS_VERSION=3.8.0'
 require_literal "$dockerfile" 'GH_VERSION=2.103.0'
 require_literal "$dockerfile" 'NPM_VERSION=11.21.1'

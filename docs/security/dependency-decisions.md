@@ -42,11 +42,43 @@ Primary evidence:
 The managed image remains opt-in, linux/amd64, nonroot, with the same mounted
 directories, tools, readiness and signal/persistence contracts.
 
-- Use current stable Debian 13 Trixie slim, pinned to its amd64 manifest.
-  Upgrade both build and runtime together to preserve dynamic linking. Bookworm
-  had many vendor records without a supported fix. Trixie is a supported path,
-  not a guarantee of zero findings; never drop tools, filter no-fix findings or
-  weaken severity/unknown policy to clear the baseline.
+- Allison additionally approved the glibc-based Wolfi build/runtime direction
+  and reviewed source corrections on October 22, 2026. Pin the amd64 manifest
+  in both stages; retain the GNU ABI and development profile. The Trixie
+  predecessor still had 241 blocking OS finding records. Stock Wolfi's apparent
+  zero was insufficient: actual Kerberos, SASL and GCC header bytes require
+  the owned corrections below. Never filter findings or weaken the policy.
+- The approved supplier profile includes glibc 2.44, GCC 16.2, OpenSSL 4 runtime
+  libraries alongside the OpenSSL 3 development interface, Python
+  3.13.16_git20261016 and zlib 1.3.2.1_rc20260921. Keep these snapshot identities
+  visible; qualify GNU ABI, compiler execution, Python venv/SSL, locale and
+  mounted HOME/read-only-root behavior against the actual image.
+- Own temporary APK revisions for upstream Kerberos 1.22.2 with accepted commits
+  `2e75f0d9362fb979f5fc92829431a590a130929f` and
+  `62196e2b269159a5465f5b8d0ed7cf6f29c3282a`. Version 1.22.3 is not a published
+  release. Preserve the source NOTICE and library/plugin scope; distinguish the
+  actual upstream version from the NAC downstream package revision.
+- Apply accepted GCC commit `aaa8351f4d2e636f9680a1f0a8ebc2f0a60611e6` to the
+  exact shipped template header, preserving the rest of the signed dev payload
+  and COPYING3/COPYING.RUNTIME. The aligned-new report is inapplicable to the
+  observed Linux posix_memalign path; that evidence is target-specific.
+- Rebuild the existing Heimdal-backed SASL 2.1.28 plugin profile with Debian's
+  maintained `0043-CVE-2026-107161.patch` from source package
+  `2.1.28+dfsg1-12`. The equivalent upstream proposal
+  `f79bfeb393fc0f1f9a614b35f50e2e72fde8f6e2` remains closed and unmerged;
+  do not describe this as an upstream release fix. Preserve CMU's exact COPYING
+  and acknowledgement obligation instead of trusting the abbreviated BSD label.
+- Exact archives, patches and owned revisions are recorded in
+  `docker/managed/packages/sources.lock.json`. Actual APK upgrades replace the
+  superseded payloads in the same runtime layer. Retain source/build/file hashes,
+  supplier identity, SPDX and notices; those are build evidence, not automatic
+  vulnerability clearance or a policy exception.
+- Current curl restores SCP/SFTP, NTLM, LDAP and zstd through configuration.
+  Upstream removed RTMP, TLS-SRP and SMB/SMBS since the retained Debian baseline;
+  repository usage/documentation establishes no reliance on those capabilities.
+  Allison explicitly accepted those upstream removals on October 22, 2026.
+  Preserve the remaining supported protocols/authentication/compression;
+  no legacy compatibility fork is introduced.
 - Keep Node 24.22.1; replace its npm 11.19.1 bundle with pinned npm 11.21.1,
   Artistic-2.0. This updates the affected bundled graph while preserving the
   existing npm major. npm 12 changes CLI/config, shrinkwrap and script defaults.
@@ -67,7 +99,13 @@ directories, tools, readiness and signal/persistence contracts.
   Remove the overlay when a supported upstream LFS release includes the fixed
   dependencies. No application-code fork or vendored implementation enters NAC.
 
-Evidence: [Debian stable](https://www.debian.org/releases/),
+Evidence: [Wolfi base](https://images.chainguard.dev/directory/image/wolfi-base/overview),
+[Kerberos release](https://web.mit.edu/kerberos/krb5-1.22/),
+[ticket-info correction](https://github.com/krb5/krb5/commit/62196e2b269159a5465f5b8d0ed7cf6f29c3282a),
+[NegoEx correction](https://github.com/krb5/krb5/commit/2e75f0d9362fb979f5fc92829431a590a130929f),
+[GCC correction](https://github.com/gcc-mirror/gcc/commit/aaa8351f4d2e636f9680a1f0a8ebc2f0a60611e6),
+[Debian SASL source](https://sources.debian.org/src/cyrus-sasl2/2.1.28%2Bdfsg1-12/debian/patches/0043-CVE-2026-107161.patch/),
+[curl removals](https://curl.se/dev/deprecate.html),
 [Go releases](https://go.dev/dl/),
 [uv advisory](https://github.com/astral-sh/uv/security/advisories/GHSA-hq85-5cpj-mr62),
 [npm 11.21.1](https://github.com/npm/cli/releases/tag/v11.21.1),

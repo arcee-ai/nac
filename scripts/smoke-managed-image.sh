@@ -225,6 +225,8 @@ NAC_MANAGED_RUNTIME_ASSERTIONS
 
 # Exercise clean/smudge and an actual LFS transfer as the managed user with the
 # read-only root and mounted HOME; binary presence alone misses setup failures.
+"$container_runtime" exec -i "$container_name" python3 - < "$repo_root/scripts/smoke-managed-runtime.py"
+
 "$container_runtime" exec -i "$container_name" /bin/sh < "$repo_root/scripts/smoke-managed-git-lfs.sh"
 
 # Use the same ready NAC runtime and managed UID for actual human PTY HTTP

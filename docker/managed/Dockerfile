@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
 # Managed NAC v0 is intentionally linux/amd64-only. The platform-specific
-# Debian manifest prevents an accidental cross-architecture publication.
-FROM --platform=linux/amd64 debian:trixie-slim@sha256:4876fdea29cac1a33a3195f1eb1952feb1fca7dd6dd00be3e2f1879cf20d34d2 AS build
+# Wolfi manifest prevents an accidental cross-architecture publication.
+# Owned package builds retain exact upstream source, correction and notice evidence.
+FROM --platform=linux/amd64 cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b AS build
 
 ARG RUST_VERSION=1.98.0
 ARG RUSTUP_VERSION=1.29.0
@@ -15,17 +16,11 @@ ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-RUN test "$(dpkg --print-architecture)" = amd64 \
-    && apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        build-essential \
-        ca-certificates \
-        cmake \
-        curl \
-        git \
-        libssl-dev \
-        pkg-config \
-    && rm -rf /var/lib/apt/lists/* \
+RUN test "$(apk --print-arch)" = x86_64 \
+    && apk upgrade --no-cache \
+    && apk add --no-cache \
+        build-base ca-certificates-bundle cmake curl git gnutar xz \
+        openssl-dev=3.6.5-r5 pkgconf \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/rustup-init \
         "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/x86_64-unknown-linux-gnu/rustup-init" \
     && echo "${RUSTUP_SHA256}  /tmp/rustup-init" | sha256sum -c - \
@@ -43,7 +38,27 @@ RUN NAC_BUILD_TRACK="${NAC_BUILD_TRACK}" \
     NAC_SOURCE_REVISION="${NAC_SOURCE_REVISION}" \
     cargo build --release --locked -p nac-server --bin nac-web
 
-FROM --platform=linux/amd64 debian:trixie-slim@sha256:4876fdea29cac1a33a3195f1eb1952feb1fca7dd6dd00be3e2f1879cf20d34d2 AS runtime
+FROM --platform=linux/amd64 cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b AS runtime-package-sdk
+RUN apk upgrade --no-cache && apk add --no-cache build-base autoconf automake bison flex \
+    ca-certificates-bundle curl git gnutar gzip xz patch python3 jq perl pkgconf \
+    e2fsprogs-dev keyutils-dev krb5-conf krb5-dev libverto-dev openldap-2.6-dev=2.6.14-r0 openssl-dev=3.6.5-r5
+FROM runtime-package-sdk AS runtime-packages
+COPY docker/managed/packages/sources.lock.json docker/managed/packages/fetch-sources.sh /recipe/
+RUN sh /recipe/fetch-sources.sh
+COPY docker/managed/packages/build-krb5.sh docker/managed/packages/krb5-libraries.list /recipe/
+RUN sh /recipe/build-krb5.sh
+COPY docker/managed/packages/build-curl.sh /recipe/
+RUN sh /recipe/build-curl.sh
+COPY docker/managed/packages/build-sasl.sh /recipe/
+RUN sh /recipe/build-sasl.sh
+COPY docker/managed/packages/build-gcc-headers.sh /recipe/
+RUN sh /recipe/build-gcc-headers.sh
+COPY docker/managed/packages/package-runtime-apk.py /recipe/
+RUN python3 /recipe/package-runtime-apk.py /recipe/sources.lock.json \
+    && cp /recipe/* /out/ \
+    && cd /out && sha256sum ./*.apk > packages.sha256
+
+FROM --platform=linux/amd64 cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b AS runtime
 
 ARG NODE_VERSION=24.22.1
 ARG NODE_SHA256=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
@@ -70,39 +85,20 @@ ENV LANG=C.UTF-8 \
     PATH=/usr/local/cargo/bin:/usr/local/go/bin:/home/nac/go/bin:/home/nac/.cargo/bin:/home/nac/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 COPY docker/managed/git-lfs/go.mod docker/managed/git-lfs/go.sum /tmp/nac-lfs-dependencies/
+COPY --from=runtime-packages /out/ /usr/share/nac/runtime-package-build/
 
-RUN test "$(dpkg --print-architecture)" = amd64 \
-    && apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        bash \
-        binutils \
-        build-essential \
-        ca-certificates \
-        cmake \
-        coreutils \
-        curl \
-        fd-find \
-        findutils \
-        git \
-        gzip \
-        jq \
-        libssl-dev \
-        make \
-        openssh-client \
-        pkg-config \
-        procps \
-        python3 \
-        python3-pip \
-        python3-venv \
-        ripgrep \
-        rsync \
-        tar \
-        tini \
-        unzip \
-        xz-utils \
-        zip \
-    && rm -rf /var/lib/apt/lists/* \
-    && ln -s /usr/bin/fdfind /usr/local/bin/fd \
+RUN test "$(apk --print-arch)" = x86_64 \
+    && apk upgrade --no-cache \
+    && apk add --no-cache \
+        bash binutils build-base ca-certificates-bundle cmake coreutils \
+        curl=8.23.0-r1 fd findutils git gzip jq openssl-dev=3.6.5-r5 make \
+        openssh-client pkgconf procps python-3.13=3.13.16_git20261016-r1 \
+        py3-pip=26.2.2-r0 ripgrep rsync gnutar tini unzip xz zip shadow perl util-linux libxml2 py3-setuptools \
+        zlib=1.3.2.1_rc20260921-r0 \
+    && cd /usr/share/nac/runtime-package-build \
+    && sha256sum -c packages.sha256 \
+    && apk add --no-cache --allow-untrusted ./*.apk \
+    && test -x /usr/bin/fd \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/node.tar.xz \
         "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
     && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
@@ -175,6 +171,7 @@ COPY --from=build /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=build /src/nac/target/release/nac-web /usr/local/bin/nac-web
 COPY docker/managed/entrypoint.sh /usr/local/bin/nac-managed-entrypoint
 COPY docker/managed/check-process-capabilities.sh /usr/local/libexec/nac/check-process-capabilities
+COPY docker/managed/packages/collect-runtime-provenance.py /usr/local/libexec/nac/collect-runtime-provenance.py
 
 RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint /usr/local/libexec/nac/check-process-capabilities \
     && chmod -R a+rX /usr/local/rustup /usr/local/cargo/bin \
@@ -189,7 +186,8 @@ RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint /usr
     && XDG_CONFIG_HOME=/tmp/nac-go-check go version \
     && rm -rf /tmp/nac-go-check \
     && uv --version \
-    && test "$(stat -c '%u:%g' /home/nac)" = 10001:10001
+    && test "$(stat -c '%u:%g' /home/nac)" = 10001:10001 \
+    && python3 /usr/local/libexec/nac/collect-runtime-provenance.py
 
 # Keep LFS filters outside HOME, which is replaced by a persistent mount.
 # The system installation above remains available after dropping privileges.
