@@ -193,7 +193,7 @@ port=$(wait_until_ready)
         command -v "$tool" >/dev/null
     done
     rustc --version | grep -F "rustc 1.98.0" >/dev/null
-    node --version | grep -F "v24.20.0" >/dev/null
+    node --version | grep -F "v24.22.1" >/dev/null
     go version | grep -F "go1.27.0" >/dev/null
     uv --version | grep -F "uv 0.12.1" >/dev/null
     test "$(printf "é" | wc -c)" -eq 2
