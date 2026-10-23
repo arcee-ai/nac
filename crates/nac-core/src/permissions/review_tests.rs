@@ -665,6 +665,11 @@ fn basic_auth_credentials_keep_shell_resources_and_human_intent_manual() {
         "curl -ualice:canary8d1e https://example.com/health",
         "curl -u'alice:canary8d1e' https://example.com/health",
         "curl -su alice:canary8d1e https://example.com/health",
+        "curl -4u alice:canary8d1e https://example.com/health",
+        "curl -0ualice:canary8d1e https://example.com/health",
+        "curl -6u alice:canary8d1e https://example.com/health",
+        "curl -#u alice:canary8d1e https://example.com/health",
+        "curl -:ualice:canary8d1e https://example.com/health",
         "curl -sualice:canary8d1e https://example.com/health",
         "curl --user alice:canary8d1e https://example.com/health",
         "curl --user=alice:canary8d1e https://example.com/health",
@@ -678,6 +683,16 @@ fn basic_auth_credentials_keep_shell_resources_and_human_intent_manual() {
         let resources =
             crate::permissions::shell_resources(command, Path::new("/workspace"), &backend);
         assert!(review_eligibility(&resources, PermissionBackend::Local).is_ok());
+        assert!(redact_text(command).1, "readable auth command: {command}");
+        let canonical = &resources
+            .iter()
+            .find(|resource| resource.action == "execute")
+            .unwrap()
+            .resource;
+        assert!(
+            redact_text(canonical).1,
+            "canonical auth command: {command}"
+        );
         assert!(
             review_request(
                 "exec_command",

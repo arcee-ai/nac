@@ -557,13 +557,13 @@ pub(crate) fn redact_text_with(text: &str, secrets: &ExactSecrets) -> (String, b
             // and option clusters, e.g. -ualice:pw and -su alice:pw. Match
             // both readable commands and the canonical [argument] form.
             (
-                r#"((?:^|[\s\[])-[A-Za-z]*[uU](?:\s+|\]\[)?)(?:"[^"]*:[^"]*"|'[^']*:[^']*'|[^\s'"\[\]]+:[^\s'"\[\]]*)"#.to_string(),
+                r#"((?:^|[\s\[])-[^-\s\[\]'"]*[uU](?:\s+|\]\[)?)(?:"[^"]*:[^"]*"|'[^']*:[^']*'|[^\s'"\[\]]+:[^\s'"\[\]]*)"#.to_string(),
                 "${1}«redacted»",
             ),
             // Canonical arguments percent-encode punctuation and whitespace,
             // including colons and spaces inside a quoted username.
             (
-                r"(\[-[A-Za-z]*[uU](?:\]\[)?)[^\[\]]*%3[Aa][^\[\]]*".to_string(),
+                r"(\[-[^-\[\]]*[uU](?:\]\[)?)[^\[\]]*%3[Aa][^\[\]]*".to_string(),
                 "${1}«redacted»",
             ),
             // Known credential shapes.
