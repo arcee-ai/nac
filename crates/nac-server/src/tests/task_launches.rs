@@ -253,10 +253,17 @@ async fn retained_task_invalid_ref_or_title_is_a_request_error_without_reservati
     let manager = test_manager(&root);
     let request = fixture(&root, &manager).await;
     let app = router(manager.clone());
-    for field in ["git_ref", "default_ref", "title"] {
+    for field in ["git_ref", "default_ref", "title", "option_ref"] {
         let mut invalid = serde_json::to_value(&request).unwrap();
-        invalid[field] = if field == "title" {
+        let key = if field == "option_ref" {
+            "git_ref"
+        } else {
+            field
+        };
+        invalid[key] = if field == "title" {
             "x".repeat(121).into()
+        } else if field == "option_ref" {
+            "--help".into()
         } else {
             "missing-branch".into()
         };
