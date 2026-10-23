@@ -112,16 +112,12 @@ for (const [name, viewport, mobile] of [
       running,
     );
     harness.provider.enqueue(
-      "panel-continuation-done",
+      "panel-steer",
       {
+        token: "E2E_PANEL_STEER",
         functionOutputCallId: "panel-continuation-1",
         afterStep: "panel-continuation",
       },
-      { kind: "text", text: "panel continuation completed", stream: "request" },
-    );
-    harness.provider.enqueue(
-      "panel-steer",
-      { token: "E2E_PANEL_STEER" },
       { kind: "text", text: "panel steer completed", stream: "request" },
     );
     const parentId = await createSession(request, harness, "direct");
@@ -216,7 +212,13 @@ for (const [name, viewport, mobile] of [
     // Observe actual durable admission, rather than racing the provider release with HTTP handling.
     await waitForDelegatedInput(harness, "child", olderId, "E2E_PANEL_STEER check the cache too");
     running.release();
-    await harness.provider.waitForRequestCount(5);
+    await harness.provider.waitForRequestCount(4);
+    expect(harness.provider.requests.map((entry) => entry.matchedStep)).toEqual([
+      "E2E_OLDER_CHILD",
+      "E2E_NEWER_CHILD",
+      "panel-continuation",
+      "panel-steer",
+    ]);
     await expect(composer.getByRole("textbox", { name: "Send a message" })).toHaveValue("");
     expect(starts).toHaveLength(2);
     await expect.poll(() => replies).toEqual([201, 201]);
@@ -238,8 +240,8 @@ for (const [name, viewport, mobile] of [
       })
       .toEqual(
         expect.arrayContaining([
-          // The server runs the steer once the held turn ends, as the next generation.
-          { id: olderId, parent: parentId, generation: 3, status: "completed" },
+          // Durable steering admitted before release is consumed by the held generation.
+          { id: olderId, parent: parentId, generation: 2, status: "completed" },
         ]),
       );
     const listed = (await (

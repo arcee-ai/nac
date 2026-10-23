@@ -12,17 +12,29 @@ export async function waitForDelegatedInput(
 ) {
   await expect
     .poll(() => {
-      const database = new DatabaseSync(path.join(harness.runRoot, "store.db"), {
-        readOnly: true,
-      });
+      let database: DatabaseSync | undefined;
       try {
+        database = new DatabaseSync(path.join(harness.runRoot, "store.db"), {
+          readOnly: true,
+        });
         const query =
           topology === "child"
             ? "SELECT COUNT(*) AS count FROM session_inbox WHERE session_id = ? AND content = ?"
             : "SELECT COUNT(*) AS count FROM thread_steering WHERE session_id = ? AND instruction = ?";
         return database.prepare(query).get(sessionId, prompt)?.count;
+      } catch (error) {
+        // This external observer has no serving-owner connection. A concurrent
+        // checkpoint/open can briefly lock it; retry only that observation,
+        // never the product's submission or an arbitrary SQL failure.
+        if (
+          error instanceof Error &&
+          "errcode" in error &&
+          (error.errcode === 5 || error.errcode === 6)
+        )
+          return 0;
+        throw error;
       } finally {
-        database.close();
+        database?.close();
       }
     })
     .toBe(1);
