@@ -1,5 +1,7 @@
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { creationBehavior } from "@/app/features/ui-policy/policy";
+import { TaskLaunchModal } from "@/app/features/task-launches/TaskLaunchModal";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -55,6 +57,9 @@ export function NewSessionPopover({
 }) {
   const policy = useUiPolicy();
   const [open, setOpen] = useState(false);
+  const [isolated, setIsolated] = useState<{ defaultRef: string | null } | null>(null);
+  const [checkingSource, setCheckingSource] = useState(false);
+  const { api } = useNativeRuntime();
   const navigate = useNavigate();
   const toast = useToast();
   const createSession = useCreateSession();
@@ -71,9 +76,19 @@ export function NewSessionPopover({
     setOpen((current) => !current);
   };
 
-  const start = async (behavior: SessionBehavior) => {
-    if (!projectId || createSession.isPending) return;
+  const start = async (behavior: SessionBehavior, existingCheckout = false) => {
+    if (!projectId || createSession.isPending || checkingSource) return;
     try {
+      if (behavior === "direct" && !existingCheckout) {
+        setCheckingSource(true);
+        const source = await api.taskLaunchSource(projectId);
+        setCheckingSource(false);
+        if (source.eligible) {
+          setOpen(false);
+          setIsolated({ defaultRef: source.default_ref ?? null });
+          return;
+        }
+      }
       const snapshot = await createSession.mutateAsync({
         project_id: projectId,
         behavior: creationBehavior(policy, behavior),
@@ -82,43 +97,57 @@ export function NewSessionPopover({
       setOpen(false);
       if (sessionId) navigate(routes.session(sessionId));
     } catch (error) {
+      setCheckingSource(false);
       toast.error(`Failed to start a chat: ${humanErrorText(toRunError(error))}`);
     }
   };
 
   return (
-    <Popover
-      open={open}
-      onClose={() => setOpen(false)}
-      sticky
-      placement={PopoverPlacement.RightTop}
-      size={PopoverSize.Medium}
-      panelClassName="gap-2"
-      className={className}
-      content={
-        <>
-          {OPTIONS.map((option) => {
-            const presentation = sessionBehaviorPresentation(option.behavior);
-            return (
-              <TabButton
-                key={option.behavior}
-                disabled={createSession.isPending}
-                hoverHint={{
-                  title: presentation.label,
-                  description: behaviorDescription(option.behavior),
-                  muted: true,
-                }}
-                onClick={() => void start(option.behavior)}
-              >
-                <Icon iconName={option.icon} />
-                <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
-              </TabButton>
-            );
-          })}
-        </>
-      }
-    >
-      {children(openMenu)}
-    </Popover>
+    <>
+      {isolated && projectId && (
+        <TaskLaunchModal
+          projectId={projectId}
+          defaultRef={isolated.defaultRef}
+          onClose={() => setIsolated(null)}
+          onExistingCheckout={() => {
+            setIsolated(null);
+            void start("direct", true);
+          }}
+        />
+      )}
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        sticky
+        placement={PopoverPlacement.RightTop}
+        size={PopoverSize.Medium}
+        panelClassName="gap-2"
+        className={className}
+        content={
+          <>
+            {OPTIONS.map((option) => {
+              const presentation = sessionBehaviorPresentation(option.behavior);
+              return (
+                <TabButton
+                  key={option.behavior}
+                  disabled={createSession.isPending || checkingSource}
+                  hoverHint={{
+                    title: presentation.label,
+                    description: behaviorDescription(option.behavior),
+                    muted: true,
+                  }}
+                  onClick={() => void start(option.behavior)}
+                >
+                  <Icon iconName={option.icon} />
+                  <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
+                </TabButton>
+              );
+            })}
+          </>
+        }
+      >
+        {children(openMenu)}
+      </Popover>
+    </>
   );
 }

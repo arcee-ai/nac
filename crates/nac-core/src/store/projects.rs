@@ -247,7 +247,7 @@ fn ensure_model_configuration(
     Ok(())
 }
 
-fn load_project_with_connection(
+pub(super) fn load_project_with_connection(
     conn: &rusqlite::Connection,
     project_id: &str,
 ) -> ProjectResult<ProjectRecord> {

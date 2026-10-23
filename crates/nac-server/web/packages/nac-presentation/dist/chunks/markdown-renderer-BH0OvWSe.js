@@ -1,5 +1,5 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { Ii as r, Mr as i, Or as a, Qr as o, Ri as s, cr as c, d as l, i as u, lr as d, t as f, u as p, ur as m, zi as h } from "./PerfProfiler-DclDxUgj.js";
+import { Ii as r, Mr as i, Or as a, Qr as o, Ri as s, cr as c, d as l, i as u, lr as d, t as f, u as p, ur as m, zi as h } from "./PerfProfiler-D3fU9Z0a.js";
 import { a as g, c as _, l as v, o as y, r as b, s as x, t as S } from "./lib-rX7C_D5H.js";
 import { Suspense as C, isValidElement as w, memo as T, use as E } from "react";
 import { useQueryClient as ee } from "@tanstack/react-query";
@@ -6566,7 +6566,7 @@ function gl(e, t = []) {
 var _l = /* @__PURE__ */ e({ default: () => Ml }), vl = [Bc], yl = /* @__PURE__ */ new Map();
 function bl(e) {
 	let t = yl.get(e);
-	return t || (t = import("./markdown-mathjax-CpahWqlt.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-BGPFui4q.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...vl, n],
 		rehype: [t(e)]
 	})), yl.set(e, t)), t;

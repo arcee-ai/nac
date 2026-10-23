@@ -3011,6 +3011,89 @@
         }
       }
     },
+    "/projects/{project_id}/task-launch-source": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "source_info",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskLaunchSourceInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/task-launches": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "inventory",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskLaunchRecord"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/providers/models": {
       "post": {
         "tags": [
@@ -9404,6 +9487,136 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/StoreInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task-launches": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskLaunchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskLaunchRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task-launches/{request_id}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "status",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskLaunchRecord"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task-launches/{request_id}/cancel": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "cancel",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskLaunchRecord"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
                 }
               }
             }
@@ -17292,6 +17505,177 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "TaskLaunchPhase": {
+        "type": "string",
+        "enum": [
+          "pinned",
+          "preparing_workspace",
+          "preparing_runtime",
+          "ready",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "TaskLaunchRecord": {
+        "type": "object",
+        "required": [
+          "request",
+          "source",
+          "session_id",
+          "workspace_path",
+          "phase",
+          "session_present",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_input_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/TaskLaunchPhase"
+          },
+          "request": {
+            "$ref": "#/components/schemas/TaskLaunchRequest"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "session_present": {
+            "type": "boolean",
+            "description": "Passive projection; inventory survives deletion of its published session."
+          },
+          "source": {
+            "$ref": "#/components/schemas/TaskLaunchSource"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "workspace_path": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskLaunchRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "project_id",
+          "title",
+          "prompt"
+        ],
+        "properties": {
+          "default_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required when initially binding a project without an invoking task.\nThe binding persists independently of the ref selected for this launch."
+          },
+          "git_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "invoking_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskLaunchSource": {
+        "type": "object",
+        "required": [
+          "project_cwd",
+          "source_cwd",
+          "repo_root",
+          "common_git_dir",
+          "repository_identity",
+          "subdirectory",
+          "default_ref",
+          "selected_ref",
+          "commit",
+          "excluded_source_edits"
+        ],
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "common_git_dir": {
+            "type": "string"
+          },
+          "default_ref": {
+            "type": "string"
+          },
+          "excluded_source_edits": {
+            "type": "boolean"
+          },
+          "project_cwd": {
+            "type": "string"
+          },
+          "repo_root": {
+            "type": "string"
+          },
+          "repository_identity": {
+            "type": "string"
+          },
+          "selected_ref": {
+            "type": "string"
+          },
+          "source_cwd": {
+            "type": "string"
+          },
+          "subdirectory": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskLaunchSourceInfo": {
+        "type": "object",
+        "required": [
+          "eligible"
+        ],
+        "properties": {
+          "default_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "eligible": {
+            "type": "boolean"
           }
         }
       },

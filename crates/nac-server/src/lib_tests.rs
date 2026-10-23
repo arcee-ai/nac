@@ -1039,3 +1039,6 @@ mod terminal_selection;
 
 #[path = "tests/terminal_control.rs"]
 mod terminal_control;
+
+#[path = "tests/task_launches.rs"]
+mod task_launches;
