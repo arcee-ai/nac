@@ -110,7 +110,8 @@ as passes and are not a blanket skip exemption.
 Upstream suite mode drops client exit status when applying its baseline verdict.
 The launcher therefore retains each exact scenario/revision, client status,
 signal and stderr independently. Deferred failures require the exact known NAC
-rejection and exit 1. Missing executables, timeouts, panics, malformed reports,
+rejection and exit 1. Client backtrace settings are pinned off so a caller's
+diagnostic environment cannot change these messages. Missing executables, timeouts, panics, malformed reports,
 runner errors and wire-schema harness errors cannot match that allowance.
 
 Each run retains raw checks/client output, Cargo logs, candidate SHA, platform,

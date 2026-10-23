@@ -130,3 +130,20 @@ test("client launcher records ENOENT independently of upstream checks", () => {
     assert.equal(receipt.status, null);
   } finally { rmSync(directory, { recursive: true }); }
 });
+
+test("launcher normalizes inherited Rust diagnostics before exact rejection checks", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nac-mcp-backtrace-"));
+  try {
+    const client = join(directory, "environment-client.mjs");
+    writeFileSync(client, 'console.log(JSON.stringify({backtrace:process.env.RUST_BACKTRACE,lib:process.env.RUST_LIB_BACKTRACE}));');
+    const result = spawnSync(process.execPath, [join(root, "scripts/mcp-conformance/client-launch.mjs"), client], {
+      env: { ...process.env, RUST_BACKTRACE: "full", RUST_LIB_BACKTRACE: "1", MCP_CONFORMANCE_SCENARIO: "tools_call",
+        MCP_CONFORMANCE_PROTOCOL_VERSION: revisions[1], NAC_MCP_RECEIPTS: directory, NAC_MCP_CLIENT: process.execPath },
+      encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), { backtrace: "0", lib: "0" });
+    const receipt = JSON.parse(readFileSync(join(directory, "tools_call.json"), "utf8"));
+    assert.equal(receipt.status, 0);
+    assert.equal(receipt.stderr, "");
+  } finally { rmSync(directory, { recursive: true }); }
+});

@@ -7,7 +7,8 @@ const scenario = process.env.MCP_CONFORMANCE_SCENARIO;
 if (!scenario || !process.env.NAC_MCP_RECEIPTS || !process.env.NAC_MCP_CLIENT) {
   throw new Error("missing conformance launch binding");
 }
-const environment = { ...process.env };
+// Keep exact known rejections independent of the caller's diagnostic settings.
+const environment = { ...process.env, RUST_BACKTRACE: "0", RUST_LIB_BACKTRACE: "0" };
 // Safe control: connect/list normally but omit the required add_numbers call.
 if (process.env.NAC_MCP_SEED === "omit-tool-call" && scenario === "tools_call") {
   environment.MCP_CONFORMANCE_SCENARIO = "initialize";
