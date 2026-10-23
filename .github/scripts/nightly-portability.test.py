@@ -62,6 +62,15 @@ class Controls(unittest.TestCase):
                     runner.run([sys.executable, '-c', 'print("owned fixture")'], output / 'fixture.log',
                                dict(os.environ), phases, 'fixture')
             self.assertIn('seconds', phases[0])
+            with patch.object(runner.subprocess, 'Popen') as factory:
+                child = factory.return_value
+                child.pid = 123
+                child.wait.side_effect = [runner.Cancelled('cancelled by signal 2'),
+                                          subprocess.TimeoutExpired('owned child', 2)]
+                with patch.object(runner, 'signal_owned_group', side_effect=RuntimeError('group 123 signal 15 live members T')):
+                    with self.assertRaisesRegex(RuntimeError, 'group 123 signal 15 live members T; owned group 123 reaping failed'):
+                        runner.run(['owned child'], output / 'combined.log', dict(os.environ), phases, 'combined')
+            self.assertIn('seconds', phases[1])
             report = {'platform': 'control', 'architecture': 'control', 'result': 'failed',
                       'seconds': 0, 'phases': phases + [{'label': 'interrupted', 'log': 'interrupted.log'}]}
             runner.summary(report, output)

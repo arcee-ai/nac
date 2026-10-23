@@ -72,7 +72,13 @@ def run(command, output, env, phases, label, timeout=2400):
                     except subprocess.TimeoutExpired:
                         pass
                     signal_owned_group(process.pid, signal.SIGKILL)
-                finally:
+                except Exception as cleanup_error:
+                    try:
+                        process.wait(timeout=2)
+                    except Exception as reap_error:
+                        raise RuntimeError(f'{cleanup_error}; owned group {process.pid} reaping failed: {reap_error}') from cleanup_error
+                    raise
+                else:
                     process.wait(timeout=2)
         finally:
             entry['seconds'] = round(time.monotonic() - started, 3)
