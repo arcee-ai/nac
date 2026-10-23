@@ -3,6 +3,16 @@ import { DatabaseSync } from "node:sqlite";
 
 import { expect, type EmbeddedHarness } from "./harness";
 
+export function isSqliteObservationLock(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("errcode" in error)) return false;
+  const code = error.errcode;
+  if (typeof code !== "number" || !Number.isInteger(code) || code < 0) return false;
+  // SQLite's low byte is the primary result code. BUSY/LOCKED can carry an
+  // extended code, and native errors can originate outside this module's realm.
+  const primary = code & 0xff;
+  return primary === 5 || primary === 6;
+}
+
 /** Read the committed receipt before releasing a model barrier; never mutate fixture state. */
 export async function waitForDelegatedInput(
   harness: EmbeddedHarness,
@@ -26,12 +36,7 @@ export async function waitForDelegatedInput(
         // This external observer has no serving-owner connection. A concurrent
         // checkpoint/open can briefly lock it; retry only that observation,
         // never the product's submission or an arbitrary SQL failure.
-        if (
-          error instanceof Error &&
-          "errcode" in error &&
-          (error.errcode === 5 || error.errcode === 6)
-        )
-          return 0;
+        if (isSqliteObservationLock(error)) return 0;
         throw error;
       } finally {
         database?.close();
