@@ -33,9 +33,12 @@ Fetch the bot PR into an isolated clean checkout based on its actual head/base;
 read the release notes and generated diff. Do not replace an unrelated owner's
 checkout. Run `make setup` initially and after either lockfile changes.
 
-- Cargo: inspect `cargo update --locked` output/lockfile changes and run affected
-  locked crate tests, formatting and clippy. A major migration needs explicit
-  scope review; do not bundle unrelated runtime redesign.
+- Cargo: inspect the bot's manifest/lockfile diff and run affected locked crate
+  tests, formatting and clippy. If a targeted repair is needed, use
+  `cargo update -p PACKAGE --precise VERSION`, inspect the resulting lockfile,
+  then validate with locked checks. `cargo update --locked` rejects a required
+  lockfile change. A major migration needs explicit scope review; do not bundle
+  unrelated runtime redesign.
 - npm: use `npm --prefix crates/nac-server/web ci` and
   `npm --prefix .github/scripts ci`, preserving both locked graphs.
 - API drift: run `make generate-api-contract`; inspect and commit the sole-writer
