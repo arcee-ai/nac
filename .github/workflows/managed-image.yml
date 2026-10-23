@@ -33,8 +33,9 @@ jobs:
       policy_mode: ${{ steps.policy.outputs.mode }}
       policy_sha: ${{ steps.policy.outputs.policy_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           ref: ${{ inputs.source_sha || github.sha }}
           fetch-depth: 0
       - id: candidate
@@ -44,7 +45,7 @@ jobs:
           sha=$(git rev-parse HEAD)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "short_sha=${sha:0:12}" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
       - name: Bind image policy to the eligible caller event
@@ -60,8 +61,9 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.sha }}
       - name: Check image, entrypoint, smoke, and workflow contracts
         run: |
@@ -69,7 +71,7 @@ jobs:
           sh -n scripts/smoke-managed-image.sh
           sh -n scripts/test-managed-image-contract.sh
           sh scripts/test-managed-image-contract.sh
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
       - name: Test image inventory, trusted-policy and workflow failure contracts
@@ -82,15 +84,16 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.sha }}
       - name: Install pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
         with:
           components: rustfmt, clippy
       - name: Install Node LTS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
           cache: npm
@@ -111,14 +114,15 @@ jobs:
     needs: [prepare, contract, quality]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Build exact linux/amd64 image without publication
         id: build-image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/managed/Dockerfile
@@ -147,7 +151,7 @@ jobs:
           MANAGED_IMAGE: ${{ steps.image.outputs.id }}
           MANAGED_IMAGE_SKIP_BUILD: "1"
         run: sh scripts/smoke-managed-image.sh
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
       - name: Pin canonical reviewed-dev image policy for publication
@@ -160,7 +164,7 @@ jobs:
         run: |
           node .github/scripts/publication-policy.mjs resolve "$CANDIDATE_SHA" \
             "$GITHUB_WORKSPACE/image-security-evidence/policy" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ steps.publication-policy.outputs.sha || needs.prepare.outputs.policy_sha }}
           path: trusted-image-policy
@@ -212,7 +216,7 @@ jobs:
           fi
       - name: Retain exact-image security evidence even when blocked
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: managed-image-security-${{ needs.prepare.outputs.sha }}
           path: image-security-evidence/
@@ -220,7 +224,7 @@ jobs:
           if-no-files-found: error
       - name: Retain live qualification evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: managed-image-security-fixtures-${{ needs.prepare.outputs.sha }}
           path: |
@@ -235,8 +239,9 @@ jobs:
     needs: [prepare, contract, quality, build-smoke]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           ref: ${{ inputs.source_sha || github.sha }}
       - name: Reject any missing, skipped, cancelled or failed managed work
         env:

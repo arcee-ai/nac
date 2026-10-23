@@ -1,4 +1,4 @@
-.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size test-mcp-conformance generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size lint-workflows test-workflow-lint test-mcp-conformance generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -68,7 +68,7 @@ install:
 	$(CARGO) install --path crates/$(PKG) --bin $(BIN) --locked --force --root $(INSTALL_ROOT)
 
 ## Run portable formatting, lint, unit, and asset gates (release CI also runs test-e2e)
-ci: format-check lint test
+ci: lint-workflows test-workflow-lint format-check lint test
 
 ## Run workspace Rust tests, frontend tests, source-size, and web asset checks
 test: test-source-size test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract
@@ -208,6 +208,14 @@ test-managed-image:
 check: test-source-size
 	$(CARGO) check --workspace --locked
 
+## Check every tracked workflow, embedded shell block, and standalone shell script
+lint-workflows:
+	node .github/scripts/workflow-lint.mjs
+
+## Prove workflow/shell enforcement with real pinned tools and invalid fixtures
+test-workflow-lint:
+	node --test .github/scripts/workflow-lint.test.mjs
+
 ## Lint frontend and production Rust targets
 lint:
 	npm --prefix $(WEB_DIR) run lint
@@ -276,6 +284,8 @@ help:
 		'  managed-image Build the linux/amd64 managed developer image' \
 		'  test-managed-image Build and smoke the managed image locally' \
 		'  check        Run cargo check --workspace --locked' \
+		'  lint-workflows Lint all tracked Actions workflows and shell scripts' \
+		'  test-workflow-lint Exercise seeded workflow/shell enforcement failures' \
 		'  lint         Lint frontend and production Rust targets' \
 		'  fix          Apply safe Rust lint fixes and format Rust sources' \
 		'  format-check Check frontend and Rust formatting' \

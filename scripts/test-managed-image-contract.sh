@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 dockerfile="$repo_root/docker/managed/Dockerfile"
 entrypoint="$repo_root/docker/managed/entrypoint.sh"
 workflow="$repo_root/.github/workflows/managed-image.yml"
@@ -30,6 +30,8 @@ require_literal "$dockerfile" 'krb5-libs=1.22.2-r5 cyrus-sasl-heimdal-libs=2.1.2
 require_literal "$dockerfile" 'python3 check-supplier-packages.py sources.lock.json > supplier-predecessors.json'
 python3 "$repo_root/docker/managed/packages/test_supplier_packages.py"
 require_literal "$dockerfile" 'sha256sum -c packages.sha256'
+# Assert the literal shell/Actions template, without expanding it here.
+# shellcheck disable=SC2016
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'python3 - < "$repo_root/scripts/smoke-managed-runtime.py"'
 require_literal "$dockerfile" 'useradd --uid 10001 --gid 10001'
 require_literal "$dockerfile" 'USER 10001:10001'
@@ -63,6 +65,8 @@ require_literal "$dockerfile" '/run/secrets/nac'
 require_literal "$entrypoint" '--bind 0.0.0.0:3210'
 require_literal "$entrypoint" '--allow-remote'
 require_literal "$entrypoint" '--store-path /var/lib/nac/nac.sqlite3'
+# Assert the literal shell/Actions template, without expanding it here.
+# shellcheck disable=SC2016
 require_literal "$entrypoint" '--managed-config "$managed_config"'
 require_literal "$entrypoint" 'without requiring the bootstrap mount'
 store_path_count=$(grep -c -- '--store-path' "$entrypoint")
@@ -91,6 +95,8 @@ require_literal "$repo_root/scripts/smoke-managed-image.sh" '/run/secrets/nac/bo
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assert_bootstrap_required'
 python3 "$repo_root/scripts/test-managed-smoke-payload.py"
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'smoke-managed-git-lfs.sh'
+# Assert the literal shell/Actions template, without expanding it here.
+# shellcheck disable=SC2016
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'python3 - < "$repo_root/scripts/smoke-managed-terminal.py"'
 require_literal "$terminal_smoke" 'os.getuid() == 10001 and os.getgid() == 10001'
 require_literal "$terminal_smoke" '"behavior": "direct"'
@@ -120,6 +126,8 @@ require_literal "$workflow" 'sbom: false'
 require_literal "$workflow" 'run: make ci'
 require_literal "$workflow" 'npm --prefix .github/scripts ci'
 require_literal "$workflow" 'NAC_BUILD_TRACK=dev'
+# Assert the literal shell/Actions template, without expanding it here.
+# shellcheck disable=SC2016
 require_literal "$workflow" 'NAC_SOURCE_REVISION=${{ needs.prepare.outputs.sha }}'
 if grep -Eq '(id-token:[[:space:]]*write|aws-actions/|amazon-ecr|ECR_|push:[[:space:]]*true|environment:[[:space:]]*dev)' "$workflow"; then
     fail 'public repository workflow must remain build-and-smoke only'

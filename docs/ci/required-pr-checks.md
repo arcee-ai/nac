@@ -16,10 +16,12 @@ new candidate after the base advances; a prior head's green check is insufficien
 | Job | Every PR | Coverage |
 | --- | --- | --- |
 | prepare | yes | Exact source identity and complete merge diff applicability |
+| workflow-lint | yes | Pinned actionlint/ShellCheck over every tracked workflow and shell script, plus real-tool enforcement fixtures |
 | lint | yes | Workspace production clippy, web lint, Rust/web formatting |
 | test-server | yes | Server and stable binary, web tests, generated OpenAPI/types, all committed browser/client assets, production Chromium journeys |
 | test-core | yes | Core/catalog tests, release policy, installer, PR gate/rollout model tests |
 | test-workspace | yes | Contracts, credentials, managed and process crate tests; source command/binary/size, durability, managed load and static image contracts |
+| macos-native | yes | Native ARM macOS process/credential suites and 12 exact core terminal regressions; measured first/warm runs and Darwin behavioral failure control ([coverage](native-macos.md)) |
 | test | yes | Compatibility result covering all test lanes and lint |
 | build | yes | Existing Linux musl and macOS ARM release binary/archive validation |
 | managed | explicit | Reusable contract, pinned quality/fault-fixture, exact Linux image build and credential-independent smoke |
@@ -51,6 +53,9 @@ skip all fail. The reusable managed workflow independently requires all its inne
 jobs, preventing an accidentally skipped build/smoke from turning the call green.
 Cancellation of the aggregate itself blocks merging. Platform failure to start a
 workflow cannot emit a job; the missing required context still blocks merging.
+
+Workflow/shell lint inventory, tool verification, dialects and seeded failure evidence
+are documented in [workflow-shell-lint.md](workflow-shell-lint.md).
 
 Extension contract: a source-security reusable call must become a direct
 `required-pr-checks.needs` dependency and an entry in `pr-checks.mjs`'s
