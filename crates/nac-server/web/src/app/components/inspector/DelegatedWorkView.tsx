@@ -9,11 +9,13 @@ import { PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
 import { groupByRecency } from "@/app/lib/projects";
+import { sessionBehaviorIcon } from "@/app/lib/sessionBehavior";
 
 import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
 import type {
   ManagedOrchestratorRecord,
   SessionBehavior,
+  SessionLineage,
   TraditionalChildRecord,
   TraditionalChildStatus,
 } from "@/app/types/api";
@@ -27,8 +29,12 @@ interface SubagentRow {
   background: boolean;
   updatedAt: string;
   fallbackText: string | null;
-  icon: IconName;
 }
+
+const MODE_LINEAGE = {
+  child: "traditional-child",
+  orchestrator: "managed-orchestrator",
+} as const satisfies Record<SubagentRow["mode"], SessionLineage["kind"]>;
 
 function nonempty(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
@@ -49,7 +55,6 @@ function rowFromChild(child: TraditionalChildRecord): SubagentRow {
       nonempty(child.report) ??
       nonempty(child.change_summary) ??
       nonempty(child.verification_summary),
-    icon: IconName.Plane,
   };
 }
 
@@ -63,7 +68,6 @@ function rowFromOrchestrator(orchestrator: ManagedOrchestratorRecord): SubagentR
     background: orchestrator.execution_mode !== "foreground",
     updatedAt: orchestrator.updated_at,
     fallbackText: nonempty(orchestrator.failure) ?? nonempty(orchestrator.report),
-    icon: IconName.Orchestrator,
   };
 }
 
@@ -175,7 +179,7 @@ export function DelegatedWorkView({
               <ChatSessionButton
                 key={row.key}
                 title={row.description}
-                icon={row.icon}
+                icon={sessionBehaviorIcon(null, MODE_LINEAGE[row.mode])}
                 running={row.status === "running"}
                 active={selected?.key === row.key}
                 onClick={() => chooseRow(row.key)}
@@ -196,7 +200,7 @@ export function DelegatedWorkView({
               sessionId={selected.id}
               title={selected.description}
               fallbackText={selected.fallbackText}
-              icon={selected.icon}
+              icon={sessionBehaviorIcon(null, MODE_LINEAGE[selected.mode])}
             />
             {/* A phone's tab bar floats over the bottom of the panel, as for Files and Threads. */}
             <div className="shrink-0 p-2 pb-[104px] md:pb-2">

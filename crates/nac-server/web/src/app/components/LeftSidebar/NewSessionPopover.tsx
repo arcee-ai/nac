@@ -3,7 +3,8 @@ import { creationBehavior } from "@/app/features/ui-policy/policy";
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Icon, IconName, Popover, PopoverPlacement, PopoverSize, TabButton } from "@/app/atoms";
+import { Popover, PopoverPlacement, PopoverSize, TabButton } from "@/app/atoms";
+import SessionBehaviorIcon from "@/app/atoms/session-behavior-icon";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
@@ -14,22 +15,18 @@ import type { SessionBehavior } from "@/app/types/api";
 const OPTIONS: readonly {
   behavior: SessionBehavior;
   label: string;
-  icon: IconName;
 }[] = [
   {
     behavior: "direct",
     label: "Agent Session",
-    icon: IconName.Plane,
   },
   {
     behavior: "direct-with-orchestrator",
     label: "Agent + Orchestrator Session",
-    icon: IconName.PlaneAdd,
   },
   {
     behavior: "orchestrator",
     label: "Orchestrator Session",
-    icon: IconName.Orchestrator,
   },
 ];
 
@@ -110,7 +107,7 @@ export function NewSessionPopover({
                 }}
                 onClick={() => void start(option.behavior)}
               >
-                <Icon iconName={option.icon} />
+                <SessionBehaviorIcon behavior={option.behavior} />
                 <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
               </TabButton>
             );
