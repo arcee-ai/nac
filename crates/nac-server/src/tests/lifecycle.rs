@@ -121,6 +121,7 @@ async fn active_run_accepts_orchestrator_steering() {
             SubmitPromptRequest {
                 prompt: "begin the original task".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();
@@ -130,6 +131,7 @@ async fn active_run_accepts_orchestrator_steering() {
             OrchestratorSteeringRequest {
                 instruction: "change direction".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();
@@ -160,6 +162,7 @@ async fn cancel_active_run_route_is_idempotent() {
             SubmitPromptRequest {
                 prompt: "begin the original task".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();
@@ -221,6 +224,7 @@ async fn exact_run_cancellation_never_cancels_a_replacement_run() {
             SubmitPromptRequest {
                 prompt: "first run".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();
@@ -247,6 +251,7 @@ async fn exact_run_cancellation_never_cancels_a_replacement_run() {
             SubmitPromptRequest {
                 prompt: "replacement run".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();
@@ -344,6 +349,7 @@ async fn deletion_winning_lifecycle_gate_prevents_late_submission_recreation() {
                 SubmitPromptRequest {
                     prompt: "must not revive deleted state".to_string(),
                 },
+                nac_core::store::InputOrigin::Automation,
             )
             .await
     });
@@ -390,6 +396,7 @@ async fn submission_winning_lifecycle_gate_makes_concurrent_patch_reject_busy() 
                 SubmitPromptRequest {
                     prompt: "hold this run open".to_string(),
                 },
+                nac_core::store::InputOrigin::Automation,
             )
             .await
     });
@@ -495,6 +502,7 @@ async fn patch_winning_lifecycle_gate_evicts_before_concurrent_submission_attach
                 SubmitPromptRequest {
                     prompt: "use committed settings".to_string(),
                 },
+                nac_core::store::InputOrigin::Automation,
             )
             .await
     });
@@ -558,6 +566,7 @@ async fn external_active_operation_lease_rejects_patch_from_independent_manager(
             SubmitPromptRequest {
                 prompt: "hold cross-process lease".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .expect("first manager starts run");
@@ -640,6 +649,7 @@ async fn stale_manager_rebuilds_all_model_authority_after_external_patch() {
             SubmitPromptRequest {
                 prompt: "must use externally committed authority".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .expect("stale manager converges before starting the next run");

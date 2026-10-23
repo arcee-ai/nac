@@ -16,6 +16,7 @@ pub(crate) struct StartTraditionalChild {
     pub(crate) profile: String,
     pub(crate) description: String,
     pub(crate) prompt: String,
+    pub(crate) origin: nac_core::store::InputOrigin,
     pub(crate) child_session_id: Option<String>,
     pub(crate) background: bool,
 }
@@ -83,6 +84,7 @@ impl<'a> DelegationApplication<'a> {
                     profile: command.profile,
                     description: command.description,
                     prompt: command.prompt,
+                    origin: command.origin,
                     execution_mode: if command.background {
                         TraditionalChildExecutionMode::Background
                     } else {
@@ -111,6 +113,37 @@ impl<'a> DelegationApplication<'a> {
             child_session_id,
         )?
         .ok_or_else(|| anyhow!("traditional child was not found"))
+    }
+
+    pub(crate) async fn authorize_child_permission_review_retry(
+        &self,
+        parent_session_id: &str,
+        child_session_id: &str,
+        review_id: &str,
+    ) -> Result<nac_core::permissions::PermissionReview> {
+        let _host_admission = self.manager.managed_work_admission_async().await?;
+        let gate = self.manager.lifecycle_gate(parent_session_id);
+        let _lifecycle = gate.lock().await;
+        self.manager
+            .validate_operation_session(
+                parent_session_id,
+                super::persistence::OperationSessionScope::Direct,
+            )
+            .await?;
+        // Check ownership before attaching or waking any child service.
+        let manager = self.manager.clone();
+        let parent = parent_session_id.to_owned();
+        let child = child_session_id.to_owned();
+        self.manager
+            .inner
+            ._store_ownership
+            .call_legacy(move || manager.delegation().traditional_child(&parent, &child))
+            .await??;
+        let service = self.manager.attach_session(child_session_id).await?;
+        service.reconcile_traditional_child_terminal().await?;
+        service
+            .authorize_child_permission_review_retry(parent_session_id, review_id)
+            .await
     }
 
     pub(crate) async fn cancel_traditional_child(

@@ -212,7 +212,7 @@ fn identified_selection_migration_from_32_preserves_legacy_records_and_reopens()
         connection
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        34
+        35
     );
     let columns: (Option<String>, Option<String>) = connection
         .query_row(

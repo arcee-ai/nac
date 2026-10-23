@@ -60,6 +60,7 @@ import type {
   OrchestratorSteeringResponse,
   PermissionApprovalMode,
   PermissionReply,
+  PermissionReview,
   PermissionStateResponse,
   SessionGoalRecord,
   StartTraditionalChildRequest,
@@ -536,6 +537,18 @@ export function createNacApi(nacClient: NacClient) {
       request<void>("POST", `${sessionPath(id)}/permissions/${encodeURIComponent(requestId)}`, {
         body: { reply },
       }),
+
+    authorizePermissionReviewRetry: (id: string, reviewId: string) =>
+      request<PermissionReview>(
+        "POST",
+        `${sessionPath(id)}/permissions/reviews/${encodeURIComponent(reviewId)}/authorize-retry`,
+      ),
+
+    authorizeChildPermissionReviewRetry: (parentId: string, childId: string, reviewId: string) =>
+      request<PermissionReview>(
+        "POST",
+        `${sessionPath(parentId)}/children/${encodeURIComponent(childId)}/permissions/reviews/${encodeURIComponent(reviewId)}/authorize-retry`,
+      ),
 
     setPermissionApprovalMode: (id: string, mode: PermissionApprovalMode) =>
       request<void>("PUT", `${sessionPath(id)}/permissions/mode`, {

@@ -5,11 +5,20 @@ import { useSessionPermissions, useTraditionalChildren } from "@/app/services/qu
 import { queryKeys } from "@/app/services/queries/keys";
 
 /** Read each broker independently; aggregation never changes request or grant ownership. */
-export function usePermissionQueue(sessionId: string, enabled: boolean, requesterLabel?: string) {
+export function usePermissionQueue(
+  sessionId: string,
+  enabled: boolean,
+  requesterLabel?: string,
+  {
+    poll = true,
+    includeChildren = true,
+    parentSessionId,
+  }: { poll?: boolean; includeChildren?: boolean; parentSessionId?: string } = {},
+) {
   const { api } = useNativeRuntime();
-  const parent = useSessionPermissions(sessionId, enabled);
-  const children = useTraditionalChildren(sessionId, enabled);
-  const records = enabled ? (children.data ?? []) : [];
+  const parent = useSessionPermissions(sessionId, enabled, poll);
+  const children = useTraditionalChildren(sessionId, enabled && includeChildren);
+  const records = enabled && includeChildren ? (children.data ?? []) : [];
   const childPermissions = useQueries({
     queries: records.map((child) => ({
       queryKey: queryKeys.sessionPermissions(child.child_session_id),
@@ -21,9 +30,10 @@ export function usePermissionQueue(sessionId: string, enabled: boolean, requeste
     })),
   });
   const scopes = [
-    { sessionId, label: requesterLabel ?? "this session", query: parent },
+    { sessionId, parentSessionId, label: requesterLabel ?? "this session", query: parent },
     ...records.map((child, index) => ({
       sessionId: child.child_session_id,
+      parentSessionId: child.parent_session_id,
       label: `child agent “${child.description}”`,
       query: childPermissions[index],
     })),
@@ -37,5 +47,15 @@ export function usePermissionQueue(sessionId: string, enabled: boolean, requeste
       key: JSON.stringify([scope.sessionId, request.id]),
     })),
   );
-  return { parent, children, records, scopes, requests };
+  const reviews = scopes
+    .flatMap((scope) =>
+      (scope.query.data?.reviews ?? []).map((review) => ({
+        scope,
+        review,
+        key: JSON.stringify([scope.sessionId, review.id]),
+        authorizable: (scope.query.data?.authorizable_review_ids ?? []).includes(review.id),
+      })),
+    )
+    .sort((left, right) => right.review.created_at_epoch_ms - left.review.created_at_epoch_ms);
+  return { parent, children, records, scopes, requests, reviews, includeChildren };
 }

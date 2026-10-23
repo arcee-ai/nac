@@ -135,6 +135,65 @@ pub fn create_session_inbox_item(
     target_run_id: Option<&str>,
     client_id: Option<&str>,
 ) -> Result<SessionInboxRecord> {
+    insert_session_inbox_item(path, session_id, delivery, content, target_run_id, client_id, None)
+}
+command CreateSessionInboxItemCommand {
+    session_id: String = session_id.to_owned(),
+    delivery: InboxDelivery = delivery,
+    content: String = content.to_owned(),
+    target_run_id: Option<String> = target_run_id.map(str::to_owned),
+    client_id: Option<String> = client_id.map(str::to_owned),
+}
+call |command| (&command.session_id, command.delivery, &command.content, command.target_run_id.as_deref(), command.client_id.as_deref())
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+coordinated_command! {
+/// Creates an inbox item a person typed on a human-facing route.
+/// `review_intent` is their text as typed, before expansion; it becomes
+/// review intent when the item reaches the model, never before.
+pub fn create_person_session_inbox_item(
+    path: &Path,
+    session_id: &str,
+    delivery: InboxDelivery,
+    content: &str,
+    target_run_id: Option<&str>,
+    client_id: Option<&str>,
+    review_intent: &str,
+) -> Result<SessionInboxRecord> {
+    insert_session_inbox_item(
+        path,
+        session_id,
+        delivery,
+        content,
+        target_run_id,
+        client_id,
+        Some(review_intent),
+    )
+}
+command CreatePersonSessionInboxItemCommand {
+    session_id: String = session_id.to_owned(),
+    delivery: InboxDelivery = delivery,
+    content: String = content.to_owned(),
+    target_run_id: Option<String> = target_run_id.map(str::to_owned),
+    client_id: Option<String> = client_id.map(str::to_owned),
+    review_intent: String = review_intent.to_owned(),
+}
+call |command| (&command.session_id, command.delivery, &command.content, command.target_run_id.as_deref(), command.client_id.as_deref(), &command.review_intent)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+fn insert_session_inbox_item(
+    path: &Path,
+    session_id: &str,
+    delivery: InboxDelivery,
+    content: &str,
+    target_run_id: Option<&str>,
+    client_id: Option<&str>,
+    review_intent: Option<&str>,
+) -> Result<SessionInboxRecord> {
     let session_id = session_id.trim();
     let content = content.trim();
     if session_id.is_empty() {
@@ -151,29 +210,19 @@ pub fn create_session_inbox_item(
     connection.execute(
         "INSERT INTO session_inbox
          (session_id, delivery, status, content, target_run_id, client_id,
-          created_at, updated_at)
-         VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?6)",
+          created_at, updated_at, review_intent)
+         VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?6, ?7)",
         params![
             session_id,
             delivery.as_str(),
             content,
             target_run_id,
             client_id,
-            now
+            now,
+            review_intent
         ],
     )?;
     load_session_inbox_item_with_connection(&connection, session_id, connection.last_insert_rowid())
-}
-command CreateSessionInboxItemCommand {
-    session_id: String = session_id.to_owned(),
-    delivery: InboxDelivery = delivery,
-    content: String = content.to_owned(),
-    target_run_id: Option<String> = target_run_id.map(str::to_owned),
-    client_id: Option<String> = client_id.map(str::to_owned),
-}
-call |command| (&command.session_id, command.delivery, &command.content, command.target_run_id.as_deref(), command.client_id.as_deref())
-correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port public;
 }
 
 coordinated_command! {

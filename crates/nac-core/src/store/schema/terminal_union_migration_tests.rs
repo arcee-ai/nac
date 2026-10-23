@@ -252,7 +252,7 @@ fn assert_union(connection: &Connection) {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        34
+        35
     );
     assert!(table_exists(connection, "human_shell_operations").unwrap());
     assert!(column_exists(connection, "session_inbox", "admission_id").unwrap());

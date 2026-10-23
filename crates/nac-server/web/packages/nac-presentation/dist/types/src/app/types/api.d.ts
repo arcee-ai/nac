@@ -106,6 +106,7 @@ export type PermissionRequestResource = ApiSchema<"PermissionRequestResource">;
 export type PermissionRequest = ApiSchema<"PermissionRequest">;
 export type PermissionGrantRecord = ApiSchema<"PermissionGrantRecord">;
 export type PermissionStateResponse = ApiSchema<"PermissionStateResponse">;
+export type PermissionReview = ApiSchema<"PermissionReview">;
 export type GoalStatus = ApiSchema<"GoalStatus">;
 export type SessionGoalRecord = ApiSchema<"SessionGoalRecord">;
 export type CreateGoalRequest = ApiSchema<"CreateGoalRequest">;

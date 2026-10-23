@@ -154,6 +154,8 @@ export function SubagentComposer({
             sessionId={permissionSessionId}
             behavior={permissionBehavior}
             autoApprovalAvailable={false}
+            retryParentSessionId={target.mode === "child" ? parentSessionId : undefined}
+            poll={running}
             requesterLabel={requesterLabel}
           />
         ) : null

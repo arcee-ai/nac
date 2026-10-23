@@ -48,12 +48,17 @@ mod chat_stream;
 mod chatgpt_codex;
 mod client;
 mod history;
+mod jev;
+mod permission_reviewer;
 mod providers;
 mod pseudo_tool_calls;
 mod redact;
 mod requests;
 mod responses;
 mod responses_stream;
+#[cfg(feature = "review-fixture")]
+mod review_fixture;
+mod reviewer_policy;
 mod sse;
 mod stream;
 #[cfg(test)]
@@ -78,13 +83,69 @@ pub use catalog::{
 pub(crate) use catalog::{
     Compat, CompletionsThinkingFormat, CompletionsTokenLimit, ModelMetadata, ThinkingLevelMap,
 };
+pub use jev::{smoke_test_jev_reviewer, JevReviewer, ARCEE_REVIEW_CREDENTIAL_REQUIRED};
+#[cfg(feature = "review-fixture")]
+pub use review_fixture::ScriptedReviewer;
+
+/// The calibrated Clef reviewer for new permission brokers.
+/// Construction-time profile selection is snapshotted here; a
+/// `review-fixture` build may run a scripted browser journey instead.
+pub(crate) fn default_permission_reviewer(
+) -> std::sync::Arc<dyn crate::permissions::PermissionReviewer> {
+    #[cfg(feature = "review-fixture")]
+    if let Some(reviewer) = ScriptedReviewer::from_environment() {
+        return std::sync::Arc::new(reviewer);
+    }
+    permission_reviewer::from_environment()
+}
 pub use providers::{
     list_managed_provider_models, list_provider_models, list_provider_models_with_http_policy,
     provider_default_base_url, provider_uses_api_key, ProviderModel,
 };
 pub(crate) use redact::{
     redact_credentials, redact_credentials_with_extra_headers, redact_json_body_with_extra_headers,
+    REDACTED as REDACTED_MARKER,
 };
+
+/// Credential values NAC itself holds or can see: stored API keys, the stored
+/// Arcee login tokens, and secret-named process environment variables. Used
+/// only to remove exact values from text that leaves the process, so an
+/// unreadable store is an error rather than an empty set.
+pub(crate) fn known_credential_values() -> Result<Vec<String>> {
+    let mut values = api_key_store::stored_api_key_values()?;
+    if let Some(auth) = arcee::read_stored_auth_optional()? {
+        values.push(auth.access_token);
+        values.push(auth.refresh_token);
+    }
+    values.extend(environment_credential_values(std::env::vars()));
+    values.retain(|value| !value.is_empty());
+    values.sort();
+    values.dedup();
+    Ok(values)
+}
+
+/// Exempt known non-secret settings by name, never by the length or shape of
+/// their value: even a one-character password must remain an exact secret.
+fn environment_credential_values(
+    variables: impl IntoIterator<Item = (String, String)>,
+) -> impl Iterator<Item = String> {
+    variables
+        .into_iter()
+        .filter(|(name, value)| {
+            crate::permissions::is_secret_name(name)
+                && !value.is_empty()
+                && ![
+                    "TOKENIZERS_PARALLELISM",
+                    "KEYTIMEOUT",
+                    "DESKTOP_SESSION",
+                    "KDE_FULL_SESSION",
+                    "SESSION_MANAGER",
+                ]
+                .iter()
+                .any(|setting| name.eq_ignore_ascii_case(setting))
+        })
+        .map(|(_, value)| value)
+}
 
 /// Resolve the API key a backend would use at run time.
 ///
@@ -471,3 +532,6 @@ use responses::*;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod reviewer_fixtures;

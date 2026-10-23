@@ -28,6 +28,9 @@ separate owners.
   deterministic control Deny and additional input Deny when granting human input.
   It grants no model approval bypass. Process-incarnation/controller revision
   fences must survive approval waits and actual queued writer admission.
+- Automatic review answers only an Ask that policy produced, never creates
+  grants, and fails closed: an ineligible request keeps the manual path and
+  an unavailable reviewer blocks rather than allows.
 - Persistence of grants belongs to the store adapter; evaluation depends on a
   narrow grant interface rather than transport or UI types.
 
@@ -39,7 +42,20 @@ separate owners.
 - `shell_parser.rs` / `command_classification.rs` — token/command semantics.
 - `resource_projection.rs` / `resource_binding.rs` — prepared resource identity
   before and after approval.
-- `broker.rs` — interactive request/reply lifecycle.
+- `broker.rs` — interactive request/reply lifecycle. It stays one module
+  (about 900 lines) because pending prompts, answer-mode transitions, captured
+  run capabilities, waiter delivery and human grant settlement share admission
+  ordering and the durable revision fence. Grant transaction mechanics remain
+  in the inward store adapter.
+- `broker_review.rs` — Approve for me on the broker: reviewer wiring, the
+  review of one eligible Ask request, and blocked-action retry authorization.
+- `review.rs` — review eligibility, the redacted reviewer projection, and
+  per-run review limits. Its roughly 900 lines keep the bounded review record,
+  exact-action retry memory, latched run capability and outcome accounting
+  together so reset, retry restoration and stop limits share one owner. The
+  reviewer itself (Jev) lives in `../model/jev.rs`.
+- `review_failure.rs` — fixed failure categories for clients; provider details
+  remain server diagnostics and never become model or UI error text.
 - `../store/permission_grants.rs` — durable remembered-grant adapter.
 - `permissions_tests.rs` — sibling characterization suite.
 

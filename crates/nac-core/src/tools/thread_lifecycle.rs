@@ -215,6 +215,7 @@ impl ActiveThreadRegistry {
         thread_name: &str,
         instruction: &str,
         expected_run_id: Option<&str>,
+        origin: crate::store::InputOrigin,
     ) -> anyhow::Result<Option<crate::store::ThreadSteeringRecord>> {
         let state = self.lock();
         if expected_run_id.is_some() && state.run_id.as_deref() != expected_run_id {
@@ -223,13 +224,22 @@ impl ActiveThreadRegistry {
         let Some(dispatch) = state.dispatches.get(thread_name) else {
             return Ok(None);
         };
-        crate::store::queue_thread_steering(
-            store_path,
-            session_id,
-            thread_name,
-            &dispatch.dispatch_id,
-            instruction,
-        )
+        match origin {
+            crate::store::InputOrigin::Person => crate::store::queue_person_thread_steering(
+                store_path,
+                session_id,
+                thread_name,
+                &dispatch.dispatch_id,
+                instruction,
+            ),
+            crate::store::InputOrigin::Automation => crate::store::queue_thread_steering(
+                store_path,
+                session_id,
+                thread_name,
+                &dispatch.dispatch_id,
+                instruction,
+            ),
+        }
         .map(Some)
     }
 
@@ -483,7 +493,8 @@ mod active_thread_registry_tests {
                 "session",
                 "worker",
                 "belongs to run one",
-                Some("run-1")
+                Some("run-1"),
+                crate::store::InputOrigin::Automation,
             )
             .unwrap()
             .is_none());

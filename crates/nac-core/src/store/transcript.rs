@@ -438,6 +438,15 @@ fn mark_inbox_item_delivered(
             "inbox item {item_id} was changed or delivered before its transcript commit"
         ));
     }
+    // A person's item becomes review intent as it reaches the model.
+    let review_intent: Option<String> = transaction.query_row(
+        "SELECT review_intent FROM session_inbox WHERE session_id = ?1 AND id = ?2",
+        params![session_id, item_id],
+        |row| row.get(0),
+    )?;
+    if let Some(text) = review_intent {
+        super::record_review_intent(transaction, session_id, &text)?;
+    }
     Ok(())
 }
 
@@ -595,7 +604,30 @@ impl TranscriptLogWriter {
         }, call |command| command.writer.append_run_prompt(&command.session_id, command.idx, &command.message, &command.run_id),
         correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
 
-        self.append_run_prompt_inner(session_id, idx, message, run_id, None)
+        self.append_run_prompt_inner(session_id, idx, message, run_id, None, None)
+    }
+
+    /// Appends a run prompt a person typed on a human-facing route and, in
+    /// the same transaction, records `review_intent` (their text as typed,
+    /// before expansion) as review intent.
+    pub fn append_person_run_prompt(
+        &self,
+        session_id: &str,
+        idx: u64,
+        message: &Message,
+        run_id: &str,
+        review_intent: &str,
+    ) -> Result<()> {
+        coordinate_writer!(self, Result<()>, {
+            session_id: String = session_id.to_owned(),
+            idx: u64 = idx,
+            message: Message = message.clone(),
+            run_id: String = run_id.to_owned(),
+            review_intent: String = review_intent.to_owned(),
+        }, call |command| command.writer.append_person_run_prompt(&command.session_id, command.idx, &command.message, &command.run_id, &command.review_intent),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
+        self.append_run_prompt_inner(session_id, idx, message, run_id, None, Some(review_intent))
     }
 
     pub fn append_inbox_run_prompt(
@@ -615,7 +647,7 @@ impl TranscriptLogWriter {
         }, call |command| command.writer.append_inbox_run_prompt(&command.session_id, command.idx, &command.message, &command.run_id, command.inbox_item_id),
         correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
 
-        self.append_run_prompt_inner(session_id, idx, message, run_id, Some(inbox_item_id))
+        self.append_run_prompt_inner(session_id, idx, message, run_id, Some(inbox_item_id), None)
     }
 
     fn append_run_prompt_inner(
@@ -625,6 +657,7 @@ impl TranscriptLogWriter {
         message: &Message,
         run_id: &str,
         inbox_item_id: Option<i64>,
+        review_intent: Option<&str>,
     ) -> Result<()> {
         let Message::User { content } = message else {
             anyhow::bail!("a run prompt must be a user transcript message");
@@ -648,6 +681,9 @@ impl TranscriptLogWriter {
                         content,
                     )?;
                     mark_inbox_item_delivered(transaction, session_id, item_id, run_id, content)?;
+                }
+                if let Some(text) = review_intent {
+                    super::record_review_intent(transaction, session_id, text)?;
                 }
                 Ok(())
             },
@@ -710,7 +746,7 @@ impl TranscriptLogWriter {
                 session_id,
                 record.id,
                 run_id,
-                &record.content,
+                &record.content
             )?;
         }
         let ids = records.iter().map(|r| r.id).collect::<Vec<_>>();
@@ -1038,6 +1074,12 @@ impl TranscriptLogWriter {
             .map(|(_, entry, message)| (entry.idx, message.clone()))
             .collect();
         let recovery = if let Some((position, expected_idx, found_idx)) = boundary {
+            if decoded_rows[position..]
+                .iter()
+                .any(|(_, _, message)| matches!(message, Message::User { .. }))
+            {
+                super::review_intent::invalidate_review_intent(&transaction, session_id)?;
+            }
             for (id, _, _) in &decoded_rows[position..] {
                 transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
             }
@@ -1072,7 +1114,7 @@ impl TranscriptLogWriter {
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let row_ids = {
+        let (row_ids, removed_user) = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
                  FROM thread_events
@@ -1084,6 +1126,7 @@ impl TranscriptLogWriter {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                 })?;
             let mut row_ids = Vec::new();
+            let mut removed_user = false;
             for row in rows {
                 let (id, event_json) = row?;
                 let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
@@ -1092,13 +1135,17 @@ impl TranscriptLogWriter {
                     )
                 })?;
                 if entry.idx >= from_idx {
+                    removed_user |= entry.kind == TranscriptMessageKind::User;
                     row_ids.push(id);
                 }
             }
-            row_ids
+            (row_ids, removed_user)
         };
         for id in &row_ids {
             transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
+        }
+        if removed_user {
+            super::review_intent::invalidate_review_intent(&transaction, session_id)?;
         }
         if !row_ids.is_empty() {
             refresh_session_summary(&transaction, session_id)?;
@@ -1133,7 +1180,7 @@ impl TranscriptLogWriter {
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let row_ids = {
+        let (row_ids, removed_user) = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
                  FROM thread_events
@@ -1145,6 +1192,7 @@ impl TranscriptLogWriter {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                 })?;
             let mut row_ids = Vec::new();
+            let mut removed_user = false;
             for row in rows {
                 let (id, event_json) = row?;
                 let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
@@ -1153,11 +1201,29 @@ impl TranscriptLogWriter {
                     )
                 })?;
                 if entry.idx >= from_idx {
+                    removed_user |= entry.kind == TranscriptMessageKind::User;
                     row_ids.push(id);
                 }
             }
-            row_ids
+            (row_ids, removed_user)
         };
+        let previous_json: String = transaction.query_row(
+            "SELECT messages_json FROM sessions WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )?;
+        let previous: Vec<Message> = serde_json::from_str(&previous_json)
+            .context("failed to parse previous transcript snapshot")?;
+        let changed_user = previous.iter().enumerate().any(|(idx, message)| {
+            if let Message::User { content } = message {
+                !matches!(messages.get(idx), Some(Message::User { content: kept }) if content == kept)
+            } else {
+                false
+            }
+        });
+        if removed_user || changed_user {
+            super::review_intent::invalidate_review_intent(&transaction, session_id)?;
+        }
         let updated = transaction.execute(
             "UPDATE sessions SET messages_json = ?1 WHERE session_id = ?2",
             params![messages_json, session_id],

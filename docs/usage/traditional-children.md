@@ -17,6 +17,15 @@ its traditional children. It answers only requests that reach each child's
 broker after configured and hard denials; remembered grants remain child-local.
 Managed orchestrators are a separate topology and do not inherit the mode.
 
+In **Approve for me** mode, the child's permissions dialog retains blocked
+reviews even after the child finishes. **Authorize retry** routes through the
+owning parent and authorizes one matching child action to be reviewed again;
+it does not change the inherited mode or create a remembered grant. A running
+child receives a steer for its current generation. A terminal child starts a
+new background generation, whose completion is delivered to the parent through
+the usual durable completion inbox. Recent reviews and retry authorizations
+exist only in the current server process; a restart does not recreate them.
+
 Open the people control beside the direct-session composer to start, inspect,
 continue, steer, cancel, or open a child transcript. The first visible profile
 is `general`. It exposes exactly `read`, `write`, `edit`, `glob`, `grep`,

@@ -620,6 +620,24 @@ mod tests {
             .git_dir_mounts
             .iter()
             .any(|mount| mount.host == common_git_dir.join("objects") && !mount.read_only));
+        // The overlays write the host repository's objects and refs, so
+        // review treats the fork like a real machine.
+        let mut mounts = forked.git_dir_mounts.clone();
+        mounts.push(MountSpec {
+            host: forked.host.clone(),
+            guest: PathBuf::from(crate::sandbox::DEFAULT_SANDBOX_WORKDIR),
+            read_only: false,
+        });
+        let spec = crate::sandbox::SandboxSpec {
+            mounts,
+            worktree: Some(forked.worktree.clone()),
+            ..crate::sandbox::SandboxSpec::default()
+        };
+        assert!(
+            spec.mounts_host_data_beyond_workspace(),
+            "{:?}",
+            spec.mounts
+        );
         // Host launch registers the fork without checking out repository
         // content; materialization is deferred to the sandbox container.
         assert!(!forked.worktree.path.join("a.txt").exists());

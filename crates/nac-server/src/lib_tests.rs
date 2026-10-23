@@ -982,6 +982,10 @@ fn stalled_then_scripted_direct_response() -> (
 
 #[path = "tests/catalog.rs"]
 mod catalog;
+#[path = "tests/child_input_origin.rs"]
+mod child_input_origin;
+#[path = "tests/child_review_retry.rs"]
+mod child_review_retry;
 #[path = "tests/children_and_leases.rs"]
 mod children_and_leases;
 #[path = "tests/compaction.rs"]
@@ -1001,6 +1005,8 @@ mod managed_fault_fixture;
 mod managed_load;
 #[path = "tests/managed_topology.rs"]
 mod managed_topology;
+#[path = "tests/openapi_contract.rs"]
+mod openapi_contract;
 
 #[path = "tests/goal_reads.rs"]
 mod goal_reads;

@@ -330,6 +330,9 @@ impl From<anyhow::Error> for ApiError {
         } else if let Some(error) = error.downcast_ref::<PermissionApprovalModeUpdateError>() {
             match error {
                 PermissionApprovalModeUpdateError::ConcurrentChange => StatusCode::CONFLICT,
+                PermissionApprovalModeUpdateError::ReviewerUnavailable(_) => {
+                    StatusCode::BAD_REQUEST
+                }
             }
         } else if error.downcast_ref::<ModelConfigurationError>().is_some()
             || error.downcast_ref::<RequestConfigurationError>().is_some()

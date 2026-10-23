@@ -51,6 +51,12 @@ admission, cancellation, recovery, settlement, and direct interaction to the
 submodules above. New use-case logic belongs in a focused submodule; do not grow
 the root with another lifecycle implementation.
 
+`direct_interaction.rs` also remains a cohesive owner above 800 lines: direct
+input, parent-mediated child retry, inbox admission/wake and goal continuation
+share active-operation binding and durable enqueue-before-wake ordering. Retry
+rollback must use that same insertion boundary and preserve relationship leases
+through in-flight store calls; do not fork a second inbox mutation path.
+
 ## Verification
 
 ```sh

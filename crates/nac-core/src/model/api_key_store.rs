@@ -107,6 +107,12 @@ pub(super) fn read_stored_api_key(name: &str) -> Result<Option<String>> {
     Ok(load(&path)?.api_keys.remove(name))
 }
 
+/// Every stored key value, for exact-value redaction only.
+pub(super) fn stored_api_key_values() -> Result<Vec<String>> {
+    let path = store_path()?;
+    Ok(load(&path)?.api_keys.into_values().collect())
+}
+
 pub fn list_stored_api_keys() -> Result<Vec<StoredApiKeySummary>> {
     let path = store_path()?;
     Ok(load(&path)?

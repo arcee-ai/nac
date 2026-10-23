@@ -1,4 +1,4 @@
-.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size lint-workflows test-workflow-lint test-mcp-conformance test-nightly-portability test-terminal-browser generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size lint-workflows test-workflow-lint test-mcp-conformance test-nightly-portability test-terminal-browser generate-api-contract test-api-contract test-assets test-e2e test-e2e-review test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -157,6 +157,12 @@ test-e2e:
 	npm --prefix $(WEB_DIR) run build
 	$(CARGO) build --locked -p $(PKG) --bin $(BIN)
 	NAC_E2E_BINARY="$(CURDIR)/target/debug/$(BIN)" npm --prefix $(WEB_DIR) run test:e2e
+
+## Run the Approve for me browser journey against a scripted-reviewer build
+test-e2e-review:
+	npm --prefix $(WEB_DIR) run build
+	$(CARGO) build --locked -p $(PKG) --bin $(BIN) --features review-fixture --target-dir target/review-fixture
+	NAC_E2E_REVIEW_FIXTURE=1 NAC_E2E_BINARY="$(CURDIR)/target/review-fixture/debug/$(BIN)" npm --prefix $(WEB_DIR) run test:e2e -- review.e2e.ts
 
 ## Run non-destructive BasicAuth or portal-launch smoke checks against a remote Managed NAC
 test-e2e-remote:

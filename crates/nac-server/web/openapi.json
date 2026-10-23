@@ -3921,6 +3921,82 @@
         }
       }
     },
+    "/sessions/{session_id}/children/{child_session_id}/permissions/reviews/{review_id}/authorize-retry": {
+      "post": {
+        "tags": [
+          "permissions"
+        ],
+        "operationId": "post_sessions_session_id_children_child_session_id_permissions_reviews_review_id_authorize_retry",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "child_session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Parent authorized a fresh review of the child's blocked action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionReview"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Child or blocked review not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Primary direct parent required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/commands": {
       "get": {
         "tags": [
@@ -6311,6 +6387,74 @@
           },
           "409": {
             "description": "Concurrent permission approval mode update",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/permissions/reviews/{review_id}/authorize-retry": {
+      "post": {
+        "tags": [
+          "permissions"
+        ],
+        "operationId": "post_sessions_session_id_permissions_reviews_review_id_authorize_retry",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retry authorized; the model is asked to retry and the retry is reviewed again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionReview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Blocked review not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -14220,7 +14364,8 @@
         "description": "User-selected approval behavior for one durable direct ownership tree.\n\nThis is deliberately an answer policy at the broker boundary, not an\nexecution backend or a reusable resource grant.",
         "enum": [
           "manual",
-          "auto_approve"
+          "auto_approve",
+          "review"
         ]
       },
       "PermissionGrantRecord": {
@@ -14330,6 +14475,141 @@
           }
         }
       },
+      "PermissionReview": {
+        "type": "object",
+        "description": "Redacted record of one automatic review, emitted to clients. It carries\nno arguments beyond the redacted display already shown to the reviewer.",
+        "required": [
+          "id",
+          "session_id",
+          "tool",
+          "backend",
+          "resources",
+          "user_authorized_retry",
+          "reviewer",
+          "created_at_epoch_ms"
+        ],
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "call_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReviewCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PermissionReviewCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at_epoch_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "failure_reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PermissionReviewFailureReason",
+                "description": "A fixed, safe explanation for an unavailable review. No provider text."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PermissionReviewOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewResource"
+            }
+          },
+          "reviewer": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "user_authorized_retry": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PermissionReviewCode": {
+        "type": "string",
+        "description": "Stable machine-readable codes returned to the model with an unexecuted\noperation.",
+        "enum": [
+          "review_rejected",
+          "review_uncertain",
+          "review_unavailable",
+          "review_stopped"
+        ]
+      },
+      "PermissionReviewFailureReason": {
+        "type": "string",
+        "description": "Safe failure categories that clients can explain without provider details.",
+        "enum": [
+          "authentication",
+          "access_denied",
+          "model_unavailable",
+          "insufficient_credits",
+          "rate_limited",
+          "timeout",
+          "invalid_response",
+          "service_unavailable",
+          "cancelled"
+        ]
+      },
+      "PermissionReviewOutcome": {
+        "type": "string",
+        "description": "The outcome reported to clients and recorded for audit.",
+        "enum": [
+          "approved",
+          "rejected",
+          "uncertain",
+          "unavailable"
+        ]
+      },
       "PermissionStateResponse": {
         "type": "object",
         "required": [
@@ -14342,6 +14622,13 @@
             "$ref": "#/components/schemas/PermissionApprovalMode",
             "description": "Effective for this session's durable traditional-child ownership tree.\n`manual` is the compatibility default."
           },
+          "authorizable_review_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Blocked reviews the user may still authorize for one retry."
+          },
           "grants": {
             "type": "array",
             "items": {
@@ -14353,6 +14640,13 @@
             "items": {
               "$ref": "#/components/schemas/PermissionRequest"
             }
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PermissionReview"
+            },
+            "description": "Recent automatic reviews in every state, newest first: in progress\n(no outcome), approved, blocked or unavailable. Empty outside Approve\nfor me."
           }
         }
       },
@@ -15554,6 +15848,38 @@
           }
         }
       },
+      "ReviewCategory": {
+        "type": "string",
+        "description": "Risk category reported by a reviewer.",
+        "enum": [
+          "routine",
+          "destructive",
+          "exfiltration",
+          "credential",
+          "out_of_scope",
+          "unclear"
+        ]
+      },
+      "ReviewResource": {
+        "type": "object",
+        "description": "One resource as the reviewer sees it.",
+        "required": [
+          "action",
+          "resource",
+          "display"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "display": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          }
+        }
+      },
       "RunFailure": {
         "type": "object",
         "description": "Credential-redacted failure metadata suitable for persistence and API use.",
@@ -15985,6 +16311,44 @@
                 "type": "string",
                 "enum": [
                   "permission_approval_mode_changed"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An eligible Ask request was sent to the automatic reviewer. Carries\nonly the redacted projection the reviewer sees.",
+            "required": [
+              "review",
+              "type"
+            ],
+            "properties": {
+              "review": {
+                "$ref": "#/components/schemas/PermissionReview"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "permission_review_started"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The automatic reviewer finished. Rejected and uncertain reviews are\nreturned to the model unexecuted; the user may authorize one retry.",
+            "required": [
+              "review",
+              "type"
+            ],
+            "properties": {
+              "review": {
+                "$ref": "#/components/schemas/PermissionReview"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "permission_reviewed"
                 ]
               }
             }

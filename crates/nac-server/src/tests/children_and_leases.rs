@@ -195,6 +195,7 @@ async fn traditional_child_cancel_endpoint_propagates_to_active_generation() {
                 profile: "general".to_string(),
                 description: "cancel active child".to_string(),
                 prompt: "additional foreground steering".to_string(),
+                origin: nac_core::store::InputOrigin::Automation,
                 execution_mode: TraditionalChildExecutionMode::Foreground,
             },
         )
@@ -564,6 +565,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
             SubmitPromptRequest {
                 prompt: "bypass parent ownership".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap_err();
@@ -576,6 +578,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
             SubmitPromptRequest {
                 prompt: "bypass parent ownership".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap_err();
@@ -630,6 +633,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
                 OrchestratorSteeringRequest {
                     instruction: "bypass parent steering".to_string(),
                 },
+                nac_core::store::InputOrigin::Automation,
             )
             .await
             .unwrap_err();
@@ -796,6 +800,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
                 profile: "general".to_string(),
                 description: "owned child".to_string(),
                 prompt: "must remain opaque".to_string(),
+                origin: nac_core::store::InputOrigin::Automation,
                 execution_mode: TraditionalChildExecutionMode::Foreground,
             },
         )

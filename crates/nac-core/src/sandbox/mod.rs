@@ -211,6 +211,89 @@ impl Default for SandboxSpec {
     }
 }
 
+impl SandboxSpec {
+    /// Whether code in this sandbox can write host data beyond the workspace's
+    /// own files. The only writable mount allowed is the workspace at the
+    /// default workdir, and only when it holds no Git administrative data.
+    /// Git metadata is shared beyond the session: a live checkout's `.git`
+    /// holds every branch's refs and its hooks, and a forked worktree's
+    /// overlays write the host repository's `objects` and `refs`, so code
+    /// that can write it can move another branch or plant a hook that runs
+    /// on the host. Any other writable mount, such as one added with
+    /// `--mount`, counts too. Read-only mounts must also be checked: a Unix
+    /// socket or device can change host state through its protocol despite
+    /// the filesystem mount being read-only. Explicit GPU/device access also
+    /// exposes host authority independently of mounts.
+    pub(crate) fn mounts_host_data_beyond_workspace(&self) -> bool {
+        !self.gpu_devices.is_empty()
+            || self.mounts.iter().any(|mount| {
+                (!mount.read_only && mount.guest != Path::new(DEFAULT_SANDBOX_WORKDIR))
+                    || holds_host_authority(&mount.host, !mount.read_only)
+            })
+    }
+}
+
+/// Most entries examined to establish a mount's host authority. Larger or
+/// unreadable trees cannot establish workspace-only confinement.
+const HOST_AUTHORITY_SCAN_LIMIT: usize = 20_000;
+
+/// Detects special files (including sockets) in every mount and Git
+/// administrative data in writable mounts. A read-only socket still exposes
+/// the host daemon's authority. Writable Git metadata can move shared refs or
+/// plant host hooks. Symbolic links are not followed; an uncheckable root or
+/// tree retains the conservative host-mounted classification.
+fn holds_host_authority(root: &Path, writable: bool) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(root) else {
+        return true;
+    };
+    if metadata.is_file() {
+        return writable;
+    }
+    if !metadata.is_dir() {
+        return true;
+    }
+    let mut pending = vec![root.to_path_buf()];
+    let mut examined = 0;
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return true;
+        };
+        let mut bare = [false; 3];
+        for entry in entries {
+            examined += 1;
+            if examined > HOST_AUTHORITY_SCAN_LIMIT {
+                return true;
+            }
+            let Ok(entry) = entry else {
+                return true;
+            };
+            let Ok(file_type) = entry.file_type() else {
+                return true;
+            };
+            if !file_type.is_file() && !file_type.is_dir() && !file_type.is_symlink() {
+                return true;
+            }
+            let name = entry.file_name();
+            if writable {
+                match name.to_str() {
+                    Some(".git") => return true,
+                    Some("HEAD") => bare[0] = true,
+                    Some("objects") => bare[1] = true,
+                    Some("refs") => bare[2] = true,
+                    _ => {}
+                }
+            }
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            }
+        }
+        if bare.iter().all(|found| *found) {
+            return true;
+        }
+    }
+    false
+}
+
 /// The per-session worktree a sandboxed session runs in, when its working
 /// directory was forked from a git repository instead of mounting the user's
 /// live checkout. Recorded so a resumed session can re-attach the worktree and
