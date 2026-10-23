@@ -135,11 +135,16 @@ test("unknown standalone or embedded dialects and empty inventories fail closed"
   ])
     fixture({ ...clean(), helper: `#!${launcher}\nprintf '%s\\n' "$HOME"\n` }, (root) => {
       const result = lint(root, tools, { report: false });
-      assert.equal(result.failed, false, result.output);
       assert.ok(
         result.inputs.scripts.some(({ file }) => file === "helper"),
         launcher,
       );
+      // Without -S, multiple shebang arguments are nonportable. Discovery must
+      // still send them to ShellCheck, which retains its SC2096 rejection.
+      if (launcher.includes(" -i ") || launcher.includes(" -u ")) {
+        assert.equal(result.failed, true);
+        assert.match(result.output, /SC2096/);
+      } else assert.equal(result.failed, false, result.output);
     });
   for (const files of [
     { ...clean(), "ambiguous.sh": "echo ambiguous\n" },
