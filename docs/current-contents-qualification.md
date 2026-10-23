@@ -7,7 +7,16 @@ nor closes ALL-330. The new tests and isolated oracle are maintained evidence,
 not a production capture candidate. No launch behavior changes in this PR.
 
 Subject and starting base: `90be848ba3f0410b5e697bb60f4d71a935216361`, freshly
-fetched `origin/dev` on October 23, 2026. No base update was made. ALL-417,
+fetched `origin/dev` on October 23, 2026. The review candidate was subsequently
+rebased onto verified `dev` `57e97a84f996a5e440f61be6213939825bb0ce2d` after
+PR #416 landed the shared Tokio/Zod lockfile repair. Workspace helper source is
+byte-identical across those bases, and the qualification code was preserved;
+the only rebase conflict retained both Makefile test targets. The saved primary
+checkout was not changed. Recorded JSON remains the original measurement evidence
+with its original subject/repository SHA and runner fingerprints; it is not
+relabeled as new-base performance data. Focused acceptance and current-head CI
+are refreshed after `make setup` on the new base; see the PR for live results.
+ALL-417,
 ALL-418, ALL-415, ALL-329 and ALL-330 were read with their complete comment
 results (none). Current execution authorization supersedes their historical
 “planning only” notes. ALL-415's independent clean-ref delivery is unaffected.
