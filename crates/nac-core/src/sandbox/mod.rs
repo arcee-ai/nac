@@ -222,12 +222,14 @@ impl SandboxSpec {
     /// on the host. Any other writable mount, such as one added with
     /// `--mount`, counts too. Read-only mounts must also be checked: a Unix
     /// socket or device can change host state through its protocol despite
-    /// the filesystem mount being read-only.
+    /// the filesystem mount being read-only. Explicit GPU/device access also
+    /// exposes host authority independently of mounts.
     pub(crate) fn mounts_host_data_beyond_workspace(&self) -> bool {
-        self.mounts.iter().any(|mount| {
-            (!mount.read_only && mount.guest != Path::new(DEFAULT_SANDBOX_WORKDIR))
-                || holds_host_authority(&mount.host, !mount.read_only)
-        })
+        !self.gpu_devices.is_empty()
+            || self.mounts.iter().any(|mount| {
+                (!mount.read_only && mount.guest != Path::new(DEFAULT_SANDBOX_WORKDIR))
+                    || holds_host_authority(&mount.host, !mount.read_only)
+            })
     }
 }
 

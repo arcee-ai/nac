@@ -98,6 +98,10 @@ fn short_environment_credentials_remain_exact_secrets_and_keep_review_manual() {
     let flags = [
         ("TOKENIZERS_PARALLELISM", "false"),
         ("KEYTIMEOUT", "1"),
+        ("KDE_FULL_SESSION", "true"),
+        ("DESKTOP_SESSION", "ubuntu"),
+        ("DESKTOP_SESSION", "plasma"),
+        ("SESSION_MANAGER", "local/desktop:@/tmp/.ICE-unix/123"),
         ("PWD", "/workspace"),
         ("PGPASSWORD", ""),
     ];
@@ -110,7 +114,7 @@ fn short_environment_credentials_remain_exact_secrets_and_keep_review_manual() {
         "exec_command",
         &[PermissionResource::new("execute", "command:[ls]")],
         PermissionBackend::Local,
-        &["Inspect 1 file if the check is false".to_owned()],
+        &["Inspect 1 file on ubuntu or plasma if the check is false or true".to_owned()],
         false,
         &ExactSecrets::from_values(values)
     )

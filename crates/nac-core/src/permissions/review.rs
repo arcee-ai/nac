@@ -512,6 +512,9 @@ pub(crate) fn redact_text_with(text: &str, secrets: &ExactSecrets) -> (String, b
         // A secret value is a quoted string or an unquoted run of
         // non-space, non-quote characters.
         const VALUE: &str = r#"(?:"[^"]*"|'[^']*'|[^\s'"]+)"#;
+        // Shell words may concatenate quoted and unquoted segments, including
+        // an empty username before the credential separator.
+        const AUTH_VALUE: &str = r#"(?:"[^"]*:[^"]*"|'[^']*:[^']*'|(?:"[^"]*"|'[^']*'|[^\s\[\]'"])*:(?:"[^"]*"|'[^']*'|[^\s\[\]'"])*)"#;
         const NAME: &str = SECRET_NAME;
         [
             // Header values and bearer tokens.
@@ -529,6 +532,16 @@ pub(crate) fn redact_text_with(text: &str, secrets: &ExactSecrets) -> (String, b
             (
                 r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@".to_string(),
                 "${1}«redacted»@",
+            ),
+            // Curl also accepts scheme-less proxy/URL userinfo. Cover both
+            // readable shell text and percent-encoded canonical arguments.
+            (
+                r#"[^\s\[\]@'"]*:[^\s\[\]@'"]+@"#.to_string(),
+                "«redacted»@",
+            ),
+            (
+                r"(?i)[^\[\]]*%3A[^\[\]]+%40".to_string(),
+                "«redacted»%40",
             ),
             // JSON style quoted secret-named keys, and YAML style keys at the
             // start of a line. Bare prose such as NAC's own "broad executable
@@ -550,20 +563,20 @@ pub(crate) fn redact_text_with(text: &str, secrets: &ExactSecrets) -> (String, b
                 "${1}«redacted»",
             ),
             (
-                format!(r"((?:^|[\s\[])--(?:user|proxy-user)(?:=|\s+|\]\[|%3[Dd])){VALUE}"),
+                format!(r"((?:^|[\s\[])--(?:user|proxy-user|cert|proxy-cert)(?:=|\s+|\]\[|%3[Dd])){VALUE}"),
                 "${1}«redacted»",
             ),
             // Curl's short Basic Auth options also accept attached arguments
             // and option clusters, e.g. -ualice:pw and -su alice:pw. Match
             // both readable commands and the canonical [argument] form.
             (
-                r#"((?:^|[\s\[])-[^-\s\[\]'"]*[uU](?:\s+|\]\[)?)(?:"[^"]*:[^"]*"|'[^']*:[^']*'|[^\s'"\[\]]+:[^\s'"\[\]]*)"#.to_string(),
+                format!(r#"((?:^|[\s\[])-[^-\s\[\]'"]*[uUE](?:\s+|\]\[)?){AUTH_VALUE}"#),
                 "${1}«redacted»",
             ),
             // Canonical arguments percent-encode punctuation and whitespace,
             // including colons and spaces inside a quoted username.
             (
-                r"(\[-[^-\[\]]*[uU](?:\]\[)?)[^\[\]]*%3[Aa][^\[\]]*".to_string(),
+                r"(\[-[^-\[\]]*[uUE](?:\]\[)?)[^\[\]]*%3[Aa][^\[\]]*".to_string(),
                 "${1}«redacted»",
             ),
             // Known credential shapes.

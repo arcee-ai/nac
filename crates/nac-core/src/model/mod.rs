@@ -134,9 +134,15 @@ fn environment_credential_values(
         .filter(|(name, value)| {
             crate::permissions::is_secret_name(name)
                 && !value.is_empty()
-                && !["TOKENIZERS_PARALLELISM", "KEYTIMEOUT"]
-                    .iter()
-                    .any(|setting| name.eq_ignore_ascii_case(setting))
+                && ![
+                    "TOKENIZERS_PARALLELISM",
+                    "KEYTIMEOUT",
+                    "DESKTOP_SESSION",
+                    "KDE_FULL_SESSION",
+                    "SESSION_MANAGER",
+                ]
+                .iter()
+                .any(|setting| name.eq_ignore_ascii_case(setting))
         })
         .map(|(_, value)| value)
 }

@@ -31,7 +31,8 @@ answer modes:
   the session: a live checkout's `.git` holds every branch and its hooks,
   and a forked worktree writes the repository's objects and refs. So is a
   sandbox started with extra writable mounts (`--mount`) or with host sockets
-  or devices in any mount, including read-only mounts (`--mount-ro`). Read-only
+  or devices in any mount, including read-only mounts (`--mount-ro`), or with
+  explicit GPU/device access (`--sandbox-gpu` or API `gpus`). Read-only
   mount trees are scanned too: connecting to a daemon socket can change host
   state even when files cannot be written. Unreadable or over-budget mount
   trees retain the conservative classification. In these cases, broad
@@ -41,8 +42,9 @@ answer modes:
   error to the agent with a stable code (`review_rejected`, `review_uncertain`,
   `review_unavailable`, `review_stopped`). Everything else, including
   unsandboxed broad execution, unsupported shell syntax, terminal input,
-  credential files, Basic Auth arguments (including curl `-u`, `--user` and
-  `--proxy-user`), and operations whose description had to be redacted, keeps
+  credential files, authentication arguments (including curl `-u`, `--user`,
+  `--proxy-user`, certificate passphrases and scheme-less URL/proxy userinfo),
+  and operations whose description had to be redacted, keeps
   the manual prompt; without an interactive approver it fails closed.
 
 Automatic approval has durable ownership-tree scope. On a direct or

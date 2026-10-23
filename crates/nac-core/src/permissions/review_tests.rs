@@ -679,20 +679,40 @@ fn basic_auth_credentials_keep_shell_resources_and_human_intent_manual() {
         "curl -Ualice:canary8d1e https://example.com/health",
         "curl --proxy-user alice:canary8d1e https://example.com/health",
         "curl --proxy-user=alice:canary8d1e https://example.com/health",
+        "curl -u :canary8d1e https://example.com/health",
+        "curl -u:canary8d1e https://example.com/health",
+        "curl -u \"$USER\":canary8d1e https://example.com/health",
+        "curl -u 'alice':canary8d1e https://example.com/health",
+        "curl -u 'alice bob':canary8d1e https://example.com/health",
+        "curl -u alice:'canary with spaces' https://example.com/health",
+        "curl -x alice:canary8d1e@proxy.example:3128 https://example.com/health",
+        "curl --proxy alice:canary8d1e@proxy.example:3128 https://example.com/health",
+        "curl --socks5 alice:canary8d1e@proxy.example:1080 https://example.com/health",
+        "curl alice:canary8d1e@example.com/health",
+        "curl -E client.pem:canary8d1e https://example.com/health",
+        "curl -Eclient.pem:canary8d1e https://example.com/health",
+        "curl --cert client.pem:canary8d1e https://example.com/health",
+        "curl --proxy-cert=client.pem:canary8d1e https://example.com/health",
     ] {
         let resources =
             crate::permissions::shell_resources(command, Path::new("/workspace"), &backend);
-        assert!(review_eligibility(&resources, PermissionBackend::Local).is_ok());
+        assert_eq!(
+            review_eligibility(&resources, PermissionBackend::Local).is_ok(),
+            !command.contains("$USER"),
+            "only variable expansion is already ineligible: {command}"
+        );
         assert!(redact_text(command).1, "readable auth command: {command}");
         let canonical = &resources
             .iter()
             .find(|resource| resource.action == "execute")
             .unwrap()
             .resource;
-        assert!(
-            redact_text(canonical).1,
-            "canonical auth command: {command}"
-        );
+        if !command.contains("$USER") {
+            assert!(
+                redact_text(canonical).1,
+                "canonical auth command: {command}"
+            );
+        } // Unsupported expansion uses an opaque canonical hash; intent remains readable.
         assert!(
             review_request(
                 "exec_command",
@@ -734,6 +754,26 @@ fn basic_auth_credentials_keep_shell_resources_and_human_intent_manual() {
             "{command}"
         );
     }
+}
+
+#[test]
+fn gpu_devices_keep_broad_podman_execution_manual() {
+    for device in ["all", "/dev/dri/renderD128", "/dev/kfd"] {
+        let source = ReviewBackendSource::Sandbox(Box::new(crate::sandbox::SandboxSpec {
+            gpu_devices: vec![device.to_owned()],
+            ..crate::sandbox::SandboxSpec::default()
+        }));
+        assert_eq!(source.current(), ReviewBackend::PodmanWithHostMounts);
+        assert!(review_eligibility(
+            &[resource("execute_broad", "command:[make][test]")],
+            source.current()
+        )
+        .is_err());
+    }
+    assert_eq!(
+        ReviewBackendSource::Sandbox(Box::default()).current(),
+        ReviewBackend::Podman
+    );
 }
 
 #[cfg(unix)]
