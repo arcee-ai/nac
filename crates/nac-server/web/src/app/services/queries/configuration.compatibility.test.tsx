@@ -36,6 +36,7 @@ it("keeps MCP runtime reload live while setup defers model discovery", async () 
     state: "connected",
     auth_required: false,
     required: false,
+    sessions_blocked: false,
     tool_count: 0,
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

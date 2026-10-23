@@ -13402,7 +13402,8 @@
           "state",
           "required",
           "auth_required",
-          "tool_count"
+          "tool_count",
+          "sessions_blocked"
         ],
         "properties": {
           "auth_required": {
@@ -13437,6 +13438,10 @@
               "string",
               "null"
             ]
+          },
+          "sessions_blocked": {
+            "type": "boolean",
+            "description": "The user disconnected this server; sessions refuse to use it until it is connected."
           },
           "state": {
             "$ref": "#/components/schemas/McpRuntimeState"

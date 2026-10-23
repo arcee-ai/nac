@@ -35,7 +35,18 @@ impl McpToolCapture {
         if let Some(arguments) = arguments {
             params = params.with_arguments(arguments);
         }
-        let service = self.server.service.read().await.clone();
+        let refused = |error: anyhow::Error| ToolResult {
+            content: self
+                .server
+                .redactor
+                .redact(&format!("Error calling MCP tool '{name}': {error:#}"))
+                .into(),
+            is_error: true,
+        };
+        let service = match self.server.admitted_service().await {
+            Ok(service) => service,
+            Err(error) => return refused(error),
+        };
         let first_result = service.read().await.call_tool(params.clone()).await;
         match first_result {
             Ok(result) => {
@@ -45,6 +56,9 @@ impl McpToolCapture {
                 if self.server.config.has_header_helper() && authorization_required(&error) =>
             {
                 let _refresh = self.server.refresh.lock().await;
+                if let Err(error) = self.server.admit() {
+                    return refused(error);
+                }
                 let refreshed_service = {
                     let current = self.server.service.read().await.clone();
                     if Arc::ptr_eq(&current, &service) {
@@ -84,6 +98,9 @@ impl McpToolCapture {
                         current
                     }
                 };
+                if let Err(error) = self.server.admit() {
+                    return refused(error);
+                }
                 let refreshed_result = refreshed_service.read().await.call_tool(params).await;
                 match refreshed_result {
                     Ok(result) => {

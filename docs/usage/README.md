@@ -13,4 +13,5 @@ durable direct-session work.
 - [Traditional child sessions](traditional-children.md)
 - [Managed orchestrator sessions](managed-orchestrators.md)
 - [Native web retrieval](web-retrieval.md)
+- [MCP disconnect, log out, and revoke](mcp-disconnect-and-logout.md)
 - [Release lifecycle](releases.md)
