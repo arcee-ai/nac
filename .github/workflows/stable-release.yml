@@ -353,6 +353,13 @@ jobs:
           name: nac-${{ matrix.target }}
           path: dist/nac-${{ matrix.target }}.tar.gz
 
+  macos-native:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.run == 'true' }}
+    uses: ./.github/workflows/macos-native.yml
+    with:
+      source-sha: ${{ needs.prepare.outputs.sha }}
+
   managed:
     needs: prepare
     if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
@@ -373,7 +380,7 @@ jobs:
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed, source-security, workflow-lint]
+    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

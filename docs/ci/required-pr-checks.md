@@ -21,6 +21,7 @@ new candidate after the base advances; a prior head's green check is insufficien
 | test-server | yes | Server and stable binary, web tests, generated OpenAPI/types, all committed browser/client assets, production Chromium journeys |
 | test-core | yes | Core/catalog tests, release policy, installer, PR gate/rollout model tests |
 | test-workspace | yes | Contracts, credentials, managed and process crate tests; source command/binary/size, durability, managed load and static image contracts |
+| macos-native | yes | Native ARM macOS process/credential suites and 12 exact core terminal regressions; measured first/warm runs and Darwin behavioral failure control ([coverage](native-macos.md)) |
 | test | yes | Compatibility result covering all test lanes and lint |
 | build | yes | Existing Linux musl and macOS ARM release binary/archive validation |
 | managed | explicit | Reusable contract, pinned quality/fault-fixture, exact Linux image build and credential-independent smoke |
