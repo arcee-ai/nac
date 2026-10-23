@@ -46,6 +46,13 @@ checkout. Run `make setup` initially and after either lockfile changes.
 - Web/client drift: run `npm --prefix crates/nac-server/web run build`; inspect
   and commit all affected `assets/dist` and web package `dist` outputs. Run
   `make test-assets`, web tests and `make test-e2e` with production assets.
+- Docker base digests: inspect the upstream manifest and select the same
+  linux/amd64 platform for every Wolfi `FROM`. The static image contract
+  intentionally checks the reviewed exact base digest. Update its matching
+  digest literal in `scripts/test-managed-image-contract.sh` in the same repair
+  commit, then run `make test-managed-image-contract` and the full native managed
+  build/smoke/inventory lane. A bot-only Dockerfile bump should fail until this
+  deliberate contract repair; do not remove the pinned-base assertion.
 - Run the relevant required local gates and full current-head PR CI. Push the
   repair to the authorized bot branch (or a replacement reviewed PR if policy
   prevents it); keep the source PR linked. Recheck head/base, automated feedback,
