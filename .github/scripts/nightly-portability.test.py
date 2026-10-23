@@ -1,0 +1,144 @@
+"""Real process/failure controls; never run provider, SSH or container services."""
+import importlib.util
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+sys.dont_write_bytecode = True
+SCRIPT = Path(__file__).with_name('nightly-portability.py')
+spec = importlib.util.spec_from_file_location('portability', SCRIPT)
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+
+
+class Controls(unittest.TestCase):
+    def test_inventory_drift_fails_closed(self):
+        inventory = json.loads(runner.INVENTORY.read_text())
+        listing = '\n'.join(case['name'] + ': test' for case in inventory)
+        runner.verify_inventory(listing, inventory)
+        for changed in (listing + '\nunreviewed::paid_test: test', listing.split('\n', 1)[1]):
+            with self.assertRaisesRegex(RuntimeError, 'inventory drift'):
+                runner.verify_inventory(changed, inventory)
+        with self.assertRaisesRegex(RuntimeError, 'duplicate'):
+            runner.verify_inventory(listing, inventory + inventory[:1])
+
+    def test_zero_selected_or_ignored_does_not_pass(self):
+        for log in ('running 0 tests', 'test exact::case ... ignored'):
+            with self.assertRaisesRegex(RuntimeError, 'exact test did not pass'):
+                runner.require_exact(log, 'exact::case')
+        runner.require_exact('test exact::case ... ok', 'exact::case')
+
+    def test_allowlist_and_serial_commands(self):
+        # Guard the public CLI contract against accidentally including all ignored cases.
+        source = SCRIPT.read_text()
+        self.assertNotIn('--include-ignored', source)
+        self.assertIn("'--test-threads=1'", source)
+        included = [c for c in json.loads(runner.INVENTORY.read_text()) if c['disposition'] == 'included']
+        self.assertEqual(len(included), 4)
+        self.assertEqual(sum('process-PATH mutation' in c['capabilities'] for c in included), 2)
+        self.assertFalse(any('Podman machine' in c['capabilities'] for c in included))
+
+    def test_full_command_plan_is_serial_and_exact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'debug').mkdir()
+            (root / 'debug/nac-web').touch()
+            cargo = root / 'cargo'
+            cargo.write_text("""#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+inventory=json.loads(Path(os.environ['CONTROL_INVENTORY']).read_text())
+if '--list' in sys.argv:
+    print('\\n'.join(c['name']+': test' for c in inventory))
+elif '--exact' in sys.argv:
+    assert '--ignored' in sys.argv and '--test-threads=1' in sys.argv
+    names=[c['name'] for c in inventory if c['name'] in sys.argv]
+    assert len(names)==1
+    print('test '+names[0]+' ... ok')
+    with open(os.environ['CONTROL_ORDER'],'a') as f: f.write(names[0]+'\\n')
+elif '--workspace' in sys.argv and '--no-run' not in sys.argv:
+    assert '--ignored' not in sys.argv
+    with open(os.environ['CONTROL_ORDER'],'a') as f: f.write('workspace\\n')
+""")
+            cargo.chmod(0o700)
+            sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=runner.ROOT, text=True).strip()
+            order = root / 'order'
+            env = dict(os.environ, CARGO=str(cargo), CARGO_TARGET_DIR=str(root),
+                       CONTROL_INVENTORY=str(runner.INVENTORY), CONTROL_ORDER=str(order))
+            result = subprocess.run([sys.executable, str(SCRIPT), '--expected-sha', sha,
+                                     '--output', str(root / 'evidence')],
+                                    env=env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            included = [c['name'] for c in json.loads(runner.INVENTORY.read_text())
+                        if c['disposition'] == 'included']
+            self.assertEqual(order.read_text().splitlines(), ['workspace', *included])
+            report = json.loads((root / 'evidence/report.json').read_text())
+            self.assertEqual(report['fixture_pids_remaining'], [])
+            self.assertEqual(report['fixture_files_remaining'], [])
+
+    def test_real_rust_seed_is_detected_once_and_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=runner.ROOT, text=True).strip()
+            result = subprocess.run([sys.executable, str(SCRIPT), '--expected-sha', sha,
+                                     '--seed-failure', '--output', str(output)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            report = json.loads((output / 'report.json').read_text())
+            self.assertEqual(report['result'], 'failed')
+            phases = report['phases']
+            self.assertEqual([p['label'] for p in phases].count('portability_seeded_failure'), 1)
+            self.assertEqual(phases[-1]['returncode'], 101)
+            self.assertIn('portability_seeded_failure ... FAILED', (output / 'seed-failure.log').read_text())
+            binary = Path(phases[-1]['command'][0])
+            self.assertFalse(binary.parent.exists())
+            self.assertFalse(any(p['label'] == 'workspace-default' for p in phases))
+
+    def test_cancellation_kills_root_and_child_and_retains_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            # Exercise the actual command supervisor in a subprocess, with readiness barrier.
+            helper = root / 'helper.py'
+            helper.write_text('''import importlib.util, pathlib, signal, sys
+spec = importlib.util.spec_from_file_location('runner', sys.argv[1])
+r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)
+signal.signal(signal.SIGTERM, r.interrupt)
+try:
+    r.run([sys.executable, '-c', sys.argv[3]], pathlib.Path(sys.argv[2]), None, [], 'cancel')
+except r.Cancelled:
+    sys.exit(130)
+''')
+            ready = root / 'ready'
+            log = root / 'child.log'
+            child = ("import pathlib,subprocess,sys,time,os; "
+                     "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(300)']); "
+                     f"pathlib.Path({str(ready)!r}).write_text(str(os.getpid())+' '+str(p.pid)); "
+                     "print('ready',flush=True); time.sleep(300)")
+            process = subprocess.Popen([sys.executable, str(helper), str(SCRIPT), str(log), child])
+            try:
+                deadline = time.monotonic() + 10
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(.02)
+                self.assertTrue(ready.exists(), 'child never reached readiness barrier')
+                pids = [int(p) for p in ready.read_text().split()]
+                process.send_signal(signal.SIGTERM)
+                self.assertEqual(process.wait(timeout=10), 130)
+                for pid in pids:
+                    # A reparented zombie is dead, even before launchd reaps it.
+                    result = subprocess.run(['ps', '-p', str(pid), '-o', 'stat='], capture_output=True, text=True)
+                    self.assertTrue(not result.stdout.strip() or result.stdout.strip().startswith('Z'), result.stdout)
+                self.assertIn('ready', log.read_text())
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+
+
+if __name__ == '__main__':
+    unittest.main()
