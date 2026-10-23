@@ -15,7 +15,7 @@ export declare function useManagedHostStatus(): import("@tanstack/react-query").
     checks: import("../../types/openapi.generated").components["schemas"]["ReadinessCheck"][];
     github_status: string;
     logical_host_id: string;
-    maintenance?: null | import("../../types/openapi.generated").components["schemas"]["ManagedMaintenanceSnapshot"];
+    maintenance?: import("../../types/openapi.generated").components["schemas"]["ManagedMaintenanceSnapshot"] | null;
     maintenance_state: string;
     managed: boolean;
     migration_failure?: string | null;
