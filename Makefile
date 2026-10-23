@@ -78,7 +78,12 @@ test-rust:
 
 ## Run the official frozen client requirements for every advertised MCP revision
 test-mcp-conformance:
-	sh scripts/test-mcp-conformance.sh
+	CARGO="$(CARGO)" sh scripts/test-mcp-conformance.sh --seed
+
+.PHONY: test-mcp-conformance-contract
+## Check conformance inventory, failure propagation, and applicability without compiling Rust
+test-mcp-conformance-contract:
+	node --test scripts/mcp-conformance/*.test.mjs
 
 ## Run frontend unit and component tests
 test-web:
@@ -272,6 +277,8 @@ help:
 		'  ci           Run formatting, lint, and test gates' \
 		'  test         Run Rust/frontend tests and web asset checks' \
 		'  test-rust    Run cargo test --workspace --locked' \
+		'  test-mcp-conformance Run both locked MCP revisions and seeded failure proof' \
+		'  test-mcp-conformance-contract Check MCP inventory and failure controls' \
 		'  test-web     Run frontend unit and component tests' \
 		'  test-release Validate stable release preparation policy' \
 		'  test-source-workflow Verify source commands, install safety, and supervision' \
