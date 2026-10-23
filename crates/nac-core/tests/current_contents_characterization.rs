@@ -16,6 +16,8 @@ impl Repo {
         repo.git(&["init", "-q"]);
         repo.git(&["config", "user.name", "fixture"]);
         repo.git(&["config", "user.email", "fixture@invalid"]);
+        repo.git(&["config", "core.attributesFile", "/dev/null"]);
+        repo.git(&["config", "core.excludesFile", "/dev/null"]);
         repo.git(&["config", "core.autocrlf", "false"]);
         repo.git(&["config", "core.filemode", "true"]);
         repo.put("tracked", b"base\n");
