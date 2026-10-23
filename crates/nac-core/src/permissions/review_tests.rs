@@ -693,6 +693,13 @@ fn basic_auth_credentials_keep_shell_resources_and_human_intent_manual() {
         "curl -Eclient.pem:canary8d1e https://example.com/health",
         "curl --cert client.pem:canary8d1e https://example.com/health",
         "curl --proxy-cert=client.pem:canary8d1e https://example.com/health",
+        "curl --header 'PRIVATE-TOKEN: canary8d1e' https://example.com/health",
+        "curl -H 'X-Vault-Token: canary8d1e' https://example.com/health",
+        "curl -H 'X-Auth-Key: canary8d1e' https://example.com/health",
+        "curl -HX-Auth-Key:canary8d1e https://example.com/health",
+        "curl -H X-Auth-Key:canary8d1e https://example.com/health",
+        "curl --tlspassword canary8d1e https://example.com/health",
+        "curl --proxy-tlspassword canary8d1e https://example.com/health",
     ] {
         let resources =
             crate::permissions::shell_resources(command, Path::new("/workspace"), &backend);

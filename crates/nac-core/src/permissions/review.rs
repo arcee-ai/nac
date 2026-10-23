@@ -524,6 +524,13 @@ pub(crate) fn redact_text_with(text: &str, secrets: &ExactSecrets) -> (String, b
                 ),
                 "$1: «redacted»",
             ),
+            // Custom authentication headers, in header-option/quoted text or
+            // canonical arguments. Requiring that context preserves prose
+            // such as "the session token: expires tomorrow".
+            (
+                format!(r#"(?i)(?:^|["'\[]|--(?:proxy-)?header(?:=|\s+|\]\[)|-[^-\s\[\]'"]*H(?:\s+|\]\[)?)([a-z0-9_-]*(?:key|token|secret|pass|auth|cookie)[a-z0-9_-]*)\s*(?::|%3a)(?:\s|%20|%09)*{VALUE}"#),
+                "$1: «redacted»",
+            ),
             (
                 r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}".to_string(),
                 "Bearer «redacted»",
@@ -558,7 +565,7 @@ pub(crate) fn redact_text_with(text: &str, secrets: &ExactSecrets) -> (String, b
             (format!(r"(?i)\b({NAME})\s*=\s*{VALUE}"), "$1=«redacted»"),
             (
                 format!(
-                    r"(?i)(--?(?:password|passwd|pass|token|secret|api[-_]?key|access[-_]?key|auth|cookie)(?:=|\s+|\]\[)){VALUE}"
+                    r"(?i)(--?(?:[a-z0-9_-]*(?:password|passwd|passphrase|token|secret|api[-_]?key|access[-_]?key|cookie)[a-z0-9_-]*|pass|auth)(?:=|\s+|\]\[|%3d)){VALUE}"
                 ),
                 "${1}«redacted»",
             ),
