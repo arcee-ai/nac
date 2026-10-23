@@ -547,12 +547,13 @@ test("applies parent auto-approval to child agents and identifies manual child r
       name: "read",
       callId: "child-auto-read",
       arguments: { path: automatic },
+      stream: "request",
     },
   );
   harness.provider.enqueue(
     "child-auto-complete",
     { functionOutputCallId: "child-auto-read" },
-    { kind: "text", text: "automatic child complete" },
+    { kind: "text", text: "automatic child complete", stream: "request" },
   );
   harness.provider.enqueue(
     "child-manual-read",
@@ -566,12 +567,13 @@ test("applies parent auto-approval to child agents and identifies manual child r
       name: "read",
       callId: "child-manual-read",
       arguments: { path: manual },
+      stream: "request",
     },
   );
   harness.provider.enqueue(
     "child-manual-complete",
     { functionOutputCallId: "child-manual-read" },
-    { kind: "text", text: "manual child complete" },
+    { kind: "text", text: "manual child complete", stream: "request" },
   );
 
   const sessionId = await createDirectSession(request, harness);
@@ -596,7 +598,10 @@ test("applies parent auto-approval to child agents and identifies manual child r
     "ALL58_AUTO_CHILD",
   );
   await harness.provider.waitForRequestCount(2);
-  expect((await automaticStart).status()).toBe(201);
+  const automaticResult = await automaticStart;
+  expect(automaticResult.status()).toBe(201);
+  const automaticChild = await automaticResult.json();
+  expect(automaticChild).toMatchObject({ status: "completed" });
   await expect(page.getByText("Permission required")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
@@ -642,8 +647,19 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await expect(permissionDialog).toContainText(String(manualChildId));
   await permissionDialog.getByRole("button", { name: "Allow once" }).click();
   await harness.provider.waitForRequestCount(4);
-  expect((await manualStart).status()).toBe(201);
+  const manualResult = await manualStart;
+  expect(manualResult.status()).toBe(201);
+  expect(await manualResult.json()).toMatchObject({
+    child_session_id: manualChildId,
+    status: "completed",
+  });
   harness.provider.assertConsumed();
+  expect(harness.provider.requests.map((entry) => entry.matchedStep)).toEqual([
+    "child-auto-read",
+    "child-auto-complete",
+    "child-manual-read",
+    "child-manual-complete",
+  ]);
 });
 
 test("renders an unknown primary tool failure safely after reload", async ({
