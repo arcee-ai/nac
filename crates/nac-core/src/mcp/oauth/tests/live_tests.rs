@@ -206,6 +206,7 @@ async fn step_up_tracks_only_missing_scopes_and_accepts_an_omitted_token_scope()
     assert_eq!(profile.pending_scopes, vec!["mcp:write", "mcp:admin"]);
 
     let adapter = OAuthProfileStore {
+        logout_generation: test_support::logout_generation(&path, "slack"),
         path,
         server_name: "slack".into(),
         endpoint: normalize_endpoint(endpoint).unwrap(),
@@ -308,6 +309,7 @@ async fn credential_clear_removes_pending_and_dynamic_registration_state() {
     })
     .unwrap();
     let adapter = OAuthProfileStore {
+        logout_generation: test_support::logout_generation(&path, "dynamic"),
         path,
         server_name: "dynamic".into(),
         endpoint: normalize_endpoint(endpoint).unwrap(),
@@ -321,6 +323,147 @@ async fn credential_clear_removes_pending_and_dynamic_registration_state() {
     assert!(profile.registered_client_secret.is_none());
 }
 
+#[test]
+fn logout_clears_authorization_material_but_preserves_configuration() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let (_home, _restore) = test_environment("logout");
+    configure_mcp_oauth(
+        Path::new("/workspace"),
+        "slack",
+        "https://mcp.slack.com/mcp",
+        configuration(),
+    )
+    .unwrap();
+    assert_eq!(
+        clear_mcp_oauth(Path::new("/workspace"), "slack").unwrap(),
+        McpOAuthStatus::NeedsAuthorization
+    );
+    assert!(has_mcp_oauth_profile(Path::new("/workspace"), "slack").unwrap());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn authorization_completing_across_logout_cannot_restore_credentials() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let (_home, _restore) = test_environment("completion-across-logout");
+    let endpoint = "https://mcp.example.test/mcp";
+    configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
+    let path = oauth_store_path(Path::new("/workspace")).unwrap();
+    let adapter = |logout_generation| OAuthProfileStore {
+        path: path.clone(),
+        server_name: "slack".into(),
+        endpoint: normalize_endpoint(endpoint).unwrap(),
+        expected_client_id: Some("public-test-client".into()),
+        save_mode: CredentialSaveMode::Independent,
+        logout_generation,
+    };
+    let credentials: StoredCredentials = serde_json::from_value(serde_json::json!({
+        "client_id": "public-test-client",
+        "token_response": {"access_token": "late-access-token", "token_type": "bearer"},
+        "granted_scopes": ["channels:history"],
+        "token_received_at": 1,
+        "issuer": null
+    }))
+    .unwrap();
+    let started_before_logout = adapter(test_support::logout_generation(&path, "slack"));
+
+    clear_mcp_oauth(Path::new("/workspace"), "slack").unwrap();
+    let error = CredentialStore::save(&started_before_logout, credentials.clone())
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("logged out"));
+    assert_eq!(
+        mcp_oauth_status(Path::new("/workspace"), "slack", endpoint).unwrap(),
+        McpOAuthStatus::NeedsAuthorization
+    );
+
+    let started_after_logout = adapter(test_support::logout_generation(&path, "slack"));
+    CredentialStore::save(&started_after_logout, credentials)
+        .await
+        .unwrap();
+    assert_eq!(
+        mcp_oauth_status(Path::new("/workspace"), "slack", endpoint).unwrap(),
+        McpOAuthStatus::Connected
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn authorization_completing_across_delete_and_recreate_cannot_save() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let (_home, _restore) = test_environment("completion-across-recreate");
+    let endpoint = "https://mcp.example.test/mcp";
+    configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
+    let path = oauth_store_path(Path::new("/workspace")).unwrap();
+    let started_before_delete = OAuthProfileStore {
+        logout_generation: test_support::logout_generation(&path, "slack"),
+        path: path.clone(),
+        server_name: "slack".into(),
+        endpoint: normalize_endpoint(endpoint).unwrap(),
+        expected_client_id: Some("public-test-client".into()),
+        save_mode: CredentialSaveMode::Independent,
+    };
+    delete_mcp_oauth_profile(Path::new("/workspace"), "slack").unwrap();
+    configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
+
+    let credentials: StoredCredentials = serde_json::from_value(serde_json::json!({
+        "client_id": "public-test-client",
+        "token_response": {"access_token": "late-access-token", "token_type": "bearer"},
+        "granted_scopes": ["channels:history"],
+        "token_received_at": 1,
+        "issuer": null
+    }))
+    .unwrap();
+    assert!(CredentialStore::save(&started_before_delete, credentials)
+        .await
+        .is_err());
+    assert_eq!(
+        mcp_oauth_status(Path::new("/workspace"), "slack", endpoint).unwrap(),
+        McpOAuthStatus::NeedsAuthorization
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn logout_waits_for_a_refresh_in_progress_and_then_clears_its_token() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let (_home, _restore) = test_environment("refresh-across-logout");
+    let endpoint = "https://mcp.example.test/mcp";
+    configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
+    let path = oauth_store_path(Path::new("/workspace")).unwrap();
+    let refreshing = OAuthProfileStore {
+        logout_generation: test_support::logout_generation(&path, "slack"),
+        path: path.clone(),
+        server_name: "slack".into(),
+        endpoint: normalize_endpoint(endpoint).unwrap(),
+        expected_client_id: Some("public-test-client".into()),
+        save_mode: CredentialSaveMode::RefreshGuarded,
+    };
+    let guard = CredentialStore::acquire_refresh_guard(&refreshing)
+        .await
+        .unwrap()
+        .expect("refresh saves hold the credential lock");
+    let home = std::env::var_os("NAC_HOME").unwrap();
+    let logout = std::thread::spawn(move || {
+        unsafe { std::env::set_var("NAC_HOME", home) };
+        clear_mcp_oauth(Path::new("/workspace"), "slack")
+    });
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(!logout.is_finished(), "logout must wait for the refresh");
+
+    let refreshed: StoredCredentials = serde_json::from_value(serde_json::json!({
+        "client_id": "public-test-client",
+        "token_response": {"access_token": "refreshed-access-token", "token_type": "bearer"},
+        "granted_scopes": ["channels:history"],
+        "token_received_at": 2,
+        "issuer": null
+    }))
+    .unwrap();
+    CredentialStore::save(&refreshing, refreshed).await.unwrap();
+    drop(guard);
+    logout.join().unwrap().unwrap();
+    assert!(read_store(&path).unwrap().profiles["slack"]
+        .credentials
+        .is_none());
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn credential_save_respects_independent_and_refresh_guarded_locking() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
@@ -329,6 +472,7 @@ async fn credential_save_respects_independent_and_refresh_guarded_locking() {
     configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
     let path = oauth_store_path(Path::new("/workspace")).unwrap();
     let adapter = OAuthProfileStore {
+        logout_generation: test_support::logout_generation(&path, "slack"),
         path: path.clone(),
         server_name: "slack".into(),
         endpoint: normalize_endpoint(endpoint).unwrap(),
@@ -406,6 +550,7 @@ async fn credential_save_respects_independent_and_refresh_guarded_locking() {
     })
     .unwrap();
     let guarded_adapter = OAuthProfileStore {
+        logout_generation: test_support::logout_generation(&path, "slack"),
         path,
         server_name: "slack".into(),
         endpoint: normalize_endpoint(endpoint).unwrap(),
@@ -721,6 +866,7 @@ async fn scope_step_up_preserves_an_unpublished_live_authorization_state() {
     configure_mcp_oauth(cwd, "slack", endpoint, configuration()).unwrap();
     let path = oauth_store_path(cwd).unwrap();
     let adapter = OAuthProfileStore {
+        logout_generation: test_support::logout_generation(&path, "slack"),
         path: path.clone(),
         server_name: "slack".into(),
         endpoint: normalize_endpoint(endpoint).unwrap(),
@@ -786,6 +932,7 @@ async fn failed_authorization_start_discards_its_unpublished_state() {
     })
     .unwrap();
     let adapter = OAuthProfileStore {
+        logout_generation: test_support::logout_generation(&path, "slack"),
         path: path.clone(),
         server_name: "slack".into(),
         endpoint: normalize_endpoint(endpoint).unwrap(),
@@ -1001,6 +1148,7 @@ async fn remote_scope_step_up_defers_without_invalidating_an_active_authorizatio
     assert!(published.states.contains_key("replacement"));
 
     let adapter = OAuthProfileStore {
+        logout_generation: test_support::logout_generation(&path, "slack"),
         path,
         server_name: "slack".into(),
         endpoint: normalize_endpoint(endpoint).unwrap(),

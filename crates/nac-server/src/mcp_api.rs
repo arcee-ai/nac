@@ -913,6 +913,15 @@ pub async fn update_server_handler(
         revision,
     )?;
     if server_name != record.name {
+        manager
+            .mcp_runtime()
+            .keep_disconnected_after_rename(&server_name, &record.name)
+            .map_err(|error| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("MCP disconnect state could not be renamed: {error:#}"),
+                )
+            })?;
         remove_oauth_flow(&oauth_flow_key(&manager, &server_name)).await;
         remove_oauth_flow(&oauth_flow_key(&manager, &record.name)).await;
         let redirect_uri = oauth_redirect_uri(&manager, &record.name)?;
@@ -1761,6 +1770,7 @@ pub async fn logout_oauth_handler(
             "MCP OAuth logout could not complete",
         )
     })?;
+    manager.mcp_runtime().forget(&server_name).await;
     Ok(Json(McpOAuthStatusResponse {
         status: public_oauth_status(status),
         message: None,

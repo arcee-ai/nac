@@ -23,6 +23,8 @@ pub struct McpRuntimeStatus {
     pub server_name: Option<String>,
     pub server_version: Option<String>,
     pub tool_count: usize,
+    /// The user disconnected this server; sessions refuse to use it until it is connected.
+    pub sessions_blocked: bool,
 }
 
 struct RuntimeEntry {
@@ -49,6 +51,7 @@ impl McpRuntimeManager {
 
     pub async fn statuses(&self) -> Result<Vec<McpRuntimeStatus>> {
         let (defaults, servers) = self.configured_servers()?;
+        let connection_state = self.connection_state()?;
         let entries = self.entries.read().await;
         let mut statuses = Vec::with_capacity(servers.len());
         for (name, config) in servers {
@@ -64,6 +67,15 @@ impl McpRuntimeManager {
                 status.state = McpRuntimeState::Failed;
                 status.error = Some(format!("invalid timeout configuration: {error:#}"));
             }
+            status.sessions_blocked = match connection_state.is_disconnected(&name) {
+                Ok(blocked) => blocked,
+                Err(error) => {
+                    status.error = Some(format!(
+                        "disconnect state is unreadable; connect to repair it: {error:#}"
+                    ));
+                    true
+                }
+            };
             statuses.push(status);
         }
         Ok(statuses)
@@ -75,10 +87,13 @@ impl McpRuntimeManager {
     }
 
     async fn connect_inner(&self, name: &str) -> Result<McpRuntimeStatus> {
-        let (defaults, mut servers) = self.configured_servers()?;
+        let (defaults, servers) = self.configured_servers()?;
         let config = servers
-            .remove(name)
+            .get(name)
+            .cloned()
             .with_context(|| format!("MCP server '{name}' was not found"))?;
+        self.connection_state()?
+            .set_disconnected(name, false, servers.keys())?;
         if !config.enabled {
             let status = McpRuntimeStatus {
                 state: McpRuntimeState::Disabled,
@@ -151,6 +166,7 @@ impl McpRuntimeManager {
                 .and_then(|info| info.server_info.as_ref())
                 .map(|info| info.version.clone()),
             tool_count: tools.len(),
+            sessions_blocked: false,
         };
         let service = Arc::new(tokio::sync::RwLock::new(service));
         self.set_entry(status.clone(), Some(service)).await;
@@ -159,11 +175,14 @@ impl McpRuntimeManager {
 
     pub async fn disconnect(&self, name: &str) -> Result<McpRuntimeStatus> {
         let _operation = self.operation.lock().await;
-        let (_defaults, mut servers) = self.configured_servers()?;
+        let (_defaults, servers) = self.configured_servers()?;
         let config = servers
-            .remove(name)
+            .get(name)
+            .cloned()
             .with_context(|| format!("MCP server '{name}' was not found"))?;
-        let status = if config.enabled {
+        self.connection_state()?
+            .set_disconnected(name, true, servers.keys())?;
+        let mut status = if config.enabled {
             disconnected_status(name, &config)
         } else {
             McpRuntimeStatus {
@@ -171,8 +190,14 @@ impl McpRuntimeManager {
                 ..disconnected_status(name, &config)
             }
         };
+        status.sessions_blocked = true;
         self.set_entry(status.clone(), None).await;
         Ok(status)
+    }
+
+    /// After a committed rename, also disconnects the new name; runs under the config write lease.
+    pub fn keep_disconnected_after_rename(&self, old_name: &str, new_name: &str) -> Result<()> {
+        self.connection_state()?.copy_mark(old_name, new_name)
     }
 
     pub async fn reload(&self, name: &str) -> Result<McpRuntimeStatus> {
@@ -208,6 +233,7 @@ impl McpRuntimeManager {
             server_name: None,
             server_version: None,
             tool_count: 0,
+            sessions_blocked: false,
         };
         self.set_entry(status.clone(), None).await;
         status
@@ -235,6 +261,10 @@ impl McpRuntimeManager {
         if let Some(removed) = removed {
             close_shared_mcp_service(removed).await;
         }
+    }
+
+    fn connection_state(&self) -> Result<super::admission::ConnectionState> {
+        super::admission::ConnectionState::for_home(&PathContext::new(&self.cwd))
     }
 
     fn configured_servers(&self) -> Result<(McpDefaults, BTreeMap<String, McpServerConfig>)> {
@@ -269,6 +299,7 @@ fn disconnected_status(name: &str, config: &McpServerConfig) -> McpRuntimeStatus
         server_name: None,
         server_version: None,
         tool_count: 0,
+        sessions_blocked: false,
     }
 }
 

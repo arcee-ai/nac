@@ -289,32 +289,28 @@ impl NacMcpClientHandler {
         }
     }
 
+    /// The mounted server, while this connection is current and the user has not disconnected it.
+    pub(super) fn admitted_server(&self) -> Option<Arc<McpServer>> {
+        self.binding.server().filter(|server| {
+            server.is_current_connection_generation(self.connection_generation)
+                && server.admit().is_ok()
+        })
+    }
+
     pub(super) fn observe_progress(&self, params: ProgressNotificationParam) {
-        if let Some(server) = self
-            .binding
-            .server()
-            .filter(|server| server.is_current_connection_generation(self.connection_generation))
-        {
+        if let Some(server) = self.admitted_server() {
             server.observe_progress(params);
         }
     }
 
     pub(super) fn observe_log(&self, params: LoggingMessageNotificationParam) {
-        if let Some(server) = self
-            .binding
-            .server()
-            .filter(|server| server.is_current_connection_generation(self.connection_generation))
-        {
+        if let Some(server) = self.admitted_server() {
             server.observe_log(params);
         }
     }
 
     pub(super) fn observe_resource_update(&self, params: ResourceUpdatedNotificationParam) {
-        if let Some(server) = self
-            .binding
-            .server()
-            .filter(|server| server.is_current_connection_generation(self.connection_generation))
-        {
+        if let Some(server) = self.admitted_server() {
             server.sync.emit_resource_update(&server.name, &params.uri);
         }
     }
@@ -373,6 +369,9 @@ impl McpServer {
         for uri in wanted.difference(&current) {
             if !self.is_current_connection_generation(generation) {
                 return;
+            }
+            if self.admit().is_err() {
+                break;
             }
             if matches!(
                 timeout(
@@ -509,7 +508,7 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>, gener
         let Some(current) = server.upgrade() else {
             return;
         };
-        if !current.is_current_connection_generation(generation) {
+        if !current.is_current_connection_generation(generation) || current.admit().is_err() {
             return;
         }
         let filter = current.subscription_filter();
@@ -540,7 +539,9 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>, gener
                         let _ = subscription.cancel().await;
                         return;
                     };
-                    if !current.is_current_connection_generation(generation) {
+                    if !current.is_current_connection_generation(generation)
+                        || current.admit().is_err()
+                    {
                         let _ = subscription.cancel().await;
                         return;
                     }

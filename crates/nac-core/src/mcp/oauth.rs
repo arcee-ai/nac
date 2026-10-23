@@ -1,5 +1,7 @@
 mod authorization_state;
 mod client_config;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod url_validation;
 
 use std::collections::BTreeMap;
@@ -129,6 +131,9 @@ struct OAuthProfile {
     credentials: Option<StoredCredentials>,
     #[serde(default)]
     states: BTreeMap<String, StoredAuthorizationState>,
+    /// Advanced by each logout so an authorization already completing cannot restore credentials.
+    #[serde(default)]
+    logout_generation: u64,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -234,6 +239,7 @@ fn migrate_legacy_store(legacy: LegacyOAuthStoreFile) -> Result<OAuthStoreFile> 
                 registered_client_secret: None,
                 credentials: profile.credentials,
                 states: profile.states,
+                logout_generation: 0,
             },
         );
     }
@@ -519,6 +525,15 @@ pub fn configure_mcp_oauth(
             }
             None => false,
         };
+        // A re-created profile must not reuse a deleted profile's generation.
+        let logout_generation = existing.map_or_else(
+            || {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(1, |elapsed| elapsed.as_nanos() as u64)
+            },
+            |profile| profile.logout_generation,
+        );
         let matching = existing.filter(|_| same_configuration);
         let previous_issuer = matching.and_then(|profile| profile.binding.issuer.clone());
         let credentials = matching
@@ -549,6 +564,7 @@ pub fn configure_mcp_oauth(
                 registered_client_secret,
                 credentials,
                 states: BTreeMap::new(),
+                logout_generation,
             },
         );
         Ok(connected)
@@ -601,6 +617,7 @@ pub fn clear_mcp_oauth(cwd: &Path, server_name: &str) -> Result<McpOAuthStatus> 
         profile.pending_authorization_url = None;
         profile.pending_scopes.clear();
         profile.registered_client_secret = None;
+        profile.logout_generation += 1;
         Ok(true)
     })?;
     Ok(if configured {
@@ -654,6 +671,7 @@ pub(crate) struct OAuthProfileStore {
     endpoint: String,
     expected_client_id: Option<String>,
     save_mode: CredentialSaveMode,
+    logout_generation: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -703,6 +721,12 @@ impl CredentialStore for OAuthProfileStore {
                 .get_mut(&self.server_name)
                 .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
             validate_profile_binding(profile, &self.endpoint)?;
+            // Refresh saves hold the credential lock from load to save, so logout cannot interleave.
+            if matches!(self.save_mode, CredentialSaveMode::Independent)
+                && profile.logout_generation != self.logout_generation
+            {
+                bail!("MCP OAuth was logged out while this authorization was in progress");
+            }
             profile.binding.issuer = credentials.issuer.clone();
             if matches!(self.save_mode, CredentialSaveMode::Independent) {
                 if credentials.granted_scopes.is_empty() {
@@ -848,6 +872,7 @@ async fn manager_and_profile(
         endpoint: normalize_endpoint(endpoint)?,
         expected_client_id: registration.expected_client_id().map(ToOwned::to_owned),
         save_mode,
+        logout_generation: profile.logout_generation,
     };
     let mut manager = AuthorizationManager::new(endpoint)
         .await
@@ -1494,6 +1519,7 @@ mod tests {
         configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
         let path = oauth_store_path(Path::new("/workspace")).unwrap();
         let adapter = OAuthProfileStore {
+            logout_generation: test_support::logout_generation(&path, "slack"),
             path: path.clone(),
             server_name: "slack".to_string(),
             endpoint: normalize_endpoint(endpoint).unwrap(),
@@ -1613,24 +1639,6 @@ mod tests {
             "https://auth.example.com/authorize?client_id=test",
             "http://localhost:1456/mcp_library/oauth/callback?code=code&state=current%20state"
         ));
-    }
-
-    #[test]
-    fn logout_clears_authorization_material_but_preserves_configuration() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
-        let (_home, _restore) = test_environment("logout");
-        configure_mcp_oauth(
-            Path::new("/workspace"),
-            "slack",
-            "https://mcp.slack.com/mcp",
-            configuration(),
-        )
-        .unwrap();
-        assert_eq!(
-            clear_mcp_oauth(Path::new("/workspace"), "slack").unwrap(),
-            McpOAuthStatus::NeedsAuthorization
-        );
-        assert!(has_mcp_oauth_profile(Path::new("/workspace"), "slack").unwrap());
     }
 
     #[test]
@@ -1828,6 +1836,7 @@ mod tests {
                 None,
             )),
             states: BTreeMap::new(),
+            logout_generation: 0,
         };
         assert_eq!(
             authorization_scopes(&profile),

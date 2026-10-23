@@ -12,6 +12,7 @@ const fakes = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   test: vi.fn(),
+  runtime: undefined as { servers: { name: string; sessions_blocked: boolean }[] } | undefined,
 }));
 
 vi.mock("@/app/components/modals/MCPServersModal/McpOAuthPanel", () => ({
@@ -25,7 +26,7 @@ vi.mock("@/app/services/queries", () => {
     useTestMcpServer: () => mutation(fakes.test),
     useDeleteMcpServer: () => mutation(vi.fn()),
     useMcpRuntimeAction: () => mutation(vi.fn()),
-    useMcpRuntimeStatus: () => ({ data: undefined }),
+    useMcpRuntimeStatus: () => ({ data: fakes.runtime }),
   };
 });
 
@@ -109,6 +110,7 @@ beforeEach(() => {
   fakes.create.mockReset().mockResolvedValue({ name: "linear" });
   fakes.update.mockReset().mockResolvedValue({ name: "linear" });
   fakes.test.mockReset().mockResolvedValue({ connected: true, tools: [], error: null });
+  fakes.runtime = undefined;
 });
 
 afterEach(() => {
@@ -341,5 +343,15 @@ describe("header helper arguments", () => {
     await waitFor(() => expect(fakes.update).toHaveBeenCalledOnce());
     expect(fakes.test.mock.calls[0][0].header_helper.args).toEqual(sent);
     expect(fakes.update.mock.calls[0][0].payload.header_helper.args).toEqual(sent);
+  });
+});
+
+describe("runtime connection", () => {
+  it("says sessions will not use a server the user disconnected", () => {
+    fakes.runtime = { servers: [{ name: "linear", sessions_blocked: true }] };
+    render(<Form record={stdioRecord([])} />);
+    expect(
+      screen.getByText("Disconnected. Sessions won't use this server until you connect it."),
+    ).toBeTruthy();
   });
 });

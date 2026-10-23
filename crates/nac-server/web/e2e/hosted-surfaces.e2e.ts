@@ -318,7 +318,11 @@ for (const mobile of [false, true]) {
       await editing.getByRole("button", { name: "Reload", exact: true }).click();
       await expect(editing.getByText("Runtime: connected", { exact: true })).toBeVisible();
       await editing.getByRole("button", { name: "Disconnect", exact: true }).click();
-      await expect(editing.getByText("Runtime: disconnected", { exact: true })).toBeVisible();
+      await expect(
+        editing.getByText("Disconnected. Sessions won't use this server until you connect it.", {
+          exact: true,
+        }),
+      ).toBeVisible();
       await editing.getByPlaceholder("my_server").fill("renamed_fixture");
       await editing.getByRole("button", { name: "Save", exact: true }).click();
       if (mobile) await page.getByRole("button", { name: "renamed_fixture", exact: true }).click();
