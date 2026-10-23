@@ -1,4 +1,5 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -34,6 +35,7 @@ function SessionCollectionRow({
   const actions = useSessionActions();
   const sessionTitle = useSessionTitle();
   const isMobile = useIsMobile();
+  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const attention = useAttention(entry.summary.session_id);
   const viewedAt = useSessionViewedAt(entry.summary.session_id);
   const title = sessionTitle(entry.summary);
@@ -55,6 +57,8 @@ function SessionCollectionRow({
   return (
     <ChatSessionButton
       title={title}
+      behavior={entry.summary.behavior}
+      showBehaviorIcon={showBehaviorIcon}
       active={active}
       running={running}
       unread={unread}
@@ -71,6 +75,7 @@ function SessionCollectionRow({
         <ChatSessionActions
           title={title}
           pinned={pinned}
+          isMobile={isMobile}
           onPin={() => toggleSessionNavigationPin(entry.summary.session_id)}
           onRename={() => actions.rename(entry.summary)}
           onDelete={() => actions.remove(entry.summary)}

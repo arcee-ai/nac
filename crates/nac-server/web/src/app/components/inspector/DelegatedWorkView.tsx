@@ -1,5 +1,6 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useEffect, useMemo } from "react";
 
 import { Button, ButtonSize, ButtonVariant, ChatSessionButton, Icon, IconName } from "@/app/atoms";
@@ -101,6 +102,7 @@ export function DelegatedWorkView({
 
   const supportsOrchestrators =
     useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
+  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const children = useTraditionalChildren(sessionId, true);
   const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
   const now = useNow(60_000);
@@ -179,7 +181,8 @@ export function DelegatedWorkView({
               <ChatSessionButton
                 key={row.key}
                 title={row.description}
-                icon={sessionBehaviorIcon(null, MODE_LINEAGE[row.mode])}
+                lineage={MODE_LINEAGE[row.mode]}
+                showBehaviorIcon={showBehaviorIcon}
                 running={row.status === "running"}
                 active={selected?.key === row.key}
                 onClick={() => chooseRow(row.key)}
