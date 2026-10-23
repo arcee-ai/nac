@@ -46,7 +46,9 @@ quality evidence, and image work need not wait for an unrelated browser journey.
 reusable quality job validates all fields and results before reuse; invalid or
 foreign evidence fails. A blank receipt runs full `make ci`, including in standalone
 manual managed runs, which expose no receipt/skip dispatch input. The feature-gated
-fault fixture always runs. No cross-workflow status lookup or previous green
+fault fixture always runs. Image construction/smoke and fault compilation run
+concurrently after the managed contract. The terminal managed result requires
+both; unprivileged construction is never publication authority. No cross-workflow status lookup or previous green
 candidate can supply quality evidence. A failed-job rerun can retain successful upstream outputs from an earlier
 attempt. A complete valid earlier receipt with the same run/repository/candidate
 selects full `make ci` in the current attempt; it is never reused. Future attempts,

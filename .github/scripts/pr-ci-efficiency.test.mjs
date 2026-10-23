@@ -169,3 +169,14 @@ test("failed-job reruns repeat full quality for a valid earlier attempt without 
   assert.equal(run("").stdout.trim(), "mode=full");
   assert.notEqual(run(JSON.stringify({ ...receipt, run_id: "124" })).status, 0);
 });
+
+test("unprivileged image verification overlaps fault compilation but final managed and publication gates require both", () => {
+  const managed = workflow("managed-image");
+  assert.deepEqual(managed.jobs["build-smoke"].needs, ["prepare", "contract"]);
+  assert.deepEqual(managed.jobs.result.needs, ["prepare", "contract", "quality", "build-smoke"]);
+  assert.equal(managed.permissions.contents, "read");
+  assert.equal(managed.jobs["build-smoke"].permissions, undefined);
+  const stable = workflow("stable-release");
+  assert.ok(stable.jobs["required-pr-checks"].needs.includes("managed"));
+  assert.ok(stable.jobs.publish.needs.includes("required-pr-checks"));
+});

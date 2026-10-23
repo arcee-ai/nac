@@ -127,7 +127,8 @@ jobs:
         run: make test-managed-fault-fixture
 
   build-smoke:
-    needs: [prepare, contract, quality]
+    # Image construction/smoke is unprivileged; result still requires full fault quality.
+    needs: [prepare, contract]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
