@@ -1,36 +1,27 @@
 name: Managed NAC image
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/managed-image.yml
-      - .dockerignore
-      - docker/managed/**
-      - scripts/smoke-managed-image.sh
-      - scripts/test-managed-image-contract.sh
-      - Cargo.toml
-      - Cargo.lock
-      - version.txt
-      - crates/**
-  push:
-    branches: [main, dev]
-    paths:
-      - .github/workflows/managed-image.yml
-      - .dockerignore
-      - docker/managed/**
-      - scripts/smoke-managed-image.sh
-      - scripts/test-managed-image-contract.sh
-      - Cargo.toml
-      - Cargo.lock
-      - version.txt
-      - crates/**
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Immutable candidate from the caller's preparation job
+        required: true
+        type: string
+      policy_mode:
+        description: Event-bound policy mode from the caller; standalone runs derive it
+        default: ''
+        type: string
+      trusted_policy_sha:
+        description: Ordinary trusted policy pin; publication resolves canonical dev independently
+        default: ''
+        type: string
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: managed-image-${{ github.workflow }}-${{ github.ref }}
+  group: managed-image-${{ github.run_id }}-${{ github.run_attempt }}
   cancel-in-progress: false
 
 jobs:
@@ -39,11 +30,13 @@ jobs:
     outputs:
       sha: ${{ steps.candidate.outputs.sha }}
       short_sha: ${{ steps.candidate.outputs.short_sha }}
+      policy_mode: ${{ steps.policy.outputs.mode }}
+      policy_sha: ${{ steps.policy.outputs.policy_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
+          ref: ${{ inputs.source_sha || github.sha }}
+          fetch-depth: 0
       - id: candidate
         name: Resolve immutable candidate
         shell: bash
@@ -51,6 +44,17 @@ jobs:
           sha=$(git rev-parse HEAD)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "short_sha=${sha:0:12}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Bind image policy to the eligible caller event
+        id: policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_POLICY_MODE: ${{ inputs.policy_mode }}
+          REQUESTED_POLICY_SHA: ${{ inputs.trusted_policy_sha }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: node scripts/security/image-policy.mjs select "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
 
   contract:
     needs: prepare
@@ -65,6 +69,14 @@ jobs:
           sh -n scripts/smoke-managed-image.sh
           sh -n scripts/test-managed-image-contract.sh
           sh scripts/test-managed-image-contract.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Test image inventory, trusted-policy and workflow failure contracts
+        run: |
+          npm --prefix .github/scripts ci --ignore-scripts
+          python3 -m unittest discover -s scripts/security -p 'test_*.py'
+          node --test scripts/security/image-policy.test.mjs scripts/security/image-workflow.test.mjs scripts/security/image-publication.test.mjs
 
   quality:
     needs: prepare
@@ -80,7 +92,7 @@ jobs:
       - name: Install Node LTS
         uses: actions/setup-node@v4
         with:
-          node-version: 24.20.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: |
             crates/nac-server/web/package-lock.json
@@ -102,8 +114,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
       - uses: docker/setup-buildx-action@v3
       - name: Build exact linux/amd64 image without publication
+        id: build-image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -118,8 +132,114 @@ jobs:
             NAC_SOURCE_REVISION=${{ needs.prepare.outputs.sha }}
           provenance: false
           sbom: false
-      - name: Run credential-independent image smoke
+      - name: Bind the loaded immutable image identity once
+        id: image
         env:
-          MANAGED_IMAGE: nac-managed-smoke:${{ needs.prepare.outputs.short_sha }}
+          BUILT_IMAGE_ID: ${{ steps.build-image.outputs.imageid }}
+        run: |
+          [[ "$BUILT_IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]
+          image_id=$(docker image inspect --format '{{.Id}}' "$BUILT_IMAGE_ID")
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "id=$image_id" >> "$GITHUB_OUTPUT"
+      - name: Run credential-independent image smoke
+        id: smoke
+        env:
+          MANAGED_IMAGE: ${{ steps.image.outputs.id }}
           MANAGED_IMAGE_SKIP_BUILD: "1"
         run: sh scripts/smoke-managed-image.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Pin canonical reviewed-dev image policy for publication
+        id: publication-policy
+        if: needs.prepare.outputs.policy_mode == 'publication'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
+          REQUESTED_POLICY_SHA: ${{ needs.prepare.outputs.policy_sha }}
+        run: |
+          node .github/scripts/publication-policy.mjs resolve "$CANDIDATE_SHA" \
+            "$GITHUB_WORKSPACE/image-security-evidence/policy" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.publication-policy.outputs.sha || needs.prepare.outputs.policy_sha }}
+          path: trusted-image-policy
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Qualify real OS/Node advisory matching and runtime/DB negatives
+        run: |
+          python3 scripts/security/image_qualify.py --output image-security-fixtures \
+            --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db"
+      - name: Inventory the exact tested image
+        id: inventory
+        if: ${{ !cancelled() && steps.image.outputs.id != '' && steps.smoke.outcome == 'success' }}
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.id }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          python3 scripts/security/image_scan.py --image "$IMAGE_ID" --source-revision "$SOURCE_SHA" \
+            --trusted-policy trusted-image-policy/.github/security/exceptions.json \
+            --candidate-policy .github/security/exceptions.json --output image-security-evidence/inventory --inventory-only \
+            --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db"
+      - name: Scan the same tested image with reviewed policy
+        if: ${{ !cancelled() && steps.image.outputs.id != '' && steps.inventory.outcome == 'success' }}
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.id }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+          POLICY_MODE: ${{ needs.prepare.outputs.policy_mode }}
+          NAC_PUBLICATION_POLICY_SHA: ${{ steps.publication-policy.outputs.sha }}
+        run: |
+          extra=()
+          if [[ "$POLICY_MODE" = publication ]]; then
+            extra+=(--publication-policy "$GITHUB_WORKSPACE/image-security-evidence/policy/publication-policy.json")
+          fi
+          scan_status=0
+          python3 scripts/security/image_scan.py --bundle image-security-evidence/inventory --image "$IMAGE_ID" --source-revision "$SOURCE_SHA" \
+            --trusted-policy trusted-image-policy/.github/security/exceptions.json \
+            --candidate-policy .github/security/exceptions.json --output image-security-evidence/security \
+            --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db" "${extra[@]}" || scan_status=$?
+          python3 scripts/security/image_ci_report.py --scan-output image-security-evidence/security \
+            --scanner-exit "$scan_status" --image "$IMAGE_ID" --source-revision "$SOURCE_SHA"
+      - name: Report exact-image security findings
+        if: always()
+        run: |
+          echo '### Image findings are advisory; enforcement is deferred' >> "$GITHUB_STEP_SUMMARY"
+          echo 'CI success does not establish image security clearance. Full findings remain below.' >> "$GITHUB_STEP_SUMMARY"
+          if test -f image-security-evidence/security/report.md; then
+            cat image-security-evidence/security/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Image security incomplete: inspect failed inventory/tool/database/fixture steps.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Retain exact-image security evidence even when blocked
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: managed-image-security-${{ needs.prepare.outputs.sha }}
+          path: image-security-evidence/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Retain live qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: managed-image-security-fixtures-${{ needs.prepare.outputs.sha }}
+          path: |
+            image-security-fixtures/
+            !image-security-fixtures/**/root/**
+          retention-days: 14
+          if-no-files-found: error
+
+  result:
+    name: Managed checks complete
+    if: ${{ always() }}
+    needs: [prepare, contract, quality, build-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Reject any missing, skipped, cancelled or failed managed work
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_SHA: ${{ inputs.source_sha || github.sha }}
+        run: node .github/scripts/pr-checks.mjs managed-aggregate

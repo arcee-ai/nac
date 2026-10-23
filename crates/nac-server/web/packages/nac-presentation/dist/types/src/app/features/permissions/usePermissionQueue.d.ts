@@ -17,7 +17,7 @@ export declare function usePermissionQueue(sessionId: string, enabled: boolean, 
         completion_inbox_id: number | null;
         created_at: string;
         description: string;
-        execution_mode: null | import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode: import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure: string | null;
         generation: number;
         nesting_depth: number;
@@ -37,7 +37,7 @@ export declare function usePermissionQueue(sessionId: string, enabled: boolean, 
         completion_inbox_id: number | null;
         created_at: string;
         description: string;
-        execution_mode: null | import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode: import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure: string | null;
         generation: number;
         nesting_depth: number;
@@ -102,13 +102,13 @@ export declare function usePermissionQueue(sessionId: string, enabled: boolean, 
         review: {
             backend: string;
             call_id?: string | null;
-            category?: null | import("../../types/openapi.generated").components["schemas"]["ReviewCategory"];
-            code?: null | import("../../types/openapi.generated").components["schemas"]["PermissionReviewCode"];
+            category?: import("../../types/openapi.generated").components["schemas"]["ReviewCategory"] | null;
+            code?: import("../../types/openapi.generated").components["schemas"]["PermissionReviewCode"] | null;
             created_at_epoch_ms: number;
             duration_ms?: number | null;
-            failure_reason?: null | import("../../types/openapi.generated").components["schemas"]["PermissionReviewFailureReason"];
+            failure_reason?: import("../../types/openapi.generated").components["schemas"]["PermissionReviewFailureReason"] | null;
             id: string;
-            outcome?: null | import("../../types/openapi.generated").components["schemas"]["PermissionReviewOutcome"];
+            outcome?: import("../../types/openapi.generated").components["schemas"]["PermissionReviewOutcome"] | null;
             resources: import("../../types/openapi.generated").components["schemas"]["ReviewResource"][];
             reviewer: string;
             session_id: string;

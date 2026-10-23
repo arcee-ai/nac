@@ -146,13 +146,39 @@ test("embedded pane resets and replays an actual retention gap", async ({
       }
     })
     .toBe(true);
-  await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-  const show = page.getByRole("button", { name: "Show panel", exact: true });
-  if (await show.isVisible()) await show.click();
+  const observerPath = `${harness.baseUrl}/sessions/${session}/executions/${terminal.terminal_id}/observers/`;
+  let replayObserver: string | undefined;
+  const replayComplete = page.waitForResponse(async (response) => {
+    if (
+      !response.url().startsWith(observerPath) ||
+      !response.url().endsWith("/read") ||
+      response.request().method() !== "POST" ||
+      !response.ok()
+    )
+      return false;
+    const frame = await response.json();
+    if (frame.gap) replayObserver = frame.observer_id;
+    // An empty caught-up frame follows the renderer's ACK of the retained tail.
+    return (
+      replayObserver !== undefined &&
+      frame.observer_id === replayObserver &&
+      !frame.gap &&
+      frame.caught_up &&
+      !frame.requires_ack
+    );
+  });
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await expect(pane).toBeVisible();
-  await expect(pane.getByRole("alert")).toContainText("Earlier output was discarded");
-  // Observe real replay before checking xterm's throttled accessibility mirror.
+  await Promise.all([
+    replayComplete,
+    (async () => {
+      await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
+      const show = page.getByRole("button", { name: "Show panel", exact: true });
+      if (await show.isVisible()) await show.click();
+      await expect(pane).toBeVisible();
+      await expect(pane.getByRole("alert")).toContainText("Earlier output was discarded");
+    })(),
+  ]);
+  // Replay completion and painted text precede xterm's throttled accessibility mirror.
   await expect(pane.locator(".xterm-rows")).toContainText("GAP-OK");
   await expect(pane.locator(".xterm-accessibility")).toContainText("GAP-OK");
   expect((await api.getUserTerminal(session, terminal.terminal_id)).alive).toBe(true);

@@ -1,5 +1,29 @@
 use super::*;
 
+#[test]
+fn openapi_31_responses_keep_required_descriptions_after_dependency_upgrades() {
+    let document = serde_json::to_value(openapi_document()).unwrap();
+    assert_eq!(document["openapi"], "3.1.0");
+    for (path, item) in document["paths"].as_object().unwrap() {
+        for (method, operation) in item.as_object().unwrap() {
+            let Some(responses) = operation
+                .get("responses")
+                .and_then(serde_json::Value::as_object)
+            else {
+                continue;
+            };
+            for (status, response) in responses {
+                if response.get("$ref").is_none() {
+                    assert!(
+                        response["description"].is_string(),
+                        "{method} {path} {status}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn route_health_and_readiness_latency_use_bounded_content_free_labels() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
