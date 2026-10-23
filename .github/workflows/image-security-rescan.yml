@@ -1,0 +1,49 @@
+name: Daily managed image security
+
+on:
+  schedule:
+    - cron: '43 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: daily-managed-image-security
+  cancel-in-progress: false
+
+jobs:
+  rescan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: dev
+      - name: Rescan retained unchanged managed image inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scan_status=0
+          python3 scripts/security/image_rescan.py --output image-rescan-evidence || scan_status=$?
+          python3 scripts/security/image_ci_report.py --scan-output image-rescan-evidence/rescan \
+            --scanner-exit "$scan_status"
+      - name: Report current unchanged-image security result
+        if: always()
+        shell: bash
+        run: |
+          echo '### Image findings are advisory; enforcement is deferred' >> "$GITHUB_STEP_SUMMARY"
+          if test -f image-rescan-evidence/rescan/report.md; then
+            cat image-rescan-evidence/rescan/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Image rescan did not produce a complete result; inspect failed steps.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo 'Daily results do not revoke old PR checks. Rerun stale candidates before merging/publication.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain current findings and unchanged candidate evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: daily-managed-image-security-${{ github.run_id }}
+          path: image-rescan-evidence
+          retention-days: 14
+          if-no-files-found: error

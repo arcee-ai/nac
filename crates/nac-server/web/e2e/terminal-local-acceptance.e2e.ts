@@ -448,6 +448,13 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   await pane.getByRole("button", { name: "New shell", exact: true }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
+  // The first history refresh removes its empty-state row and resizes the terminal.
+  // Complete that setup before exercising selection under noisy output.
+  await expect(
+    pane
+      .getByRole("region", { name: "Recent terminal activity" })
+      .locator(`option[value="${terminal}"]`),
+  ).toHaveCount(1);
   const pages: Array<{ bytes: number; gap: boolean; retained: number }> = [];
   const pending = new Set<Promise<void>>();
   page.on("response", (response) => {
@@ -503,7 +510,9 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       })
       .toBe(true);
     measurements.resizeMs = performance.now() - resizedAt;
-    await focus(pane);
+    // Copy and viewport resize preserve native input focus. Re-clicking the
+    // moving toolbar adds automation backoff while noisy output accumulates.
+    await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
     await armRenderedMarker(pane, "NOISE-INTERRUPTED");
     await page.keyboard.press("Control+c");
     await command(page, "printf '" + octal("NOISE-INTERRUPTED\n") + "'");

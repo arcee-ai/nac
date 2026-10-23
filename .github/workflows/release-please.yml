@@ -84,7 +84,7 @@ jobs:
           RELEASE_CREATED: ${{ steps.prepare.outputs.release_created }}
         run: test "$RELEASE_CREATED" != true
 
-  publish-approved-release:
+  release-candidate:
     if: >-
       github.event_name == 'pull_request' &&
       github.event.action == 'closed' &&
@@ -93,7 +93,46 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'release-please--branches--release-preparation-source--components--nac'
     runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.identity.outputs.sha }}
     steps:
+      - name: Bind the merged release PR candidate before security evaluation
+        id: identity
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          [[ "$MERGE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          echo "sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
+
+  source-security:
+    needs: release-candidate
+    uses: ./.github/workflows/source-security.yml
+    with:
+      candidate-sha: ${{ needs.release-candidate.outputs.sha }}
+      policy-mode: publication
+
+  publish-approved-release:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'dev' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'release-please--branches--release-preparation-source--components--nac'
+    needs: [release-candidate, source-security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.release-candidate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Install locked release tooling without lifecycle scripts
+        run: npm --prefix .github/scripts ci --ignore-scripts
+      - name: Verify release policy and exact-plan publication contracts
+        run: node --test .github/scripts/release-policy.test.mjs .github/scripts/source-release.test.mjs
       - name: Mint repository-scoped release token
         id: app-token
         uses: actions/create-github-app-token@v2
@@ -106,11 +145,9 @@ jobs:
           permission-pull-requests: write
           permission-issues: write
 
-      - name: Create approved stable tag and GitHub Release only
-        uses: googleapis/release-please-action@v4
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-          target-branch: dev
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-          skip-github-pull-request: true
+      - name: Publish only the exact scanned stable release plan
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SCANNED_SHA: ${{ needs.release-candidate.outputs.sha }}
+          RELEASE_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node .github/scripts/source-release.mjs

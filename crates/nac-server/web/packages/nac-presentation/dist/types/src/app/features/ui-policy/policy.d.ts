@@ -8,10 +8,10 @@ export declare function creationBehavior(policy: UiPolicy, selected: SessionBeha
 export declare function sessionAvailable(policy: UiPolicy, behavior: SessionBehavior | null | undefined, lineage: SessionLineage | null | undefined): boolean;
 export declare function visibleSessions(policy: UiPolicy, sessions: ManagedSessionSummary[]): {
     active: boolean;
-    active_run?: null | import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"];
-    lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
+    active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+    lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
     summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
-    workspace_diff?: null | import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"];
+    workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
 }[];
 /** Existing API callers retain first_chat's newest-primary semantics. */
 export declare function firstChatAdmission(policy: UiPolicy, sessions: ManagedSessionSummary[], projectId: string): boolean;

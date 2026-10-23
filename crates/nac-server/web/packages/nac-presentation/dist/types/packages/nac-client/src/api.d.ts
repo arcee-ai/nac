@@ -98,7 +98,7 @@ export declare function createNacApi(nacClient: NacClient): {
         checks: import("./openapi.generated.js").components["schemas"]["ReadinessCheck"][];
         github_status: string;
         logical_host_id: string;
-        maintenance?: null | import("./openapi.generated.js").components["schemas"]["ManagedMaintenanceSnapshot"];
+        maintenance?: import("./openapi.generated.js").components["schemas"]["ManagedMaintenanceSnapshot"] | null;
         maintenance_state: string;
         managed: boolean;
         migration_failure?: string | null;
@@ -181,7 +181,7 @@ export declare function createNacApi(nacClient: NacClient): {
         error?: string | null;
         operation_id: string;
         progress: string;
-        project?: null | import("./openapi.generated.js").components["schemas"]["ProjectRecord"];
+        project?: import("./openapi.generated.js").components["schemas"]["ProjectRecord"] | null;
         project_id: string;
         project_name: string;
         repository: string;
@@ -199,7 +199,7 @@ export declare function createNacApi(nacClient: NacClient): {
         error?: string | null;
         operation_id: string;
         progress: string;
-        project?: null | import("./openapi.generated.js").components["schemas"]["ProjectRecord"];
+        project?: import("./openapi.generated.js").components["schemas"]["ProjectRecord"] | null;
         project_id: string;
         project_name: string;
         repository: string;
@@ -217,7 +217,7 @@ export declare function createNacApi(nacClient: NacClient): {
         error?: string | null;
         operation_id: string;
         progress: string;
-        project?: null | import("./openapi.generated.js").components["schemas"]["ProjectRecord"];
+        project?: import("./openapi.generated.js").components["schemas"]["ProjectRecord"] | null;
         project_id: string;
         project_name: string;
         repository: string;
@@ -349,7 +349,7 @@ export declare function createNacApi(nacClient: NacClient): {
         created_at: string;
         extra_headers: Record<string, string>;
         initial_prompt?: string | null;
-        light_model?: null | import("./openapi.generated.js").components["schemas"]["LightModelSettings"];
+        light_model?: import("./openapi.generated.js").components["schemas"]["LightModelSettings"] | null;
         model: string;
         name: string;
         orchestrator_compaction_threshold?: number | null;
@@ -365,7 +365,7 @@ export declare function createNacApi(nacClient: NacClient): {
         created_at: string;
         extra_headers: Record<string, string>;
         initial_prompt?: string | null;
-        light_model?: null | import("./openapi.generated.js").components["schemas"]["LightModelSettings"];
+        light_model?: import("./openapi.generated.js").components["schemas"]["LightModelSettings"] | null;
         model: string;
         name: string;
         orchestrator_compaction_threshold?: number | null;
@@ -415,7 +415,7 @@ export declare function createNacApi(nacClient: NacClient): {
         env_headers: Record<string, string>;
         env_vars: string[];
         execution_timeout_ms?: number | null;
-        header_helper?: null | import("./openapi.generated.js").components["schemas"]["McpHeaderHelperConfig"];
+        header_helper?: import("./openapi.generated.js").components["schemas"]["McpHeaderHelperConfig"] | null;
         headers: Record<string, string>;
         library_id?: string | null;
         name: string;
@@ -440,7 +440,7 @@ export declare function createNacApi(nacClient: NacClient): {
         env_headers: Record<string, string>;
         env_vars: string[];
         execution_timeout_ms?: number | null;
-        header_helper?: null | import("./openapi.generated.js").components["schemas"]["McpHeaderHelperConfig"];
+        header_helper?: import("./openapi.generated.js").components["schemas"]["McpHeaderHelperConfig"] | null;
         headers: Record<string, string>;
         library_id?: string | null;
         name: string;
@@ -457,7 +457,7 @@ export declare function createNacApi(nacClient: NacClient): {
         auth_required: boolean;
         connected: boolean;
         error?: string | null;
-        probe?: null | import("./openapi.generated.js").components["schemas"]["McpProbeResult"];
+        probe?: import("./openapi.generated.js").components["schemas"]["McpProbeResult"] | null;
         tools: import("./openapi.generated.js").components["schemas"]["McpProbedTool"][];
     }>;
     getMcpOAuthStatus: (name: string, signal?: AbortSignal) => Promise<{
@@ -524,7 +524,7 @@ export declare function createNacApi(nacClient: NacClient): {
         model: string | null;
         models: import("./openapi.generated.js").components["schemas"]["ProviderModel"][];
         models_error: string | null;
-        reasoning_effort: null | import("./openapi.generated.js").components["schemas"]["ReasoningEffort"];
+        reasoning_effort: import("./openapi.generated.js").components["schemas"]["ReasoningEffort"] | null;
     }>;
     resolveConfigFile: (path: string, signal?: AbortSignal) => Promise<{
         allow_insecure_http: boolean;
@@ -534,7 +534,7 @@ export declare function createNacApi(nacClient: NacClient): {
         model: string | null;
         models: import("./openapi.generated.js").components["schemas"]["ProviderModel"][];
         models_error: string | null;
-        reasoning_effort: null | import("./openapi.generated.js").components["schemas"]["ReasoningEffort"];
+        reasoning_effort: import("./openapi.generated.js").components["schemas"]["ReasoningEffort"] | null;
     }>;
     listProjects: (signal?: AbortSignal) => Promise<{
         projects: import("./openapi.generated.js").components["schemas"]["ProjectRecord"][];
@@ -595,14 +595,14 @@ export declare function createNacApi(nacClient: NacClient): {
     }>;
     listSessions: (options?: ListSessionsOptions, signal?: AbortSignal) => Promise<{
         active: boolean;
-        active_run?: null | import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"];
-        lineage?: null | import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"];
+        active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
+        lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"];
-        workspace_diff?: null | import("./openapi.generated.js").components["schemas"]["WorkspaceDiffTotals"];
+        workspace_diff?: import("./openapi.generated.js").components["schemas"]["WorkspaceDiffTotals"] | null;
     }[]>;
     getSession: (id: string, options?: SessionSnapshotOptions) => Promise<{
-        active_compaction?: null | import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"];
-        active_run?: null | import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"];
+        active_compaction?: import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"] | null;
+        active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
         active_threads?: string[];
         covered_orchestrator_steering_ids?: number[];
         forks?: import("./openapi.generated.js").components["schemas"]["SessionForkLink"][];
@@ -611,7 +611,7 @@ export declare function createNacApi(nacClient: NacClient): {
         metadata: import("./openapi.generated.js").components["schemas"]["SessionMetadata"];
         primary_tool_events?: import("./openapi.generated.js").components["schemas"]["AgentEvent"][];
         response_timing: import("./openapi.generated.js").components["schemas"]["ResponseTimingSnapshot"];
-        run_failure?: null | import("./openapi.generated.js").components["schemas"]["RunFailure"];
+        run_failure?: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
         sessions: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
         shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
         thread_episodes: Record<string, import("./openapi.generated.js").components["schemas"]["EpisodeSnapshot"][]>;
@@ -624,14 +624,14 @@ export declare function createNacApi(nacClient: NacClient): {
         worksets: import("./openapi.generated.js").components["schemas"]["WorksetsSnapshot"];
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
-        lineage?: null | import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"];
-        message_cycle?: null | import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"];
-        message_page?: null | import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
+        lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
+        message_cycle?: import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"] | null;
+        message_page?: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"] | null;
         terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
     }>;
     createSession: (payload: CreateSessionRequest) => Promise<{
-        active_compaction?: null | import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"];
-        active_run?: null | import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"];
+        active_compaction?: import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"] | null;
+        active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
         active_threads?: string[];
         covered_orchestrator_steering_ids?: number[];
         forks?: import("./openapi.generated.js").components["schemas"]["SessionForkLink"][];
@@ -640,7 +640,7 @@ export declare function createNacApi(nacClient: NacClient): {
         metadata: import("./openapi.generated.js").components["schemas"]["SessionMetadata"];
         primary_tool_events?: import("./openapi.generated.js").components["schemas"]["AgentEvent"][];
         response_timing: import("./openapi.generated.js").components["schemas"]["ResponseTimingSnapshot"];
-        run_failure?: null | import("./openapi.generated.js").components["schemas"]["RunFailure"];
+        run_failure?: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
         sessions: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
         shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
         thread_episodes: Record<string, import("./openapi.generated.js").components["schemas"]["EpisodeSnapshot"][]>;
@@ -653,22 +653,22 @@ export declare function createNacApi(nacClient: NacClient): {
         worksets: import("./openapi.generated.js").components["schemas"]["WorksetsSnapshot"];
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
-        lineage?: null | import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"];
-        message_cycle?: null | import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"];
-        message_page?: null | import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
+        lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
+        message_cycle?: import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"] | null;
+        message_page?: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"] | null;
         terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
     }>;
     deleteSession: (id: string) => Promise<void>;
     launchDefaults: (payload: LaunchModelDefaultsRequest, signal?: AbortSignal) => Promise<{
         configured_model?: string | null;
-        configured_reasoning_effort?: null | import("./openapi.generated.js").components["schemas"]["ReasoningEffort"];
+        configured_reasoning_effort?: import("./openapi.generated.js").components["schemas"]["ReasoningEffort"] | null;
     }>;
     updatePresentation: (id: string, payload: UpdateSessionPresentationRequest) => Promise<{
         backend: string;
         behavior?: import("./openapi.generated.js").components["schemas"]["SessionBehavior"];
         created_at: string;
         cwd: string;
-        forked_from?: null | import("./openapi.generated.js").components["schemas"]["SessionForkOrigin"];
+        forked_from?: import("./openapi.generated.js").components["schemas"]["SessionForkOrigin"] | null;
         last_user_prompt: string | null;
         model: string;
         model_config_error?: string | null;
@@ -700,7 +700,7 @@ export declare function createNacApi(nacClient: NacClient): {
         config_version: number;
         diagnostics?: string[];
         extra_headers_json: string | null;
-        light_model?: null | import("./openapi.generated.js").components["schemas"]["LightModelSettings"];
+        light_model?: import("./openapi.generated.js").components["schemas"]["LightModelSettings"] | null;
         model: string;
         orchestrator_compaction_threshold: number | null;
         reasoning_effort: string | null;
@@ -722,7 +722,7 @@ export declare function createNacApi(nacClient: NacClient): {
         continuation_run_id: string | null;
         created_at: string;
         goal_id: string;
-        last_failure: null | import("./openapi.generated.js").components["schemas"]["RunFailure"];
+        last_failure: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
         next_attempt_at_epoch_ms: number | null;
         objective: string;
         session_id: string;
@@ -741,7 +741,7 @@ export declare function createNacApi(nacClient: NacClient): {
         continuation_run_id: string | null;
         created_at: string;
         goal_id: string;
-        last_failure: null | import("./openapi.generated.js").components["schemas"]["RunFailure"];
+        last_failure: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
         next_attempt_at_epoch_ms: number | null;
         objective: string;
         session_id: string;
@@ -760,7 +760,7 @@ export declare function createNacApi(nacClient: NacClient): {
         continuation_run_id: string | null;
         created_at: string;
         goal_id: string;
-        last_failure: null | import("./openapi.generated.js").components["schemas"]["RunFailure"];
+        last_failure: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
         next_attempt_at_epoch_ms: number | null;
         objective: string;
         session_id: string;
@@ -784,7 +784,7 @@ export declare function createNacApi(nacClient: NacClient): {
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
         target_run_id?: string | null;
-        terminal_selection?: null | import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
+        terminal_selection?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"] | null;
         updated_at: string;
         version: number;
     }[]>;
@@ -800,7 +800,7 @@ export declare function createNacApi(nacClient: NacClient): {
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
         target_run_id?: string | null;
-        terminal_selection?: null | import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
+        terminal_selection?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"] | null;
         updated_at: string;
         version: number;
     }>;
@@ -816,7 +816,7 @@ export declare function createNacApi(nacClient: NacClient): {
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
         target_run_id?: string | null;
-        terminal_selection?: null | import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
+        terminal_selection?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"] | null;
         updated_at: string;
         version: number;
     }>;
@@ -832,7 +832,7 @@ export declare function createNacApi(nacClient: NacClient): {
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
         target_run_id?: string | null;
-        terminal_selection?: null | import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
+        terminal_selection?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"] | null;
         updated_at: string;
         version: number;
     }>;
@@ -842,7 +842,7 @@ export declare function createNacApi(nacClient: NacClient): {
         completion_inbox_id: number | null;
         created_at: string;
         description: string;
-        execution_mode: null | import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure: string | null;
         generation: number;
         nesting_depth: number;
@@ -862,7 +862,7 @@ export declare function createNacApi(nacClient: NacClient): {
         completion_inbox_id: number | null;
         created_at: string;
         description: string;
-        execution_mode: null | import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure: string | null;
         generation: number;
         nesting_depth: number;
@@ -882,7 +882,7 @@ export declare function createNacApi(nacClient: NacClient): {
         completion_inbox_id: number | null;
         created_at: string;
         description: string;
-        execution_mode: null | import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure: string | null;
         generation: number;
         nesting_depth: number;
@@ -902,7 +902,7 @@ export declare function createNacApi(nacClient: NacClient): {
         completion_inbox_id: number | null;
         created_at: string;
         description: string;
-        execution_mode: null | import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure: string | null;
         generation: number;
         nesting_depth: number;
@@ -920,7 +920,7 @@ export declare function createNacApi(nacClient: NacClient): {
         completion_inbox_id?: number | null;
         created_at: string;
         description: string;
-        execution_mode?: null | import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode?: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure?: string | null;
         generation: number;
         orchestrator_session_id: string;
@@ -936,7 +936,7 @@ export declare function createNacApi(nacClient: NacClient): {
         completion_inbox_id?: number | null;
         created_at: string;
         description: string;
-        execution_mode?: null | import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode?: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure?: string | null;
         generation: number;
         orchestrator_session_id: string;
@@ -952,7 +952,7 @@ export declare function createNacApi(nacClient: NacClient): {
         completion_inbox_id?: number | null;
         created_at: string;
         description: string;
-        execution_mode?: null | import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode?: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure?: string | null;
         generation: number;
         orchestrator_session_id: string;
@@ -968,7 +968,7 @@ export declare function createNacApi(nacClient: NacClient): {
         completion_inbox_id?: number | null;
         created_at: string;
         description: string;
-        execution_mode?: null | import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"];
+        execution_mode?: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
         failure?: string | null;
         generation: number;
         orchestrator_session_id: string;
@@ -992,7 +992,7 @@ export declare function createNacApi(nacClient: NacClient): {
         events: import("./openapi.generated.js").components["schemas"]["ThreadEventPageItem"][];
         has_older: boolean;
         next_before_id?: number | null;
-        thread_event_boundary?: null | import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
+        thread_event_boundary?: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"] | null;
     }>;
     getWorkspaceDiff: (id: string, path: string, { stage, context, revision, signal }?: WorkspaceDiffOptions) => Promise<{
         error: string | null;

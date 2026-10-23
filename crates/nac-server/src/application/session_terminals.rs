@@ -61,27 +61,28 @@ impl<'a> SessionTerminalApplication<'a> {
         &self,
         session_id: &str,
     ) -> Result<Option<Arc<SessionService>>, TerminalApplicationError> {
-        self.manager
-            .validate_operation_session(
-                session_id,
-                super::persistence::OperationSessionScope::Persisted,
-            )
-            .await?;
+        // An existing cached identity avoids a redundant existence lookup, not
+        // authorization. The fresh configuration read below proves durable
+        // existence and version under the lifecycle gate on each invocation.
+        // Unknown/unbounded IDs retain validation before allocating a gate.
+        let cached_identity = SessionManager::operation_session_id_is_bounded(session_id)
+            && self
+                .manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .contains_key(session_id);
+        if !cached_identity {
+            self.manager
+                .validate_operation_session(
+                    session_id,
+                    super::persistence::OperationSessionScope::Persisted,
+                )
+                .await?;
+        }
         let gate = self.manager.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        self.cached_user_service_locked(session_id).await
-    }
-
-    async fn cached_user_service_locked(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<Arc<SessionService>>, TerminalApplicationError> {
-        self.manager
-            .validate_operation_session(
-                session_id,
-                super::persistence::OperationSessionScope::Persisted,
-            )
-            .await?;
         let config_version = self
             .manager
             .session_state()

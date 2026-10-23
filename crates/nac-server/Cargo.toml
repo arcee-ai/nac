@@ -35,8 +35,8 @@ tower-http = { version = "0.6", features = ["compression-gzip", "cors"] }
 url = "2"
 uuid = { workspace = true, features = ["v4"] }
 utoipa.workspace = true
-utoipa-axum = "0.2"
-utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum", "vendored"] }
+utoipa-axum = "0.3"
+utoipa-swagger-ui = { version = "10.0.2", default-features = false, features = ["axum", "vendored"] }
 
 [dev-dependencies]
 base64.workspace = true

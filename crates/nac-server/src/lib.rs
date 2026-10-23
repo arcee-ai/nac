@@ -1178,12 +1178,15 @@ impl SessionManager {
             .await
     }
 
-    fn persisted_operation_session_exists(&self, session_id: &str) -> Result<bool> {
+    fn operation_session_id_is_bounded(session_id: &str) -> bool {
         // Lease filenames hex-encode IDs; 120 bytes plus the suffix fits within
         // the common 255-byte component limit.
         const MAX_SESSION_ID_BYTES: usize = 120;
+        !session_id.is_empty() && session_id.len() <= MAX_SESSION_ID_BYTES
+    }
 
-        if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_BYTES {
+    fn persisted_operation_session_exists(&self, session_id: &str) -> Result<bool> {
+        if !Self::operation_session_id_is_bounded(session_id) {
             return Ok(false);
         }
         sessions::session_exists(&self.inner.store_path, session_id)

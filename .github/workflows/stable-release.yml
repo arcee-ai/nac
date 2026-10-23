@@ -5,6 +5,7 @@ on:
     branches: [main, dev]
     tags: ["v*.*.*"]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
 
 permissions:
@@ -22,6 +23,9 @@ jobs:
       sha: ${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}
       version: ${{ steps.stable.outputs.version || steps.ci.outputs.version }}
       tag: ${{ steps.stable.outputs.tag }}
+      managed_applicable: ${{ steps.applicability.outputs.managed_applicable }}
+      source_policy_mode: ${{ steps.source-policy.outputs.mode }}
+      source_policy_sha: ${{ steps.source-policy.outputs.policy_sha }}
 
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +64,26 @@ jobs:
             echo "sha=$SOURCE_SHA"
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Select ordinary base policy or publication-only resolution
+        id: source-policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}
+        run: node .github/scripts/publication-policy.mjs select "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Decide managed applicability from the complete merge diff
+        id: applicability
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            git diff --no-renames --name-only -z "$BASE_SHA" HEAD > "$RUNNER_TEMP/pr-paths"
+            node .github/scripts/pr-checks.mjs applicability "$RUNNER_TEMP/pr-paths" >> "$GITHUB_OUTPUT"
+          else
+            echo 'managed_applicable=true' >> "$GITHUB_OUTPUT"
+          fi
 
   lint:
     if: ${{ needs.prepare.outputs.run == 'true' }}
@@ -136,15 +160,8 @@ jobs:
       # The build output is committed so that building nac-web never needs Node.
       # Rebuilding it here catches a commit that changed `web/` without shipping
       # the matching bundle.
-      - name: Check the committed frontend build is current
-        working-directory: crates/nac-server/web
-        run: |
-          npm run build
-          if [ -n "$(git status --porcelain -- ../assets/dist)" ]; then
-            echo "::error::crates/nac-server/assets/dist is stale; run 'npm --prefix crates/nac-server/web run build' and commit the result"
-            git status --porcelain -- ../assets/dist
-            exit 1
-          fi
+      - name: Check generated API and every committed browser/client bundle
+        run: make test-assets
 
       - name: Run nac-server tests
         run: cargo test -p nac-server --locked
@@ -201,6 +218,9 @@ jobs:
       - name: Run nac-core and nac-catalog-gen tests
         run: cargo test -p nac-core -p nac-catalog-gen --locked
 
+      - name: Test PR gates and rollout safeguards
+        run: node --test .github/scripts/pr-*.test.mjs
+
       - name: Test stable release policy and configuration
         run: |
           bash -n .github/scripts/stable-release-preparation.sh
@@ -212,9 +232,28 @@ jobs:
           sh -n scripts/install.sh
           sh .github/scripts/install.test.sh
 
+  test-workspace:
+    if: ${{ needs.prepare.outputs.run == 'true' }}
+    needs: [prepare, lint]
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Test the other four workspace crates
+        run: cargo test --locked -p nac-contracts -p nac-credential-store -p nac-managed -p nac-process
+      - name: Preserve source, size, and lifecycle contracts on every PR
+        run: |
+          make test-source-size test-source-workflow test-source-binary
+          make test-durability test-managed-load test-managed-image-contract
+
   test:
     if: ${{ always() && needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, test-server, test-core]
+    needs: [prepare, lint, test-server, test-core, test-workspace]
     runs-on: ubuntu-latest
 
     steps:
@@ -222,9 +261,13 @@ jobs:
         env:
           SERVER_RESULT: ${{ needs.test-server.result }}
           CORE_RESULT: ${{ needs.test-core.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          WORKSPACE_RESULT: ${{ needs.test-workspace.result }}
         run: |
           test "$SERVER_RESULT" = success
           test "$CORE_RESULT" = success
+          test "$LINT_RESULT" = success
+          test "$WORKSPACE_RESULT" = success
 
   build:
     if: ${{ needs.prepare.outputs.run == 'true' }}
@@ -292,12 +335,48 @@ jobs:
           name: nac-${{ matrix.target }}
           path: dist/nac-${{ matrix.target }}.tar.gz
 
+  managed:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
+    uses: ./.github/workflows/managed-image.yml
+    with:
+      source_sha: ${{ needs.prepare.outputs.sha }}
+      policy_mode: ${{ needs.prepare.outputs.source_policy_mode }}
+      trusted_policy_sha: ${{ needs.prepare.outputs.source_policy_sha }}
+
+  source-security:
+    needs: prepare
+    uses: ./.github/workflows/source-security.yml
+    with:
+      candidate-sha: ${{ needs.prepare.outputs.sha }}
+      policy-mode: ${{ needs.prepare.outputs.source_policy_mode }}
+      trusted-policy-sha: ${{ needs.prepare.outputs.source_policy_sha }}
+
+  required-pr-checks:
+    name: Required PR checks
+    if: ${{ always() }}
+    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed, source-security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require every applicable job from this run
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          MANAGED_APPLICABLE: ${{ needs.prepare.outputs.managed_applicable }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: node .github/scripts/pr-checks.mjs aggregate
+
   publish:
     if: >-
       needs.prepare.outputs.run == 'true' &&
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
-    needs: [prepare, test, build]
+    needs: [prepare, test, build, required-pr-checks, source-security]
     runs-on: ubuntu-latest
     permissions:
       contents: write

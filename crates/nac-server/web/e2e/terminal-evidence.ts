@@ -7,6 +7,15 @@ export async function reviewTerminalEvidence(page: Page, pane: Locator, evidence
     /^[\x20-\x7e]+$/.test(evidence),
     "Evidence fixture must occupy one cell per character",
   ).toBe(true);
+  // History loads independently of the live shell. Its empty-state paragraph
+  // disappears when this source arrives, resizing the terminal and clearing a
+  // selection. Settle that real layout prerequisite before measuring a drag.
+  const source = await pane.getByRole("combobox", { name: "Shell", exact: true }).inputValue();
+  await expect(
+    pane
+      .getByRole("combobox", { name: "Recent activity", exact: true })
+      .locator(`option[value="${source}"]`),
+  ).toHaveCount(1);
   const screen = pane.locator(".xterm-screen");
   await expect(screen).toBeVisible();
   await screen.scrollIntoViewIfNeeded();
