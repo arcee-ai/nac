@@ -31,7 +31,7 @@ def verify_result(path, negative=False):
         raise RuntimeError('exactly one selected test and one attempt required')
     result = tests[0]['results'][0]
     if negative:
-        if result['status'] != 'failed' or len(result.get('errors', [])) != 1 or 'native paste byte negative control' not in json.dumps(result['errors']):
+        if result['status'] != 'failed' or len(result.get('errors', [])) != 1 or not result['errors'][0].get('message', '').startswith('Error: native paste byte negative control\n\n'):
             raise RuntimeError('negative control did not fail at the selected paste-byte assertion')
     elif result['status'] != 'passed' or tests[0]['status'] != 'expected':
         raise RuntimeError('native journey did not pass; skipped/retried cases are not acceptance')
@@ -40,6 +40,35 @@ def verify_result(path, negative=False):
     stats = report['stats']
     if stats['expected'] != (0 if negative else 1) or stats['unexpected'] != (1 if negative else 0) or stats['skipped'] or stats['flaky']:
         raise RuntimeError('unexpected test selection or result')
+
+
+def owned_processes(marker):
+    args = ['ps', 'eww', '-axo', 'pid=,stat=,command='] if platform.system() == 'Darwin' else ['ps', 'eww', '-e', '-o', 'pid=,stat=,command=']
+    listing = subprocess.check_output(args, text=True)
+    token = re.compile(r'(?:^|\s)NAC_E2E_CLEANUP_ID=' + re.escape(marker) + r'(?:-|\s|$)')
+    return [int(fields[0]) for line in listing.splitlines()
+            if len(fields := line.split(None, 2)) == 3 and not fields[1].startswith('Z') and token.search(fields[2])]
+
+
+def settle_owned(marker):
+    before = owned_processes(marker)
+    for signum in (signal.SIGTERM, signal.SIGKILL):
+        deadline = time.monotonic() + 3
+        while pids := owned_processes(marker):
+            for pid in pids:
+                try:
+                    os.kill(pid, signum)
+                except ProcessLookupError:
+                    pass
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(.025)
+        if not pids:
+            break
+    remaining = owned_processes(marker)
+    if remaining:
+        raise RuntimeError(f'owned detached processes survived cleanup: {remaining}')
+    return before
 
 
 def main():
@@ -57,6 +86,8 @@ def main():
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, portability.interrupt)
     mutant = None
+    marker = uuid.uuid4().hex
+    report['cleanup_marker'] = marker
     try:
         report['candidate'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
         if not re.fullmatch(r'[0-9a-f]{40}', args.expected_sha) or args.expected_sha != report['candidate']:
@@ -71,7 +102,7 @@ def main():
                 raise RuntimeError(f'required executable unavailable: {executable}')
         if any(key.startswith('NAC_E2E_REMOTE') and value for key, value in os.environ.items()):
             raise RuntimeError('focused native journey requires local isolated harness, not remote settings')
-        env = dict(os.environ, CARGO_PROFILE_TEST_DEBUG='0')
+        env = dict(os.environ, CARGO_PROFILE_TEST_DEBUG='0', NAC_E2E_CLEANUP_ID=marker)
         run = lambda command, label, environment=env: portability.run(command, output / f'{label}.log', environment, report['phases'], label)
         report['python'] = run(['python3', '--version'], 'python')
         report['node'] = run(['node', '--version'], 'node')
@@ -90,15 +121,12 @@ def main():
         # A disposable sibling keeps identical imports/fixtures and leaves candidate source untouched.
         # The sole deliberate fault is an incorrect expected bracket prefix, after real trusted paste.
         original = SOURCE.read_text()
-        needle = '.toEqual(Array.from(new TextEncoder().encode("\\x1b[200~Ω中\\rliteral paste\\x1b[201~")))'
+        needle = 'expect(pasteInputs.flat(), "trusted paste product input bytes").toEqual(\n      Array.from(new TextEncoder().encode("\\x1b[200~Ω中\\rliteral paste\\x1b[201~")),\n    );'
         if original.count(needle) != 1:
             raise RuntimeError('negative-control assertion anchor drift')
-        replacement = '.toEqual(Array.from(new TextEncoder().encode("native paste byte negative control")))'
-        # Include an explicit assertion message so infrastructure failures cannot qualify the control.
+        # The preceding real PTY assertion must pass before the deliberately wrong HTTP expectation.
+        replacement = needle.replace('trusted paste product input bytes', 'native paste byte negative control').replace('200~', '200X')
         changed = original.replace(needle, replacement)
-        changed = changed.replace('await fs.readFile(path.join(workspace, "paste_bytes.json"), "utf8").catch(() => "null"),\n        ),\n      )', 'await fs.readFile(path.join(workspace, "paste_bytes.json"), "utf8").catch(() => "null"),\n        ),\n        { message: "native paste byte negative control" },\n      )', 1)
-        if 'message: "native paste byte negative control"' not in changed:
-            raise RuntimeError('negative-control message anchor drift')
         mutant = SOURCE.with_name(f'terminal-byte-negative-{uuid.uuid4().hex}.e2e.ts')
         mutant.write_text(changed)
         try:
@@ -115,6 +143,15 @@ def main():
     finally:
         if mutant is not None:
             mutant.unlink(missing_ok=True)
+        try:
+            report['owned_pids_before_cleanup'] = settle_owned(marker)
+            report['owned_pids_remaining'] = owned_processes(marker)
+            if report['owned_pids_before_cleanup'] and report['result'].startswith('passed'):
+                report['result'] = 'failed'
+                report['error'] = 'fixture teardown leaked owned processes; runner settled them'
+        except Exception as cleanup_error:
+            report['result'] = 'failed'
+            report['cleanup_error'] = str(cleanup_error)
         report['seconds'] = round(time.monotonic() - started, 3)
         (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
         lines = ['# Focused native terminal browser', '',

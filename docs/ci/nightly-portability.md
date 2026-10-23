@@ -156,8 +156,9 @@ profile records platform, user agent, shell and chord. The Desktop Chrome
 profile's user agent alone does not identify its keyboard platform.
 
 After the positive journey, a disposable sibling test changes only the expected
-bracketed bytes. It performs the same actual clipboard/PTY journey and must fail
-at the specifically named byte assertion exactly once. An unrelated timeout,
+bracketed HTTP bytes. The unchanged raw-PTY byte assertion must first pass;
+the later immediate HTTP assertion must then fail with the specific control
+message exactly once. An unrelated timeout,
 capability, setup or cleanup failure cannot qualify it. Candidate source is not
 modified; the sibling is removed in `finally`. The expected negative is retained
 separately and does not replace or retry positive acceptance.
@@ -167,7 +168,13 @@ phase commands/durations/exits, JSON test receipts, browser profile, screenshot,
 and failure traces/logs for 14 days. The existing isolated scripted-provider
 harness owns its private workspace, strips host provider credentials, terminates
 its process tree and fails cleanup errors. The shared native runner supervisor
-terminates its active owned process group on SIGINT/SIGTERM or command timeout;
+terminates its active owned process group on SIGINT/SIGTERM or command timeout,
+then discovers and settles detached fixtures by a unique invocation prefix on
+the existing per-harness cleanup marker. Unexpected normal-teardown leaks fail
+even when this final cleanup settles them. An actual cancellation control waits
+for a real shell-written PID file, signals the runner, requires its cancelled
+failure report, and verifies both observed server/shell PIDs and all marked
+processes are gone;
 SIGKILL/host loss can prevent reports and hosted teardown remains the final
 boundary. No remote host, real provider credentials or sandbox backend is used.
 The focused jobs have a 35-minute build/setup bound; report actual hosted runtime

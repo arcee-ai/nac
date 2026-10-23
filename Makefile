@@ -86,6 +86,8 @@ test-nightly-portability:
 test-terminal-browser:
 	CARGO="$(CARGO)" python3 .github/scripts/terminal-browser.py \
 		--expected-sha "$$(git rev-parse HEAD)" --output "$${TERMINAL_BROWSER_OUTPUT:-/tmp/nac-terminal-browser}"
+	CARGO="$(CARGO)" python3 .github/scripts/terminal-browser-cancel.py \
+		--expected-sha "$$(git rev-parse HEAD)" --output "$${TERMINAL_BROWSER_OUTPUT:-/tmp/nac-terminal-browser}/cancellation-control"
 
 ## Run the official frozen client requirements for every advertised MCP revision
 test-mcp-conformance:

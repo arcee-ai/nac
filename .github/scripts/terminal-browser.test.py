@@ -37,9 +37,10 @@ class Controls(unittest.TestCase):
             self.verify(zero)
 
     def test_negative_requires_selected_failure_and_clean_teardown(self):
-        failure = self.receipt(status='failed', errors=[{'message': 'native paste byte negative control'}], unexpected=1, expected=0)
+        failure = self.receipt(status='failed', errors=[{'message': 'Error: native paste byte negative control\n\nexpected bytes differ'}], unexpected=1, expected=0)
         self.verify(failure, True)
-        for message in ('timeout', 'missing clipboard permission', 'cleanup failed'):
+        for message in ('timeout', 'missing clipboard permission', 'cleanup failed',
+                        'Error: raw capture timeout\nsource context: native paste byte negative control'):
             wrong = self.receipt(status='failed', errors=[{'message': message}], unexpected=1, expected=0)
             with self.assertRaises(RuntimeError):
                 self.verify(wrong, True)

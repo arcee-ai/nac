@@ -95,6 +95,12 @@ jobs:
         run: |
           exec python3 .github/scripts/terminal-browser.py \
             --expected-sha "$EXPECTED_SHA" --output "$RUNNER_TEMP/terminal-browser"
+      - name: Prove cancellation settles the actual detached server and shell
+        env:
+          EXPECTED_SHA: ${{ inputs.candidate || github.sha }}
+        run: |
+          exec python3 .github/scripts/terminal-browser-cancel.py \
+            --expected-sha "$EXPECTED_SHA" --output "$RUNNER_TEMP/terminal-browser/cancellation-control"
       - name: Summarize exact candidate and attempts
         if: always()
         run: |
@@ -102,6 +108,9 @@ jobs:
             cat "$RUNNER_TEMP/terminal-browser/summary.md" >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'Focused browser setup did not complete; no journey pass is claimed.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f "$RUNNER_TEMP/terminal-browser/cancellation-control/cancellation.json" ]; then
+            cat "$RUNNER_TEMP/terminal-browser/cancellation-control/cancellation.json" >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Retain native journey and negative-control evidence
         if: always()
