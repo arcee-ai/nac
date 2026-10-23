@@ -416,10 +416,16 @@ async fn linked_external_resource_requires_canonical_permission_and_deny_still_w
             done(),
         ]);
         let mut run = f.direct(&server.base_url, rules).await;
-        run.agent
-            .send("Read only the linked fixture reference.")
-            .await
-            .unwrap();
+        let PreparedUserInput::SubmitPrompt(prompt) = prepare_user_input(
+            "Use $linked-demo; read only the linked fixture reference.",
+            run.agent.skills().as_deref(),
+        ) else {
+            panic!("expected prompt")
+        };
+        assert!(prompt
+            .agent_prompt
+            .contains("<skill_content name=\"linked-demo\">"));
+        run.agent.send(&prompt.agent_prompt).await.unwrap();
         let result = tool_result(&run, "read");
         assert!(result.contains(expected), "{result}");
         if expected != "external-fixture-marker" {
