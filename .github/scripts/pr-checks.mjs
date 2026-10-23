@@ -11,6 +11,7 @@ export const requiredJobs = [
   "test-workspace",
   "test",
   "build",
+  "source-security",
 ];
 export const managedJobs = ["prepare", "contract", "quality", "build-smoke"];
 

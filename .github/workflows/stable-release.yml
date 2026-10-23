@@ -24,6 +24,8 @@ jobs:
       version: ${{ steps.stable.outputs.version || steps.ci.outputs.version }}
       tag: ${{ steps.stable.outputs.tag }}
       managed_applicable: ${{ steps.applicability.outputs.managed_applicable }}
+      source_policy_mode: ${{ steps.source-policy.outputs.mode }}
+      source_policy_sha: ${{ steps.source-policy.outputs.policy_sha }}
 
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +64,13 @@ jobs:
             echo "sha=$SOURCE_SHA"
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Select ordinary base policy or publication-only resolution
+        id: source-policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}
+        run: node .github/scripts/publication-policy.mjs select "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Decide managed applicability from the complete merge diff
         id: applicability
@@ -333,10 +342,18 @@ jobs:
     with:
       source_sha: ${{ needs.prepare.outputs.sha }}
 
+  source-security:
+    needs: prepare
+    uses: ./.github/workflows/source-security.yml
+    with:
+      candidate-sha: ${{ needs.prepare.outputs.sha }}
+      policy-mode: ${{ needs.prepare.outputs.source_policy_mode }}
+      trusted-policy-sha: ${{ needs.prepare.outputs.source_policy_sha }}
+
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed]
+    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed, source-security]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -357,7 +374,7 @@ jobs:
       needs.prepare.outputs.run == 'true' &&
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
-    needs: [prepare, test, build, required-pr-checks]
+    needs: [prepare, test, build, required-pr-checks, source-security]
     runs-on: ubuntu-latest
     permissions:
       contents: write

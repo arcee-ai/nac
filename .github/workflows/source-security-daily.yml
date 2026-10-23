@@ -1,0 +1,28 @@
+name: Daily dev source security
+
+on:
+  schedule:
+    - cron: '23 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.identity.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: dev
+          persist-credentials: false
+      - id: identity
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  scan:
+    needs: candidate
+    uses: ./.github/workflows/source-security.yml
+    with:
+      candidate-sha: ${{ needs.candidate.outputs.sha }}
+      trusted-policy-sha: ${{ needs.candidate.outputs.sha }}
