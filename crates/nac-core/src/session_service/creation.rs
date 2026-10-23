@@ -10,6 +10,25 @@ impl SessionService {
         &self,
         resources: crate::runtime::PreparedSessionResources,
     ) -> Result<SessionFrontendSnapshot> {
+        self.persist_prepared_session(resources, None).await
+    }
+
+    /// Atomically publish the retained launch, session and one initial inbox
+    /// item. A cancelled launch cannot cross this acceptance boundary.
+    pub async fn persist_new_task_session_with_snapshot(
+        &self,
+        resources: crate::runtime::PreparedSessionResources,
+        launch_id: String,
+    ) -> Result<SessionFrontendSnapshot> {
+        self.persist_prepared_session(resources, Some(launch_id))
+            .await
+    }
+
+    async fn persist_prepared_session(
+        &self,
+        resources: crate::runtime::PreparedSessionResources,
+        launch_id: Option<String>,
+    ) -> Result<SessionFrontendSnapshot> {
         // Accepted blocking work outlives a dropped request. Its shared resource
         // guard must also outlive that request and disarm inside the commit
         // command, before acknowledgement can be lost.
@@ -28,6 +47,7 @@ impl SessionService {
             crate::store::spawn_blocking_store_caller(move || {
                 let command = CreateSessionWithSnapshot {
                     snapshot,
+                    launch_id,
                     response,
                     resources: operation_resources,
                     #[cfg(test)]
@@ -62,6 +82,7 @@ impl SessionService {
 
 struct CreateSessionWithSnapshot {
     snapshot: sessions::SessionSnapshot,
+    launch_id: Option<String>,
     response: SessionFrontendSnapshot,
     resources: Arc<StdMutex<Option<crate::runtime::PreparedSessionResources>>>,
     #[cfg(test)]
@@ -82,6 +103,13 @@ impl PersistenceCommand for CreateSessionWithSnapshot {
             let transaction =
                 connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             sessions::insert_new_session_in_transaction(&transaction, path, &self.snapshot)?;
+            if let Some(launch_id) = self.launch_id.as_deref() {
+                crate::store::task_launches::publish_in_transaction(
+                    &transaction,
+                    launch_id,
+                    &self.snapshot,
+                )?;
+            }
             self.response.sessions = view::list_sessions_with_connection(&transaction)?;
             transaction.commit()?;
             Ok(())

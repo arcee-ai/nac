@@ -30,6 +30,7 @@ pub(crate) use shell_commands::{
 };
 mod ssh_configurations;
 mod steering;
+pub(crate) mod task_launches;
 mod terminal_cleanups;
 mod terminal_selection;
 mod thread_events;
@@ -80,6 +81,11 @@ pub use session_goals::*;
 pub use session_inbox::*;
 pub use ssh_configurations::*;
 pub use steering::*;
+pub use task_launches::{
+    list_task_launches, load_project_git_source, load_task_launch, reconcile_task_launches,
+    reserve_task_launch, update_task_launch, TaskLaunchPhase, TaskLaunchRecord, TaskLaunchRequest,
+    TaskLaunchSource,
+};
 pub use terminal_cleanups::*;
 pub use terminal_selection::*;
 pub use thread_events::*;

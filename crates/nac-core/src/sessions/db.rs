@@ -1202,7 +1202,7 @@ correlation |_command| crate::telemetry::Correlation::default();
 port public;
 }
 
-fn normalize_presentation_title(
+pub(crate) fn normalize_presentation_title(
     title: &str,
 ) -> std::result::Result<Option<String>, SessionPresentationError> {
     if title.chars().any(char::is_control) {

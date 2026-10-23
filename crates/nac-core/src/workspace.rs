@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 mod git;
 mod revisions;
+pub mod task_worktree;
 pub(crate) mod worktree;
 
 pub use git::GitTarget;

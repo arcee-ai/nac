@@ -1450,6 +1450,44 @@ export interface components {
             create?: boolean;
             name: string;
         };
+        TaskLaunchPhase: "pinned" | "preparing_workspace" | "preparing_runtime" | "ready" | "failed" | "cancelled";
+        TaskLaunchRecord: {
+            created_at: string;
+            error?: string | null;
+            first_input_id?: number | null;
+            phase: components["schemas"]["TaskLaunchPhase"];
+            request: components["schemas"]["TaskLaunchRequest"];
+            session_id: string;
+            session_present: boolean;
+            source: components["schemas"]["TaskLaunchSource"];
+            updated_at: string;
+            workspace_path: string;
+        };
+        TaskLaunchRequest: {
+            default_ref?: string | null;
+            git_ref?: string | null;
+            invoking_session_id?: string | null;
+            project_id: string;
+            prompt: string;
+            request_id: string;
+            title: string;
+        };
+        TaskLaunchSource: {
+            commit: string;
+            common_git_dir: string;
+            default_ref: string;
+            excluded_source_edits: boolean;
+            project_cwd: string;
+            repo_root: string;
+            repository_identity: string;
+            selected_ref: string;
+            source_cwd: string;
+            subdirectory: string;
+        };
+        TaskLaunchSourceInfo: {
+            default_ref?: string | null;
+            eligible: boolean;
+        };
         TerminalSelectionAttribution: {
             admission_id: string;
             capture_id: string;
