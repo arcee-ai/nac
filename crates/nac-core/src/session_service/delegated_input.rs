@@ -42,9 +42,7 @@ impl SessionService {
                     return self.wait_for_child_input_delivery(item_id).await;
                 }
                 ChildInputTransition::Recovering(lease) => {
-                    self.reconcile_durable_run_recovery(&lease).await?;
-                    self.reconcile_traditional_child_terminal_with_lease(&lease)
-                        .await?;
+                    self.recover_child_input_for_admission(&lease).await?;
                 }
                 ChildInputTransition::Finishing(mut settlement) => {
                     if !*settlement.borrow_and_update() {
@@ -57,6 +55,27 @@ impl SessionService {
                 }
             }
         }
+    }
+
+    async fn recover_child_input_for_admission(
+        &self,
+        lease: &sessions::SessionOperationLease,
+    ) -> Result<()> {
+        self.reconcile_durable_run_recovery(lease).await?;
+        let child = self
+            .reconcile_traditional_child_terminal_with_lease(lease)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("traditional child was not found after recovery"))?;
+        if child.status == crate::store::TraditionalChildStatus::Running {
+            // The lease proves there is no live owner to receive a steer. A
+            // mismatched recovery identity or failed settlement is not progress;
+            // fail closed instead of hot-looping or queueing to an unowned run.
+            return Err(anyhow::anyhow!(
+                "traditional child generation {} remains running after recovery; input was not admitted",
+                child.generation,
+            ));
+        }
+        Ok(())
     }
 
     async fn wait_for_child_input_delivery(&self, item_id: i64) -> Result<TraditionalChildRecord> {
@@ -327,3 +346,7 @@ impl SessionService {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "delegated_input_tests.rs"]
+mod tests;
