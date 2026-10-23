@@ -26,6 +26,26 @@ fn repository_identity(path: &Path) -> Result<String> {
     }
 }
 
+/// Distinguish an ordinary non-Git directory from an unavailable/broken source.
+/// A failed probe must never silently select the existing-checkout launch path.
+pub fn is_git_project(cwd: &Path) -> Result<bool> {
+    let cwd = canonical(cwd)?;
+    let target = GitTarget::local(&cwd);
+    let output =
+        target.output_with_env(&cwd, &[("LC_ALL", "C")], &["rev-parse", "--show-toplevel"])?;
+    if output.status.success() {
+        return Ok(true);
+    }
+    let error = String::from_utf8_lossy(&output.stderr);
+    if error.contains("not a git repository") {
+        return Ok(false);
+    }
+    Err(anyhow!(
+        "Git source probe failed: {}",
+        super::first_stderr_line(&output.stderr)
+    ))
+}
+
 /// Resolve an exact commit once, before any workspace effect. The caller first
 /// checks for an existing durable request so retry never consults a moving ref.
 pub fn resolve_source(
@@ -130,22 +150,8 @@ pub fn resolve_source(
             &format!("{selected_ref}^{{commit}}"),
         ],
     )?;
-    // Optional locks are disabled: status must never refresh the source index.
-    let status = source_target.output_with_env(
-        &source_cwd,
-        &[("GIT_OPTIONAL_LOCKS", "0")],
-        &[
-            "-c",
-            "core.fsmonitor=false",
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=normal",
-        ],
-    )?;
-    anyhow::ensure!(
-        status.status.success(),
-        "could not inspect source edit exclusion"
-    );
+    // Ref launch excludes edits by construction. Do not scan source file
+    // contents or run clean/fsmonitor programs merely to report that policy.
     Ok(TaskLaunchSource {
         project_cwd: project.cwd.clone(),
         source_cwd,
@@ -156,7 +162,7 @@ pub fn resolve_source(
         default_ref,
         selected_ref,
         commit,
-        excluded_source_edits: !status.stdout.is_empty(),
+        excluded_source_edits: true,
     })
 }
 
@@ -201,7 +207,21 @@ pub fn authorize_human_preparation(
         store_path,
         true,
     );
-    resources.push(PermissionResource::new("execute", "git worktree add"));
+    resources.push(PermissionResource::new(
+        "execute",
+        format!(
+            "git worktree add --detach {} {}",
+            launch.workspace_path.display(),
+            launch.source.commit
+        ),
+    ));
+    resources.push(PermissionResource::new(
+        "execute",
+        format!(
+            "git update-ref refs/nac/task-launches/{} {}",
+            launch.request.request_id, launch.source.commit
+        ),
+    ));
     let decision =
         PermissionPolicy::for_backend(PermissionBackend::Local, config.permissions.rules.clone())
             .evaluate(&resources, &[]);
@@ -225,8 +245,10 @@ pub fn prepare_workspace(launch: &TaskLaunchRecord) -> Result<PathBuf> {
         .workspace_path
         .parent()
         .ok_or_else(|| anyhow!("workspace has no parent"))?;
-    if !parent.exists() {
-        std::fs::create_dir(parent)?;
+    match std::fs::create_dir(parent) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
     }
     anyhow::ensure!(
         canonical(parent)? == parent,
@@ -270,7 +292,17 @@ pub fn prepare_workspace(launch: &TaskLaunchRecord) -> Result<PathBuf> {
             pinned.status.code() == Some(1),
             "could not inspect retained commit ref"
         );
-        run_git(&target, &["update-ref", &pin, &launch.source.commit, ""])?;
+        run_git(
+            &target,
+            &[
+                "-c",
+                "core.hooksPath=/dev/null",
+                "update-ref",
+                &pin,
+                &launch.source.commit,
+                "",
+            ],
+        )?;
     }
     if std::fs::symlink_metadata(&launch.workspace_path).is_err() {
         // Preparation executes no repository hooks or content-filter programs.

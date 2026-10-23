@@ -30,9 +30,7 @@ impl<'a> TaskLaunchApplication<'a> {
             let bound = store::load_project_git_source(&path, &project_id)?;
             let eligible = unmanaged
                 && project.ssh_host.is_none()
-                && nac_core::workspace::GitTarget::local(&project.cwd)
-                    .repo_root()
-                    .is_ok();
+                && (bound.is_some() || task_worktree::is_git_project(&project.cwd)?);
             Ok(TaskLaunchSourceInfo {
                 eligible,
                 default_ref: bound.map(|b| b.default_ref),
@@ -188,6 +186,11 @@ impl<'a> TaskLaunchApplication<'a> {
 /// Construction is synchronous, including embedders on a current-thread
 /// runtime. Submit the typed startup command from a bounded ordinary thread.
 pub(crate) fn reconcile_startup(path: &std::path::Path) -> Result<()> {
+    // Ordinary construction/preflight must not create a database as a side
+    // effect. A new store has no interrupted preparations to reconcile.
+    if !path.exists() {
+        return Ok(());
+    }
     std::thread::scope(|scope| scope.spawn(|| store::reconcile_task_launches(path)).join())
         .map_err(|_| anyhow!("task preparation reconciliation thread panicked"))?
 }

@@ -277,3 +277,34 @@ fn missing_refs_remote_hosts_and_missing_or_symlinked_subdirectories_fail_visibl
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn retained_commit_pin_obeys_configured_deny_and_executes_no_reference_hook() {
+    let (root, project, request) = fixture();
+    let source = resolve_source(&project, &request, None, None).unwrap();
+    let launch = store::reserve_task_launch(&root.join("store.db"), request, source).unwrap();
+    let mut config = crate::runtime::NacConfig::default();
+    config
+        .permissions
+        .rules
+        .push(crate::permissions::PermissionRule::new(
+            "execute",
+            "git update-ref*",
+            crate::permissions::PermissionEffect::Deny,
+        ));
+    assert!(authorize_human_preparation(&launch, &config, &root.join("store.db")).is_err());
+    assert!(!launch.workspace_path.exists());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let hook = root.join("repo/.git/hooks/reference-transaction");
+        let marker = root.join("reference-hook-ran");
+        std::fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let index = std::fs::read(root.join("repo/.git/index")).unwrap();
+        prepare_workspace(&launch).unwrap();
+        assert!(!marker.exists());
+        assert_eq!(std::fs::read(root.join("repo/.git/index")).unwrap(), index);
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
