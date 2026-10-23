@@ -61,3 +61,9 @@ retains its expected failing log separately from normal successful suites.
 Adding this required lane does not activate repository rulesets or supply human
 approval. The designated reviewer and deliberate human override policy in
 [required-pr-checks.md](required-pr-checks.md) is unchanged.
+
+The shared CI quality profile now pins the existing supported Rust 1.98.0
+compiler across Linux, managed checks and native ARM checks. Native test
+selection and safe Darwin failure controls are unchanged. Its Cargo cache may
+restore trusted entries; only main/dev push runs may save entries. See
+[CI efficiency](ci-efficiency.md) for cache and measurement boundaries.

@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.run_id }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action == 'synchronize' || github.event.changes.base != null) }}
 
 jobs:
   prepare:
@@ -98,7 +98,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 24.22.1
       - name: Install locked workflow-parser dependencies
         run: npm --prefix .github/scripts ci --ignore-scripts
       - name: Check workflows and scripts, then prove enforcement
@@ -116,33 +116,35 @@ jobs:
           ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
         with:
           components: rustfmt, clippy
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: ${{ github.job }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
 
       - name: Install Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: crates/nac-server/web/package-lock.json
+          node-version: 24.22.1
 
       - name: Install web dependencies
         working-directory: crates/nac-server/web
         run: npm ci
 
-      - name: Lint frontend and backend
-        run: make lint
+      - name: Lint backend (frontend lint is part of test-assets)
+        run: cargo clippy --workspace --locked --lib --bins -- -D warnings
 
       - name: Check frontend and backend formatting
         run: make format-check
 
   test-server:
     if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, lint]
+    needs: prepare
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
@@ -154,17 +156,19 @@ jobs:
           ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: ${{ github.job }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
 
       - name: Install Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: crates/nac-server/web/package-lock.json
+          node-version: 24.22.1
 
       - name: Install web dependencies
         working-directory: crates/nac-server/web
@@ -173,10 +177,6 @@ jobs:
       - name: Run frontend tests
         working-directory: crates/nac-server/web
         run: npm test
-
-      - name: Typecheck the web app
-        working-directory: crates/nac-server/web
-        run: npm run typecheck
 
       # The build output is committed so that building nac-web never needs Node.
       # Rebuilding it here catches a commit that changed `web/` without shipping
@@ -190,6 +190,31 @@ jobs:
       - name: Exercise stable binary readiness and status identity
         run: make test-stable-binary
 
+
+  browser:
+    if: ${{ needs.prepare.outputs.run == 'true' }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: ${{ github.job }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Install locked browser dependencies
+        run: npm --prefix crates/nac-server/web ci
+      # This candidate's committed bundles are checked by test-server/test-assets.
+      # The final aggregate requires BOTH that drift gate and these real journeys.
       - name: Install Playwright Chromium
         working-directory: crates/nac-server/web
         run: npx playwright install --with-deps chromium
@@ -197,7 +222,9 @@ jobs:
       - name: Run production-embedded browser tests
         env:
           NAC_E2E_ARTIFACTS: ${{ github.workspace }}/crates/nac-server/web/test-results
-        run: make test-e2e
+        run: |
+          cargo build --locked -p nac-server --bin nac-web
+          NAC_E2E_BINARY="$GITHUB_WORKSPACE/target/debug/nac-web" npm --prefix crates/nac-server/web run test:e2e
 
       - name: Upload browser test artifacts
         if: failure()
@@ -209,7 +236,7 @@ jobs:
 
   test-core:
     if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, lint]
+    needs: prepare
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
@@ -221,17 +248,19 @@ jobs:
           ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: ${{ github.job }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
 
       - name: Install Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: .github/scripts/package-lock.json
+          node-version: 24.22.1
 
       - name: Install pinned release-policy dependencies
         working-directory: .github/scripts
@@ -256,7 +285,7 @@ jobs:
 
   test-workspace:
     if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, lint]
+    needs: prepare
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
@@ -265,8 +294,12 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: ${{ github.job }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
       - name: Test the other four workspace crates
         run: cargo test --locked -p nac-contracts -p nac-credential-store -p nac-managed -p nac-process
       - name: Preserve source, size, and lifecycle contracts on every PR
@@ -274,23 +307,40 @@ jobs:
           make test-source-size test-source-workflow test-source-binary
           make test-durability test-managed-load test-managed-image-contract
 
-  test:
+  quality:
     if: ${{ always() && needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, lint, test-server, test-core, test-workspace]
+    needs: [prepare, lint, workflow-lint, test-server, test-core, test-workspace]
     runs-on: ubuntu-latest
+    outputs:
+      quality_receipt: ${{ steps.receipt.outputs.quality_receipt }}
 
     steps:
-      - name: Require all test suites
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Bind complete successful quality results to this candidate
+        id: receipt
         env:
-          SERVER_RESULT: ${{ needs.test-server.result }}
-          CORE_RESULT: ${{ needs.test-core.result }}
-          LINT_RESULT: ${{ needs.lint.result }}
-          WORKSPACE_RESULT: ${{ needs.test-workspace.result }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_SHA: ${{ needs.prepare.outputs.sha }}
+        run: node .github/scripts/pr-checks.mjs quality-receipt >> "$GITHUB_OUTPUT"
+
+  test:
+    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
+    needs: [prepare, quality, browser]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require shared quality and real browser acceptance
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
         run: |
-          test "$SERVER_RESULT" = success
-          test "$CORE_RESULT" = success
-          test "$LINT_RESULT" = success
-          test "$WORKSPACE_RESULT" = success
+          test "$QUALITY_RESULT" = success
+          test "$BROWSER_RESULT" = success
 
   build:
     if: ${{ needs.prepare.outputs.run == 'true' }}
@@ -319,12 +369,16 @@ jobs:
           sudo apt-get install -y musl-tools
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
         with:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: ${{ github.job }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
 
       - name: Build nac-web binary
         env:
@@ -367,11 +421,12 @@ jobs:
       source-sha: ${{ needs.prepare.outputs.sha }}
 
   managed:
-    needs: prepare
+    needs: [prepare, quality]
     if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
     uses: ./.github/workflows/managed-image.yml
     with:
       source_sha: ${{ needs.prepare.outputs.sha }}
+      quality_receipt: ${{ needs.quality.outputs.quality_receipt }}
       policy_mode: ${{ needs.prepare.outputs.source_policy_mode }}
       trusted_policy_sha: ${{ needs.prepare.outputs.source_policy_sha }}
 
@@ -386,7 +441,7 @@ jobs:
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed, source-security, workflow-lint, macos-native]
+    needs: [prepare, lint, test-server, test-core, test-workspace, quality, browser, test, build, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -395,7 +450,7 @@ jobs:
           ref: ${{ github.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 24.22.1
       - name: Require every applicable job from this run
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
