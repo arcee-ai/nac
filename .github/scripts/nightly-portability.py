@@ -158,6 +158,13 @@ def main():
         worker = ROOT / os.environ.get('CARGO_TARGET_DIR', 'target') / 'debug/nac-web'
         if not worker.is_file():
             raise RuntimeError(f'managed-load worker missing: {worker}')
+        # Package-isolated feature resolution can differ from workspace unification.
+        # Precompile each selected harness outside the test fixture environment too.
+        packages = sorted({case['package'] for case in inventory
+                           if case['disposition'] == 'included'})
+        for package in packages:
+            run([cargo, 'test', '--locked', '-p', package, '--lib', '--no-run'],
+                output / f'{package}-build.log', env, report['phases'], f'{package}-build')
         with tempfile.TemporaryDirectory(prefix='nac-portability-fixture-') as directory:
             fixture = Path(directory).resolve()
             test_env = dict(env, TMPDIR=str(fixture), TMP=str(fixture), TEMP=str(fixture),
@@ -169,7 +176,7 @@ def main():
                         continue
                     label = case['name'].rsplit('::', 1)[-1]
                     command = [cargo, 'test', '--locked', '-p', case['package'], '--lib',
-                               case['name'], '--', '--ignored', '--exact', '--nocapture', '--test-threads=1']
+                               case['name'], '--', '--ignored', '--exact', '--show-output', '--test-threads=1']
                     log = run(command, output / f'{label}.log', test_env, report['phases'], case['name'])
                     require_exact(log, case['name'])
             finally:

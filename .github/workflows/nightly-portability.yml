@@ -31,7 +31,7 @@ jobs:
     env:
       CARGO_PROFILE_TEST_DEBUG: '0'
     steps:
-      # Reuse the landed native lane's runner, Rust revision and cache action.
+      # Reuse native runner/setup and the supported managed toolchain profile.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
@@ -44,16 +44,16 @@ jobs:
           test "$(uname -s)" = Darwin
           test "$(uname -m)" = arm64
           sw_vers
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
         with:
-          toolchain: stable
+          toolchain: 1.98.0
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         id: cache
         with:
           shared-key: nightly-portability
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 24.22.1
       - name: Prepare locked development dependencies
         run: make setup
       - name: Prove failure propagation, serialization and cancellation cleanup
@@ -66,7 +66,7 @@ jobs:
         run: |
           args=()
           if [ "$SEED_FAILURE" = true ]; then args+=(--seed-failure); fi
-          python3 .github/scripts/nightly-portability.py \
+          exec python3 .github/scripts/nightly-portability.py \
             --output "$RUNNER_TEMP/nightly-portability" "${args[@]}"
       - name: Summarize exact test owner and failure
         if: always()

@@ -9,8 +9,8 @@ GitHub schedules require the workflow on the default branch; a PR run or a
 fixture testing schedule syntax does not prove deployed scheduling.
 
 The lane reuses the landed native PR setup: actual `macos-26` Darwin ARM64,
-identical pinned Rust/cache/checkout actions, no checkout credentials and a
-separate cache key. It runs `make setup` before verification. The candidate is
+the supported Rust 1.98.0 and Node 24.22.1 profile, pinned cache/checkout
+actions, no checkout credentials and a separate cache key. It runs `make setup` before verification. The candidate is
 the immutable event SHA (PR test merge, scheduled default head or dispatched
 ref resolved by GitHub); both checkout and runner verify it. No moving branch
 is resolved between phases.

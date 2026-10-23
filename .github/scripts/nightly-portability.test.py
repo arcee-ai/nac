@@ -65,10 +65,13 @@ class Controls(unittest.TestCase):
 import json, os, sys
 from pathlib import Path
 inventory=json.loads(Path(os.environ['CONTROL_INVENTORY']).read_text())
-if '--list' in sys.argv:
+if '--no-run' in sys.argv:
+    assert os.environ.get('TMPDIR') == os.environ.get('CONTROL_BUILD_TMPDIR')
+elif '--list' in sys.argv:
     print('\\n'.join(c['name']+': test' for c in inventory))
 elif '--exact' in sys.argv:
     assert '--ignored' in sys.argv and '--test-threads=1' in sys.argv
+    assert '--show-output' in sys.argv and '--nocapture' not in sys.argv
     names=[c['name'] for c in inventory if c['name'] in sys.argv]
     assert len(names)==1
     print('test '+names[0]+' ... ok')
@@ -81,7 +84,8 @@ elif '--workspace' in sys.argv and '--no-run' not in sys.argv:
             sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=runner.ROOT, text=True).strip()
             order = root / 'order'
             env = dict(os.environ, CARGO=str(cargo), CARGO_TARGET_DIR=str(root),
-                       CONTROL_INVENTORY=str(runner.INVENTORY), CONTROL_ORDER=str(order))
+                       CONTROL_INVENTORY=str(runner.INVENTORY), CONTROL_ORDER=str(order),
+                       CONTROL_BUILD_TMPDIR=os.environ.get('TMPDIR', ''))
             result = subprocess.run([sys.executable, str(SCRIPT), '--expected-sha', sha,
                                      '--output', str(root / 'evidence')],
                                     env=env, text=True, capture_output=True)
@@ -114,42 +118,51 @@ elif '--workspace' in sys.argv and '--no-run' not in sys.argv:
     def test_cancellation_kills_root_and_child_and_retains_log(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            # Exercise the actual command supervisor in a subprocess, with readiness barrier.
-            helper = root / 'helper.py'
-            helper.write_text('''import importlib.util, pathlib, signal, sys
-sys.dont_write_bytecode = True
-spec = importlib.util.spec_from_file_location('runner', sys.argv[1])
-r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)
-signal.signal(signal.SIGTERM, r.interrupt)
-try:
-    r.run([sys.executable, '-c', sys.argv[3]], pathlib.Path(sys.argv[2]), None, [], 'cancel')
-except r.Cancelled:
-    sys.exit(130)
-''')
+            # Execute the actual workflow shell block, so signal delivery cannot
+            # accidentally stop at a wrapper shell instead of the Python supervisor.
+            cargo = root / 'cargo'
             ready = root / 'ready'
-            log = root / 'child.log'
-            child = ("import pathlib,subprocess,sys,time,os; "
-                     "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(300)']); "
-                     f"pathlib.Path({str(ready)!r}).write_text(str(os.getpid())+' '+str(p.pid)); "
-                     "print('ready',flush=True); time.sleep(300)")
-            process = subprocess.Popen([sys.executable, str(helper), str(SCRIPT), str(log), child])
+            cargo.write_text("""#!/usr/bin/env python3
+import os, pathlib, subprocess, sys, time
+if '-V' in sys.argv:
+    print('cargo cancellation fixture')
+else:
+    p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(300)'])
+    pathlib.Path(os.environ['CONTROL_READY']).write_text(str(os.getpid())+' '+str(p.pid))
+    print('ready',flush=True)
+    time.sleep(300)
+""")
+            cargo.chmod(0o700)
+            workflow = SCRIPT.parents[1] / 'workflows/nightly-portability.yml'
+            block = workflow.read_text().split('      - name: Run full workspace and exact reviewed ignored cases\n')[1]
+            block = block.split('        run: |\n')[1].split('      - name: Summarize')[0]
+            shell = root / 'workflow-step.sh'
+            shell.write_text('\n'.join(line[10:] for line in block.splitlines())+'\n')
+            sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=runner.ROOT, text=True).strip()
+            env = dict(os.environ, CARGO=str(cargo), CONTROL_READY=str(ready),
+                       EXPECTED_SHA=sha, RUNNER_TEMP=str(root), SEED_FAILURE='false')
+            process = subprocess.Popen(['bash', str(shell)], cwd=runner.ROOT, env=env,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
                 deadline = time.monotonic() + 10
                 while not ready.exists() and time.monotonic() < deadline:
                     time.sleep(.02)
                 self.assertTrue(ready.exists(), 'child never reached readiness barrier')
                 pids = [int(p) for p in ready.read_text().split()]
-                process.send_signal(signal.SIGTERM)
+                process.send_signal(signal.SIGINT)
                 self.assertEqual(process.wait(timeout=10), 130)
                 for pid in pids:
-                    # A reparented zombie is dead, even before launchd reaps it.
                     result = subprocess.run(['ps', '-p', str(pid), '-o', 'stat='], capture_output=True, text=True)
                     self.assertTrue(not result.stdout.strip() or result.stdout.strip().startswith('Z'), result.stdout)
-                self.assertIn('ready', log.read_text())
+                evidence = root / 'nightly-portability'
+                report = json.loads((evidence / 'report.json').read_text())
+                self.assertEqual(report['result'], 'cancelled')
+                self.assertIn('ready', (evidence / 'build.log').read_text())
             finally:
                 if process.poll() is None:
                     process.kill()
                     process.wait()
+
 
 
 if __name__ == '__main__':
