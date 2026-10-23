@@ -86,6 +86,24 @@ jobs:
             echo 'managed_applicable=true' >> "$GITHUB_OUTPUT"
           fi
 
+  workflow-lint:
+    if: ${{ needs.prepare.outputs.run == 'true' }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install locked workflow-parser dependencies
+        run: npm --prefix .github/scripts ci --ignore-scripts
+      - name: Check workflows and scripts, then prove enforcement
+        run: make lint-workflows test-workflow-lint
+
   lint:
     if: ${{ needs.prepare.outputs.run == 'true' }}
     needs: prepare
@@ -361,7 +379,7 @@ jobs:
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed, source-security]
+    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed, source-security, workflow-lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

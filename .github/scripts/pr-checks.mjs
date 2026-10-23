@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 export const requiredJobs = [
   "prepare",
   "lint",
+  "workflow-lint",
   "test-server",
   "test-core",
   "test-workspace",

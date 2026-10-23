@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-lock=/recipe/sources.lock.json
 # Curl retains the existing Wolfi capabilities and restores Debian's NTLM/SCP/SFTP.
 # Only this build SDK switches headers; the final image keeps its OpenSSL3 SDK.
 apk del openssl-dev

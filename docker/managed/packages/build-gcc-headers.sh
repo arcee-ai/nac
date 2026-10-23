@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-lock=/recipe/sources.lock.json
 # The GCC defect is in an installed template header. Repackage the exact checksum-pinned
 # supplier development payload, changing only that header and owned metadata.
 # fetch-sources.sh already verifies the exact reviewed supplier archive SHA256.
