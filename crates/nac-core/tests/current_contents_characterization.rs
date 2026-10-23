@@ -144,3 +144,31 @@ fn history_recaptures_same_identity_and_pins_chain_only_in_source() {
         .join(".git/nac-revisions/index-retry")
         .exists());
 }
+
+#[test]
+fn raw_history_preserves_non_utf8_link_targets_and_resulting_rename_deletion_paths() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let repo = Repo::new();
+    fs::create_dir(repo.0.join("removed")).unwrap();
+    fs::write(repo.0.join("removed/file"), b"deleted").unwrap();
+    repo.put("old", b"renamed bytes\0\xff");
+    repo.git(&["add", "--all"]);
+    repo.git(&["commit", "-qm", "before deletes"]);
+    fs::remove_dir_all(repo.0.join("removed")).unwrap();
+    fs::rename(repo.0.join("old"), repo.0.join("renamed")).unwrap();
+    symlink(OsStr::from_bytes(b"missing-\xff"), repo.0.join("link")).unwrap();
+    let before = repo.source();
+    let revision = capture(&repo.target(), "raw-link-and-paths", None).unwrap();
+    assert_eq!(repo.blob(&revision.commit, "link"), b"missing-\xff");
+    assert_eq!(
+        repo.blob(&revision.commit, "renamed"),
+        b"renamed bytes\0\xff"
+    );
+    let paths =
+        String::from_utf8(repo.git(&["ls-tree", "-r", "--name-only", &revision.commit])).unwrap();
+    assert!(!paths
+        .lines()
+        .any(|path| path == "old" || path == "removed/file"));
+    assert_eq!(repo.source(), before);
+}

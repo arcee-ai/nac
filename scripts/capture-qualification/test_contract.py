@@ -69,6 +69,18 @@ class Contract(unittest.TestCase):
         self.assertEqual(self.repo.git('-C', 'nested', 'rev-parse', '--show-toplevel').strip(),
                          os.fsencode(self.root.resolve()))
 
+    def test_deleted_parent_directory_is_a_tracked_deletion(self):
+        self.repo.put('removed/file', b'deleted')
+        self.repo.commit()
+        shutil.rmtree(self.root / 'removed')
+        before = source_evidence(self.root)
+        manifest = validate_twice(self.root)
+        self.assertIsNone(manifest['entries']['removed/file'])
+        p = Probe(self.root)
+        commit = history_recipe(p, self.root / '.git/deletion-index')
+        self.assertNotIn(b'removed/file', self.repo.git('ls-tree', '-r', commit))
+        self.assertEqual(source_evidence(self.root), before)
+
     def test_ignored_tracked_and_unreadable_ignored_nested_tree(self):
         self.repo.put('.gitignore', b'tracked\nignored/\n')
         self.repo.put('ignored/nested/.git/secret', b'excluded')
