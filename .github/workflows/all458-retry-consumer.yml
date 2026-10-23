@@ -1,0 +1,47 @@
+name: ALL-458 isolated retry consumer
+on:
+  workflow_call:
+    inputs:
+      receipt:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: b9f957b01793fdf7e095cf61851cf1249f792fbe
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Exercise production mode selector with actual reusable-workflow attempt context
+        id: mode
+        env:
+          QUALITY_RECEIPT: ${{ inputs.receipt }}
+          EXPECTED_SHA: b9f957b01793fdf7e095cf61851cf1249f792fbe
+        run: |
+          mkdir evidence
+          node .github/scripts/pr-checks.mjs quality-mode | tee evidence/mode.txt >> "$GITHUB_OUTPUT"
+          node --input-type=module -e 'import fs from "node:fs"; const r=JSON.parse(process.env.QUALITY_RECEIPT); fs.writeFileSync("evidence/receipt.json", JSON.stringify({fixture_only:true,candidate:process.env.EXPECTED_SHA,producer_attempt:r.run_attempt,consumer_attempt:process.env.GITHUB_RUN_ATTEMPT,producer_run:r.run_id,consumer_run:process.env.GITHUB_RUN_ID,repository:process.env.GITHUB_REPOSITORY},null,2));'
+      - name: Retain explicit scheduling-only receipt (no NAC quality claim)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: all458-retry-fixture-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+      - name: Deliberately fail attempt one; require full recomputation selection on retry
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          if [ "$GITHUB_RUN_ATTEMPT" = 1 ]; then
+            test "$MODE" = reuse
+            echo 'Expected fixture failure: use Re-run failed jobs, preserving successful producer outputs.'
+            exit 1
+          fi
+          test "$MODE" = full
+          echo 'Scheduling fixture only: production full make ci is covered by workflow contract and actual NAC CI; never claim this synthetic fixture ran it.'

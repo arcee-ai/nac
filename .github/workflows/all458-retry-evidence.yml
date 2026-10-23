@@ -1,0 +1,34 @@
+name: ALL-458 isolated retry evidence
+on:
+  push:
+    branches: [codex/all-458-retry-evidence]
+permissions:
+  contents: read
+concurrency:
+  group: all458-retry-evidence-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  producer:
+    runs-on: ubuntu-latest
+    outputs:
+      receipt: ${{ steps.receipt.outputs.quality_receipt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: b9f957b01793fdf7e095cf61851cf1249f792fbe
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Produce explicitly synthetic successful results for retry scheduling only
+        id: receipt
+        env:
+          EXPECTED_SHA: b9f957b01793fdf7e095cf61851cf1249f792fbe
+        run: |
+          export NEEDS_JSON="$(node --input-type=module -e 'import {qualityJobs} from "./.github/scripts/pr-checks.mjs"; const n=Object.fromEntries(qualityJobs.map(j=>[j,{result:"success"}])); n.prepare.outputs={sha:process.env.EXPECTED_SHA,run:"true"}; console.log(JSON.stringify(n));')"
+          node .github/scripts/pr-checks.mjs quality-receipt >> "$GITHUB_OUTPUT"
+  consumer:
+    needs: producer
+    uses: ./.github/workflows/all458-retry-consumer.yml
+    with:
+      receipt: ${{ needs.producer.outputs.receipt }}
