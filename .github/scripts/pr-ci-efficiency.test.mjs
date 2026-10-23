@@ -55,13 +55,13 @@ test("real receipt CLI carries only completed exact-run results and fails closed
 test("caller supplies observed complete quality needs; standalone always runs full quality", () => {
   const stable = workflow("stable-release");
   const managed = workflow("managed-image");
-  assert.deepEqual([...stable.jobs.test.needs].sort(), [...qualityJobs].sort());
-  const receipt = stable.jobs.test.steps.find(s => s.id === "receipt");
+  assert.deepEqual([...stable.jobs.quality.needs].sort(), [...qualityJobs].sort());
+  const receipt = stable.jobs.quality.steps.find(s => s.id === "receipt");
   assert.equal(receipt.env.NEEDS_JSON, "${{ toJSON(needs) }}");
   assert.equal(receipt.env.EXPECTED_SHA, "${{ needs.prepare.outputs.sha }}");
   assert.match(receipt.run, /pr-checks.mjs quality-receipt/);
-  assert.deepEqual(stable.jobs.managed.needs, ["prepare", "test"]);
-  assert.equal(stable.jobs.managed.with.quality_receipt, "${{ needs.test.outputs.quality_receipt }}");
+  assert.deepEqual(stable.jobs.managed.needs, ["prepare", "quality"]);
+  assert.equal(stable.jobs.managed.with.quality_receipt, "${{ needs.quality.outputs.quality_receipt }}");
   assert.equal(managed.on.workflow_call.inputs.quality_receipt.default, "");
   assert.equal(managed.on.workflow_dispatch, null, "standalone has no caller-supplied skip/receipt inputs");
   const steps = managed.jobs.quality.steps;
@@ -77,11 +77,17 @@ test("caller supplies observed complete quality needs; standalone always runs fu
   for (const step of steps) assert.equal(step["continue-on-error"], undefined);
 });
 
-test("browser consumes the one checked bundle; every generated API and committed asset check remains", () => {
+test("browser binds the same committed bundle and independent drift gate without a second web build", () => {
   const steps = workflow("stable-release").jobs["test-server"].steps;
   assert.equal(steps.filter(s => s.run === "make test-assets").length, 1);
   assert.equal(steps.filter(s => /(?:npm run build|make test-e2e)/.test(s.run ?? "")).length, 0);
-  const browser = steps.find(s => s.name === "Run production-embedded browser tests");
+  const stable = workflow("stable-release");
+  const browserJob = stable.jobs.browser;
+  assert.equal(browserJob.needs, "prepare");
+  assert.equal(browserJob.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
+  assert.ok(requiredJobs.includes("browser"));
+  assert.deepEqual(stable.jobs.test.needs, ["prepare", "quality", "browser"]);
+  const browser = browserJob.steps.find(s => s.name === "Run production-embedded browser tests");
   assert.match(browser.run, /cargo build --locked -p nac-server --bin nac-web/);
   assert.match(browser.run, /NAC_E2E_BINARY="\$GITHUB_WORKSPACE\/target\/debug\/nac-web" npm --prefix crates\/nac-server\/web run test:e2e/);
   const makefile = readFileSync("Makefile", "utf8");
@@ -129,7 +135,7 @@ test("PR identity cancels superseded checks while tag/push/dispatch/release muta
 });
 
 test("seeded browser/source/native/image failures still fail the full current-candidate aggregate", () => {
-  for (const job of ["test-server", "source-security", "macos-native", "workflow-lint", "managed"]) {
+  for (const job of ["test-server", "browser", "quality", "source-security", "macos-native", "workflow-lint", "managed"]) {
     for (const result of ["failure", "cancelled", "skipped"]) {
       const needs = Object.fromEntries([...requiredJobs, "managed"].map(name => [name, { result: "success" }]));
       needs.prepare.outputs = { sha, run: "true" };

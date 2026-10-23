@@ -18,11 +18,13 @@ new candidate after the base advances; a prior head's green check is insufficien
 | prepare | yes | Exact source identity and complete merge diff applicability |
 | workflow-lint | yes | Pinned actionlint/ShellCheck over every tracked workflow and shell script, plus real-tool enforcement fixtures |
 | lint | yes | Workspace production clippy, web lint, Rust/web formatting |
-| test-server | yes | Server and stable binary, web tests, generated OpenAPI/types, all committed browser/client assets, production Chromium journeys |
+| test-server | yes | Server and stable binary, web tests, generated OpenAPI/types, all committed browser/client assets |
+| browser | yes | Same-candidate committed bundle and production Chromium journeys; separately required alongside the asset drift gate |
+| quality | yes | Exact candidate/repository/run/attempt receipt covering complete successful unit/assets/lint/workflow-lint results |
 | test-core | yes | Core/catalog tests, release policy, installer, PR gate/rollout model tests |
 | test-workspace | yes | Contracts, credentials, managed and process crate tests; source command/binary/size, durability, managed load and static image contracts |
 | macos-native | yes | Native ARM macOS process/credential suites and 12 exact core terminal regressions; measured first/warm runs and Darwin behavioral failure control ([coverage](native-macos.md)) |
-| test | yes | Compatibility result and exact candidate/repository/run/attempt receipt covering all test lanes, lint and workflow lint |
+| test | yes | Compatibility result requires both shared quality and browser acceptance |
 | build | yes | Existing Linux musl and macOS ARM release binary/archive validation |
 | managed | explicit | Reusable contract, verified same-run quality reuse, private fault fixture, exact Linux image build, smoke and advisory findings |
 | required-pr-checks | always | Explicit result set and candidate binding; no cross-workflow lookup races |

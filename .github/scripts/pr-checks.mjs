@@ -10,6 +10,8 @@ export const requiredJobs = [
   "test-server",
   "test-core",
   "test-workspace",
+  "quality",
+  "browser",
   "test",
   "build",
   "source-security",

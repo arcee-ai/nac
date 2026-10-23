@@ -21,8 +21,8 @@ managed image work remains contents-read/build-and-smoke only.
 | Workspace clippy; Rust/web formatting | Stable lint plus managed quality repeat | Stable lint once; receipt requires success |
 | Web lint/typecheck | Stable lint, server checks/assets and managed repeat | `test-assets` lint/typecheck once; formatting remains in lint |
 | Generated API document, app types, bounded nac-client types | `test-assets -> test-api-contract` plus managed repeat | Same sole writer/check chain in server; required receipt |
-| Committed browser, nac-client and nac-presentation dist | Server asset build, browser rebuild, managed asset build | One server `test-assets` build and unchanged dirty-output failure check; browser consumes that build |
-| Web tests and production Chromium journeys | Stable server plus managed web tests | Stable server; same browser command/config, retries and assertions |
+| Committed browser, nac-client and nac-presentation dist | Server asset build, browser rebuild, managed asset build | One server `test-assets` build and unchanged dirty-output failure check; browser consumes the identical committed bundles from the same candidate |
+| Web tests and production Chromium journeys | Stable server plus managed web tests | Stable server tests plus separate required concurrent browser job; same browser command/config, retries and assertions |
 | Source-size, source workflow/binary, durability, managed load/static image contract | Stable workspace plus managed repeat | Stable workspace; required receipt |
 | Managed private fault feature tests and feature clippy | Managed quality after full `make ci` | Always managed quality, after receipt validation; never deduplicated |
 | Exact native linux/amd64 image, load, smoke, inventory, advisory scan/qualification | Managed contract/quality/build-smoke/result | Same exact loaded image ID and candidate, scanner infrastructure enforced; findings advisory as accepted |
@@ -36,13 +36,20 @@ managed image work remains contents-read/build-and-smoke only.
 Tests start after preparation instead of waiting for clippy; both the compatibility
 `test` result and Required PR checks still wait for lint. The receipt records only
 an exact, complete successful result set from preparation, lint, workflow lint,
-server, core and workspace. It binds candidate SHA, repository, run ID and attempt.
-The managed caller directly needs that `test` job and passes its output. The
+server unit/assets, core and workspace. It binds candidate SHA, repository, run ID and attempt.
+The managed caller directly needs the receipt-producing `quality` job and passes
+its output. The separate compatibility `test` result requires both quality and
+browser success. Browser builds the exact candidate with its checked-in bundles;
+server `test-assets` independently proves those committed bytes match the sole
+writer. Both jobs are mandatory in Required PR checks. Browser never supplies
+quality evidence, and image work need not wait for an unrelated browser journey. The
 reusable quality job validates all fields and results before reuse; invalid or
 foreign evidence fails. A blank receipt runs full `make ci`, including in standalone
 manual managed runs, which expose no receipt/skip dispatch input. The feature-gated
 fault fixture always runs. No cross-workflow status lookup or previous green
-candidate can supply quality evidence. Native/build/source-security are separately
+candidate can supply quality evidence. A downstream-only rerun in a new
+attempt rejects an older upstream receipt; regenerate quality through a full
+workflow rerun rather than weakening attempt binding. Browser/native/build/source-security are separately
 required by the final aggregate, rather than falsely described as receipt contents.
 
 ## Cache and cancellation boundary

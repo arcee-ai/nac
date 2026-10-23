@@ -190,6 +190,31 @@ jobs:
       - name: Exercise stable binary readiness and status identity
         run: make test-stable-binary
 
+
+  browser:
+    if: ${{ needs.prepare.outputs.run == 'true' }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: ${{ github.job }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Install locked browser dependencies
+        run: npm --prefix crates/nac-server/web ci
+      # This candidate's committed bundles are checked by test-server/test-assets.
+      # The final aggregate requires BOTH that drift gate and these real journeys.
       - name: Install Playwright Chromium
         working-directory: crates/nac-server/web
         run: npx playwright install --with-deps chromium
@@ -282,7 +307,7 @@ jobs:
           make test-source-size test-source-workflow test-source-binary
           make test-durability test-managed-load test-managed-image-contract
 
-  test:
+  quality:
     if: ${{ always() && needs.prepare.outputs.run == 'true' }}
     needs: [prepare, lint, workflow-lint, test-server, test-core, test-workspace]
     runs-on: ubuntu-latest
@@ -303,6 +328,19 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
           EXPECTED_SHA: ${{ needs.prepare.outputs.sha }}
         run: node .github/scripts/pr-checks.mjs quality-receipt >> "$GITHUB_OUTPUT"
+
+  test:
+    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
+    needs: [prepare, quality, browser]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require shared quality and real browser acceptance
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
+        run: |
+          test "$QUALITY_RESULT" = success
+          test "$BROWSER_RESULT" = success
 
   build:
     if: ${{ needs.prepare.outputs.run == 'true' }}
@@ -383,12 +421,12 @@ jobs:
       source-sha: ${{ needs.prepare.outputs.sha }}
 
   managed:
-    needs: [prepare, test]
+    needs: [prepare, quality]
     if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
     uses: ./.github/workflows/managed-image.yml
     with:
       source_sha: ${{ needs.prepare.outputs.sha }}
-      quality_receipt: ${{ needs.test.outputs.quality_receipt }}
+      quality_receipt: ${{ needs.quality.outputs.quality_receipt }}
       policy_mode: ${{ needs.prepare.outputs.source_policy_mode }}
       trusted_policy_sha: ${{ needs.prepare.outputs.source_policy_sha }}
 
@@ -403,7 +441,7 @@ jobs:
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-core, test-workspace, test, build, managed, source-security, workflow-lint, macos-native]
+    needs: [prepare, lint, test-server, test-core, test-workspace, quality, browser, test, build, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
