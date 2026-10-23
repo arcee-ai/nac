@@ -200,6 +200,10 @@ cannot distinguish Allison from an agent holding her credentials. Agent policy
 requires explicit human per-merge intent; routine automation should use an App
 not present in the bypass list.
 
+The [ALL-460 queue qualification report](merge-queue-qualification.md) records
+the installed tooling, current settings, unperformed fixture cases, recovery and
+measured CI cost. Its recommendation is to defer queues; it activates no rules.
+
 References: [CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners),
 [user bypass](https://github.blog/changelog/2026-05-07-repository-rulesets-user-bypass-and-branch-renaming/),
 [ruleset rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets).

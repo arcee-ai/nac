@@ -1,0 +1,429 @@
+{
+  "scope": "ALL-460 read-only qualification; no hosted fixture or bypass tested",
+  "baseline": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+  "rules_snapshot": {
+    "schema_version": 1,
+    "captured_at": "2026-10-23T05:31:11.617Z",
+    "repository": "arcee-ai/nac",
+    "default_branch": "dev",
+    "dev_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+    "merge_methods": {
+      "merge_commit": true,
+      "squash_merge": true,
+      "rebase_merge": true
+    },
+    "rulesets": [
+      {
+        "id": 2955537,
+        "name": "Protect default branch",
+        "target": "branch",
+        "source_type": "Enterprise",
+        "source": "arcee-ai",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "exclude": [],
+            "include": [
+              "~DEFAULT_BRANCH"
+            ]
+          }
+        },
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "non_fast_forward"
+          }
+        ],
+        "node_id": "RRS_lACoQnVzaW5lc3POAAQOiM4ALRkR",
+        "created_at": "2024-12-12T11:16:33.502-08:00",
+        "updated_at": "2025-02-05T16:09:12.383-08:00",
+        "current_user_can_bypass": "never",
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/arcee-ai/nac/rulesets/2955537"
+          },
+          "html": {
+            "href": "https://github.com/arcee-ai/nac/rules/2955537"
+          }
+        }
+      },
+      {
+        "id": 2955527,
+        "name": "Viability and Transfer Restriction",
+        "target": "repository",
+        "source_type": "Enterprise",
+        "source": "arcee-ai",
+        "enforcement": "active",
+        "conditions": {},
+        "rules": [
+          {
+            "type": "repository_transfer"
+          }
+        ],
+        "node_id": "RRS_lACoQnVzaW5lc3POAAQOiM4ALRkH",
+        "created_at": "2024-12-12T11:14:46.664-08:00",
+        "updated_at": "2024-12-12T11:14:46.664-08:00",
+        "current_user_can_bypass": "never",
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/arcee-ai/nac/rulesets/2955527"
+          }
+        }
+      }
+    ],
+    "effective_dev_rules": [
+      {
+        "type": "deletion",
+        "ruleset_source_type": "Enterprise",
+        "ruleset_source": "arcee-ai",
+        "ruleset_id": 2955537
+      },
+      {
+        "type": "non_fast_forward",
+        "ruleset_source_type": "Enterprise",
+        "ruleset_source": "arcee-ai",
+        "ruleset_id": 2955537
+      },
+      {
+        "type": "repository_transfer",
+        "ruleset_source_type": "Enterprise",
+        "ruleset_source": "arcee-ai",
+        "ruleset_id": 2955527
+      }
+    ],
+    "classic_protection": null,
+    "owners": [
+      {
+        "login": "allisoneer",
+        "id": 20910163,
+        "permission": "admin"
+      },
+      {
+        "login": "Cecocho",
+        "id": 105443339,
+        "permission": "write"
+      },
+      {
+        "login": "ericlau98",
+        "id": 17348362,
+        "permission": "write"
+      }
+    ],
+    "codeowners": "* @allisoneer @Cecocho @ericlau98\n",
+    "checks": [
+      {
+        "name": "test-server",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "in_progress",
+        "conclusion": null,
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256538552",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "test-workspace",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "in_progress",
+        "conclusion": null,
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256538460",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "test-core",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256538446",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "managed / contract",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256257939",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "managed / quality",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "in_progress",
+        "conclusion": null,
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256257850",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "managed / prepare",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256177260",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "source-security / Full locked source scan",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256177163",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "macos-native / ARM macOS process and credentials",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256177118",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "build (macos-26, aarch64-apple-darwin)",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256177117",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "build (ubuntu-latest, x86_64-unknown-linux-musl)",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256177029",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "lint",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256176927",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "workflow-lint",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256176923",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      },
+      {
+        "name": "prepare",
+        "head_sha": "9386c906ed20ff1f751c47a875a792ae2b4fb6cd",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/arcee-ai/nac/actions/runs/39905409133/job/120256107371",
+        "app": {
+          "id": 15368,
+          "slug": "github-actions"
+        }
+      }
+    ]
+  },
+  "observations": {
+    "git-version": {
+      "command": [
+        "git",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout": "git version 2.50.1 (Apple Git-155)\n",
+      "stderr": ""
+    },
+    "gh-version": {
+      "command": [
+        "gh",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout": "gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0\n",
+      "stderr": ""
+    },
+    "extensions": {
+      "command": [
+        "gh",
+        "extension",
+        "list"
+      ],
+      "exit_code": 0,
+      "stdout": "gh stack\tgithub/gh-stack\tv0.1.1\n",
+      "stderr": ""
+    },
+    "stack-version": {
+      "command": [
+        "gh",
+        "stack",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout": "gh stack version 0.1.1\n",
+      "stderr": ""
+    },
+    "stack-help": {
+      "command": [
+        "gh",
+        "stack",
+        "--help"
+      ],
+      "exit_code": 0,
+      "stdout": "Stacked PRs let you break a large change into a chain of pull requests\nthat build on each other. Use `gh stack` to create and manage your stack\nlocally, then push to GitHub to create your stack of PRs.\n\nUsage:\n  gh stack [command]\n\nExamples:\n  # Start a new stack targeting your default branch\n  $ gh stack init\n\n  # Or turn an existing set of branches into a stack\n  $ gh stack init branch1 branch2 branch3\n\n  # Make changes and commit, then add a branch to the stack\n  $ gh stack add branch4\n\n  # Push all branches and create/update PRs on GitHub\n  $ gh stack submit\n\n  # Keep your local in sync with remote\n  $ gh stack sync\n\nStack management:\n  add         Add a new branch on top of the current stack\n  checkout    Checkout a stack by stack number, PR number, PR URL, or branch name\n  init        Initialize a new stack\n  modify      Interactively restructure a stack\n  unstack     Remove a stack locally and on GitHub\n  view        View the current stack\n\nRemote operations:\n  link        Link PRs into a stack on GitHub without local tracking\n  merge       Merge a stack of pull requests\n  push        Push active branches in the current stack to the remote\n  rebase      Rebase a stack of branches\n  submit      Create a stack of PRs on GitHub\n  sync        Sync the current stack with the remote\n\nNavigation:\n  bottom      Check out the bottom branch of the stack (closest to the trunk)\n  down        Check out a branch further down in the stack (closer to the trunk)\n  switch      Interactively switch to another branch in the stack\n  top         Check out the top branch of the stack (furthest from the trunk)\n  trunk       Check out the trunk branch of the stack\n  up          Check out a branch further up in the stack (further from the trunk)\n\nUtilities:\n  alias       Create a shell alias for gh stack\n  feedback    Submit feedback for gh-stack\n\nFlags:\n  -h, --help      help for stack\n  -v, --version   version for stack\n\nUse \"gh stack [command] --help\" for more information about a command.\n\nLearn more:\n  Documentation: https://gh.io/stacks\n  Feedback: https://gh.io/stacks-feedback\n",
+      "stderr": ""
+    },
+    "merge-help": {
+      "command": [
+        "gh",
+        "stack",
+        "merge",
+        "--help"
+      ],
+      "exit_code": 0,
+      "stdout": "Merge some or all of a stack of pull requests using GitHub's atomic stack\nmerge. All members of the stack up to and including your chosen pull request are\nmerged into the base branch in a single, all-or-nothing operation: if any PR\ncannot be merged, none are.\n\nWith no argument, the stack for the current branch is used. Pass a stack number\nto merge a stack you don't have checked out, or a pull request number to merge\ndirectly up to that PR. A bare number is treated first as a stack number, then\nas a pull request number.\n\nIn an interactive terminal, a short wizard lets you choose how far up the stack\nto merge (everything below your selection is always included), pick the merge\nmethod, and confirm, then shows live progress. In a non-interactive terminal, or\nwith --yes, the whole stack (or everything up to the given PR) is merged without\nprompting, using your last-used merge method unless one is specified.\n\nOnly basic pull request state is checked before merging (open and not a draft);\nGitHub evaluates branch protection and repository rules when the merge runs, so\nany such failure is reported back to you. Bypassing merge requirements is not\nsupported for stacks.\n\nIf the base branch uses a merge queue, the stack is added to the queue and merges\nonce the queue processes it; otherwise it is merged directly.\n\nUsage:\n  gh stack merge [<stack-number> | <pr-number>] [flags]\n\nExamples:\n  # Merge the current stack (interactive picker)\n  $ gh stack merge\n\n  # Merge a stack you don't have checked out, by stack number\n  $ gh stack merge 7\n\n  # Merge everything up to and including PR #42\n  $ gh stack merge 42\n\n  # Merge the whole current stack without prompting, squashing\n  $ gh stack merge --yes --squash\n\nFlags:\n  -h, --help                  help for merge\n      --merge                 Merge with a merge commit\n      --merge-method string   Merge method to use: merge, squash, or rebase\n      --rebase                Rebase and merge\n      --squash                Squash and merge\n  -y, --yes                   Merge without prompting for confirmation\n",
+      "stderr": ""
+    },
+    "sync-help": {
+      "command": [
+        "gh",
+        "stack",
+        "sync",
+        "--help"
+      ],
+      "exit_code": 0,
+      "stdout": "Fetch, rebase, push, and sync PR state for the current stack.\n\nThis command performs a safe synchronization:\n\n  1. Fetches the latest changes from the remote\n  2. Reconciles the stack on GitHub with your local stack: pulls down\n     branches for any PRs added to the stack on GitHub, or prompts you to\n     resolve a divergence in an interactive terminal\n  3. Fast-forwards the trunk branch to match the remote\n  4. Cascade-rebases stack branches onto their updated parents\n  5. Pushes all branches atomically (using --force-with-lease --atomic)\n  6. Syncs PR state from GitHub\n  7. Links the stack's open PRs into a stack on GitHub (creating or updating\n     the remote stack object) when two or more PRs exist\n\nIf PRs have been added to the stack on GitHub, their branches are pulled\ndown and appended to your local stack so it mirrors the remote. A clean\n\"remote is ahead\" update happens automatically without prompting. If the\nlocal and remote stacks have diverged, sync prompts (in an interactive\nterminal) to use the remote as the source of truth, delete the stack on\nGitHub and recreate it later with sync/submit, or cancel. Cancelling \u2014 or a\ndivergence in a non-interactive terminal \u2014 aborts the sync without pushing\nbranches or updating PRs.\n\nIf a rebase conflict is detected, all branches are restored to their\noriginal state and you are advised to run \"gh stack rebase\" to resolve\nconflicts interactively.\n\nSync never opens pull requests \u2014 use \"gh stack submit\" for that. It only\nlinks PRs that already exist. The final message reflects what happened:\n\"Stack synced\" means the stack object on GitHub now matches your local\nstack, while \"Branches synced\" means the branches were rebased and pushed\nbut no remote stack object was created or updated (for example, when fewer\nthan two PRs exist yet).\n\nUse --prune to delete local branches for merged PRs. Stack metadata is\npreserved so that rebase and display logic continue to work correctly.\nIf you are on a branch that would be pruned, your checkout is moved to\nthe first active branch in the stack, or the trunk if all are merged.\n\nUsage:\n  gh stack sync [flags]\n\nFlags:\n  -h, --help            help for sync\n      --prune           Delete local branches for merged PRs\n      --remote string   Remote to fetch from and push to (defaults to auto-detected remote)\n",
+      "stderr": ""
+    },
+    "rebase-help": {
+      "command": [
+        "gh",
+        "stack",
+        "rebase",
+        "--help"
+      ],
+      "exit_code": 0,
+      "stdout": "Pull from remote and do a cascading rebase across the stack.\n\nEnsures that each branch in the stack has the tip of the previous\nlayer in its commit history, rebasing if necessary.\n\nUse --no-trunk to skip fetching and rebasing with the trunk branch.\nOnly the inter-branch rebases are performed (branch 2 onto branch 1,\nbranch 3 onto branch 2, etc.).\n\nUsage:\n  gh stack rebase [branch] [flags]\n\nExamples:\n  # Rebase the entire stack\n  $ gh stack rebase\n\n  # Only rebase from trunk to the current branch\n  $ gh stack rebase --downstack\n\n  # Only rebase from current branch to the top\n  $ gh stack rebase --upstack\n\n  # Rebase stack branches without pulling from or rebasing with trunk\n  $ gh stack rebase --no-trunk\n\n  # Continue after resolving conflicts\n  $ gh stack rebase --continue\n\n  # Abort and restore all branches\n  $ gh stack rebase --abort\n\nFlags:\n      --abort                           Abort rebase and restore all branches\n      --committer-date-is-author-date   Set the committer date to the author date during rebase\n      --continue                        Continue rebase after resolving conflicts\n      --downstack                       Only rebase branches from trunk to current branch\n  -h, --help                            help for rebase\n      --no-trunk                        Skip trunk \u2014 only rebase stack branches onto each other\n      --preserve-dates                  Alias for --committer-date-is-author-date\n      --remote string                   Remote to fetch from (defaults to auto-detected remote)\n      --upstack                         Only rebase branches from current branch to top\n",
+      "stderr": ""
+    },
+    "pr-merge-help": {
+      "command": [
+        "gh",
+        "pr",
+        "merge",
+        "--help"
+      ],
+      "exit_code": 0,
+      "stdout": "Merge a pull request on GitHub.\n\nWithout an argument, the pull request that belongs to the current branch\nis selected.\n\nWhen targeting a branch that requires a merge queue, no merge strategy is required.\nIf required checks have not yet passed, auto-merge will be enabled.\nIf required checks have passed, the pull request will be added to the merge queue.\nTo bypass a merge queue and merge directly, pass the `--admin` flag.\n\n\nUSAGE\n  gh pr merge [<number> | <url> | <branch>] [flags]\n\nFLAGS\n      --admin                   Use administrator privileges to merge a pull request that does not meet requirements\n  -A, --author-email text       Email text for merge commit author\n      --auto                    Automatically merge only after necessary requirements are met\n  -b, --body text               Body text for the merge commit\n  -F, --body-file file          Read body text from file (use \"-\" to read from standard input)\n  -d, --delete-branch           Delete the local and remote branch after merge\n      --disable-auto            Disable auto-merge for this pull request\n      --match-head-commit SHA   Commit SHA that the pull request head must match to allow merge\n  -m, --merge                   Merge the commits with the base branch\n  -r, --rebase                  Rebase the commits onto the base branch\n  -s, --squash                  Squash the commits into one commit and merge it into the base branch\n  -t, --subject text            Subject text for the merge commit\n\nINHERITED FLAGS\n      --help                     Show help for command\n  -R, --repo [HOST/]OWNER/REPO   Select another repository using the [HOST/]OWNER/REPO format\n\nLEARN MORE\n  Use `gh <command> <subcommand> --help` for more information about a command.\n  Read the manual at https://cli.github.com/manual\n  Learn about exit codes using `gh help exit-codes`\n  Learn about accessibility experiences using `gh help accessibility`\n\n",
+      "stderr": ""
+    },
+    "repo-settings": {
+      "command": [
+        "gh",
+        "api",
+        "repos/arcee-ai/nac",
+        "--jq",
+        "{full_name,visibility,default_branch,allow_auto_merge,allow_merge_commit,allow_squash_merge,allow_rebase_merge,delete_branch_on_merge}"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"allow_auto_merge\":false,\"allow_merge_commit\":true,\"allow_rebase_merge\":true,\"allow_squash_merge\":true,\"default_branch\":\"dev\",\"delete_branch_on_merge\":false,\"full_name\":\"arcee-ai/nac\",\"visibility\":\"public\"}\n",
+      "stderr": ""
+    },
+    "merge-group-runs": {
+      "command": [
+        "gh",
+        "api",
+        "--method",
+        "GET",
+        "repos/arcee-ai/nac/actions/workflows/stable-release.yml/runs",
+        "-f",
+        "event=merge_group",
+        "-f",
+        "per_page=1",
+        "--jq",
+        "{total_count,workflow_runs}"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"total_count\":0,\"workflow_runs\":[]}\n",
+      "stderr": ""
+    }
+  },
+  "timings": [
+    {
+      "run_id": 39895390955,
+      "event": "pull_request",
+      "head_sha": "d7f7e493aaaa4a9310f0753467b7420528247250",
+      "conclusion": "success",
+      "url": "https://github.com/arcee-ai/nac/actions/runs/39895390955",
+      "created_at": "2026-10-23T03:30:33Z",
+      "required_completed_at": "2026-10-23T04:06:47Z",
+      "wall_seconds_to_required": 2174.0,
+      "sum_job_seconds": 4927.0
+    },
+    {
+      "run_id": 39895553128,
+      "event": "pull_request",
+      "head_sha": "78411f063cb67021cae73e76355f3fcf6550ca43",
+      "conclusion": "success",
+      "url": "https://github.com/arcee-ai/nac/actions/runs/39895553128",
+      "created_at": "2026-10-23T03:32:22Z",
+      "required_completed_at": "2026-10-23T04:11:25Z",
+      "wall_seconds_to_required": 2343.0,
+      "sum_job_seconds": 5772.0
+    },
+    {
+      "run_id": 39898328402,
+      "event": "pull_request",
+      "head_sha": "87018d2d676e6bffed88bc4d4b91f520d0ab71a0",
+      "conclusion": "success",
+      "url": "https://github.com/arcee-ai/nac/actions/runs/39898328402",
+      "created_at": "2026-10-23T04:04:09Z",
+      "required_completed_at": "2026-10-23T04:45:58Z",
+      "wall_seconds_to_required": 2509.0,
+      "sum_job_seconds": 5499.0
+    }
+  ],
+  "local_policy_event_characterization": {
+    "scope": "local synthetic event characterization; not hosted queue evidence",
+    "outcome": "rejected",
+    "message": "ordinary policy requires a PR base, canonical dev, or protected branch push"
+  },
+  "upstream_stack_tag": {
+    "tag": "v0.1.1",
+    "commit": "2bd699a544a09cb5c45a013d03416e0894b0454e"
+  }
+}
