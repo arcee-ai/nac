@@ -1,0 +1,118 @@
+name: MCP conformance
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  schedule:
+    - cron: "23 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.identity.outputs.sha }}
+      applicable: ${{ steps.applicability.outputs.applicable }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.22.1"
+      - run: npm --prefix .github/scripts ci --ignore-scripts
+      - name: Bind candidate and verify workflow contracts
+        id: identity
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "sha=$EXPECTED_SHA" >> "$GITHUB_OUTPUT"
+          make test-mcp-conformance-contract
+      - name: Classify the complete candidate diff
+        id: applicability
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            git diff --no-renames --name-only -z "$BASE_SHA" HEAD > "$RUNNER_TEMP/mcp-paths"
+            node scripts/mcp-conformance/contracts.mjs applicability "$RUNNER_TEMP/mcp-paths" >> "$GITHUB_OUTPUT"
+          else
+            echo 'applicable=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  conformance:
+    needs: prepare
+    if: needs.prepare.outputs.applicable == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.22.1"
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: mcp-conformance
+      - name: Install the complete locked runner graph
+        run: npm --prefix .github/scripts ci --ignore-scripts
+      - name: Run both frozen revisions and the omitted-tool-call control
+        env:
+          EXPECTED_SHA: ${{ needs.prepare.outputs.sha }}
+          MCP_CONFORMANCE_OUTPUT: ${{ runner.temp }}/mcp-conformance
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          make test-mcp-conformance
+      - name: Summarize bound results
+        if: always()
+        env:
+          MCP_CONFORMANCE_OUTPUT: ${{ runner.temp }}/mcp-conformance
+        run: |
+          if [ -f "$MCP_CONFORMANCE_OUTPUT/summary.json" ]; then
+            cat "$MCP_CONFORMANCE_OUTPUT/summary.json" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'MCP conformance did not complete; inspect failed setup/build/runner steps.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mcp-conformance-${{ needs.prepare.outputs.sha }}
+          path: ${{ runner.temp }}/mcp-conformance
+          if-no-files-found: error
+          retention-days: 14
+
+  complete:
+    name: MCP conformance complete
+    needs: [prepare, conformance]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.22.1"
+      - run: npm --prefix .github/scripts ci --ignore-scripts
+      - name: Require the exact applicable result
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: node scripts/mcp-conformance/contracts.mjs complete
