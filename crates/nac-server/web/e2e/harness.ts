@@ -379,7 +379,9 @@ async function startHarness(
     resolveAddress = resolve;
     rejectAddress = reject;
   });
-  const cleanupMarker = randomUUID();
+  // A focused runner can also settle detached fixtures after Playwright itself
+  // is interrupted. Each harness retains a distinct suffix for normal teardown.
+  const cleanupMarker = [process.env.NAC_E2E_CLEANUP_ID, randomUUID()].filter(Boolean).join("-");
   const server = spawn(
     binaryPath,
     [

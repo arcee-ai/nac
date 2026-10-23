@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 SCRIPT = Path(__file__).with_name('nightly-portability.py')
@@ -18,6 +19,63 @@ spec.loader.exec_module(runner)
 
 
 class Controls(unittest.TestCase):
+    def test_signal_permission_failure_remains_closed_for_live_group(self):
+        with patch.object(runner.os, 'killpg', side_effect=PermissionError('denied')):
+            with patch.object(runner, 'live_group_members', return_value=[{'pid': 123, 'group': 123, 'state': 'T'}]):
+                with self.assertRaisesRegex(RuntimeError, 'live members'):
+                    runner.signal_owned_group(123, signal.SIGKILL)
+            with patch.object(runner, 'live_group_members', return_value=[]):
+                runner.signal_owned_group(123, signal.SIGKILL)
+            for observation in ('malformed output', ''):
+                with patch.object(runner.subprocess, 'check_output', return_value=observation):
+                    with self.assertRaisesRegex(RuntimeError, 'cannot inspect owned group'):
+                        runner.signal_owned_group(123, signal.SIGKILL)
+            with patch.object(runner.subprocess, 'check_output', side_effect=RuntimeError('ps failed')):
+                with self.assertRaisesRegex(RuntimeError, 'cannot inspect owned group'):
+                    runner.signal_owned_group(123, signal.SIGKILL)
+
+    def test_actual_zombie_only_group_is_already_settled(self):
+        child = subprocess.Popen([sys.executable, '-c', 'pass'], start_new_session=True,
+                                 stdout=subprocess.PIPE)
+        try:
+            child.stdout.read()
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                state = subprocess.check_output(['ps', '-p', str(child.pid), '-o', 'stat='], text=True).strip()
+                if state.startswith('Z'):
+                    break
+                time.sleep(.01)
+            else:
+                self.fail('owned child did not reach zombie barrier before reaping')
+            self.assertEqual(runner.live_group_members(child.pid), [])
+            runner.signal_owned_group(child.pid, signal.SIGKILL)
+        finally:
+            child.wait()
+            child.stdout.close()
+
+    def test_cleanup_failure_keeps_duration_and_partial_summary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            phases = []
+            with patch.object(runner, 'signal_owned_group', side_effect=RuntimeError('cleanup denied')):
+                with self.assertRaisesRegex(RuntimeError, 'cleanup denied'):
+                    runner.run([sys.executable, '-c', 'print("owned fixture")'], output / 'fixture.log',
+                               dict(os.environ), phases, 'fixture')
+            self.assertIn('seconds', phases[0])
+            with patch.object(runner.subprocess, 'Popen') as factory:
+                child = factory.return_value
+                child.pid = 123
+                child.wait.side_effect = [runner.Cancelled('cancelled by signal 2'),
+                                          subprocess.TimeoutExpired('owned child', 2)]
+                with patch.object(runner, 'signal_owned_group', side_effect=RuntimeError('group 123 signal 15 live members T')):
+                    with self.assertRaisesRegex(RuntimeError, 'group 123 signal 15 live members T; owned group 123 reaping failed'):
+                        runner.run(['owned child'], output / 'combined.log', dict(os.environ), phases, 'combined')
+            self.assertIn('seconds', phases[1])
+            report = {'platform': 'control', 'architecture': 'control', 'result': 'failed',
+                      'seconds': 0, 'phases': phases + [{'label': 'interrupted', 'log': 'interrupted.log'}]}
+            runner.summary(report, output)
+            self.assertIn('| interrupted | interrupted | interrupted |', (output / 'summary.md').read_text())
+
     def test_stale_evidence_cannot_mix_candidates(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -155,8 +213,10 @@ else:
             sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=runner.ROOT, text=True).strip()
             env = dict(os.environ, CARGO=str(cargo), CONTROL_READY=str(ready),
                        EXPECTED_SHA=sha, RUNNER_TEMP=str(root), SEED_FAILURE='false')
+            wrapper_output = root / 'wrapper.log'
+            wrapper_log = wrapper_output.open('w')
             process = subprocess.Popen(['bash', str(shell)], cwd=runner.ROOT, env=env,
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                       stdout=wrapper_log, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 10
                 while not ready.exists() and time.monotonic() < deadline:
@@ -164,7 +224,13 @@ else:
                 self.assertTrue(ready.exists(), 'child never reached readiness barrier')
                 pids = [int(p) for p in ready.read_text().split()]
                 process.send_signal(signal.SIGINT)
-                self.assertEqual(process.wait(timeout=10), 130)
+                code = process.wait(timeout=10)
+                wrapper_log.flush()
+                report_path = root / 'nightly-portability/report.json'
+                diagnostics = wrapper_output.read_text()
+                if report_path.exists():
+                    diagnostics += '\n' + report_path.read_text()
+                self.assertEqual(code, 130, diagnostics)
                 for pid in pids:
                     result = subprocess.run(['ps', '-p', str(pid), '-o', 'stat='], capture_output=True, text=True)
                     self.assertTrue(not result.stdout.strip() or result.stdout.strip().startswith('Z'), result.stdout)
@@ -176,6 +242,7 @@ else:
                 if process.poll() is None:
                     process.kill()
                     process.wait()
+                wrapper_log.close()
 
 
 

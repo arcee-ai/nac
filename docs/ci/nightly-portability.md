@@ -82,10 +82,14 @@ claim that every detached process identity is observable. Abrupt SIGKILL/host
 loss may prevent final reports; missing evidence is not success. Hosted runner
 teardown is the final isolation boundary.
 
-Eight controls cover stale evidence rejection, inventory drift, exact-selection
+Eleven controls cover stale evidence rejection, inventory drift, exact-selection
 failure, the full serialized command plan, long-argv fixture process visibility,
 allowlist scope, real Rust first-attempt failure and cancellation of an actual parent/child
-process behind a readiness barrier. The Rust fixture lives in its own temporary
+process behind a readiness barrier. They also cover a real zombie-only group,
+fail-closed EPERM with live/stopped members or failed/malformed observation,
+and retained timing/summary when cleanup fails. On Darwin, EPERM is normalized
+only after a fresh PID/PGID/state listing proves no live members of the exact
+owned group; other permission failures remain errors. The Rust fixture lives in its own temporary
 directory, mutates no repository source and never overlaps the workspace suite.
 To demonstrate a failing full runner receipt manually:
 
@@ -124,3 +128,60 @@ PR/native local/control evidence is useful prelanding evidence, but cannot
 certify the future deployed schedule. Missing permission to dispatch or read
 billing is an explicit access gap with a maintainer follow-up. No merge or
 production setting change is authorized by this guide.
+
+## Focused native terminal browser coverage
+
+The nightly/manual workflow also calls `terminal-browser.yml`, with one ARM
+`macos-26` journey and its Linux equivalent on `ubuntu-latest`. It does not run a
+second full browser suite. The same focused workflow qualifies PRs touching the
+terminal frontend/backend, browser fixture/configuration,
+client transport, locked dependencies or this lane. Other PRs do not acquire a
+Mac browser job. The existing required Linux `browser` job still runs the full
+production-embedded suite, now including this formerly Mac-only journey; its
+required aggregate and source-security/advisory-image policies are unchanged.
+
+After `make setup`, on native ARM macOS or Linux with `/usr/bin/less`, `python3`
+and `/bin/zsh` (Mac) or `/bin/bash` (Linux), use a fresh directory:
+
+```sh
+TERMINAL_BROWSER_OUTPUT=/tmp/nac-terminal-browser-manual make test-terminal-browser
+```
+
+CI provisions Linux `less` and Chromium system dependencies; macOS uses native
+Zsh/less. Missing executables, unsupported platforms, clipboard capabilities or
+zero/skipped tests fail. The runner builds `nac-web` with locked Cargo inputs,
+uses the candidate's committed embedded UI, and runs exactly one test once with
+the existing 45-second test, 10-second assertion, one-worker, zero-retry budgets.
+It checks real pager content during resize, changed PTY dimensions, unchanged
+shell PID after pager/paste, retained terminal identity, no HTTP input from
+synthetic paste, and exact bracketed UTF-8 bytes at both HTTP and raw PTY.
+Chromium's actual `navigator.platform` selects Meta+V or Control+Shift+V; an attached
+profile records platform, user agent, shell and chord. The Desktop Chrome
+profile's user agent alone does not identify its keyboard platform.
+
+After the positive journey, a disposable sibling test changes only the expected
+bracketed HTTP bytes. The unchanged raw-PTY byte assertion must first pass;
+the later immediate HTTP assertion must then fail with the specific control
+message exactly once. An unrelated timeout,
+capability, setup or cleanup failure cannot qualify it. Candidate source is not
+modified; the sibling is removed in `finally`. The expected negative is retained
+separately and does not replace or retry positive acceptance.
+
+Artifacts retain the immutable candidate, native platform/tool identities,
+phase commands/durations/exits, JSON test receipts, browser profile, screenshot,
+and failure traces/logs for 14 days. The existing isolated scripted-provider
+harness owns its private workspace, strips host provider credentials, terminates
+its process tree and fails cleanup errors. The shared native runner supervisor
+terminates its active owned process group on SIGINT/SIGTERM or command timeout,
+then discovers and settles detached fixtures by a unique invocation prefix on
+the existing per-harness cleanup marker. Unexpected normal-teardown leaks fail
+even when this final cleanup settles them. An actual cancellation control waits
+for a real shell-written PID file, signals the runner, requires its cancelled
+failure report, and verifies both observed server/shell PIDs and all marked
+processes are gone;
+SIGKILL/host loss can prevent reports and hosted teardown remains the final
+boundary. No remote host, real provider credentials or sandbox backend is used.
+The focused jobs have a 35-minute build/setup bound; report actual hosted runtime
+and available billing rather than inferring cost from local timings. Clipboard
+coverage is this supported Chromium profile, not an all-browser or OS matrix.
+Postlanding schedule/billing qualification above remains a separate rollout gap.
