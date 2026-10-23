@@ -8,6 +8,41 @@ import { installTools, pins } from "./workflow-lint-tools.mjs";
 const require = createRequire(import.meta.url);
 const YAML = require("yaml"); // Existing locked release-tooling dependency.
 
+// Recognize launcher paths by basename rather than one host's /usr/bin/env.
+// Ambiguous env syntax must fail visibly instead of dropping an extensionless
+// shell script from the inventory. No shebang text is executed to classify it.
+function shebangShell(line) {
+  if (!line.startsWith("#!")) return undefined;
+  const words = line.slice(2).trim().split(/\s+/);
+  let interpreter = path.posix.basename(words.shift() ?? "");
+  if (interpreter === "env") {
+    if (/["'\\]/.test(line)) throw new Error("unsupported quoted/escaped env shebang");
+    while (words.length) {
+      const word = words[0];
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) words.shift();
+      else if (word === "--") {
+        words.shift();
+        break;
+      } else if (word.startsWith("--split-string=")) words[0] = word.slice(15);
+      else if (["-i", "--ignore-environment", "-S", "--split-string"].includes(word)) words.shift();
+      else if (["-u", "--unset", "-C", "--chdir", "-a", "--argv0"].includes(word)) {
+        words.shift();
+        if (!words.shift()) throw new Error("missing env shebang option argument");
+      } else if (/^--(?:unset|chdir|argv0)=/.test(word)) words.shift();
+      else if (word.startsWith("-")) throw new Error(`unsupported env shebang option: ${word}`);
+      else break;
+    }
+    interpreter = path.posix.basename(words.shift() ?? "");
+    if (!interpreter) throw new Error("missing env shebang interpreter");
+  }
+  if (["bash", "sh", "dash", "ksh"].includes(interpreter))
+    return interpreter === "dash" ? "sh" : interpreter;
+  if (/sh$|^ksh\d+$|^(?:fish|busybox)$/.test(interpreter)) {
+    throw new Error(`unsupported shell dialect: ${interpreter}`);
+  }
+  return undefined;
+}
+
 export function inventory(root) {
   const files = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" })
     .split("\0")
@@ -18,18 +53,15 @@ export function inventory(root) {
   for (const file of files) {
     const descriptor = fs.openSync(path.join(root, file), "r");
     const prefix = Buffer.alloc(256);
+    let length;
     try {
-      fs.readSync(descriptor, prefix, 0, prefix.length, 0);
+      length = fs.readSync(descriptor, prefix, 0, prefix.length, 0);
     } finally {
       fs.closeSync(descriptor);
     }
-    const shebang = prefix.toString("utf8").split("\n", 1)[0];
-    const shell = shebang.match(
-      /^#!\s*(?:\/usr\/bin\/env\s+(?:-S\s+)?)?(?:\S*\/)?(bash|sh|dash|ksh|zsh|fish|csh|tcsh)(?:\s|$)/,
-    )?.[1];
-    if (shell && !["bash", "sh", "dash", "ksh"].includes(shell))
-      throw new Error(`unsupported shell dialect ${shell}: ${file}`);
-    if (shell) scripts.push({ file, shell: shell === "dash" ? "sh" : shell });
+    const shebang = prefix.subarray(0, length).toString("utf8").split("\n", 1)[0];
+    const shell = shebangShell(shebang);
+    if (shell) scripts.push({ file, shell });
     else if (/\.(?:sh|bash|dash|ksh|zsh|fish|csh|tcsh)$/.test(file))
       throw new Error(`shell script needs a supported explicit shebang: ${file}`);
     if (!/^\.github\/workflows\/[^/]+\.ya?ml$/.test(file)) continue;

@@ -46,7 +46,10 @@ CI. The five-minute bound includes download failures/retries and dependency setu
 prints each workflow, each standalone script and its detected dialect, and each
 embedded block's workflow/job/step/dialect. New tracked inputs are discovered
 automatically, including extensionless shell scripts and names containing spaces
-or newlines. Untracked files must be staged to enter the gate.
+or newlines. Untracked files must be staged to enter the gate. Stage deletions as well: missing
+indexed paths and non-readable/non-file inputs fail closed rather than silently
+skipping tracked coverage. This target expects a complete working tree, not a
+sparse checkout.
 
 At the starting revision `c8d3b26b11903f76a725a03cbc542ebe2ad35b66`, the inventory
 contains eight workflows, 23 standalone shell scripts, and 61 embedded Bash
@@ -93,7 +96,10 @@ files**.
 
 Standalone dialects come from shebangs, with explicit ShellCheck shell selection
 (`dash` uses POSIX `sh`; `ksh` is supported). A shell extension without a supported
-shebang, or a discovered unsupported shell, fails inventory. Embedded shell
+shebang, or a discovered unsupported shell, fails inventory. Extensionless scripts
+using alternate `env` paths, supported launcher options or environment assignments
+are also discovered. Unrecognized shell-like interpreters (including ash/mksh) and
+ambiguous/unsupported `env` launcher syntax fail visibly. Embedded shell
 selection honors step, job and workflow defaults; current runners default to
 Bash. Unsupported embedded shells fail inventory and require explicit coverage
 work before adoption. actionlint checks expressions/workflow structure and sends
@@ -116,6 +122,6 @@ fixtures. It proves failure for invalid Actions context/expression, unsafe
 embedded and standalone quoting, incomplete embedded and extensionless script
 syntax, and POSIX scripts/blocks containing Bash arrays. Positive controls cover
 Bash arrays, POSIX sh, step overrides, defaults, extensionless scripts and unusual
-filenames. Unknown dialects, empty inventories, unavailable tools and poisoned
+filenames and alternate `env` launchers. Unknown dialects, empty inventories, unavailable tools and poisoned
 archive caches fail closed. The lane wiring and aggregate-result tests preserve
 the exact-candidate, exact-set contract independently of future required lanes.

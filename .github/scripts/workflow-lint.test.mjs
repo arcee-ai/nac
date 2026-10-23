@@ -124,9 +124,29 @@ test("explicit embedded sh and workflow defaults cannot silently lint Bashisms a
 });
 
 test("unknown standalone or embedded dialects and empty inventories fail closed", () => {
+  for (const launcher of [
+    "/bin/env bash",
+    "/usr/local/bin/env sh",
+    "/usr/bin/env -i bash",
+    "/usr/bin/env -u IGNORED MODE=fixture sh",
+    "/usr/bin/env -S bash -e",
+    "/usr/bin/env --split-string=bash -e",
+    "/bin/sh",
+  ])
+    fixture({ ...clean(), helper: `#!${launcher}\nprintf '%s\\n' "$HOME"\n` }, (root) => {
+      const result = lint(root, tools, { report: false });
+      assert.equal(result.failed, false, result.output);
+      assert.ok(
+        result.inputs.scripts.some(({ file }) => file === "helper"),
+        launcher,
+      );
+    });
   for (const files of [
     { ...clean(), "ambiguous.sh": "echo ambiguous\n" },
     { ...clean(), extensionless: "#!/bin/zsh\necho hello\n" },
+    { ...clean(), extensionless: "#!/bin/ash\necho hello\n" },
+    { ...clean(), extensionless: "#!/bin/mksh\necho hello\n" },
+    { ...clean(), extensionless: "#!/usr/bin/env --unknown bash\necho hello\n" },
     {
       ...clean(),
       ".github/workflows/check.yml": workflow("Write-Output hello", {
@@ -136,6 +156,10 @@ test("unknown standalone or embedded dialects and empty inventories fail closed"
     { "portable.sh": clean()["portable.sh"] },
   ])
     fixture(files, (root) => assert.throws(() => inventory(root), /dialect|shebang|empty/));
+  fixture(clean(), (root) => {
+    fs.unlinkSync(path.join(root, "portable.sh"));
+    assert.throws(() => inventory(root), /ENOENT/);
+  });
 });
 
 test("checksum mismatch and poisoned cache fail before execution; all platform pins are immutable", () => {
