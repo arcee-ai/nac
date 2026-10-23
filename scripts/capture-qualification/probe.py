@@ -67,7 +67,7 @@ class Probe:
         return result
 
     def selected(self):
-        sparse = self.git('config', '--get', 'core.sparseCheckout') if self.configured('core.sparseCheckout') else b''
+        sparse = self.git('config', '--type=bool', '--get', 'core.sparseCheckout') if self.configured('core.sparseCheckout') else b''
         if sparse.strip() == b'true':
             raise Rejected('unsupported:sparse-checkout')
         if self.git('ls-files', '-u', '-z'):
@@ -163,16 +163,11 @@ class Probe:
                         lexical.pop()
                     elif component not in ('', '.'):
                         lexical.append(component)
-                # lstat only; never read through link chains, including targets
-                # with a symlinked intermediate directory. Dangling is allowed.
-                probe = self.root
-                for component in lexical:
-                    probe /= component
-                    try:
+                        # Inspect BEFORE normalization can erase a component:
+                        # alias/.. must never hide a link chain. lstat only.
+                        probe = self.root.joinpath(*lexical)
                         if probe.is_symlink():
                             raise Rejected('unsupported:link-chain:' + name)
-                    except OSError as error:
-                        raise Rejected('unsupported:link:' + name) from error
                 data, mode = target, '120000'
             elif stat.S_ISREG(before.st_mode):
                 if not before.st_mode & 0o444:

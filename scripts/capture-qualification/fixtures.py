@@ -15,6 +15,8 @@ class Repo:
         self.git('init', '-q')
         self.git('config', 'user.name', 'fixture')
         self.git('config', 'user.email', 'fixture@invalid')
+        self.git('config', 'core.attributesFile', '/dev/null')
+        self.git('config', 'core.excludesFile', '/dev/null')
         self.git('config', 'core.autocrlf', 'false')
         self.git('config', 'core.filemode', 'true')
         self.put('tracked', b'base\n')

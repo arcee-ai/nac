@@ -102,6 +102,25 @@ class Contract(unittest.TestCase):
                   if row.get('category') == 'read_directory' and row.get('key') == 'directories-visited']
         self.assertEqual(counts, [2])  # root + visible, never ignored/deep/...
 
+    def test_xdg_git_defaults_do_not_change_fixture_selection(self):
+        from unittest.mock import patch
+        xdg = Path(self.repo.temp.name) / 'xdg/git'
+        xdg.mkdir(parents=True)
+        (xdg / 'attributes').write_text('* text=auto\n')
+        (xdg / 'ignore').write_text('tracked\n')
+        with patch.dict(os.environ, {'XDG_CONFIG_HOME': str(xdg.parent)}):
+            repo = Repo()
+            try:
+                self.assertIn('tracked', Probe(repo.root).inspect()['entries'])
+            finally:
+                repo.close()
+
+    def test_link_chain_before_parent_component_is_rejected(self):
+        (self.root / 'sub/deep').mkdir(parents=True)
+        os.symlink('../..', self.root / 'sub/deep/alias')
+        os.symlink('sub/deep/alias/../outside', self.root / 'bad')
+        self.reject('link-chain:bad')
+
     def test_absolute_link(self):
         os.symlink('/outside', self.root / 'bad')
         self.reject('absolute-link:bad')
@@ -144,8 +163,19 @@ class Contract(unittest.TestCase):
         self.reject('gitlink:module')
 
     def test_sparse(self):
-        self.repo.git('config', 'core.sparseCheckout', 'true')
-        self.reject('sparse-checkout')
+        for value in ('true', 'yes', 'on', '1', 'True'):
+            with self.subTest(value=value):
+                self.repo.git('config', 'core.sparseCheckout', value)
+                self.reject('sparse-checkout')
+
+    def test_skip_worktree_flag_alone_keeps_current_disk_contents(self):
+        from probe import digest
+        self.repo.git('update-index', '--skip-worktree', 'tracked')
+        self.repo.put('tracked', b'current bytes despite index flag')
+        before = source_evidence(self.root)
+        self.assertEqual(Probe(self.root).inspect()['entries']['tracked']['sha256'],
+                         digest(b'current bytes despite index flag'))
+        self.assertEqual(source_evidence(self.root), before)
 
     def test_unmerged(self):
         oid = self.repo.git('rev-parse', 'HEAD:tracked').strip()
@@ -168,8 +198,11 @@ class Contract(unittest.TestCase):
         import stat
         metadata = (self.root / 'tracked').stat()
         fake = os.stat_result((stat.S_IFCHR | 0o600, *metadata[1:]))
-        with patch('probe.os.stat', return_value=fake):
-            self.reject('unsupported:type:tracked', lambda: Probe(self.root).read_entry(b'tracked'))
+        def read_device():
+            with patch('probe.os.stat', return_value=fake):
+                return Probe(self.root).read_entry(b'tracked')
+        # reject() snapshots the real filesystem before and after the patch.
+        self.reject('unsupported:type:tracked', read_device)
 
     def test_unreadable(self):
         (self.root / 'tracked').chmod(0)

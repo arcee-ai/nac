@@ -48,10 +48,10 @@ gate, never a successful capture. Test names below are searchable suffixes.
 | Git state/staging not copied | Private index isolated; archive only tree paths. Actual source index bytes unchanged. No staging reproduction promised | PASS on fixtures |
 | Safe relative/dangling/directory links preserved literally; no directory traversal | Actual-helper link with newline target, oracle dangling/directory link and parent-link rejection. Raw history preserves non-UTF-8 targets, but `local_non_utf8_link_target_is_lossy` proves Local reader changes `0xff` to replacement-character bytes | **FAIL** for Local reader byte fidelity; ordinary UTF-8/raw-history cases pass |
 | Absolute/escaping links rejected with exact path | Actual helper accepts both and preserves unsafe target bytes; oracle rejects `bad` | **FAIL** |
-| Unsupported link chains rejected | Oracle `link_chain`, `link_chain_with_directory_component`; history has no such validation | **FAIL** |
+| Unsupported link chains rejected | Oracle `link_chain`, `link_chain_with_directory_component`, `link_chain_before_parent_component_is_rejected`; history has no such validation | **FAIL** |
 | No reads through linked parents/source type races | Actual `local_parent_link_escape_is_flagged_after_external_bytes_are_read` returns outside fixture bytes with `escapes=true`; `escapes=false` for symlink means parent containment only | **FAIL** |
 | Nested repository/submodule/gitlink rejected | Oracle detects initialized nested repo and real index mode `160000`; current add can synthesize a gitlink, with no product preflight | **FAIL** |
-| Unmerged/sparse checkout rejected | Real unmerged index and configured sparse fixtures refused by oracle; fresh history index does not inspect real conflict/sparse state | **FAIL** |
+| Unmerged/sparse checkout rejected | Real unmerged index and Git-canonicalized sparse boolean fixtures refused by oracle; fresh history index does not inspect real conflict/sparse state | **FAIL** |
 | Sockets/FIFOs/devices/unreadable rejected | Actual capture silently drops FIFO. Git untracked enumeration omits FIFO/socket; oracle inventory catches both, unreadable fixture refuses. Device policy tested with injected stat type only | **FAIL**; real device fixture unavailable unprivileged |
 | Invalid/escaping paths rejected before reads | Oracle `invalid_parent_path`, descriptor-relative parent test; existing reader is not a canonical path-validation API | **FAIL** for launch reuse |
 | No normalization/LFS/filter execution before refusal | Actual CRLF fixture normalizes to LF. Oracle refuses text/eol/encoding/ident/LFS and poison clean/smudge attributes without executing sentinel command; autocrlf refused | **FAIL** for actual adapter |
@@ -84,6 +84,14 @@ also move/remove history pins. Existing run-history lifecycle is not immutable
 launch-checkpoint ownership. `GitTarget::output_with_env` uses blocking
 `std::process::Command::output` for Local commands without capture cancellation,
 command/output limits or a request deadline.
+
+The oracle canonicalizes sparse configuration through Git's boolean parser.
+A skip-worktree flag by itself is not reproduced in the destination and does not
+replace existing disk bytes (`skip_worktree_flag_alone_keeps_current_disk_contents`).
+Do not expand ALL-418's unsupported-source taxonomy to every index flag: staging
+and index distinctions are excluded. Ambiguous leftover sparse/skip state with
+missing files remains a production qualification gap, not a proved complete
+sparse-state classifier in this oracle.
 
 The Local reader first stats/canonicalizes, then reads by pathname. It can read
 outside before a consumer sees the containment flag, and stat/open replacement
@@ -126,10 +134,10 @@ unrepaired history recipe on safe fixtures, not a production capture measurement
 
 | Fixture | Candidates | Selected bytes | Git commands | First / warm seconds | New object allocation first / warm | Private index |
 | --- | ---: | ---: | ---: | --- | --- | ---: |
-| Small clean: 24 × 1 KiB | 26 | 24,590 | 24 | 0.298 / 0.304 | 4 / 4 KiB | 4 KiB |
-| Small dirty | 27 | 23,599 | 24 | 0.289 / 0.293 | 24 / 0 KiB | 4 KiB |
-| Larger clean: 4,096 × 8 KiB | 4,098 | 33,554,446 | 86 | 1.699 / 1.421 | 4 / 4 KiB | 324 KiB |
-| Larger dirty | 4,099 | 33,546,287 | 86 | 1.738 / 1.439 | 24 / 4 KiB | 324 KiB |
+| Small clean: 24 × 1 KiB | 26 | 24,590 | 24 | 0.257 / 0.278 | 4 / 4 KiB | 4 KiB |
+| Small dirty | 27 | 23,599 | 24 | 0.362 / 0.368 | 24 / 0 KiB | 4 KiB |
+| Larger clean: 4,096 × 8 KiB | 4,098 | 33,554,446 | 86 | 2.093 / 1.830 | 4 / 4 KiB | 324 KiB |
+| Larger dirty | 4,099 | 33,546,287 | 86 | 2.330 / 1.611 | 24 / 4 KiB | 324 KiB |
 
 The larger source object database already occupied 50,491,392 physical bytes;
 Git deduplicates existing blobs, but that says nothing about byte fidelity.
