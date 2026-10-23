@@ -93,27 +93,28 @@ def main():
         report['rustc'], _ = checked(['rustc', '-Vv'], output / 'rustc.log', env)
         report['cargo'], _ = checked(['cargo', '-V'], output / 'cargo.log', env)
         report['candidate'], _ = checked(['git', 'rev-parse', 'HEAD'], output / 'candidate.log', env)
+        packages = ['cargo', 'test', '--locked', '-p', 'nac-process', '-p', 'nac-credential-store']
+        core = ['cargo', 'test', '--locked', '-p', 'nac-core', '--lib']
+        # Compiler/linker caches are build artifacts, never test-fixture leaks.
+        for label, command in [('packages-build', packages), ('core-build', core)]:
+            _, elapsed = checked(command + ['--no-run'], output / f'{label}.log', env)
+            report['phases'][label] = elapsed
+        listing, _ = checked(core + ['--', '--list'], output / 'core-list.log', env)
+        require_selected(listing, CORE_TESTS, ': test')
         # Canonical TMPDIR avoids macOS /var -> /private/var alias mismatches.
-        # A dedicated fixture root makes residual files observable before removal.
+        # Only test execution receives the dedicated fixture environment.
         with tempfile.TemporaryDirectory(prefix='nac-native-regressions-') as directory:
             fixture = Path(directory).resolve()
-            env.update(TMPDIR=str(fixture), TMP=str(fixture), TEMP=str(fixture))
-            packages = ['cargo', 'test', '--locked', '-p', 'nac-process', '-p', 'nac-credential-store']
-            core = ['cargo', 'test', '--locked', '-p', 'nac-core', '--lib']
-            for label, command in [('packages-build', packages), ('core-build', core)]:
-                _, elapsed = checked(command + ['--no-run'], output / f'{label}.log', env)
-                report['phases'][label] = elapsed
-            listing, _ = checked(core + ['--', '--list'], output / 'core-list.log', env)
-            require_selected(listing, CORE_TESTS, ': test')
+            test_env = dict(env, TMPDIR=str(fixture), TMP=str(fixture), TEMP=str(fixture))
             # First test pass and one fixed warm measurement, never retry a failure.
             for temperature in ['first', 'warm']:
-                _, elapsed = checked(packages, output / f'packages-{temperature}.log', env)
+                _, elapsed = checked(packages, output / f'packages-{temperature}.log', test_env)
                 report['phases'][f'packages-{temperature}'] = elapsed
                 log, elapsed = checked(core + ['--', '--exact', *CORE_TESTS],
-                                       output / f'core-{temperature}.log', env)
+                                       output / f'core-{temperature}.log', test_env)
                 require_selected(log, [f'test {name}' for name in CORE_TESTS], ' ... ok')
                 report['phases'][f'core-{temperature}'] = elapsed
-            # No test process may retain this fixture directory in its command.
+            # Secondary argv check; owner-level tests assert exact identities die.
             processes = subprocess.run(['ps', '-axo', 'pid=,command='], text=True,
                                        stdout=subprocess.PIPE, check=True).stdout
             leftovers = [line for line in processes.splitlines() if str(fixture) in line]
@@ -124,13 +125,14 @@ def main():
             report['fixture_files_remaining'] = remaining
             if remaining:
                 raise RuntimeError(f'fixture files remain: {remaining}')
-            if args.seed_macos:
-                report['seed'] = seed_macos(output, env)
-                log, elapsed = checked(
-                    ['cargo', 'test', '--locked', '-p', 'nac-process', '--lib', SEED_TEST, '--', '--exact'],
-                    output / 'seed-restored.log', env)
-                require_selected(log, [f'test {SEED_TEST}'], ' ... ok')
-                report['phases']['seed-restored'] = elapsed
+        if args.seed_macos:
+            # Mutation recompilation also uses the ordinary build environment.
+            report['seed'] = seed_macos(output, env)
+            log, elapsed = checked(
+                ['cargo', 'test', '--locked', '-p', 'nac-process', '--lib', SEED_TEST, '--', '--exact'],
+                output / 'seed-restored.log', env)
+            require_selected(log, [f'test {SEED_TEST}'], ' ... ok')
+            report['phases']['seed-restored'] = elapsed
         report['result'] = 'passed'
     finally:
         (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')

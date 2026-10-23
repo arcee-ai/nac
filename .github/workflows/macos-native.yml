@@ -39,6 +39,8 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: native-regressions
+      - name: Verify fixture isolation and exact selection controls
+        run: python3 .github/scripts/native-regressions.test.py
       - name: Run exact native regressions and safe Darwin failure control
         env:
           NATIVE_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}

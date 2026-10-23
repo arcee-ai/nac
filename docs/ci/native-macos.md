@@ -35,7 +35,9 @@ container or browser tests are added to this lane. UID-transition runtime
 qualification is outside these same-UID/fault suites.
 
 Each invocation uses a dedicated canonical temporary directory (resolving macOS
-`/var` aliases). Before removing it, the runner rejects leftover files and process
+`/var` aliases). No-run compilation, test inventory and mutation recompilation
+use the ordinary build environment, so compiler/linker cache files do not count
+as test-fixture leaks. Before removing it, the runner rejects leftover files and process
 commands referencing it; native PTY fixtures additionally assert captured exact
 identities are dead. These checks concern owned fixtures, not a system-wide claim
 about unrelated processes. No credential values or complete host process list
