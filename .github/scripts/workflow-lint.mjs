@@ -22,6 +22,7 @@ function shebangShell(line) {
       if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) words.shift();
       else if (word === "--") {
         words.shift();
+        while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? "")) words.shift();
         break;
       } else if (word.startsWith("--split-string=")) words[0] = word.slice(15);
       else if (["-i", "--ignore-environment", "-S", "--split-string"].includes(word)) words.shift();

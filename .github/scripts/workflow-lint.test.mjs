@@ -130,6 +130,7 @@ test("unknown standalone or embedded dialects and empty inventories fail closed"
     "/usr/bin/env -i bash",
     "/usr/bin/env -u IGNORED MODE=fixture sh",
     "/usr/bin/env -S bash -e",
+    "/usr/bin/env -S -- MODE=fixture bash",
     "/usr/bin/env --split-string=bash -e",
     "/bin/sh",
   ])
