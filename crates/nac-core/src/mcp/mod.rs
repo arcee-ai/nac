@@ -810,7 +810,46 @@ pub(crate) mod test_support {
         body: Option<Value>,
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn fake_http_reader_clears_accepted_socket_nonblocking_mode() {
+        use std::os::fd::AsRawFd;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut stream, _) = listener.accept().unwrap();
+        // Force Darwin's inherited accepted-socket state on every Unix platform.
+        stream.set_nonblocking(true).unwrap();
+        let empty_read = stream.read(&mut [0; 1]).unwrap_err();
+        assert_eq!(empty_read.kind(), std::io::ErrorKind::WouldBlock);
+
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let writer_gate = Arc::clone(&gate);
+        let writer = thread::spawn(move || {
+            writer_gate.wait();
+            peer.write_all(b"POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")
+                .unwrap();
+        });
+        gate.wait();
+        let received = read_fake_http_request(&mut stream);
+        // SAFETY: the stream owns a live descriptor; F_GETFL only reads its flags.
+        let flags = unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_GETFL) };
+        writer.join().unwrap();
+        assert_ne!(flags, -1);
+        // This fails on the old helper even if the writer wins the scheduling race.
+        assert_eq!(
+            flags & libc::O_NONBLOCK,
+            0,
+            "fixture reader must use blocking I/O"
+        );
+        let received = received.expect("parse peer request after accepted-socket barrier");
+        assert_eq!(received.method, "POST");
+        assert_eq!(received.body, Some(json!({})));
+    }
+
     fn read_fake_http_request(stream: &mut TcpStream) -> Option<FakeHttpRequest> {
+        // Darwin accepts inherit listener O_NONBLOCK; a timeout does not clear it.
+        stream.set_nonblocking(false).ok()?;
         stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
         let mut buf = Vec::new();
         let mut chunk = [0u8; 1024];

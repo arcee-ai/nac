@@ -1,0 +1,88 @@
+name: Nightly native portability
+
+on:
+  schedule:
+    - cron: '23 10 * * *'
+  workflow_dispatch:
+    inputs:
+      seed-failure:
+        description: 'Qualification only: intentionally fail a disposable Rust test'
+        type: boolean
+        default: false
+  # Qualify changes to this lane before landing; ordinary PRs keep fast coverage.
+  pull_request:
+    paths:
+      - '.github/workflows/nightly-portability.yml'
+      - '.github/scripts/nightly-portability*'
+      - 'docs/ci/nightly-portability.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-portability-${{ github.run_id }}-${{ github.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  portability:
+    name: ARM macOS full Rust workspace and selected integrations
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      # Reuse native runner/setup and the supported managed toolchain profile.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Bind native platform and immutable event candidate
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          sw_vers
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        id: cache
+        with:
+          shared-key: nightly-portability
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Prepare locked development dependencies
+        run: make setup
+      - name: Prove failure propagation, serialization and cancellation cleanup
+        run: python3 .github/scripts/nightly-portability.test.py
+      - name: Run full workspace and exact reviewed ignored cases
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          PORTABILITY_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          SEED_FAILURE: ${{ inputs.seed-failure || false }}
+        run: |
+          args=()
+          if [ "$SEED_FAILURE" = true ]; then args+=(--seed-failure); fi
+          exec python3 .github/scripts/nightly-portability.py \
+            --output "$RUNNER_TEMP/nightly-portability" "${args[@]}"
+      - name: Summarize exact test owner and failure
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/nightly-portability/summary.md" ]; then
+            cat "$RUNNER_TEMP/nightly-portability/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Portability did not reach its runner; inspect setup/control logs. No suite pass is claimed.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Retain candidate, inventory, timings and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nightly-portability-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/nightly-portability
+            target/persistence-load
+          retention-days: 14
+          if-no-files-found: error
