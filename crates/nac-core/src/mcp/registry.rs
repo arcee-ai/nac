@@ -54,6 +54,7 @@ pub(super) struct McpServer {
     pub(super) handler: NacMcpClientHandler,
     pub(super) connection_generation: std::sync::atomic::AtomicU64,
     pub(super) cwd: PathBuf,
+    pub(super) connection_state: super::admission::ConnectionState,
     pub(super) startup_timeout: Duration,
     pub(super) catalog_timeout: Duration,
     pub(super) execution_timeout: Duration,
@@ -81,7 +82,7 @@ impl McpServer {
     }
 
     pub(super) fn admit(&self) -> Result<()> {
-        if super::admission::is_disconnected(&self.cwd, &self.name)? {
+        if self.connection_state.is_disconnected(&self.name)? {
             bail!(
                 "MCP server '{}' was disconnected; connect it in MCP settings to use it again",
                 self.name
@@ -254,6 +255,7 @@ impl McpRegistry {
         }
 
         let roots = mcp_roots_for_policy(cwd, sandbox, root_policy)?;
+        let connection_state = super::admission::ConnectionState::for_home(paths)?;
         let sync = Arc::new(McpSyncState::new());
 
         let mut tools = HashMap::new();
@@ -268,7 +270,7 @@ impl McpRegistry {
             if !server_config.enabled {
                 continue;
             }
-            let disconnected = match super::admission::is_disconnected(cwd, &server_name) {
+            let disconnected = match connection_state.is_disconnected(&server_name) {
                 Ok(false) => None,
                 Ok(true) => Some("disconnected; connect it in MCP settings to use it".to_string()),
                 Err(error) => Some(format!("connection state is unreadable: {error:#}")),
@@ -469,6 +471,7 @@ impl McpRegistry {
                 handler: handler.clone(),
                 connection_generation: std::sync::atomic::AtomicU64::new(0),
                 cwd: cwd.to_path_buf(),
+                connection_state: connection_state.clone(),
                 startup_timeout,
                 catalog_timeout,
                 execution_timeout,

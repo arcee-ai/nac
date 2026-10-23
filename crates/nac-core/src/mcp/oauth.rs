@@ -525,7 +525,15 @@ pub fn configure_mcp_oauth(
             }
             None => false,
         };
-        let logout_generation = existing.map_or(0, |profile| profile.logout_generation);
+        // A re-created profile must not reuse a deleted profile's generation.
+        let logout_generation = existing.map_or_else(
+            || {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(1, |elapsed| elapsed.as_nanos() as u64)
+            },
+            |profile| profile.logout_generation,
+        );
         let matching = existing.filter(|_| same_configuration);
         let previous_issuer = matching.and_then(|profile| profile.binding.issuer.clone());
         let credentials = matching
@@ -1511,12 +1519,12 @@ mod tests {
         configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
         let path = oauth_store_path(Path::new("/workspace")).unwrap();
         let adapter = OAuthProfileStore {
+            logout_generation: test_support::logout_generation(&path, "slack"),
             path: path.clone(),
             server_name: "slack".to_string(),
             endpoint: normalize_endpoint(endpoint).unwrap(),
             expected_client_id: Some("public-test-client".to_string()),
             save_mode: CredentialSaveMode::Independent,
-            logout_generation: 0,
         };
         for (csrf, requirement) in [
             ("fake-state", None),

@@ -1000,7 +1000,7 @@ pub(crate) mod test_support {
         write_fake_http_response_with_headers(stream, status, &[], content_type, body);
     }
 
-    fn write_fake_http_response_with_headers(
+    pub(crate) fn write_fake_http_response_with_headers(
         stream: &mut TcpStream,
         status: &str,
         headers: &[&str],
@@ -1025,6 +1025,9 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod policy_tests;
+
+#[cfg(test)]
+pub(crate) mod recording_server;
 
 #[cfg(test)]
 mod session_admission_tests;

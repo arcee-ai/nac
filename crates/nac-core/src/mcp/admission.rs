@@ -16,37 +16,75 @@ struct DisconnectedServers {
     servers: BTreeSet<String>,
 }
 
-fn disconnected_path(cwd: &Path) -> Result<PathBuf> {
-    PathContext::new(cwd)
-        .nac_home_dir()
-        .map(|dir| dir.join(DISCONNECTED_FILE))
-        .ok_or_else(|| anyhow!("no home directory is available for MCP connection state"))
+/// The disconnect record of the NAC home that also holds the MCP configuration.
+#[derive(Clone)]
+pub(super) struct ConnectionState {
+    path: PathBuf,
 }
 
-fn read_disconnected(path: &Path) -> Result<DisconnectedServers> {
-    read_auth_string_from_path(path)?
-        .map(|raw| serde_json::from_str(&raw).context("MCP connection state is invalid"))
-        .unwrap_or_else(|| Ok(DisconnectedServers::default()))
-}
+impl ConnectionState {
+    pub(super) fn for_home(paths: &PathContext) -> Result<Self> {
+        let home = paths
+            .nac_home_dir()
+            .ok_or_else(|| anyhow!("no home directory is available for MCP connection state"))?;
+        Ok(Self {
+            path: home.join(DISCONNECTED_FILE),
+        })
+    }
 
-pub(super) fn is_disconnected(cwd: &Path, server_name: &str) -> Result<bool> {
-    Ok(read_disconnected(&disconnected_path(cwd)?)?
-        .servers
-        .contains(server_name))
-}
+    fn read(&self) -> Result<DisconnectedServers> {
+        read_auth_string_from_path(&self.path)?
+            .map(|raw| serde_json::from_str(&raw).context("MCP connection state is invalid"))
+            .unwrap_or_else(|| Ok(DisconnectedServers::default()))
+    }
 
-pub(super) fn set_disconnected(cwd: &Path, server_name: &str, disconnected: bool) -> Result<()> {
-    let path = disconnected_path(cwd)?;
-    with_credential_lock(&path.with_extension("json.lock"), || {
-        let mut state = read_disconnected(&path)?;
-        let changed = if disconnected {
-            state.servers.insert(server_name.to_string())
-        } else {
-            state.servers.remove(server_name)
-        };
-        if changed {
-            write_auth_string_to_path(&path, &serde_json::to_string(&state)?)?;
-        }
-        Ok(())
-    })
+    pub(super) fn is_disconnected(&self, server_name: &str) -> Result<bool> {
+        Ok(self.read()?.servers.contains(server_name))
+    }
+
+    /// Records one server's state; an unreadable record is rebuilt with all `configured` servers disconnected.
+    pub(super) fn set_disconnected<'a>(
+        &self,
+        server_name: &str,
+        disconnected: bool,
+        configured: impl IntoIterator<Item = &'a String>,
+    ) -> Result<()> {
+        self.edit(
+            |servers| {
+                if disconnected {
+                    servers.insert(server_name.to_string());
+                } else {
+                    servers.remove(server_name);
+                }
+            },
+            configured,
+        )
+    }
+
+    /// Marks `to` disconnected when `from` is; an unreadable record already blocks every server.
+    pub(super) fn copy_mark(&self, from: &str, to: &str) -> Result<()> {
+        with_credential_lock(&self.path.with_extension("json.lock"), || {
+            let Ok(mut state) = self.read() else {
+                return Ok(());
+            };
+            if state.servers.contains(from) && state.servers.insert(to.to_string()) {
+                write_auth_string_to_path(&self.path, &serde_json::to_string(&state)?)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn edit<'a>(
+        &self,
+        change: impl FnOnce(&mut BTreeSet<String>),
+        configured: impl IntoIterator<Item = &'a String>,
+    ) -> Result<()> {
+        with_credential_lock(&self.path.with_extension("json.lock"), || {
+            let mut state = self.read().unwrap_or_else(|_| DisconnectedServers {
+                servers: configured.into_iter().cloned().collect(),
+            });
+            change(&mut state.servers);
+            write_auth_string_to_path(&self.path, &serde_json::to_string(&state)?)
+        })
+    }
 }

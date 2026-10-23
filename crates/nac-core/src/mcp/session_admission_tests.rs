@@ -1,170 +1,9 @@
-use super::test_support::{
-    read_fake_http_request, restore_env, toml_string, unique_temp_dir, write_fake_http_response,
-};
+use super::recording_server::{RecordingMcpServer, TestHome};
 use super::*;
 use crate::TEST_ENV_LOCK;
 use serde_json::json;
 use std::fs;
-use std::net::TcpListener;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Mutex};
-use std::thread;
-
-/// Serves one echo tool and one prompt, recording each JSON-RPC method with its Authorization header.
-struct RecordingMcpServer {
-    url: String,
-    requests: Arc<Mutex<Vec<(String, Option<String>)>>>,
-    stop: Arc<AtomicBool>,
-    handle: Option<thread::JoinHandle<()>>,
-}
-
-impl RecordingMcpServer {
-    fn start() -> Self {
-        Self::start_with(None)
-    }
-
-    /// Starts a server whose first tools/call waits, after signalling arrival, for a release.
-    fn start_holding_first_call() -> (Self, mpsc::Receiver<()>, mpsc::Sender<()>) {
-        let (arrived, arrival) = mpsc::channel();
-        let (release_sender, release) = mpsc::channel();
-        (
-            Self::start_with(Some((arrived, release))),
-            arrival,
-            release_sender,
-        )
-    }
-
-    fn start_with(mut held: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>) -> Self {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind recording MCP server");
-        listener.set_nonblocking(true).unwrap();
-        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
-        let requests = Arc::new(Mutex::new(Vec::new()));
-        let stop = Arc::new(AtomicBool::new(false));
-        let (recorded, stopped) = (Arc::clone(&requests), Arc::clone(&stop));
-        let handle = thread::spawn(move || {
-            while !stopped.load(Ordering::Acquire) {
-                let mut stream = match listener.accept() {
-                    Ok((stream, _)) => stream,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(10));
-                        continue;
-                    }
-                    Err(_) => return,
-                };
-                let Some(request) = read_fake_http_request(&mut stream) else {
-                    continue;
-                };
-                let Some(body) = request.body.filter(|_| request.method == "POST") else {
-                    write_fake_http_response(&mut stream, "405 Method Not Allowed", None, "");
-                    continue;
-                };
-                let method = body["method"].as_str().unwrap_or_default().to_string();
-                recorded.lock().unwrap().push((
-                    method.clone(),
-                    request.headers.get("authorization").cloned(),
-                ));
-                let result = match method.as_str() {
-                    "initialize" => json!({
-                        "protocolVersion": "2025-06-18",
-                        "capabilities": {"tools": {"listChanged": false}, "prompts": {"listChanged": false}},
-                        "serverInfo": {"name": "recording-mcp", "version": "0.1.0"}
-                    }),
-                    "prompts/list" => json!({"prompts": []}),
-                    "tools/list" => json!({"tools": [{
-                        "name": "echo",
-                        "inputSchema": {"type": "object", "properties": {}}
-                    }]}),
-                    "tools/call" => {
-                        if let Some((arrived, release)) = held.take() {
-                            arrived.send(()).unwrap();
-                            release.recv_timeout(Duration::from_secs(10)).unwrap();
-                        }
-                        json!({"content": [{"type": "text", "text": "echoed"}]})
-                    }
-                    _ => {
-                        write_fake_http_response(&mut stream, "202 Accepted", None, "");
-                        continue;
-                    }
-                };
-                let response = json!({"jsonrpc": "2.0", "id": body["id"], "result": result});
-                write_fake_http_response(
-                    &mut stream,
-                    "200 OK",
-                    Some("application/json"),
-                    &response.to_string(),
-                );
-            }
-        });
-        Self {
-            url,
-            requests,
-            stop,
-            handle: Some(handle),
-        }
-    }
-
-    /// The Authorization header of every request for `method`, in arrival order.
-    fn authorizations(&self, method: &str) -> Vec<Option<String>> {
-        self.requests
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(recorded, _)| recorded == method)
-            .map(|(_, authorization)| authorization.clone())
-            .collect()
-    }
-}
-
-impl Drop for RecordingMcpServer {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
-
-struct TestHome {
-    path: PathBuf,
-    restore: Vec<(&'static str, Option<std::ffi::OsString>)>,
-}
-
-impl TestHome {
-    fn new(label: &str, server_name: &str, url: &str) -> Self {
-        Self::with_server(label, server_name, url, "")
-    }
-
-    fn with_server(label: &str, server_name: &str, url: &str, extra: &str) -> Self {
-        let path = unique_temp_dir(label);
-        fs::create_dir_all(&path).unwrap();
-        fs::write(
-            path.join("config.toml"),
-            format!(
-                "[mcp_servers.{server_name}]\ntransport = \"streamable_http\"\nurl = {}\napproval = \"allow\"\n{extra}",
-                toml_string(url)
-            ),
-        )
-        .unwrap();
-        let restore = ["NAC_HOME", "TEST_MCP_CLIENT_ID"]
-            .into_iter()
-            .map(|name| (name, env::var_os(name)))
-            .collect();
-        unsafe {
-            env::set_var("NAC_HOME", &path);
-            env::set_var("TEST_MCP_CLIENT_ID", "public-test-client");
-        }
-        Self { path, restore }
-    }
-}
-
-impl Drop for TestHome {
-    fn drop(&mut self) {
-        for (name, value) in self.restore.drain(..) {
-            restore_env(name, value);
-        }
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
+use std::sync::mpsc;
 
 async fn load(cwd: &Path) -> McpLoadOutcome {
     McpRegistry::load_reporting_skips(
@@ -178,6 +17,18 @@ async fn load(cwd: &Path) -> McpLoadOutcome {
     .unwrap()
 }
 
+fn seed_authorization(cwd: &Path, url: &str, token: &str, expires_in: Option<u64>) {
+    oauth::test_support::seed_authorization(
+        cwd,
+        "oauth",
+        url,
+        "TEST_MCP_CLIENT_ID",
+        token,
+        expires_in,
+    )
+    .unwrap();
+}
+
 #[tokio::test]
 async fn disconnect_stops_mounted_and_new_sessions_until_connect() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
@@ -189,8 +40,12 @@ async fn disconnect_stops_mounted_and_new_sessions_until_connect() {
     let capture = registry.capture_tool("mcp__recorded__echo").unwrap();
     assert!(!capture.call(json!({}), false).await.is_error);
 
+    let handler = &registry.servers["recorded"].handler;
+    assert!(handler.admitted_server().is_some());
     let runtime = McpRuntimeManager::new(home.path.clone());
     runtime.disconnect("recorded").await.unwrap();
+    // Progress, log and resource-update notifications pass only through this gate.
+    assert!(handler.admitted_server().is_none());
     let refused = capture.call(json!({}), false).await;
     assert!(refused.is_error);
     assert!(refused.content.to_string().contains("disconnected"));
@@ -236,14 +91,7 @@ async fn logout_stops_a_mounted_session_from_sending_until_reauthorized() {
     let server = RecordingMcpServer::start();
     let home = TestHome::new("nac-mcp-logout-admission", "oauth", &server.url);
     let cwd = std::env::current_dir().unwrap();
-    oauth::test_support::seed_authorization(
-        &cwd,
-        "oauth",
-        &server.url,
-        "TEST_MCP_CLIENT_ID",
-        "first-access-canary",
-    )
-    .unwrap();
+    seed_authorization(&cwd, &server.url, "first-access-canary", None);
     let registry = load(&cwd).await.registry.expect("OAuth server mounts");
     let capture = registry.capture_tool("mcp__oauth__echo").unwrap();
     assert!(!capture.call(json!({}), false).await.is_error);
@@ -257,14 +105,7 @@ async fn logout_stops_a_mounted_session_from_sending_until_reauthorized() {
         vec![Some("Bearer first-access-canary".to_string())]
     );
 
-    oauth::test_support::seed_authorization(
-        &cwd,
-        "oauth",
-        &server.url,
-        "TEST_MCP_CLIENT_ID",
-        "second-access-canary",
-    )
-    .unwrap();
+    seed_authorization(&cwd, &server.url, "second-access-canary", None);
     assert!(!capture.call(json!({}), false).await.is_error);
     assert_eq!(
         server
@@ -276,6 +117,45 @@ async fn logout_stops_a_mounted_session_from_sending_until_reauthorized() {
     );
     drop(registry);
     drop(home);
+}
+
+#[tokio::test]
+async fn an_expired_token_without_refresh_is_never_sent_or_replaced_by_no_credentials() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let server = RecordingMcpServer::start();
+    let _home = TestHome::new("nac-mcp-expired-token", "oauth", &server.url);
+    let cwd = std::env::current_dir().unwrap();
+    seed_authorization(&cwd, &server.url, "live-access-canary", None);
+    let registry = load(&cwd).await.registry.expect("OAuth server mounts");
+    let capture = registry.capture_tool("mcp__oauth__echo").unwrap();
+
+    // Issued at the epoch and valid for a minute: expired, with no refresh token to renew it.
+    seed_authorization(&cwd, &server.url, "expired-access-canary", Some(60));
+    let refused = capture.call(json!({}), false).await;
+    assert!(refused.is_error);
+    assert!(!refused.content.to_string().contains("canary"));
+    assert!(server.authorizations("tools/call").is_empty());
+    drop(registry);
+}
+
+#[tokio::test]
+async fn a_token_the_server_revoked_fails_once_without_an_unauthenticated_retry() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let server = RecordingMcpServer::start_rejecting("Bearer revoked-access-canary");
+    let _home = TestHome::new("nac-mcp-revoked-token", "oauth", &server.url);
+    let cwd = std::env::current_dir().unwrap();
+    seed_authorization(&cwd, &server.url, "revoked-access-canary", None);
+    let registry = load(&cwd).await.registry.expect("OAuth server mounts");
+    let capture = registry.capture_tool("mcp__oauth__echo").unwrap();
+
+    let refused = capture.call(json!({}), false).await;
+    assert!(refused.is_error);
+    assert!(!refused.content.to_string().contains("canary"));
+    assert_eq!(
+        server.authorizations("tools/call"),
+        vec![Some("Bearer revoked-access-canary".to_string())]
+    );
+    drop(registry);
 }
 
 /// Starts the capture's call and waits until the server holds it.
@@ -311,4 +191,165 @@ async fn a_call_running_across_disconnect_settles_once() {
     assert!(capture.call(json!({}), false).await.is_error);
     assert_eq!(server.authorizations("tools/call").len(), 1);
     drop(registry);
+}
+
+#[tokio::test]
+async fn a_call_interrupted_across_disconnect_is_not_replayed() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let (server, arrival, release) = RecordingMcpServer::start_holding_first_call();
+    let home = TestHome::new("nac-mcp-disconnect-interrupted", "recorded", &server.url);
+    let cwd = std::env::current_dir().unwrap();
+    let registry = load(&cwd).await.registry.expect("server mounts");
+    let capture = registry.capture_tool("mcp__recorded__echo").unwrap();
+    let call = call_held(&capture, arrival).await;
+
+    McpRuntimeManager::new(home.path.clone())
+        .disconnect("recorded")
+        .await
+        .unwrap();
+    call.abort();
+    assert!(call.await.unwrap_err().is_cancelled());
+    release.send(()).unwrap();
+    assert!(capture.call(json!({}), false).await.is_error);
+    assert_eq!(server.authorizations("tools/call").len(), 1);
+    drop(registry);
+}
+
+#[tokio::test]
+async fn an_unreadable_disconnect_record_fails_closed_until_connect_repairs_it() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let server = RecordingMcpServer::start();
+    let home = TestHome::with_server(
+        "nac-mcp-unreadable-state",
+        "recorded",
+        &server.url,
+        "[mcp_servers.other]\ntransport = \"streamable_http\"\nurl = \"http://127.0.0.1:9/mcp\"\n",
+    );
+    let cwd = std::env::current_dir().unwrap();
+    let registry = load(&cwd).await.registry.expect("server mounts");
+    let capture = registry.capture_tool("mcp__recorded__echo").unwrap();
+    fs::write(home.path.join("mcp_disconnected.json"), "not json").unwrap();
+    assert!(capture.call(json!({}), false).await.is_error);
+    assert!(server.authorizations("tools/call").is_empty());
+
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    let statuses = runtime.statuses().await.unwrap();
+    assert_eq!(statuses.len(), 2);
+    assert!(statuses.iter().all(|status| status.sessions_blocked
+        && status
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("unreadable"))));
+
+    runtime.connect("recorded").await.unwrap();
+    assert!(!capture.call(json!({}), false).await.is_error);
+    let statuses = runtime.statuses().await.unwrap();
+    let blocked = |name: &str| {
+        statuses
+            .iter()
+            .find(|status| status.name == name)
+            .unwrap()
+            .sessions_blocked
+    };
+    assert!(!blocked("recorded"));
+    assert!(blocked("other"), "repairing one server re-admitted another");
+    runtime.forget("recorded").await;
+    drop(registry);
+}
+
+#[tokio::test]
+async fn renaming_a_disconnected_server_keeps_both_names_disconnected() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let home = TestHome::new(
+        "nac-mcp-rename-disconnected",
+        "recorded",
+        "http://127.0.0.1:9/mcp",
+    );
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    runtime.disconnect("recorded").await.unwrap();
+
+    runtime
+        .keep_disconnected_after_rename("recorded", "renamed")
+        .unwrap();
+    let state = admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
+    assert!(state.is_disconnected("renamed").unwrap());
+    // Running sessions keep the name they mounted.
+    assert!(state.is_disconnected("recorded").unwrap());
+}
+
+const PROCESS_DIR: &str = "NAC_TEST_MCP_SESSION_DIR";
+
+/// Run as a separate process by the cross-process test: mounts, waits for `go`, then calls.
+#[tokio::test]
+async fn mcp_session_process_helper() {
+    let Some(dir) = std::env::var_os(PROCESS_DIR).map(PathBuf::from) else {
+        return;
+    };
+    let cwd = std::env::current_dir().unwrap();
+    let outcome = load(&cwd).await;
+    let Some(registry) = outcome.registry else {
+        let reasons = outcome
+            .skipped
+            .iter()
+            .map(|skipped| skipped.reason.clone())
+            .collect::<Vec<_>>();
+        fs::write(
+            dir.join("result"),
+            format!("skipped: {}", reasons.join("; ")),
+        )
+        .unwrap();
+        return;
+    };
+    let capture = registry.capture_tool("mcp__recorded__echo").unwrap();
+    fs::write(dir.join("mounted"), "").unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !dir.join("go").exists() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let result = capture.call(json!({}), false).await;
+    fs::write(dir.join("result"), result.content.to_string()).unwrap();
+}
+
+#[tokio::test]
+async fn disconnect_reaches_sessions_in_other_processes_and_survives_restart() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let server = RecordingMcpServer::start();
+    let home = TestHome::new("nac-mcp-cross-process", "recorded", &server.url);
+    let spawn = |dir: &Path| {
+        fs::create_dir_all(dir).unwrap();
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "mcp::session_admission_tests::mcp_session_process_helper",
+            ])
+            .env(PROCESS_DIR, dir)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap()
+    };
+
+    let mounted = home.path.join("mounted-session");
+    let mut session = spawn(&mounted);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !mounted.join("mounted").exists() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    McpRuntimeManager::new(home.path.clone())
+        .disconnect("recorded")
+        .await
+        .unwrap();
+    fs::write(mounted.join("go"), "").unwrap();
+    assert!(session.wait().unwrap().success());
+    assert!(fs::read_to_string(mounted.join("result"))
+        .unwrap()
+        .contains("was disconnected"));
+    assert!(server.authorizations("tools/call").is_empty());
+
+    let restarted = home.path.join("restarted-session");
+    assert!(spawn(&restarted).wait().unwrap().success());
+    let result = fs::read_to_string(restarted.join("result")).unwrap();
+    assert!(
+        result.starts_with("skipped:") && result.contains("disconnected"),
+        "{result}"
+    );
 }

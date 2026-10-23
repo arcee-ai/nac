@@ -1,12 +1,13 @@
 use super::*;
 
-/// Configures `server_name` with a pre-registered client and a stored access token.
+/// Configures a pre-registered client with an epoch-issued access token and no refresh token.
 pub(crate) fn seed_authorization(
     cwd: &Path,
     server_name: &str,
     endpoint: &str,
     client_id_credential: &str,
     access_token: &str,
+    expires_in: Option<u64>,
 ) -> Result<()> {
     configure_mcp_oauth(
         cwd,
@@ -39,11 +40,16 @@ pub(crate) fn seed_authorization(
             .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?
             .credentials = Some(serde_json::from_value(serde_json::json!({
             "client_id": client_id,
-            "token_response": {"access_token": access_token, "token_type": "bearer"},
+            "token_response": {"access_token": access_token, "token_type": "bearer", "expires_in": expires_in},
             "granted_scopes": ["mcp:read"],
             "token_received_at": 1,
             "issuer": null
         }))?);
         Ok(())
     })
+}
+
+/// The stored logout generation, for building credential stores the way `manager_and_profile` does.
+pub(crate) fn logout_generation(path: &Path, server_name: &str) -> u64 {
+    read_store(path).unwrap().profiles[server_name].logout_generation
 }
