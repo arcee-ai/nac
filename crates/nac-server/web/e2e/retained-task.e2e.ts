@@ -41,6 +41,23 @@ test("Local UI opens and steers two pinned retained tasks after restart", async 
   const invoking = await createSession(request, harness, "direct", project);
   await page.goto(`${harness.baseUrl}/#/session/${invoking}/files`);
   await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
+  // A broken source fails visibly; ordinary creation requires explicit intent.
+  const metadata = path.join(harness.runRoot, "saved-git-metadata");
+  await fs.rename(path.join(repo, ".git"), metadata);
+  await fs.writeFile(path.join(repo, ".git"), "gitdir: /missing-nac-gitdir\n");
+  await page
+    .getByRole("button", { name: /^New [Ss]ession$/ })
+    .first()
+    .click();
+  await page.getByRole("button", { name: "Agent Session", exact: true }).click();
+  const sourceError = page.getByRole("dialog").filter({ hasText: "Git source unavailable" });
+  await expect(sourceError).toBeVisible();
+  await sourceError.getByRole("button", { name: "Use existing checkout" }).click();
+  await expect(sourceError).not.toBeVisible();
+  await expect(page).not.toHaveURL(new RegExp(invoking));
+  await fs.unlink(path.join(repo, ".git"));
+  await fs.rename(metadata, path.join(repo, ".git"));
+  await page.goto(`${harness.baseUrl}/#/session/${invoking}/files`);
   await page
     .getByRole("button", { name: /^New [Ss]ession$/ })
     .first()

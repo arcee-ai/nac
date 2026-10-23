@@ -28,11 +28,15 @@ impl TaskLaunchRequest {
         anyhow::ensure!(
             !self.project_id.is_empty()
                 && self.project_id.len() <= 256
-                && !self.title.trim().is_empty()
-                && self.title.len() <= 512
                 && !self.prompt.trim().is_empty()
                 && self.prompt.len() <= 131072,
             "invalid request: project, title and initial prompt are required and bounded"
+        );
+        let title = crate::sessions::normalize_presentation_title(&self.title)
+            .map_err(|error| anyhow!("invalid request: {error}"))?;
+        anyhow::ensure!(
+            title.as_deref() == Some(self.title.as_str()),
+            "invalid request: task title must be nonblank and trimmed"
         );
         for value in [&self.git_ref, &self.default_ref, &self.invoking_session_id]
             .into_iter()
@@ -311,6 +315,7 @@ pub(crate) fn publish_in_transaction(
     snapshot: &crate::sessions::SessionSnapshot,
 ) -> Result<()> {
     let launch = load(tx, request_id)?.ok_or_else(|| anyhow!("launch not found"))?;
+    launch.request.validate()?;
     anyhow::ensure!(
         launch.phase == TaskLaunchPhase::PreparingRuntime,
         "conflict: launch is not preparing runtime"

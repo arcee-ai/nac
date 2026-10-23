@@ -44,6 +44,7 @@ export function TaskLaunchModal({
               label="Task title"
               aria-label="Task title"
               value={title}
+              maxLength={120}
               isDisabled={frozen}
               onChange={(e) => setTitle(e.target.value)}
             />
@@ -150,7 +151,7 @@ export function TaskLaunchModal({
                   onClick={() => launch.cancel.mutate(record.request.request_id)}
                   disabled={launch.cancel.isPending}
                 >
-                  Cancel task preparation or run
+                  Cancel preparation or current run
                 </Button>
               )}
             </article>

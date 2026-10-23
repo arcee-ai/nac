@@ -6,6 +6,8 @@ import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
+  Button,
+  Modal,
   Popover,
   PopoverPlacement,
   PopoverSize,
@@ -61,6 +63,7 @@ export function NewSessionPopover({
   const [open, setOpen] = useState(false);
   const [isolated, setIsolated] = useState<{ defaultRef: string | null } | null>(null);
   const [checkingSource, setCheckingSource] = useState(false);
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const { api } = useNativeRuntime();
   const navigate = useNavigate();
   const toast = useToast();
@@ -83,8 +86,16 @@ export function NewSessionPopover({
     try {
       if (behavior === "direct" && !existingCheckout) {
         setCheckingSource(true);
-        const source = await api.taskLaunchSource(projectId);
-        setCheckingSource(false);
+        let source;
+        try {
+          source = await api.taskLaunchSource(projectId);
+        } catch (error) {
+          setOpen(false);
+          setSourceError(humanErrorText(toRunError(error)));
+          return;
+        } finally {
+          setCheckingSource(false);
+        }
         if (source.eligible) {
           setOpen(false);
           setIsolated({ defaultRef: source.default_ref ?? null });
@@ -106,6 +117,23 @@ export function NewSessionPopover({
 
   return (
     <>
+      {sourceError && (
+        <Modal open title="Git source unavailable" onClose={() => setSourceError(null)}>
+          <p role="alert">{sourceError}</p>
+          <p>
+            Repair the Git source to start an isolated task, or explicitly use the existing
+            checkout.
+          </p>
+          <Button
+            onClick={() => {
+              setSourceError(null);
+              void start("direct", true);
+            }}
+          >
+            Use existing checkout
+          </Button>
+        </Modal>
+      )}
       {isolated && projectId && (
         <TaskLaunchModal
           projectId={projectId}

@@ -173,7 +173,7 @@ impl<'a> TaskLaunchApplication<'a> {
             store::update_task_launch(&path, &request_id, TaskLaunchPhase::Cancelled, None)
         })
         .await??;
-        if record.first_input_id.is_some() {
+        if record.first_input_id.is_some() && record.session_present {
             self.manager
                 .session_runs()
                 .cancel(&record.session_id)

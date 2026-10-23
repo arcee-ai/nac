@@ -20,6 +20,8 @@ brief. Open either conversation to send or queue input independently.
 projects, remote projects and other session behaviors retain their established
 creation path. Retained isolation itself currently supports unmanaged Local
 hosts on Unix platforms; SSH and Podman are not supported launch backends.
+If Git source inspection fails, the error view offers the same explicit
+existing-checkout action. It never selects that action automatically.
 
 ## Retries and interrupted preparation
 
@@ -34,6 +36,9 @@ Session publication and the first durable inbox item commit together. A lost
 response cannot create a second session or brief. Cancellation before publication
 prevents both; cancellation after publication withdraws a pending initial brief
 or cancels the active run through the established session lifecycle.
+The inventory's **Cancel preparation or current run** action deliberately targets
+the task's current run, including a later follow-up. Removed tasks can still have
+their preparation receipt cancelled without reopening the session.
 
 ## Retention
 
@@ -49,3 +54,6 @@ missing source, changed repository identity, invalid effective subdirectory,
 policy denial or ambiguous interrupted Git effect fails visibly without using
 the source checkout as a fallback. Uncertain resources remain retained for
 inspection; preparation never resets an existing owned checkout to hide edits.
+The saved source/default-branch binding is immutable in this delivery. If that
+branch is renamed or removed, select its replacement explicitly in the Git ref
+field. Changing the saved binding requires a future project configuration flow.

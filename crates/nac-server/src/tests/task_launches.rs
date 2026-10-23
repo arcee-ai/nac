@@ -233,8 +233,41 @@ async fn retained_task_concurrent_first_launches_publish_distinct_sessions_and_i
         .await
         .unwrap();
         manager.delete_session(&record.session_id).await.unwrap();
+        let response = post_json(
+            app.clone(),
+            &format!("/task-launches/{}/cancel", record.request.request_id),
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
         assert!(record.workspace_path.join("nested/file").is_file());
     }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn retained_task_invalid_ref_or_title_is_a_request_error_without_reservation() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retained_task_invalid_input");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let manager = test_manager(&root);
+    let request = fixture(&root, &manager).await;
+    let app = router(manager.clone());
+    for field in ["git_ref", "default_ref", "title"] {
+        let mut invalid = serde_json::to_value(&request).unwrap();
+        invalid[field] = if field == "title" {
+            "x".repeat(121).into()
+        } else {
+            "missing-branch".into()
+        };
+        let response = post_json(app.clone(), "/task-launches", invalid).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    assert!(
+        nac_core::store::list_task_launches(&manager.inner.store_path, &request.project_id)
+            .unwrap()
+            .is_empty()
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
