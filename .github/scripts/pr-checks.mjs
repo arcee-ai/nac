@@ -13,6 +13,7 @@ export const requiredJobs = [
   "test",
   "build",
   "source-security",
+  "macos-native",
 ];
 export const managedJobs = ["prepare", "contract", "quality", "build-smoke"];
 
