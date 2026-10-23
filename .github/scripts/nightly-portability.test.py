@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 SCRIPT = Path(__file__).with_name('nightly-portability.py')
@@ -18,6 +19,54 @@ spec.loader.exec_module(runner)
 
 
 class Controls(unittest.TestCase):
+    def test_signal_permission_failure_remains_closed_for_live_group(self):
+        with patch.object(runner.os, 'killpg', side_effect=PermissionError('denied')):
+            with patch.object(runner, 'live_group_members', return_value=[{'pid': 123, 'group': 123, 'state': 'T'}]):
+                with self.assertRaisesRegex(RuntimeError, 'live members'):
+                    runner.signal_owned_group(123, signal.SIGKILL)
+            with patch.object(runner, 'live_group_members', return_value=[]):
+                runner.signal_owned_group(123, signal.SIGKILL)
+            for observation in ('malformed output', ''):
+                with patch.object(runner.subprocess, 'check_output', return_value=observation):
+                    with self.assertRaisesRegex(RuntimeError, 'cannot inspect owned group'):
+                        runner.signal_owned_group(123, signal.SIGKILL)
+            with patch.object(runner.subprocess, 'check_output', side_effect=RuntimeError('ps failed')):
+                with self.assertRaisesRegex(RuntimeError, 'cannot inspect owned group'):
+                    runner.signal_owned_group(123, signal.SIGKILL)
+
+    def test_actual_zombie_only_group_is_already_settled(self):
+        child = subprocess.Popen([sys.executable, '-c', 'pass'], start_new_session=True,
+                                 stdout=subprocess.PIPE)
+        try:
+            child.stdout.read()
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                state = subprocess.check_output(['ps', '-p', str(child.pid), '-o', 'stat='], text=True).strip()
+                if state.startswith('Z'):
+                    break
+                time.sleep(.01)
+            else:
+                self.fail('owned child did not reach zombie barrier before reaping')
+            self.assertEqual(runner.live_group_members(child.pid), [])
+            runner.signal_owned_group(child.pid, signal.SIGKILL)
+        finally:
+            child.wait()
+            child.stdout.close()
+
+    def test_cleanup_failure_keeps_duration_and_partial_summary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            phases = []
+            with patch.object(runner, 'signal_owned_group', side_effect=RuntimeError('cleanup denied')):
+                with self.assertRaisesRegex(RuntimeError, 'cleanup denied'):
+                    runner.run([sys.executable, '-c', 'print("owned fixture")'], output / 'fixture.log',
+                               dict(os.environ), phases, 'fixture')
+            self.assertIn('seconds', phases[0])
+            report = {'platform': 'control', 'architecture': 'control', 'result': 'failed',
+                      'seconds': 0, 'phases': phases + [{'label': 'interrupted', 'log': 'interrupted.log'}]}
+            runner.summary(report, output)
+            self.assertIn('| interrupted | interrupted | interrupted |', (output / 'summary.md').read_text())
+
     def test_stale_evidence_cannot_mix_candidates(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)

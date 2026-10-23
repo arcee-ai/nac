@@ -82,10 +82,14 @@ claim that every detached process identity is observable. Abrupt SIGKILL/host
 loss may prevent final reports; missing evidence is not success. Hosted runner
 teardown is the final isolation boundary.
 
-Eight controls cover stale evidence rejection, inventory drift, exact-selection
+Eleven controls cover stale evidence rejection, inventory drift, exact-selection
 failure, the full serialized command plan, long-argv fixture process visibility,
 allowlist scope, real Rust first-attempt failure and cancellation of an actual parent/child
-process behind a readiness barrier. The Rust fixture lives in its own temporary
+process behind a readiness barrier. They also cover a real zombie-only group,
+fail-closed EPERM with live/stopped members or failed/malformed observation,
+and retained timing/summary when cleanup fails. On Darwin, EPERM is normalized
+only after a fresh PID/PGID/state listing proves no live members of the exact
+owned group; other permission failures remain errors. The Rust fixture lives in its own temporary
 directory, mutates no repository source and never overlaps the workspace suite.
 To demonstrate a failing full runner receipt manually:
 

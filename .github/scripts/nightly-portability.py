@@ -24,6 +24,32 @@ def interrupt(signum, _frame):
     raise Cancelled(f'cancelled by signal {signum}')
 
 
+def live_group_members(group):
+    listing = subprocess.check_output(['ps', '-axo', 'pid=,pgid=,stat='], text=True, timeout=2)
+    lines = [line.split() for line in listing.splitlines() if line.strip()]
+    if not lines or any(len(row) != 3 or not row[0].isdigit() or not row[1].isdigit()
+                        or not re.fullmatch(r'[A-Za-z?+<>=0-9-]+', row[2]) for row in lines):
+        raise RuntimeError('invalid process-group observation')
+    return [{'pid': int(pid), 'group': int(pgid), 'state': state}
+            for pid, pgid, state in lines if int(pgid) == group and not state.startswith('Z')]
+
+
+def signal_owned_group(group, signum):
+    try:
+        os.killpg(group, signum)
+    except ProcessLookupError:
+        pass
+    except PermissionError as error:
+        # Darwin can report EPERM for an existing group containing only zombies.
+        # Never normalize a permission failure while any live member remains.
+        try:
+            members = live_group_members(group)
+        except Exception as inspection:
+            raise RuntimeError(f'cannot inspect owned group {group} after signal {signum} EPERM') from inspection
+        if members:
+            raise RuntimeError(f'cannot signal owned group {group} with {signum}; live members {members}') from error
+
+
 def run(command, output, env, phases, label, timeout=2400):
     """One attempt; retain output and terminate the owned process group on abort."""
     entry = {'label': label, 'command': command, 'log': output.name}
@@ -36,19 +62,20 @@ def run(command, output, env, phases, label, timeout=2400):
                                        stderr=subprocess.STDOUT, start_new_session=True)
             entry['returncode'] = process.wait(timeout=timeout)
     finally:
-        if process is not None:
-            # Also settle descendants when the root exits before its children.
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
+        try:
+            if process is not None:
+                # Also settle descendants when the root exits before its children.
                 try:
+                    signal_owned_group(process.pid, signal.SIGTERM)
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    signal_owned_group(process.pid, signal.SIGKILL)
+                finally:
                     process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    pass
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
-        entry['seconds'] = round(time.monotonic() - started, 3)
+        finally:
+            entry['seconds'] = round(time.monotonic() - started, 3)
     if entry['returncode']:
         raise RuntimeError(f'{label} failed ({entry["returncode"]}); see {output.name}')
     return output.read_text()
@@ -89,7 +116,7 @@ def summary(report, output):
         lines += [report['error'], '']
     lines += ['| Phase | Seconds | Exit | Log |', '|---|---:|---:|---|']
     for phase in report['phases']:
-        lines.append(f'| {phase["label"]} | {phase["seconds"]} | '
+        lines.append(f'| {phase["label"]} | {phase.get("seconds", "interrupted")} | '
                      f'{phase.get("returncode", "interrupted")} | {phase["log"]} |')
     lines += ['', 'Owner/triage: docs/ci/nightly-portability.md. No retries. '
               'Excluded capabilities are recorded in inventory.json.']
