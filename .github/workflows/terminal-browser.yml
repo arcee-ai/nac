@@ -10,6 +10,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/terminal-browser.yml'
+      - '.github/workflows/nightly-portability.yml'
       - '.github/scripts/terminal-browser*'
       - '.github/scripts/nightly-portability.py'
       - 'Makefile'
