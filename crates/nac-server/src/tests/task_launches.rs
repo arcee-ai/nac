@@ -295,3 +295,129 @@ async fn retained_task_bound_missing_git_source_never_advertises_existing_checko
         .is_empty());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn retained_task_cancel_during_real_git_effect_keeps_inventory_and_never_admits_input() {
+    use std::os::unix::fs::PermissionsExt;
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retained_task_git_cancel");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let manager = test_manager(&root);
+    let request = fixture(&root, &manager).await;
+    let original_path = std::env::var_os("PATH");
+    let git = std::env::split_paths(original_path.as_ref().unwrap())
+        .map(|p| p.join("git"))
+        .find(|p| p.is_file())
+        .unwrap();
+    let bin = root.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let shim = bin.join("git");
+    std::fs::write(&shim,"#!/bin/sh\ncase \"$*\" in *'worktree add'*) : > \"$NAC_TEST_TASK_GIT_READY\"; while [ ! -f \"$NAC_TEST_TASK_GIT_RELEASE\" ]; do /bin/sleep 0.01; done ;; esac\nexec \"$NAC_TEST_TASK_REAL_GIT\" \"$@\"\n").unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let ready = root.join("git-ready");
+    let release = root.join("git-release");
+    struct Environment(Vec<(&'static str, Option<std::ffi::OsString>)>);
+    impl Drop for Environment {
+        fn drop(&mut self) {
+            for (name, value) in self.0.drain(..) {
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
+            }
+        }
+    }
+    let mut paths = vec![bin];
+    paths.extend(std::env::split_paths(original_path.as_ref().unwrap()));
+    let values = [
+        ("PATH", std::env::join_paths(paths).unwrap()),
+        ("NAC_TEST_TASK_REAL_GIT", git.into_os_string()),
+        ("NAC_TEST_TASK_GIT_READY", ready.clone().into_os_string()),
+        (
+            "NAC_TEST_TASK_GIT_RELEASE",
+            release.clone().into_os_string(),
+        ),
+    ];
+    let environment = Environment(
+        values
+            .iter()
+            .map(|(name, _)| (*name, std::env::var_os(name)))
+            .collect(),
+    );
+    for (name, value) in values {
+        unsafe {
+            std::env::set_var(name, value);
+        }
+    }
+    struct ReleaseOnDrop(std::path::PathBuf);
+    impl Drop for ReleaseOnDrop {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.0, "release interrupted fixture");
+        }
+    }
+    let _release_on_drop = ReleaseOnDrop(release.clone());
+    let app = router(manager.clone());
+    let response = post_json(
+        app.clone(),
+        "/task-launches",
+        serde_json::to_value(&request).unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !ready.exists() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let record = launch_status(app.clone(), &request.request_id).await;
+    assert_eq!(record.phase, TaskLaunchPhase::PreparingWorkspace);
+    let cancelled = post_json(
+        app.clone(),
+        &format!("/task-launches/{}/cancel", request.request_id),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        cancelled.status(),
+        StatusCode::OK,
+        "Git must not hold the DB transaction during effects"
+    );
+    assert_eq!(
+        launch_status(app.clone(), &request.request_id).await.phase,
+        TaskLaunchPhase::Cancelled
+    );
+    std::fs::write(release, "resume real Git").unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if sessions::SessionOperationLease::try_acquire(
+                &manager.inner.store_path,
+                &format!("task-launch:{}", request.request_id),
+            )
+            .is_ok()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let settled = launch_status(app, &request.request_id).await;
+    assert_eq!(settled.phase, TaskLaunchPhase::Cancelled);
+    assert!(settled.first_input_id.is_none());
+    assert!(!settled.session_present);
+    assert_eq!(
+        std::fs::read_to_string(record.workspace_path.join("nested/file")).unwrap(),
+        "committed"
+    );
+    assert!(sessions::list_sessions(&manager.inner.store_path)
+        .unwrap()
+        .is_empty());
+    drop(environment);
+    std::fs::remove_dir_all(root).unwrap();
+}
