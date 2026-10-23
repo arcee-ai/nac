@@ -15,6 +15,38 @@ use std::os::unix::fs::symlink;
 
 mod sources;
 
+/// HOME/NAC_HOME isolation must not change the environment inherited by
+/// unrelated process tests running concurrently in the parent test binary.
+fn run_in_subprocess(name: &str, ignored: bool) -> bool {
+    let selected = format!("skills::qualification::{name}");
+    if std::env::var("NAC_SKILL_QUALIFICATION_CHILD").as_deref() == Ok(selected.as_str()) {
+        return false;
+    }
+    // Also keep the child's inherited PATH/config snapshot clear of other
+    // cooperating environment fixtures while it is spawned.
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .args([selected.as_str(), "--exact", "--nocapture"])
+        .env("NAC_SKILL_QUALIFICATION_CHILD", &selected);
+    if ignored {
+        command.arg("--ignored");
+    }
+    let output = command.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    print!("{stdout}");
+    assert!(
+        output.status.success(),
+        "{selected}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("1 passed;") && stdout.contains(&selected),
+        "child did not execute {selected}"
+    );
+    true
+}
+
 struct Fixture {
     root: PathBuf,
     env: Vec<(&'static str, Option<OsString>)>,
@@ -168,6 +200,12 @@ fn tool_result(run: &OrchestratorRunConfig, id: &str) -> String {
 
 #[test]
 fn all_four_roots_shadow_in_order_and_registry_retains_loaded_bytes() {
+    if run_in_subprocess(
+        "all_four_roots_shadow_in_order_and_registry_retains_loaded_bytes",
+        false,
+    ) {
+        return;
+    }
     let _lock = crate::TEST_ENV_LOCK.lock().unwrap();
     let f = Fixture::new();
     let roots = [
@@ -218,6 +256,7 @@ fn all_four_roots_shadow_in_order_and_registry_retains_loaded_bytes() {
 #[tokio::test]
 async fn direct_expansion_reads_linked_resources_executes_inert_script_and_rejects_missing_capability(
 ) {
+    if run_in_subprocess("direct_expansion_reads_linked_resources_executes_inert_script_and_rejects_missing_capability", false) { return; }
     let _lock = crate::TEST_ENV_LOCK.lock().unwrap();
     let f = Fixture::new();
     let package = f.skill("project/catalog", "Read references/guide.txt; scripts/probe.py is inert. Missing references/absent.txt must be reported. unavailable_connector is unsupported.");
@@ -366,6 +405,12 @@ async fn direct_expansion_reads_linked_resources_executes_inert_script_and_rejec
 
 #[tokio::test]
 async fn linked_external_resource_requires_canonical_permission_and_deny_still_wins() {
+    if run_in_subprocess(
+        "linked_external_resource_requires_canonical_permission_and_deny_still_wins",
+        false,
+    ) {
+        return;
+    }
     let _lock = crate::TEST_ENV_LOCK.lock().unwrap();
     let f = Fixture::new();
     let package = f.skill("catalog", "Read references/guide.txt.");
