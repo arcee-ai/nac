@@ -47,9 +47,10 @@ reusable quality job validates all fields and results before reuse; invalid or
 foreign evidence fails. A blank receipt runs full `make ci`, including in standalone
 manual managed runs, which expose no receipt/skip dispatch input. The feature-gated
 fault fixture always runs. No cross-workflow status lookup or previous green
-candidate can supply quality evidence. A downstream-only rerun in a new
-attempt rejects an older upstream receipt; regenerate quality through a full
-workflow rerun rather than weakening attempt binding. Browser/native/build/source-security are separately
+candidate can supply quality evidence. A failed-job rerun can retain successful upstream outputs from an earlier
+attempt. A complete valid earlier receipt with the same run/repository/candidate
+selects full `make ci` in the current attempt; it is never reused. Future attempts,
+foreign identities, malformed or incomplete results still fail closed. Browser/native/build/source-security are separately
 required by the final aggregate, rather than falsely described as receipt contents.
 
 ## Cache and cancellation boundary
@@ -72,7 +73,8 @@ single-build identity boundary. Cache hits never replace smoke/security checks.
 Credentialed publication does not execute untrusted cached builds or candidate code.
 
 Ordinary `pull_request` runs share a concurrency group only with the same PR
-number and cancel superseded runs. Push/tag/manual runs have unique run groups
+number and cancel superseded runs on synchronize or base-ref edits. Title/body
+edits, ready transitions and reopen events queue without cancelling active work. Push/tag/manual runs have unique run groups
 and `cancel-in-progress=false`, so their pending slots cannot replace one another.
 The separate release-preparation/publication workflow remains non-cancellable.
 The reusable managed workflow retains unique run/attempt groups; a superseded PR's

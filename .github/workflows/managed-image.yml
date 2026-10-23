@@ -108,19 +108,19 @@ jobs:
           prefix-key: nac-ci-v1
           key: managed-quality
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
-      - name: Validate the caller quality receipt before reuse
-        if: inputs.quality_receipt != ''
+      - name: Select verified reuse or full quality for this attempt
+        id: quality-mode
         env:
           QUALITY_RECEIPT: ${{ inputs.quality_receipt }}
           EXPECTED_SHA: ${{ needs.prepare.outputs.sha }}
-        run: node .github/scripts/pr-checks.mjs verify-quality
+        run: node .github/scripts/pr-checks.mjs quality-mode >> "$GITHUB_OUTPUT"
       - name: Install test dependencies
-        if: inputs.quality_receipt == ''
+        if: steps.quality-mode.outputs.mode == 'full'
         run: |
           npm --prefix crates/nac-server/web ci
           npm --prefix .github/scripts ci
       - name: Run the repository acceptance gates
-        if: inputs.quality_receipt == ''
+        if: steps.quality-mode.outputs.mode == 'full'
         run: make ci
 
       - name: Verify the private managed fault fixture

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { qualityJobs, qualityReceipt, verifyQuality, requiredJobs, requireComplete } from "./pr-checks.mjs";
+import { qualityJobs, qualityReceipt, verifyQuality, qualityMode, requiredJobs, requireComplete } from "./pr-checks.mjs";
 
 const require = createRequire(import.meta.url);
 const YAML = require("yaml");
@@ -65,14 +65,14 @@ test("caller supplies observed complete quality needs; standalone always runs fu
   assert.equal(managed.on.workflow_call.inputs.quality_receipt.default, "");
   assert.equal(managed.on.workflow_dispatch, null, "standalone has no caller-supplied skip/receipt inputs");
   const steps = managed.jobs.quality.steps;
-  const validate = steps.findIndex(s => s.run?.includes("pr-checks.mjs verify-quality"));
+  const validate = steps.findIndex(s => s.run?.includes("pr-checks.mjs quality-mode"));
   const full = steps.findIndex(s => s.run === "make ci");
   const fault = steps.findIndex(s => s.run === "make test-managed-fault-fixture");
   assert.ok(validate >= 0 && full > validate && fault > full);
-  assert.equal(steps[validate].if, "inputs.quality_receipt != ''");
+  assert.equal(steps[validate].if, undefined);
   assert.equal(steps[validate].env.QUALITY_RECEIPT, "${{ inputs.quality_receipt }}");
   assert.equal(steps[validate].env.EXPECTED_SHA, "${{ needs.prepare.outputs.sha }}");
-  assert.equal(steps[full].if, "inputs.quality_receipt == ''");
+  assert.equal(steps[full].if, "steps.quality-mode.outputs.mode == 'full'");
   assert.equal(steps[fault].if, undefined, "feature-gated fault tests are never deduplicated");
   for (const step of steps) assert.equal(step["continue-on-error"], undefined);
 });
@@ -122,13 +122,18 @@ test("compiler caches isolate job/profile/toolchain and PRs cannot save npm/Carg
 
 test("PR identity cancels superseded checks while tag/push/dispatch/release mutations never share a slot", () => {
   const stable = workflow("stable-release");
-  assert.equal(stable.concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
+  assert.equal(stable.concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' && (github.event.action == 'synchronize' || github.event.changes.base != null) }}");
   assert.equal(stable.concurrency.group, "${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}");
   // The exact expression above chooses the PR number only for ordinary PR events.
   const identity = (event, pr, run) => event === "pull_request" ? `Stable release-pr-${pr}` : `Stable release-run-${run}`;
   assert.equal(identity("pull_request", 412, 1), identity("pull_request", 412, 2));
   assert.notEqual(identity("pull_request", 412, 1), identity("pull_request", 413, 2));
   for (const event of ["push", "workflow_dispatch"]) assert.notEqual(identity(event, 0, 1), identity(event, 0, 2));
+  const cancels = (event, action, baseChanged = false) => event === "pull_request" && (action === "synchronize" || baseChanged);
+  assert.equal(cancels("pull_request", "synchronize"), true);
+  assert.equal(cancels("pull_request", "edited", true), true);
+  for (const action of ["edited", "ready_for_review", "reopened", "opened"]) assert.equal(cancels("pull_request", action), false);
+  for (const event of ["push", "workflow_dispatch"]) assert.equal(cancels(event, "synchronize", true), false);
   assert.equal(workflow("release-please").concurrency["cancel-in-progress"], false);
   assert.equal(workflow("managed-image").concurrency["cancel-in-progress"], false);
   assert.match(stable.jobs.publish.if, /github.event_name == 'push'/);
@@ -143,4 +148,24 @@ test("seeded browser/source/native/image failures still fail the full current-ca
       assert.throws(() => requireComplete(needs, "true", sha), undefined, `${job}/${result}`);
     }
   }
+});
+
+test("failed-job reruns repeat full quality for a valid earlier attempt without reusing stale evidence", () => {
+  const receipt = qualityReceipt(quality(), sha, context);
+  assert.equal(qualityMode(null, sha, context), "full");
+  assert.equal(qualityMode(receipt, sha, context), "reuse");
+  assert.equal(qualityMode(receipt, sha, { ...context, run_attempt: "2" }), "full");
+  assert.throws(() => verifyQuality(receipt, sha, { ...context, run_attempt: "2" }));
+  for (const [field, value] of [["sha", "b".repeat(40)], ["repository", "other/repo"], ["run_id", "124"], ["run_attempt", "3"]]) {
+    assert.throws(() => qualityMode({ ...receipt, [field]: value }, sha, { ...context, run_attempt: "2" }));
+  }
+  for (const result of ["failure", "skipped", "cancelled", undefined]) {
+    assert.throws(() => qualityMode({ ...receipt, results: { ...receipt.results, lint: result } }, sha, { ...context, run_attempt: "2" }));
+  }
+  const run = value => spawnSync(process.execPath, [".github/scripts/pr-checks.mjs", "quality-mode"], {
+    encoding: "utf8", env: { ...process.env, EXPECTED_SHA: sha, GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "2", GITHUB_REPOSITORY: "arcee-ai/nac", QUALITY_RECEIPT: value },
+  });
+  assert.equal(run(JSON.stringify(receipt)).stdout.trim(), "mode=full");
+  assert.equal(run("").stdout.trim(), "mode=full");
+  assert.notEqual(run(JSON.stringify({ ...receipt, run_id: "124" })).status, 0);
 });

@@ -35,7 +35,8 @@ Managed work applies when any changed path is under `.github/`, `crates/`,
 and renames/deletions. Non-PR runs conservatively enable managed work. The
 stable-release workflow is the sole main/dev push producer; managed-image has
 only reusable-call and manual
-triggers. Superseded ordinary PR runs cancel by PR number. Other runs use a unique run
+triggers. Superseded ordinary PR runs cancel by PR number on synchronize or base-ref edits;
+metadata-only edits do not cancel active work. Other runs use a unique run
 identity and never cancel release/publication work. Each managed call retains a
 unique run/attempt identity; cancellation comes from its superseded parent PR,
 so unrelated callers cannot replace a pending call. Downstream trusted
