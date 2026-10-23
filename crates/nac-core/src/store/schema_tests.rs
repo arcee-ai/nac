@@ -290,6 +290,18 @@ fn assert_current_schema(conn: &Connection) {
             "version",
         ]
     );
+    for (table, session_id) in [
+        ("traditional_child_terminal_receipts", "child_session_id"),
+        (
+            "managed_orchestrator_terminal_receipts",
+            "orchestrator_session_id",
+        ),
+    ] {
+        assert_eq!(
+            table_columns(conn, table),
+            [session_id, "generation", "run_id", "record_json"]
+        );
+    }
     assert_eq!(
         table_columns(conn, "managed_host_maintenance"),
         [
@@ -511,7 +523,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 34);
+    assert_eq!(STORE_SCHEMA_VERSION, 35);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

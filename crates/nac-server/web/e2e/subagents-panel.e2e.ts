@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 
+import { waitForDelegatedInput } from "./delegation-observation";
 import { createSession, expect, showSubagents, startForegroundChild, test } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
@@ -212,6 +213,8 @@ for (const [name, viewport, mobile] of [
       starts.map((body) => (JSON.parse(body) as { child_session_id: string }).child_session_id),
     ).toEqual([olderId, olderId]);
 
+    // Observe actual durable admission, rather than racing the provider release with HTTP handling.
+    await waitForDelegatedInput(harness, "child", olderId, "E2E_PANEL_STEER check the cache too");
     running.release();
     await harness.provider.waitForRequestCount(5);
     await expect(composer.getByRole("textbox", { name: "Send a message" })).toHaveValue("");

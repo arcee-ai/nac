@@ -26,6 +26,17 @@ with **Parent chat**. That page keeps the same composer, which acts through the
 parent, but its transcript has no resend, revert, fork, branch, or commit
 controls.
 
+After sending, the field becomes the draft for the next message. A pending
+foreground reply does not prevent steering once the orchestrator is running.
+**Stop** is a separate button; submitting an empty field never cancels a run.
+Drafts stay with their selected orchestrator across navigation and same-tab
+reloads.
+
+Submitted text with failed or unconfirmed delivery is retained separately from
+the next draft. A lost response does not prove the message failed: inspect the
+transcript before restoring and sending it again. Recovery never sends
+automatically or replaces a newer draft.
+
 A foreground launch waits for the generation's final report. A background
 launch returns immediately, then atomically queues one completion for the
 parent when the run completes, fails, is cancelled, or is reconciled after a
@@ -33,6 +44,8 @@ restart. The queue is durable and exactly-once. Continuing a terminal session
 starts its next generation; sending a prompt while it is running steers the
 current orchestrator generation. At most four managed orchestrators may run
 for one parent, and deleting the parent deletes its managed sessions.
+The foreground result remains tied to that generation even if a subsequent
+generation has already started.
 
 The native controls call the same protocol-independent Rust operations used by
 NAC's outgoing session-control MCP server. They do not make an HTTP or MCP

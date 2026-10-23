@@ -14,6 +14,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import type { TraditionalChildStatus } from "@/app/types/api";
 
 const BACKGROUND_HINT =
@@ -61,6 +62,7 @@ export function SubagentChatInputBox({
   permission,
 }: SubagentChatInputBoxProps) {
   const field = useRef<HTMLTextAreaElement>(null);
+  const isMobile = useIsMobile();
   const filled = value.trim().length > 0;
   const sendable = filled && (running || !starting);
   const placeholder = running ? "Steer a message" : "Send a message";
@@ -84,11 +86,15 @@ export function SubagentChatInputBox({
       onSubmit={(event) => {
         event.preventDefault();
         if (busy) return;
-        if (running && !sendable) onStop();
-        else if (sendable) onSubmit();
+        if (sendable) onSubmit();
       }}
     >
-      <div className="relative flex items-end overflow-hidden rounded-[4px] bg-input py-2 pr-12 pl-2">
+      <div
+        className={cn(
+          "relative flex items-end overflow-hidden rounded-[4px] bg-input py-2 pl-2",
+          running ? "pr-24" : "pr-12",
+        )}
+      >
         <textarea
           ref={field}
           rows={1}
@@ -99,7 +105,9 @@ export function SubagentChatInputBox({
           className="max-h-40 min-h-5 w-full resize-none bg-transparent px-1 text-small text-input outline-none placeholder:text-input-placeholder"
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
             if (event.key !== "Enter" || event.shiftKey) return;
+            if (isMobile && !event.metaKey && !event.ctrlKey) return;
             event.preventDefault();
             if (sendable && !busy) onSubmit();
           }}
@@ -110,15 +118,25 @@ export function SubagentChatInputBox({
           variant={ButtonVariant.Primary}
           content={ButtonContent.Icon}
           className="absolute right-0 bottom-0"
-          disabled={busy || (!running && !sendable)}
-          onClick={(event) => {
-            // The second click of a double-clicked Steer lands on Stop; it must not cancel the run.
-            if (event.detail > 1 && running && !sendable) event.preventDefault();
-          }}
-          aria-label={running ? (sendable ? "Steer" : "Stop") : "Send"}
+          disabled={busy || !sendable}
+          aria-label={running ? "Steer" : "Send"}
         >
-          <Icon iconName={running && !sendable ? IconName.Stop : IconName.ArrowTop} />
+          <Icon iconName={IconName.ArrowTop} />
         </Button>
+        {running ? (
+          <Button
+            type="button"
+            size={ButtonSize.Medium}
+            variant={ButtonVariant.Ghost}
+            content={ButtonContent.Icon}
+            className="absolute right-12 bottom-0"
+            disabled={busy}
+            onClick={onStop}
+            aria-label="Stop"
+          >
+            <Icon iconName={IconName.Stop} />
+          </Button>
+        ) : null}
       </div>
       <div className="flex items-center gap-2.5 h-6">
         <div className="flex min-w-0 flex-1 items-center gap-2">

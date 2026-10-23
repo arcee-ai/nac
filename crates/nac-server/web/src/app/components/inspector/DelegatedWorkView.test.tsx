@@ -365,7 +365,7 @@ describe("selection and drafts", () => {
       ]);
     });
 
-    // The status is part of the composer's key, so this is a fresh composer.
+    // Status updates preserve the existing composer and its draft.
     await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeTruthy());
     expect(draftBox("Send a message").value).toBe("Also check grants");
   });
@@ -403,30 +403,33 @@ describe("selection and drafts", () => {
     expect(draftBox("Steer a message").value).toBe("");
   });
 
-  it("does not stop a subagent when Steer is double-clicked", async () => {
-    const reply = deferred<TraditionalChildRecord>();
-    startChild.mockReturnValue(reply.promise);
-    mount("direct");
-    fireEvent.change(draftBox("Steer a message"), {
-      target: { value: "Check the grant" },
-    });
-    const button = screen.getByRole("button", { name: "Steer" });
-    fireEvent.click(button, { detail: 1 });
-    // The same button is Stop by the second click of the double-click.
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }), {
-      detail: 2,
-    });
-    await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
-    expect(cancelChild).not.toHaveBeenCalled();
+  it.each([0, 1, 2])(
+    "keeps repeated Steer activation separate from Stop (detail %s)",
+    async (detail) => {
+      const reply = deferred<TraditionalChildRecord>();
+      startChild.mockReturnValue(reply.promise);
+      mount("direct");
+      fireEvent.change(draftBox("Steer a message"), {
+        target: { value: "Check the grant" },
+      });
+      const button = screen.getByRole("button", { name: "Steer" });
+      fireEvent.click(button, { detail });
+      // Send keeps its identity/position and becomes disabled; cancellation has its own control.
+      expect(screen.getByRole("button", { name: "Steer" })).toBe(button);
+      fireEvent.click(button, { detail });
+      fireEvent.submit(button.closest("form")!);
+      await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
+      expect(cancelChild).not.toHaveBeenCalled();
 
-    // A separate click stops the run while the steer is still pending.
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }), {
-      detail: 1,
-    });
-    await waitFor(() => expect(cancelChild).toHaveBeenCalledWith("parent", "child-1"));
-    await act(async () => reply.resolve(child));
-    expect(startChild).toHaveBeenCalledOnce();
-  });
+      // An intentional click on the distinct Stop works while steering is pending.
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }), {
+        detail: 1,
+      });
+      await waitFor(() => expect(cancelChild).toHaveBeenCalledWith("parent", "child-1"));
+      await act(async () => reply.resolve(child));
+      expect(startChild).toHaveBeenCalledOnce();
+    },
+  );
 
   it("holds a second continuation until the target runs, then lets the next message steer", async () => {
     const finished = {
@@ -548,7 +551,7 @@ describe("selection and drafts", () => {
     expect(startChild).toHaveBeenCalledTimes(2);
   });
 
-  it("puts a failed message back and sends it again only on an explicit retry", async () => {
+  it("preserves an unconfirmed message separately and sends it again only after explicit recovery", async () => {
     const reply = deferred<TraditionalChildRecord>();
     startChild.mockReturnValueOnce(reply.promise);
     const client = mount("direct");
@@ -561,6 +564,9 @@ describe("selection and drafts", () => {
 
     await act(async () => reply.reject(new Error("busy")));
 
+    expect(draftBox("Steer a message").value).toBe("");
+    expect(screen.getByText(/Message delivery is unconfirmed/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Restore to composer" }));
     expect(draftBox("Steer a message").value).toBe("Check the grant");
     expect(startChild).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
@@ -589,9 +595,81 @@ describe("selection and drafts", () => {
     await act(async () => accepted.resolve(child));
     expect(draftBox("Steer a message").value).toBe("Unsent");
     await act(async () => rejected.reject(new Error("busy")));
-    expect(draftBox("Steer a message").value).toBe("Second\n\nUnsent");
+    expect(draftBox("Steer a message").value).toBe("Unsent");
+    expect(screen.getByText("Second")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Restore to composer" })).toHaveProperty(
+      "disabled",
+      true,
+    );
     expect(startChild).toHaveBeenCalledTimes(2);
   });
+
+  it.each(["child", "orchestrator"] as const)(
+    "ignores an older %s foreground response after a newer generation",
+    async (mode) => {
+      const client = mount(mode === "child" ? "direct" : "direct-with-orchestrator");
+      if (mode === "child") {
+        const reply = deferred<TraditionalChildRecord>();
+        startChild.mockReturnValueOnce(reply.promise);
+        fireEvent.change(draftBox("Steer a message"), { target: { value: "Steer" } });
+        fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+        await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
+        const newer = { ...child, generation: 3, version: 8 };
+        act(() => client.setQueryData(queryKeys.traditionalChildren("parent"), [newer]));
+        await act(async () => reply.resolve({ ...child, status: "completed", version: 4 }));
+        expect(client.getQueryData(queryKeys.traditionalChildren("parent"))).toEqual([newer]);
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
+        const reply = deferred<ManagedOrchestratorRecord>();
+        startOrchestrator.mockReturnValueOnce(reply.promise);
+        fireEvent.change(draftBox("Send a message"), { target: { value: "Continue" } });
+        fireEvent.click(screen.getByRole("button", { name: "Send" }));
+        await waitFor(() => expect(startOrchestrator).toHaveBeenCalledOnce());
+        const newer = { ...orchestrator, status: "running" as const, generation: 3, version: 8 };
+        act(() => client.setQueryData(queryKeys.managedOrchestrators("parent"), [newer]));
+        await act(async () => reply.resolve({ ...orchestrator, generation: 2, version: 4 }));
+        expect(client.getQueryData(queryKeys.managedOrchestrators("parent"))).toEqual([newer]);
+      }
+      await waitFor(() => {
+        expect(draftBox("Steer a message")).toBeTruthy();
+        expect(screen.queryByText("Sending message…")).toBeNull();
+      });
+    },
+  );
+
+  it.each(["child", "orchestrator"] as const)(
+    "does not rewind a %s record when an older poll completes",
+    async (mode) => {
+      const client = mount("direct-with-orchestrator");
+      if (mode === "child") {
+        const poll = deferred<TraditionalChildRecord[]>();
+        listChildren.mockReturnValueOnce(poll.promise);
+        const refresh = client.refetchQueries({
+          queryKey: queryKeys.traditionalChildren("parent"),
+        });
+        const newer = { ...child, generation: 3, version: 8 };
+        act(() => client.setQueryData(queryKeys.traditionalChildren("parent"), [newer]));
+        await act(async () => {
+          poll.resolve([child]);
+          await refresh;
+        });
+        expect(client.getQueryData(queryKeys.traditionalChildren("parent"))).toEqual([newer]);
+      } else {
+        const poll = deferred<ManagedOrchestratorRecord[]>();
+        listOrchestrators.mockReturnValueOnce(poll.promise);
+        const refresh = client.refetchQueries({
+          queryKey: queryKeys.managedOrchestrators("parent"),
+        });
+        const newer = { ...orchestrator, generation: 3, version: 8 };
+        act(() => client.setQueryData(queryKeys.managedOrchestrators("parent"), [newer]));
+        await act(async () => {
+          poll.resolve([orchestrator]);
+          await refresh;
+        });
+        expect(client.getQueryData(queryKeys.managedOrchestrators("parent"))).toEqual([newer]);
+      }
+    },
+  );
 
   it("keeps a selection and a draft per parent", async () => {
     listChildren.mockImplementation(async (parent) =>

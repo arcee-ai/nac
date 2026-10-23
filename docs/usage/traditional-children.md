@@ -9,8 +9,8 @@ permission grants are not inherited.
 
 When a running child needs new approval, the parent chat keeps a child-scoped
 permission connection open and presents that request beside the child controls.
-The child transcript remains non-composable but exposes the same approval
-control. A child waits briefly for the parent UI to establish this connection;
+The child page exposes the same approval control beside its existing-session
+composer. A child waits briefly for the parent UI to establish this connection;
 without one, the request fails closed and the operation is not executed.
 The parent's **Approve all automatically** mode governs the parent and all of
 its traditional children. It answers only requests that reach each child's
@@ -34,6 +34,16 @@ through the parent, but its transcript has none of a primary chat's history
 controls: no resend, revert, fork, goal, branch, or commit. Child goal ownership
 is rejected by the service as well as hidden by the UI.
 
+After sending, the field becomes the draft for the next message. A pending
+foreground reply does not prevent steering once the child is running. **Stop**
+is a separate button; submitting an empty field never cancels a run. Drafts stay
+with their selected child across navigation and same-tab reloads.
+
+If delivery fails or its response is lost, the submitted text is retained
+separately from the next draft. An unconfirmed message may already have reached
+the child: check its transcript before restoring and sending it again. Recovery
+never sends automatically or replaces a newer draft.
+
 A foreground launch waits for the generation's structured outcome. A background
 launch returns its durable child ID immediately. When a background generation
 settles, NAC atomically queues one completion for the parent and wakes the
@@ -41,6 +51,8 @@ parent if possible. The queue is the source of truth, so a process restart can
 reconcile an abandoned generation as interrupted and deliver its outcome once.
 Do not poll background children from the model; the completion arrives
 automatically.
+The foreground result remains tied to that generation even if a subsequent
+generation has already started.
 
 Continuing a terminal child starts its next generation with the same immutable
 profile, description, parent, model/backend, and workspace. Sending a prompt to

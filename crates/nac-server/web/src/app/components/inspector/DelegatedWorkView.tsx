@@ -201,7 +201,7 @@ export function DelegatedWorkView({
             {/* A phone's tab bar floats over the bottom of the panel, as for Files and Threads. */}
             <div className="shrink-0 p-2 pb-[104px] md:pb-2">
               <SubagentComposer
-                key={`${selected.mode}:${selected.id}:${selected.status}`}
+                key={`${selected.mode}:${selected.id}`}
                 parentSessionId={sessionId}
                 target={selected}
                 permissionSessionId={selected.id}

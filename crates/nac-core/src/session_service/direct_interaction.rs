@@ -16,6 +16,11 @@ impl SessionService {
         self.cancel_goal_retry_wake();
         self.coordinate_local(|service| {
             let operation = service.lock_active_operation();
+            if let Some(ActiveSessionOperation::Run(run)) = operation.as_ref() {
+                // Wake finishing-input observers so they revalidate the closed
+                // admission gate even when cleanup cannot finish during shutdown.
+                run.settlement.send_replace(false);
+            }
             if let Some(ActiveSessionOperation::HumanShell(command)) = operation.as_ref() {
                 command.cancel_for_shutdown();
             }
