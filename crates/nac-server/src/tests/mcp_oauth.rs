@@ -147,6 +147,81 @@ async fn abandoned_authorization_clears_durable_pending_state() {
 }
 
 #[tokio::test]
+async fn renaming_a_disconnected_server_keeps_it_blocked_for_sessions() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("mcp_disconnected_rename");
+    let _model_env = ScopedModelEnv::isolated(&root.join("nac-home"), None);
+    let app = router(test_manager(&root));
+    for (name, url) in [
+        ("slack", "https://mcp.slack.com/mcp"),
+        ("github", "https://api.githubcopilot.com/mcp"),
+    ] {
+        let created = post_json(
+            app.clone(),
+            "/mcp_library/servers",
+            serde_json::json!({
+                "name": name,
+                "enabled": true,
+                "transport": "streamable_http",
+                "url": url,
+                "headers": {},
+                "args": [],
+                "env": {}
+            }),
+        )
+        .await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+    }
+    assert_eq!(
+        post_json(
+            app.clone(),
+            "/mcp_library/servers/slack/disconnect",
+            serde_json::json!({}),
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    let rename = |name: &str| {
+        app.clone().oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/mcp_library/servers/slack")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({"name": name}).to_string()))
+                .unwrap(),
+        )
+    };
+    let blocked = |statuses: &serde_json::Value, name: &str| {
+        statuses["servers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|server| server["name"] == name)
+            .unwrap()["sessions_blocked"]
+            .clone()
+    };
+
+    assert_eq!(
+        rename("github").await.unwrap().status(),
+        StatusCode::CONFLICT
+    );
+    let statuses =
+        response_json(get_response(app.clone(), "/mcp_library/servers/status", None).await).await;
+    assert_eq!(
+        blocked(&statuses, "github"),
+        false,
+        "a rejected rename disconnected the target"
+    );
+
+    assert_eq!(rename("teams").await.unwrap().status(), StatusCode::OK);
+    let statuses =
+        response_json(get_response(app, "/mcp_library/servers/status", None).await).await;
+    assert_eq!(blocked(&statuses, "teams"), true);
+    assert_eq!(blocked(&statuses, "github"), false);
+}
+
+#[tokio::test]
 async fn renaming_server_rebinds_remote_oauth_callback_and_clears_old_flow() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("mcp_oauth_rename");

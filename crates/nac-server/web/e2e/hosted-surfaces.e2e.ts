@@ -327,8 +327,11 @@ for (const mobile of [false, true]) {
         ]);
         expect(response.ok()).toBe(true);
         await expect(button).toBeEnabled();
-        const state = action === "Disconnect" ? "disconnected" : "connected";
-        await expect(editing.getByText(`Runtime: ${state}`, { exact: true })).toBeVisible();
+        const status =
+          action === "Disconnect"
+            ? "Disconnected. Sessions won't use this server until you connect it."
+            : "Runtime: connected";
+        await expect(editing.getByText(status, { exact: true })).toBeVisible();
         expect(
           fixture.calls.filter((call) => call.method === "POST" && call.path === actionPath),
         ).toHaveLength(1);

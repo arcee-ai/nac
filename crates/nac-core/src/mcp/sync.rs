@@ -289,32 +289,28 @@ impl NacMcpClientHandler {
         }
     }
 
+    /// The mounted server, while this connection is current and the user has not disconnected it.
+    pub(super) fn admitted_server(&self) -> Option<Arc<McpServer>> {
+        self.binding.server().filter(|server| {
+            server.is_current_connection_generation(self.connection_generation)
+                && server.admit().is_ok()
+        })
+    }
+
     pub(super) fn observe_progress(&self, params: ProgressNotificationParam) {
-        if let Some(server) = self
-            .binding
-            .server()
-            .filter(|server| server.is_current_connection_generation(self.connection_generation))
-        {
+        if let Some(server) = self.admitted_server() {
             server.observe_progress(params);
         }
     }
 
     pub(super) fn observe_log(&self, params: LoggingMessageNotificationParam) {
-        if let Some(server) = self
-            .binding
-            .server()
-            .filter(|server| server.is_current_connection_generation(self.connection_generation))
-        {
+        if let Some(server) = self.admitted_server() {
             server.observe_log(params);
         }
     }
 
     pub(super) fn observe_resource_update(&self, params: ResourceUpdatedNotificationParam) {
-        if let Some(server) = self
-            .binding
-            .server()
-            .filter(|server| server.is_current_connection_generation(self.connection_generation))
-        {
+        if let Some(server) = self.admitted_server() {
             server.sync.emit_resource_update(&server.name, &params.uri);
         }
     }
@@ -371,8 +367,11 @@ impl McpServer {
             subscriptions.uris.clone()
         };
         for uri in wanted.difference(&current) {
-            if !self.is_current_connection_generation(generation) || self.admit().is_err() {
+            if !self.is_current_connection_generation(generation) {
                 return;
+            }
+            if self.admit().is_err() {
+                break;
             }
             if matches!(
                 timeout(
@@ -395,7 +394,7 @@ impl McpServer {
             }
         }
         for uri in current.difference(&wanted) {
-            if !self.is_current_connection_generation(generation) || self.admit().is_err() {
+            if !self.is_current_connection_generation(generation) {
                 return;
             }
             let _ = timeout(

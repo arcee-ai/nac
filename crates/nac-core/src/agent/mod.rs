@@ -1087,6 +1087,11 @@ impl Agent {
     }
 
     #[cfg(test)]
+    pub(crate) fn mcp_for_test(&self) -> Option<&Arc<crate::mcp::McpRegistry>> {
+        self.tool_runtime.mcp.as_ref()
+    }
+
+    #[cfg(test)]
     pub(crate) fn has_light_client_for_test(&self) -> bool {
         self.tool_runtime.light_client.is_some()
     }
