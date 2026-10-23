@@ -239,6 +239,33 @@ async fn retained_task_concurrent_first_launches_publish_distinct_sessions_and_i
 }
 
 #[tokio::test]
+async fn retained_task_unbound_broken_git_pointer_never_advertises_existing_checkout_fallback() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retained_task_broken_pointer");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let manager = test_manager(&root);
+    let request = fixture(&root, &manager).await;
+    std::fs::rename(root.join("repo/.git"), root.join("retained-git-metadata")).unwrap();
+    std::fs::write(root.join("repo/.git"), "gitdir: /missing-nac-gitdir\n").unwrap();
+    let response = get_response(
+        router(manager.clone()),
+        &format!("/projects/{}/task-launch-source", request.project_id),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(sessions::list_sessions(&manager.inner.store_path)
+        .unwrap()
+        .is_empty());
+    assert!(
+        nac_core::store::list_task_launches(&manager.inner.store_path, &request.project_id)
+            .unwrap()
+            .is_empty()
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn retained_task_bound_missing_git_source_never_advertises_existing_checkout_fallback() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("retained_task_source_probe");
