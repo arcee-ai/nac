@@ -50,7 +50,7 @@ revisions use that single installation and the same once-built executable.
 Cargo builds the feature-gated example with `--locked`; it is selected from
 Cargo's artifact receipt, including when `CARGO_TARGET_DIR` is customized.
 No `npx` or install-on-demand resolution occurs during testing. Node 22+ and
-Cargo are prerequisites; CI uses the existing Node 24.22.1 and stable Rust.
+Cargo are prerequisites; CI uses Node 24.22.1 and the existing managed-build Rust 1.98.0 pin.
 
 The existing tooling npm root remains covered by enforcing source-security CI
 and its Dependabot entry. No additional scanning input or package root is added.
