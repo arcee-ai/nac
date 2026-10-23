@@ -17,7 +17,7 @@ The October 23, 2026 run used macOS arm64, Rust 1.98.0 and Python 3.14.8:
   `632bde23f012189992091baec47d155090d3e810`.
   The local durable checkout was `/Users/allison/git/allison-gerred-skills`.
 - Actual installed root: `/Users/allison/.agents/skills`, with **11** directory
-  symlinks to that checkout. These were inspected read-only and reproduced in a
+  symlinks at the initial observation. These were inspected read-only and reproduced in a
   temporary home. The real installation, subscriptions and profiles were untouched.
 - `make setup` completed before development. The tests create disposable project,
   home/config paths and session databases, and restore their process environment.
@@ -26,15 +26,28 @@ The October 23, 2026 run used macOS arm64, Rust 1.98.0 and Python 3.14.8:
   No production sessions, provider credentials, real connector operations or
   release/triage mutations are used.
 
+After the shared dependency repair landed, this lane was rebased onto verified
+`dev` **`57e97a84f996a5e440f61be6213939825bb0ce2d`**, without moving the primary
+checkout. Setup was rerun after inheriting the lockfile changes. The qualification
+patch and NAC skill-loader, permission, prompt and repository skill bytes were
+unchanged across the base update; fresh tests exercise the patched dependencies.
+The catalog had independently advanced to
+**`510877f8adfb18214ea82522fe581d5a39164377`**, adding `pr-review`; a fresh link
+audit observed **12 installed packages**. Existing installed package bytes were
+unchanged. Requalification at these new revisions passed **30 native reads**.
+The catalog and real installation remained read-only throughout this task.
+
 The catalog manager's read-only `catalog --client nac` output includes partial
 NAC declarations elsewhere, including `allisoneer/linear-reporting`; that package
-was **not installed** in this snapshot. Of the 11 installed packages, only
+was **not installed** in either snapshot. Of the latest 12 installed packages, only
 `shared/arcee-skills` is installation-eligible for NAC via its `portable`
-declaration. NAC nevertheless discovers all 11 through its user fallback tree:
+declaration. NAC nevertheless discovers all 12 through its user fallback tree:
 the scanner does not read the sidecar.
 
 ## Installed availability matrix
 
+This table describes the later 12-package observation at `510877f8`; `pr-review`
+was absent from the initial 11-package observation at `632bde23`.
 All links below are relative to the catalog checkout. Each installed package
 was discovered, explicitly `$`-expanded into the model request and read with
 NAC's native `read`, including every listed resource. These results are
@@ -49,13 +62,15 @@ NAC's native `read`, including every listed resource. These results are
 | linear-planning | `contributors/allisoneer/skills/linear-planning` | codex, claude-code | Relative planning references readable; tracker operations unexercised |
 | parallel-work | `contributors/allisoneer/skills/parallel-work` | codex | Native peer coordination and task orchestration unqualified |
 | pr-ready | `contributors/allisoneer/skills/pr-ready` | codex, claude-code, cursor | Relative review references readable; NAC PR/review workflow unexercised |
+| pr-review | `contributors/allisoneer/skills/pr-review` | codex | Relative feedback/re-review references readable; reviewer workflow unexercised |
 | slack | `contributors/allisoneer/skills/slack` | codex, claude-code | Connector discovery/delivery unexercised |
 | spawn-codex-task | `contributors/allisoneer/skills/spawn-codex-task` | codex | Requires Codex desktop task APIs; ALL-420 owns adaptation |
 | stacked-prs | `contributors/allisoneer/skills/stacked-prs` | codex, claude-code, cursor | Git/gh stack workflow unexercised |
 | vertical-slices | `contributors/allisoneer/skills/vertical-slices` | codex | Planning/execution composition unexercised |
 
-Repository `qa`, `release`, and `triage` were exported from the exact NAC commit
-above into the temporary project's `.agents/skills`. All three were discovered,
+Repository `qa`, `release`, and `triage` were exported from `90be848b` initially
+and `57e97a84` on requalification into the temporary project's `.agents/skills`.
+Their committed bytes are identical. All three were discovered,
 expanded and read, with no supporting `scripts/`, `references/` or `assets/`
 files at that revision. Their full workflows were deliberately not executed:
 
@@ -65,8 +80,9 @@ files at that revision. Their full workflows were deliberately not executed:
   assumptions. Reading it supplies no release authority or current release proof.
 - `triage` requires GitHub inventories and authorized issue mutations. None ran.
 
-The source run verified **27 native reads**: 14 entrypoints plus 13 package
-resources. This includes the real shared `arcee-skills/scripts/repository_root.py`
+The initial source run verified **27 native reads**: 14 entrypoints plus 13 package
+resources. Requalification verified **30**: 15 entrypoints plus 15 resources,
+including `pr-review`'s entrypoint and two references. This includes the real shared `arcee-skills/scripts/repository_root.py`
 and relative references in planning, review and other installed packages. Real
 catalog scripts were read, not executed. The normal fixture separately executes
 a task-owned Python script that only prints a marker.
@@ -94,7 +110,7 @@ admission, or end-to-end external service workflows.
 | Explicitly selected canonical read target | Exact temporary file allowed by fixture configuration is readable through its link; lexical link-path allow alone is insufficient | External-resource fixture; no directory-wide allow |
 | Configured Deny | Exact canonical read Deny blocks even with external-directory Allow; marker never returned | External-resource fixture |
 | Retained registry | Body remains original after source edit; fresh load sees updated body; subsequent resource read sees updated disk bytes | Direct fixture and retained-registry fixture |
-| Actual catalog and clean repository skills | All 14 selected skills explicitly expanded; all 27 native reads match source content and have revisions | Opt-in exact-source test |
+| Actual catalog and clean repository skills | Initially 14 skills / 27 reads; requalification 15 skills / 30 reads. All explicitly expanded, with native reads matching source content and returning revisions | Opt-in exact-source test |
 | SSH / Podman | **Unqualified** | No remote/mount test performed; Local success supplies no remote guarantee |
 
 NAC has no skill-specific allowed-root bypass. Local native reads canonicalize
@@ -126,8 +142,8 @@ supplied SHA are exported, excluding local changes.
 env NAC_QUALIFY_CATALOG=/absolute/reviewed/catalog \
   NAC_QUALIFY_INSTALLED=/absolute/installed/skills \
   NAC_QUALIFY_SOURCE=/absolute/nac/checkout \
-  NAC_QUALIFY_CATALOG_REV=632bde23f012189992091baec47d155090d3e810 \
-  NAC_QUALIFY_SOURCE_REV=90be848ba3f0410b5e697bb60f4d71a935216361 \
+  NAC_QUALIFY_CATALOG_REV=510877f8adfb18214ea82522fe581d5a39164377 \
+  NAC_QUALIFY_SOURCE_REV=57e97a84f996a5e440f61be6213939825bb0ce2d \
   cargo test --locked -p nac-core \
   skills::qualification::sources::exact_catalog_links_and_repository_skills_are_discovered_expanded_and_read \
   -- --ignored --exact --nocapture
