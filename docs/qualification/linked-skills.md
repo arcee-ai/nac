@@ -21,6 +21,8 @@ The October 23, 2026 run used macOS arm64, Rust 1.98.0 and Python 3.14.8:
   temporary home. The real installation, subscriptions and profiles were untouched.
 - `make setup` completed before development. The tests create disposable project,
   home/config paths and session databases, and restore their process environment.
+  Each case runs in its own test subprocess so its temporary HOME/NAC_HOME
+  cannot affect concurrent process tests in the parent test binary.
   No production sessions, provider credentials, real connector operations or
   release/triage mutations are used.
 
@@ -112,7 +114,8 @@ fixtures (Unix plus `python3`; no catalog, credentials or connector required):
 cargo test --locked -p nac-core skills::qualification -- --nocapture
 ```
 
-Three tests run. The real-source test is ignored by default because personal
+Four tests run, including stable Git inspection across fixture home changes.
+The real-source test is ignored by default because personal
 paths and a reviewed catalog checkout are not CI inputs. To repeat that test,
 provide explicit existing read-only paths and full immutable revisions. The
 catalog must be clean and its HEAD must equal the supplied catalog SHA. The

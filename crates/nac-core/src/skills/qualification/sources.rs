@@ -2,19 +2,44 @@
 use super::*;
 use std::process::Command;
 
-fn git(root: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).unwrap()
+struct SourceGit {
+    home: Option<OsString>,
+    xdg: Option<OsString>,
+}
+
+impl SourceGit {
+    fn capture() -> Self {
+        Self {
+            home: std::env::var_os("HOME"),
+            xdg: std::env::var_os("XDG_CONFIG_HOME"),
+        }
+    }
+
+    fn run(&self, root: &Path, args: &[&str]) -> String {
+        let mut command = Command::new("git");
+        command
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .env("GIT_OPTIONAL_LOCKS", "0");
+        for (name, value) in [("HOME", &self.home), ("XDG_CONFIG_HOME", &self.xdg)] {
+            match value {
+                Some(value) => {
+                    command.env(name, value);
+                }
+                None => {
+                    command.env_remove(name);
+                }
+            }
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    }
 }
 
 fn required(name: &str) -> String {
@@ -25,6 +50,12 @@ fn required(name: &str) -> String {
 #[tokio::test]
 #[ignore = "requires explicit read-only catalog/installed paths and immutable source revisions"]
 async fn exact_catalog_links_and_repository_skills_are_discovered_expanded_and_read() {
+    if run_in_subprocess(
+        "sources::exact_catalog_links_and_repository_skills_are_discovered_expanded_and_read",
+        true,
+    ) {
+        return;
+    }
     let _lock = crate::TEST_ENV_LOCK.lock().unwrap();
     let catalog = PathBuf::from(required("NAC_QUALIFY_CATALOG"));
     let installed = PathBuf::from(required("NAC_QUALIFY_INSTALLED"));
@@ -32,28 +63,36 @@ async fn exact_catalog_links_and_repository_skills_are_discovered_expanded_and_r
     let catalog_rev = required("NAC_QUALIFY_CATALOG_REV");
     let source_rev = required("NAC_QUALIFY_SOURCE_REV");
     let catalog = catalog.canonicalize().unwrap();
-    assert_eq!(git(&catalog, &["rev-parse", "HEAD"]).trim(), catalog_rev);
+    let git = SourceGit::capture();
+    assert_eq!(
+        git.run(&catalog, &["rev-parse", "HEAD"]).trim(),
+        catalog_rev
+    );
     assert!(
-        git(&catalog, &["status", "--porcelain"]).is_empty(),
+        git.run(&catalog, &["status", "--porcelain"]).is_empty(),
         "catalog must be clean"
     );
-    assert_eq!(git(&source, &["rev-parse", &source_rev]).trim(), source_rev);
+    assert_eq!(
+        git.run(&source, &["rev-parse", &source_rev]).trim(),
+        source_rev
+    );
     let f = Fixture::new();
     // Export only immutable tracked skill bytes, never execute their workflow.
-    for file in git(
-        &source,
-        &[
-            "ls-tree",
-            "-r",
-            "--name-only",
-            &source_rev,
-            "--",
-            ".agents/skills",
-        ],
-    )
-    .lines()
+    for file in git
+        .run(
+            &source,
+            &[
+                "ls-tree",
+                "-r",
+                "--name-only",
+                &source_rev,
+                "--",
+                ".agents/skills",
+            ],
+        )
+        .lines()
     {
-        let contents = git(&source, &["show", &format!("{source_rev}:{file}")]);
+        let contents = git.run(&source, &["show", &format!("{source_rev}:{file}")]);
         f.write(&format!("project/{file}"), &contents);
     }
     let user_root = f.root.join("home/.agents/skills");
@@ -171,7 +210,53 @@ async fn exact_catalog_links_and_repository_skills_are_discovered_expanded_and_r
             .to_string()
             .contains(&format!("<skill_content name=\\\"{name}\\\">")));
     }
-    assert_eq!(git(&catalog, &["rev-parse", "HEAD"]).trim(), catalog_rev);
-    assert!(git(&catalog, &["status", "--porcelain"]).is_empty());
+    assert_eq!(
+        git.run(&catalog, &["rev-parse", "HEAD"]).trim(),
+        catalog_rev
+    );
+    assert!(git.run(&catalog, &["status", "--porcelain"]).is_empty());
     println!("catalog={catalog_rev}; repository skill bytes={source_rev}; {} installed packages; {} native reads", names.len(), requests.len());
+}
+
+#[test]
+fn source_git_keeps_original_global_config_across_fixture_home_change() {
+    if run_in_subprocess(
+        "sources::source_git_keeps_original_global_config_across_fixture_home_change",
+        false,
+    ) {
+        return;
+    }
+    let _lock = crate::TEST_ENV_LOCK.lock().unwrap();
+    let mut owner = Fixture::new();
+    // A real temporary Git home, independent of the operator's Git settings.
+    for name in [
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_PARAMETERS",
+    ] {
+        owner.env.push((name, std::env::var_os(name)));
+        unsafe { std::env::remove_var(name) };
+    }
+    owner.write("home/.config/git/ignore", "catalog-noise\n");
+    owner.set_env(
+        "XDG_CONFIG_HOME",
+        owner.root.join("home/.config").as_os_str(),
+    );
+    let repo = owner.root.join("catalog");
+    fs::create_dir_all(&repo).unwrap();
+    let git = SourceGit::capture();
+    git.run(&repo, &["init", "--quiet"]);
+    owner.write(
+        "catalog/catalog-noise",
+        "ignored only by the original global config\n",
+    );
+    assert!(git.run(&repo, &["status", "--porcelain"]).is_empty());
+    let _changed_home = Fixture::new();
+    // Original helper behavior reproduces the finding: the same checkout now
+    // appears dirty solely because HOME/XDG changed, with no source mutation.
+    assert!(SourceGit::capture()
+        .run(&repo, &["status", "--porcelain"])
+        .contains("catalog-noise"));
+    assert!(git.run(&repo, &["status", "--porcelain"]).is_empty());
+    assert!(!repo.join(".git/index").exists());
 }
