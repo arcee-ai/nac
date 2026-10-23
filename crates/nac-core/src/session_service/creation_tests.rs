@@ -9,6 +9,7 @@ async fn command(label: &str) -> (CreateSessionWithSnapshot, PathBuf) {
     (
         CreateSessionWithSnapshot {
             snapshot,
+            launch_id: None,
             response,
             resources: Arc::new(StdMutex::new(Some(
                 crate::runtime::PreparedSessionResources::for_test(None),
@@ -168,6 +169,126 @@ async fn creation_commit_retains_owned_worktree_when_acknowledgement_is_lost() {
     assert!(
         checkout.is_dir(),
         "committed resource ownership cannot depend on the HTTP waiter"
+    );
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+async fn retained_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, String) {
+    let (mut command, path) = command(label).await;
+    crate::store::insert_project(
+        &path,
+        crate::store::NewProject {
+            project_id: "retained-project".into(),
+            name: None,
+            description: None,
+            cwd: "/repo/nested".into(),
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        },
+    )
+    .unwrap();
+    let request = crate::store::TaskLaunchRequest {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        project_id: "retained-project".into(),
+        invoking_session_id: None,
+        git_ref: Some("dev".into()),
+        default_ref: Some("dev".into()),
+        title: "Retained task".into(),
+        prompt: "One initial input".into(),
+    };
+    let source = crate::store::TaskLaunchSource {
+        project_cwd: "/repo/nested".into(),
+        source_cwd: "/repo/nested".into(),
+        repo_root: "/repo".into(),
+        common_git_dir: "/repo/.git".into(),
+        repository_identity: "fixture".into(),
+        subdirectory: "nested".into(),
+        default_ref: "dev".into(),
+        selected_ref: "dev".into(),
+        commit: "a".repeat(40),
+        excluded_source_edits: false,
+    };
+    let launch = crate::store::reserve_task_launch(&path, request, source).unwrap();
+    crate::store::update_task_launch(
+        &path,
+        &launch.request.request_id,
+        crate::store::TaskLaunchPhase::PreparingRuntime,
+        None,
+    )
+    .unwrap();
+    command.snapshot.session_id = launch.session_id.clone();
+    command.snapshot.project_id = Some(launch.request.project_id.clone());
+    command.snapshot.behavior = sessions::SessionBehavior::Direct;
+    command.snapshot.cwd = launch.workspace_path.join("nested");
+    command.snapshot.ssh = None;
+    command.snapshot.sandbox_spec = None;
+    command.response.metadata.session_id = Some(launch.session_id);
+    command.launch_id = Some(launch.request.request_id.clone());
+    (command, path, launch.request.request_id)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn retained_creation_lost_ack_commits_one_session_and_one_initial_input() {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
+    let (mut command, path, id) = retained_command("retained_lost_ack").await;
+    let (reached, observed) = std::sync::mpsc::channel();
+    let (resume, release) = std::sync::mpsc::channel();
+    command.after_commit = Some((reached, release));
+    let owner_path = path.clone();
+    let owner = crate::store::spawn_blocking_store_caller(move || {
+        crate::store::StoreCoordinator::acquire(&owner_path)
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    let pending = owner.submit(command).unwrap();
+    observed.recv_timeout(Duration::from_secs(5)).unwrap();
+    drop(pending);
+    resume.send(()).unwrap();
+    owner.shutdown().await.unwrap();
+    assert_eq!(owner.stats().acknowledgements_lost, 1);
+    drop(owner);
+    let receipt = crate::store::load_task_launch(&path, &id).unwrap().unwrap();
+    assert_eq!(receipt.phase, crate::store::TaskLaunchPhase::Ready);
+    assert!(sessions::session_exists(&path, &receipt.session_id).unwrap());
+    let inbox = crate::store::list_session_inbox(&path, &receipt.session_id).unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(Some(inbox[0].id), receipt.first_input_id);
+    assert_eq!(inbox[0].content, "One initial input");
+    let retry =
+        crate::store::reserve_task_launch(&path, receipt.request.clone(), receipt.source.clone())
+            .unwrap();
+    assert_eq!(retry, receipt);
+    // Cancel before promotion atomically withdraws the initial input, retaining
+    // the session and its durable workspace inventory through later deletion.
+    crate::store::update_task_launch(&path, &id, crate::store::TaskLaunchPhase::Cancelled, None)
+        .unwrap();
+    assert_eq!(
+        crate::store::list_session_inbox(&path, &receipt.session_id).unwrap()[0].status,
+        crate::store::InboxStatus::Cancelled
+    );
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn retained_creation_cancel_before_publication_rolls_back_session_and_input() {
+    let (command, path, id) = retained_command("retained_cancel_before_commit").await;
+    let session_id = command.snapshot.session_id.clone();
+    crate::store::update_task_launch(&path, &id, crate::store::TaskLaunchPhase::Cancelled, None)
+        .unwrap();
+    assert!(command.execute(&path).is_err());
+    assert!(!sessions::session_exists(&path, &session_id).unwrap());
+    assert!(crate::store::list_session_inbox(&path, &session_id)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        crate::store::load_task_launch(&path, &id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        crate::store::TaskLaunchPhase::Cancelled
     );
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

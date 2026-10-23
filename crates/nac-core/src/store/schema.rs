@@ -53,6 +53,7 @@ mod future_schema_tests;
 use wal_preflight::read_schema_version_header;
 
 // 38 retains bounded run and replaced/cleared goal outcomes for task reads.
+// Retained task launch receipts and saved Git source bindings follow this revision.
 // 37 binds queued foreground intent to crash-safe exact-input waiting authority.
 // 36 retains requested child execution mode with queued input across recovery.
 // 35 retains terminal results for each delegated generation independently of
@@ -983,6 +984,7 @@ fn open_connection_with_hooks(
     super::shell_commands::create_shell_commands_table(&transaction)?;
     ensure_column(&transaction, "session_goals", "last_run_id", "TEXT")?;
     super::task_evidence::create_task_evidence_tables(&transaction)?;
+    super::task_launches::create_tables(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
