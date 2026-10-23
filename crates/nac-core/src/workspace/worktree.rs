@@ -50,8 +50,8 @@ pub fn find_repo(cwd: &Path) -> Result<Option<RepoInfo>> {
         Some(path) => absolutize(cwd, &path)?,
         None => return Ok(None),
     };
-    let common_git_dir = match rev_parse_path(cwd, "--git-common-dir")? {
-        Some(path) => absolutize(cwd, &path)?,
+    let common_git_dir = match common_git_dir(cwd)? {
+        Some(path) => path,
         None => return Ok(None),
     };
     let head = run_git(cwd, &["rev-parse", "--verify", "HEAD"])
@@ -68,6 +68,14 @@ pub fn find_repo(cwd: &Path) -> Result<Option<RepoInfo>> {
         common_git_dir,
         head,
     }))
+}
+
+/// Shared canonical metadata path for both sandbox and retained Local worktrees.
+/// Older Git returns a path relative to its command cwd.
+pub(super) fn common_git_dir(cwd: &Path) -> Result<Option<PathBuf>> {
+    rev_parse_path(cwd, "--git-common-dir")?
+        .map(|path| absolutize(cwd, &path))
+        .transpose()
 }
 
 #[cfg(test)]

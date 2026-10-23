@@ -51,7 +51,7 @@ fn fixture() -> (PathBuf, crate::projects::ProjectRecord, TaskLaunchRequest) {
 }
 
 #[test]
-fn source_probe_only_falls_back_without_git_metadata() {
+fn source_probe_distinguishes_discovery_from_broken_consulted_metadata() {
     let root = std::env::temp_dir().join(format!("nac-task-probe-{}", uuid::Uuid::new_v4()));
     let nested = root.join("nested");
     std::fs::create_dir_all(&nested).unwrap();
@@ -64,8 +64,41 @@ fn source_probe_only_falls_back_without_git_metadata() {
     {
         std::fs::remove_file(root.join(".git")).unwrap();
         std::os::unix::fs::symlink(root.join("missing"), root.join(".git")).unwrap();
-        assert!(is_git_project(&nested).is_err());
+        // Git deliberately ignores a dangling symlink as repository metadata.
+        assert!(!is_git_project(&nested).unwrap());
     }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn source_probe_respects_git_discovery_ceiling_and_explicit_gitdir_errors() {
+    let (root, project, _) = fixture();
+    let ceiling = root.join("repo");
+    assert!(is_git_project(&project.cwd).unwrap());
+    let target = GitTarget::local(&project.cwd);
+    let output = target
+        .output_with_env(
+            &project.cwd,
+            &[
+                ("LC_ALL", "C"),
+                ("GIT_CEILING_DIRECTORIES", ceiling.to_str().unwrap()),
+            ],
+            &["rev-parse", "--show-toplevel"],
+        )
+        .unwrap();
+    assert!(!git_probe_result(output).unwrap());
+    let output = target
+        .output_with_env(
+            &project.cwd,
+            &[("LC_ALL", "C"), ("GIT_DIR", "/missing-nac-gitdir")],
+            &["rev-parse", "--show-toplevel"],
+        )
+        .unwrap();
+    assert!(git_probe_result(output).is_err());
+    assert_eq!(
+        resolve_common_git_dir(&project.cwd).unwrap(),
+        canonical(&ceiling.join(".git")).unwrap()
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 

@@ -33,22 +33,17 @@ pub fn is_git_project(cwd: &Path) -> Result<bool> {
     let target = GitTarget::local(&cwd);
     let output =
         target.output_with_env(&cwd, &[("LC_ALL", "C")], &["rev-parse", "--show-toplevel"])?;
+    git_probe_result(output)
+}
+
+fn git_probe_result(output: std::process::Output) -> Result<bool> {
     if output.status.success() {
         return Ok(true);
     }
-    // Git uses the same "not a git repository" wording for failed discovery
-    // and broken gitdir/worktree pointers. Existing metadata is source intent,
-    // even when it is a dangling symlink or an unreadable/malformed file.
-    for ancestor in cwd.ancestors() {
-        match std::fs::symlink_metadata(ancestor.join(".git")) {
-            Ok(_) => anyhow::bail!(
-                "Git source probe failed: {}",
-                super::first_stderr_line(&output.stderr)
-            ),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error).context("cannot inspect Git source metadata"),
-        }
-    }
+    // Discovery failure has a parenthesized explanation. Broken gitdir
+    // pointers use a colon; malformed/unreadable metadata has other errors.
+    // Let Git honor discovery ceilings, filesystem boundaries and ignored
+    // metadata rather than independently walking ancestors beyond its scope.
     let error = String::from_utf8_lossy(&output.stderr);
     if output.status.code() == Some(128) && error.starts_with("fatal: not a git repository (") {
         return Ok(false);
@@ -57,6 +52,11 @@ pub fn is_git_project(cwd: &Path) -> Result<bool> {
         "Git source probe failed: {}",
         super::first_stderr_line(&output.stderr)
     ))
+}
+
+fn resolve_common_git_dir(cwd: &Path) -> Result<PathBuf> {
+    super::worktree::common_git_dir(cwd)?
+        .ok_or_else(|| anyhow!("Git source common directory is unavailable"))
 }
 
 /// Resolve an exact commit once, before any workspace effect. The caller first
@@ -76,10 +76,7 @@ pub fn resolve_source(
     let source_target = GitTarget::local(&source_cwd);
     let repo_root = canonical(&source_target.repo_root()?)?;
     let subdirectory = source_cwd.strip_prefix(&repo_root)?.to_path_buf();
-    let common_git_dir = canonical(Path::new(&run_git(
-        &source_target,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    )?))?;
+    let common_git_dir = resolve_common_git_dir(&source_cwd)?;
     let repository_identity = repository_identity(&common_git_dir)?;
     let default_ref = bound
         .map(|b| b.default_ref.clone())
@@ -109,7 +106,6 @@ pub fn resolve_source(
                 "rev-parse",
                 "--symbolic-full-name",
                 "--verify",
-                "--end-of-options",
                 &default_ref,
             ],
         )
@@ -128,10 +124,7 @@ pub fn resolve_source(
         );
         if invoking.project_id.as_deref() == Some(project.project_id.as_str()) {
             let target = GitTarget::local(canonical(&invoking.cwd)?);
-            let common = canonical(Path::new(&run_git(
-                &target,
-                &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-            )?))?;
+            let common = resolve_common_git_dir(&target.repo_root()?)?;
             anyhow::ensure!(
                 common == common_git_dir,
                 "conflict: invoking task belongs to another repository"
@@ -160,7 +153,6 @@ pub fn resolve_source(
         &[
             "rev-parse",
             "--verify",
-            "--end-of-options",
             &format!("{selected_ref}^{{commit}}"),
         ],
     )
@@ -193,11 +185,7 @@ fn validate_source(source: &TaskLaunchSource) -> Result<GitTarget> {
     );
     anyhow::ensure!(
         canonical(&target.repo_root()?)? == source.repo_root
-            && canonical(Path::new(&run_git(
-                &target,
-                &["rev-parse", "--path-format=absolute", "--git-common-dir"]
-            )?))?
-                == source.common_git_dir,
+            && resolve_common_git_dir(&source.source_cwd)? == source.common_git_dir,
         "conflict: source repository changed"
     );
     Ok(target)
@@ -366,11 +354,7 @@ pub fn prepare_workspace(launch: &TaskLaunchRecord) -> Result<PathBuf> {
     let workspace = GitTarget::local(&launch.workspace_path);
     anyhow::ensure!(
         run_git(&workspace, &["rev-parse", "HEAD"])? == launch.source.commit
-            && canonical(Path::new(&run_git(
-                &workspace,
-                &["rev-parse", "--path-format=absolute", "--git-common-dir"]
-            )?))?
-                == launch.source.common_git_dir,
+            && resolve_common_git_dir(&launch.workspace_path)? == launch.source.common_git_dir,
         "conflict: retained workspace identity changed; files retained for inspection"
     );
     let mut cwd = launch.workspace_path.clone();

@@ -47,6 +47,12 @@ impl TaskLaunchRequest {
                 "invalid request: launch references must be nonblank and bounded"
             );
         }
+        for reference in [&self.git_ref, &self.default_ref].into_iter().flatten() {
+            anyhow::ensure!(
+                !reference.starts_with('-'),
+                "invalid request: Git references cannot begin with an option prefix"
+            );
+        }
         Ok(())
     }
 }

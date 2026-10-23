@@ -61,6 +61,8 @@ fn launch_title_uses_existing_session_presentation_rules() {
     }
     request.title = "é".repeat(120);
     request.validate().unwrap();
+    request.git_ref = Some("--help".into());
+    assert!(request.validate().is_err());
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
 
