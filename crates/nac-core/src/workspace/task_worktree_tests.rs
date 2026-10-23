@@ -51,6 +51,25 @@ fn fixture() -> (PathBuf, crate::projects::ProjectRecord, TaskLaunchRequest) {
 }
 
 #[test]
+fn source_probe_only_falls_back_without_git_metadata() {
+    let root = std::env::temp_dir().join(format!("nac-task-probe-{}", uuid::Uuid::new_v4()));
+    let nested = root.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    assert!(!is_git_project(&nested).unwrap());
+    std::fs::write(root.join(".git"), "gitdir: /missing-nac-gitdir\n").unwrap();
+    assert!(is_git_project(&nested).is_err());
+    std::fs::write(root.join(".git"), "malformed metadata\n").unwrap();
+    assert!(is_git_project(&nested).is_err());
+    #[cfg(unix)]
+    {
+        std::fs::remove_file(root.join(".git")).unwrap();
+        std::os::unix::fs::symlink(root.join("missing"), root.join(".git")).unwrap();
+        assert!(is_git_project(&nested).is_err());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn pins_moving_deleted_ref_and_preserves_dirty_source_head_index_and_files() {
     let (root, project, request) = fixture();
     let repo = root.join("repo");

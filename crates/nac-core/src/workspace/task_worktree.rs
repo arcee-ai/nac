@@ -36,8 +36,21 @@ pub fn is_git_project(cwd: &Path) -> Result<bool> {
     if output.status.success() {
         return Ok(true);
     }
+    // Git uses the same "not a git repository" wording for failed discovery
+    // and broken gitdir/worktree pointers. Existing metadata is source intent,
+    // even when it is a dangling symlink or an unreadable/malformed file.
+    for ancestor in cwd.ancestors() {
+        match std::fs::symlink_metadata(ancestor.join(".git")) {
+            Ok(_) => anyhow::bail!(
+                "Git source probe failed: {}",
+                super::first_stderr_line(&output.stderr)
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("cannot inspect Git source metadata"),
+        }
+    }
     let error = String::from_utf8_lossy(&output.stderr);
-    if error.contains("not a git repository") {
+    if output.status.code() == Some(128) && error.starts_with("fatal: not a git repository (") {
         return Ok(false);
     }
     Err(anyhow!(
