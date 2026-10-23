@@ -545,8 +545,21 @@ pub(crate) fn redact_text_with(text: &str, secrets: &ExactSecrets) -> (String, b
             (format!(r"(?i)\b({NAME})\s*=\s*{VALUE}"), "$1=«redacted»"),
             (
                 format!(
-                    r"(?i)(--?(?:password|passwd|pass|token|secret|api[-_]?key|access[-_]?key|auth|cookie)(?:=|\s+|\]\[)){VALUE}"
+                    r"(?i)(--?(?:password|passwd|pass|token|secret|api[-_]?key|access[-_]?key|auth|cookie|user|proxy-user)(?:=|\s+|\]\[)){VALUE}"
                 ),
+                "${1}«redacted»",
+            ),
+            // Curl's short Basic Auth options also accept attached arguments
+            // and option clusters, e.g. -ualice:pw and -su alice:pw. Match
+            // both readable commands and the canonical [argument] form.
+            (
+                r#"((?:^|[\s\[])-[A-Za-z]*[uU](?:\s+|\]\[)?)(?:"[^"]*:[^"]*"|'[^']*:[^']*'|[^\s'"\[\]]+:[^\s'"\[\]]*)"#.to_string(),
+                "${1}«redacted»",
+            ),
+            // Canonical arguments can contain spaces that no longer carry
+            // their original shell quoting, including inside the username.
+            (
+                r"((?:^|[\s\[])-[A-Za-z]*[uU]\]\[)[^\[\]]*:[^\[\]]*".to_string(),
                 "${1}«redacted»",
             ),
             // Known credential shapes.

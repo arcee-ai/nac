@@ -25,19 +25,24 @@ answer modes:
   allow one exact invocation once. On a Podman sandbox whose only writable
   host mount is a workspace without Git metadata anywhere in it (checked
   again at every review, including nested and bare repositories; a
-  workspace of more than 20,000 entries counts as having it), review needs
-  less confidence to allow a command than on Local or SSH. A sandbox that can write Git
+  workspace of more than 20,000 entries counts as having it), broad execution
+  is eligible for review. A sandbox that can write Git
   metadata is reviewed like Local, because that metadata is shared beyond
   the session: a live checkout's `.git` holds every branch and its hooks,
   and a forked worktree writes the repository's objects and refs. So is a
-  sandbox started with extra writable mounts (`--mount`). In both, broad
+  sandbox started with extra writable mounts (`--mount`) or with host sockets
+  or devices in any mount, including read-only mounts (`--mount-ro`). Read-only
+  mount trees are scanned too: connecting to a daemon socket can change host
+  state even when files cannot be written. Unreadable or over-budget mount
+  trees retain the conservative classification. In these cases, broad
   execution keeps the manual prompt and the stricter thresholds apply, which
   covers most Podman sessions on a Git repository. Rejected, uncertain,
   failed and timed-out reviews return an unexecuted
   error to the agent with a stable code (`review_rejected`, `review_uncertain`,
   `review_unavailable`, `review_stopped`). Everything else, including
   unsandboxed broad execution, unsupported shell syntax, terminal input,
-  credential files and operations whose description had to be redacted, keeps
+  credential files, Basic Auth arguments (including curl `-u`, `--user` and
+  `--proxy-user`), and operations whose description had to be redacted, keeps
   the manual prompt; without an interactive approver it fails closed.
 
 Automatic approval has durable ownership-tree scope. On a direct or

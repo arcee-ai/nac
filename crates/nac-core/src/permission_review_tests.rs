@@ -1459,3 +1459,75 @@ mod stop_tests;
 
 #[path = "permission_intent_tests.rs"]
 mod intent_tests;
+
+#[tokio::test]
+async fn basic_auth_commands_never_reach_the_reviewer() {
+    let reviewer = FakeReviewer::answering([Ok(ReviewVerdict::ApproveOnce)]);
+    let (_path, broker) = review_broker(PermissionBackend::Local, Arc::clone(&reviewer)).await;
+    let backend = ExecutionBackend::Local {
+        workspace_cwd: "/workspace".into(),
+    };
+    let resources = shell_resources(
+        "curl --user alice:canary8d1e https://example.com/health",
+        Path::new("/workspace"),
+        &backend,
+    );
+    let reason = denied(authorize(&broker, &resources).await);
+    assert!(reason.contains("no interactive session client"), "{reason}");
+    assert!(reviewer.seen().is_empty());
+    assert!(broker.recent_reviews().is_empty());
+    assert_eq!(
+        authorize(&broker, &[execute("command:[ls]")]).await,
+        AuthorizationOutcome::Allowed
+    );
+    assert_eq!(reviewer.seen().len(), 1);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn socket_added_to_readonly_mount_during_review_discards_approval() {
+    use crate::sandbox::{MountSpec, SandboxSpec, DEFAULT_SANDBOX_WORKDIR};
+    let (_path, broker, reviewer, release) = gated_broker().await;
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    let root = std::env::temp_dir().join(format!("nac-sock-{}", &suffix[..8]));
+    std::fs::create_dir_all(root.join("w")).unwrap();
+    std::fs::create_dir_all(root.join("r")).unwrap();
+    broker.set_review_backend(ReviewBackendSource::Sandbox(Box::new(SandboxSpec {
+        mounts: vec![
+            MountSpec {
+                host: root.join("w"),
+                guest: DEFAULT_SANDBOX_WORKDIR.into(),
+                read_only: false,
+            },
+            MountSpec {
+                host: root.join("r"),
+                guest: "/readonly".into(),
+                read_only: true,
+            },
+        ],
+        ..SandboxSpec::default()
+    })));
+    let pending = spawn_authorize(
+        &broker,
+        vec![PermissionResource::new(
+            "execute_broad",
+            "command:[make][test]",
+        )],
+    );
+    tokio::time::timeout(Duration::from_secs(2), reviewer.started.notified())
+        .await
+        .unwrap();
+    let listener = std::os::unix::net::UnixListener::bind(root.join("r/d.sock")).unwrap();
+    release.send(ReviewVerdict::ApproveOnce).unwrap();
+    let outcome = tokio::time::timeout(Duration::from_secs(2), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(denied(outcome).contains("execution boundary changed"));
+    assert!(broker
+        .recent_reviews()
+        .iter()
+        .all(|review| review.outcome != Some(PermissionReviewOutcome::Approved)));
+    drop(listener);
+    std::fs::remove_dir_all(root).unwrap();
+}

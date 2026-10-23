@@ -220,33 +220,37 @@ impl SandboxSpec {
     /// overlays write the host repository's `objects` and `refs`, so code
     /// that can write it can move another branch or plant a hook that runs
     /// on the host. Any other writable mount, such as one added with
-    /// `--mount`, counts too.
+    /// `--mount`, counts too. Read-only mounts must also be checked: a Unix
+    /// socket or device can change host state through its protocol despite
+    /// the filesystem mount being read-only.
     pub(crate) fn mounts_host_data_beyond_workspace(&self) -> bool {
-        self.mounts
-            .iter()
-            .filter(|mount| !mount.read_only)
-            .any(|mount| {
-                mount.guest != Path::new(DEFAULT_SANDBOX_WORKDIR) || holds_git_metadata(&mount.host)
-            })
+        self.mounts.iter().any(|mount| {
+            (!mount.read_only && mount.guest != Path::new(DEFAULT_SANDBOX_WORKDIR))
+                || holds_host_authority(&mount.host, !mount.read_only)
+        })
     }
 }
 
-/// Most directory entries examined when looking for Git metadata in a
-/// workspace. A workspace with more counts as holding it.
-const GIT_METADATA_SCAN_LIMIT: usize = 20_000;
+/// Most entries examined to establish a mount's host authority. Larger or
+/// unreadable trees cannot establish workspace-only confinement.
+const HOST_AUTHORITY_SCAN_LIMIT: usize = 20_000;
 
-/// Whether a writable workspace holds Git administrative data anywhere in
-/// it: a `.git` entry, or the `HEAD`, `objects` and `refs` of a bare
-/// repository, at any depth. Code that can write a repository's metadata can
-/// move its refs or plant a hook that runs when someone uses it on the host.
-/// Symbolic links are not followed. Anything that cannot be checked, and a
-/// workspace too large to check within `GIT_METADATA_SCAN_LIMIT` entries,
-/// counts as holding it.
-fn holds_git_metadata(workspace: &Path) -> bool {
-    if std::fs::symlink_metadata(workspace).map_or(true, |metadata| !metadata.is_dir()) {
+/// Detects special files (including sockets) in every mount and Git
+/// administrative data in writable mounts. A read-only socket still exposes
+/// the host daemon's authority. Writable Git metadata can move shared refs or
+/// plant host hooks. Symbolic links are not followed; an uncheckable root or
+/// tree retains the conservative host-mounted classification.
+fn holds_host_authority(root: &Path, writable: bool) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(root) else {
+        return true;
+    };
+    if metadata.is_file() {
+        return writable;
+    }
+    if !metadata.is_dir() {
         return true;
     }
-    let mut pending = vec![workspace.to_path_buf()];
+    let mut pending = vec![root.to_path_buf()];
     let mut examined = 0;
     while let Some(dir) = pending.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -255,7 +259,7 @@ fn holds_git_metadata(workspace: &Path) -> bool {
         let mut bare = [false; 3];
         for entry in entries {
             examined += 1;
-            if examined > GIT_METADATA_SCAN_LIMIT {
+            if examined > HOST_AUTHORITY_SCAN_LIMIT {
                 return true;
             }
             let Ok(entry) = entry else {
@@ -264,13 +268,18 @@ fn holds_git_metadata(workspace: &Path) -> bool {
             let Ok(file_type) = entry.file_type() else {
                 return true;
             };
+            if !file_type.is_file() && !file_type.is_dir() && !file_type.is_symlink() {
+                return true;
+            }
             let name = entry.file_name();
-            match name.to_str() {
-                Some(".git") => return true,
-                Some("HEAD") => bare[0] = true,
-                Some("objects") => bare[1] = true,
-                Some("refs") => bare[2] = true,
-                _ => {}
+            if writable {
+                match name.to_str() {
+                    Some(".git") => return true,
+                    Some("HEAD") => bare[0] = true,
+                    Some("objects") => bare[1] = true,
+                    Some("refs") => bare[2] = true,
+                    _ => {}
+                }
             }
             if file_type.is_dir() {
                 pending.push(entry.path());

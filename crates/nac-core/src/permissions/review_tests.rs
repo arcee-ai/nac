@@ -386,10 +386,7 @@ fn podman_with_extra_host_mounts_or_git_metadata_is_not_a_workspace_only_sandbox
         spec(vec![]),
         spec(vec![workspace.clone()]),
         // Read-only mounts, including Git metadata, cannot change host data.
-        spec(vec![
-            workspace.clone(),
-            mount(std::path::Path::new("/home/dev/skills"), "/skills", true),
-        ]),
+        spec(vec![workspace.clone(), mount(&plain, "/skills", true)]),
         spec(vec![mount(&checkout, DEFAULT_SANDBOX_WORKDIR, true)]),
     ];
     for spec in confined {
@@ -656,4 +653,132 @@ fn known_credential_locations_and_process_environments_are_never_reviewed() {
             "{path}"
         );
     }
+}
+
+#[test]
+fn basic_auth_credentials_keep_shell_resources_and_human_intent_manual() {
+    let backend = crate::sandbox::ExecutionBackend::Local {
+        workspace_cwd: "/workspace".into(),
+    };
+    for command in [
+        "curl -u alice:canary8d1e https://example.com/health",
+        "curl -ualice:canary8d1e https://example.com/health",
+        "curl -u'alice:canary8d1e' https://example.com/health",
+        "curl -su alice:canary8d1e https://example.com/health",
+        "curl -sualice:canary8d1e https://example.com/health",
+        "curl --user alice:canary8d1e https://example.com/health",
+        "curl --user=alice:canary8d1e https://example.com/health",
+        "curl --user 'alice:canary with spaces' https://example.com/health",
+        "curl -u 'alice with spaces:canary8d1e' https://example.com/health",
+        "curl -U alice:canary8d1e https://example.com/health",
+        "curl -Ualice:canary8d1e https://example.com/health",
+        "curl --proxy-user alice:canary8d1e https://example.com/health",
+        "curl --proxy-user=alice:canary8d1e https://example.com/health",
+    ] {
+        let resources =
+            crate::permissions::shell_resources(command, Path::new("/workspace"), &backend);
+        assert!(review_eligibility(&resources, PermissionBackend::Local).is_ok());
+        assert!(
+            review_request(
+                "exec_command",
+                &resources,
+                PermissionBackend::Local,
+                &intent(&["Check the health endpoint"]),
+                false,
+                &ExactSecrets::default()
+            )
+            .is_err(),
+            "credential-bearing command must stay manual: {command}"
+        );
+        assert!(
+            review_request(
+                "exec_command",
+                &[resource("execute", "command:[ls]")],
+                PermissionBackend::Local,
+                &intent(&[command]),
+                false,
+                &ExactSecrets::default()
+            )
+            .is_err(),
+            "credential-bearing human intent must stay manual: {command}"
+        );
+    }
+    for command in ["id -u", "id -un", "curl -s https://example.com/health"] {
+        let resources =
+            crate::permissions::shell_resources(command, Path::new("/workspace"), &backend);
+        assert!(
+            review_request(
+                "exec_command",
+                &resources,
+                PermissionBackend::Local,
+                &intent(&["Check the service"]),
+                false,
+                &ExactSecrets::default()
+            )
+            .is_ok(),
+            "{command}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn sockets_in_readonly_mounts_or_the_workspace_are_not_confined() {
+    use crate::sandbox::{MountSpec, SandboxSpec, DEFAULT_SANDBOX_WORKDIR};
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    let root = std::env::temp_dir().join(format!("nac-sock-{}", &suffix[..8]));
+    let workspace = root.join("w");
+    let readonly = root.join("r");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&readonly).unwrap();
+    let source = |host: &Path, guest: &str, read_only| {
+        ReviewBackendSource::Sandbox(Box::new(SandboxSpec {
+            mounts: vec![MountSpec {
+                host: host.into(),
+                guest: guest.into(),
+                read_only,
+            }],
+            ..SandboxSpec::default()
+        }))
+    };
+    let readonly_source = source(&readonly, "/readonly", true);
+    assert_eq!(readonly_source.current(), ReviewBackend::Podman);
+    std::fs::write(readonly.join("settings"), "ordinary config").unwrap();
+    assert_eq!(
+        source(&readonly.join("settings"), "/settings", true).current(),
+        ReviewBackend::Podman
+    );
+    let socket = readonly.join("d.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let parsed = crate::sandbox::parse_mount_spec(
+        &format!("{}:/run/daemon.sock", socket.display()),
+        true,
+        &root,
+    )
+    .unwrap();
+    let direct = ReviewBackendSource::Sandbox(Box::new(SandboxSpec {
+        mounts: vec![parsed],
+        ..SandboxSpec::default()
+    }));
+    for candidate in [direct, readonly_source] {
+        let backend = candidate.current();
+        assert_eq!(backend, ReviewBackend::PodmanWithHostMounts);
+        assert!(review_eligibility(
+            &[resource("execute_broad", "command:[make][test]")],
+            backend
+        )
+        .is_err());
+    }
+    let workspace_listener =
+        std::os::unix::net::UnixListener::bind(workspace.join("d.sock")).unwrap();
+    assert_eq!(
+        source(&workspace, DEFAULT_SANDBOX_WORKDIR, false).current(),
+        ReviewBackend::PodmanWithHostMounts
+    );
+    assert_eq!(
+        source(&root.join("missing"), "/readonly", true).current(),
+        ReviewBackend::PodmanWithHostMounts
+    );
+    drop((listener, workspace_listener));
+    std::fs::remove_dir_all(root).unwrap();
 }

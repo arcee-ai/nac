@@ -117,25 +117,28 @@ pub(crate) fn known_credential_values() -> Result<Vec<String>> {
         values.push(auth.access_token);
         values.push(auth.refresh_token);
     }
-    values.extend(
-        std::env::vars()
-            .filter(|(name, value)| {
-                crate::permissions::is_secret_name(name) && plausible_secret_value(value)
-            })
-            .map(|(_, value)| value),
-    );
+    values.extend(environment_credential_values(std::env::vars()));
     values.retain(|value| !value.is_empty());
     values.sort();
     values.dedup();
     Ok(values)
 }
 
-/// Whether an environment value under a secret-shaped name can be a secret.
-/// Flags such as TOKENIZERS_PARALLELISM=false or KEYTIMEOUT=1 are too short
-/// to be credentials, and matching them would mark ordinary commands as
-/// redacted.
-fn plausible_secret_value(value: &str) -> bool {
-    value.trim().len() >= 8
+/// Exempt known non-secret settings by name, never by the length or shape of
+/// their value: even a one-character password must remain an exact secret.
+fn environment_credential_values(
+    variables: impl IntoIterator<Item = (String, String)>,
+) -> impl Iterator<Item = String> {
+    variables
+        .into_iter()
+        .filter(|(name, value)| {
+            crate::permissions::is_secret_name(name)
+                && !value.is_empty()
+                && !["TOKENIZERS_PARALLELISM", "KEYTIMEOUT"]
+                    .iter()
+                    .any(|setting| name.eq_ignore_ascii_case(setting))
+        })
+        .map(|(_, value)| value)
 }
 
 /// Resolve the API key a backend would use at run time.
