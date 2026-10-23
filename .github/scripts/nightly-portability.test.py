@@ -115,6 +115,20 @@ elif '--workspace' in sys.argv and '--no-run' not in sys.argv:
             self.assertFalse(binary.parent.exists())
             self.assertFalse(any(p['label'] == 'workspace-default' for p in phases))
 
+    def test_long_fixture_argv_is_visible_to_cleanup(self):
+        with tempfile.TemporaryDirectory(prefix='nac-portability-long-argv-') as directory:
+            fixture = Path(directory).resolve() / ('nested-' * 35) / 'fixture-marker'
+            child = subprocess.Popen([sys.executable, '-c',
+                                      "import time; print('ready',flush=True); time.sleep(300)",
+                                      str(fixture)], stdout=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(child.stdout.readline().strip(), 'ready')
+                self.assertIn(child.pid, runner.fixture_processes(fixture))
+            finally:
+                child.kill()
+                child.wait()
+                child.stdout.close()
+
     def test_cancellation_kills_root_and_child_and_retains_log(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

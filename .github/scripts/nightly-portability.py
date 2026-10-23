@@ -74,7 +74,7 @@ def verify_inventory(log, inventory):
 
 
 def fixture_processes(fixture):
-    listing = subprocess.check_output(['ps', '-axo', 'pid=,command='], text=True)
+    listing = subprocess.check_output(['ps', '-axww', '-o', 'pid=,command='], text=True)
     return [int(line.split(None, 1)[0]) for line in listing.splitlines()
             if str(fixture) in line and line.strip()]
 

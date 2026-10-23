@@ -65,7 +65,7 @@ runner does not double the suite to manufacture warm evidence.
 Only test execution uses a canonical invocation-specific temporary directory;
 compiler caches remain outside it. SIGINT/SIGTERM and command timeouts terminate
 the active owned process group, including descendants, then retain failure or
-cancellation reports. Before removing the fixture directory, the runner records
+cancellation reports. Before removing the fixture directory, the runner uses full-width process argv, records
 remaining files, fails on process commands referencing that exact private path,
 and attempts to kill those owned leaked PIDs. It removes owned temporary files
 on success and failure. This is bounded invocation cleanup, not a system-wide
@@ -73,8 +73,9 @@ claim that every detached process identity is observable. Abrupt SIGKILL/host
 loss may prevent final reports; missing evidence is not success. Hosted runner
 teardown is the final isolation boundary.
 
-Seven controls cover stale evidence rejection, inventory drift, exact-selection
-failure, the full serialized command plan, allowlist scope, real Rust first-attempt failure and cancellation of an actual parent/child
+Eight controls cover stale evidence rejection, inventory drift, exact-selection
+failure, the full serialized command plan, long-argv fixture process visibility,
+allowlist scope, real Rust first-attempt failure and cancellation of an actual parent/child
 process behind a readiness barrier. The Rust fixture lives in its own temporary
 directory, mutates no repository source and never overlaps the workspace suite.
 To demonstrate a failing full runner receipt manually:
