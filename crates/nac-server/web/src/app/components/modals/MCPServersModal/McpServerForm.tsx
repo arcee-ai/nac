@@ -657,7 +657,9 @@ export function McpServerForm({
           {record ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-small text-basic-muted">
-                Runtime: {runtime?.state ?? "disconnected"}
+                {runtime?.sessions_blocked
+                  ? "Disconnected. Sessions won't use this server until you connect it."
+                  : `Runtime: ${runtime?.state ?? "disconnected"}`}
                 {runtime?.error ? ` — ${runtime.error}` : ""}
               </span>
               {(["connect", "disconnect", "reload"] as const).map((action) => (
@@ -693,7 +695,7 @@ export function McpServerForm({
           </div>
         </div>
         {record && transport === "streamable_http" ? (
-          <McpOAuthPanel serverName={record.name} />
+          <McpOAuthPanel serverName={record.name} endpoint={record.url ?? undefined} />
         ) : null}
         {tools && tools.length ? (
           <div className="flex flex-col gap-1">

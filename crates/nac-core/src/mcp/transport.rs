@@ -16,6 +16,17 @@ struct NacOAuthClient {
 }
 
 impl NacOAuthClient {
+    /// The stored token for a request; after logout nothing is sent unauthenticated.
+    async fn access_token(
+        &self,
+        auth_header: Option<String>,
+    ) -> std::result::Result<Option<String>, StreamableHttpError<reqwest::Error>> {
+        match auth_header {
+            Some(header) => Ok(Some(header)),
+            None => Ok(Some(self.inner.get_access_token().await?)),
+        }
+    }
+
     async fn capture_scope_step_up<T>(
         &self,
         result: std::result::Result<T, StreamableHttpError<reqwest::Error>>,
@@ -116,7 +127,13 @@ impl StreamableHttpClient for NacOAuthClient {
     ) -> std::result::Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
         self.capture_scope_step_up(
             self.inner
-                .post_message(uri, message, session_id, auth_header, custom_headers)
+                .post_message(
+                    uri,
+                    message,
+                    session_id,
+                    self.access_token(auth_header).await?,
+                    custom_headers,
+                )
                 .await,
         )
         .await
@@ -137,7 +154,7 @@ impl StreamableHttpClient for NacOAuthClient {
                     uri,
                     message,
                     session_id,
-                    auth_header,
+                    self.access_token(auth_header).await?,
                     custom_headers,
                     max_sse_event_size,
                 )
@@ -155,7 +172,12 @@ impl StreamableHttpClient for NacOAuthClient {
     ) -> std::result::Result<(), StreamableHttpError<Self::Error>> {
         self.capture_scope_step_up(
             self.inner
-                .delete_session(uri, session_id, auth_header, custom_headers)
+                .delete_session(
+                    uri,
+                    session_id,
+                    self.access_token(auth_header).await?,
+                    custom_headers,
+                )
                 .await,
         )
         .await
@@ -174,7 +196,13 @@ impl StreamableHttpClient for NacOAuthClient {
     > {
         self.capture_scope_step_up(
             self.inner
-                .get_stream(uri, session_id, last_event_id, auth_header, custom_headers)
+                .get_stream(
+                    uri,
+                    session_id,
+                    last_event_id,
+                    self.access_token(auth_header).await?,
+                    custom_headers,
+                )
                 .await,
         )
         .await
@@ -198,7 +226,7 @@ impl StreamableHttpClient for NacOAuthClient {
                     uri,
                     session_id,
                     last_event_id,
-                    auth_header,
+                    self.access_token(auth_header).await?,
                     custom_headers,
                     max_sse_event_size,
                 )

@@ -1761,6 +1761,7 @@ pub async fn logout_oauth_handler(
             "MCP OAuth logout could not complete",
         )
     })?;
+    manager.mcp_runtime().forget(&server_name).await;
     Ok(Json(McpOAuthStatusResponse {
         status: public_oauth_status(status),
         message: None,

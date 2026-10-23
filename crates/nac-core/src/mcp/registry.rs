@@ -74,6 +74,22 @@ impl McpServer {
         self.service.read().await.clone()
     }
 
+    /// The current connection for a new request, unless the user disconnected this server.
+    pub(super) async fn admitted_service(&self) -> Result<SharedMcpService> {
+        self.admit()?;
+        Ok(self.current_service().await)
+    }
+
+    pub(super) fn admit(&self) -> Result<()> {
+        if super::admission::is_disconnected(&self.cwd, &self.name)? {
+            bail!(
+                "MCP server '{}' was disconnected; connect it in MCP settings to use it again",
+                self.name
+            );
+        }
+        Ok(())
+    }
+
     pub(super) fn current_connection_generation(&self) -> u64 {
         self.connection_generation
             .load(std::sync::atomic::Ordering::Acquire)
@@ -250,6 +266,22 @@ impl McpRegistry {
 
         for (server_name, server_config) in servers {
             if !server_config.enabled {
+                continue;
+            }
+            let disconnected = match super::admission::is_disconnected(cwd, &server_name) {
+                Ok(false) => None,
+                Ok(true) => Some("disconnected; connect it in MCP settings to use it".to_string()),
+                Err(error) => Some(format!("connection state is unreadable: {error:#}")),
+            };
+            if let Some(reason) = disconnected {
+                if server_config.required {
+                    close_mounted_services(&mut mounted_services).await;
+                    bail!("required MCP server '{server_name}' cannot mount: {reason}");
+                }
+                skipped.push(McpSkippedServer {
+                    name: server_name,
+                    reason,
+                });
                 continue;
             }
             let redaction_values = redaction_values(&server_config)?;

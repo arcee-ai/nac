@@ -371,7 +371,7 @@ impl McpServer {
             subscriptions.uris.clone()
         };
         for uri in wanted.difference(&current) {
-            if !self.is_current_connection_generation(generation) {
+            if !self.is_current_connection_generation(generation) || self.admit().is_err() {
                 return;
             }
             if matches!(
@@ -395,7 +395,7 @@ impl McpServer {
             }
         }
         for uri in current.difference(&wanted) {
-            if !self.is_current_connection_generation(generation) {
+            if !self.is_current_connection_generation(generation) || self.admit().is_err() {
                 return;
             }
             let _ = timeout(
@@ -509,7 +509,7 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>, gener
         let Some(current) = server.upgrade() else {
             return;
         };
-        if !current.is_current_connection_generation(generation) {
+        if !current.is_current_connection_generation(generation) || current.admit().is_err() {
             return;
         }
         let filter = current.subscription_filter();
@@ -540,7 +540,9 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>, gener
                         let _ = subscription.cancel().await;
                         return;
                     };
-                    if !current.is_current_connection_generation(generation) {
+                    if !current.is_current_connection_generation(generation)
+                        || current.admit().is_err()
+                    {
                         let _ = subscription.cancel().await;
                         return;
                     }

@@ -23,6 +23,8 @@ pub struct McpRuntimeStatus {
     pub server_name: Option<String>,
     pub server_version: Option<String>,
     pub tool_count: usize,
+    /// The user disconnected this server; sessions refuse to use it until it is connected.
+    pub sessions_blocked: bool,
 }
 
 struct RuntimeEntry {
@@ -57,6 +59,7 @@ impl McpRuntimeManager {
                 .map(|entry| entry.status.clone())
                 .unwrap_or_else(|| disconnected_status(&name, &config));
             status.required = config.required;
+            status.sessions_blocked = super::admission::is_disconnected(&self.cwd, &name)?;
             if !config.enabled {
                 status.state = McpRuntimeState::Disabled;
                 status.error = None;
@@ -79,6 +82,7 @@ impl McpRuntimeManager {
         let config = servers
             .remove(name)
             .with_context(|| format!("MCP server '{name}' was not found"))?;
+        super::admission::set_disconnected(&self.cwd, name, false)?;
         if !config.enabled {
             let status = McpRuntimeStatus {
                 state: McpRuntimeState::Disabled,
@@ -151,6 +155,7 @@ impl McpRuntimeManager {
                 .and_then(|info| info.server_info.as_ref())
                 .map(|info| info.version.clone()),
             tool_count: tools.len(),
+            sessions_blocked: false,
         };
         let service = Arc::new(tokio::sync::RwLock::new(service));
         self.set_entry(status.clone(), Some(service)).await;
@@ -163,7 +168,8 @@ impl McpRuntimeManager {
         let config = servers
             .remove(name)
             .with_context(|| format!("MCP server '{name}' was not found"))?;
-        let status = if config.enabled {
+        super::admission::set_disconnected(&self.cwd, name, true)?;
+        let mut status = if config.enabled {
             disconnected_status(name, &config)
         } else {
             McpRuntimeStatus {
@@ -171,6 +177,7 @@ impl McpRuntimeManager {
                 ..disconnected_status(name, &config)
             }
         };
+        status.sessions_blocked = true;
         self.set_entry(status.clone(), None).await;
         Ok(status)
     }
@@ -208,6 +215,7 @@ impl McpRuntimeManager {
             server_name: None,
             server_version: None,
             tool_count: 0,
+            sessions_blocked: false,
         };
         self.set_entry(status.clone(), None).await;
         status
@@ -269,6 +277,7 @@ fn disconnected_status(name: &str, config: &McpServerConfig) -> McpRuntimeStatus
         server_name: None,
         server_version: None,
         tool_count: 0,
+        sessions_blocked: false,
     }
 }
 
