@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 container_runtime=${CONTAINER_RUNTIME:-}
 if [ -z "$container_runtime" ]; then
     if command -v docker >/dev/null 2>&1; then

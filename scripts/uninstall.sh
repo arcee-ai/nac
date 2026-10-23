@@ -3,6 +3,8 @@ set -eu
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
+# Keep the installer binary list explicit for future installed binaries.
+# shellcheck disable=SC2043
 for bin in nac-web; do
   bin_path="$INSTALL_DIR/$bin"
   if [ -f "$bin_path" ]; then

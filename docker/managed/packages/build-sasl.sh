@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-lock=/recipe/sources.lock.json
 # Preserve the existing Heimdal-backed SASL plugin set, with the reviewed source correction.
 apk del krb5-dev openldap-2.6-dev e2fsprogs-dev
 apk add --no-cache heimdal-dev gdbm-dev libtool sqlite-dev
