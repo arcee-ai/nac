@@ -1,8 +1,9 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { expect, test as base, type APIRequestContext, type TestInfo } from "@playwright/test";
 
 import { ExaDouble } from "./exa-double";
@@ -14,6 +15,37 @@ const webRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(webRoot, "../../../..");
 const cleanupMarkers = new WeakMap<ChildProcess, string>();
 const cleanupMarkerEnvironment = "NAC_E2E_CLEANUP_ID";
+const execute = promisify(execFile);
+
+/** Keep production snapshots inside this fixture, even when Playwright's output
+ * directory is nested in the source checkout. Restarts preserve owned changes.
+ */
+export async function initializeHarnessWorkspace(workspace: string): Promise<void> {
+  await fs.mkdir(workspace, { recursive: true });
+  const git = (...args: string[]) => execute("git", ["-C", workspace, ...args]);
+  await git("init", "--quiet", "--initial-branch=main");
+  const { stdout } = await git("rev-parse", "--show-toplevel");
+  if ((await fs.realpath(stdout.trim())) !== (await fs.realpath(workspace))) {
+    throw new Error("E2E workspace must own its Git repository boundary");
+  }
+  try {
+    await git("rev-parse", "--verify", "HEAD");
+  } catch {
+    await git(
+      "-c",
+      "user.name=Disposable NAC fixture",
+      "-c",
+      "user.email=nac-fixture@example.test",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "fixture baseline",
+    );
+  }
+}
 
 export type EmbeddedHarness = {
   baseUrl: string;
@@ -319,10 +351,9 @@ async function startHarness(
   const xdg = path.join(runRoot, "xdg");
   const tmp = path.join(runRoot, "tmp");
   await Promise.all(
-    [runRoot, workspace, nacHome, home, xdg, tmp].map((directory) =>
-      fs.mkdir(directory, { recursive: true }),
-    ),
+    [runRoot, nacHome, home, xdg, tmp].map((directory) => fs.mkdir(directory, { recursive: true })),
   );
+  await initializeHarnessWorkspace(workspace);
 
   const binaryPath = path.resolve(
     process.env.NAC_E2E_BINARY ?? path.join(repoRoot, "target/debug/nac-web"),
