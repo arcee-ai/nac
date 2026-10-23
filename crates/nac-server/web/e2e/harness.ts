@@ -4,7 +4,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { expect, test as base, type APIRequestContext, type TestInfo } from "@playwright/test";
+import {
+  expect,
+  test as base,
+  type APIRequestContext,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 
 import { ExaDouble } from "./exa-double";
 import { ScriptedProvider } from "./scripted-provider";
@@ -867,4 +873,45 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   } finally {
     if (timeout != null) clearTimeout(timeout);
   }
+}
+
+/**
+ * The right sidebar starts collapsed, so panel tabs and rows sit behind this.
+ * A saved open preference can remove the button after the first paint, which
+ * makes a click that already saw it wait until the test times out.
+ */
+export async function showSidePanel(page: Page) {
+  const show = page.getByRole("button", { name: "Show panel" });
+  const open = page.getByRole("tab", { name: "Files" });
+  await expect(show.or(open).first()).toBeVisible();
+  await expect(async () => {
+    if (await open.isVisible()) return;
+    if (await show.isVisible()) await show.click();
+    await expect(open).toBeVisible();
+  }).toPass();
+}
+
+/** Starts a foreground child the way the parent's subagent tool does; the reply waits for its outcome. */
+export function startForegroundChild(
+  request: APIRequestContext,
+  harness: { baseUrl: string },
+  sessionId: string,
+  description: string,
+  prompt: string,
+) {
+  return request.post(`${harness.baseUrl}/sessions/${sessionId}/children`, {
+    data: { profile: "general", description, prompt, background: false },
+  });
+}
+
+/** Opens the Subagents panel at any width; on a phone it is a dialog over the chat. */
+export async function showSubagents(page: Page, mobile: boolean) {
+  const tab = page.getByRole("tab", { name: "Subagents" });
+  if (mobile) {
+    if (!(await tab.first().isVisible()))
+      await page.getByRole("button", { name: "Open panel", exact: true }).click();
+  } else {
+    await showSidePanel(page);
+  }
+  await tab.last().click();
 }

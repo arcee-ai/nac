@@ -7,6 +7,9 @@ import {
   createProject,
   createSession,
   expect,
+  showSidePanel,
+  showSubagents,
+  startForegroundChild,
   test,
   waitForRunIdle,
 } from "./harness";
@@ -16,33 +19,6 @@ import { ScriptGate } from "./scripted-provider";
 async function newChatChord(page: Page): Promise<string> {
   const isMac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
   return isMac ? "Meta+Shift+O" : "Control+Shift+O";
-}
-
-/**
- * The right sidebar starts collapsed, so panel tabs and rows sit behind this.
- * A saved open preference can remove the button after the first paint, which
- * makes a click that already saw it wait until the test times out.
- */
-async function showSidePanel(page: Page) {
-  const show = page.getByRole("button", { name: "Show panel" });
-  const open = page.getByRole("tab", { name: "Files" });
-  await expect(show.or(open).first()).toBeVisible();
-  await expect(async () => {
-    if (await open.isVisible()) return;
-    if (await show.isVisible()) await show.click();
-    await expect(open).toBeVisible();
-  }).toPass();
-}
-
-/** Spawn menu → foreground child. The first prompt line is the description. */
-async function launchForegroundChild(page: Page, description: string, prompt: string) {
-  await page.getByRole("button", { name: "Spawn" }).click();
-  await page.getByRole("button", { name: "Create Subagent" }).click();
-  const field = page.getByRole("textbox", { name: "Send a message" });
-  await field.fill(`${description}\n${prompt}`);
-  const form = page.locator("form").filter({ has: field });
-  await form.getByRole("switch", { name: "Run in the background" }).click();
-  return form.getByRole("button", { name: "Send" });
 }
 
 test("serves the production-embedded application and hashed assets", async ({
@@ -571,12 +547,13 @@ test("applies parent auto-approval to child agents and identifies manual child r
       name: "read",
       callId: "child-auto-read",
       arguments: { path: automatic },
+      stream: "request",
     },
   );
   harness.provider.enqueue(
     "child-auto-complete",
     { functionOutputCallId: "child-auto-read" },
-    { kind: "text", text: "automatic child complete" },
+    { kind: "text", text: "automatic child complete", stream: "request" },
   );
   harness.provider.enqueue(
     "child-manual-read",
@@ -590,12 +567,13 @@ test("applies parent auto-approval to child agents and identifies manual child r
       name: "read",
       callId: "child-manual-read",
       arguments: { path: manual },
+      stream: "request",
     },
   );
   harness.provider.enqueue(
     "child-manual-complete",
     { functionOutputCallId: "child-manual-read" },
-    { kind: "text", text: "manual child complete" },
+    { kind: "text", text: "manual child complete", stream: "request" },
   );
 
   const sessionId = await createDirectSession(request, harness);
@@ -606,31 +584,39 @@ test("applies parent auto-approval to child agents and identifies manual child r
     "This setting governs this session and all existing or future owned child agents",
   );
   await expect(permissions).toContainText("Separately managed orchestrators are not included");
-  await permissions.getByRole("switch", { name: "Approve all automatically" }).click();
+  const automaticMode = permissions.getByRole("switch", { name: "Approve all automatically" });
+  await automaticMode.click();
+  // The child start below is a separate request; it must not overtake the mode change.
+  await expect(automaticMode).toBeChecked();
   await page.keyboard.press("Escape");
 
-  const automaticSend = await launchForegroundChild(page, "Automatic child", "ALL58_AUTO_CHILD");
-  const automaticStart = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      response.url().endsWith(`/sessions/${sessionId}/children`),
+  const automaticStart = startForegroundChild(
+    request,
+    harness,
+    sessionId,
+    "Automatic child",
+    "ALL58_AUTO_CHILD",
   );
-  await automaticSend.click();
   await harness.provider.waitForRequestCount(2);
-  expect((await automaticStart).status()).toBe(201);
+  const automaticResult = await automaticStart;
+  expect(automaticResult.status()).toBe(201);
+  const automaticChild = await automaticResult.json();
+  expect(automaticChild).toMatchObject({ status: "completed" });
   await expect(page.getByText("Permission required")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
-  await page.getByRole("switch", { name: "Approve all automatically" }).click();
+  const manualMode = page.getByRole("switch", { name: "Approve all automatically" });
+  await manualMode.click();
+  await expect(manualMode).not.toBeChecked();
   await page.keyboard.press("Escape");
 
-  const manualSend = await launchForegroundChild(page, "Manual child", "ALL58_MANUAL_CHILD");
-  const manualStart = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      response.url().endsWith(`/sessions/${sessionId}/children`),
+  const manualStart = startForegroundChild(
+    request,
+    harness,
+    sessionId,
+    "Manual child",
+    "ALL58_MANUAL_CHILD",
   );
-  await manualSend.click();
   await harness.provider.waitForRequestCount(3);
 
   await expect
@@ -661,8 +647,19 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await expect(permissionDialog).toContainText(String(manualChildId));
   await permissionDialog.getByRole("button", { name: "Allow once" }).click();
   await harness.provider.waitForRequestCount(4);
-  expect((await manualStart).status()).toBe(201);
+  const manualResult = await manualStart;
+  expect(manualResult.status()).toBe(201);
+  expect(await manualResult.json()).toMatchObject({
+    child_session_id: manualChildId,
+    status: "completed",
+  });
   harness.provider.assertConsumed();
+  expect(harness.provider.requests.map((entry) => entry.matchedStep)).toEqual([
+    "child-auto-read",
+    "child-auto-complete",
+    "child-manual-read",
+    "child-manual-complete",
+  ]);
 });
 
 test("renders an unknown primary tool failure safely after reload", async ({
@@ -800,7 +797,8 @@ test("asks for immutable behavior on every first and new chat", async ({
   expect(hybridPresentation.ok()).toBe(true);
   await page.getByRole("tab", { name: "Subagents" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${hybridSessionId}/delegated$`));
-  await expect(page.getByRole("button", { name: "New Orchestrator" })).toBeVisible();
+  await expect(page.getByText("No subagents yet")).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Orchestrator" })).toHaveCount(0);
 
   const runningGate = new ScriptGate();
   harness.provider.enqueue(
@@ -816,8 +814,8 @@ test("asks for immutable behavior on every first and new chat", async ({
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
-  await expect(page.getByRole("button", { name: "New Agent" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "New Orchestrator" })).toBeVisible();
+  await expect(page.getByText("No subagents yet")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Spawn" })).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Sessions" })).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Subagents" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
@@ -1479,13 +1477,13 @@ test("shows live background delegated work, terminal events, cancellation, and g
   harness.provider.enqueue(
     "background-success",
     { token: "E2E_BACKGROUND_SUCCESS" },
-    { kind: "text", text: "background child completed" },
+    { kind: "text", text: "background child completed", stream: "request" },
     success,
   );
   harness.provider.enqueue(
     "background-cancel",
     { token: "E2E_BACKGROUND_CANCEL" },
-    { kind: "text", text: "should be cancelled" },
+    { kind: "text", text: "should be cancelled", stream: "request" },
     cancelled,
   );
   harness.provider.enqueue(
@@ -1500,23 +1498,35 @@ test("shows live background delegated work, terminal events, cancellation, and g
   ] as const) {
     harness.provider.enqueue(
       id,
-      { token, afterStep },
-      { kind: "text", text: `${id} acknowledged` },
+      // A child's instructions also contain its delegation label. Only the
+      // parent exposes subagent, so a child request cannot consume this reply.
+      { token, afterStep, requiredTools: ["subagent"] },
+      { kind: "text", text: `${id} acknowledged`, stream: "request" },
     );
   }
   harness.provider.enqueue(
     "background-generation-2",
     { token: "E2E_GENERATION_TWO" },
-    { kind: "text", text: "second generation completed", stream: true },
+    { kind: "text", text: "second generation completed", stream: "request" },
     continued,
   );
   harness.provider.enqueue(
     "observe-generation-2",
-    { token: "second generation completed", afterStep: "background-generation-2" },
-    { kind: "text", text: "generation 2 acknowledged", stream: true },
+    {
+      token: "second generation completed",
+      afterStep: "background-generation-2",
+      requiredTools: ["subagent"],
+    },
+    { kind: "text", text: "generation 2 acknowledged", stream: "request" },
   );
 
   const parentId = await createSession(request, harness, "direct");
+  const awaitParentReceipt = async (step: string) => {
+    await expect
+      .poll(() => harness.provider.requests.some((entry) => entry.matchedStep === step))
+      .toBe(true);
+    await waitForRunIdle(request, harness, parentId);
+  };
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
   await showSidePanel(page);
   const launch = async (description: string, prompt: string) => {
@@ -1531,6 +1541,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await launch("Background cancellation", "E2E_BACKGROUND_CANCEL");
   await cancelled.accepted;
   await launch("Background failure", "E2E_BACKGROUND_FAILURE");
+  await awaitParentReceipt("observe-failure");
 
   const subagent = (name: string) => page.getByRole("button", { name, exact: true });
   const composer = page.locator("form").filter({
@@ -1545,6 +1556,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
   cancelled.release();
   await subagent("Background failure").click();
   await expect(composer.getByText("Failed", { exact: true })).toBeVisible();
+  await awaitParentReceipt("observe-cancel");
 
   success.release();
   await subagent("Background success").click();
@@ -1552,28 +1564,29 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await expect(page.getByLabel("Coding agent completed")).toContainText("Background success");
   await expect(page.getByLabel("Coding agent failed")).toContainText("Background failure");
   await expect(page.getByLabel("Coding agent cancelled")).toContainText("Background cancellation");
-  await expect(page.getByRole("button", { name: "Resend" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
-  // The open parent is still answering the completion, and that run rejects
-  // another child generation until it finishes. Retry past the conflict.
-  await expect
-    .poll(
-      async () => {
-        const response = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
-          data: {
-            profile: "general",
-            description: "Background success",
-            prompt: "E2E_GENERATION_TWO",
-            background: true,
-            child_session_id: successChild.child_session_id,
-          },
-        });
-        return response.ok();
-      },
-      { timeout: 15_000, intervals: [100, 200, 400] },
-    )
-    .toBe(true);
+  // Parent acknowledgement messages may have normal snapshot/fork actions;
+  // the three durable completion cards themselves must remain passive.
+  for (const label of ["Coding agent completed", "Coding agent failed", "Coding agent cancelled"]) {
+    const event = page.getByLabel(label, { exact: true });
+    await expect(event).toHaveCount(1);
+    for (const name of ["Resend", "Revert to this snapshot", "Create fork"]) {
+      await expect(event.getByRole("button", { name, exact: true })).toHaveCount(0);
+    }
+  }
+  // Settle the parent's completion acknowledgement before issuing one new
+  // admission. Only observation is polled; the continuation is never replayed.
+  await awaitParentReceipt("observe-success");
+  const continuation = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
+    data: {
+      profile: "general",
+      description: "Background success",
+      prompt: "E2E_GENERATION_TWO",
+      background: true,
+      child_session_id: successChild.child_session_id,
+    },
+  });
+  expect(continuation.ok()).toBe(true);
+  expect((await continuation.json()).child_session_id).toBe(successChild.child_session_id);
   await continued.accepted;
   await expect(composer.locator("span", { hasText: "Running in the background" })).toBeVisible();
   await expect
@@ -1591,6 +1604,17 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await expect(page.getByLabel("Coding agent completed").last()).toContainText("Generation 2");
   await expect(page.getByRole("button", { name: "Open exact transcript" }).last()).toBeVisible();
   expect(successChild.child_session_id).toBeTruthy();
+  await awaitParentReceipt("observe-generation-2");
+  expect(harness.provider.requests.map((entry) => entry.matchedStep)).toEqual([
+    "background-success",
+    "background-cancel",
+    "background-failure",
+    "observe-failure",
+    "observe-cancel",
+    "observe-success",
+    "background-generation-2",
+    "observe-generation-2",
+  ]);
   harness.provider.assertConsumed();
 });
 
@@ -1744,6 +1768,13 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
     "Coordinate the compatibility audit",
   );
   harness.provider.assertConsumed();
+  // An unsent draft must come back after the transcript round trip below.
+  const panelComposer = page.locator("form").filter({
+    has: page.getByRole("switch", { name: "Run in the background" }),
+  });
+  await panelComposer
+    .getByRole("textbox", { name: "Send a message" })
+    .fill("Unsent follow-up for the orchestrator");
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByText("Managed NAC orchestrator", { exact: true })).toBeVisible();
   await expect(page.getByText("Coordinate the compatibility audit", { exact: true })).toBeVisible();
@@ -1786,4 +1817,11 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(managedMobilePanel).toBeHidden();
   await page.getByRole("button", { name: "Parent chat" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
+  await showSubagents(page, true);
+  await expect(
+    page.getByText("Coordinate the compatibility audit", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(panelComposer.getByRole("textbox", { name: "Send a message" })).toHaveValue(
+    "Unsent follow-up for the orchestrator",
+  );
 });

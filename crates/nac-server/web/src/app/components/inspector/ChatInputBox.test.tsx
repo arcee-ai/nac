@@ -669,6 +669,17 @@ describe("slash-command suggestions", () => {
 });
 
 describe("direct inbox and goal journeys", () => {
+  it.each([false, true])("offers no subagent launch control (mobile: %s)", (phone) => {
+    mobile = phone;
+    for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
+      composer({ behavior });
+      for (const name of ["Spawn", "Launch coding agent", "Launch NAC orchestrator"]) {
+        expect(screen.queryByRole("button", { name })).toBeNull();
+      }
+      cleanup();
+    }
+  });
+
   it("fails closed until ownership is known and keeps delegated transcripts non-composable", () => {
     composer({ entryAvailable: false }, false);
     expect(screen.getByText("Loading session controls…")).toBeTruthy();

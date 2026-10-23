@@ -1022,3 +1022,38 @@ async fn failed_run_normalizes_the_dangling_tool_turn_for_the_next_run() {
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
+
+#[tokio::test]
+async fn finishing_handoff_waits_for_exact_release_and_shutdown_wakes_it() {
+    let parts = test_picker_service("finishing_input_handoff");
+    let active = parts
+        .service
+        .try_begin_run(None, "run being settled")
+        .unwrap();
+    parts.service.mark_run_finishing(&active.run_id).unwrap();
+    let mut handoff = Box::pin(parts.service.await_finishing_run());
+    assert_pending(handoff.as_mut());
+    parts.service.clear_finished_run(&SessionRunId::new());
+    assert_pending(handoff.as_mut());
+    parts.service.clear_finished_run(&active.run_id);
+    handoff.await.unwrap();
+    assert!(parts.service.active_run().is_none());
+
+    let active = parts
+        .service
+        .try_begin_run(None, "finishing during shutdown")
+        .unwrap();
+    parts.service.mark_run_finishing(&active.run_id).unwrap();
+    let mut handoff = Box::pin(parts.service.await_finishing_run());
+    assert_pending(handoff.as_mut());
+    parts.service.stop_run_admission().await.unwrap();
+    let error = handoff.await.unwrap_err();
+    assert!(error.to_string().contains("shutting down"));
+    parts.service.clear_finished_run(&active.run_id);
+    let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
+}
+
+fn assert_pending<F: std::future::Future>(future: std::pin::Pin<&mut F>) {
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    assert!(std::future::Future::poll(future, &mut context).is_pending());
+}

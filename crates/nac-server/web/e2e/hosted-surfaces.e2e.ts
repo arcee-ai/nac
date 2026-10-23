@@ -313,12 +313,26 @@ for (const mobile of [false, true]) {
       const editing = page.getByRole("dialog").last();
       await expect(editing.getByRole("textbox", { name: "Argument 1" })).toHaveValue(script);
       await expect(editing.getByRole("textbox", { name: "Argument 2" })).toHaveValue(allowlist);
-      await editing.getByRole("button", { name: "Connect", exact: true }).click();
-      await expect(editing.getByText("Runtime: connected", { exact: true })).toBeVisible();
-      await editing.getByRole("button", { name: "Reload", exact: true }).click();
-      await expect(editing.getByText("Runtime: connected", { exact: true })).toBeVisible();
-      await editing.getByRole("button", { name: "Disconnect", exact: true }).click();
-      await expect(editing.getByText("Runtime: disconnected", { exact: true })).toBeVisible();
+      for (const action of ["Connect", "Reload", "Disconnect"] as const) {
+        const actionPath = `/mcp_library/servers/injected_fixture/${action.toLowerCase()}`;
+        const button = editing.getByRole("button", { name: action, exact: true });
+        // Reload retains "connected" while pending. Wait for this operation,
+        // rather than reading the old status and clicking a newly disabled button.
+        const [response] = await Promise.all([
+          page.waitForResponse(
+            (response) =>
+              response.request().method() === "POST" && response.url().endsWith(actionPath),
+          ),
+          button.click(),
+        ]);
+        expect(response.ok()).toBe(true);
+        await expect(button).toBeEnabled();
+        const state = action === "Disconnect" ? "disconnected" : "connected";
+        await expect(editing.getByText(`Runtime: ${state}`, { exact: true })).toBeVisible();
+        expect(
+          fixture.calls.filter((call) => call.method === "POST" && call.path === actionPath),
+        ).toHaveLength(1);
+      }
       await editing.getByPlaceholder("my_server").fill("renamed_fixture");
       await editing.getByRole("button", { name: "Save", exact: true }).click();
       if (mobile) await page.getByRole("button", { name: "renamed_fixture", exact: true }).click();

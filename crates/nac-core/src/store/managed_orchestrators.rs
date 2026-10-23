@@ -2,6 +2,10 @@ use super::*;
 
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
+mod terminal_receipts;
+pub use terminal_receipts::load_managed_orchestrator_terminal_receipt;
+pub(super) use terminal_receipts::seed_terminal_receipts;
+
 pub const MAX_RUNNING_MANAGED_ORCHESTRATORS: u64 = 4;
 const MAX_OUTCOME_CHARS: usize = 64 * 1024;
 
@@ -624,6 +628,7 @@ fn settle_managed_orchestrator_run_inner(
         settled = load_with_connection(&transaction, orchestrator_session_id)?
             .ok_or_else(|| anyhow!("managed orchestrator disappeared after delivery"))?;
     }
+    terminal_receipts::insert_terminal_receipt(&transaction, &settled)?;
     transaction.commit()?;
     Ok(ManagedOrchestratorSettlement {
         orchestrator: settled,

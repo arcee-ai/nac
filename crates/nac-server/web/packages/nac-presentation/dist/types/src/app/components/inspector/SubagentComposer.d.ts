@@ -1,28 +1,18 @@
 import type { SessionBehavior, SessionLineage, TraditionalChildStatus } from "../../types/api";
-export type SubagentTarget = {
-    mode: "new-agent";
-} | {
-    mode: "new-orchestrator";
-} | {
+export interface SubagentTarget {
     mode: "child" | "orchestrator";
     id: string;
     description: string;
     status: TraditionalChildStatus;
     background: boolean;
-};
-/**
- * Sends, steers, or stops one parent-owned subagent. A new launch takes its
- * description from the first line of the prompt.
- */
-export declare function SubagentComposer({ parentSessionId, target, permissionSessionId, permissionBehavior, requesterLabel, onStarted, autoFocus, focusRequest, showPermissions, }: {
+}
+/** Sends, steers, or stops one existing parent-owned subagent. */
+export declare function SubagentComposer({ parentSessionId, target, permissionSessionId, permissionBehavior, requesterLabel, showPermissions, }: {
     parentSessionId: string;
     target: SubagentTarget;
     permissionSessionId: string;
     permissionBehavior: SessionBehavior | null;
     requesterLabel?: string;
-    onStarted?: (id: string) => void;
-    autoFocus?: boolean;
-    focusRequest?: number;
     /**
      * The parent composer and a running child's bridge already present permission
      * dialogs. The panel composer must not open a second copy of the same ask.

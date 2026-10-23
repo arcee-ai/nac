@@ -7,11 +7,7 @@ import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 interface SessionLayoutState {
   /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
   collapsed: boolean;
-  /**
-   * Whether the next collapsed change should tween. A launch from the composer
-   * opens a collapsed panel in place, so the chat column does not replay its
-   * layout for half a second.
-   */
+  /** Whether the next collapsed change should tween; restoring a project's stored rail does not. */
   sidePanelAnimate: boolean;
   /**
    * Project the collapsed preference belongs to. Null until the open session's
@@ -42,17 +38,12 @@ interface SessionLayoutState {
   selectedThreadRunning: boolean;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
+  /** Open Subagents row per parent, kept so returning from a transcript reopens it. */
+  selectedSubagents: ReadonlyMap<string, string>;
   /** Revision the panels are looking at, or null for the live working tree. */
   selectedRevision: number | null;
   /** File the Files panel is showing. */
   selectedFile: string | null;
-  /**
-   * Subagents tab opened on a blank launch, from the parent composer's spawn
-   * menu or from New Agent / New Orchestrator in the list.
-   */
-  subagentLaunch: "agent" | "orchestrator" | null;
-  /** Bumps every time a blank subagent launch is requested, so the composer can take focus again. */
-  subagentLaunchRequest: number;
   /** Folders flipped away from their default open state, by path. */
   toggledFolders: ReadonlySet<string>;
   /**
@@ -75,12 +66,11 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     selectedThreadEpisode: null,
     selectedThreadRunning: false,
     selectedWorkset: null,
+    selectedSubagents: new Map(),
     selectedRevision: null,
     selectedFile: null,
     toggledFolders: new Set(),
     fileListing: "tree",
-    subagentLaunch: null,
-    subagentLaunchRequest: 0,
   });
   const initial_sessionLayoutStore = sessionLayoutStore.getState();
 
@@ -221,6 +211,13 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     if (selectedWorkset) showSidePanelList(false);
   }
 
+  function selectSubagent(parentSessionId: string, key: string): void {
+    if (getState().selectedSubagents.get(parentSessionId) === key) return;
+    setState((state) => ({
+      selectedSubagents: new Map(state.selectedSubagents).set(parentSessionId, key),
+    }));
+  }
+
   /** Point the panels at a captured revision, or back at the working tree. */
   function selectRevision(selectedRevision: number | null): void {
     setState({ selectedRevision });
@@ -244,28 +241,8 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     setState({ fileListing });
   }
 
-  /** Open the Subagents tab on a blank agent or orchestrator launch. */
-  function openSubagentLaunch(subagentLaunch: "agent" | "orchestrator"): void {
-    setState((state) => ({
-      subagentLaunch,
-      panelList: false,
-      subagentLaunchRequest: state.subagentLaunchRequest + 1,
-      collapsed: false,
-      // The chat is laid out against the column width. Tweening that from the
-      // rail to half the screen reflows the whole transcript, which reads as the
-      // session resetting. The panel is already full size off to the side, so it
-      // can appear without that tween.
-      sidePanelAnimate: state.collapsed ? false : state.sidePanelAnimate,
-    }));
-    rememberCollapsed(false);
-  }
-
   function setSidePanelAnimate(sidePanelAnimate: boolean): void {
     if (getState().sidePanelAnimate !== sidePanelAnimate) setState({ sidePanelAnimate });
-  }
-
-  function clearSubagentLaunch(): void {
-    if (getState().subagentLaunch != null) setState({ subagentLaunch: null });
   }
 
   /**
@@ -293,7 +270,6 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
       toggledFolders: new Set(),
       panelList: false,
       selectedThreadRunning: false,
-      subagentLaunch: null,
     });
   }
 
@@ -309,12 +285,12 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
   const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
   const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
+  const useSelectedSubagent = (parentSessionId: string) =>
+    useStore((s) => s.selectedSubagents.get(parentSessionId) ?? null);
   const useSelectedRevision = () => useStore((s) => s.selectedRevision);
   const useSelectedFile = () => useStore((s) => s.selectedFile);
   const useToggledFolders = () => useStore((s) => s.toggledFolders);
   const useFileListing = () => useStore((s) => s.fileListing);
-  const useSubagentLaunch = () => useStore((s) => s.subagentLaunch);
-  const useSubagentLaunchRequest = () => useStore((s) => s.subagentLaunchRequest);
   return {
     release: () => {
       sessionLayoutStore.setState(initial_sessionLayoutStore);
@@ -330,13 +306,12 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     selectThread,
     setSelectedThreadRunning,
     selectWorkset,
+    selectSubagent,
     selectRevision,
     selectFile,
     toggleFolder,
     selectFileListing,
-    openSubagentLaunch,
     setSidePanelAnimate,
-    clearSubagentLaunch,
     resetSessionSelection,
     useSidePanelCollapsed,
     useSidePanelAnimate,
@@ -346,12 +321,11 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     useSelectedThreadEpisode,
     useSelectedThreadRunning,
     useSelectedWorkset,
+    useSelectedSubagent,
     useSelectedRevision,
     useSelectedFile,
     useToggledFolders,
     useFileListing,
-    useSubagentLaunch,
-    useSubagentLaunchRequest,
   };
 }
 
@@ -368,13 +342,12 @@ export const {
   selectThread,
   setSelectedThreadRunning,
   selectWorkset,
+  selectSubagent,
   selectRevision,
   selectFile,
   toggleFolder,
   selectFileListing,
-  openSubagentLaunch,
   setSidePanelAnimate,
-  clearSubagentLaunch,
   resetSessionSelection,
   useSidePanelCollapsed,
   useSidePanelAnimate,
@@ -384,10 +357,9 @@ export const {
   useSelectedThreadEpisode,
   useSelectedThreadRunning,
   useSelectedWorkset,
+  useSelectedSubagent,
   useSelectedRevision,
   useSelectedFile,
   useToggledFolders,
   useFileListing,
-  useSubagentLaunch,
-  useSubagentLaunchRequest,
 } = createSessionLayoutStore(standalonePreferenceStorage);

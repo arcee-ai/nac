@@ -14,6 +14,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import type { TraditionalChildStatus } from "@/app/types/api";
 
 const BACKGROUND_HINT =
@@ -37,11 +38,9 @@ export interface SubagentChatInputBoxProps {
   onBackgroundChange: (background: boolean) => void;
   status?: TraditionalChildStatus | null;
   busy?: boolean;
+  /** A start is still pending: nothing more is sent until the target is running. */
+  starting?: boolean;
   permission?: ReactNode;
-  /** Put the caret in the field once this composer is shown. */
-  autoFocus?: boolean;
-  /** Changes whenever a new launch should take the caret again. */
-  focusRequest?: number;
 }
 
 /**
@@ -59,12 +58,13 @@ export function SubagentChatInputBox({
   onBackgroundChange,
   status = null,
   busy = false,
+  starting = false,
   permission,
-  autoFocus = false,
-  focusRequest = 0,
 }: SubagentChatInputBoxProps) {
   const field = useRef<HTMLTextAreaElement>(null);
+  const isMobile = useIsMobile();
   const filled = value.trim().length > 0;
+  const sendable = filled && (running || !starting);
   const placeholder = running ? "Steer a message" : "Send a message";
   const badge = !running && status ? STATUS_BADGE[status] : undefined;
   const runLabel = running
@@ -80,26 +80,21 @@ export function SubagentChatInputBox({
     element.style.height = `${element.scrollHeight}px`;
   }, [value]);
 
-  useLayoutEffect(() => {
-    if (!autoFocus) return;
-    const focus = () => field.current?.focus({ preventScroll: true });
-    focus();
-    // The spawn menu unmounts in the same turn and can move focus back to the
-    // parent composer. Retry once the panel is focusable.
-    const frame = requestAnimationFrame(focus);
-    return () => cancelAnimationFrame(frame);
-  }, [autoFocus, focusRequest]);
-
   return (
     <form
       className="flex w-full flex-col gap-4 rounded-[8px] bg-elevation-level-2 p-4 shadow-2xl"
       onSubmit={(event) => {
         event.preventDefault();
-        if (running && !filled) onStop();
-        else if (filled) onSubmit();
+        if (busy) return;
+        if (sendable) onSubmit();
       }}
     >
-      <div className="relative flex items-end overflow-hidden rounded-[4px] bg-input py-2 pr-12 pl-2">
+      <div
+        className={cn(
+          "relative flex items-end overflow-hidden rounded-[4px] bg-input py-2 pl-2",
+          running ? "pr-24" : "pr-12",
+        )}
+      >
         <textarea
           ref={field}
           rows={1}
@@ -110,9 +105,11 @@ export function SubagentChatInputBox({
           className="max-h-40 min-h-5 w-full resize-none bg-transparent px-1 text-small text-input outline-none placeholder:text-input-placeholder"
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
             if (event.key !== "Enter" || event.shiftKey) return;
+            if (isMobile && !event.metaKey && !event.ctrlKey) return;
             event.preventDefault();
-            if (filled && !busy) onSubmit();
+            if (sendable && !busy) onSubmit();
           }}
         />
         <Button
@@ -121,18 +118,32 @@ export function SubagentChatInputBox({
           variant={ButtonVariant.Primary}
           content={ButtonContent.Icon}
           className="absolute right-0 bottom-0"
-          disabled={busy || (!running && !filled)}
-          aria-label={running ? (filled ? "Steer" : "Stop") : "Send"}
+          disabled={busy || !sendable}
+          aria-label={running ? "Steer" : "Send"}
         >
-          <Icon iconName={running && !filled ? IconName.Stop : IconName.ArrowTop} />
+          <Icon iconName={IconName.ArrowTop} />
         </Button>
+        {running ? (
+          <Button
+            type="button"
+            size={ButtonSize.Medium}
+            variant={ButtonVariant.Ghost}
+            content={ButtonContent.Icon}
+            className="absolute right-12 bottom-0"
+            disabled={busy}
+            onClick={onStop}
+            aria-label="Stop"
+          >
+            <Icon iconName={IconName.Stop} />
+          </Button>
+        ) : null}
       </div>
       <div className="flex items-center gap-2.5 h-6">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {running ? null : (
             <Switch
               checked={background}
-              disabled={busy}
+              disabled={busy || starting}
               aria-label="Run in the background"
               onChange={onBackgroundChange}
             />
