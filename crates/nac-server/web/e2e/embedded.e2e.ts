@@ -1461,13 +1461,13 @@ test("shows live background delegated work, terminal events, cancellation, and g
   harness.provider.enqueue(
     "background-success",
     { token: "E2E_BACKGROUND_SUCCESS" },
-    { kind: "text", text: "background child completed" },
+    { kind: "text", text: "background child completed", stream: "request" },
     success,
   );
   harness.provider.enqueue(
     "background-cancel",
     { token: "E2E_BACKGROUND_CANCEL" },
-    { kind: "text", text: "should be cancelled" },
+    { kind: "text", text: "should be cancelled", stream: "request" },
     cancelled,
   );
   harness.provider.enqueue(
@@ -1482,23 +1482,35 @@ test("shows live background delegated work, terminal events, cancellation, and g
   ] as const) {
     harness.provider.enqueue(
       id,
-      { token, afterStep },
-      { kind: "text", text: `${id} acknowledged` },
+      // A child's instructions also contain its delegation label. Only the
+      // parent exposes subagent, so a child request cannot consume this reply.
+      { token, afterStep, requiredTools: ["subagent"] },
+      { kind: "text", text: `${id} acknowledged`, stream: "request" },
     );
   }
   harness.provider.enqueue(
     "background-generation-2",
     { token: "E2E_GENERATION_TWO" },
-    { kind: "text", text: "second generation completed", stream: true },
+    { kind: "text", text: "second generation completed", stream: "request" },
     continued,
   );
   harness.provider.enqueue(
     "observe-generation-2",
-    { token: "second generation completed", afterStep: "background-generation-2" },
-    { kind: "text", text: "generation 2 acknowledged", stream: true },
+    {
+      token: "second generation completed",
+      afterStep: "background-generation-2",
+      requiredTools: ["subagent"],
+    },
+    { kind: "text", text: "generation 2 acknowledged", stream: "request" },
   );
 
   const parentId = await createSession(request, harness, "direct");
+  const awaitParentReceipt = async (step: string) => {
+    await expect
+      .poll(() => harness.provider.requests.some((entry) => entry.matchedStep === step))
+      .toBe(true);
+    await waitForRunIdle(request, harness, parentId);
+  };
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
   await showSidePanel(page);
   const launch = async (description: string, prompt: string) => {
@@ -1513,6 +1525,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await launch("Background cancellation", "E2E_BACKGROUND_CANCEL");
   await cancelled.accepted;
   await launch("Background failure", "E2E_BACKGROUND_FAILURE");
+  await awaitParentReceipt("observe-failure");
 
   const subagent = (name: string) => page.getByRole("button", { name, exact: true });
   const composer = page.locator("form").filter({
@@ -1527,6 +1540,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
   cancelled.release();
   await subagent("Background failure").click();
   await expect(composer.getByText("Failed", { exact: true })).toBeVisible();
+  await awaitParentReceipt("observe-cancel");
 
   success.release();
   await subagent("Background success").click();
@@ -1534,28 +1548,29 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await expect(page.getByLabel("Coding agent completed")).toContainText("Background success");
   await expect(page.getByLabel("Coding agent failed")).toContainText("Background failure");
   await expect(page.getByLabel("Coding agent cancelled")).toContainText("Background cancellation");
-  await expect(page.getByRole("button", { name: "Resend" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
-  // The open parent is still answering the completion, and that run rejects
-  // another child generation until it finishes. Retry past the conflict.
-  await expect
-    .poll(
-      async () => {
-        const response = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
-          data: {
-            profile: "general",
-            description: "Background success",
-            prompt: "E2E_GENERATION_TWO",
-            background: true,
-            child_session_id: successChild.child_session_id,
-          },
-        });
-        return response.ok();
-      },
-      { timeout: 15_000, intervals: [100, 200, 400] },
-    )
-    .toBe(true);
+  // Parent acknowledgement messages may have normal snapshot/fork actions;
+  // the three durable completion cards themselves must remain passive.
+  for (const label of ["Coding agent completed", "Coding agent failed", "Coding agent cancelled"]) {
+    const event = page.getByLabel(label, { exact: true });
+    await expect(event).toHaveCount(1);
+    for (const name of ["Resend", "Revert to this snapshot", "Create fork"]) {
+      await expect(event.getByRole("button", { name, exact: true })).toHaveCount(0);
+    }
+  }
+  // Settle the parent's completion acknowledgement before issuing one new
+  // admission. Only observation is polled; the continuation is never replayed.
+  await awaitParentReceipt("observe-success");
+  const continuation = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
+    data: {
+      profile: "general",
+      description: "Background success",
+      prompt: "E2E_GENERATION_TWO",
+      background: true,
+      child_session_id: successChild.child_session_id,
+    },
+  });
+  expect(continuation.ok()).toBe(true);
+  expect((await continuation.json()).child_session_id).toBe(successChild.child_session_id);
   await continued.accepted;
   await expect(composer.locator("span", { hasText: "Running in the background" })).toBeVisible();
   await expect
@@ -1573,6 +1588,17 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await expect(page.getByLabel("Coding agent completed").last()).toContainText("Generation 2");
   await expect(page.getByRole("button", { name: "Open exact transcript" }).last()).toBeVisible();
   expect(successChild.child_session_id).toBeTruthy();
+  await awaitParentReceipt("observe-generation-2");
+  expect(harness.provider.requests.map((entry) => entry.matchedStep)).toEqual([
+    "background-success",
+    "background-cancel",
+    "background-failure",
+    "observe-failure",
+    "observe-cancel",
+    "observe-success",
+    "background-generation-2",
+    "observe-generation-2",
+  ]);
   harness.provider.assertConsumed();
 });
 
