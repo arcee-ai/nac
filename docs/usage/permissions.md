@@ -162,7 +162,7 @@ billing requirements. A working ChatGPT connection does not establish Arcee
 review readiness; insufficient credits for an Arcee coding model are also
 separate from a missing review model.
 
-The current reviewer adapter requests `typesafe/jev-1.13` at the credential's
+The default reviewer adapter requests `cloudflare/clef` at the credential's
 Arcee origin on `/api/alpha/decisions`. Each environment needs an active,
 API-enabled registry row of type `decisions` for that name, included in the
 selected workspace's access profile. An authenticated request can return
@@ -185,11 +185,16 @@ API-key reviews; stored logins use their own environment and take precedence.
 ### Testing the reviewer
 
 - `make test-e2e-review` runs the browser journey against a build with the
-  `review-fixture` feature, whose scripted reviewer replaces Jev only when
-  `NAC_REVIEW_FIXTURE` is set. Ordinary builds cannot load it.
-- `cargo test --locked -p nac-core live_jev_smoke -- --ignored --nocapture` sends one
-  synthetic request to the configured Arcee environment. To test with an Arcee API key
-  from that environment, set `ARCEE_API_KEY` and
+  `review-fixture` feature, whose scripted reviewer replaces the calibrated
+  reviewer only when `NAC_REVIEW_FIXTURE` is set. Ordinary builds cannot load it.
+- `cargo test --locked -p nac-core live_default_clef_scope_profile_smoke -- --ignored --nocapture`
+  sends one synthetic request through the default reviewer factory. Use an
+  isolated dev2 `NAC_HOME` with its existing environment-issued Arcee login,
+  and leave `NAC_PERMISSION_REVIEW_PROFILE` unset. The test refuses credentials
+  for other origins and never executes the described command.
+- The legacy diagnostic `cargo test --locked -p nac-core live_jev_smoke -- --ignored --nocapture`
+  sends one synthetic Jev request to the configured Arcee environment. To test
+  with an Arcee API key from that environment, set `ARCEE_API_KEY` and
   `NAC_REVIEW_ARCEE_BASE_URL=https://api.apps.dev.arcee.ai/api/v1` (or the
   dev2 host). The override applies only to API-key review and must be an
   approved Arcee origin.
@@ -206,22 +211,28 @@ session through both a routine approval and a blocked action. Record the code
 revision, environment and result; an older corpus pass does not establish that
 the current deployment is ready.
 
-### Operator reviewer experiments
+### Calibrated reviewer profile
 
-New permission brokers use the existing Jev reviewer by default. For an
-explicit operator experiment, `NAC_PERMISSION_REVIEW_PROFILE` accepts only
-`clef-scope-v6`. Unset the variable to keep legacy Jev; an
-empty, unknown or non-Unicode value disables automatic review with a fixed
-configuration error. Selection is snapshotted when each broker is constructed.
-Changing the environment does not mutate an existing broker's profile.
+New permission brokers use the frozen `clef-scope-v6` profile by default.
+`NAC_PERMISSION_REVIEW_PROFILE` may be unset or explicitly set to
+`clef-scope-v6`; an empty, unknown or non-Unicode value disables automatic
+review with a fixed configuration error. There is no automatic Jev fallback.
+Selection is snapshotted when each broker is constructed. Changing the
+environment does not mutate an existing broker's profile.
 
-The fixed training-selected profile remains an experiment. Training results
-and passing finite fixtures alone do not qualify deployment; evaluate the
-frozen model, rubric and numeric gates on fresh cases before enabling an
-environment. Prior rejected profiles are not enabled by this setting.
+Manual remains the default permission mode. Selecting Approve for me opts in
+to using this reviewer; the reviewer default does not enable automatic review
+for a session. The existing ArceeFM route and authentication are retained;
+NAC does not connect directly to Cloudflare or require an OpenRouter key.
+
+The frozen profile passed the fresh dev2 comparison described in the committed
+benchmark provenance. Finite fixtures do not qualify every deployment; verify
+actual model access in the target environment before enabling it for users.
+Prior rejected profiles are not enabled by this setting.
 
 The Clef profile binds the model, exact additional scope question, numeric
-gates and history identity. Legacy Jev remains unchanged. Clef requires safe
+gates and history identity. Legacy Jev remains an explicit diagnostic baseline,
+not an automatic fallback. Clef requires safe
 probability at least 0.80 on every backend, routine category probability at
 least 0.60, explicit confidence at least 0.40, and scope probability at least
 0.70. Every gate must pass;

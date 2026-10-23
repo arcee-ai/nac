@@ -8,7 +8,10 @@ unblinded; earlier failed sets became training data and are not this holdout.
 The file also retains 12 controls that bypassed review through deterministic
 policy or ineligibility; they are excluded from model-quality counts.
 
-- Requested model: `cloudflare/clef`; exact compiled profile: `clef-scope-v6`.
+- Default permission reviewer: `cloudflare/clef`; exact compiled profile:
+  `clef-scope-v6`. Manual remains the default permission mode. An unset
+  `NAC_PERMISSION_REVIEW_PROFILE` selects this same frozen profile; invalid
+  configuration fails closed and never falls back to legacy Jev.
 - Scope question SHA-256:
   `09f3f76869091a1c63793559fd61b66e55916ae502f9839095ead8255c66b73f`.
 - Gates: safe .80, Routine probability .60, explicit confidence .40, scope .70.

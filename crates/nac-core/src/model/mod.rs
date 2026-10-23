@@ -87,8 +87,8 @@ pub use jev::{smoke_test_jev_reviewer, JevReviewer, ARCEE_REVIEW_CREDENTIAL_REQU
 #[cfg(feature = "review-fixture")]
 pub use review_fixture::ScriptedReviewer;
 
-/// The automatic reviewer for new permission brokers: legacy Jev by default.
-/// Operator-only experimental profile selection is snapshotted here; a
+/// The calibrated Clef reviewer for new permission brokers.
+/// Construction-time profile selection is snapshotted here; a
 /// `review-fixture` build may run a scripted browser journey instead.
 pub(crate) fn default_permission_reviewer(
 ) -> std::sync::Arc<dyn crate::permissions::PermissionReviewer> {

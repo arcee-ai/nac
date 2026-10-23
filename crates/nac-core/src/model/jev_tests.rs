@@ -281,11 +281,11 @@ async fn live_jev_smoke() {
 /// Exercise the factory-selected production profile/authentication path with a
 /// synthetic projected request. This never invokes the described shell command.
 #[tokio::test]
-#[ignore = "requires explicit clef-scope-v6 selection and isolated dev2 credentials"]
-async fn live_production_clef_scope_profile_smoke() {
+#[ignore = "requires isolated dev2 credentials for the default Clef reviewer"]
+async fn live_default_clef_scope_profile_smoke() {
     assert!(
-        std::env::var("NAC_PERMISSION_REVIEW_PROFILE").as_deref() == Ok("clef-scope-v6"),
-        "explicit clef-scope-v6 operator selection is required"
+        std::env::var_os("NAC_PERMISSION_REVIEW_PROFILE").is_none(),
+        "leave NAC_PERMISSION_REVIEW_PROFILE unset to test the production default"
     );
     let credentials = resolve_credentials().expect("isolated Arcee credentials are required");
     assert!(!credentials.is_empty());

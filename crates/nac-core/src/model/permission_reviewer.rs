@@ -1,4 +1,4 @@
-//! Operator-only, construction-time reviewer selection.
+//! Construction-time selection of the qualified permission reviewer profile.
 
 use std::ffi::OsStr;
 use std::sync::Arc;
@@ -13,8 +13,7 @@ use crate::permissions::{
 };
 
 const PROFILE_ENV: &str = "NAC_PERMISSION_REVIEW_PROFILE";
-const INVALID_PROFILE: &str =
-    "NAC_PERMISSION_REVIEW_PROFILE must be clef-scope-v6; unset it to use the legacy Jev reviewer.";
+const INVALID_PROFILE: &str = "NAC_PERMISSION_REVIEW_PROFILE must be unset or clef-scope-v6.";
 
 pub(super) fn from_environment() -> Arc<dyn PermissionReviewer> {
     from_selection(std::env::var_os(PROFILE_ENV).as_deref())
@@ -22,7 +21,7 @@ pub(super) fn from_environment() -> Arc<dyn PermissionReviewer> {
 
 fn from_selection(selection: Option<&OsStr>) -> Arc<dyn PermissionReviewer> {
     let profile = match selection {
-        None => return Arc::new(JevReviewer::default()),
+        None => ReviewProfile::ClefScopeV6,
         Some(value) if value == OsStr::new("clef-scope-v6") => ReviewProfile::ClefScopeV6,
         // Do not echo configuration values, which may contain sensitive text.
         // Invalid input never silently switches to another reviewer.
@@ -100,8 +99,11 @@ mod tests {
     }
 
     #[test]
-    fn default_is_legacy_and_profile_selection_is_owned_and_exact() {
-        assert_eq!(from_selection(None).identity(), "jev:typesafe/jev-1.13");
+    fn default_is_qualified_clef_and_profile_selection_is_owned_and_exact() {
+        assert_eq!(
+            from_selection(None).identity(),
+            "decisions:cloudflare/clef:clef-scope-v6"
+        );
         {
             let value = "clef-scope-v6";
             let identity = "decisions:cloudflare/clef:clef-scope-v6";
