@@ -1,0 +1,117 @@
+import type React from "react";
+import { useId } from "react";
+
+import { useIsMobile } from "../../hooks/useMediaQuery";
+import { cn } from "../../lib/cn";
+import { ButtonSize, ButtonVariant } from "../button";
+import CopyButton from "../button/CopyButton";
+import Icon, { IconName } from "../icon";
+import Loader, { LoaderSize } from "../loader";
+import { TooltipPosition } from "../tooltip";
+
+export { default as InsightCodeBox } from "./InsightCodeBox";
+export { default as InsightLinkButton } from "./InsightLinkButton";
+
+export enum InsightItemState {
+  Default = "default",
+  Loading = "loading",
+  Error = "error",
+}
+
+interface InsightItemProps {
+  /** Scroll-into-view anchor. */
+  id?: string;
+  icon: IconName;
+  /** Loading appends the ellipsis, so pass the bare loading title ("Thinking"). */
+  title: string;
+  state?: InsightItemState;
+  /** Highlights the item a list row points at; the layout does not move. */
+  active?: boolean;
+  /** What the header's copy button puts on the clipboard. Default state only. */
+  copyText?: string | null;
+  /** Shown under the body in the Error state. */
+  errorMessage?: string | null;
+  /**
+   * The type's body, rendered straight into the item's 8px-gap column in every
+   * state: the type decides what stays visible while loading or after a
+   * failure (a session link, the input box).
+   */
+  children?: React.ReactNode;
+}
+
+/**
+ * One step in the Insights detail column: a header with the type icon, the
+ * title and a copy button, then the type's own body. Loading swaps the icon
+ * for the spinner and shimmers the title; Error swaps it for the error-tone
+ * Close and appends the message. Neither offers copy. Body text defaults to
+ * the design's 12px tertiary text; code boxes and links bring their own.
+ */
+const InsightItem: React.FC<InsightItemProps> = ({
+  id,
+  icon,
+  title,
+  state = InsightItemState.Default,
+  active = false,
+  copyText,
+  errorMessage,
+  children,
+}) => {
+  const isMobile = useIsMobile();
+  const titleId = useId();
+  const loading = state === InsightItemState.Loading;
+  const failed = state === InsightItemState.Error;
+
+  return (
+    <div
+      id={id}
+      role="group"
+      aria-labelledby={titleId}
+      aria-current={active || undefined}
+      className={cn(
+        "flex flex-col gap-2 p-4 pb-12 text-micro text-basic-tertiary",
+        active && "bg-btn-ghost-highlighted",
+      )}
+    >
+      <div className="flex w-full items-start gap-2 py-1">
+        {loading ? (
+          <Loader size={LoaderSize.Small} aria-hidden className="shrink-0" />
+        ) : (
+          <Icon
+            iconName={failed ? IconName.Close : icon}
+            size={20}
+            aria-hidden
+            className={cn(
+              "shrink-0",
+              failed ? "[&>path]:fill-error-primary" : "[&>path]:fill-basic-primary",
+            )}
+          />
+        )}
+        <span
+          id={titleId}
+          className={cn(
+            "flex-1 min-w-0 break-words label-small",
+            loading ? "text-shimmer-basic motion-reduce:animate-none" : "text-basic-primary",
+          )}
+        >
+          {loading ? `${title}…` : title}
+        </span>
+        {copyText && state === InsightItemState.Default ? (
+          <CopyButton
+            value={copyText}
+            title={`Copy ${title}`}
+            size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+            variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+            position={TooltipPosition.BottomLeft}
+            className="md:!h-4 md:!min-h-4 md:!p-0"
+          />
+        ) : null}
+      </div>
+      {children}
+      {failed && errorMessage ? (
+        <p className="break-words text-small text-error-primary">{errorMessage}</p>
+      ) : null}
+    </div>
+  );
+};
+
+export default InsightItem;
