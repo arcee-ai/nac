@@ -17640,7 +17640,8 @@
             "type": "string"
           },
           "excluded_source_edits": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Source-selection policy, not the result of scanning dirty contents."
           },
           "project_cwd": {
             "type": "string"

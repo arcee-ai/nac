@@ -64,6 +64,7 @@ pub struct TaskLaunchSource {
     pub default_ref: String,
     pub selected_ref: String,
     pub commit: String,
+    /// Source-selection policy, not the result of scanning dirty contents.
     pub excluded_source_edits: bool,
 }
 
