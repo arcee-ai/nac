@@ -151,6 +151,9 @@
   --color-border-info-tertiary: var(--blue-trans-100);
   --color-border-info-muted: var(--blue-trans-50);
 
+  /* Border / Input */
+  --color-border-input: var(--dark-trans-50);
+
   /* Border / Inversed */
   --color-border-primary-inversed: var(--white);
   --color-border-secondary-inversed: var(--white-trans-500);

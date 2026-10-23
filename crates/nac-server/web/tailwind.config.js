@@ -243,6 +243,8 @@ const config = {
         "info-tertiary": "var(--color-border-info-tertiary)",
         "info-muted": "var(--color-border-info-muted)",
 
+        input: "var(--color-border-input)",
+
         "primary-inversed": "var(--color-border-primary-inversed)",
         "secondary-inversed": "var(--color-border-secondary-inversed)",
         "tertiary-inversed": "var(--color-border-tertiary-inversed)",
