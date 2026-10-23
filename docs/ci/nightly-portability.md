@@ -73,8 +73,8 @@ claim that every detached process identity is observable. Abrupt SIGKILL/host
 loss may prevent final reports; missing evidence is not success. Hosted runner
 teardown is the final isolation boundary.
 
-Five controls cover inventory drift, exact-selection failure, allowlist scope,
-real Rust first-attempt failure and cancellation of an actual parent/child
+Seven controls cover stale evidence rejection, inventory drift, exact-selection
+failure, the full serialized command plan, allowlist scope, real Rust first-attempt failure and cancellation of an actual parent/child
 process behind a readiness barrier. The Rust fixture lives in its own temporary
 directory, mutates no repository source and never overlaps the workspace suite.
 To demonstrate a failing full runner receipt manually:

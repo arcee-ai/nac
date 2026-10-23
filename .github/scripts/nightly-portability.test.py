@@ -18,6 +18,17 @@ spec.loader.exec_module(runner)
 
 
 class Controls(unittest.TestCase):
+    def test_stale_evidence_cannot_mix_candidates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            sentinel = output / 'report.json'
+            sentinel.write_text('previous candidate')
+            result = subprocess.run([sys.executable, str(SCRIPT), '--output', str(output)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('new or empty evidence directory', result.stderr)
+            self.assertEqual(sentinel.read_text(), 'previous candidate')
+
     def test_inventory_drift_fails_closed(self):
         inventory = json.loads(runner.INVENTORY.read_text())
         listing = '\n'.join(case['name'] + ': test' for case in inventory)
@@ -106,6 +117,7 @@ elif '--workspace' in sys.argv and '--no-run' not in sys.argv:
             # Exercise the actual command supervisor in a subprocess, with readiness barrier.
             helper = root / 'helper.py'
             helper.write_text('''import importlib.util, pathlib, signal, sys
+sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location('runner', sys.argv[1])
 r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)
 signal.signal(signal.SIGTERM, r.interrupt)

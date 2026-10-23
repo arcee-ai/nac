@@ -104,6 +104,8 @@ def main():
                         help='qualification only: fail a disposable real Rust test before suites')
     args = parser.parse_args()
     output = args.output.resolve()
+    if output.exists() and any(output.iterdir()):
+        parser.error('--output must be a new or empty evidence directory')
     output.mkdir(parents=True, exist_ok=True)
     report = {'platform': platform.platform(), 'architecture': platform.machine(),
               'runner_image': os.environ.get('ImageVersion'),
