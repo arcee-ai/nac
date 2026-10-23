@@ -53,6 +53,15 @@ suite. The runner verifies the exact success line, rejecting zero-test or
 still-ignored results. There is no blanket include-ignored invocation and no
 retry. A missing SFTP server, worker, inventory or failed command fails the lane.
 
+The shared test HTTP reader clears accepted-socket nonblocking mode before its
+existing five-second read timeout. Darwin can inherit `O_NONBLOCK` from the
+fixture listener; a timeout alone does not clear it, and the old reader treated
+`WouldBlock` as a missing request. A Unix real-socket regression forces that
+state, verifies the empty read, gates the peer request at acceptance, and checks
+both parsed JSON and cleared descriptor flags. Removing normalization fails the
+flag invariant even if the writer wins scheduling. This corrects test support;
+production MCP transport, protocol assertions and timeout budgets are unchanged.
+
 ## Evidence, cancellation and qualification
 
 The 14-day artifact name includes candidate SHA, run ID and attempt. It contains
