@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { constants } from "node:fs";
 import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
@@ -33,7 +34,11 @@ declare class MutationObserver {
   observe(target: unknown, options: Record<string, boolean>): void;
   disconnect(): void;
 }
-declare const navigator: { clipboard: { writeText: (text: string) => Promise<void> } };
+declare const navigator: {
+  platform: string;
+  userAgent: string;
+  clipboard: { writeText: (text: string) => Promise<void> };
+};
 declare function requestAnimationFrame(callback: (timestamp: number) => void): number;
 declare function cancelAnimationFrame(handle: number): void;
 
@@ -138,13 +143,26 @@ async function copyRow(page: Page, pane: Locator, line: string, cols: number, ro
   });
 }
 
-test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste return to the same shell", async ({
+test("connected native shell, less resize, and trusted browser bracketed UTF-8 paste return to the same shell", async ({
   harness,
   request,
   page,
 }, info) => {
-  test.skip(process.platform !== "darwin", "This episode qualifies installed Mac Zsh/less only");
-  await Promise.all([fs.access("/bin/zsh"), fs.access("/usr/bin/less")]);
+  const shell = process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+  expect(["darwin", "linux"], "supported native terminal browser platform").toContain(
+    process.platform,
+  );
+  await Promise.all([shell, "/usr/bin/less"].map((file) => fs.access(file, constants.X_OK)));
+  const browser = await page.evaluate(() => ({
+    platform: navigator.platform,
+    userAgent: navigator.userAgent,
+  }));
+  expect(browser.platform, "browser keyboard platform must be recognized").toMatch(/Mac|Linux|Win/);
+  const shortcut = browser.platform.includes("Mac") ? "Meta+V" : "Control+V";
+  await info.attach("native-browser-profile", {
+    body: JSON.stringify({ host: process.platform, shell, ...browser, shortcut }, null, 2),
+    contentType: "application/json",
+  });
   const session = await createDirectSession(request, harness);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
@@ -175,11 +193,11 @@ test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste retu
     terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
     const accessible = pane.locator(".xterm-accessibility");
     await focus(pane);
-    await command(page, "exec /bin/zsh -f");
     await command(
       page,
-      "printf '" + octal("ZSH-REAL-READY\n") + "'; /usr/bin/less -R -- pager.txt",
+      `exec ${shell} ${process.platform === "darwin" ? "-f" : "--noprofile --norc"}`,
     );
+    await command(page, "printf '%s\\n' \"$$\" > shell-before.pid; /usr/bin/less -R -- pager.txt");
     await expect(accessible).toContainText("LESS-REAL-CONTENT");
     const before = await api.getUserTerminal(session, terminal);
     await page.setViewportSize({ width: 970, height: 600 });
@@ -191,8 +209,22 @@ test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste retu
       .toBe(true);
     await expect(accessible).toContainText("LESS-REAL-CONTENT");
     await page.keyboard.press("q");
-    await command(page, "printf '" + octal("LESS-SHELL-BACK\n") + "'; python3 capture_paste.py");
+    await command(
+      page,
+      "printf '%s\\n' \"$$\" > shell-after-pager.pid; stty size > resized.txt; python3 capture_paste.py",
+    );
     await expect(accessible).toContainText("PASTE-RAW-READY");
+    const shellPid = (await fs.readFile(path.join(workspace, "shell-before.pid"), "utf8")).trim();
+    expect(shellPid).toMatch(/^[1-9][0-9]*$/);
+    expect((await fs.readFile(path.join(workspace, "shell-after-pager.pid"), "utf8")).trim()).toBe(
+      shellPid,
+    );
+    expect(
+      (await fs.readFile(path.join(workspace, "resized.txt"), "utf8"))
+        .trim()
+        .split(/\s+/)
+        .map(Number),
+    ).not.toEqual([before.rows, before.cols]);
     const pasteInputs: number[][] = [];
     page.on("request", (sent) => {
       if (
@@ -221,7 +253,7 @@ test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste retu
       ).clipboard.writeText("Ω中\nliteral paste"),
     );
     expect(pasteInputs).toHaveLength(0);
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+    await page.keyboard.press(shortcut);
     await expect
       .poll(async () =>
         JSON.parse(
@@ -229,13 +261,22 @@ test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste retu
         ),
       )
       .toEqual(Array.from(new TextEncoder().encode("\x1b[200~Ω中\rliteral paste\x1b[201~")));
-    await command(page, "printf '" + octal("PASTE-SHELL-BACK\n") + "'");
+    expect(pasteInputs.flat(), "trusted paste product input bytes").toEqual(
+      Array.from(new TextEncoder().encode("\x1b[200~Ω中\rliteral paste\x1b[201~")),
+    );
+    await command(
+      page,
+      "printf '%s\\n' \"$$\" > shell-after-paste.pid; printf '" + octal("PASTE-SHELL-BACK\n") + "'",
+    );
     await expect(accessible).toContainText("PASTE-SHELL-BACK");
+    expect((await fs.readFile(path.join(workspace, "shell-after-paste.pid"), "utf8")).trim()).toBe(
+      shellPid,
+    );
     expect((await api.listUserTerminals(session)).terminals.map((row) => row.terminal_id)).toEqual([
       terminal,
     ]);
     await page.screenshot({
-      path: info.outputPath("connected-zsh-less-paste.png"),
+      path: info.outputPath("connected-native-shell-less-paste.png"),
       fullPage: true,
     });
   } finally {
