@@ -37,3 +37,20 @@ fn local_parent_link_escape_is_flagged_after_external_bytes_are_read() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn local_non_utf8_link_target_is_lossy() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let root = std::env::temp_dir().join(format!("nac-link-bytes-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    symlink(OsStr::from_bytes(b"missing-\xff"), root.join("link")).unwrap();
+    assert_eq!(
+        local_worktree(&root.canonicalize().unwrap(), "link", 1024).unwrap(),
+        WorktreeRead::Symlink {
+            target: "missing-\u{fffd}".as_bytes().to_vec(),
+            escapes: false,
+        }
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}

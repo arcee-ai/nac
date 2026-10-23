@@ -42,11 +42,11 @@ gate, never a successful capture. Test names below are searchable suffixes.
 | --- | --- | --- |
 | Whole bound repo from nested effective cwd | `history_preserves_source_and_ordinary_bytes_modes_links_from_nested_cwd`; resolves top-level and includes sibling paths | PASS for Git root resolution; saved-project/host binding is ALL-415/418 |
 | Final disk text/binary, unstaged wins, ordinary untracked, executable modes | Same actual-helper test compares literal blobs, real index, HEAD, disk bytes and tree modes | PASS on ordinary unfiltered fixture |
-| Deletes/renames as resulting paths | Oracle `supported_bytes_deletes_renames_mode_staging_nested_cwd`, dirty benchmark archive/manifest equality | PASS in isolated candidate recipe; no production launch claim |
+| Deletes/renames as resulting paths | Oracle `supported_bytes_deletes_renames_mode_staging_nested_cwd`, dirty benchmark archive/manifest equality | PASS in actual raw-history test `raw_history_preserves_non_utf8_link_targets_and_resulting_rename_deletion_paths`, including whole deleted parent directory; no production launch claim |
 | Tracked files remain included despite ignore matches | `fresh_history_index_silently_omits_tracked_files_matching_ignore` proves omission from fresh private index | **FAIL** |
 | Ignored untracked/build trees excluded, no traversal | Actual-helper ignored fixture excludes secret. Oracle prunes an unreadable ignored nested repo and records visited directories; all benchmark inventories exclude ignored tree; Git trace2 directory counts match only selected directories | PASS on fixtures via oracle + Git trace2; no syscall-level arbitrary-race proof |
 | Git state/staging not copied | Private index isolated; archive only tree paths. Actual source index bytes unchanged. No staging reproduction promised | PASS on fixtures |
-| Safe relative/dangling/directory links preserved literally; no directory traversal | Actual-helper link with newline target, oracle dangling/directory link and parent-link rejection | PASS for literal Local links; capture path safety fails below |
+| Safe relative/dangling/directory links preserved literally; no directory traversal | Actual-helper link with newline target, oracle dangling/directory link and parent-link rejection. Raw history preserves non-UTF-8 targets, but `local_non_utf8_link_target_is_lossy` proves Local reader changes `0xff` to replacement-character bytes | **FAIL** for Local reader byte fidelity; ordinary UTF-8/raw-history cases pass |
 | Absolute/escaping links rejected with exact path | Actual helper accepts both and preserves unsafe target bytes; oracle rejects `bad` | **FAIL** |
 | Unsupported link chains rejected | Oracle `link_chain`, `link_chain_with_directory_component`; history has no such validation | **FAIL** |
 | No reads through linked parents/source type races | Actual `local_parent_link_escape_is_flagged_after_external_bytes_are_read` returns outside fixture bytes with `escapes=true`; `escapes=false` for symlink means parent containment only | **FAIL** |
@@ -87,8 +87,9 @@ command/output limits or a request deadline.
 
 The Local reader first stats/canonicalizes, then reads by pathname. It can read
 outside before a consumer sees the containment flag, and stat/open replacement
-windows remain. A symlink's literal target is correctly returned locally, but
-its `escapes` field describes its parent directory. It is not target validation.
+windows remain. The Local symlink reader uses `to_string_lossy()`, so non-UTF-8 literal targets
+are changed even though raw Git history preserves them. Its `escapes` field
+describes its parent directory. It is not target validation.
 SSH behavior is outside this Local qualification and is not inferred from it.
 
 ## Recovery and race boundaries
@@ -125,10 +126,10 @@ unrepaired history recipe on safe fixtures, not a production capture measurement
 
 | Fixture | Candidates | Selected bytes | Git commands | First / warm seconds | New object allocation first / warm | Private index |
 | --- | ---: | ---: | ---: | --- | --- | ---: |
-| Small clean: 24 × 1 KiB | 26 | 24,590 | 24 | 0.266 / 0.245 | 4 / 0 KiB | 4 KiB |
-| Small dirty | 27 | 23,599 | 24 | 0.266 / 0.235 | 24 / 4 KiB | 4 KiB |
-| Larger clean: 4,096 × 8 KiB | 4,098 | 33,554,446 | 86 | 1.831 / 1.528 | 4 / 4 KiB | 324 KiB |
-| Larger dirty | 4,099 | 33,546,287 | 86 | 1.773 / 1.636 | 24 / 4 KiB | 324 KiB |
+| Small clean: 24 × 1 KiB | 26 | 24,590 | 24 | 0.298 / 0.304 | 4 / 4 KiB | 4 KiB |
+| Small dirty | 27 | 23,599 | 24 | 0.289 / 0.293 | 24 / 0 KiB | 4 KiB |
+| Larger clean: 4,096 × 8 KiB | 4,098 | 33,554,446 | 86 | 1.699 / 1.421 | 4 / 4 KiB | 324 KiB |
+| Larger dirty | 4,099 | 33,546,287 | 86 | 1.738 / 1.439 | 24 / 4 KiB | 324 KiB |
 
 The larger source object database already occupied 50,491,392 physical bytes;
 Git deduplicates existing blobs, but that says nothing about byte fidelity.
