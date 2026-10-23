@@ -114,6 +114,12 @@ async fn retained_task_http_cancel_before_commit_retains_workspace_and_rejects_c
     assert_eq!(record.phase, TaskLaunchPhase::PreparingRuntime);
     assert!(!record.session_present);
     assert!(record.workspace_path.join("nested/file").exists());
+    assert!(record
+        .workspace_path
+        .parent()
+        .unwrap()
+        .join(format!("{}.materialized", record.session_id))
+        .is_file());
     // Passive status did not publish/admit the initial input.
     assert!(!sessions::session_exists(&manager.inner.store_path, &record.session_id).unwrap());
     let mut changed = request.clone();
@@ -242,6 +248,97 @@ async fn retained_task_concurrent_first_launches_publish_distinct_sessions_and_i
         assert_eq!(response.status(), StatusCode::OK);
         assert!(record.workspace_path.join("nested/file").is_file());
     }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn retained_task_restart_refuses_partial_checkout_without_admitting_initial_input() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retained_task_partial_checkout");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let manager = test_manager(&root);
+    let request = fixture(&root, &manager).await;
+    let project = nac_core::projects::load_project_launch_context(
+        &manager.inner.store_path,
+        &request.project_id,
+    )
+    .unwrap()
+    .project;
+    let source =
+        nac_core::workspace::task_worktree::resolve_source(&project, &request, None, None).unwrap();
+    let record =
+        nac_core::store::reserve_task_launch(&manager.inner.store_path, request.clone(), source)
+            .unwrap();
+    nac_core::store::update_task_launch(
+        &manager.inner.store_path,
+        &request.request_id,
+        TaskLaunchPhase::PreparingWorkspace,
+        None,
+    )
+    .unwrap();
+    let parent = record.workspace_path.parent().unwrap();
+    std::fs::create_dir_all(parent).unwrap();
+    std::fs::write(
+        parent.join(format!("{}.owner", record.session_id)),
+        &request.request_id,
+    )
+    .unwrap();
+    let index = std::fs::read(root.join("repo/.git/index")).unwrap();
+    // This is Git's state after HEAD registration but before populating files.
+    git(
+        &root.join("repo"),
+        &[
+            "worktree",
+            "add",
+            "--no-checkout",
+            "--detach",
+            record.workspace_path.to_str().unwrap(),
+            &record.source.commit,
+        ],
+    );
+    std::fs::write(record.workspace_path.join("keep"), "partial work").unwrap();
+    drop(manager);
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
+    assert_eq!(
+        launch_status(app.clone(), &request.request_id).await.phase,
+        TaskLaunchPhase::Failed
+    );
+    let response = post_json(
+        app.clone(),
+        "/task-launches",
+        serde_json::to_value(&request).unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let status = launch_status(app.clone(), &request.request_id).await;
+            assert_ne!(status.phase, TaskLaunchPhase::Ready);
+            if status
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("materialization"))
+            {
+                assert_eq!(status.phase, TaskLaunchPhase::Failed);
+                assert!(!status.session_present);
+                assert!(status.first_input_id.is_none());
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(sessions::list_sessions(&manager.inner.store_path)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        std::fs::read_to_string(record.workspace_path.join("keep")).unwrap(),
+        "partial work"
+    );
+    assert!(!record.workspace_path.join("nested/file").exists());
+    assert_eq!(std::fs::read(root.join("repo/.git/index")).unwrap(), index);
     std::fs::remove_dir_all(root).unwrap();
 }
 

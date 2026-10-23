@@ -103,6 +103,52 @@ fn source_probe_respects_git_discovery_ceiling_and_explicit_gitdir_errors() {
 }
 
 #[test]
+fn interrupted_materialization_with_valid_head_never_resumes_as_ready() {
+    let (root, project, request) = fixture();
+    let source = resolve_source(&project, &request, None, None).unwrap();
+    let launch = store::reserve_task_launch(&root.join("store.db"), request, source).unwrap();
+    let parent = launch.workspace_path.parent().unwrap();
+    std::fs::create_dir_all(parent).unwrap();
+    std::fs::write(
+        parent.join(format!("{}.owner", launch.session_id)),
+        &launch.request.request_id,
+    )
+    .unwrap();
+    git(
+        &root.join("repo"),
+        &[
+            "worktree",
+            "add",
+            "--no-checkout",
+            "--detach",
+            launch.workspace_path.to_str().unwrap(),
+            &launch.source.commit,
+        ],
+    );
+    assert_eq!(
+        git(&launch.workspace_path, &["rev-parse", "HEAD"]),
+        launch.source.commit
+    );
+    std::fs::write(launch.workspace_path.join("keep"), "partial user work").unwrap();
+    assert!(prepare_workspace(&launch)
+        .unwrap_err()
+        .to_string()
+        .contains("materialization"));
+    assert!(!launch.workspace_path.join("nested/file").exists());
+    assert_eq!(
+        std::fs::read_to_string(launch.workspace_path.join("keep")).unwrap(),
+        "partial user work"
+    );
+    std::fs::write(
+        parent.join(format!("{}.materialized", launch.session_id)),
+        "wrong-checkpoint",
+    )
+    .unwrap();
+    assert!(prepare_workspace(&launch).is_err());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn pins_moving_deleted_ref_and_preserves_dirty_source_head_index_and_files() {
     let (root, project, request) = fixture();
     let repo = root.join("repo");
@@ -134,10 +180,30 @@ fn pins_moving_deleted_ref_and_preserves_dirty_source_head_index_and_files() {
         std::fs::read_to_string(repo.join("untracked")).unwrap(),
         "untracked"
     );
-    // Restart reconciliation uses the existing owned path without resetting it.
+    // Proof persisted but its acknowledgement/phase update may be lost. Retry
+    // reuses the materialized checkout, including newer user edits.
     std::fs::write(cwd.join("work"), "retained").unwrap();
+    store::reconcile_task_launches(&root.join("store.db")).unwrap();
+    let launch = store::load_task_launch(&root.join("store.db"), &launch.request.request_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(launch.phase, store::TaskLaunchPhase::Failed);
     assert_eq!(prepare_workspace(&launch).unwrap(), cwd);
     assert!(cwd.join("work").is_file());
+    let proof = launch
+        .workspace_path
+        .parent()
+        .unwrap()
+        .join(format!("{}.materialized", launch.session_id));
+    let inside_checkout = cwd.join("materialized-proof");
+    std::fs::rename(&proof, &inside_checkout).unwrap();
+    assert!(
+        prepare_workspace(&launch).is_err(),
+        "a checkout entry is never materialization authority"
+    );
+    assert!(cwd.join("work").is_file());
+    std::fs::rename(inside_checkout, proof).unwrap();
+    assert_eq!(prepare_workspace(&launch).unwrap(), cwd);
     std::fs::remove_dir_all(root).unwrap();
 }
 
