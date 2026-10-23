@@ -25,6 +25,9 @@ mod registry;
 mod resources;
 mod tool;
 
+#[cfg(all(test, unix))]
+mod qualification;
+
 pub use registry::SkillRegistry;
 pub use tool::auto_mounts;
 

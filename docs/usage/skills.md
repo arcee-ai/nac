@@ -1,6 +1,6 @@
 # Skills
 
-Skills are directories that contain a `SKILL.md` file. nac discovers them from project and user skill trees, shows the orchestrator a compact catalog, preloads selected skills into worker threads, and expands `$skillname` references in top-level prompts. Workers cannot activate skills themselves: there is no `activate_skill` tool, and workers do not receive an available-skills listing.
+Skills are directories that contain a `SKILL.md` file. nac discovers them from project and user skill trees, shows the orchestrator a compact catalog, preloads selected skills into worker threads, and expands `$skillname` references in top-level direct and orchestrator prompts. Workers cannot activate skills themselves: there is no `activate_skill` tool, and workers do not receive an available-skills listing.
 
 ## Discovery
 
@@ -35,9 +35,17 @@ Instructions the worker should follow.
 
 `name` and `description` are required. A missing or empty description or body skips the skill with a warning. If `name` does not match the parent directory, nac still loads it and warns. Unquoted `description` values that contain colons are repaired so they parse as YAML.
 
-nac ignores `disable-model-invocation`. Avoid interactive skills: nac is intended to run rather autonomously.
+nac parses `name`, `description`, and `compatibility`. Other frontmatter, including `disable-model-invocation`, `user-invocable`, and `allowed-tools`, does not enforce invocation or tool policy. A catalog's adjacent `skill.json` is not consulted by NAC discovery. Installer eligibility and runtime discovery are separate.
 
-Optional files under `scripts/`, `references/`, and `assets/` (at most 64 total) are listed as skill resources and included when the skill is activated.
+Optional files under `scripts/`, `references/`, and `assets/` (at most 64 total) are listed as skill resources. Activation includes their paths, not their contents; reading or executing them requires an ordinary authorized tool operation.
+
+## Local direct sessions
+
+A direct session retains its discovered registry at construction. `$skillname` in a submitted prompt expands the selected skill body before the model call. Ordinary prose does not automatically select a skill, and the direct system prompt does not include an available-skills catalog. There is no `activate_skill` tool.
+
+Local discovery follows skill-directory symlinks and renders the discovery path as the skill directory. Native resource reads resolve their canonical targets through the normal permission pipeline. A linked package outside the workspace can be discovered and expanded while its resources still require external-directory approval; a link inside the workspace does not grant access to its external target. Hard and configured denials remain effective.
+
+The retained registry contains the loaded body and resource listing. Resource bytes are read from disk when requested and can change independently. Use a reviewed immutable package revision when reproducibility matters. See the [Local linked-skill qualification and supported-use recipe](../qualification/linked-skills.md) for reproducible fixtures, the installed-catalog snapshot, and explicit workflow limits.
 
 ## How the orchestrator uses skills
 
@@ -49,7 +57,7 @@ On a local unsandboxed session the skill directory is the real host path. Under 
 
 ## Referencing skills in a prompt
 
-In a top-level orchestrator prompt you can reference a skill as `$skillname`. Recognized names are resolved from the session's skill registry, and the skill's instructions are appended to the prompt before the first model call — no tool call and no extra round trip.
+In a top-level direct or orchestrator prompt you can reference a skill as `$skillname`. Recognized names are resolved from the session's skill registry, and the skill's instructions are appended to the prompt before the first model call — no tool call and no extra round trip.
 
 The literal `$skillname` stays in your sentence; the skill content is appended after it, wrapped in an `<invoked_skills>` element. You can reference several skills in one prompt: each is included once, in first-reference order.
 
