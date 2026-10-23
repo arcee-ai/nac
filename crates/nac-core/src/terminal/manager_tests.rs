@@ -1416,7 +1416,7 @@ async fn exited_retained_terminal_is_archived_and_releases_cross_process_authori
     manager
         .create(
             name.clone(),
-            "printf complete",
+            "while [ ! -e release ]; do sleep 0.01; done; printf complete",
             Some(root.clone()),
             120,
             40,
@@ -1425,6 +1425,9 @@ async fn exited_retained_terminal_is_archived_and_releases_cross_process_authori
         .await
         .unwrap();
     manager.retain(&name).await.unwrap();
+    // Establish retention before allowing the child to exit, even when
+    // the test executor is descheduled immediately after create().
+    std::fs::write(root.join("release"), "").unwrap();
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             if manager.get(&name).await.is_some_and(|info| !info.alive) {
