@@ -545,8 +545,12 @@ pub(crate) fn redact_text_with(text: &str, secrets: &ExactSecrets) -> (String, b
             (format!(r"(?i)\b({NAME})\s*=\s*{VALUE}"), "$1=«redacted»"),
             (
                 format!(
-                    r"(?i)(--?(?:password|passwd|pass|token|secret|api[-_]?key|access[-_]?key|auth|cookie|user|proxy-user)(?:=|\s+|\]\[)){VALUE}"
+                    r"(?i)(--?(?:password|passwd|pass|token|secret|api[-_]?key|access[-_]?key|auth|cookie)(?:=|\s+|\]\[)){VALUE}"
                 ),
+                "${1}«redacted»",
+            ),
+            (
+                format!(r"((?:^|[\s\[])--(?:user|proxy-user)(?:=|\s+|\]\[|%3[Dd])){VALUE}"),
                 "${1}«redacted»",
             ),
             // Curl's short Basic Auth options also accept attached arguments
@@ -556,10 +560,10 @@ pub(crate) fn redact_text_with(text: &str, secrets: &ExactSecrets) -> (String, b
                 r#"((?:^|[\s\[])-[A-Za-z]*[uU](?:\s+|\]\[)?)(?:"[^"]*:[^"]*"|'[^']*:[^']*'|[^\s'"\[\]]+:[^\s'"\[\]]*)"#.to_string(),
                 "${1}«redacted»",
             ),
-            // Canonical arguments can contain spaces that no longer carry
-            // their original shell quoting, including inside the username.
+            // Canonical arguments percent-encode punctuation and whitespace,
+            // including colons and spaces inside a quoted username.
             (
-                r"((?:^|[\s\[])-[A-Za-z]*[uU]\]\[)[^\[\]]*:[^\[\]]*".to_string(),
+                r"(\[-[A-Za-z]*[uU](?:\]\[)?)[^\[\]]*%3[Aa][^\[\]]*".to_string(),
                 "${1}«redacted»",
             ),
             // Known credential shapes.
@@ -588,13 +592,16 @@ pub(crate) fn redact_text_with(text: &str, secrets: &ExactSecrets) -> (String, b
         Some(snapshot) => snapshot.redact(text),
         None => text.to_owned(),
     };
-    let exact = secrets
+    // Provider-error redaction preserves prose around very short secrets.
+    // Reviewer input must instead fail closed on every exact occurrence.
+    if secrets
         .values
         .iter()
-        .map(String::as_str)
-        .filter(|secret| !secret.is_empty())
-        .collect::<Vec<_>>();
-    redacted = crate::model::redact_credentials(&redacted, &exact);
+        .any(|secret| !secret.is_empty() && text.contains(secret))
+    {
+        return (REDACTED.to_owned(), true);
+    }
+    redacted = crate::model::redact_credentials(&redacted, &[]);
     let mut changed = redacted != text;
     if changed {
         redacted = redacted.replace(crate::model::REDACTED_MARKER, REDACTED);
