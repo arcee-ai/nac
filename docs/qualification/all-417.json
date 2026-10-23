@@ -1,0 +1,581 @@
+{
+  "schema": 1,
+  "qualification_verdict": "FAIL",
+  "subject_revision": "90be848ba3f0410b5e697bb60f4d71a935216361",
+  "repository_head_at_measurement": "90be848ba3f0410b5e697bb60f4d71a935216361",
+  "measured_at_utc": "2026-10-23T19:48:33.729218+00:00",
+  "runner_source_sha256": {
+    "fixtures.py": "b520762e0027e5d4b50b19657dd216f5880f5a84123f2bbbaf255fab5ea11edd",
+    "probe.py": "7f68b2355acb7dad2a6d484adc7a734df87c08326c5dd72cc739ab8f1ed7beae",
+    "run.py": "c98aeab306396e578445ef804b78d0623c06e159d8f8c079858bf6fa7ea79d69",
+    "test_contract.py": "f2a777e5f93373df958af3c1d8164b5fed9f2fa719e5b4c5c4e4eba671bfd80c"
+  },
+  "environment": {
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "cpu": "Apple M5 Max",
+    "memory_bytes": "38654705664",
+    "git": "git version 2.50.1 (Apple Git-155)",
+    "python": "3.14.8",
+    "cache": "OS cache warm after fixture creation; no cache purge; first/warm PRIVATE index only"
+  },
+  "oracle_tests_passed": 26,
+  "benchmarks": [
+    {
+      "fixture": "24-files-1024-bytes",
+      "dirty": false,
+      "ignored_files": 10000,
+      "ignored_logical_bytes": 10240000,
+      "runs": [
+        {
+          "cache": "first-private-index",
+          "capture_validation_wall_seconds": 0.2657,
+          "git_commands_capture_validation": 24,
+          "command_counts": {
+            "rev-parse": 2,
+            "config": 6,
+            "ls-files": 4,
+            "check-ignore": 6,
+            "check-attr": 2,
+            "add": 1,
+            "write-tree": 1,
+            "-c": 1,
+            "update-ref": 1
+          },
+          "oracle_visited_directories": [
+            ".",
+            "src/",
+            "src/000/"
+          ],
+          "git_trace2_directories_visited": [
+            3
+          ],
+          "ignored_tree_visited": false,
+          "candidates": 26,
+          "selected_logical_bytes": 24590,
+          "oracle_bytes_read_two_passes": 49180,
+          "archive_bytes": 51200,
+          "independent_bundle_bytes": 25948,
+          "independent_bundle_physical": 28672,
+          "bundle_retention_wall_seconds": 0.0184,
+          "git_objects_physical_before": 131072,
+          "git_objects_physical_after": 135168,
+          "private_index_physical": 4096,
+          "child_os_input_blocks": 0,
+          "child_os_output_blocks": 0,
+          "source_before": {
+            "head": "a117e3b286898c0f83e327d63f963bcd7917dca1",
+            "index_sha256": "78c07645434c83420c195d55798ff8b6ac16721bfa432adeb52caec063cbff2d",
+            "manifest_sha256": "48c0576d39ce5faadd040277876a9147db82c71887c05186cd738f0aa7dcd58d",
+            "entries": 26
+          },
+          "source_after": {
+            "head": "a117e3b286898c0f83e327d63f963bcd7917dca1",
+            "index_sha256": "78c07645434c83420c195d55798ff8b6ac16721bfa432adeb52caec063cbff2d",
+            "manifest_sha256": "48c0576d39ce5faadd040277876a9147db82c71887c05186cd738f0aa7dcd58d",
+            "entries": 26
+          },
+          "materialized_manifest_equal": true
+        },
+        {
+          "cache": "warm-private-index",
+          "capture_validation_wall_seconds": 0.2449,
+          "git_commands_capture_validation": 24,
+          "command_counts": {
+            "rev-parse": 2,
+            "config": 6,
+            "ls-files": 4,
+            "check-ignore": 6,
+            "check-attr": 2,
+            "add": 1,
+            "write-tree": 1,
+            "-c": 1,
+            "update-ref": 1
+          },
+          "oracle_visited_directories": [
+            ".",
+            "src/",
+            "src/000/"
+          ],
+          "git_trace2_directories_visited": [
+            3
+          ],
+          "ignored_tree_visited": false,
+          "candidates": 26,
+          "selected_logical_bytes": 24590,
+          "oracle_bytes_read_two_passes": 49180,
+          "archive_bytes": 51200,
+          "independent_bundle_bytes": 25948,
+          "independent_bundle_physical": 28672,
+          "bundle_retention_wall_seconds": 0.0204,
+          "git_objects_physical_before": 135168,
+          "git_objects_physical_after": 135168,
+          "private_index_physical": 4096,
+          "child_os_input_blocks": 0,
+          "child_os_output_blocks": 0,
+          "source_before": {
+            "head": "a117e3b286898c0f83e327d63f963bcd7917dca1",
+            "index_sha256": "78c07645434c83420c195d55798ff8b6ac16721bfa432adeb52caec063cbff2d",
+            "manifest_sha256": "48c0576d39ce5faadd040277876a9147db82c71887c05186cd738f0aa7dcd58d",
+            "entries": 26
+          },
+          "source_after": {
+            "head": "a117e3b286898c0f83e327d63f963bcd7917dca1",
+            "index_sha256": "78c07645434c83420c195d55798ff8b6ac16721bfa432adeb52caec063cbff2d",
+            "manifest_sha256": "48c0576d39ce5faadd040277876a9147db82c71887c05186cd738f0aa7dcd58d",
+            "entries": 26
+          },
+          "materialized_manifest_equal": true
+        }
+      ]
+    },
+    {
+      "fixture": "24-files-1024-bytes",
+      "dirty": true,
+      "ignored_files": 10000,
+      "ignored_logical_bytes": 10240000,
+      "runs": [
+        {
+          "cache": "first-private-index",
+          "capture_validation_wall_seconds": 0.266,
+          "git_commands_capture_validation": 24,
+          "command_counts": {
+            "rev-parse": 2,
+            "config": 6,
+            "ls-files": 4,
+            "check-ignore": 6,
+            "check-attr": 2,
+            "add": 1,
+            "write-tree": 1,
+            "-c": 1,
+            "update-ref": 1
+          },
+          "oracle_visited_directories": [
+            ".",
+            "src/",
+            "src/000/"
+          ],
+          "git_trace2_directories_visited": [
+            3
+          ],
+          "ignored_tree_visited": false,
+          "candidates": 27,
+          "selected_logical_bytes": 23599,
+          "oracle_bytes_read_two_passes": 47198,
+          "archive_bytes": 51200,
+          "independent_bundle_bytes": 24957,
+          "independent_bundle_physical": 28672,
+          "bundle_retention_wall_seconds": 0.0197,
+          "git_objects_physical_before": 131072,
+          "git_objects_physical_after": 155648,
+          "private_index_physical": 4096,
+          "child_os_input_blocks": 0,
+          "child_os_output_blocks": 0,
+          "source_before": {
+            "head": "8db3488d1dd11f254345b29f9ca407c2c0d33da1",
+            "index_sha256": "78e642efdffb7f59bf0c806a716769928f4706aed54241423fcdbacc4e4b5297",
+            "manifest_sha256": "4905113e3a1b8b5239f5c11d504820bc89ff0456e6cdaefde4bce35a87dd78a0",
+            "entries": 27
+          },
+          "source_after": {
+            "head": "8db3488d1dd11f254345b29f9ca407c2c0d33da1",
+            "index_sha256": "78e642efdffb7f59bf0c806a716769928f4706aed54241423fcdbacc4e4b5297",
+            "manifest_sha256": "4905113e3a1b8b5239f5c11d504820bc89ff0456e6cdaefde4bce35a87dd78a0",
+            "entries": 27
+          },
+          "materialized_manifest_equal": true
+        },
+        {
+          "cache": "warm-private-index",
+          "capture_validation_wall_seconds": 0.2349,
+          "git_commands_capture_validation": 24,
+          "command_counts": {
+            "rev-parse": 2,
+            "config": 6,
+            "ls-files": 4,
+            "check-ignore": 6,
+            "check-attr": 2,
+            "add": 1,
+            "write-tree": 1,
+            "-c": 1,
+            "update-ref": 1
+          },
+          "oracle_visited_directories": [
+            ".",
+            "src/",
+            "src/000/"
+          ],
+          "git_trace2_directories_visited": [
+            3
+          ],
+          "ignored_tree_visited": false,
+          "candidates": 27,
+          "selected_logical_bytes": 23599,
+          "oracle_bytes_read_two_passes": 47198,
+          "archive_bytes": 51200,
+          "independent_bundle_bytes": 24957,
+          "independent_bundle_physical": 28672,
+          "bundle_retention_wall_seconds": 0.0169,
+          "git_objects_physical_before": 155648,
+          "git_objects_physical_after": 159744,
+          "private_index_physical": 4096,
+          "child_os_input_blocks": 0,
+          "child_os_output_blocks": 0,
+          "source_before": {
+            "head": "8db3488d1dd11f254345b29f9ca407c2c0d33da1",
+            "index_sha256": "78e642efdffb7f59bf0c806a716769928f4706aed54241423fcdbacc4e4b5297",
+            "manifest_sha256": "4905113e3a1b8b5239f5c11d504820bc89ff0456e6cdaefde4bce35a87dd78a0",
+            "entries": 27
+          },
+          "source_after": {
+            "head": "8db3488d1dd11f254345b29f9ca407c2c0d33da1",
+            "index_sha256": "78e642efdffb7f59bf0c806a716769928f4706aed54241423fcdbacc4e4b5297",
+            "manifest_sha256": "4905113e3a1b8b5239f5c11d504820bc89ff0456e6cdaefde4bce35a87dd78a0",
+            "entries": 27
+          },
+          "materialized_manifest_equal": true
+        }
+      ]
+    },
+    {
+      "fixture": "4096-files-8192-bytes",
+      "dirty": false,
+      "ignored_files": 10000,
+      "ignored_logical_bytes": 10240000,
+      "runs": [
+        {
+          "cache": "first-private-index",
+          "capture_validation_wall_seconds": 1.8311,
+          "git_commands_capture_validation": 86,
+          "command_counts": {
+            "rev-parse": 2,
+            "config": 6,
+            "ls-files": 4,
+            "check-ignore": 68,
+            "check-attr": 2,
+            "add": 1,
+            "write-tree": 1,
+            "-c": 1,
+            "update-ref": 1
+          },
+          "oracle_visited_directories": [
+            ".",
+            "src/",
+            "src/024/",
+            "src/023/",
+            "src/015/",
+            "src/012/",
+            "src/013/",
+            "src/014/",
+            "src/022/",
+            "src/025/",
+            "src/007/",
+            "src/000/",
+            "src/009/",
+            "src/031/",
+            "src/030/",
+            "src/008/",
+            "src/001/",
+            "src/006/",
+            "src/020/",
+            "src/027/",
+            "src/018/",
+            "src/011/",
+            "src/016/",
+            "src/029/",
+            "src/017/",
+            "src/028/",
+            "src/010/",
+            "src/026/",
+            "src/019/",
+            "src/021/",
+            "src/003/",
+            "src/004/",
+            "src/005/",
+            "src/002/"
+          ],
+          "git_trace2_directories_visited": [
+            34
+          ],
+          "ignored_tree_visited": false,
+          "candidates": 4098,
+          "selected_logical_bytes": 33554446,
+          "oracle_bytes_read_two_passes": 67108892,
+          "archive_bytes": 35676160,
+          "independent_bundle_bytes": 33712731,
+          "independent_bundle_physical": 33714176,
+          "bundle_retention_wall_seconds": 0.7852,
+          "git_objects_physical_before": 50491392,
+          "git_objects_physical_after": 50495488,
+          "private_index_physical": 331776,
+          "child_os_input_blocks": 0,
+          "child_os_output_blocks": 0,
+          "source_before": {
+            "head": "d25fc5150f22d049b737f066f225361349bb9e64",
+            "index_sha256": "50b7e65fd60f83865fd293a26cc6e5cac0f064b2b5337dfe378ff871427bcf0e",
+            "manifest_sha256": "36312d3863816e1e14f7293383f1e8e11f6544c065676960f6c859f46e237709",
+            "entries": 4098
+          },
+          "source_after": {
+            "head": "d25fc5150f22d049b737f066f225361349bb9e64",
+            "index_sha256": "50b7e65fd60f83865fd293a26cc6e5cac0f064b2b5337dfe378ff871427bcf0e",
+            "manifest_sha256": "36312d3863816e1e14f7293383f1e8e11f6544c065676960f6c859f46e237709",
+            "entries": 4098
+          },
+          "materialized_manifest_equal": true
+        },
+        {
+          "cache": "warm-private-index",
+          "capture_validation_wall_seconds": 1.5275,
+          "git_commands_capture_validation": 86,
+          "command_counts": {
+            "rev-parse": 2,
+            "config": 6,
+            "ls-files": 4,
+            "check-ignore": 68,
+            "check-attr": 2,
+            "add": 1,
+            "write-tree": 1,
+            "-c": 1,
+            "update-ref": 1
+          },
+          "oracle_visited_directories": [
+            ".",
+            "src/",
+            "src/024/",
+            "src/023/",
+            "src/015/",
+            "src/012/",
+            "src/013/",
+            "src/014/",
+            "src/022/",
+            "src/025/",
+            "src/007/",
+            "src/000/",
+            "src/009/",
+            "src/031/",
+            "src/030/",
+            "src/008/",
+            "src/001/",
+            "src/006/",
+            "src/020/",
+            "src/027/",
+            "src/018/",
+            "src/011/",
+            "src/016/",
+            "src/029/",
+            "src/017/",
+            "src/028/",
+            "src/010/",
+            "src/026/",
+            "src/019/",
+            "src/021/",
+            "src/003/",
+            "src/004/",
+            "src/005/",
+            "src/002/"
+          ],
+          "git_trace2_directories_visited": [
+            34
+          ],
+          "ignored_tree_visited": false,
+          "candidates": 4098,
+          "selected_logical_bytes": 33554446,
+          "oracle_bytes_read_two_passes": 67108892,
+          "archive_bytes": 35676160,
+          "independent_bundle_bytes": 33712731,
+          "independent_bundle_physical": 33714176,
+          "bundle_retention_wall_seconds": 0.7065,
+          "git_objects_physical_before": 50495488,
+          "git_objects_physical_after": 50499584,
+          "private_index_physical": 331776,
+          "child_os_input_blocks": 0,
+          "child_os_output_blocks": 0,
+          "source_before": {
+            "head": "d25fc5150f22d049b737f066f225361349bb9e64",
+            "index_sha256": "50b7e65fd60f83865fd293a26cc6e5cac0f064b2b5337dfe378ff871427bcf0e",
+            "manifest_sha256": "36312d3863816e1e14f7293383f1e8e11f6544c065676960f6c859f46e237709",
+            "entries": 4098
+          },
+          "source_after": {
+            "head": "d25fc5150f22d049b737f066f225361349bb9e64",
+            "index_sha256": "50b7e65fd60f83865fd293a26cc6e5cac0f064b2b5337dfe378ff871427bcf0e",
+            "manifest_sha256": "36312d3863816e1e14f7293383f1e8e11f6544c065676960f6c859f46e237709",
+            "entries": 4098
+          },
+          "materialized_manifest_equal": true
+        }
+      ]
+    },
+    {
+      "fixture": "4096-files-8192-bytes",
+      "dirty": true,
+      "ignored_files": 10000,
+      "ignored_logical_bytes": 10240000,
+      "runs": [
+        {
+          "cache": "first-private-index",
+          "capture_validation_wall_seconds": 1.7733,
+          "git_commands_capture_validation": 86,
+          "command_counts": {
+            "rev-parse": 2,
+            "config": 6,
+            "ls-files": 4,
+            "check-ignore": 68,
+            "check-attr": 2,
+            "add": 1,
+            "write-tree": 1,
+            "-c": 1,
+            "update-ref": 1
+          },
+          "oracle_visited_directories": [
+            ".",
+            "src/",
+            "src/024/",
+            "src/023/",
+            "src/015/",
+            "src/012/",
+            "src/013/",
+            "src/014/",
+            "src/022/",
+            "src/025/",
+            "src/007/",
+            "src/000/",
+            "src/009/",
+            "src/031/",
+            "src/030/",
+            "src/008/",
+            "src/001/",
+            "src/006/",
+            "src/020/",
+            "src/027/",
+            "src/018/",
+            "src/011/",
+            "src/016/",
+            "src/029/",
+            "src/017/",
+            "src/028/",
+            "src/010/",
+            "src/026/",
+            "src/019/",
+            "src/021/",
+            "src/003/",
+            "src/004/",
+            "src/005/",
+            "src/002/"
+          ],
+          "git_trace2_directories_visited": [
+            34
+          ],
+          "ignored_tree_visited": false,
+          "candidates": 4099,
+          "selected_logical_bytes": 33546287,
+          "oracle_bytes_read_two_passes": 67092574,
+          "archive_bytes": 35665920,
+          "independent_bundle_bytes": 33704572,
+          "independent_bundle_physical": 33705984,
+          "bundle_retention_wall_seconds": 0.6897,
+          "git_objects_physical_before": 50491392,
+          "git_objects_physical_after": 50515968,
+          "private_index_physical": 331776,
+          "child_os_input_blocks": 0,
+          "child_os_output_blocks": 0,
+          "source_before": {
+            "head": "7e01c26bbbbd5b41a1f2f691004a939e440da096",
+            "index_sha256": "7985ee4c4e89bb3c0f7b6e8c22f3424ad8adda51279cc3b2d5cd6b3381e2ca97",
+            "manifest_sha256": "92b2791c0148a14a4834c856cdee93f0f1d3f09a650df63147934e22f3d2b7fc",
+            "entries": 4099
+          },
+          "source_after": {
+            "head": "7e01c26bbbbd5b41a1f2f691004a939e440da096",
+            "index_sha256": "7985ee4c4e89bb3c0f7b6e8c22f3424ad8adda51279cc3b2d5cd6b3381e2ca97",
+            "manifest_sha256": "92b2791c0148a14a4834c856cdee93f0f1d3f09a650df63147934e22f3d2b7fc",
+            "entries": 4099
+          },
+          "materialized_manifest_equal": true
+        },
+        {
+          "cache": "warm-private-index",
+          "capture_validation_wall_seconds": 1.6362,
+          "git_commands_capture_validation": 86,
+          "command_counts": {
+            "rev-parse": 2,
+            "config": 6,
+            "ls-files": 4,
+            "check-ignore": 68,
+            "check-attr": 2,
+            "add": 1,
+            "write-tree": 1,
+            "-c": 1,
+            "update-ref": 1
+          },
+          "oracle_visited_directories": [
+            ".",
+            "src/",
+            "src/024/",
+            "src/023/",
+            "src/015/",
+            "src/012/",
+            "src/013/",
+            "src/014/",
+            "src/022/",
+            "src/025/",
+            "src/007/",
+            "src/000/",
+            "src/009/",
+            "src/031/",
+            "src/030/",
+            "src/008/",
+            "src/001/",
+            "src/006/",
+            "src/020/",
+            "src/027/",
+            "src/018/",
+            "src/011/",
+            "src/016/",
+            "src/029/",
+            "src/017/",
+            "src/028/",
+            "src/010/",
+            "src/026/",
+            "src/019/",
+            "src/021/",
+            "src/003/",
+            "src/004/",
+            "src/005/",
+            "src/002/"
+          ],
+          "git_trace2_directories_visited": [
+            34
+          ],
+          "ignored_tree_visited": false,
+          "candidates": 4099,
+          "selected_logical_bytes": 33546287,
+          "oracle_bytes_read_two_passes": 67092574,
+          "archive_bytes": 35665920,
+          "independent_bundle_bytes": 33704573,
+          "independent_bundle_physical": 33705984,
+          "bundle_retention_wall_seconds": 0.7242,
+          "git_objects_physical_before": 50515968,
+          "git_objects_physical_after": 50520064,
+          "private_index_physical": 331776,
+          "child_os_input_blocks": 0,
+          "child_os_output_blocks": 0,
+          "source_before": {
+            "head": "7e01c26bbbbd5b41a1f2f691004a939e440da096",
+            "index_sha256": "7985ee4c4e89bb3c0f7b6e8c22f3424ad8adda51279cc3b2d5cd6b3381e2ca97",
+            "manifest_sha256": "92b2791c0148a14a4834c856cdee93f0f1d3f09a650df63147934e22f3d2b7fc",
+            "entries": 4099
+          },
+          "source_after": {
+            "head": "7e01c26bbbbd5b41a1f2f691004a939e440da096",
+            "index_sha256": "7985ee4c4e89bb3c0f7b6e8c22f3424ad8adda51279cc3b2d5cd6b3381e2ca97",
+            "manifest_sha256": "92b2791c0148a14a4834c856cdee93f0f1d3f09a650df63147934e22f3d2b7fc",
+            "entries": 4099
+          },
+          "materialized_manifest_equal": true
+        }
+      ]
+    }
+  ]
+}

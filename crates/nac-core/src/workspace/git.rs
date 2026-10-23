@@ -687,3 +687,7 @@ pub(crate) fn first_stderr_line(stderr: &[u8]) -> String {
         .unwrap_or("no details reported")
         .to_string()
 }
+
+#[cfg(all(test, unix))]
+#[path = "git_qualification_tests.rs"]
+mod qualification_tests;

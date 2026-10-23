@@ -1,4 +1,4 @@
-.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size lint-workflows test-workflow-lint test-mcp-conformance test-nightly-portability test-terminal-browser generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: test-capture-qualification all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size lint-workflows test-workflow-lint test-mcp-conformance test-nightly-portability test-terminal-browser generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -71,7 +71,7 @@ install:
 ci: lint-workflows test-workflow-lint format-check lint test
 
 ## Run workspace Rust tests, frontend tests, source-size, and web asset checks
-test: test-source-size test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract
+test: test-capture-qualification test-source-size test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract
 
 test-rust:
 	$(CARGO) test --workspace --locked
@@ -125,6 +125,10 @@ test-source-workflow:
 test-source-binary:
 	env -u NAC_BUILD_TRACK -u NAC_BUILD_ID -u NAC_SOURCE_REVISION \
 		$(CARGO) test --locked -p nac-server --test source_binary_contract -- --nocapture
+
+## Run isolated nonshipping current-contents contract probes (ALL-417)
+test-capture-qualification:
+	python3 -m unittest discover -s scripts/capture-qualification -p 'test_*.py' -v
 
 ## Keep tracked human-authored files within the agent-context budget
 test-source-size:
