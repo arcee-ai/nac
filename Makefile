@@ -1,4 +1,4 @@
-.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size lint-workflows test-workflow-lint test-mcp-conformance test-nightly-portability generate-api-contract test-api-contract test-assets test-e2e test-e2e-review test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size lint-workflows test-workflow-lint test-mcp-conformance test-nightly-portability test-terminal-browser generate-api-contract test-api-contract test-assets test-e2e test-e2e-review test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -81,6 +81,13 @@ test-rust:
 test-nightly-portability:
 	CARGO="$(CARGO)" python3 .github/scripts/nightly-portability.py \
 		--expected-sha "$$(git rev-parse HEAD)" --output "$${PORTABILITY_OUTPUT:-/tmp/nac-nightly-portability}"
+
+## Run one native terminal browser journey and its deterministic byte negative control
+test-terminal-browser:
+	CARGO="$(CARGO)" python3 .github/scripts/terminal-browser.py \
+		--expected-sha "$$(git rev-parse HEAD)" --output "$${TERMINAL_BROWSER_OUTPUT:-/tmp/nac-terminal-browser}"
+	CARGO="$(CARGO)" python3 .github/scripts/terminal-browser-cancel.py \
+		--expected-sha "$$(git rev-parse HEAD)" --output "$${TERMINAL_BROWSER_OUTPUT:-/tmp/nac-terminal-browser}/cancellation-control"
 
 ## Run the official frozen client requirements for every advertised MCP revision
 test-mcp-conformance:

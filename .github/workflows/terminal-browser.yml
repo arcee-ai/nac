@@ -1,0 +1,125 @@
+name: Focused native terminal browser
+
+on:
+  workflow_call:
+    inputs:
+      candidate:
+        required: true
+        type: string
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/terminal-browser.yml'
+      - '.github/workflows/nightly-portability.yml'
+      - '.github/scripts/terminal-browser*'
+      - '.github/scripts/nightly-portability.py'
+      - 'Makefile'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/nac-process/**'
+      - 'crates/nac-core/src/terminal/**'
+      - 'crates/nac-core/src/tools/*terminal*'
+      - 'crates/nac-core/src/session_service/*terminal*'
+      - 'crates/nac-core/src/sandbox/**'
+      - 'crates/nac-core/src/runtime/**'
+      - 'crates/nac-server/src/application/*terminal*'
+      - 'crates/nac-server/src/delivery/*terminal*'
+      - 'crates/nac-server/src/delivery/executions.rs'
+      - 'crates/nac-server/src/delivery/server.rs'
+      - 'crates/nac-server/src/lib.rs'
+      - 'crates/nac-server/web/src/app/features/terminal/**'
+      - 'crates/nac-server/web/src/app/features/terminal-selection/**'
+      - 'crates/nac-server/web/src/app/components/inspector/SessionSideBox.tsx'
+      - 'crates/nac-server/web/src/app/services/**'
+      - 'crates/nac-server/web/src/app/runtime/**'
+      - 'crates/nac-server/web/e2e/**'
+      - 'crates/nac-server/web/playwright.config.ts'
+      - 'crates/nac-server/web/package*.json'
+      - 'crates/nac-server/web/packages/nac-client/**'
+      - 'docs/ci/nightly-portability.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminal-browser-${{ github.run_id }}-${{ github.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  terminal-browser:
+    name: ${{ matrix.profile }} real shell, pager and trusted clipboard
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            profile: ARM macOS
+          - runner: ubuntu-latest
+            profile: Linux
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.candidate || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          # Match stable-release browser: prefix + key(browser) + job(browser).
+          shared-key: browser-browser
+          key: browser
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Provision Linux pager
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes less
+      - name: Prepare locked development dependencies
+        run: make setup
+      - name: Install Linux Chromium system dependencies
+        if: runner.os == 'Linux'
+        working-directory: crates/nac-server/web
+        run: npx playwright install-deps chromium
+      - name: Verify native Rust supervisor controls
+        if: runner.os == 'macOS'
+        run: python3 .github/scripts/nightly-portability.test.py
+      - name: Verify browser result selection controls
+        run: python3 .github/scripts/terminal-browser.test.py
+      - name: Run native journey and deterministic byte negative control
+        env:
+          EXPECTED_SHA: ${{ inputs.candidate || github.sha }}
+        run: |
+          exec python3 .github/scripts/terminal-browser.py \
+            --expected-sha "$EXPECTED_SHA" --output "$RUNNER_TEMP/terminal-browser"
+      - name: Prove cancellation settles the actual detached server and shell
+        env:
+          EXPECTED_SHA: ${{ inputs.candidate || github.sha }}
+        run: |
+          exec python3 .github/scripts/terminal-browser-cancel.py \
+            --expected-sha "$EXPECTED_SHA" --output "$RUNNER_TEMP/terminal-browser/cancellation-control"
+      - name: Summarize exact candidate and attempts
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/terminal-browser/summary.md" ]; then
+            cat "$RUNNER_TEMP/terminal-browser/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Focused browser setup did not complete; no journey pass is claimed.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f "$RUNNER_TEMP/terminal-browser/cancellation-control/cancellation.json" ]; then
+            cat "$RUNNER_TEMP/terminal-browser/cancellation-control/cancellation.json" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Retain native journey and negative-control evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: terminal-browser-${{ runner.os }}-${{ inputs.candidate || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/terminal-browser
+          retention-days: 14
+          if-no-files-found: error

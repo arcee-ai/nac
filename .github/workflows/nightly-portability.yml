@@ -24,6 +24,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  terminal-browser:
+    if: ${{ github.event_name != 'pull_request' }}
+    uses: ./.github/workflows/terminal-browser.yml
+    with:
+      candidate: ${{ github.sha }}
+
   portability:
     name: ARM macOS full Rust workspace and selected integrations
     runs-on: macos-26
