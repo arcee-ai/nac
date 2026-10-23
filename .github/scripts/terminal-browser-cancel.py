@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -39,8 +40,9 @@ def main():
             deadline = time.monotonic() + 2400
             while process.poll() is None:
                 files = list(evidence.glob('journey/**/shell-before.pid'))
-                if files:
-                    shell_pid = int(files[0].read_text().strip())
+                shell_pid_text = files[0].read_text().strip() if files else ''
+                if re.fullmatch(r'[1-9][0-9]*', shell_pid_text):
+                    shell_pid = int(shell_pid_text)
                     os.kill(shell_pid, 0)
                     receipt['live_shell_pid'] = shell_pid
                     receipt['live_server_pid'] = json.loads((files[0].parents[1] / 'process.json').read_text())['pid']

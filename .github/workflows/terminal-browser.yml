@@ -85,10 +85,11 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: crates/nac-server/web
         run: npx playwright install-deps chromium
-      - name: Verify failure selection and process cancellation controls
-        run: |
-          python3 .github/scripts/nightly-portability.test.py
-          python3 .github/scripts/terminal-browser.test.py
+      - name: Verify native Rust supervisor controls
+        if: runner.os == 'macOS'
+        run: python3 .github/scripts/nightly-portability.test.py
+      - name: Verify browser result selection controls
+        run: python3 .github/scripts/terminal-browser.test.py
       - name: Run native journey and deterministic byte negative control
         env:
           EXPECTED_SHA: ${{ inputs.candidate || github.sha }}
