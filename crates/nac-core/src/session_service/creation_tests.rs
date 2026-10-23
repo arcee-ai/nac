@@ -195,7 +195,7 @@ async fn retained_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, S
         invoking_session_id: None,
         git_ref: Some("dev".into()),
         default_ref: Some("dev".into()),
-        title: "Retained task".into(),
+        title: "é".repeat(120),
         prompt: "One initial input".into(),
     };
     let source = crate::store::TaskLaunchSource {
@@ -253,6 +253,15 @@ async fn retained_creation_lost_ack_commits_one_session_and_one_initial_input() 
     let receipt = crate::store::load_task_launch(&path, &id).unwrap().unwrap();
     assert_eq!(receipt.phase, crate::store::TaskLaunchPhase::Ready);
     assert!(sessions::session_exists(&path, &receipt.session_id).unwrap());
+    let pinned = sessions::update_session_presentation(
+        &path,
+        &receipt.session_id,
+        &receipt.request.title,
+        true,
+        0,
+    )
+    .unwrap();
+    assert!(pinned.pinned);
     let inbox = crate::store::list_session_inbox(&path, &receipt.session_id).unwrap();
     assert_eq!(inbox.len(), 1);
     assert_eq!(Some(inbox[0].id), receipt.first_input_id);

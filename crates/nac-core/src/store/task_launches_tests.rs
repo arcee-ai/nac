@@ -44,6 +44,27 @@ pub(crate) fn fixture() -> (PathBuf, TaskLaunchRequest, TaskLaunchSource) {
 }
 
 #[test]
+fn launch_title_uses_existing_session_presentation_rules() {
+    let (path, mut request, _) = fixture();
+    for invalid in [
+        "x".repeat(121),
+        "bad\ttitle".into(),
+        " untrimmed ".into(),
+        " ".into(),
+    ] {
+        request.title = invalid;
+        assert!(request
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .starts_with("invalid request:"));
+    }
+    request.title = "é".repeat(120);
+    request.validate().unwrap();
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
 fn retry_after_reopen_returns_original_pin_and_intentional_duplicate_is_distinct() {
     let (path, request, mut source) = fixture();
     let first = reserve_task_launch(&path, request.clone(), source.clone()).unwrap();

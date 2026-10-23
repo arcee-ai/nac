@@ -10863,6 +10863,7 @@ function vm({ projectId: e, defaultRef: t, onClose: n, onExistingCheckout: r }) 
 						label: "Task title",
 						"aria-label": "Task title",
 						value: a,
+						maxLength: 120,
 						isDisabled: m,
 						onChange: (e) => o(e.target.value)
 					}),
@@ -10974,7 +10975,7 @@ function vm({ projectId: e, defaultRef: t, onClose: n, onExistingCheckout: r }) 
 							e.phase !== "cancelled" && /* @__PURE__ */ Y(j, {
 								onClick: () => p.cancel.mutate(e.request.request_id),
 								disabled: p.cancel.isPending,
-								children: "Cancel task preparation or run"
+								children: "Cancel preparation or current run"
 							})
 						]
 					}, e.request.request_id))]
@@ -11011,60 +11012,89 @@ function bm(e) {
 	].join(" ");
 }
 function xm({ projectId: e, onUnavailable: t, className: n, children: r }) {
-	let i = ye(), [a, o] = q(!1), [s, c] = q(null), [l, u] = q(!1), { api: d } = z(), f = wi(), p = xn(), m = Tr(), h = () => {
-		e ? i.orchestrationEnabled ? o((e) => !e) : g("direct") : t();
-	}, g = async (t, n = !1) => {
-		if (!(!e || m.isPending || l)) try {
+	let i = ye(), [a, o] = q(!1), [s, c] = q(null), [l, u] = q(!1), [d, f] = q(null), { api: p } = z(), m = wi(), h = xn(), g = Tr(), _ = () => {
+		e ? i.orchestrationEnabled ? o((e) => !e) : v("direct") : t();
+	}, v = async (t, n = !1) => {
+		if (!(!e || g.isPending || l)) try {
 			if (t === "direct" && !n) {
 				u(!0);
-				let t = await d.taskLaunchSource(e);
-				if (u(!1), t.eligible) {
+				let t;
+				try {
+					t = await p.taskLaunchSource(e);
+				} catch (e) {
+					o(!1), f(xu($(e)));
+					return;
+				} finally {
+					u(!1);
+				}
+				if (t.eligible) {
 					o(!1), c({ defaultRef: t.default_ref ?? null });
 					return;
 				}
 			}
-			let r = (await m.mutateAsync({
+			let r = (await g.mutateAsync({
 				project_id: e,
 				behavior: lr(i, t)
 			})).metadata.session_id;
-			o(!1), r && f(Er.session(r));
+			o(!1), r && m(Er.session(r));
 		} catch (e) {
-			u(!1), p.error(`Failed to start a chat: ${xu($(e))}`);
+			u(!1), h.error(`Failed to start a chat: ${xu($(e))}`);
 		}
 	};
-	return /* @__PURE__ */ X(J, { children: [s && e && /* @__PURE__ */ Y(vm, {
-		projectId: e,
-		defaultRef: s.defaultRef,
-		onClose: () => c(null),
-		onExistingCheckout: () => {
-			c(null), g("direct", !0);
-		}
-	}), /* @__PURE__ */ Y(Jr, {
-		open: a,
-		onClose: () => o(!1),
-		sticky: !0,
-		placement: R.RightTop,
-		size: Ut.Medium,
-		panelClassName: "gap-2",
-		className: n,
-		content: /* @__PURE__ */ Y(J, { children: ym.map((e) => {
-			let t = Zl(e.behavior);
-			return /* @__PURE__ */ X(pl, {
-				disabled: m.isPending || l,
-				hoverHint: {
-					title: t.label,
-					description: bm(e.behavior),
-					muted: !0
-				},
-				onClick: () => void g(e.behavior),
-				children: [/* @__PURE__ */ Y(N, { iconName: e.icon }), /* @__PURE__ */ Y("span", {
-					className: "min-w-0 flex-1 truncate text-left",
-					children: e.label
-				})]
-			}, e.behavior);
-		}) }),
-		children: r(h)
-	})] });
+	return /* @__PURE__ */ X(J, { children: [
+		d && /* @__PURE__ */ X($t, {
+			open: !0,
+			title: "Git source unavailable",
+			onClose: () => f(null),
+			children: [
+				/* @__PURE__ */ Y("p", {
+					role: "alert",
+					children: d
+				}),
+				/* @__PURE__ */ Y("p", { children: "Repair the Git source to start an isolated task, or explicitly use the existing checkout." }),
+				/* @__PURE__ */ Y(j, {
+					onClick: () => {
+						f(null), v("direct", !0);
+					},
+					children: "Use existing checkout"
+				})
+			]
+		}),
+		s && e && /* @__PURE__ */ Y(vm, {
+			projectId: e,
+			defaultRef: s.defaultRef,
+			onClose: () => c(null),
+			onExistingCheckout: () => {
+				c(null), v("direct", !0);
+			}
+		}),
+		/* @__PURE__ */ Y(Jr, {
+			open: a,
+			onClose: () => o(!1),
+			sticky: !0,
+			placement: R.RightTop,
+			size: Ut.Medium,
+			panelClassName: "gap-2",
+			className: n,
+			content: /* @__PURE__ */ Y(J, { children: ym.map((e) => {
+				let t = Zl(e.behavior);
+				return /* @__PURE__ */ X(pl, {
+					disabled: g.isPending || l,
+					hoverHint: {
+						title: t.label,
+						description: bm(e.behavior),
+						muted: !0
+					},
+					onClick: () => void v(e.behavior),
+					children: [/* @__PURE__ */ Y(N, { iconName: e.icon }), /* @__PURE__ */ Y("span", {
+						className: "min-w-0 flex-1 truncate text-left",
+						children: e.label
+					})]
+				}, e.behavior);
+			}) }),
+			children: r(_)
+		})
+	] });
 }
 // src/app/components/LeftSidebar/SidebarProjectList.tsx
 var Sm = 6e4, Cm = 4;

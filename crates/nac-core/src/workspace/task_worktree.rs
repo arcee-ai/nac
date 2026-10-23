@@ -112,7 +112,8 @@ pub fn resolve_source(
                 "--end-of-options",
                 &default_ref,
             ],
-        )?;
+        )
+        .map_err(|error| anyhow!("invalid request: cannot resolve default branch: {error}"))?;
         anyhow::ensure!(
             branch.starts_with("refs/heads/") || branch.starts_with("refs/remotes/"),
             "invalid request: project default must name a configured Git branch"
@@ -162,7 +163,8 @@ pub fn resolve_source(
             "--end-of-options",
             &format!("{selected_ref}^{{commit}}"),
         ],
-    )?;
+    )
+    .map_err(|error| anyhow!("invalid request: cannot resolve selected Git ref: {error}"))?;
     // Ref launch excludes edits by construction. Do not scan source file
     // contents or run clean/fsmonitor programs merely to report that policy.
     Ok(TaskLaunchSource {
