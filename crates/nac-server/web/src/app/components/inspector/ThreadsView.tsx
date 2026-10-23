@@ -25,15 +25,18 @@ import {
   ThreadViewSelect,
   type ThreadDetailView,
 } from "@/app/components/inspector/threads/ThreadViewControls";
+import { useThreadEventLog } from "@/app/components/inspector/threads/useThreadEventLog";
+import {
+  canSteerThread,
+  useThreadRunState,
+} from "@/app/components/inspector/threads/useThreadRunState";
 import { cn } from "@/app/lib/cn";
-import { mergeThreadEventPages } from "@/app/lib/threadLog";
 import {
   cancelledThreadNames,
   dispatchActions,
   dispatchThreadName,
   partitionThreadCalls,
 } from "@/app/lib/transcript";
-import { useThreadEventPages } from "@/app/services/queries";
 import { type RuntimeThread } from "@/app/store/runtimeStore";
 
 import type { SessionSnapshotResponse, ThreadSnapshot, ToolCall } from "@/app/types/api";
@@ -135,14 +138,10 @@ export function ThreadsView({
 }) {
   const { setSelectedThreadRunning } = useNativeRuntime().stores.sessionLayoutStore;
 
-  const { useStreamStatus, useLiveThreads } = useNativeRuntime().stores.runtimeStore;
-
-  const liveThreads = useLiveThreads();
-  const streamStatus = useStreamStatus();
+  const { liveThreads, runningNames, pendingNames } = useThreadRunState(snapshot);
   const [view, setView] = useState<ThreadDetailView>("log");
   const [steeringThread, setSteeringThread] = useState<string | null>(null);
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
-  const activeThreads = snapshot?.active_threads;
   const sessionId = snapshot?.metadata.session_id ?? "";
   const waveRank = useMemo(() => waveRankByName(snapshot?.messages), [snapshot?.messages]);
   const actions = useMemo(() => dispatchActions(snapshot?.messages ?? []), [snapshot?.messages]);
@@ -166,38 +165,6 @@ export function ThreadsView({
     }
     return names;
   }, [snapshot?.messages]);
-  // Switching tabs resets live thread state before SSE catches up. Until then
-  // every `active_threads` name would look pending and the detail pane would
-  // claim nothing is selected even though the list already has rows.
-  const streamSettling = streamStatus === "connecting" || streamStatus === "reconnecting";
-
-  // Backend pre-marks every name in a DAG batch as active. Only
-  // `thread_started` means the worker is actually running; the rest are
-  // pending on in-batch deps. While the stream is still catching up, treat
-  // those names as running so the pane stays on a real thread.
-  const { runningNames, pendingNames } = useMemo(() => {
-    const running = new Set<string>();
-    const pending = new Set<string>();
-    for (const name of activeThreads ?? []) {
-      const live = liveThreads[name];
-      if (live?.status === "running") running.add(name);
-      else if (live?.status === "finished") {
-        // Stay out of both sets until the snapshot drops the name.
-      } else if (streamSettling) {
-        running.add(name);
-      } else pending.add(name);
-    }
-    for (const [name, thread] of Object.entries(liveThreads)) {
-      if (thread.status === "running") {
-        running.add(name);
-        pending.delete(name);
-      } else if (thread.status === "finished") {
-        running.delete(name);
-        pending.delete(name);
-      }
-    }
-    return { runningNames: running, pendingNames: pending };
-  }, [activeThreads, liveThreads, streamSettling]);
 
   const ordered = useMemo(() => {
     const persisted = new Set(threads.map((thread) => thread.name));
@@ -281,17 +248,8 @@ export function ThreadsView({
   // phone dialog header names that thread instead of the panel label.
   const currentName = current?.name ?? null;
   const currentRunning = Boolean(currentName && runningNames.has(currentName));
-  // `runningNames` deliberately treats active snapshot entries as running
-  // while SSE reconnects so the list and detail pane do not flash pending.
-  // Steering is a capability boundary, however, and must wait for the live
-  // `thread_started` state so a pending or just-finished worker never gains an
-  // actionable control during that approximation window.
-  const canSteerCurrent = canSteerWorkers && live?.status === "running";
-  const eventPages = useThreadEventPages(snapshot ? sessionId : null, currentName);
-  const pagedEvents = useMemo(
-    () => (eventPages.data ? mergeThreadEventPages(eventPages.data.pages) : undefined),
-    [eventPages.data],
-  );
+  const canSteerCurrent = canSteerThread(canSteerWorkers, live);
+  const eventLog = useThreadEventLog(snapshot, currentName);
   useEffect(() => {
     if (!currentName) return;
     if (selected === currentName) return;
@@ -437,20 +395,15 @@ export function ThreadsView({
             thread={current}
             action={currentAction}
             episodes={snapshot.thread_episodes?.[current.name] ?? []}
-            events={pagedEvents ?? snapshot.thread_events?.[current.name]}
+            events={eventLog.events}
             liveLog={live?.log ?? []}
             running={runningNames.has(current.name)}
-            hasOlder={Boolean(eventPages.hasNextPage)}
-            loadingOlder={eventPages.isFetchingNextPage}
-            loadingInitial={eventPages.isPending}
-            historyError={eventPages.error instanceof Error ? eventPages.error.message : null}
-            onLoadOlder={async () => {
-              await eventPages.fetchNextPage();
-            }}
-            onRetry={async () => {
-              if (eventPages.data) await eventPages.fetchNextPage();
-              else await eventPages.refetch();
-            }}
+            hasOlder={eventLog.hasOlder}
+            loadingOlder={eventLog.loadingOlder}
+            loadingInitial={eventLog.loadingInitial}
+            historyError={eventLog.historyError}
+            onLoadOlder={eventLog.loadOlder}
+            onRetry={eventLog.retry}
             view={view}
             canSteer={canSteerCurrent}
             onSteer={() => setSteeringThread(current.name)}
