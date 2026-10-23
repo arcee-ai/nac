@@ -758,6 +758,7 @@ export interface components {
             required: boolean;
             server_name?: string | null;
             server_version?: string | null;
+            sessions_blocked: boolean;
             state: components["schemas"]["McpRuntimeState"];
             tool_count: number;
         };
