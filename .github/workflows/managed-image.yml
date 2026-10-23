@@ -1,36 +1,19 @@
 name: Managed NAC image
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/managed-image.yml
-      - .dockerignore
-      - docker/managed/**
-      - scripts/smoke-managed-image.sh
-      - scripts/test-managed-image-contract.sh
-      - Cargo.toml
-      - Cargo.lock
-      - version.txt
-      - crates/**
-  push:
-    branches: [main, dev]
-    paths:
-      - .github/workflows/managed-image.yml
-      - .dockerignore
-      - docker/managed/**
-      - scripts/smoke-managed-image.sh
-      - scripts/test-managed-image-contract.sh
-      - Cargo.toml
-      - Cargo.lock
-      - version.txt
-      - crates/**
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Immutable candidate from the caller's preparation job
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: managed-image-${{ github.workflow }}-${{ github.ref }}
+  group: managed-image-${{ github.run_id }}-${{ github.run_attempt }}
   cancel-in-progress: false
 
 jobs:
@@ -42,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
           fetch-depth: 1
       - id: candidate
         name: Resolve immutable candidate
@@ -123,3 +106,18 @@ jobs:
           MANAGED_IMAGE: nac-managed-smoke:${{ needs.prepare.outputs.short_sha }}
           MANAGED_IMAGE_SKIP_BUILD: "1"
         run: sh scripts/smoke-managed-image.sh
+
+  result:
+    name: Managed checks complete
+    if: ${{ always() }}
+    needs: [prepare, contract, quality, build-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Reject any missing, skipped, cancelled or failed managed work
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_SHA: ${{ inputs.source_sha || github.sha }}
+        run: node .github/scripts/pr-checks.mjs managed-aggregate

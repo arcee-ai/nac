@@ -89,6 +89,7 @@ test-release:
 	bash -n .github/scripts/stable-release-preparation.sh
 	sh -n .github/scripts/stable-release-rollout.sh
 	node --test .github/scripts/release-policy.test.mjs
+	node --test .github/scripts/pr-*.test.mjs
 	$(MAKE) test-stable-binary
 
 ## Build a stable binary and exercise its real readiness/status identity contract

@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-21T20:58:28.663Z",
+  "repository": "arcee-ai/nac",
+  "default_branch": "dev",
+  "dev_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+  "merge_methods": {
+    "merge_commit": true,
+    "squash_merge": true,
+    "rebase_merge": true
+  },
+  "rulesets": [
+    {
+      "id": 2955537,
+      "name": "Protect default branch",
+      "target": "branch",
+      "source_type": "Enterprise",
+      "source": "arcee-ai",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "~DEFAULT_BRANCH"
+          ]
+        }
+      },
+      "rules": [
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "non_fast_forward"
+        }
+      ],
+      "node_id": "RRS_lACoQnVzaW5lc3POAAQOiM4ALRkR",
+      "created_at": "2024-12-12T11:16:33.502-08:00",
+      "updated_at": "2025-02-05T16:09:12.383-08:00",
+      "current_user_can_bypass": "never",
+      "_links": {
+        "self": {
+          "href": "https://api.github.com/repos/arcee-ai/nac/rulesets/2955537"
+        },
+        "html": {
+          "href": "https://github.com/arcee-ai/nac/rules/2955537"
+        }
+      }
+    },
+    {
+      "id": 2955527,
+      "name": "Viability and Transfer Restriction",
+      "target": "repository",
+      "source_type": "Enterprise",
+      "source": "arcee-ai",
+      "enforcement": "active",
+      "conditions": {},
+      "rules": [
+        {
+          "type": "repository_transfer"
+        }
+      ],
+      "node_id": "RRS_lACoQnVzaW5lc3POAAQOiM4ALRkH",
+      "created_at": "2024-12-12T11:14:46.664-08:00",
+      "updated_at": "2024-12-12T11:14:46.664-08:00",
+      "current_user_can_bypass": "never",
+      "_links": {
+        "self": {
+          "href": "https://api.github.com/repos/arcee-ai/nac/rulesets/2955527"
+        }
+      }
+    }
+  ],
+  "effective_dev_rules": [
+    {
+      "type": "deletion",
+      "ruleset_source_type": "Enterprise",
+      "ruleset_source": "arcee-ai",
+      "ruleset_id": 2955537
+    },
+    {
+      "type": "non_fast_forward",
+      "ruleset_source_type": "Enterprise",
+      "ruleset_source": "arcee-ai",
+      "ruleset_id": 2955537
+    },
+    {
+      "type": "repository_transfer",
+      "ruleset_source_type": "Enterprise",
+      "ruleset_source": "arcee-ai",
+      "ruleset_id": 2955527
+    }
+  ],
+  "classic_protection": null,
+  "owners": [
+    {
+      "login": "allisoneer",
+      "id": 20910163,
+      "permission": "admin"
+    },
+    {
+      "login": "Cecocho",
+      "id": 105443339,
+      "permission": "write"
+    },
+    {
+      "login": "ericlau98",
+      "id": 17348362,
+      "permission": "write"
+    }
+  ],
+  "codeowners": "# CODEOWNERS file for AFM-Application\n# This file assigns reviewers to all pull requests\n# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners\n\n# Global owners - these users will be assigned to all PRs\n*       @sapiosaturn @Cecocho @Crystalcareai @eric-tramel\n\n",
+  "checks": [
+    {
+      "name": "publish",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212384/job/119402697368",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "test",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212384/job/119402644556",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "build-smoke",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212455/job/119400879053",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "test-core",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212384/job/119393622883",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "test-server",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212384/job/119393622686",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "build (macos-26, aarch64-apple-darwin)",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212384/job/119392943627",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "build (ubuntu-latest, x86_64-unknown-linux-musl)",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212384/job/119392943310",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "lint",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212384/job/119392943266",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "contract",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212455/job/119392849753",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "quality",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212455/job/119392849413",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "prepare",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212455/job/119392787847",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    },
+    {
+      "name": "prepare",
+      "head_sha": "1c9ccccae2202a74ade42f20cad220f279a7dde8",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/arcee-ai/nac/actions/runs/39649212384/job/119392787219",
+      "app": {
+        "id": 15368,
+        "slug": "github-actions"
+      }
+    }
+  ]
+}
