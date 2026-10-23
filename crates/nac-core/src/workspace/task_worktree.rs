@@ -264,12 +264,14 @@ pub fn prepare_workspace(launch: &TaskLaunchRecord) -> Result<PathBuf> {
         permissions.set_mode(0o700);
         std::fs::set_permissions(parent, permissions)?;
     }
+    let creating = match std::fs::symlink_metadata(&launch.workspace_path) {
+        Ok(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(error) => return Err(error.into()),
+    };
     let marker = parent.join(format!("{}.owner", launch.session_id));
     if !marker.exists() {
-        anyhow::ensure!(
-            std::fs::symlink_metadata(&launch.workspace_path).is_err(),
-            "conflict: unowned workspace already exists"
-        );
+        anyhow::ensure!(creating, "conflict: unowned workspace already exists");
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -283,6 +285,25 @@ pub fn prepare_workspace(launch: &TaskLaunchRecord) -> Result<PathBuf> {
             && std::fs::read_to_string(&marker)? == launch.request.request_id,
         "conflict: workspace ownership marker changed"
     );
+    let completed = parent.join(format!("{}.materialized", launch.session_id));
+    let checkpoint = serde_json::to_vec(&(
+        &launch.request.request_id,
+        &launch.session_id,
+        &launch.workspace_path,
+        &launch.source,
+    ))?;
+    if creating {
+        anyhow::ensure!(
+            matches!(std::fs::symlink_metadata(&completed), Err(error) if error.kind() == std::io::ErrorKind::NotFound),
+            "conflict: materialized workspace is missing; retained inventory requires inspection"
+        );
+    } else {
+        anyhow::ensure!(
+            std::fs::symlink_metadata(&completed).is_ok_and(|metadata| metadata.is_file())
+                && std::fs::read(&completed)? == checkpoint,
+            "conflict: retained checkout materialization is incomplete or uncertain; files retained for inspection"
+        );
+    }
     let pin = format!("refs/nac/task-launches/{}", launch.request.request_id);
     let pinned = target.output(target.root(), &["show-ref", "--verify", "--quiet", &pin])?;
     if pinned.status.success() {
@@ -307,7 +328,7 @@ pub fn prepare_workspace(launch: &TaskLaunchRecord) -> Result<PathBuf> {
             ],
         )?;
     }
-    if std::fs::symlink_metadata(&launch.workspace_path).is_err() {
+    if creating {
         // Preparation executes no repository hooks or content-filter programs.
         // Fetching LFS/submodules and repository setup remain explicit agent work.
         let filters = target.output(
@@ -367,6 +388,19 @@ pub fn prepare_workspace(launch: &TaskLaunchRecord) -> Result<PathBuf> {
             std::fs::symlink_metadata(&cwd)?.is_dir(),
             "task subdirectory is missing or a symlink"
         );
+    }
+    if creating {
+        // HEAD/common-dir alone do not prove checkout finished: Git writes
+        // those before populating files. Publish this checkpoint only after
+        // successful materialization and validation, never during recovery.
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(completed)?;
+        file.write_all(&checkpoint)?;
+        file.sync_all()?;
+        std::fs::File::open(parent)?.sync_all()?;
     }
     Ok(cwd)
 }

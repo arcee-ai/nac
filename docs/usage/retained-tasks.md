@@ -31,6 +31,9 @@ or was deleted. Reusing that identity with different arguments conflicts.
 **Start another intentional task** creates a new identity and separate checkout.
 After a host restart, interrupted preparation is shown as failed with a resume
 action. Merely reading preparation status does not resume work or wake an agent.
+An existing checkout without its durable materialization checkpoint remains
+failed for inspection: Git may have registered HEAD before populating files.
+Resume never treats that partial state as ready, fills it in, or resets it.
 
 Session publication and the first durable inbox item commit together. A lost
 response cannot create a second session or brief. Cancellation before publication
