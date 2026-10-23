@@ -137,7 +137,7 @@ test("workflow wiring preserves the aggregate, exact jobs, coverage and unprivil
   assert.match(workflow, /run: make test-assets/);
   assert.match(workflow, /-p nac-contracts -p nac-credential-store -p nac-managed -p nac-process/);
   assert.match(workflow, /make test-durability test-managed-load test-managed-image-contract/);
-  assert.match(workflow, /run: make test-e2e/);
+  assert.match(workflow, /NAC_E2E_BINARY=.* npm --prefix crates\/nac-server\/web run test:e2e/);
   assert.match(workflow, /runner: macos-26/);
   assert.match(workflow, /target: x86_64-unknown-linux-musl/);
   assert.match(workflow, /uses: \.\/\.github\/workflows\/managed-image.yml/);

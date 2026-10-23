@@ -7,6 +7,10 @@ on:
         description: Immutable candidate from the caller's preparation job
         required: true
         type: string
+      quality_receipt:
+        description: Exact-candidate complete successful quality results from the same caller run
+        default: ''
+        type: string
       policy_mode:
         description: Event-bound policy mode from the caller; standalone runs derive it
         default: ''
@@ -47,7 +51,7 @@ jobs:
           echo "short_sha=${sha:0:12}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: 24.22.1
       - name: Bind image policy to the eligible caller event
         id: policy
         env:
@@ -73,7 +77,7 @@ jobs:
           sh scripts/test-managed-image-contract.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: 24.22.1
       - name: Test image inventory, trusted-policy and workflow failure contracts
         run: |
           npm --prefix .github/scripts ci --ignore-scripts
@@ -83,6 +87,8 @@ jobs:
   quality:
     needs: prepare
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -96,15 +102,25 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
-          cache: npm
-          cache-dependency-path: |
-            crates/nac-server/web/package-lock.json
-            .github/scripts/package-lock.json
+      - name: Cache managed fault and standalone quality compilation
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: managed-quality
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - name: Validate the caller quality receipt before reuse
+        if: inputs.quality_receipt != ''
+        env:
+          QUALITY_RECEIPT: ${{ inputs.quality_receipt }}
+          EXPECTED_SHA: ${{ needs.prepare.outputs.sha }}
+        run: node .github/scripts/pr-checks.mjs verify-quality
       - name: Install test dependencies
+        if: inputs.quality_receipt == ''
         run: |
           npm --prefix crates/nac-server/web ci
           npm --prefix .github/scripts ci
       - name: Run the repository acceptance gates
+        if: inputs.quality_receipt == ''
         run: make ci
 
       - name: Verify the private managed fault fixture
@@ -129,6 +145,8 @@ jobs:
           platforms: linux/amd64
           load: true
           push: false
+          cache-from: type=gha,scope=nac-managed-linux-amd64-v1
+          cache-to: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && 'type=gha,mode=max,scope=nac-managed-linux-amd64-v1' || '' }}
           tags: nac-managed-smoke:${{ needs.prepare.outputs.short_sha }}
           build-args: |
             NAC_BUILD_TRACK=dev
@@ -153,7 +171,7 @@ jobs:
         run: sh scripts/smoke-managed-image.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: 24.22.1
       - name: Pin canonical reviewed-dev image policy for publication
         id: publication-policy
         if: needs.prepare.outputs.policy_mode == 'publication'
