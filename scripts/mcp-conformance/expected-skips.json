@@ -1,0 +1,144 @@
+{
+  "2025-11-25": [
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "json-schema-2020-12-client-$defs-preserved",
+      "name": "JsonSchema2020_12Client$DefsPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "json-schema-2020-12-client-$schema-preserved",
+      "name": "JsonSchema2020_12Client$SchemaPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "json-schema-2020-12-client-additionalProperties-preserved",
+      "name": "JsonSchema2020_12ClientAdditionalPropertiesPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "sep-2106-client-anchor-keyword-preserved",
+      "name": "JsonSchema2020_12ClientAnchorKeywordPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "sep-2106-client-composition-keywords-preserved",
+      "name": "JsonSchema2020_12ClientCompositionKeywordsPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "sep-2106-client-conditional-keywords-preserved",
+      "name": "JsonSchema2020_12ClientConditionalKeywordsPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    }
+  ],
+  "2026-07-28": [
+    {
+      "scenario": "http-standard-headers",
+      "id": "sep-2243-client-includes-standard-headers",
+      "name": "ClientMcpMethodHeader_initialize",
+      "reason": "Client did not send a initialize request; Mcp-Method header was not exercised for this method."
+    },
+    {
+      "scenario": "http-standard-headers",
+      "id": "sep-2243-client-includes-standard-headers",
+      "name": "ClientMcpMethodHeader_notifications_initialized",
+      "reason": "Client did not send a notifications/initialized request; Mcp-Method header was not exercised for this method."
+    },
+    {
+      "scenario": "http-standard-headers",
+      "id": "sep-2243-client-includes-standard-headers",
+      "name": "ClientMcpMethodHeader_prompts_get",
+      "reason": "Client did not send a prompts/get request; Mcp-Method header was not exercised for this method."
+    },
+    {
+      "scenario": "http-standard-headers",
+      "id": "sep-2243-client-includes-standard-headers",
+      "name": "ClientMcpMethodHeader_prompts_list",
+      "reason": "Client did not send a prompts/list request; Mcp-Method header was not exercised for this method."
+    },
+    {
+      "scenario": "http-standard-headers",
+      "id": "sep-2243-client-includes-standard-headers",
+      "name": "ClientMcpMethodHeader_resources_list",
+      "reason": "Client did not send a resources/list request; Mcp-Method header was not exercised for this method."
+    },
+    {
+      "scenario": "http-standard-headers",
+      "id": "sep-2243-client-includes-standard-headers",
+      "name": "ClientMcpMethodHeader_resources_read",
+      "reason": "Client did not send a resources/read request; Mcp-Method header was not exercised for this method."
+    },
+    {
+      "scenario": "http-standard-headers",
+      "id": "sep-2243-client-includes-standard-headers",
+      "name": "ClientMcpNameHeader_prompts_get",
+      "reason": "Client did not send a prompts/get request; Mcp-Name header was not exercised for this method."
+    },
+    {
+      "scenario": "http-standard-headers",
+      "id": "sep-2243-client-includes-standard-headers",
+      "name": "ClientMcpNameHeader_resources_read",
+      "reason": "Client did not send a resources/read request; Mcp-Name header was not exercised for this method."
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "json-schema-2020-12-client-$defs-preserved",
+      "name": "JsonSchema2020_12Client$DefsPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "json-schema-2020-12-client-$schema-preserved",
+      "name": "JsonSchema2020_12Client$SchemaPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "json-schema-2020-12-client-additionalProperties-preserved",
+      "name": "JsonSchema2020_12ClientAdditionalPropertiesPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "sep-2106-client-anchor-keyword-preserved",
+      "name": "JsonSchema2020_12ClientAnchorKeywordPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "sep-2106-client-composition-keywords-preserved",
+      "name": "JsonSchema2020_12ClientCompositionKeywordsPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "json-schema-2020-12-preservation",
+      "id": "sep-2106-client-conditional-keywords-preserved",
+      "name": "JsonSchema2020_12ClientConditionalKeywordsPreserved",
+      "reason": "Skipped because the client did not complete the schema echo"
+    },
+    {
+      "scenario": "request-metadata",
+      "id": "sep-2575-client-declares-elicitation-capability",
+      "name": "ClientDeclaresElicitationCapability",
+      "reason": "Optional capability is not advertised by the client."
+    },
+    {
+      "scenario": "request-metadata",
+      "id": "sep-2575-client-declares-roots-capability",
+      "name": "ClientDeclaresRootsCapability",
+      "reason": "Optional capability is not advertised by the client."
+    },
+    {
+      "scenario": "request-metadata",
+      "id": "sep-2575-client-declares-sampling-capability",
+      "name": "ClientDeclaresSamplingCapability",
+      "reason": "Optional capability is not advertised by the client."
+    }
+  ]
+}

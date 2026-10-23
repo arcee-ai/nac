@@ -16,13 +16,17 @@ new candidate after the base advances; a prior head's green check is insufficien
 | Job | Every PR | Coverage |
 | --- | --- | --- |
 | prepare | yes | Exact source identity and complete merge diff applicability |
+| workflow-lint | yes | Pinned actionlint/ShellCheck over every tracked workflow and shell script, plus real-tool enforcement fixtures |
 | lint | yes | Workspace production clippy, web lint, Rust/web formatting |
-| test-server | yes | Server and stable binary, web tests, generated OpenAPI/types, all committed browser/client assets, production Chromium journeys |
+| test-server | yes | Server and stable binary, web tests, generated OpenAPI/types, all committed browser/client assets |
+| browser | yes | Same-candidate committed bundle and production Chromium journeys; separately required alongside the asset drift gate |
+| quality | yes | Exact candidate/repository/run/attempt receipt covering complete successful unit/assets/lint/workflow-lint results |
 | test-core | yes | Core/catalog tests, release policy, installer, PR gate/rollout model tests |
 | test-workspace | yes | Contracts, credentials, managed and process crate tests; source command/binary/size, durability, managed load and static image contracts |
-| test | yes | Compatibility result covering all test lanes and lint |
+| macos-native | yes | Native ARM macOS process/credential suites and 12 exact core terminal regressions; measured first/warm runs and Darwin behavioral failure control ([coverage](native-macos.md)) |
+| test | yes | Compatibility result requires both shared quality and browser acceptance |
 | build | yes | Existing Linux musl and macOS ARM release binary/archive validation |
-| managed | explicit | Reusable contract, pinned quality/fault-fixture, exact Linux image build and credential-independent smoke |
+| managed | explicit | Reusable contract, verified same-run quality reuse, private fault fixture, exact Linux image build, smoke and advisory findings |
 | required-pr-checks | always | Explicit result set and candidate binding; no cross-workflow lookup races |
 
 Managed work applies when any changed path is under `.github/`, `crates/`,
@@ -31,8 +35,11 @@ Managed work applies when any changed path is under `.github/`, `crates/`,
 and renames/deletions. Non-PR runs conservatively enable managed work. The
 stable-release workflow is the sole main/dev push producer; managed-image has
 only reusable-call and manual
-triggers. Each managed call has a unique run/attempt concurrency identity, so
-three overlapping updates cannot replace a pending call. Downstream trusted
+triggers. Superseded ordinary PR runs cancel by PR number on synchronize or base-ref edits;
+metadata-only edits do not cancel active work. Other runs use a unique run
+identity and never cancel release/publication work. Each managed call retains a
+unique run/attempt identity; cancellation comes from its superseded parent PR,
+so unrelated callers cannot replace a pending call. Downstream trusted
 image rescans must select successful **stable-release.yml dev-push** artifacts,
 never PR, manual-dispatch or standalone managed workflow artifacts.
 
@@ -51,6 +58,12 @@ skip all fail. The reusable managed workflow independently requires all its inne
 jobs, preventing an accidentally skipped build/smoke from turning the call green.
 Cancellation of the aggregate itself blocks merging. Platform failure to start a
 workflow cannot emit a job; the missing required context still blocks merging.
+
+Quality reuse, cache trust, the before/after coverage matrix and measurement
+procedure are documented in [CI efficiency](ci-efficiency.md).
+
+Workflow/shell lint inventory, tool verification, dialects and seeded failure evidence
+are documented in [workflow-shell-lint.md](workflow-shell-lint.md).
 
 Extension contract: a source-security reusable call must become a direct
 `required-pr-checks.needs` dependency and an entry in `pr-checks.mjs`'s

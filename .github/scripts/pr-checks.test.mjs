@@ -137,7 +137,7 @@ test("workflow wiring preserves the aggregate, exact jobs, coverage and unprivil
   assert.match(workflow, /run: make test-assets/);
   assert.match(workflow, /-p nac-contracts -p nac-credential-store -p nac-managed -p nac-process/);
   assert.match(workflow, /make test-durability test-managed-load test-managed-image-contract/);
-  assert.match(workflow, /run: make test-e2e/);
+  assert.match(workflow, /NAC_E2E_BINARY=.* npm --prefix crates\/nac-server\/web run test:e2e/);
   assert.match(workflow, /runner: macos-26/);
   assert.match(workflow, /target: x86_64-unknown-linux-musl/);
   assert.match(workflow, /uses: \.\/\.github\/workflows\/managed-image.yml/);
@@ -180,4 +180,20 @@ test("review request metadata operation verifies owners and excludes the author 
   assert.doesNotMatch(workflow, /uses: actions\/checkout|run:/);
   assert.match(workflow, /getCollaboratorPermissionLevel/);
   assert.match(workflow, /owner.id !== pr.user.id/);
+});
+
+test("native macOS is candidate-bound and required even for docs-only PRs", () => {
+  const workflow = fs.readFileSync(".github/workflows/stable-release.yml", "utf8");
+  const native = workflow.split("\n  macos-native:\n")[1].split("\n  managed:")[0];
+  assert.match(native, /needs: prepare/);
+  assert.match(native, /uses: \.\/\.github\/workflows\/macos-native.yml/);
+  assert.match(native, /source-sha: \$\{\{ needs.prepare.outputs.sha \}\}/);
+  assert.ok(requiredJobs.includes("macos-native"));
+  for (const managed of ["true", "false"]) {
+    const needs = successful(managed === "true" ? "success" : "skipped");
+    for (const result of ["failure", "cancelled", "skipped", undefined]) {
+      needs["macos-native"].result = result;
+      assert.throws(() => requireComplete(needs, managed, sha), /macos-native did not succeed/);
+    }
+  }
 });

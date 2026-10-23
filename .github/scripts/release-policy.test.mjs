@@ -208,8 +208,8 @@ test("release please is explicitly a dev-targeted root simple release", () => {
   assert.match(publicationJob, /RELEASE_PR_NUMBER: \$\{\{ github.event.pull_request.number \}\}/);
   assert.match(publicationJob, /run: node .github\/scripts\/source-release.mjs/);
   assert.doesNotMatch(publicationJob, /skip-github-release/);
-  assert.equal(workflow.match(/googleapis\/release-please-action@v4/g)?.length, 1);
-  assert.match(workflow, /create-github-app-token@v2/);
+  assert.equal(workflow.match(/googleapis\/release-please-action@[a-f0-9]{40} # v4\./g)?.length, 1);
+  assert.match(workflow, /create-github-app-token@[a-f0-9]{40} # v2\./);
   assert.match(workflow, /repositories: nac/);
   assert.match(workflow, /permission-contents: write/);
   assert.match(workflow, /permission-pull-requests: write/);

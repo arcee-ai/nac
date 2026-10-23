@@ -1,0 +1,59 @@
+name: Native macOS regressions
+
+on:
+  workflow_call:
+    inputs:
+      source-sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ARM macOS process and credentials
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+      - name: Bind actual native runner and candidate
+        env:
+          EXPECTED_SHA: ${{ inputs.source-sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          sw_vers
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - name: Cache focused native tests
+        id: cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: native-regressions
+          prefix-key: nac-ci-v1
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - name: Verify fixture isolation and exact selection controls
+        run: python3 .github/scripts/native-regressions.test.py
+      - name: Run exact native regressions and safe Darwin failure control
+        env:
+          NATIVE_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: >-
+          python3 .github/scripts/native-regressions.py
+          --require-macos-arm --seed-macos
+          --output "$RUNNER_TEMP/native-regressions"
+      - name: Retain architecture, toolchain, timings and regression evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-macos-${{ inputs.source-sha }}
+          path: ${{ runner.temp }}/native-regressions
+          if-no-files-found: error
