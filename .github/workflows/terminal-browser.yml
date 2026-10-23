@@ -15,6 +15,7 @@ on:
       - 'Makefile'
       - 'Cargo.lock'
       - 'Cargo.toml'
+      - 'crates/nac-process/**'
       - 'crates/nac-core/src/terminal/**'
       - 'crates/nac-core/src/tools/*terminal*'
       - 'crates/nac-core/src/session_service/*terminal*'
@@ -68,7 +69,9 @@ jobs:
           toolchain: 1.98.0
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          shared-key: focused-terminal-browser
+          prefix-key: nac-ci-v1
+          key: browser
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
