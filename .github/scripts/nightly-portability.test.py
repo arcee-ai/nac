@@ -155,8 +155,10 @@ else:
             sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=runner.ROOT, text=True).strip()
             env = dict(os.environ, CARGO=str(cargo), CONTROL_READY=str(ready),
                        EXPECTED_SHA=sha, RUNNER_TEMP=str(root), SEED_FAILURE='false')
+            wrapper_output = root / 'wrapper.log'
+            wrapper_log = wrapper_output.open('w')
             process = subprocess.Popen(['bash', str(shell)], cwd=runner.ROOT, env=env,
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                       stdout=wrapper_log, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 10
                 while not ready.exists() and time.monotonic() < deadline:
@@ -164,7 +166,13 @@ else:
                 self.assertTrue(ready.exists(), 'child never reached readiness barrier')
                 pids = [int(p) for p in ready.read_text().split()]
                 process.send_signal(signal.SIGINT)
-                self.assertEqual(process.wait(timeout=10), 130)
+                code = process.wait(timeout=10)
+                wrapper_log.flush()
+                report_path = root / 'nightly-portability/report.json'
+                diagnostics = wrapper_output.read_text()
+                if report_path.exists():
+                    diagnostics += '\n' + report_path.read_text()
+                self.assertEqual(code, 130, diagnostics)
                 for pid in pids:
                     result = subprocess.run(['ps', '-p', str(pid), '-o', 'stat='], capture_output=True, text=True)
                     self.assertTrue(not result.stdout.strip() or result.stdout.strip().startswith('Z'), result.stdout)
@@ -176,6 +184,7 @@ else:
                 if process.poll() is None:
                     process.kill()
                     process.wait()
+                wrapper_log.close()
 
 
 

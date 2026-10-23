@@ -158,7 +158,8 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
     userAgent: navigator.userAgent,
   }));
   expect(browser.platform, "browser keyboard platform must be recognized").toMatch(/Mac|Linux|Win/);
-  const shortcut = browser.platform.includes("Mac") ? "Meta+V" : "Control+V";
+  // xterm consumes Ctrl+V as terminal SYN on Linux; Shift leaves native paste to Chromium.
+  const shortcut = browser.platform.includes("Mac") ? "Meta+V" : "Control+Shift+V";
   await info.attach("native-browser-profile", {
     body: JSON.stringify({ host: process.platform, shell, ...browser, shortcut }, null, 2),
     contentType: "application/json",

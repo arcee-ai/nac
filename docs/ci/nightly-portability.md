@@ -151,7 +151,7 @@ the existing 45-second test, 10-second assertion, one-worker, zero-retry budgets
 It checks real pager content during resize, changed PTY dimensions, unchanged
 shell PID after pager/paste, retained terminal identity, no HTTP input from
 synthetic paste, and exact bracketed UTF-8 bytes at both HTTP and raw PTY.
-Chromium's actual `navigator.platform` selects Meta+V or Control+V; an attached
+Chromium's actual `navigator.platform` selects Meta+V or Control+Shift+V; an attached
 profile records platform, user agent, shell and chord. The Desktop Chrome
 profile's user agent alone does not identify its keyboard platform.
 
