@@ -36,12 +36,6 @@ const DETAIL_ICONS: Partial<Record<ActionKind, IconName>> = {
   "session-status": IconName.Eye,
 };
 
-const PROMINENT_ACTIONS: ReadonlySet<ActionKind> = new Set([
-  "thread",
-  "reasoning",
-  "define-workset",
-]);
-
 const ROW_STATUS: Record<ActionStatus, ActionListButtonStatus> = {
   ready: ActionListButtonStatus.Ready,
   pending: ActionListButtonStatus.Pending,
@@ -63,10 +57,6 @@ export function rowIcon(action: ActionKind | null): IconName {
 
 export function detailIcon(action: ActionKind): IconName {
   return DETAIL_ICONS[action] ?? ROW_ICONS[action];
-}
-
-export function isProminentAction(action: ActionKind | null): boolean {
-  return action !== null && PROMINENT_ACTIONS.has(action);
 }
 
 export function rowStatus(status: ActionStatus): ActionListButtonStatus {

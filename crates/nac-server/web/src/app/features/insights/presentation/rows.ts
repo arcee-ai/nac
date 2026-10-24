@@ -1,11 +1,7 @@
 import type { ActionListButtonStatus, IconName } from "@/app/atoms";
 import { actionMeta, entryRow, segmentRow } from "@/app/features/insights/model/labels";
 import type { InsightEntry, InsightRow, InsightSegment } from "@/app/features/insights/model/types";
-import {
-  isProminentAction,
-  rowIcon,
-  rowStatus,
-} from "@/app/features/insights/presentation/actionPresentation";
+import { rowIcon, rowStatus } from "@/app/features/insights/presentation/actionPresentation";
 import {
   sessionTarget,
   type SessionResolver,
@@ -16,7 +12,6 @@ export interface RowView {
   label: string;
   meta?: string;
   status: ActionListButtonStatus;
-  prominent: boolean;
 }
 
 export interface RowSources {
@@ -31,7 +26,6 @@ function rowView(row: InsightRow): RowView {
     label: row.label,
     meta: row.meta ?? undefined,
     status: rowStatus(row.status),
-    prominent: isProminentAction(row.action),
   };
 }
 

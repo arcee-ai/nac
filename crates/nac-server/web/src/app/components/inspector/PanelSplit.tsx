@@ -287,6 +287,7 @@ export function PanelRow({
     <TabButton
       type="button"
       size={isMobile ? TabButtonSize.Large : TabButtonSize.Small}
+      className={isMobile ? undefined : "!h-6"}
       active={active}
       disabled={disabled}
       aria-pressed={active}

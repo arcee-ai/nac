@@ -1,4 +1,4 @@
-import { ActionListButton } from "@/app/atoms";
+import { ActionListButton, ActionListSegment } from "@/app/atoms";
 import type {
   InsightEntry,
   InsightGroupEntry,
@@ -60,19 +60,16 @@ function EntryRows({
         onClick={controller.entryAction(entry) ?? undefined}
       />
       {expanded && entry.kind === "group" ? (
-        // One block under the group row: the child guide line spans only the
-        // 2px gap between children, not the wider gap between rows.
-        <div className="flex flex-col gap-0.5 [&>*]:shrink-0">
+        <ActionListSegment>
           {entry.group.segments.map((segment) => (
             <ActionListButton
               key={segment.key}
               {...controller.segmentView(segment)}
-              depth={1}
               selected={controller.segmentSelected(entry, segment)}
               onClick={controller.segmentAction(entry, segment) ?? undefined}
             />
           ))}
-        </div>
+        </ActionListSegment>
       ) : null}
     </>
   );
@@ -100,14 +97,11 @@ export function InsightsTurnSection({
       <div className="flex flex-col gap-1 py-2 [&>*]:shrink-0">
         {entryRuns(section.entries).map((run) =>
           run.kind === "wave" ? (
-            <div
-              key={`wave:${run.entries[0].id}`}
-              className="flex flex-col gap-1 border-l border-primary py-1 pl-2 [&>*]:shrink-0"
-            >
+            <ActionListSegment key={`wave:${run.entries[0].id}`}>
               {run.entries.map((entry) => (
                 <EntryRows key={entry.id} entry={entry} controller={controller} />
               ))}
-            </div>
+            </ActionListSegment>
           ) : (
             <EntryRows key={run.entry.id} entry={run.entry} controller={controller} />
           ),
