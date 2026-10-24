@@ -1846,6 +1846,8 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/insights$`));
   await expect(worksetBadge).toHaveAttribute("aria-pressed", "true");
+  // A keyboard open moves focus into the detail a frame later; let it land before moving on.
+  await expect(page.getByRole("region", { name: "Insights detail" })).toBeFocused();
   await page.getByRole("button", { name: "Worksets_managed-release", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/worksets$`));

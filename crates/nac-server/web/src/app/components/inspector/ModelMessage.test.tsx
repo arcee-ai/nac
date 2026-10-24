@@ -77,7 +77,7 @@ describe("transcript topology badge navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Workset" }));
 
     fireEvent.click(screen.getByRole("button", { name: /api/i }));
-    expect(onSelectThread).toHaveBeenCalledWith("api", "api:0");
+    expect(onSelectThread).toHaveBeenCalledWith("api", "api:0", { focusDetail: true });
   });
 
   it("keeps parent-owned transcripts free of mutation affordances", () => {

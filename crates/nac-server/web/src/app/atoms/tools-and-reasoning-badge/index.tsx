@@ -16,7 +16,7 @@ interface ToolsAndReasoningBadgeProps {
   /** Glyph in the same plate when there is no `avatarUrl`. */
   leadingIcon?: IconName;
   disabled?: boolean;
-  onClick?: () => void;
+  onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   /** Id of the Insights panel the badge opens. */
   controls?: string;
   className?: string;

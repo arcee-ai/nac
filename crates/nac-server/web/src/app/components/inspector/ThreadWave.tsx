@@ -1,9 +1,18 @@
 import { Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
 import { ThreadLogTail } from "@/app/components/inspector/ThreadLogTail";
+import { openOptionsFor } from "@/app/features/insights/transcript/openOptions";
+import {
+  INSIGHTS_DETAIL_ID,
+  type InsightsOpenOptions,
+} from "@/app/features/insights/useInsightsNavigation";
 import { cn } from "@/app/lib/cn";
 import type { ThreadState, TranscriptThread } from "@/app/lib/transcript";
 
-type SelectThread = (name: string, episodeKey: string) => void;
+export type SelectThread = (
+  name: string,
+  episodeKey: string,
+  options?: InsightsOpenOptions,
+) => void;
 
 interface ThreadBoxProps {
   thread: TranscriptThread;
@@ -155,7 +164,8 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
             selected ? "btn-ghost-highlighted" : "btn-ghost",
           )}
           aria-pressed={selected}
-          onClick={() => onSelect(thread.name, thread.key)}
+          aria-controls={INSIGHTS_DETAIL_ID}
+          onClick={(event) => onSelect(thread.name, thread.key, openOptionsFor(event))}
         >
           {content}
         </button>

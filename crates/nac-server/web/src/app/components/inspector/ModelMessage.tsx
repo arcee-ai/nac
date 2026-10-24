@@ -17,7 +17,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
-import { ThreadWave } from "@/app/components/inspector/ThreadWave";
+import { ThreadWave, type SelectThread } from "@/app/components/inspector/ThreadWave";
 import { partitionModelTurn } from "@/app/features/insights/model/segments";
 import { formatMessageDate } from "@/app/features/insights/transcript/messageDate";
 import { TranscriptGroupBadge } from "@/app/features/insights/transcript/TranscriptGroupBadge";
@@ -78,7 +78,7 @@ interface ModelMessageProps {
   selectedThreadEpisode: string | null;
   /** Id of the group the panels are pointing at, if any. */
   selectedGroupId?: string | null;
-  onSelectThread: (name: string, episodeKey: string) => void;
+  onSelectThread: SelectThread;
   /**
    * Snapshot index of the user prompt this model turn answers. Regenerate and
    * revert address that prompt — same endpoints as the user bubble above.
