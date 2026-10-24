@@ -52,7 +52,9 @@ const GLYPH_TONE =
  * so pressing or focusing an action neither presses the row nor rings it. The
  * actions live outside the button so they stay clickable. On desktop they
  * leave the layout until the row is hovered or focused from the keyboard, so
- * the title keeps the full row until then.
+ * the title keeps the full row until then. They are visually hidden rather
+ * than removed: focus leaves the row before it reaches the first action, and
+ * a removed action could not take it.
  */
 const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   title,
@@ -148,7 +150,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
             "flex items-center gap-1 shrink-0",
             isMobile
               ? null
-              : "hidden group-hover:flex group-has-[:focus-visible]:flex group-has-[>button:disabled]:hidden",
+              : "sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden",
           )}
         >
           {actions}
