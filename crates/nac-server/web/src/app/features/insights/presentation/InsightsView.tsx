@@ -203,7 +203,6 @@ export function InsightsView({
   const threadPane = useInsightsThreadPane(
     snapshot,
     shown?.kind === "thread" ? shown.name : null,
-    picked?.kind === "thread",
     runState,
     canSteerWorkers,
   );

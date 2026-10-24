@@ -136,7 +136,7 @@ export function ThreadsView({
   /** True only for the user-owned primary classic orchestrator transcript. */
   canSteerWorkers: boolean;
 }) {
-  const { setSelectedThreadRunning } = useNativeRuntime().stores.sessionLayoutStore;
+  const { setShownThread } = useNativeRuntime().stores.sessionLayoutStore;
 
   const { liveThreads, runningNames, pendingNames } = useThreadRunState(snapshot);
   const [view, setView] = useState<ThreadDetailView>("log");
@@ -293,9 +293,9 @@ export function ThreadsView({
 
   // Same running bit the detail pane uses — the dialog title shimmer reads it.
   useEffect(() => {
-    setSelectedThreadRunning(currentRunning);
-    return () => setSelectedThreadRunning(false);
-  }, [currentRunning, setSelectedThreadRunning]);
+    setShownThread(currentName ? { name: currentName, running: currentRunning } : null);
+    return () => setShownThread(null);
+  }, [currentName, currentRunning, setShownThread]);
 
   if (!snapshot) return <PanelLoading listTitle="Threads" />;
 

@@ -10,6 +10,12 @@ export type InsightSelection =
   | { kind: "group"; groupId: string; segmentKey: string | null }
   | { kind: "thread" };
 
+/** Thread the Insights detail shows, picked or the newest one by default. */
+export interface ShownThread {
+  name: string;
+  running: boolean;
+}
+
 interface SessionLayoutState {
   /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
   collapsed: boolean;
@@ -38,10 +44,10 @@ interface SessionLayoutState {
    */
   selectedThreadEpisode: string | null;
   /**
-   * Whether the thread detail pane considers the open thread running. The
-   * phone dialog header reads this so its title shimmer matches the panel.
+   * Published by the thread detail pane while it is up. The phone dialog
+   * header names this thread and shimmers while the pane shows it running.
    */
-  selectedThreadRunning: boolean;
+  shownThread: ShownThread | null;
   /** Entry the Insights detail shows; null until the panel or the chat picks one. */
   selectedInsight: InsightSelection | null;
   /**
@@ -80,7 +86,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     panelList: false,
     selectedThread: null,
     selectedThreadEpisode: null,
-    selectedThreadRunning: false,
+    shownThread: null,
     selectedInsight: null,
     insightFocusNonce: 0,
     expandedInsightGroups: new Set(),
@@ -219,11 +225,11 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     if (selectedThread) showSidePanelList(false);
   }
 
-  /** Drive the phone dialog title shimmer from the thread detail pane. */
-  function setSelectedThreadRunning(selectedThreadRunning: boolean): void {
-    if (getState().selectedThreadRunning !== selectedThreadRunning) {
-      setState({ selectedThreadRunning });
-    }
+  /** Drive the phone dialog title and its shimmer from the thread detail pane. */
+  function setShownThread(shownThread: ShownThread | null): void {
+    const current = getState().shownThread;
+    if (current?.name === shownThread?.name && current?.running === shownThread?.running) return;
+    setState({ shownThread });
   }
 
   /**
@@ -321,7 +327,6 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
       selectedFile: null,
       toggledFolders: new Set(),
       panelList: false,
-      selectedThreadRunning: false,
     });
   }
 
@@ -335,7 +340,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   const useSidePanelList = () => useStore((s) => s.panelList);
   const useSelectedThread = () => useStore((s) => s.selectedThread);
   const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
-  const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
+  const useShownThread = () => useStore((s) => s.shownThread);
   const useSelectedInsight = () => useStore((s) => s.selectedInsight);
   const useInsightFocusNonce = () => useStore((s) => s.insightFocusNonce);
   const useExpandedInsightGroups = () => useStore((s) => s.expandedInsightGroups);
@@ -360,7 +365,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     toggleSidePanelList,
     revealSidePanel,
     selectThread,
-    setSelectedThreadRunning,
+    setShownThread,
     selectInsight,
     toggleInsightGroup,
     selectInsightsFilter,
@@ -378,7 +383,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     useSidePanelList,
     useSelectedThread,
     useSelectedThreadEpisode,
-    useSelectedThreadRunning,
+    useShownThread,
     useSelectedInsight,
     useInsightFocusNonce,
     useExpandedInsightGroups,
@@ -403,7 +408,7 @@ export const {
   toggleSidePanelList,
   revealSidePanel,
   selectThread,
-  setSelectedThreadRunning,
+  setShownThread,
   selectInsight,
   toggleInsightGroup,
   selectInsightsFilter,
@@ -421,7 +426,7 @@ export const {
   useSidePanelList,
   useSelectedThread,
   useSelectedThreadEpisode,
-  useSelectedThreadRunning,
+  useShownThread,
   useSelectedInsight,
   useInsightFocusNonce,
   useExpandedInsightGroups,

@@ -100,9 +100,8 @@ export default function SessionPage() {
     useSidePanelCollapsed,
     useSidePanelAnimate,
     useSelectedWorkset,
-    useSelectedThreadRunning,
+    useShownThread,
     useSelectedThread,
-    useSelectedInsight,
     useSelectedRevision,
     useSelectedFile,
     selectInsight,
@@ -137,8 +136,7 @@ export default function SessionPage() {
   const animateSidePanel = useSidePanelAnimate();
   const expanded = useSidePanelExpanded();
   const selectedThread = useSelectedThread();
-  const selectedInsight = useSelectedInsight();
-  const selectedThreadRunning = useSelectedThreadRunning();
+  const shownThread = useShownThread();
   const selectedWorkset = useSelectedWorkset();
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
@@ -259,11 +257,10 @@ export default function SessionPage() {
       </div>
     ) : null;
 
-  // The thread Insights has open titles the phone dialog. Its detail pane syncs
-  // the running bit into the store, so the title shimmers along with it.
-  const insightThread =
-    effectivePanel === "insights" && selectedInsight?.kind === "thread" ? selectedThread : null;
-  const threadTitleRunning = insightThread != null && selectedThreadRunning;
+  // The thread the Insights detail shows, picked or the newest one, titles the
+  // phone dialog. The detail pane publishes it with its running bit, so the
+  // title shimmers along with it.
+  const insightThread = effectivePanel === "insights" ? shownThread : null;
 
   const sideBox = (
     <SessionSideBox
@@ -392,11 +389,11 @@ export default function SessionPage() {
                   <span
                     className={cn(
                       "header-small",
-                      threadTitleRunning ? "text-shimmer-basic" : "text-basic-primary",
+                      insightThread?.running ? "text-shimmer-basic" : "text-basic-primary",
                     )}
                   >
                     {effectivePanel === "insights"
-                      ? (insightThread ?? SESSION_PANEL_LABEL.insights)
+                      ? (insightThread?.name ?? SESSION_PANEL_LABEL.insights)
                       : effectivePanel === "worksets"
                         ? (selectedWorkset ??
                           snapshot?.worksets.items[0]?.id ??

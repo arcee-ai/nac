@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useLayoutEffect, useMemo } from "react";
 
 import {
   useThreadEventLog,
@@ -73,27 +73,27 @@ export function useThreadOwnership(
 }
 
 /**
- * The phone dialog title names only a picked thread and shimmers from the
- * layout store, so only a picked thread mirrors whether it runs there.
+ * The thread the detail shows, picked or the newest one, is published to the
+ * layout store: the phone dialog titles itself after it and shimmers with it.
  */
 export function useInsightsThreadPane(
   snapshot: SessionSnapshotResponse | null,
   name: string | null,
-  picked: boolean,
   { liveThreads, runningNames }: ThreadRunState,
   canSteerWorkers: boolean,
 ): InsightsThreadPane | null {
-  const { setSelectedThreadRunning } = useNativeRuntime().stores.sessionLayoutStore;
+  const { setShownThread } = useNativeRuntime().stores.sessionLayoutStore;
   const messages = snapshot?.messages;
   const actions = useMemo(() => dispatchActions(messages ?? []), [messages]);
   const eventLog = useThreadEventLog(snapshot, name);
   const running = Boolean(name && runningNames.has(name));
-  const titleRunning = picked && running;
+  const shownName = snapshot ? name : null;
 
-  useEffect(() => {
-    setSelectedThreadRunning(titleRunning);
-    return () => setSelectedThreadRunning(false);
-  }, [titleRunning, setSelectedThreadRunning]);
+  // Before paint, so the dialog never titles a thread the detail has left.
+  useLayoutEffect(() => {
+    setShownThread(shownName ? { name: shownName, running } : null);
+    return () => setShownThread(null);
+  }, [shownName, running, setShownThread]);
 
   if (!snapshot || !name) return null;
   const thread =
