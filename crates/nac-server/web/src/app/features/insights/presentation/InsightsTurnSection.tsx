@@ -6,7 +6,7 @@ import type {
   InsightThreadEntry,
   InsightTurnSection,
 } from "@/app/features/insights/model/types";
-import { formatInsightTime } from "@/app/features/insights/presentation/insightTime";
+import { formatInsightDate } from "@/app/features/insights/presentation/insightTime";
 import type { RowView } from "@/app/features/insights/presentation/rows";
 
 export interface InsightsRowController {
@@ -84,20 +84,18 @@ export function InsightsTurnSection({
   controller,
 }: {
   section: InsightTurnSection;
-  /** Heading for a section without a prompt of its own. */
+  /** Heading for a section with neither a time nor a prompt of its own. */
   fallbackPrompt: string;
   controller: InsightsRowController;
 }) {
-  const prompt = section.promptPreview || fallbackPrompt;
-  const createdAt = formatInsightTime(section.createdAt);
+  // A turn is headed by when it was sent; only a section with no time to show
+  // (the turn still streaming, the actions before the first prompt) falls back
+  // to words.
+  const heading = formatInsightDate(section.createdAt) ?? (section.promptPreview || fallbackPrompt);
   return (
     <div className="flex flex-col [&>*]:shrink-0">
-      <h3 className="flex items-center gap-1 px-1 pt-4 pb-1 leading-[14px] whitespace-nowrap text-basic-tertiary">
-        {section.ordinal === null ? null : (
-          <span className="shrink-0 text-[10px]">#{section.ordinal}</span>
-        )}
-        <span className="min-w-0 flex-1 truncate text-[11px]">{prompt}</span>
-        {createdAt === null ? null : <span className="shrink-0 text-[10px]">{createdAt}</span>}
+      <h3 className="truncate px-1 pt-4 pb-1 text-[11px] leading-[14px] text-basic-muted">
+        {heading}
       </h3>
       <div className="flex flex-col gap-1 py-2 [&>*]:shrink-0">
         {entryRuns(section.entries).map((run) =>
