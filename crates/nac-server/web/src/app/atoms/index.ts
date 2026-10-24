@@ -1,4 +1,8 @@
-export { default as ActionListButton, ActionListButtonStatus } from "./action-list-button";
+export {
+  default as ActionListButton,
+  ActionListButtonStatus,
+  ActionListSegment,
+} from "./action-list-button";
 export { default as Avatar, AvatarSize } from "./avatar";
 export { default as Badge, BadgeColor } from "./badge";
 export { default as BoxSurface } from "./box-surface";

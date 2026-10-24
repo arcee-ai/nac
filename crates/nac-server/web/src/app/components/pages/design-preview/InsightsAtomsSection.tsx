@@ -1,6 +1,11 @@
 import { Fragment, useState } from "react";
-import { ActionListButton, ActionListButtonStatus, BoxSurface, IconName } from "@/app/atoms";
-import { ActionListSegment } from "@/app/atoms/action-list-button";
+import {
+  ActionListButton,
+  ActionListButtonStatus,
+  ActionListSegment,
+  BoxSurface,
+  IconName,
+} from "@/app/atoms";
 import { InsightItemsPreview } from "@/app/components/pages/design-preview/InsightItemsPreview";
 
 interface ActionSample {
