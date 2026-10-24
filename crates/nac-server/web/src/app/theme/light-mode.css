@@ -196,9 +196,9 @@
   --color-fill-btn-secondary-disabled-highlighted: var(--dark-trans-300);
 
   /* Destructive icons match the label ramp under Text / Buttons. */
-  --color-fill-btn-destructive: var(--red-600);
-  --color-fill-btn-destructive-hovered: var(--red-700);
-  --color-fill-btn-destructive-pressed: var(--red-800);
+  --color-fill-btn-destructive: var(--red-500);
+  --color-fill-btn-destructive-hovered: var(--red-600);
+  --color-fill-btn-destructive-pressed: var(--red-700);
   --color-fill-btn-destructive-disabled: var(--red-trans-400);
 
   /* fill / Danger */
@@ -260,11 +260,11 @@
   --color-text-btn-secondary-pressed-highlighted: var(--black);
   --color-text-btn-secondary-disabled-highlighted: var(--dark-trans-300);
 
-  /* One step darker than the Telos ramp, whose resting red stays below 4.5:1 on
-     the red-tinted secondary fill. */
-  --color-text-btn-destructive: var(--red-600);
-  --color-text-btn-destructive-hovered: var(--red-700);
-  --color-text-btn-destructive-pressed: var(--red-800);
+  /* The design system's ramp: the resting red stays below 4.5:1 on the
+     red-tinted secondary fill. */
+  --color-text-btn-destructive: var(--red-500);
+  --color-text-btn-destructive-hovered: var(--red-600);
+  --color-text-btn-destructive-pressed: var(--red-700);
   --color-text-btn-destructive-disabled: var(--red-trans-400);
 
   /* Text / Danger */
