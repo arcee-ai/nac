@@ -353,6 +353,9 @@ const config = {
           "background-clip": "text",
           "-webkit-text-fill-color": "transparent",
           color: "transparent",
+          "@media (prefers-reduced-motion: reduce)": {
+            animation: "none",
+          },
         },
         ".text-shimmer-basic": {
           "background-image":
@@ -364,6 +367,9 @@ const config = {
           "background-clip": "text",
           "-webkit-text-fill-color": "transparent",
           color: "transparent",
+          "@media (prefers-reduced-motion: reduce)": {
+            animation: "none",
+          },
         },
       });
     },
