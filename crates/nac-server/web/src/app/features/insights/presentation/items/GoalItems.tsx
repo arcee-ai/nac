@@ -1,5 +1,5 @@
-import { InsightCodeBox } from "@/app/atoms";
 import { actionTypeLabel } from "@/app/features/insights/model/labels";
+import { ItemCodeField } from "@/app/features/insights/presentation/items/ItemCodeField";
 import {
   isDefault,
   showsInput,
@@ -19,10 +19,13 @@ export function goalChangeContent(segment: ToolSegment): ItemContent {
 
 export function getGoalContent(segment: ToolSegment): ItemContent {
   const result = segment.presentation?.resultPreview || null;
+  const callId = segment.presentation?.callId ?? null;
   return {
     title: actionTypeLabel("get-goal"),
     copyText: result,
     body: (state) =>
-      result && isDefault(state) ? <InsightCodeBox>{result}</InsightCodeBox> : null,
+      result && isDefault(state) ? (
+        <ItemCodeField title="Results" shortContent={result} source="output" callId={callId} />
+      ) : null,
   };
 }

@@ -56,7 +56,6 @@ export { default as StickyInput, StickyInputVariant } from "./input/StickyInput"
 export { default as TextArea, TextAreaSize } from "./input/TextArea";
 export {
   default as InsightItem,
-  InsightCodeBox,
   InsightItemCodeDisplayer,
   InsightItemCodeDisplayerState,
   InsightItemState,

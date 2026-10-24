@@ -1,5 +1,6 @@
-import { InsightCodeBox, InsightItemState } from "@/app/atoms";
+import { InsightItemState } from "@/app/atoms";
 import { actionTypeLabel } from "@/app/features/insights/model/labels";
+import { ItemCodeField } from "@/app/features/insights/presentation/items/ItemCodeField";
 import {
   isDefault,
   withDuration,
@@ -19,6 +20,7 @@ import { formatSeconds } from "@/app/lib/format";
 export function sessionContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const link = context.resolveSession(sessionTarget(segment));
   const result = segment.presentation?.resultPreview || null;
+  const callId = segment.presentation?.callId ?? null;
   const sessionLink = <SessionLinkButton link={link} context={context} />;
 
   switch (segment.action) {
@@ -29,7 +31,14 @@ export function sessionContent(segment: ToolSegment, context: ItemContext): Item
         copyText: result,
         body: (state) => (
           <>
-            {result && isDefault(state) ? <InsightCodeBox>{result}</InsightCodeBox> : null}
+            {result && isDefault(state) ? (
+              <ItemCodeField
+                title="Results"
+                shortContent={result}
+                source="output"
+                callId={callId}
+              />
+            ) : null}
             {sessionLink}
           </>
         ),
