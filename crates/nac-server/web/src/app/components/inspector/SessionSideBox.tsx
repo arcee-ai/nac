@@ -158,72 +158,75 @@ export function SessionSideBox({
         expanded ? null : "border-l border-tertiary",
       )}
     >
-      <div
-        className={cn(
-          "flex items-center gap-4 pl-2 pr-2 py-2 shrink-0 bg-elevation-ground relative border-b border-muted",
-          // Room for the Modal's Close when this box is the fullscreen body.
-          expanded ? "pr-10" : null,
-        )}
-      >
+      <div className="relative flex items-center gap-2 px-2 py-2 shrink-0 border-b border-muted bg-elevation-ground">
         <SideBoxProgress sessionId={sessionId} />
-        <div className="flex flex-1 min-w-0 items-center gap-2" role="tablist">
-          {widePanels.map((name) => {
-            const selected = active === name;
-            const badge = panelBadgeCount(
-              name,
-              subagentCount,
-              snapshot?.worksets?.items.length ?? 0,
-            );
-            return (
-              <span key={name} className="relative shrink-0">
-                <HorizontalTabsItem
-                  size={HorizontalTabsItemSize.Medium}
-                  active={selected}
-                  iconName={PANEL_ICON[name]}
-                  role="tab"
-                  aria-selected={selected}
-                  aria-label={SESSION_PANEL_LABEL[name]}
-                  onClick={() => {
-                    // A tablet shows one column at a time, and a new panel opens on
-                    // its selected row; a desktop split ignores the flag entirely.
-                    showSidePanelList(false);
-                    onPanelChange(name);
-                  }}
-                >
-                  {SESSION_PANEL_LABEL[name]}
-                </HorizontalTabsItem>
-                {badge > 0 ? <PanelCountBadge count={badge} /> : null}
-              </span>
-            );
-          })}
-        </div>
-        {/* Expand/hide live here in the split; once fullscreen the Modal owns
-            Close. */}
-        {expanded ? null : (
-          <div className="flex items-center gap-2 pb-[2px] shrink-0">
-            <Tooltip title="Expand panel" position={TooltipPosition.BottomLeft}>
-              <Button
-                size={ButtonSize.Medium}
-                variant={ButtonVariant.Ghost}
-                content={ButtonContent.Icon}
-                aria-label="Expand panel"
-                onClick={toggleSidePanelExpanded}
-              >
-                <Icon iconName={IconName.FullScreen} />
-              </Button>
-            </Tooltip>
-            <Tooltip title="Hide panel" position={TooltipPosition.BottomLeft}>
-              <Button
-                size={ButtonSize.Medium}
-                variant={ButtonVariant.Ghost}
-                content={ButtonContent.Icon}
-                aria-label="Hide panel"
-                onClick={toggleSidePanelCollapsed}
-              >
-                <Icon iconName={IconName.SidebarChevronRight} />
-              </Button>
-            </Tooltip>
+        {/* Hide/expand live here in the split. Once fullscreen the Modal owns
+            Close at the trailing corner, and equal blanks keep the tabs centred
+            clear of it. */}
+        {expanded ? (
+          <span aria-hidden className="size-9 shrink-0" />
+        ) : (
+          <Tooltip title="Hide panel" position={TooltipPosition.BottomRight} className="shrink-0">
+            <Button
+              size={ButtonSize.Medium}
+              variant={ButtonVariant.Ghost}
+              content={ButtonContent.Icon}
+              aria-label="Hide panel"
+              onClick={toggleSidePanelCollapsed}
+            >
+              <Icon iconName={IconName.SidebarChevronRight} />
+            </Button>
+          </Tooltip>
+        )}
+        {/* Auto margins rather than `justify-center`: tabs wider than the bar
+            overflow its trailing end instead of losing their first ones. */}
+        <div className="flex flex-1 min-w-0">
+          <div className="flex min-w-0 items-center gap-2 mx-auto" role="tablist">
+            {widePanels.map((name) => {
+              const selected = active === name;
+              const badge = panelBadgeCount(
+                name,
+                subagentCount,
+                snapshot?.worksets?.items.length ?? 0,
+              );
+              return (
+                <span key={name} className="relative shrink-0">
+                  <HorizontalTabsItem
+                    size={HorizontalTabsItemSize.Medium}
+                    active={selected}
+                    iconName={PANEL_ICON[name]}
+                    role="tab"
+                    aria-selected={selected}
+                    aria-label={SESSION_PANEL_LABEL[name]}
+                    onClick={() => {
+                      // A tablet shows one column at a time, and a new panel opens on
+                      // its selected row; a desktop split ignores the flag entirely.
+                      showSidePanelList(false);
+                      onPanelChange(name);
+                    }}
+                  >
+                    {SESSION_PANEL_LABEL[name]}
+                  </HorizontalTabsItem>
+                  {badge > 0 ? <PanelCountBadge count={badge} className="top-0" /> : null}
+                </span>
+              );
+            })}
           </div>
+        </div>
+        {expanded ? (
+          <span aria-hidden className="size-9 shrink-0" />
+        ) : (
+          <Tooltip title="Expand panel" position={TooltipPosition.BottomLeft} className="shrink-0">
+            <Button
+              size={ButtonSize.Medium}
+              variant={ButtonVariant.Ghost}
+              content={ButtonContent.Icon}
+              aria-label="Expand panel"
+              onClick={toggleSidePanelExpanded}
+            >
+              <Icon iconName={IconName.FullScreen} />
+            </Button>
+          </Tooltip>
         )}
       </div>
 
