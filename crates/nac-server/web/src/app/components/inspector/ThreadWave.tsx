@@ -1,3 +1,5 @@
+import { useId } from "react";
+
 import { Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
 import { ThreadLogTail } from "@/app/components/inspector/ThreadLogTail";
 import { openOptionsFor } from "@/app/features/insights/transcript/openOptions";
@@ -28,6 +30,15 @@ const STATE_ORDER = {
   cancelled: 3,
   done: 4,
 } satisfies Record<ThreadState, number>;
+
+/** The state icon in words; an error reads "failed", as on the thread's Insights row. */
+const STATE_NAME = {
+  error: "failed",
+  running: "running",
+  pending: "pending",
+  cancelled: "cancelled",
+  done: "done",
+} satisfies Record<ThreadState, string>;
 
 const ICON_SIZE = "size-4 xl:size-5";
 
@@ -89,6 +100,7 @@ function worstState(threads: TranscriptThread[]): ThreadState {
 
 /** One dispatched thread: name, live state and the newest lines it produced. */
 function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
+  const bodyId = useId();
   const running = thread.state === "running";
   const pending = thread.state === "pending";
   const cancelled = thread.state === "cancelled";
@@ -132,11 +144,13 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
         )}
       </div>
       {running || cancelled ? (
-        <ThreadLogTail lines={tail} className={LOG_BODY} />
+        <div id={bodyId} className="w-full">
+          <ThreadLogTail lines={tail} className={LOG_BODY} />
+        </div>
       ) : (
         // Chrome blockifies `-webkit-box` flex items, so the clamped text
         // needs a plain wrapper to stay clamped.
-        <div className={SUMMARY_BODY}>
+        <div id={bodyId} className={SUMMARY_BODY}>
           <span className="line-clamp-2 text-micro text-basic-muted">
             {pending ? "Pending..." : thread.summary}
           </span>
@@ -163,6 +177,10 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
             "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
             selected ? "btn-ghost-highlighted" : "btn-ghost",
           )}
+          aria-label={[thread.name, thread.weight, STATE_NAME[thread.state]]
+            .filter(Boolean)
+            .join(", ")}
+          aria-describedby={bodyId}
           aria-pressed={selected}
           aria-controls={INSIGHTS_DETAIL_ID}
           onClick={(event) => onSelect(thread.name, thread.key, openOptionsFor(event))}
