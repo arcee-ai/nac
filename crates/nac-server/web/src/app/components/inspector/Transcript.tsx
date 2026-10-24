@@ -27,7 +27,7 @@ import { RunFailureRecovery } from "@/app/components/inspector/RunFailureRecover
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useTranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
-import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
+import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
 import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -485,7 +485,7 @@ export function Transcript({
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {
               if (turn.kind === "delegated-completion") {
-                return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
+                return <DelegatedCompletionCard key={turn.key} turn={turn} />;
               }
               if (turn.kind === "user") {
                 const command = (snapshot?.shell_commands ?? []).find(

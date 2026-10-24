@@ -12,7 +12,7 @@ import {
 } from "@/app/atoms";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
-import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
+import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
 import { ChildTranscriptScope } from "@/app/features/insights/transcript/ChildTranscriptScope";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useDelegatedPreviewStream } from "@/app/hooks/useDelegatedPreviewStream";
@@ -207,7 +207,7 @@ export function SubagentPreview({
               ) : null}
               {turns.map((turn, index) => {
                 if (turn.kind === "delegated-completion") {
-                  return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
+                  return <DelegatedCompletionCard key={turn.key} turn={turn} interactive={false} />;
                 }
                 if (turn.kind === "user") {
                   return (
