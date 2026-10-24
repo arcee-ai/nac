@@ -32,7 +32,7 @@ interface InsightItemProps {
   /** Shown under the body in the Error state. */
   errorMessage?: string | null;
   /**
-   * The type's body, rendered straight into the item's 8px-gap column in every
+   * The type's body, rendered straight into the item's 16px-gap column in every
    * state: the type decides what stays visible while loading or after a
    * failure (a session link, the input box).
    */
@@ -45,6 +45,8 @@ interface InsightItemProps {
  * for the spinner and shimmers the title; Error swaps it for the error-tone
  * Close and appends the message. Neither offers copy. Body text defaults to
  * the design's 12px tertiary text; code boxes and links bring their own.
+ * Each item draws its own bottom divider inside its 24px bottom padding, as
+ * the design does, so a stack of items needs no gap or separators.
  */
 const InsightItem: React.FC<InsightItemProps> = ({
   id,
@@ -68,8 +70,8 @@ const InsightItem: React.FC<InsightItemProps> = ({
       aria-labelledby={titleId}
       aria-current={active || undefined}
       className={cn(
-        "flex flex-col gap-2 p-4 pb-12 text-micro text-basic-tertiary",
-        active && "bg-btn-ghost-highlighted",
+        "flex flex-col gap-4 border-b border-muted px-4 pt-6 pb-[23px] text-micro text-basic-tertiary",
+        active && "bg-elevation-level-1",
       )}
     >
       <div className="flex w-full items-start gap-2 py-1">

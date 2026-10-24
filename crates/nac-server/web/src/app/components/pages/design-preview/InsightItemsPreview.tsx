@@ -103,38 +103,64 @@ const ITEM_STATES = [
   { state: InsightItemState.Error, title: "Error" },
 ];
 
+/** The detail column: items stack edge to edge on their own dividers. */
+function StackedItemsPreview() {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="label-micro text-basic-muted">Stacked, the first one active</span>
+      <div className="flex w-[542px] max-w-full flex-col bg-elevation-ground">
+        {ITEM_SAMPLES.map((sample, index) => (
+          <InsightItem
+            key={sample.type}
+            id={`preview-stacked-${sample.icon}`}
+            icon={sample.icon}
+            title={sample.title}
+            active={index === 0}
+            copyText={sample.copyText}
+          >
+            {sample.body(InsightItemState.Default)}
+          </InsightItem>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function InsightItemsPreview() {
   return (
-    <div className="grid grid-cols-3 items-start gap-x-4 gap-y-2">
-      {ITEM_STATES.map(({ state, title }) => (
-        <span key={state} className="label-micro text-basic-muted">
-          {title}
-        </span>
-      ))}
-      {ITEM_SAMPLES.flatMap((sample) =>
-        [false, true].map((active) => (
-          <Fragment key={`${sample.type}-${active}`}>
-            <span className="col-span-3 pt-2 label-micro text-basic-tertiary">
-              {active ? `${sample.type}, active` : sample.type}
-            </span>
-            {ITEM_STATES.map(({ state }) => (
-              <div key={state} className="min-w-0 rounded-[4px] border border-muted">
-                <InsightItem
-                  id={`preview-${sample.icon}-${state}-${active}`}
-                  icon={sample.icon}
-                  title={state === InsightItemState.Loading ? sample.loadingTitle : sample.title}
-                  state={state}
-                  active={active}
-                  copyText={sample.copyText}
-                  errorMessage={sample.errorMessage}
-                >
-                  {sample.body(state)}
-                </InsightItem>
-              </div>
-            ))}
-          </Fragment>
-        )),
-      )}
+    <div className="flex flex-col gap-6">
+      <StackedItemsPreview />
+      <div className="grid grid-cols-3 items-start gap-x-4 gap-y-2">
+        {ITEM_STATES.map(({ state, title }) => (
+          <span key={state} className="label-micro text-basic-muted">
+            {title}
+          </span>
+        ))}
+        {ITEM_SAMPLES.flatMap((sample) =>
+          [false, true].map((active) => (
+            <Fragment key={`${sample.type}-${active}`}>
+              <span className="col-span-3 pt-2 label-micro text-basic-tertiary">
+                {active ? `${sample.type}, active` : sample.type}
+              </span>
+              {ITEM_STATES.map(({ state }) => (
+                <div key={state} className="min-w-0 bg-elevation-ground">
+                  <InsightItem
+                    id={`preview-${sample.icon}-${state}-${active}`}
+                    icon={sample.icon}
+                    title={state === InsightItemState.Loading ? sample.loadingTitle : sample.title}
+                    state={state}
+                    active={active}
+                    copyText={sample.copyText}
+                    errorMessage={sample.errorMessage}
+                  >
+                    {sample.body(state)}
+                  </InsightItem>
+                </div>
+              ))}
+            </Fragment>
+          )),
+        )}
+      </div>
     </div>
   );
 }
