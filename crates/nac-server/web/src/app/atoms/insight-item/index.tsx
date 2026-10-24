@@ -15,6 +15,7 @@ export {
   InsightItemCodeDisplayerState,
 } from "./InsightItemCodeDisplayer";
 export { default as InsightLinkButton } from "./InsightLinkButton";
+export { default as InsightShowFullButton } from "./InsightShowFullButton";
 
 export enum InsightItemState {
   Default = "default",
@@ -33,8 +34,10 @@ interface InsightItemProps {
   active?: boolean;
   /** What the header's copy button puts on the clipboard. Default state only. */
   copyText?: string | null;
-  /** Shown under the body in the Error state. */
+  /** Shown under the body in the Error state, keeping its line breaks. */
   errorMessage?: string | null;
+  /** Under the error message, e.g. an `InsightShowFullButton` for a cut message. */
+  errorAction?: React.ReactNode;
   /**
    * The type's body, rendered straight into the item's 16px-gap column in every
    * state: the type decides what stays visible while loading or after a
@@ -47,8 +50,9 @@ interface InsightItemProps {
  * One step in the Insights detail column: a header with the type icon, the
  * title and a copy button, then the type's own body. Loading swaps the icon
  * for the spinner and shimmers the title; Error swaps it for the error-tone
- * Close and appends the message. Neither offers copy. Body text defaults to
- * the design's 12px tertiary text; code boxes and links bring their own.
+ * Close and appends the message and its action. Neither offers copy. Body
+ * text defaults to the design's 12px tertiary text; code boxes and links
+ * bring their own.
  * Each item draws its own bottom divider inside its 24px bottom padding, as
  * the design does, so a stack of items needs no gap or separators.
  */
@@ -60,6 +64,7 @@ const InsightItem: React.FC<InsightItemProps> = ({
   active = false,
   copyText,
   errorMessage,
+  errorAction,
   children,
 }) => {
   const isMobile = useIsMobile();
@@ -114,7 +119,12 @@ const InsightItem: React.FC<InsightItemProps> = ({
       </div>
       {children}
       {failed && errorMessage ? (
-        <p className="break-words text-small text-error-primary">{errorMessage}</p>
+        <div className="flex flex-col gap-2">
+          <p className="whitespace-pre-wrap break-words text-small text-error-primary">
+            {errorMessage}
+          </p>
+          {errorAction}
+        </div>
       ) : null}
     </div>
   );

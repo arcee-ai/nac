@@ -2,10 +2,8 @@ import type React from "react";
 import { useId } from "react";
 
 import { cn } from "../../lib/cn";
-import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import CopyButton from "../button/CopyButton";
-import Icon, { IconName } from "../icon";
-import Loader, { LoaderSize } from "../loader";
+import InsightShowFullButton from "./InsightShowFullButton";
 
 export enum InsightItemCodeDisplayerState {
   Default = "default",
@@ -46,9 +44,6 @@ const CONTENT_TYPE =
  * it, Loading keeps the preview on screen with the link disabled, and Expanded
  * shows the full content with "Hide" and a copy button. Long lines wrap, so
  * the detail column stays the only scroller.
- *
- * The link is one button through every state, so focus stays on it while the
- * content loads; it is disabled with `aria-disabled` for that reason.
  */
 const InsightItemCodeDisplayer: React.FC<InsightItemCodeDisplayerProps> = ({
   title,
@@ -100,23 +95,12 @@ const InsightItemCodeDisplayer: React.FC<InsightItemCodeDisplayerProps> = ({
       {showsToggle || expanded ? (
         <div className="flex w-full items-start gap-4">
           {showsToggle ? (
-            <Button
-              size={ButtonSize.Small}
-              variant={ButtonVariant.Tertiary}
-              content={ButtonContent.IconRight}
-              aria-expanded={expanded}
-              aria-controls={contentId}
-              aria-disabled={loading || undefined}
-              className={cn(loading && "btn-disabled")}
-              onClick={loading ? undefined : onToggle}
-            >
-              <span className="underline">{expanded ? "Hide" : "Show full"}</span>
-              {loading ? (
-                <Loader size={LoaderSize.XSmall} aria-hidden />
-              ) : (
-                <Icon iconName={expanded ? IconName.Top : IconName.Down} size={16} aria-hidden />
-              )}
-            </Button>
+            <InsightShowFullButton
+              expanded={expanded}
+              loading={loading}
+              controls={contentId}
+              onClick={onToggle}
+            />
           ) : null}
           {expanded ? <CopyButton value={content} title={`Copy ${title}`} /> : null}
         </div>

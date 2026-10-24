@@ -6,6 +6,7 @@ import {
   InsightItemCodeDisplayerState,
   InsightItemState,
   InsightLinkButton,
+  InsightShowFullButton,
 } from "@/app/atoms";
 
 const REASONING =
@@ -49,18 +50,13 @@ const INDENT_FULL = JSON.stringify(
   null,
   2,
 );
+const EDIT_ERROR =
+  "The file changed on disk after it was read, so the edit was not applied. Read src/app/lib/lexer.ts again and repeat the edit against its current content; the old text no longer matches line 42.";
+const EDIT_ERROR_PREVIEW = `${EDIT_ERROR.slice(0, 160).trimEnd()}...`;
 const PREVIEW_LOAD_MS = 1200;
 
-/** Fakes the load a real field makes, so "Show full" walks Loading into Expanded. */
-function PreviewField({
-  title,
-  shortContent,
-  fullContent,
-}: {
-  title: string;
-  shortContent: string;
-  fullContent: string;
-}) {
+/** Fakes the load a real item makes, so "Show full" walks Loading into Expanded. */
+function usePreviewLoad() {
   const [state, setState] = useState(InsightItemCodeDisplayerState.Default);
   useEffect(() => {
     if (state !== InsightItemCodeDisplayerState.Loading) return undefined;
@@ -70,15 +66,59 @@ function PreviewField({
     );
     return () => window.clearTimeout(timer);
   }, [state]);
+  return {
+    state,
+    showFull: () => setState(InsightItemCodeDisplayerState.Loading),
+    hide: () => setState(InsightItemCodeDisplayerState.Default),
+  };
+}
+
+function PreviewField({
+  title,
+  shortContent,
+  fullContent,
+}: {
+  title: string;
+  shortContent: string;
+  fullContent: string;
+}) {
+  const load = usePreviewLoad();
   return (
     <InsightItemCodeDisplayer
       title={title}
-      state={state}
+      state={load.state}
       shortContent={shortContent}
       fullContent={fullContent}
-      onShowFull={() => setState(InsightItemCodeDisplayerState.Loading)}
-      onHide={() => setState(InsightItemCodeDisplayerState.Default)}
+      onShowFull={load.showFull}
+      onHide={load.hide}
     />
+  );
+}
+
+/** A failed call's error line, cut by its preview, opens in full like a field. */
+function CutErrorPreview() {
+  const load = usePreviewLoad();
+  const expanded = load.state === InsightItemCodeDisplayerState.Expanded;
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="label-micro text-basic-muted">Error, the message cut by its preview</span>
+      <div className="w-[542px] max-w-full bg-elevation-ground">
+        <InsightItem
+          id="preview-cut-error"
+          icon={IconName.Edit}
+          title="Edit lexer.ts"
+          state={InsightItemState.Error}
+          errorMessage={expanded ? EDIT_ERROR : EDIT_ERROR_PREVIEW}
+          errorAction={
+            <InsightShowFullButton
+              expanded={expanded}
+              loading={load.state === InsightItemCodeDisplayerState.Loading}
+              onClick={expanded ? load.hide : load.showFull}
+            />
+          }
+        />
+      </div>
+    </div>
   );
 }
 
@@ -277,6 +317,7 @@ export function InsightItemsPreview() {
     <div className="flex flex-col gap-6">
       <CodeDisplayerStatesPreview />
       <StackedItemsPreview />
+      <CutErrorPreview />
       <div className="grid grid-cols-3 items-start gap-x-4 gap-y-2">
         {ITEM_STATES.map(({ state, title }) => (
           <span key={state} className="label-micro text-basic-muted">

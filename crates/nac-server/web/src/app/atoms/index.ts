@@ -44,6 +44,7 @@ export {
   InsightItemCodeDisplayerState,
   InsightItemState,
   InsightLinkButton,
+  InsightShowFullButton,
 } from "./insight-item";
 export { default as KeyboardShortcut } from "./keyboard-shortcut";
 export { default as Label, type HoverHintConfig, LabelSize } from "./label";
