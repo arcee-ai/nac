@@ -21,7 +21,7 @@ import { panelBadgeCount, PANEL_ICON } from "@/app/components/inspector/sessionP
 import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { HistoryView } from "@/app/components/inspector/HistoryView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useSessionFetching } from "@/app/hooks/useSessionFetching";
 import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
@@ -85,6 +85,7 @@ export function SessionSideBox({
 
   const expanded = useSidePanelExpanded();
   const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
   const behavior =
@@ -189,24 +190,46 @@ export function SessionSideBox({
                 subagentCount,
                 snapshot?.worksets?.items.length ?? 0,
               );
+              const open = () => {
+                // A tablet shows one column at a time, and a new panel opens on
+                // its selected row; a desktop split ignores the flag entirely.
+                showSidePanelList(false);
+                onPanelChange(name);
+              };
               return (
                 <span key={name} className="relative shrink-0">
-                  <HorizontalTabsItem
-                    size={HorizontalTabsItemSize.Medium}
-                    active={selected}
-                    iconName={PANEL_ICON[name]}
-                    role="tab"
-                    aria-selected={selected}
-                    aria-label={SESSION_PANEL_LABEL[name]}
-                    onClick={() => {
-                      // A tablet shows one column at a time, and a new panel opens on
-                      // its selected row; a desktop split ignores the flag entirely.
-                      showSidePanelList(false);
-                      onPanelChange(name);
-                    }}
-                  >
-                    {SESSION_PANEL_LABEL[name]}
-                  </HorizontalTabsItem>
+                  {/* The tablet's narrower box draws the tabs as icon circles. */}
+                  {isTablet ? (
+                    <Tooltip
+                      title={SESSION_PANEL_LABEL[name]}
+                      position={TooltipPosition.BottomCenter}
+                    >
+                      <Button
+                        className="!rounded-full"
+                        size={ButtonSize.Medium}
+                        variant={selected ? ButtonVariant.Primary : ButtonVariant.Ghost}
+                        content={ButtonContent.Icon}
+                        role="tab"
+                        aria-selected={selected}
+                        aria-label={SESSION_PANEL_LABEL[name]}
+                        onClick={open}
+                      >
+                        <Icon iconName={PANEL_ICON[name]} />
+                      </Button>
+                    </Tooltip>
+                  ) : (
+                    <HorizontalTabsItem
+                      size={HorizontalTabsItemSize.Medium}
+                      active={selected}
+                      iconName={PANEL_ICON[name]}
+                      role="tab"
+                      aria-selected={selected}
+                      aria-label={SESSION_PANEL_LABEL[name]}
+                      onClick={open}
+                    >
+                      {SESSION_PANEL_LABEL[name]}
+                    </HorizontalTabsItem>
+                  )}
                   {badge > 0 ? <PanelCountBadge count={badge} className="top-0" /> : null}
                 </span>
               );
