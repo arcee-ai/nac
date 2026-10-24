@@ -9,6 +9,9 @@ import type { ChangedFileStat } from "@/app/types/api";
  */
 const MAX_FILES = 8;
 
+const FOCUS_RING =
+  "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2";
+
 function FileChip({
   file,
   active,
@@ -23,6 +26,7 @@ function FileChip({
       type="button"
       className={cn(
         "flex items-center gap-[6px] max-w-full py-2 md:py-1 px-2 rounded-[4px] shrink-0",
+        FOCUS_RING,
         active ? "btn-ghost-highlighted" : "btn-ghost",
       )}
       aria-pressed={active}
@@ -72,7 +76,10 @@ export function SnapshotFiles({
       {rest > 0 ? (
         <button
           type="button"
-          className="btn-ghost flex items-center shrink-0 py-1 px-2 rounded-[4px] label-micro text-basic-muted shrink-0"
+          className={cn(
+            "btn-ghost flex items-center shrink-0 py-1 px-2 rounded-[4px] label-micro text-basic-muted shrink-0",
+            FOCUS_RING,
+          )}
           onClick={onOpenAll}
         >
           {`+${rest} more`}
