@@ -15,6 +15,8 @@ import {
 } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
+const WORKED_FOR_BADGE = /^Worked for \d+\.\ds$/;
+
 /** Match the page's browser profile, which can differ from the test host. */
 async function newChatChord(page: Page): Promise<string> {
   const isMac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
@@ -260,7 +262,7 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
 
     await harness.provider.waitForRequestCount(2);
     await waitForRunIdle(request, harness, sessionId);
-    const badge = page.getByRole("button", { name: "Run command", exact: true });
+    const badge = page.getByRole("button", { name: WORKED_FOR_BADGE });
     await expect(row()).toBeVisible();
     await expect(item).toContainText(command);
     await expect(item).toContainText("ALL1_TOOL_COMPLETE");
@@ -313,7 +315,7 @@ test("renders a per-call command deadline distinctly through settlement and relo
   await waitForRunIdle(request, harness, sessionId);
   await expect(page.getByText("deadline observed")).toBeVisible();
 
-  const badge = page.getByRole("button", { name: "Run command", exact: true });
+  const badge = page.getByRole("button", { name: WORKED_FOR_BADGE });
   const failedRow = page.getByRole("button", { name: "Run command, failed", exact: true });
   const item = page.getByRole("group", { name: "sleep 30", exact: true });
   await badge.click();
@@ -420,7 +422,7 @@ test("keeps approval state and actions reachable with many remembered permission
   await harness.provider.waitForRequestCount(rememberedRequests + 2);
   await waitForRunIdle(request, harness, sessionId);
   await expect(page.getByText("permission journey complete")).toBeVisible();
-  await page.getByRole("button", { name: "Read File", exact: true }).click();
+  await page.getByRole("button", { name: WORKED_FOR_BADGE }).click();
   await expect(
     page.getByRole("button", { name: `Read File, ${rememberedRequests + 1}`, exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
@@ -508,7 +510,7 @@ test("persists session auto-approval, drains pending asks, and restores manual m
     page.getByRole("button", { name: "Auto-approve on — open permissions" }),
   ).toBeVisible();
   // Both reads settle in one badge; Insights lists the group as two successful reads.
-  await page.getByRole("button", { name: "Read File", exact: true }).click();
+  await page.getByRole("button", { name: WORKED_FOR_BADGE }).click();
   await expect(page.getByRole("button", { name: "Read File, 2", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",

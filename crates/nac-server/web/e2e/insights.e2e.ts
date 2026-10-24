@@ -110,8 +110,6 @@ test("opens old Threads links in Insights on the stored thread", async ({
 });
 
 test("opens a transcript group in Insights from its badge", async ({ harness, page, request }) => {
-  // A call preview keeps only the first 120 characters of a path, so the reads
-  // use a workspace-relative one that keeps its file name.
   const notes = "badge-notes.txt";
   await fs.writeFile(path.join(harness.runRoot, "workspace", notes), "badge notes\n");
   harness.provider.enqueue(
@@ -159,9 +157,12 @@ test("opens a transcript group in Insights from its badge", async ({ harness, pa
   }
   harness.provider.assertConsumed();
 
-  const readBadge = page.getByRole("button", { name: "Read File", exact: true });
-  const searchBadge = page.getByRole("button", { name: "Find files, Read File", exact: true });
-  const readRow = page.getByRole("button", { name: "Read File, 1", exact: true });
+  // Every step of both groups is measured, so their badges share a label; they
+  // keep the order of the runs.
+  const badges = page.getByRole("button", { name: /^Worked for \d+\.\ds$/ });
+  const readBadge = badges.nth(0);
+  const searchBadge = badges.nth(1);
+  const readRow = page.getByRole("button", { name: /^Worked for \d+\.\ds, 1$/ });
   const searchRow = page.getByRole("button", { name: "Find files, Read File, 2", exact: true });
   const fileRead = page.getByRole("group", { name: "File Read", exact: true });
   const findFiles = page.getByRole("group", { name: "Find files", exact: true });
@@ -169,6 +170,7 @@ test("opens a transcript group in Insights from its badge", async ({ harness, pa
   // A badge opens Insights from whichever panel is showing.
   await page.goto(`${harness.baseUrl}/#/session/${sessionId}/files`);
   await expect(page.getByText("second group answered")).toBeVisible();
+  await expect(badges).toHaveCount(2);
   await readBadge.click();
   await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/insights$`));
   await expect(readBadge).toHaveAttribute("aria-pressed", "true");
