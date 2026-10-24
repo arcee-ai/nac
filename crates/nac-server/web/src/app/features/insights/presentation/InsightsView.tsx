@@ -197,11 +197,12 @@ export function InsightsView({
 
   const itemContext = useMemo<ItemContext>(
     () => ({
+      sessionId,
       resolveSession,
       openSubagent: navigation.openSubagent,
       openWorkset: navigation.openWorkset,
     }),
-    [resolveSession, navigation],
+    [sessionId, resolveSession, navigation],
   );
   const [threadView, setThreadView] = useState<ThreadDetailView>("log");
   const [steeringThread, setSteeringThread] = useState<string | null>(null);
