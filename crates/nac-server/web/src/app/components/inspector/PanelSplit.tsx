@@ -211,7 +211,7 @@ export function PanelSplit({
         {listToolbar}
         <div
           className={cn(
-            "flex flex-col flex-1 min-h-0 overflow-auto pt-4 px-1 [&>*]:shrink-0",
+            "flex flex-col flex-1 min-h-0 overflow-auto px-1 py-4 [&>*]:shrink-0",
             listClassName,
           )}
         >
