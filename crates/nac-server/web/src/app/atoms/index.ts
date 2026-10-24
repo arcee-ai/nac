@@ -21,6 +21,12 @@ export { default as DatePicker, type DateRange } from "./date-picker";
 export { default as DateSelector, type DateString, type DateStringRange } from "./date-selector";
 export { default as DropdownContent } from "./dropdown-content";
 export { default as EditableHeader, EditableHeaderSize } from "./editable-header";
+export { default as FileButton, FileButtonSize } from "./file-button";
+export { default as CodeChangesBadge, CodeChangesBadgeSize } from "./file-button/CodeChangesBadge";
+export {
+  default as FileButtonsList,
+  type FileButtonsListFile,
+} from "./file-button/FileButtonsList";
 export { default as FileIcon, fileIconName } from "./file-icon";
 export { default as FileInput, type FileInputFile } from "./file-input";
 export { default as ForkSessionItem } from "./fork-session-item";

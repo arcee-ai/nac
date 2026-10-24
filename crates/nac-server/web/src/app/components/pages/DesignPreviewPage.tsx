@@ -6,6 +6,7 @@ import { ButtonsSection } from "@/app/components/pages/design-preview/ButtonsSec
 import { ChoicesSection } from "@/app/components/pages/design-preview/ChoicesSection";
 import { CodeBlockSection } from "@/app/components/pages/design-preview/CodeBlockSection";
 import { DatesSection } from "@/app/components/pages/design-preview/DatesSection";
+import { FilesAtomsSection } from "@/app/components/pages/design-preview/FilesAtomsSection";
 import { InputsSection } from "@/app/components/pages/design-preview/InputsSection";
 import { InsightsAtomsSection } from "@/app/components/pages/design-preview/InsightsAtomsSection";
 import { ModelLoaderSection } from "@/app/components/pages/design-preview/ModelLoaderSection";
@@ -44,6 +45,7 @@ export default function DesignPreviewPage() {
         <ModelLoaderSection />
         <ToolsBadgeSection />
         <InsightsAtomsSection />
+        <FilesAtomsSection />
         <SubagentCardSection />
         <AvatarsSection />
         <NumericInputsSection />
