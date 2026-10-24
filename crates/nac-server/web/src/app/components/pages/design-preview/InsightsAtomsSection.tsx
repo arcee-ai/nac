@@ -223,6 +223,9 @@ const GROUP_CHILDREN = [
 
 const WAVE_THREADS = ["impl/calendar", "impl/recurring-events", "review/calendar", "docs/calendar"];
 
+/** A side panel list column: 252px rows on the panel ground. */
+const LIST_COLUMN = "flex w-[268px] flex-col gap-1 bg-elevation-ground p-2";
+
 function sampleLabel(sample: ActionSample, status: ActionListButtonStatus): string {
   if (status === ActionListButtonStatus.Running) return sample.runningLabel ?? sample.label;
   if (status === ActionListButtonStatus.Failed) return sample.failedLabel ?? sample.label;
@@ -275,7 +278,7 @@ function GroupSegmentPreview() {
   const groupShown = selected === "group" || GROUP_CHILDREN.some(({ key }) => key === selected);
 
   return (
-    <div className="flex w-[252px] flex-col gap-1">
+    <div className={LIST_COLUMN}>
       <ActionListButton
         icon={IconName.Right}
         label="Worked for 13.3s"
@@ -340,7 +343,7 @@ function ThreadWavePreview() {
   );
 
   return (
-    <div className="flex w-[252px] flex-col gap-1">
+    <div className={LIST_COLUMN}>
       <ActionListButton icon={IconName.Brain} label="Thoughts" meta="13.8 s" />
       <ActionListSegment>{WAVE_THREADS.map(thread)}</ActionListSegment>
       <ActionListButton icon={IconName.Right} label="Worked for 13.3s" meta="12" expanded={false} />
@@ -352,7 +355,7 @@ function ThreadWavePreview() {
 
 function LongLabelsPreview() {
   return (
-    <div className="flex w-[252px] flex-col gap-1">
+    <div className={LIST_COLUMN}>
       <ActionListButton
         icon={IconName.Chat}
         label="impl/calendar-sync-recurring-events-and-time-zones"
