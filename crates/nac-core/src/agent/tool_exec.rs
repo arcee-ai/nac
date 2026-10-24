@@ -653,4 +653,52 @@ mod tests {
         assert!(results[1].2.is_error);
         assert!(results[1].2.content.contains("unknown tool"));
     }
+
+    #[tokio::test]
+    async fn control_tools_report_duration_only_when_they_ran() {
+        let root = std::env::temp_dir().join(format!(
+            "nac-control-tool-duration-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut runtime = test_runtime();
+        runtime.store_path = root.join("store.db");
+        crate::store::initialize(&runtime.store_path).unwrap();
+        crate::store::insert_test_session(&runtime.store_path, "test-session");
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        execute_tools_parallel(
+            vec![
+                make_tool_call("listed", "workset_list", json!({})),
+                make_tool_call("rejected", "workset_read", json!({})),
+            ],
+            runtime,
+            ModelClient::new_for_test(),
+            EventSink::channel(events_tx),
+            None,
+            false,
+        )
+        .await;
+
+        let mut finished = Vec::new();
+        while let Ok(event) = events_rx.try_recv() {
+            if let AgentEvent::ToolCallFinished {
+                call_id,
+                is_error,
+                execution_duration_ms,
+                ..
+            } = event
+            {
+                finished.push((call_id, is_error, execution_duration_ms.is_some()));
+            }
+        }
+        finished.sort();
+        assert_eq!(
+            finished,
+            vec![
+                ("listed".to_string(), false, true),
+                ("rejected".to_string(), true, false),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

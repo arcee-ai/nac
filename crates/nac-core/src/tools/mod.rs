@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex, Weak as StdWeak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::{Mutex, Notify, RwLock};
@@ -64,6 +64,13 @@ impl ToolResult {
             is_error,
             execution_duration_ms: None,
         }
+    }
+
+    /// Records that the call ran, timed from `started`. Exits before a call
+    /// starts its work must not use it.
+    pub(crate) fn executed_since(mut self, started: Instant) -> Self {
+        self.execution_duration_ms = Some(started.elapsed().as_millis() as u64);
+        self
     }
 }
 

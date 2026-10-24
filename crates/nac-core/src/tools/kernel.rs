@@ -872,9 +872,10 @@ impl ToolSnapshot {
                     return error;
                 }
                 let started = Instant::now();
-                let mut result = prepared.invoke_bounded(name, services, context).await;
-                result.execution_duration_ms = Some(started.elapsed().as_millis() as u64);
-                result
+                prepared
+                    .invoke_bounded(name, services, context)
+                    .await
+                    .executed_since(started)
             }
             Err(error) => error,
         }

@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use serde_json::Value;
 
 use crate::store::{self, WorksetDefinition, WorksetItemDefinition};
@@ -143,10 +145,11 @@ pub async fn execute_define(args: Value, runtime: &ToolRuntime) -> ToolResult {
         items,
     };
 
+    let started = Instant::now();
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let items_len = definition.items.len();
-    match crate::store::spawn_blocking_store_caller(move || {
+    let result = match crate::store::spawn_blocking_store_caller(move || {
         store::define_workset(&store_path, &sid, &definition)
     })
     .await
@@ -166,7 +169,8 @@ pub async fn execute_define(args: Value, runtime: &ToolRuntime) -> ToolResult {
             is_error: true,
             execution_duration_ms: None,
         },
-    }
+    };
+    result.executed_since(started)
 }
 
 pub async fn execute_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
@@ -179,10 +183,11 @@ pub async fn execute_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
         Err(error) => return error,
     };
 
+    let started = Instant::now();
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let wid = id.clone();
-    match crate::store::spawn_blocking_store_caller(move || {
+    let result = match crate::store::spawn_blocking_store_caller(move || {
         store::read_workset(&store_path, &sid, &wid)
     })
     .await
@@ -207,7 +212,8 @@ pub async fn execute_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
             is_error: true,
             execution_duration_ms: None,
         },
-    }
+    };
+    result.executed_since(started)
 }
 
 pub async fn execute_list(_args: Value, runtime: &ToolRuntime) -> ToolResult {
@@ -216,10 +222,13 @@ pub async fn execute_list(_args: Value, runtime: &ToolRuntime) -> ToolResult {
         Err(error) => return error,
     };
 
+    let started = Instant::now();
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
-    match crate::store::spawn_blocking_store_caller(move || store::list_worksets(&store_path, &sid))
-        .await
+    let result = match crate::store::spawn_blocking_store_caller(move || {
+        store::list_worksets(&store_path, &sid)
+    })
+    .await
     {
         Ok(Ok(worksets)) => ToolResult {
             content: (store::render_workset_list(&worksets)).into(),
@@ -236,7 +245,8 @@ pub async fn execute_list(_args: Value, runtime: &ToolRuntime) -> ToolResult {
             is_error: true,
             execution_duration_ms: None,
         },
-    }
+    };
+    result.executed_since(started)
 }
 
 fn def(name: &str, description: &str, parameters: serde_json::Value) -> ToolDefinition {

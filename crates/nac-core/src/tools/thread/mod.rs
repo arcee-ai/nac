@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use serde_json::Value;
 
 use crate::events::AgentEvent;
@@ -303,6 +305,7 @@ pub async fn execute_parsed_dispatch(
             };
         }
     };
+    let started = Instant::now();
 
     if let Err(error) = runtime
         .event_sink
@@ -326,7 +329,8 @@ pub async fn execute_parsed_dispatch(
             content: format!("Required thread start publication failed: {error:#}").into(),
             is_error: true,
             execution_duration_ms: None,
-        };
+        }
+        .executed_since(started);
     }
 
     let require_history = store::coordinator::owner_for(&runtime.store_path)
@@ -352,7 +356,8 @@ pub async fn execute_parsed_dispatch(
             content: message.into(),
             is_error: true,
             execution_duration_ms: None,
-        };
+        }
+        .executed_since(started);
     }
 
     let result = run_worker(
@@ -406,7 +411,8 @@ pub async fn execute_parsed_dispatch(
                 content: (message).into(),
                 is_error: true,
                 execution_duration_ms: None,
-            };
+            }
+            .executed_since(started);
         }
     };
 
@@ -481,7 +487,8 @@ pub async fn execute_parsed_dispatch(
             .into(),
             is_error: finish.is_err(),
             execution_duration_ms: None,
-        };
+        }
+        .executed_since(started);
     };
 
     if failure.status == store::EpisodeStatus::Cancelled {
@@ -492,7 +499,8 @@ pub async fn execute_parsed_dispatch(
             content: (format!("{TOOL_CALL_CANCELLED_MARKER} {}", failure.message)).into(),
             is_error: true,
             execution_duration_ms: None,
-        };
+        }
+        .executed_since(started);
     }
 
     let timed_out = failure.status == store::EpisodeStatus::TimedOut;
@@ -511,6 +519,7 @@ pub async fn execute_parsed_dispatch(
         is_error: true,
         execution_duration_ms: None,
     }
+    .executed_since(started)
 }
 
 /// Exit code standing for a dispatch whose worker never ran, so the card can
@@ -659,6 +668,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
         Ok(s) => s.to_string(),
         Err(e) => return e,
     };
+    let started = Instant::now();
 
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
@@ -674,6 +684,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
                 is_error: true,
                 execution_duration_ms: None,
             }
+            .executed_since(started)
         }
         Err(join_error) => {
             return ToolResult {
@@ -681,6 +692,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
                 is_error: true,
                 execution_duration_ms: None,
             }
+            .executed_since(started)
         }
     };
 
@@ -689,7 +701,8 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             content: ("No active threads in this session.".to_string()).into(),
             is_error: false,
             execution_duration_ms: None,
-        };
+        }
+        .executed_since(started);
     }
 
     let mut output = String::from("Active threads:");
@@ -708,6 +721,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
         is_error: false,
         execution_duration_ms: None,
     }
+    .executed_since(started)
 }
 
 pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
@@ -719,11 +733,12 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
         Ok(s) => s.to_string(),
         Err(e) => return e,
     };
+    let started = Instant::now();
 
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let tname = thread_name.clone();
-    match crate::store::spawn_blocking_store_caller(move || {
+    let result = match crate::store::spawn_blocking_store_caller(move || {
         store::thread_read(&store_path, &sid, &tname)
     })
     .await
@@ -744,7 +759,8 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
             is_error: true,
             execution_duration_ms: None,
         },
-    }
+    };
+    result.executed_since(started)
 }
 
 pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolResult {
@@ -767,11 +783,12 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             execution_duration_ms: None,
         };
     }
+    let started = Instant::now();
 
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let tname = thread_name.clone();
-    match crate::store::spawn_blocking_store_caller(move || {
+    let result = match crate::store::spawn_blocking_store_caller(move || {
         store::delete_thread(&store_path, &sid, &tname)
     })
     .await
@@ -797,7 +814,8 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             is_error: true,
             execution_duration_ms: None,
         },
-    }
+    };
+    result.executed_since(started)
 }
 
 fn def(name: &str, description: &str, parameters: serde_json::Value) -> ToolDefinition {
