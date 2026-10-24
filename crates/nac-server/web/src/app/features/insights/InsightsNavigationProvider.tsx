@@ -5,12 +5,15 @@ import {
   type InsightsNavigationTarget,
 } from "@/app/features/insights/useInsightsNavigation";
 import type { SessionPanel } from "@/app/lib/routes";
+import type { InsightSelection } from "@/app/store/sessionLayoutStore";
 
 /**
  * Lends the session page's id, panels and `focusPanel` to
  * `useInsightsNavigation`. The value changes only with the session and its
  * panels: the page hands over a new `focusPanel` on every render, and the
- * transcript rows that read this context must not re-render with it.
+ * transcript rows that read this context must not re-render with it. It also
+ * carries a keyboard pick across to the Insights detail, which takes the focus
+ * once it shows that pick.
  */
 export function InsightsNavigationProvider({
   sessionId,
@@ -22,11 +25,13 @@ export function InsightsNavigationProvider({
   useLayoutEffect(() => {
     latestFocusPanel.current = focusPanel;
   });
-  const target = useMemo<InsightsNavigationTarget>(
+  const detailFocusRef = useRef<InsightSelection | null>(null);
+  const target = useMemo(
     () => ({
       sessionId,
       panels,
       focusPanel: (panel: SessionPanel) => latestFocusPanel.current(panel),
+      detailFocusRef,
     }),
     [sessionId, panels],
   );

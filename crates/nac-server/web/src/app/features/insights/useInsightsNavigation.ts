@@ -1,14 +1,29 @@
-import { createContext, useContext, useMemo } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, type RefObject } from "react";
 
 import type { DelegatedRowKey, InsightsFilter } from "@/app/features/insights/model/types";
 import type { SessionPanel } from "@/app/lib/routes";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import type { InsightSelection } from "@/app/store/sessionLayoutStore";
+
+/**
+ * The Insights detail region, for the `aria-controls` of a control that opens
+ * an entry there. A session page mounts one detail at a time, so it is unique.
+ */
+export const INSIGHTS_DETAIL_ID = "insights-detail";
+
+export interface InsightsOpenOptions {
+  /**
+   * Keyboard activation: focus moves into the detail once it shows the entry.
+   * A pointer leaves focus where it is, so only keyboard callers pass this.
+   */
+  focusDetail?: boolean;
+}
 
 export interface InsightsNavigation {
   /** Insights with the group selected; `segmentKey` points its detail at one segment. */
-  openGroup(groupId: string, segmentKey?: string): void;
+  openGroup(groupId: string, segmentKey?: string, options?: InsightsOpenOptions): void;
   /** Insights on the thread's detail; `episodeKey` is the dispatch whose card asked. */
-  openThread(name: string, episodeKey?: string): void;
+  openThread(name: string, episodeKey?: string, options?: InsightsOpenOptions): void;
   /** Subagents with that row open; the newest row stands in until the list has it. */
   openSubagent(rowKey: DelegatedRowKey): void;
   openWorkset(worksetId: string): void;
@@ -22,11 +37,17 @@ export interface InsightsNavigationTarget {
   focusPanel: (panel: SessionPanel) => void;
 }
 
+interface InsightsNavigationValue extends InsightsNavigationTarget {
+  /** The pick made with `focusDetail` whose detail has not taken the focus yet. */
+  detailFocusRef: { current: InsightSelection | null };
+}
+
 /** Outside a session page there is no panel to open, so every jump is a no-op. */
-export const InsightsNavigationContext = createContext<InsightsNavigationTarget>({
+export const InsightsNavigationContext = createContext<InsightsNavigationValue>({
   sessionId: "",
   panels: [],
   focusPanel: () => {},
+  detailFocusRef: { current: null },
 });
 
 /**
@@ -35,7 +56,7 @@ export const InsightsNavigationContext = createContext<InsightsNavigationTarget>
  * dialog. A panel the session's policy lacks is never opened.
  */
 export function useInsightsNavigation(): InsightsNavigation {
-  const { sessionId, panels, focusPanel } = useContext(InsightsNavigationContext);
+  const { sessionId, panels, focusPanel, detailFocusRef } = useContext(InsightsNavigationContext);
   const {
     sessionLayoutStore,
     selectInsightsFilter,
@@ -57,17 +78,22 @@ export function useInsightsNavigation(): InsightsNavigation {
       const filter = sessionLayoutStore.getState().insightsFilter;
       if (filter !== "all" && filter !== keptBy) selectInsightsFilter("all");
     };
+    // The request is the selection object itself, so any later pick outdates it.
+    const pick = (selection: InsightSelection, options: InsightsOpenOptions | undefined) => {
+      detailFocusRef.current = options?.focusDetail ? selection : null;
+      selectInsight(selection);
+    };
     return {
-      openGroup: (groupId, segmentKey) =>
+      openGroup: (groupId, segmentKey, options) =>
         open("insights", () => {
           revealInList("tools");
-          selectInsight({ kind: "group", groupId, segmentKey: segmentKey ?? null });
+          pick({ kind: "group", groupId, segmentKey: segmentKey ?? null }, options);
         }),
-      openThread: (name, episodeKey) =>
+      openThread: (name, episodeKey, options) =>
         open("insights", () => {
           revealInList("threads");
           selectThread(name, episodeKey ?? null);
-          selectInsight({ kind: "thread" });
+          pick({ kind: "thread" }, options);
         }),
       openSubagent: (rowKey) => open("delegated", () => selectSubagent(sessionId, rowKey)),
       openWorkset: (worksetId) => open("worksets", () => selectWorkset(worksetId)),
@@ -76,6 +102,7 @@ export function useInsightsNavigation(): InsightsNavigation {
     sessionId,
     panels,
     focusPanel,
+    detailFocusRef,
     sessionLayoutStore,
     selectInsightsFilter,
     selectInsight,
@@ -83,4 +110,32 @@ export function useInsightsNavigation(): InsightsNavigation {
     selectSubagent,
     selectWorkset,
   ]);
+}
+
+/**
+ * The detail's side of `focusDetail`: once the detail region shows the stored
+ * selection a keyboard call asked for, focus moves into it. Returns the
+ * region's ref; `showing` says whether the detail renders that selection.
+ */
+export function useInsightsDetailFocus(
+  selection: InsightSelection | null,
+  showing: boolean,
+): RefObject<HTMLDivElement | null> {
+  const { detailFocusRef } = useContext(InsightsNavigationContext);
+  const regionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showing || !selection || detailFocusRef.current !== selection) return undefined;
+    // A frame later, once the commit's own effects ran: a phone dialog opening
+    // with the detail focuses its card first, and a collapsed panel is inert
+    // until the reveal commits.
+    const frame = requestAnimationFrame(() => {
+      const region = regionRef.current;
+      if (!region || detailFocusRef.current !== selection) return;
+      detailFocusRef.current = null;
+      // The panel may still be sliding in; scrolling to it would drag the page.
+      region.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [detailFocusRef, selection, showing]);
+  return regionRef;
 }

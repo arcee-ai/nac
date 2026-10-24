@@ -46,7 +46,11 @@ import {
   useInsightsThreadPane,
   useThreadOwnership,
 } from "@/app/features/insights/presentation/useInsightsThread";
-import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
+import {
+  INSIGHTS_DETAIL_ID,
+  useInsightsDetailFocus,
+  useInsightsNavigation,
+} from "@/app/features/insights/useInsightsNavigation";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type { SessionSnapshotResponse } from "@/app/types/api";
 
@@ -206,6 +210,8 @@ export function InsightsView({
     runState,
     canSteerWorkers,
   );
+  // A resolved pick is what the detail shows; list rows never ask for focus.
+  const detailRef = useInsightsDetailFocus(selection, snapshot != null && picked != null);
 
   if (!snapshot) return <PanelLoading listTitle="Insights" />;
 
@@ -298,7 +304,16 @@ export function InsightsView({
           />
         }
       >
-        {detail}
+        <div
+          ref={detailRef}
+          id={INSIGHTS_DETAIL_ID}
+          role="region"
+          aria-label="Insights detail"
+          tabIndex={-1}
+          className="flex flex-col flex-1 min-w-0 min-h-0 -outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2"
+        >
+          {detail}
+        </div>
       </PanelSplit>
       {steeringThread ? (
         <ThreadSteeringModal
