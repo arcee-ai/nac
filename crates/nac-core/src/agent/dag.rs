@@ -67,6 +67,7 @@ pub(crate) fn partition_tool_calls(
                             ))
                             .into(),
                             is_error: true,
+                            execution_duration_ms: None,
                         },
                     ));
                     continue;
@@ -307,6 +308,7 @@ pub(crate) async fn spawn_non_thread_into(
                             ))
                             .into(),
                             is_error: true,
+                            execution_duration_ms: None,
                         },
                     );
                 }
@@ -389,6 +391,7 @@ pub(crate) async fn execute_with_dag(
                 ))
                 .into(),
                 is_error: true,
+                execution_duration_ms: None,
             };
             event_sink
                 .emit_async(AgentEvent::ToolCallStarted {
@@ -479,6 +482,7 @@ pub(crate) async fn execute_with_dag(
                     ))
                     .into(),
                     is_error: true,
+                    execution_duration_ms: None,
                 };
 
                 event_sink
@@ -590,6 +594,7 @@ pub(crate) async fn execute_with_dag(
                                     ToolResult {
                                         content: format!("Tool task panicked: {error}").into(),
                                         is_error: true,
+                                        execution_duration_ms: None,
                                     },
                                 ));
                             }
@@ -641,6 +646,7 @@ pub(crate) async fn execute_with_dag(
                         ToolResult {
                             content: (format!("Tool task panicked: {error}")).into(),
                             is_error: true,
+                            execution_duration_ms: None,
                         },
                     ));
                 }
@@ -675,6 +681,7 @@ pub(crate) async fn execute_with_dag(
                     ToolResult {
                         content: (format!("Tool task panicked: {error}")).into(),
                         is_error: true,
+                        execution_duration_ms: None,
                     },
                 ));
             }

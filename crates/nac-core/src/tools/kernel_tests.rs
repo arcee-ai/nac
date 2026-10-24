@@ -249,7 +249,60 @@ impl NativeTool for CountTool {
             ToolResult {
                 content: ToolContent::text("counted"),
                 is_error: false,
+                execution_duration_ms: None,
             }
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SleepInput {
+    fail: bool,
+}
+
+struct SleepTool;
+
+impl NativeTool for SleepTool {
+    type Input = SleepInput;
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            def_type: "function".into(),
+            function: FunctionDef {
+                name: "sleep".into(),
+                description: "sleep".into(),
+                parameters: json!({"type":"object","properties":{"fail":{"type":"boolean"}}}),
+            },
+        }
+    }
+
+    fn admission(&self) -> ToolAdmission {
+        ToolAdmission::Parallel
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        serde_json::from_value(input)
+            .map_err(|error| ToolResult::text(format!("invalid input: {error}"), true))
+    }
+
+    fn permission_resources(
+        &self,
+        _input: &Self::Input,
+        _services: ToolServices<'_>,
+    ) -> Result<Vec<PermissionResource>, ToolResult> {
+        Ok(Vec::new())
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        _services: ToolServices<'a>,
+        _context: &'a ToolCallContext,
+    ) -> BoxFuture<'a, ToolResult> {
+        Box::pin(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            ToolResult::text("slept", input.fail)
         })
     }
 }
@@ -772,5 +825,111 @@ async fn direct_broker_authorizes_between_prepare_and_side_effects() {
     let (approved, ()) = tokio::join!(invoke, reply);
     assert!(!approved.is_error, "{}", approved.content);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[tokio::test]
+async fn executed_calls_report_duration_for_success_and_error() {
+    let registry = ToolRegistry::builder()
+        .register(SleepTool)
+        .finish()
+        .unwrap();
+    let snapshot = registry.snapshot(["sleep"]).unwrap();
+    let runtime = crate::tools::test_runtime();
+    let client = crate::model::ModelClient::new_for_test();
+    let services = ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+
+    for fail in [false, true] {
+        let result = snapshot
+            .invoke(
+                "sleep",
+                json!({ "fail": fail }),
+                services,
+                &ToolCallContext::default(),
+            )
+            .await;
+        assert_eq!(result.is_error, fail, "{}", result.content);
+        assert!(
+            result.execution_duration_ms.is_some_and(|ms| ms >= 20),
+            "{:?}",
+            result.execution_duration_ms
+        );
+    }
+}
+
+#[tokio::test]
+async fn calls_rejected_before_execution_report_no_duration() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let registry = ToolRegistry::builder()
+        .register(CountTool {
+            calls: Arc::clone(&calls),
+            name: "count",
+        })
+        .finish()
+        .unwrap();
+    let snapshot = registry.snapshot(["count"]).unwrap();
+    let directory = std::env::temp_dir().join(format!(
+        "nac-kernel-rejected-duration-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let store_path = directory.join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session-a");
+    let broker = Arc::new(crate::permissions::PermissionBroker::new(
+        store_path.clone(),
+        "session-a".to_string(),
+        crate::permissions::PermissionBackend::Local,
+        0,
+        [crate::permissions::PermissionRule::new(
+            "count",
+            "*",
+            crate::permissions::PermissionEffect::Ask,
+        )],
+    ));
+    let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+    let _interactive = bus.subscribe_assistant_deltas();
+    broker.attach_event_bus(bus);
+    let mut runtime = crate::tools::test_runtime();
+    runtime.store_path = store_path;
+    runtime.session_id = Some("session-a".to_string());
+    runtime.permission_broker = Some(Arc::clone(&broker));
+    let client = crate::model::ModelClient::new_for_test();
+    let services = ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+    let context = ToolCallContext {
+        call_id: Some("call-1".to_string()),
+        ..Default::default()
+    };
+
+    let unknown = snapshot
+        .invoke("missing", json!({}), services, &context)
+        .await;
+    let hard_denied = snapshot
+        .invoke("count", json!({"amount": usize::MAX}), services, &context)
+        .await;
+    let invoke = snapshot.invoke("count", json!({"amount": 1}), services, &context);
+    let reject = async {
+        loop {
+            if let Some(request) = broker.pending().pop() {
+                broker
+                    .reply(&request.id, crate::permissions::PermissionReply::Reject)
+                    .unwrap();
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+    let (approval_denied, ()) = tokio::join!(invoke, reject);
+
+    for result in [unknown, hard_denied, approval_denied] {
+        assert!(result.is_error, "{}", result.content);
+        assert_eq!(result.execution_duration_ms, None, "{}", result.content);
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
     let _ = std::fs::remove_dir_all(directory);
 }

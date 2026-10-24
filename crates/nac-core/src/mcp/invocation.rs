@@ -28,6 +28,7 @@ impl McpToolCapture {
                 return ToolResult {
                     content: format!("Error: MCP tool '{name}' requires object arguments").into(),
                     is_error: true,
+                    execution_duration_ms: None,
                 }
             }
         };
@@ -91,6 +92,7 @@ impl McpToolCapture {
                                     ))
                                     .into(),
                                     is_error: true,
+                                    execution_duration_ms: None,
                                 };
                             }
                         }
@@ -116,6 +118,7 @@ impl McpToolCapture {
                         ))
                             .into(),
                         is_error: true,
+                        execution_duration_ms: None,
                     },
                 }
             }
@@ -126,6 +129,7 @@ impl McpToolCapture {
                     .redact(&format!("Error calling MCP tool '{name}': {error}"))
                     .into(),
                 is_error: true,
+                execution_duration_ms: None,
             },
         }
     }

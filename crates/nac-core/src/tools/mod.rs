@@ -52,6 +52,9 @@ pub(crate) use thread_lifecycle::ThreadCancellation;
 pub struct ToolResult {
     pub content: ToolContent,
     pub is_error: bool,
+    /// Wall-clock time of backend execution, set only by the execution kernel
+    /// once an authorized call has run. Calls that never ran leave it empty.
+    pub(crate) execution_duration_ms: Option<u64>,
 }
 
 impl ToolResult {
@@ -59,6 +62,7 @@ impl ToolResult {
         Self {
             content: ToolContent::text(content),
             is_error,
+            execution_duration_ms: None,
         }
     }
 }
@@ -341,6 +345,7 @@ pub fn require_str(args: &Value, key: &str) -> Result<String, ToolResult> {
         .ok_or_else(|| ToolResult {
             content: (format!("Error: '{key}' argument required")).into(),
             is_error: true,
+            execution_duration_ms: None,
         })
 }
 
@@ -353,6 +358,7 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
         return Err(ToolResult {
             content: (format!("Error: '{key}' must be an array of strings")).into(),
             is_error: true,
+            execution_duration_ms: None,
         });
     };
 
@@ -362,6 +368,7 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
             return Err(ToolResult {
                 content: (format!("Error: '{key}' must be an array of strings")).into(),
                 is_error: true,
+                execution_duration_ms: None,
             });
         };
         out.push(value.to_string());
@@ -414,6 +421,7 @@ pub async fn execute_tool_with_context(
             return ToolResult {
                 content: (format!("Error: MCP tool '{name}' is not available")).into(),
                 is_error: true,
+                execution_duration_ms: None,
             };
         };
         return mcp_adapter::invoke(
@@ -451,6 +459,7 @@ pub async fn execute_tool_with_context(
         unknown => ToolResult {
             content: (format!("Error: unknown tool '{unknown}'")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
     }
 }

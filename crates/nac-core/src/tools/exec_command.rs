@@ -91,10 +91,12 @@ pub(crate) async fn execute_exec_command_with_cancellation(
         Ok((content, is_error)) => ToolResult {
             content: content.into(),
             is_error,
+            execution_duration_ms: None,
         },
         Err(error) => ToolResult {
             content: (format!("Error: {error:#}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
     }
 }
@@ -236,10 +238,12 @@ pub(crate) async fn execute_write_stdin_with_cancellation(
         Ok(redacted) => ToolResult {
             content: redacted.into(),
             is_error: false,
+            execution_duration_ms: None,
         },
         Err(error) => ToolResult {
             content: (format!("Error: {error:#}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
     }
 }
@@ -267,10 +271,12 @@ pub fn execute_read_command_output(args: &Value, runtime: &ToolRuntime) -> ToolR
         Ok(content) => ToolResult {
             content: content.into(),
             is_error: false,
+            execution_duration_ms: None,
         },
         Err(error) => ToolResult {
             content: (format!("Error: {error:#}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
     }
 }

@@ -102,10 +102,13 @@ pub(super) async fn finalize_tool_results(
             match next_stats {
                 Ok(stats) => transcript_image_stats = Ok(stats),
                 Err(_) => {
-                    result = ToolResult::text(
-                        "Error: image_limit_exceeded: image history limit reached",
-                        true,
-                    );
+                    result = ToolResult {
+                        execution_duration_ms: result.execution_duration_ms,
+                        ..ToolResult::text(
+                            "Error: image_limit_exceeded: image history limit reached",
+                            true,
+                        )
+                    };
                 }
             }
             event_sink
@@ -215,6 +218,7 @@ async fn spawn_and_collect_non_thread(
                     ToolResult {
                         content: (format!("Tool task panicked: {error}")).into(),
                         is_error: true,
+                        execution_duration_ms: None,
                     },
                 ));
             }
@@ -286,6 +290,7 @@ async fn execute_with_dag_error(
         let result = ToolResult {
             content: (error_message.clone()).into(),
             is_error: true,
+            execution_duration_ms: None,
         };
         event_sink
             .emit_async(AgentEvent::ToolCallStarted {

@@ -572,6 +572,7 @@ pub(crate) async fn execute_remote_cancellable(
                             return ToolResult {
                                 content,
                                 is_error: false,
+                                execution_duration_ms: None,
                             };
                         }
                     }
@@ -579,6 +580,7 @@ pub(crate) async fn execute_remote_cancellable(
                 return ToolResult {
                     content: content.into(),
                     is_error: !output.status.success(),
+                    execution_duration_ms: None,
                 };
             }
             Err(error) => {

@@ -129,6 +129,44 @@ fn kernel_deadline_shape_populates_typed_telemetry() {
 }
 
 #[test]
+fn finished_duration_prefers_the_deadline_envelope_over_the_measured_field() {
+    let mut timed_out = crate::tools::ToolResult::text(
+        serde_json::json!({
+            "error": "Tool 'remote_tool' timed_out after 8 ms (limit 5 ms; cleanup 3 ms). The remote outcome is uncertain.",
+            "_nac": {
+                "status": "timed_out",
+                "timeout_ms": 5,
+                "execution_duration_ms": 8,
+                "cleanup_duration_ms": 3,
+                "remote_outcome_uncertain": true
+            }
+        })
+        .to_string(),
+        true,
+    );
+    timed_out.execution_duration_ms = Some(11);
+    let mut completed = crate::tools::ToolResult::text("done", false);
+    completed.execution_duration_ms = Some(42);
+
+    let durations = [timed_out, completed].map(|result| {
+        let AgentEvent::ToolCallFinished {
+            execution_duration_ms,
+            ..
+        } = AgentEvent::tool_call_finished(
+            None,
+            "call-1".to_string(),
+            "remote_tool".to_string(),
+            &result,
+        )
+        else {
+            panic!("expected tool completion event");
+        };
+        execution_duration_ms
+    });
+    assert_eq!(durations, [Some(8), Some(42)]);
+}
+
+#[test]
 fn durable_cancelled_records_have_typed_cancelled_completion() {
     for name in [
         "subagent",

@@ -154,14 +154,17 @@ pub async fn execute_define(args: Value, runtime: &ToolRuntime) -> ToolResult {
         Ok(Ok(())) => ToolResult {
             content: (format!("Saved workset '{id}' with {items_len} item(s).")).into(),
             is_error: false,
+            execution_duration_ms: None,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error saving workset '{id}': {error}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error saving workset '{id}': {join_error}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
     }
 }
@@ -187,18 +190,22 @@ pub async fn execute_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
         Ok(Ok(Some(workset))) => ToolResult {
             content: (store::render_workset_document(&workset)).into(),
             is_error: false,
+            execution_duration_ms: None,
         },
         Ok(Ok(None)) => ToolResult {
             content: (format!("Workset '{id}' does not exist in this session.")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error reading workset '{id}': {error}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error reading workset '{id}': {join_error}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
     }
 }
@@ -217,14 +224,17 @@ pub async fn execute_list(_args: Value, runtime: &ToolRuntime) -> ToolResult {
         Ok(Ok(worksets)) => ToolResult {
             content: (store::render_workset_list(&worksets)).into(),
             is_error: false,
+            execution_duration_ms: None,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error listing worksets: {error}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error listing worksets: {join_error}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
     }
 }
@@ -244,6 +254,7 @@ fn require_session(runtime: &ToolRuntime) -> Result<&str, ToolResult> {
     runtime.session_id.as_deref().ok_or_else(|| ToolResult {
         content: ("Error: workset tools require an active session".to_string()).into(),
         is_error: true,
+        execution_duration_ms: None,
     })
 }
 
@@ -254,6 +265,7 @@ fn optional_string(args: &Value, key: &str) -> Result<Option<String>, ToolResult
         Some(_) => Err(ToolResult {
             content: (format!("Error: '{key}' must be a string")).into(),
             is_error: true,
+            execution_duration_ms: None,
         }),
     }
 }
@@ -263,12 +275,14 @@ fn parse_items(value: Option<&Value>) -> Result<Vec<WorksetItemDefinition>, Tool
         return Err(ToolResult {
             content: ("Error: 'workset_items' is required".to_string()).into(),
             is_error: true,
+            execution_duration_ms: None,
         });
     };
     let Some(items) = value.as_array() else {
         return Err(ToolResult {
             content: ("Error: 'workset_items' must be an array".to_string()).into(),
             is_error: true,
+            execution_duration_ms: None,
         });
     };
 
@@ -303,6 +317,7 @@ fn require_item_str(value: &Value, key: &str) -> Result<String, ToolResult> {
         .ok_or_else(|| ToolResult {
             content: (format!("Error: workset item '{key}' is required")).into(),
             is_error: true,
+            execution_duration_ms: None,
         })
 }
 
@@ -311,12 +326,14 @@ fn require_string_array(value: &Value, key: &str) -> Result<Vec<String>, ToolRes
         return Err(ToolResult {
             content: (format!("Error: '{key}' is required")).into(),
             is_error: true,
+            execution_duration_ms: None,
         });
     };
     let Some(items) = value.as_array() else {
         return Err(ToolResult {
             content: (format!("Error: '{key}' must be an array of strings")).into(),
             is_error: true,
+            execution_duration_ms: None,
         });
     };
     let mut parsed = Vec::with_capacity(items.len());
@@ -325,6 +342,7 @@ fn require_string_array(value: &Value, key: &str) -> Result<Vec<String>, ToolRes
             return Err(ToolResult {
                 content: (format!("Error: '{key}' must be an array of strings")).into(),
                 is_error: true,
+                execution_duration_ms: None,
             });
         };
         parsed.push(value.to_string());

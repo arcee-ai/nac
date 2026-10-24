@@ -174,6 +174,7 @@ pub fn parse_dispatch_args(
                 .map_err(|error| ToolResult {
                     content: (format!("Error: {error}")).into(),
                     is_error: true,
+                    execution_duration_ms: None,
                 })?,
         )
     } else {
@@ -241,6 +242,7 @@ pub async fn execute_parsed_dispatch(
         ))
             .into(),
             is_error: true,
+            execution_duration_ms: None,
         };
     };
 
@@ -274,7 +276,7 @@ pub async fn execute_parsed_dispatch(
         Err(error) => {
             close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
             if cancellation.is_cancelled() {
-                return ToolResult { content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before host admission.").into(), is_error: true };
+                return ToolResult { content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before host admission.").into(), is_error: true, execution_duration_ms: None };
             }
             let message = format!("Failed to admit worker dispatch: {error}");
             runtime
@@ -297,6 +299,7 @@ pub async fn execute_parsed_dispatch(
             return ToolResult {
                 content: message.into(),
                 is_error: true,
+                execution_duration_ms: None,
             };
         }
     };
@@ -322,6 +325,7 @@ pub async fn execute_parsed_dispatch(
         return ToolResult {
             content: format!("Required thread start publication failed: {error:#}").into(),
             is_error: true,
+            execution_duration_ms: None,
         };
     }
 
@@ -347,6 +351,7 @@ pub async fn execute_parsed_dispatch(
         return ToolResult {
             content: message.into(),
             is_error: true,
+            execution_duration_ms: None,
         };
     }
 
@@ -400,6 +405,7 @@ pub async fn execute_parsed_dispatch(
             return ToolResult {
                 content: (message).into(),
                 is_error: true,
+                execution_duration_ms: None,
             };
         }
     };
@@ -474,6 +480,7 @@ pub async fn execute_parsed_dispatch(
             }
             .into(),
             is_error: finish.is_err(),
+            execution_duration_ms: None,
         };
     };
 
@@ -484,6 +491,7 @@ pub async fn execute_parsed_dispatch(
         return ToolResult {
             content: (format!("{TOOL_CALL_CANCELLED_MARKER} {}", failure.message)).into(),
             is_error: true,
+            execution_duration_ms: None,
         };
     }
 
@@ -501,6 +509,7 @@ pub async fn execute_parsed_dispatch(
     ToolResult {
         content: (failure.message).into(),
         is_error: true,
+        execution_duration_ms: None,
     }
 }
 
@@ -635,6 +644,7 @@ pub async fn execute_dispatch(
             ))
             .into(),
             is_error: true,
+            execution_duration_ms: None,
         };
     }
     let result = execute_parsed_dispatch(params, runtime, &client).await;
@@ -662,12 +672,14 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             return ToolResult {
                 content: (format!("Error listing threads: {error}")).into(),
                 is_error: true,
+                execution_duration_ms: None,
             }
         }
         Err(join_error) => {
             return ToolResult {
                 content: (format!("Internal error listing threads: {join_error}")).into(),
                 is_error: true,
+                execution_duration_ms: None,
             }
         }
     };
@@ -676,6 +688,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
         return ToolResult {
             content: ("No active threads in this session.".to_string()).into(),
             is_error: false,
+            execution_duration_ms: None,
         };
     }
 
@@ -693,6 +706,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
     ToolResult {
         content: (output).into(),
         is_error: false,
+        execution_duration_ms: None,
     }
 }
 
@@ -717,15 +731,18 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
         Ok(Ok(episodes)) => ToolResult {
             content: (store::render_thread_document(&thread_name, &episodes)).into(),
             is_error: false,
+            execution_duration_ms: None,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error reading thread '{thread_name}': {error}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error reading thread '{thread_name}': {join_error}"))
                 .into(),
             is_error: true,
+            execution_duration_ms: None,
         },
     }
 }
@@ -747,6 +764,7 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             ))
             .into(),
             is_error: true,
+            execution_duration_ms: None,
         };
     }
 
@@ -761,19 +779,23 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
         Ok(Ok(true)) => ToolResult {
             content: (format!("Deleted thread '{thread_name}' and its retained episodes.")).into(),
             is_error: false,
+            execution_duration_ms: None,
         },
         Ok(Ok(false)) => ToolResult {
             content: (format!("Thread '{thread_name}' does not exist in this session.")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error deleting thread '{thread_name}': {error}")).into(),
             is_error: true,
+            execution_duration_ms: None,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error deleting thread '{thread_name}': {join_error}"))
                 .into(),
             is_error: true,
+            execution_duration_ms: None,
         },
     }
 }
@@ -793,6 +815,7 @@ fn require_session(runtime: &ToolRuntime) -> Result<&str, ToolResult> {
     runtime.session_id.as_deref().ok_or_else(|| ToolResult {
         content: ("Error: thread tools require an active session".to_string()).into(),
         is_error: true,
+        execution_duration_ms: None,
     })
 }
 
@@ -814,6 +837,7 @@ fn resolve_scheduled_skills(
         return Err(ToolResult {
             content: ("Error: no skills are available for thread dispatch".to_string()).into(),
             is_error: true,
+            execution_duration_ms: None,
         });
     };
 
@@ -822,6 +846,7 @@ fn resolve_scheduled_skills(
             return Err(ToolResult {
                 content: (format!("Error: unknown skill '{skill}'")).into(),
                 is_error: true,
+                execution_duration_ms: None,
             });
         }
     }
