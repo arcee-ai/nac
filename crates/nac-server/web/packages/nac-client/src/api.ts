@@ -97,6 +97,7 @@ import type {
   SwitchBranchRequest,
   ThreadEventPage,
   ThreadSteeringResponse,
+  ToolCallContentResponse,
   UpdateConfigRequest,
   UpdateGoalRequest,
   UpdateModelConfigurationRequest,
@@ -658,6 +659,13 @@ export function createNacApi(nacClient: NacClient) {
         { signal: options.signal },
       );
     },
+
+    getToolCallContent: (id: string, callId: string, signal?: AbortSignal) =>
+      request<ToolCallContentResponse>(
+        "GET",
+        `${sessionPath(id)}/tool-calls/${encodeURIComponent(callId)}`,
+        { signal },
+      ),
 
     getWorkspaceDiff: (
       id: string,

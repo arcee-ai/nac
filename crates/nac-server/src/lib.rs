@@ -32,8 +32,8 @@ pub use delivery::contracts::{
     ReplayBoundaryEvent, ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest,
     SessionLineageKind, SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse,
     SshBrowseRequest, StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
-    ThreadSteeringRequest, ThreadSteeringResponse, UpdateConfigRequest, UpdateGoalRequest,
-    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
+    ThreadSteeringRequest, ThreadSteeringResponse, ToolCallContentResponse, UpdateConfigRequest,
+    UpdateGoalRequest, UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
 };
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
@@ -130,6 +130,7 @@ use nac_core::{
         ActiveSessionOperationSnapshot, FrontendSnapshotLoadOptions, MessagePageRequest,
         MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
         SessionFrontendSnapshotLoad, SessionRunHandle, SessionService, ThreadEventPage,
+        ToolCallContent,
     },
     sessions,
     store::{
@@ -1249,6 +1250,16 @@ impl SessionManager {
     ) -> Result<MessagesPageSnapshot> {
         self.session_state()
             .messages_page(session_id, request)
+            .await
+    }
+
+    pub async fn tool_call_content(
+        &self,
+        session_id: &str,
+        call_id: &str,
+    ) -> Result<Option<ToolCallContent>> {
+        self.session_state()
+            .tool_call_content(session_id, call_id)
             .await
     }
 

@@ -1497,6 +1497,13 @@ export interface components {
       total_tokens: number;
     };
     ToolCall: { function: components["schemas"]["FunctionCall"]; id: string; type: string };
+    ToolCallContentResponse: {
+      arguments: string;
+      arguments_truncated: boolean;
+      call_id: string;
+      output: string | null;
+      output_truncated: boolean;
+    };
     ToolCompletionStatus: "success" | "error" | "timed_out" | "cancelled";
     ToolContentPartSchema:
       | { text: string; type: "text" }
