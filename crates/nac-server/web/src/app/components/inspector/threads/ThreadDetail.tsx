@@ -104,8 +104,10 @@ export function ThreadDetail({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 min-w-0">
-      <div className="flex items-center gap-2 h-14 px-4 shrink-0 border-b border-muted bg-elevation-ground">
-        <div className="flex flex-col flex-1 min-w-0 justify-center">
+      {/* The controls wrap under the name once they would squeeze it below its
+          basis, as in a detail beside the list at a 1280–1440 px window. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 min-h-14 px-4 py-2 shrink-0 border-b border-muted bg-elevation-ground">
+        <div className="flex flex-col grow basis-48 min-w-0 justify-center">
           <div className="flex items-center gap-3 min-w-0">
             <span
               className={cn(
@@ -119,13 +121,15 @@ export function ThreadDetail({
           </div>
           <span className="code code-micro text-basic-muted truncate">{thread.updated_at}</span>
         </div>
-        {canSteer ? (
-          <Button size={ButtonSize.Small} variant={ButtonVariant.Secondary} onClick={onSteer}>
-            Steer
-          </Button>
-        ) : null}
-        <ViewSwitcher view={view} onChange={onViewChange} />
-        <span className="shrink-0 text-micro text-basic-muted">{episodes.length} ep</span>
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          {canSteer ? (
+            <Button size={ButtonSize.Small} variant={ButtonVariant.Secondary} onClick={onSteer}>
+              Steer
+            </Button>
+          ) : null}
+          <ViewSwitcher view={view} onChange={onViewChange} />
+          <span className="shrink-0 text-micro text-basic-muted">{episodes.length} ep</span>
+        </div>
       </div>
       {body}
     </div>
