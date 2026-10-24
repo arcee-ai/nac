@@ -13,35 +13,27 @@ export enum ActionListButtonStatus {
 }
 
 interface ActionListButtonProps {
-  /** Type icon, shown while Ready. The other statuses bring their own glyph. */
+  /**
+   * Type icon, shown while Ready. The other statuses bring their own glyph,
+   * and a Ready group row shows its disclosure chevron instead.
+   */
   icon: IconName;
   label: string;
   /** Rendered uppercase. Running and Failed rows drop it. */
   meta?: string;
   status?: ActionListButtonStatus;
-  /** Thread rows use the brighter button label tone from the design. */
-  prominent?: boolean;
   /** Leave unset on rows that navigate away instead of selecting themselves. */
   selected?: boolean;
-  /** `1` is a child row of an expanded group: indented behind a guide line. */
-  depth?: 0 | 1;
   /** Only for group rows, which expand and collapse their children. */
   expanded?: boolean;
   onClick?: () => void;
   className?: string;
 }
 
-const LABEL_TONE: Record<ActionListButtonStatus, string> = {
-  [ActionListButtonStatus.Ready]: "text-basic-secondary",
+/** Ready and Failed labels take the tab button's own tone, so they follow its highlight and hover. */
+const LABEL_TONE: Partial<Record<ActionListButtonStatus, string>> = {
   [ActionListButtonStatus.Pending]: "text-btn-secondary-disabled",
   [ActionListButtonStatus.Running]: "text-shimmer-basic motion-reduce:animate-none",
-  [ActionListButtonStatus.Failed]: "text-basic-secondary",
-};
-
-const PROMINENT_LABEL_TONE: Record<ActionListButtonStatus, string> = {
-  ...LABEL_TONE,
-  [ActionListButtonStatus.Ready]: "text-btn-secondary",
-  [ActionListButtonStatus.Failed]: "text-btn-secondary",
 };
 
 const STATUS_NAME: Record<ActionListButtonStatus, string | null> = {
@@ -51,7 +43,15 @@ const STATUS_NAME: Record<ActionListButtonStatus, string | null> = {
   [ActionListButtonStatus.Failed]: "failed",
 };
 
-function StatusGlyph({ icon, status }: { icon: IconName; status: ActionListButtonStatus }) {
+function StatusGlyph({
+  icon,
+  status,
+  expanded,
+}: {
+  icon: IconName;
+  status: ActionListButtonStatus;
+  expanded: boolean | undefined;
+}) {
   // The `!` fills beat `.btn-ghost .icon path { fill: … }` from atoms.css, hover included.
   switch (status) {
     case ActionListButtonStatus.Running:
@@ -61,7 +61,7 @@ function StatusGlyph({ icon, status }: { icon: IconName; status: ActionListButto
         <Icon
           iconName={IconName.Close}
           size={16}
-          className="shrink-0 [&>path]:!fill-error-primary"
+          className="shrink-0 [&>path]:!fill-btn-destructive"
         />
       );
     case ActionListButtonStatus.Pending:
@@ -73,7 +73,14 @@ function StatusGlyph({ icon, status }: { icon: IconName; status: ActionListButto
         />
       );
     default:
-      return <Icon iconName={icon} size={16} className="shrink-0" />;
+      if (expanded === undefined) return <Icon iconName={icon} size={16} className="shrink-0" />;
+      return (
+        <Icon
+          iconName={IconName.Right}
+          size={16}
+          className={cn("shrink-0 transition-transform", expanded && "rotate-90")}
+        />
+      );
   }
 }
 
@@ -82,16 +89,14 @@ function StatusGlyph({ icon, status }: { icon: IconName; status: ActionListButto
  * them. The caller maps the action type to icon, label and meta; the row only
  * knows its status. It is a small `TabButton`, so hover, press, focus and the
  * selected highlight are the tab button's own. `.btn-small.btn-icon` sets its
- * height and padding in unlayered CSS, which the 36px row overrides with `!`.
+ * height and padding in unlayered CSS, which the 28px row overrides with `!`.
  */
 const ActionListButton: React.FC<ActionListButtonProps> = ({
   icon,
   label,
   meta,
   status = ActionListButtonStatus.Ready,
-  prominent = false,
   selected,
-  depth = 0,
   expanded,
   onClick,
   className,
@@ -101,9 +106,8 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
       ? undefined
       : meta;
   const accessibleName = [label, shownMeta, STATUS_NAME[status]].filter(Boolean).join(", ");
-  const labelTone = (prominent ? PROMINENT_LABEL_TONE : LABEL_TONE)[status];
 
-  const row = (
+  return (
     <TabButton
       type="button"
       size={TabButtonSize.Small}
@@ -112,10 +116,10 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
       aria-expanded={expanded}
       aria-label={accessibleName}
       onClick={onClick}
-      className={cn("!h-9 !px-2", depth === 0 && className)}
+      className={cn("!h-7 !px-2", className)}
     >
-      <StatusGlyph icon={icon} status={status} />
-      <span className={cn("flex-1 min-w-0 truncate text-left", labelTone)}>{label}</span>
+      <StatusGlyph icon={icon} status={status} expanded={expanded} />
+      <span className={cn("flex-1 min-w-0 truncate text-left", LABEL_TONE[status])}>{label}</span>
       {shownMeta ? (
         <span className="shrink-0 text-[10px] leading-[12px] uppercase text-basic-muted">
           {shownMeta}
@@ -123,23 +127,30 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
       ) : null}
     </TabButton>
   );
+};
 
-  if (depth === 0) return row;
-
+/**
+ * The child rows of an expanded group, or the threads of one wave, behind a
+ * single guide line that runs 4px past the first and the last row. The rows
+ * sit 8px in from the line's outer edge, the 1px line included.
+ */
+export function ActionListSegment({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <div
-      data-action-list-child
       className={cn(
-        "relative pl-1",
-        "before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-divider-muted",
-        // Spans the 2px list gap, so consecutive children share one guide line.
-        "[[data-action-list-child]+&]:before:-top-0.5",
+        "flex flex-col gap-1 border-l border-primary py-1 pl-[7px] [&>*]:shrink-0",
         className,
       )}
     >
-      {row}
+      {children}
     </div>
   );
-};
+}
 
 export default ActionListButton;

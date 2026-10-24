@@ -9,6 +9,7 @@ import {
   InsightItemState,
   InsightLinkButton,
 } from "@/app/atoms";
+import { ActionListSegment } from "@/app/atoms/action-list-button";
 
 interface ActionSample {
   type: string;
@@ -17,6 +18,8 @@ interface ActionSample {
   meta?: string;
   failedLabel?: string;
   runningLabel?: string;
+  /** A group row, which shows the disclosure chevron. */
+  group?: boolean;
 }
 
 const ACTION_SAMPLES: ActionSample[] = [
@@ -181,10 +184,11 @@ const ACTION_SAMPLES: ActionSample[] = [
   },
   {
     type: "ToolsSegment",
-    icon: IconName.MenuHorizontal,
-    label: "Thoughts, Edit File and more",
+    icon: IconName.Right,
+    label: "Worked for 13.3s",
     meta: "12",
-    runningLabel: "Thoughts, Edit File and more…",
+    runningLabel: "Working…",
+    group: true,
   },
   {
     type: "Web search",
@@ -216,11 +220,16 @@ const STATUS_COLUMNS = [
   { status: ActionListButtonStatus.Failed, title: "Failed or canceled" },
 ];
 
+/** Repeated as active rows; an active group row is also the expanded one. */
+const ACTIVE_TYPES = ["Thread", "Read File", "ToolsSegment"];
+
 const GROUP_CHILDREN = [
   { key: "thoughts", icon: IconName.Brain, label: "Thoughts", meta: "13.8 s" },
   { key: "read", icon: IconName.ReadFile, label: "index.tsx", meta: "Read" },
   { key: "write", icon: IconName.FileUpload, label: "index.tsx", meta: "Write" },
 ];
+
+const WAVE_THREADS = ["impl/calendar", "impl/recurring-events", "review/calendar", "docs/calendar"];
 
 function sampleLabel(sample: ActionSample, status: ActionListButtonStatus): string {
   if (status === ActionListButtonStatus.Running) return sample.runningLabel ?? sample.label;
@@ -229,19 +238,27 @@ function sampleLabel(sample: ActionSample, status: ActionListButtonStatus): stri
 }
 
 function ActionStatesGrid() {
-  const selectedSample = ACTION_SAMPLES.find((sample) => sample.type === "Read File");
+  const rows = [
+    ...ACTION_SAMPLES.map((sample) => ({ sample, active: false })),
+    ...ACTION_SAMPLES.filter((sample) => ACTIVE_TYPES.includes(sample.type)).map((sample) => ({
+      sample,
+      active: true,
+    })),
+  ];
 
   return (
-    <div className="grid grid-cols-[136px_repeat(4,minmax(0,1fr))] items-center gap-x-3 gap-y-0.5">
+    <div className="grid grid-cols-[136px_repeat(4,minmax(0,1fr))] items-center gap-x-3 gap-y-1">
       <span className="label-micro text-basic-muted">Type</span>
       {STATUS_COLUMNS.map(({ status, title }) => (
         <span key={status} className="px-2 label-micro text-basic-muted">
           {title}
         </span>
       ))}
-      {ACTION_SAMPLES.map((sample) => (
-        <Fragment key={sample.type}>
-          <span className="truncate label-micro text-basic-tertiary">{sample.type}</span>
+      {rows.map(({ sample, active }) => (
+        <Fragment key={`${sample.type}-${active}`}>
+          <span className="truncate label-micro text-basic-tertiary">
+            {active ? `${sample.type}, active` : sample.type}
+          </span>
           {STATUS_COLUMNS.map(({ status }) => (
             <ActionListButton
               key={status}
@@ -249,93 +266,105 @@ function ActionStatesGrid() {
               label={sampleLabel(sample, status)}
               meta={sample.meta}
               status={status}
-              prominent={sample.type === "Thread"}
+              selected={active || undefined}
+              expanded={sample.group ? active : undefined}
             />
           ))}
         </Fragment>
       ))}
-      {selectedSample ? (
-        <>
-          <span className="truncate label-micro text-basic-tertiary">Read File, selected</span>
-          {STATUS_COLUMNS.map(({ status }) => (
-            <ActionListButton
-              key={status}
-              icon={selectedSample.icon}
-              label={sampleLabel(selectedSample, status)}
-              meta={selectedSample.meta}
-              status={status}
-              selected
-            />
-          ))}
-        </>
-      ) : null}
     </div>
   );
 }
 
-function ExpandedGroupPreview() {
+/** The agent list: an expanded group whose children share one segment line. */
+function GroupSegmentPreview() {
   const [expanded, setExpanded] = useState(true);
   const [selected, setSelected] = useState("thoughts");
+  const groupShown = selected === "group" || GROUP_CHILDREN.some(({ key }) => key === selected);
 
   return (
-    <div className="flex w-[252px] flex-col gap-0.5">
+    <div className="flex w-[252px] flex-col gap-1">
       <ActionListButton
-        icon={IconName.Brain}
-        label="Thoughts"
-        meta="2.1 s"
-        selected={selected === "first"}
-        onClick={() => setSelected("first")}
-      />
-      <ActionListButton
-        icon={IconName.MenuHorizontal}
-        label="Thoughts, Read File and more"
+        icon={IconName.Right}
+        label="Worked for 13.3s"
         meta={String(GROUP_CHILDREN.length)}
         expanded={expanded}
-        selected={selected === "group"}
+        selected={groupShown}
         onClick={() => {
           setExpanded((open) => !open);
           setSelected("group");
         }}
       />
-      {expanded
-        ? GROUP_CHILDREN.map((child) => (
+      {expanded ? (
+        <ActionListSegment>
+          {GROUP_CHILDREN.map((child) => (
             <ActionListButton
               key={child.key}
-              depth={1}
               icon={child.icon}
               label={child.label}
               meta={child.meta}
               selected={selected === child.key}
               onClick={() => setSelected(child.key)}
             />
-          ))
-        : null}
+          ))}
+        </ActionListSegment>
+      ) : null}
       <ActionListButton
-        icon={IconName.Chat}
-        label="impl/calendar"
-        meta="Thread, 3"
-        prominent
-        selected={selected === "thread"}
-        onClick={() => setSelected("thread")}
+        icon={IconName.Eye}
+        label="Calendar rollout"
+        meta="Read"
+        onClick={() => {}}
       />
+      <ActionListButton icon={IconName.Right} label="Worked for 4.1s" meta="5" expanded={false} />
       <ActionListButton
-        icon={IconName.Plane}
-        label="Calendar sync agent"
+        icon={IconName.Orchestrator}
+        label="Calendar rollout"
         meta="Spawn"
         onClick={() => {}}
       />
+      <ActionListButton
+        icon={IconName.Brain}
+        label="Thoughts"
+        meta="2.1 s"
+        selected={selected === "last"}
+        onClick={() => setSelected("last")}
+      />
+    </div>
+  );
+}
+
+/** The orchestrator list: each wave of threads shares one segment line. */
+function ThreadWavePreview() {
+  const [selected, setSelected] = useState(WAVE_THREADS[0]);
+  const thread = (name: string) => (
+    <ActionListButton
+      key={name}
+      icon={IconName.Chat}
+      label={name}
+      meta="Thread, 3"
+      selected={selected === name}
+      onClick={() => setSelected(name)}
+    />
+  );
+
+  return (
+    <div className="flex w-[252px] flex-col gap-1">
+      <ActionListButton icon={IconName.Brain} label="Thoughts" meta="13.8 s" />
+      <ActionListSegment>{WAVE_THREADS.map(thread)}</ActionListSegment>
+      <ActionListButton icon={IconName.Right} label="Worked for 13.3s" meta="12" expanded={false} />
+      <ActionListSegment>{thread("impl/time-zones")}</ActionListSegment>
+      <ActionListButton icon={IconName.Brain} label="Thoughts" meta="2.1 s" />
     </div>
   );
 }
 
 function LongLabelsPreview() {
   return (
-    <div className="flex w-[252px] flex-col gap-0.5">
+    <div className="flex w-[252px] flex-col gap-1">
       <ActionListButton
         icon={IconName.Chat}
         label="impl/calendar-sync-recurring-events-and-time-zones"
         meta="Thread, 12"
-        prominent
       />
       <ActionListButton
         icon={IconName.Orchestrator}
@@ -491,7 +520,8 @@ export function InsightsAtomsSection() {
       <div className="p-4 flex flex-col gap-6">
         <ActionStatesGrid />
         <div className="flex flex-wrap items-start gap-6">
-          <ExpandedGroupPreview />
+          <GroupSegmentPreview />
+          <ThreadWavePreview />
           <LongLabelsPreview />
         </div>
         <InsightItemsPreview />
