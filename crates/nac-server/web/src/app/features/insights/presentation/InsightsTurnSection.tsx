@@ -8,7 +8,6 @@ import type {
 } from "@/app/features/insights/model/types";
 import { formatInsightTime } from "@/app/features/insights/presentation/insightTime";
 import type { RowView } from "@/app/features/insights/presentation/rows";
-import { cn } from "@/app/lib/cn";
 
 export interface InsightsRowController {
   expanded: ReadonlySet<string>;
@@ -60,8 +59,11 @@ function EntryRows({
         expanded={children ? expanded : undefined}
         onClick={controller.entryAction(entry) ?? undefined}
       />
-      {expanded && entry.kind === "group"
-        ? entry.group.segments.map((segment) => (
+      {expanded && entry.kind === "group" ? (
+        // One block under the group row: the child guide line spans only the
+        // 2px gap between children, not the wider gap between rows.
+        <div className="flex flex-col gap-0.5 [&>*]:shrink-0">
+          {entry.group.segments.map((segment) => (
             <ActionListButton
               key={segment.key}
               {...controller.segmentView(segment)}
@@ -69,8 +71,9 @@ function EntryRows({
               selected={controller.segmentSelected(entry, segment)}
               onClick={controller.segmentAction(entry, segment) ?? undefined}
             />
-          ))
-        : null}
+          ))}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -78,38 +81,30 @@ function EntryRows({
 export function InsightsTurnSection({
   section,
   fallbackPrompt,
-  first,
   controller,
 }: {
   section: InsightTurnSection;
   /** Heading for a section without a prompt of its own. */
   fallbackPrompt: string;
-  first: boolean;
   controller: InsightsRowController;
 }) {
   const prompt = section.promptPreview || fallbackPrompt;
   const createdAt = formatInsightTime(section.createdAt);
   return (
     <div className="flex flex-col [&>*]:shrink-0">
-      <h3
-        className={cn(
-          "flex items-center gap-1 border-b border-muted px-1 pb-0.5 leading-[14px] whitespace-nowrap text-basic-tertiary",
-          // The list column already pads its top edge.
-          first ? "h-[21px] pt-1" : "h-[33px] pt-4",
-        )}
-      >
+      <h3 className="flex items-center gap-1 px-1 pt-4 pb-1 leading-[14px] whitespace-nowrap text-basic-tertiary">
         {section.ordinal === null ? null : (
           <span className="shrink-0 text-[10px]">#{section.ordinal}</span>
         )}
         <span className="min-w-0 flex-1 truncate text-[11px]">{prompt}</span>
         {createdAt === null ? null : <span className="shrink-0 text-[10px]">{createdAt}</span>}
       </h3>
-      <div className="flex flex-col gap-0.5 py-2 [&>*]:shrink-0">
+      <div className="flex flex-col gap-1 py-2 [&>*]:shrink-0">
         {entryRuns(section.entries).map((run) =>
           run.kind === "wave" ? (
             <div
               key={`wave:${run.entries[0].id}`}
-              className="flex flex-col gap-1 border-l border-primary py-1 pl-0.5 [&>*]:shrink-0"
+              className="flex flex-col gap-1 border-l border-primary py-1 pl-2 [&>*]:shrink-0"
             >
               {run.entries.map((entry) => (
                 <EntryRows key={entry.id} entry={entry} controller={controller} />

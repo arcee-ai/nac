@@ -62,11 +62,10 @@ export function InsightsList({
   const pending = pendingPrompt.replace(/\s+/g, " ").trim();
   return (
     <div ref={listRef} className="flex flex-col [&>*]:shrink-0">
-      {sections.map((section, index) => (
+      {sections.map((section) => (
         <InsightsTurnSection
           key={section.key}
           section={section}
-          first={index === 0}
           fallbackPrompt={
             section.key === STREAMING_TURN_KEY ? pending || STREAMING_HEADING : LEADING_HEADING
           }

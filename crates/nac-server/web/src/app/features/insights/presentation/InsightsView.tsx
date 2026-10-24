@@ -276,6 +276,7 @@ export function InsightsView({
       <PanelSplit
         listTitle="Insights"
         listToolbar={<InsightsFilter options={options} value={filter} onChange={changeFilter} />}
+        listClassName="p-2"
         title={title}
         titleAction={threadPane?.action ? <TaskButton action={threadPane.action} /> : null}
         actions={

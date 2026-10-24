@@ -7,6 +7,7 @@ import type {
 } from "@/app/features/insights/model/types";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { AnchorPlacement } from "@/app/lib/anchor";
+import { cn } from "@/app/lib/cn";
 
 /**
  * "Show:" and the filter select: a bar above the list on a pointer, a pill
@@ -39,10 +40,10 @@ export function InsightsFilter({
       className={
         isMobile
           ? "flex w-fit items-center gap-2 rounded-full bg-elevation-level-3 py-1 pl-4 pr-1 shadow-2xl"
-          : "flex shrink-0 items-center gap-2 border-b border-muted py-2 pl-3 pr-2"
+          : "flex h-14 shrink-0 items-center gap-3 border-b border-muted pl-3 pr-2"
       }
     >
-      <span id={labelId} className="label-micro text-basic-primary">
+      <span id={labelId} className={cn("label-micro text-basic-primary", !isMobile && "flex-1")}>
         Show:
       </span>
       <Select
@@ -50,7 +51,7 @@ export function InsightsFilter({
         value={value}
         onValueChange={select}
         size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-        variant={ButtonVariant.Secondary}
+        variant={isMobile ? ButtonVariant.Secondary : ButtonVariant.Ghost}
         placement={isMobile ? AnchorPlacement.TopRight : AnchorPlacement.BottomLeft}
         sticky={isMobile}
       />

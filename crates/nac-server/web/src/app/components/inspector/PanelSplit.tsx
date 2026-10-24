@@ -38,6 +38,7 @@ import {
 export function PanelSplit({
   list,
   listToolbar,
+  listClassName,
   listTitle,
   title,
   titleAction,
@@ -50,6 +51,8 @@ export function PanelSplit({
    * pointer, and a pill floating over its last rows on a phone.
    */
   listToolbar?: ReactNode;
+  /** Insets of the desktop list column, for a panel drawn with its own. */
+  listClassName?: string;
   /** What the list is of, for the header of the phone's list dialog. */
   listTitle?: string;
   /** Row that is open, named for the narrow header. */
@@ -206,7 +209,12 @@ export function PanelSplit({
         style={{ width: listWidth }}
       >
         {listToolbar}
-        <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-4 px-1 [&>*]:shrink-0">
+        <div
+          className={cn(
+            "flex flex-col flex-1 min-h-0 overflow-auto pt-4 px-1 [&>*]:shrink-0",
+            listClassName,
+          )}
+        >
           {list}
         </div>
         {/* The handle sits on the list's leading edge, so dragging or arrowing
