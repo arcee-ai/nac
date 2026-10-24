@@ -23,7 +23,7 @@ export default function DesignPreviewPage() {
   const [modalOpen, setModalOpen] = useState(false);
 
   return (
-    <div className="min-h-full bg-elevation-ground text-basic-primary">
+    <div className="h-full overflow-y-auto bg-elevation-ground text-basic-primary">
       <header className="flex items-center gap-4 h-14 px-6 border-b border-secondary">
         <Logo height={18} />
         <span className="text-basic-muted label-small">design system</span>
