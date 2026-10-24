@@ -181,6 +181,11 @@ const config = {
         "btn-secondary-hovered": "var(--color-text-btn-secondary-hovered)",
         "btn-secondary-pressed": "var(--color-text-btn-secondary-pressed)",
         "btn-secondary-disabled": "var(--color-text-btn-secondary-disabled)",
+        "btn-secondary-highlighted": "var(--color-text-btn-secondary-highlighted)",
+        "btn-secondary-hovered-highlighted": "var(--color-text-btn-secondary-hovered-highlighted)",
+        "btn-secondary-pressed-highlighted": "var(--color-text-btn-secondary-pressed-highlighted)",
+        "btn-secondary-disabled-highlighted":
+          "var(--color-text-btn-secondary-disabled-highlighted)",
         "btn-destructive": "var(--color-text-btn-destructive)",
         "btn-destructive-hovered": "var(--color-text-btn-destructive-hovered)",
         "btn-destructive-pressed": "var(--color-text-btn-destructive-pressed)",
@@ -276,6 +281,11 @@ const config = {
         "btn-secondary-hovered": "var(--color-fill-btn-secondary-hovered)",
         "btn-secondary-pressed": "var(--color-fill-btn-secondary-pressed)",
         "btn-secondary-disabled": "var(--color-fill-btn-secondary-disabled)",
+        "btn-secondary-highlighted": "var(--color-fill-btn-secondary-highlighted)",
+        "btn-secondary-hovered-highlighted": "var(--color-fill-btn-secondary-hovered-highlighted)",
+        "btn-secondary-pressed-highlighted": "var(--color-fill-btn-secondary-pressed-highlighted)",
+        "btn-secondary-disabled-highlighted":
+          "var(--color-fill-btn-secondary-disabled-highlighted)",
         "btn-destructive": "var(--color-fill-btn-destructive)",
         "btn-destructive-hovered": "var(--color-fill-btn-destructive-hovered)",
         "btn-destructive-pressed": "var(--color-fill-btn-destructive-pressed)",

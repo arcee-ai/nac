@@ -188,10 +188,13 @@
   --color-fill-btn-accent-muted: var(--brand-trans-500);
 
   --color-fill-btn-secondary: var(--gray-200);
-  --color-fill-btn-secondary-highlighted: var(--gray-100);
   --color-fill-btn-secondary-hovered: var(--gray-100);
   --color-fill-btn-secondary-pressed: var(--gray-100);
   --color-fill-btn-secondary-disabled: var(--white-trans-300);
+  --color-fill-btn-secondary-highlighted: var(--gray-100);
+  --color-fill-btn-secondary-hovered-highlighted: var(--gray-100);
+  --color-fill-btn-secondary-pressed-highlighted: var(--gray-100);
+  --color-fill-btn-secondary-disabled-highlighted: var(--white-trans-300);
 
   --color-fill-btn-destructive: var(--red-300);
   --color-fill-btn-destructive-hovered: var(--red-200);
@@ -255,6 +258,10 @@
   --color-text-btn-secondary-hovered: var(--white);
   --color-text-btn-secondary-pressed: var(--white);
   --color-text-btn-secondary-disabled: var(--white-trans-400);
+  --color-text-btn-secondary-highlighted: var(--white);
+  --color-text-btn-secondary-hovered-highlighted: var(--white);
+  --color-text-btn-secondary-pressed-highlighted: var(--white);
+  --color-text-btn-secondary-disabled-highlighted: var(--white-trans-400);
 
   --color-text-btn-destructive: var(--red-300);
   --color-text-btn-destructive-hovered: var(--red-200);
