@@ -13,12 +13,13 @@ import {
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
+import { ChildTranscriptScope } from "@/app/features/insights/transcript/ChildTranscriptScope";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useDelegatedPreviewStream } from "@/app/hooks/useDelegatedPreviewStream";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
-import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
+import { displayPromptFromMessageText, invokedSkillNames } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
 import {
   STREAMING_TURN_KEY,
@@ -190,40 +191,79 @@ export function SubagentPreview({
           className={cn("h-full overflow-y-auto", fade, !revealed && "invisible")}
         >
           <div ref={contentRef} className="flex flex-col px-4 pt-2 pb-6 [&>*]:shrink-0">
-            {olderFailed && hasOlder ? (
-              <div role="alert" className="mb-4 flex items-center gap-2">
-                <span className="label-small text-basic-muted">Couldn’t load older messages.</span>
-                <Button
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Ghost}
-                  onClick={() => setOlderFailed(false)}
-                >
-                  Try again
-                </Button>
-              </div>
-            ) : null}
-            {turns.map((turn, index) => {
-              if (turn.kind === "delegated-completion") {
-                return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
-              }
-              if (turn.kind === "user") {
-                return (
-                  <UserMessage
+            <ChildTranscriptScope sessionId={sessionId} turns={snapshotTurns}>
+              {olderFailed && hasOlder ? (
+                <div role="alert" className="mb-4 flex items-center gap-2">
+                  <span className="label-small text-basic-muted">
+                    Couldn’t load older messages.
+                  </span>
+                  <Button
+                    size={ButtonSize.Small}
+                    variant={ButtonVariant.Ghost}
+                    onClick={() => setOlderFailed(false)}
+                  >
+                    Try again
+                  </Button>
+                </div>
+              ) : null}
+              {turns.map((turn, index) => {
+                if (turn.kind === "delegated-completion") {
+                  return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
+                }
+                if (turn.kind === "user") {
+                  return (
+                    <UserMessage
+                      key={turn.key}
+                      text={turn.text}
+                      invokedSkills={turn.invokedSkills}
+                      messageIndex={turn.messageIndex}
+                      readOnly
+                    />
+                  );
+                }
+                const lastIsThisRun = index === turns.length - 1;
+                const row = (
+                  <ModelMessage
                     key={turn.key}
-                    text={turn.text}
-                    invokedSkills={turn.invokedSkills}
-                    timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
+                    turn={turn}
+                    model={model}
+                    active={running && lastIsThisRun}
+                    isLast={false}
+                    selectedThreadEpisode={null}
+                    selectedWorkset={null}
+                    onSelectThread={ignoreThread}
+                    onSelectWorkset={ignoreWorkset}
                     readOnly
                   />
                 );
-              }
-              const lastIsThisRun = index === turns.length - 1;
-              const row = (
+                return streamingTurn && turn.key === STREAMING_TURN_KEY ? (
+                  <Fragment key={turn.key}>
+                    <UserMessage
+                      text={pendingText}
+                      invokedSkills={pendingSkills}
+                      pending
+                      readOnly
+                    />
+                    {row}
+                  </Fragment>
+                ) : (
+                  row
+                );
+              })}
+              {showPending && !streamingTurn ? (
+                <UserMessage text={pendingText} invokedSkills={pendingSkills} pending readOnly />
+              ) : null}
+              {showModelPending ? (
                 <ModelMessage
-                  key={turn.key}
-                  turn={turn}
+                  turn={{
+                    kind: "model",
+                    key: "model-pending",
+                    blocks: [],
+                    durationMs: null,
+                    messageIndex: null,
+                  }}
                   model={model}
-                  active={running && lastIsThisRun}
+                  active
                   isLast={false}
                   selectedThreadEpisode={null}
                   selectedWorkset={null}
@@ -231,41 +271,11 @@ export function SubagentPreview({
                   onSelectWorkset={ignoreWorkset}
                   readOnly
                 />
-              );
-              return streamingTurn && turn.key === STREAMING_TURN_KEY ? (
-                <Fragment key={turn.key}>
-                  <UserMessage text={pendingText} invokedSkills={pendingSkills} pending readOnly />
-                  {row}
-                </Fragment>
-              ) : (
-                row
-              );
-            })}
-            {showPending && !streamingTurn ? (
-              <UserMessage text={pendingText} invokedSkills={pendingSkills} pending readOnly />
-            ) : null}
-            {showModelPending ? (
-              <ModelMessage
-                turn={{
-                  kind: "model",
-                  key: "model-pending",
-                  blocks: [],
-                  durationMs: null,
-                  messageIndex: null,
-                }}
-                model={model}
-                active
-                isLast={false}
-                selectedThreadEpisode={null}
-                selectedWorkset={null}
-                onSelectThread={ignoreThread}
-                onSelectWorkset={ignoreWorkset}
-                readOnly
-              />
-            ) : null}
-            {turns.length === 0 && !running && fallbackText ? (
-              <p className="label-small py-4 text-basic-secondary">{fallbackText}</p>
-            ) : null}
+              ) : null}
+              {turns.length === 0 && !running && fallbackText ? (
+                <p className="label-small py-4 text-basic-secondary">{fallbackText}</p>
+              ) : null}
+            </ChildTranscriptScope>
           </div>
         </div>
       </div>
