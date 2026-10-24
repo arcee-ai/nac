@@ -28,6 +28,7 @@ import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useTranscriptModel } from "@/app/components/inspector/transcript/useTranscriptModel";
 import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
+import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -123,10 +124,10 @@ export function Transcript({
   const {
     useSelectedWorkset,
     useSelectedThreadEpisode,
+    useSelectedInsight,
     useSelectedRevision,
     useSelectedFile,
     selectWorkset,
-    selectThread,
     selectRevision,
     selectFile,
   } = useNativeRuntime().stores.sessionLayoutStore;
@@ -136,7 +137,9 @@ export function Transcript({
   const error = useRunError();
   const liveFailure = useRunFailure();
   const modelRetryAttempt = useModelRetryAttempt();
-  const selectedThreadEpisode = useSelectedThreadEpisode();
+  const selectedInsight = useSelectedInsight();
+  const threadEpisode = useSelectedThreadEpisode();
+  const selectedThreadEpisode = selectedInsight?.kind === "thread" ? threadEpisode : null;
   const selectedWorkset = useSelectedWorkset();
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
@@ -330,13 +333,7 @@ export function Transcript({
   // when `running` flips and the layout jumps.
   const showModelPending = (running || showPending) && !liveTurn;
 
-  const focusThread = useCallback(
-    (name: string, episodeKey: string) => {
-      selectThread(name, episodeKey);
-      onFocusPanel("threads");
-    },
-    [onFocusPanel, selectThread],
-  );
+  const { openThread } = useInsightsNavigation();
   const focusWorkset = useCallback(
     (id: string) => {
       selectWorkset(id);
@@ -563,9 +560,9 @@ export function Transcript({
                   // made Send shrink-then-grow a frame later.
                   isLast={lastIsThisRun && !showModelPending}
                   activity={running && lastIsThisRun ? activity : undefined}
-                  selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
+                  selectedThreadEpisode={panel === "insights" ? selectedThreadEpisode : null}
                   selectedWorkset={panel === "worksets" ? selectedWorkset : null}
-                  onSelectThread={focusThread}
+                  onSelectThread={openThread}
                   onSelectWorkset={focusWorkset}
                   userMessageIndex={precedingUser?.messageIndex}
                   userText={precedingUser?.text}
@@ -641,9 +638,9 @@ export function Transcript({
               model={model}
               active
               isLast
-              selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
+              selectedThreadEpisode={panel === "insights" ? selectedThreadEpisode : null}
               selectedWorkset={panel === "worksets" ? selectedWorkset : null}
-              onSelectThread={focusThread}
+              onSelectThread={openThread}
               onSelectWorkset={focusWorkset}
             />
           ) : null}

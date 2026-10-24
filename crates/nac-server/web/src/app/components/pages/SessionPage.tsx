@@ -1,4 +1,5 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { InsightsNavigationProvider } from "@/app/features/insights/InsightsNavigationProvider";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { sessionAvailable } from "@/app/features/ui-policy/policy";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
@@ -100,8 +101,10 @@ export default function SessionPage() {
     useSelectedWorkset,
     useSelectedThreadRunning,
     useSelectedThread,
+    useSelectedInsight,
     useSelectedRevision,
     useSelectedFile,
+    selectInsight,
     toggleSidePanelList,
     toggleSidePanelExpanded,
     toggleSidePanelCollapsed,
@@ -133,6 +136,7 @@ export default function SessionPage() {
   const animateSidePanel = useSidePanelAnimate();
   const expanded = useSidePanelExpanded();
   const selectedThread = useSelectedThread();
+  const selectedInsight = useSelectedInsight();
   const selectedThreadRunning = useSelectedThreadRunning();
   const selectedWorkset = useSelectedWorkset();
   const selectedFile = useSelectedFile();
@@ -165,9 +169,14 @@ export default function SessionPage() {
         : panelPolicy.defaultPanel;
 
   useEffect(() => {
-    if (!id || !snapshot || !isSessionPanel(panel) || panel === effectivePanel) return;
-    navigate(routes.session(id, effectivePanel), { replace: true });
-  }, [effectivePanel, id, navigate, panel, snapshot]);
+    if (!id || !isSessionPanel(panel)) return;
+    // Other corrections wait for the snapshot's panels. An old Threads link moves
+    // at once: moving it later would close a dialog opened over the page meanwhile.
+    const target = snapshot ? effectivePanel : panel === "threads" ? routedPanel : panel;
+    if (target === panel) return;
+    if (panel === "threads" && selectedThread) selectInsight({ kind: "thread" });
+    navigate(routes.session(id, target), { replace: true });
+  }, [effectivePanel, id, navigate, panel, routedPanel, selectInsight, selectedThread, snapshot]);
   // The phone dialog header shows the selected file's +/- badge; a revision
   // reports its own totals rather than the live workspace ones.
   const revisionChanges = useWorkspaceRevisionChanges(
@@ -249,10 +258,11 @@ export default function SessionPage() {
       </div>
     ) : null;
 
-  // ThreadsView syncs the open thread's name and running bit into the store so
-  // this header stays aligned with the detail pane (including title shimmer).
-  const currentThreadName = selectedThread;
-  const threadTitleRunning = effectivePanel === "threads" && selectedThreadRunning;
+  // The thread Insights has open titles the phone dialog. Its detail pane syncs
+  // the running bit into the store, so the title shimmers along with it.
+  const insightThread =
+    effectivePanel === "insights" && selectedInsight?.kind === "thread" ? selectedThread : null;
+  const threadTitleRunning = insightThread != null && selectedThreadRunning;
 
   const sideBox = (
     <SessionSideBox
@@ -264,7 +274,7 @@ export default function SessionPage() {
     />
   );
 
-  return (
+  const page = (
     <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground">
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
         <div
@@ -384,8 +394,8 @@ export default function SessionPage() {
                       threadTitleRunning ? "text-shimmer-basic" : "text-basic-primary",
                     )}
                   >
-                    {effectivePanel === "threads"
-                      ? (currentThreadName ?? SESSION_PANEL_LABEL.threads)
+                    {effectivePanel === "insights"
+                      ? (insightThread ?? SESSION_PANEL_LABEL.insights)
                       : effectivePanel === "worksets"
                         ? (selectedWorkset ??
                           snapshot?.worksets.items[0]?.id ??
@@ -447,5 +457,11 @@ export default function SessionPage() {
         </Modal>
       )}
     </section>
+  );
+
+  return (
+    <InsightsNavigationProvider sessionId={id} panels={sessionPanels} focusPanel={focusPanel}>
+      {page}
+    </InsightsNavigationProvider>
   );
 }
