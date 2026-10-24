@@ -70,9 +70,6 @@ server remains the source of business truth and wire schemas.
   SSH/sandbox fields and advanced launch draft in one accessible form. Ordered
   commands and session-request construction belong in `features/setup`, while
   the modal retains local field state and its presentation.
-- `components/inspector/ThreadsView.tsx` keeps orchestrator thread/workset
-  navigation and episode rendering together. Direct-child and managed-host
-  workflows remain separate features.
 - `store/runtimeStore.ts` keeps snapshot hydration and ordered live-event
   reduction in one store factory. Its activation fence and coupled run/tool/
   transcript projection must share a lifetime; splitting the reduction across
