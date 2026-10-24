@@ -7,12 +7,15 @@ import { ChoicesSection } from "@/app/components/pages/design-preview/ChoicesSec
 import { CodeBlockSection } from "@/app/components/pages/design-preview/CodeBlockSection";
 import { DatesSection } from "@/app/components/pages/design-preview/DatesSection";
 import { InputsSection } from "@/app/components/pages/design-preview/InputsSection";
+import { InsightsAtomsSection } from "@/app/components/pages/design-preview/InsightsAtomsSection";
 import { ModelLoaderSection } from "@/app/components/pages/design-preview/ModelLoaderSection";
 import { NoticesSection } from "@/app/components/pages/design-preview/NoticesSection";
 import { NumericInputsSection } from "@/app/components/pages/design-preview/NumericInputsSection";
 import { PopoverSection } from "@/app/components/pages/design-preview/PopoverSection";
 import { SessionAvatarsSection } from "@/app/components/pages/design-preview/SessionAvatarsSection";
 import { SessionIdentitySection } from "@/app/components/pages/design-preview/SessionIdentitySection";
+import { SubagentCardSection } from "@/app/components/pages/design-preview/SubagentCardSection";
+import { ToolsBadgeSection } from "@/app/components/pages/design-preview/ToolsBadgeSection";
 import { TypographySection } from "@/app/components/pages/design-preview/TypographySection";
 
 /**
@@ -39,6 +42,9 @@ export default function DesignPreviewPage() {
         <SessionAvatarsSection />
         <SessionIdentitySection />
         <ModelLoaderSection />
+        <ToolsBadgeSection />
+        <InsightsAtomsSection />
+        <SubagentCardSection />
         <AvatarsSection />
         <NumericInputsSection />
         <DatesSection />

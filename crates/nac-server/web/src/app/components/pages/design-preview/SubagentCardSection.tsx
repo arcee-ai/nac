@@ -1,8 +1,7 @@
 import type React from "react";
 import { Fragment } from "react";
 
-import { BoxSurface } from "@/app/atoms";
-import SubagentTranscriptCard, { SubagentCardStatus } from "@/app/atoms/subagent-transcript-card";
+import { BoxSurface, SubagentCardStatus, SubagentTranscriptCard } from "@/app/atoms";
 
 type CardSample = Omit<React.ComponentProps<typeof SubagentTranscriptCard>, "showBehaviorIcon">;
 

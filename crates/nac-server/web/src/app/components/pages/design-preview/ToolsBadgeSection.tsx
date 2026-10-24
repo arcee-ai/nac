@@ -1,6 +1,5 @@
 import { Fragment } from "react";
-import { BoxSurface, IconName } from "@/app/atoms";
-import ToolsAndReasoningBadge from "@/app/atoms/tools-and-reasoning-badge";
+import { BoxSurface, IconName, ToolsAndReasoningBadge } from "@/app/atoms";
 
 const STATES = [
   { caption: "Done", label: "Worked for 12.3s", inProgress: false, disabled: false },

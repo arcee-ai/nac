@@ -1,11 +1,14 @@
 import { Fragment, useState, type ReactNode } from "react";
-import { BoxSurface, IconName } from "@/app/atoms";
-import ActionListButton, { ActionListButtonStatus } from "@/app/atoms/action-list-button";
-import InsightItem, {
+import {
+  ActionListButton,
+  ActionListButtonStatus,
+  BoxSurface,
+  IconName,
   InsightCodeBox,
+  InsightItem,
   InsightItemState,
   InsightLinkButton,
-} from "@/app/atoms/insight-item";
+} from "@/app/atoms";
 
 interface ActionSample {
   type: string;
@@ -401,15 +404,14 @@ const ITEM_SAMPLES: ItemSample[] = [
     },
   },
   {
-    type: "Steer Session (Loading keeps the link)",
+    type: "Steer Session (Loading and Error keep the link)",
     icon: IconName.AddChat,
     title: "Steer session",
     loadingTitle: "Steer session",
     copyText: STEER_MESSAGE,
     errorMessage: "The session is no longer running.",
     body: (state) => {
-      if (state === InsightItemState.Error) return null;
-      if (state === InsightItemState.Loading) {
+      if (state !== InsightItemState.Default) {
         return <InsightLinkButton label="Calendar rollout" onClick={() => {}} />;
       }
       return (
