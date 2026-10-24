@@ -261,6 +261,9 @@ export default function SessionPage() {
   // phone dialog. The detail pane publishes it with its running bit, so the
   // title shimmers along with it.
   const insightThread = effectivePanel === "insights" ? shownThread : null;
+  // The chat marks the rows the side box shows, so none while it is hidden:
+  // slid off to its rail, or on a phone, with the dialog closed.
+  const sideBoxShown = expanded || (!isMobile && !collapsed);
 
   const sideBox = (
     <SessionSideBox
@@ -303,7 +306,7 @@ export default function SessionPage() {
             <Transcript
               sessionId={id}
               snapshot={snapshot}
-              panel={effectivePanel}
+              panel={sideBoxShown ? effectivePanel : null}
               onFocusPanel={focusPanel}
               errorNotice={errorNotice}
             />
