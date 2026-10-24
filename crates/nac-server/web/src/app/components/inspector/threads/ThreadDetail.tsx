@@ -10,6 +10,7 @@ import {
   ViewSwitcher,
   type ThreadDetailView,
 } from "@/app/components/inspector/threads/ThreadViewControls";
+import { formatInsightTime } from "@/app/features/insights/presentation/insightTime";
 import { cn } from "@/app/lib/cn";
 import { mergeThreadLog, persistedThreadLog, type ThreadLogLine } from "@/app/lib/threadLog";
 
@@ -119,7 +120,9 @@ export function ThreadDetail({
             </span>
             {action ? <TaskButton action={action} /> : null}
           </div>
-          <span className="code code-micro text-basic-muted truncate">{thread.updated_at}</span>
+          <span className="code code-micro text-basic-muted truncate">
+            {formatInsightTime(thread.updated_at)}
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           {canSteer ? (

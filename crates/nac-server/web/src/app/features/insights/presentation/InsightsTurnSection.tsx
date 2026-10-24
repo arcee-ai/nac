@@ -6,17 +6,9 @@ import type {
   InsightThreadEntry,
   InsightTurnSection,
 } from "@/app/features/insights/model/types";
+import { formatInsightTime } from "@/app/features/insights/presentation/insightTime";
 import type { RowView } from "@/app/features/insights/presentation/rows";
 import { cn } from "@/app/lib/cn";
-import { parseStoreTime } from "@/app/lib/format";
-
-/** The UI is English-only, while the shared store-time formatter follows the browser's locale. */
-const HEADING_TIME = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-});
 
 export interface InsightsRowController {
   expanded: ReadonlySet<string>;
@@ -96,7 +88,7 @@ export function InsightsTurnSection({
   controller: InsightsRowController;
 }) {
   const prompt = section.promptPreview || fallbackPrompt;
-  const createdAt = parseStoreTime(section.createdAt);
+  const createdAt = formatInsightTime(section.createdAt);
   return (
     <div className="flex flex-col [&>*]:shrink-0">
       <h3
@@ -110,9 +102,7 @@ export function InsightsTurnSection({
           <span className="shrink-0 text-[10px]">#{section.ordinal}</span>
         )}
         <span className="min-w-0 flex-1 truncate text-[11px]">{prompt}</span>
-        {Number.isNaN(createdAt) ? null : (
-          <span className="shrink-0 text-[10px]">{HEADING_TIME.format(createdAt)}</span>
-        )}
+        {createdAt === null ? null : <span className="shrink-0 text-[10px]">{createdAt}</span>}
       </h3>
       <div className="flex flex-col gap-0.5 py-2 [&>*]:shrink-0">
         {entryRuns(section.entries).map((run) =>
