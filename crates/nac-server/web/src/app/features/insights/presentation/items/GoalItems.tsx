@@ -4,6 +4,7 @@ import {
   isDefault,
   showsInput,
   type ItemContent,
+  type ItemContext,
   type ToolSegment,
 } from "@/app/features/insights/presentation/items/itemContent";
 import { BodyText } from "@/app/features/insights/presentation/items/ItemParts";
@@ -17,7 +18,7 @@ export function goalChangeContent(segment: ToolSegment): ItemContent {
   };
 }
 
-export function getGoalContent(segment: ToolSegment): ItemContent {
+export function getGoalContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const result = segment.presentation?.resultPreview || null;
   const callId = segment.presentation?.callId ?? null;
   return {
@@ -25,7 +26,13 @@ export function getGoalContent(segment: ToolSegment): ItemContent {
     copyText: result,
     body: (state) =>
       result && isDefault(state) ? (
-        <ItemCodeField title="Results" shortContent={result} source="output" callId={callId} />
+        <ItemCodeField
+          title="Results"
+          shortContent={result}
+          source="output"
+          sessionId={context.sessionId}
+          callId={callId}
+        />
       ) : null,
   };
 }

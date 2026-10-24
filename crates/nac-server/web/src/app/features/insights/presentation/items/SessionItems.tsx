@@ -36,6 +36,7 @@ export function sessionContent(segment: ToolSegment, context: ItemContext): Item
                 title="Results"
                 shortContent={result}
                 source="output"
+                sessionId={context.sessionId}
                 callId={callId}
               />
             ) : null}

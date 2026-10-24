@@ -41,21 +41,21 @@ function toolContent(segment: ToolSegment, context: ItemContext): ItemContent {
       return fileContent(segment);
     case "web-search":
     case "web-fetch":
-      return webContent(segment);
+      return webContent(segment, context);
     case "glob":
     case "grep":
-      return fileSearchContent(segment);
+      return fileSearchContent(segment, context);
     case "run-command":
-      return runCommandContent(segment);
+      return runCommandContent(segment, context);
     case "write-command":
-      return writeCommandContent(segment);
+      return writeCommandContent(segment, context);
     case "read-command-output":
-      return readOutputContent(segment);
+      return readOutputContent(segment, context);
     case "create-goal":
     case "update-goal":
       return goalChangeContent(segment);
     case "get-goal":
-      return getGoalContent(segment);
+      return getGoalContent(segment, context);
     case "session-status":
     case "session-steer":
     case "session-read":
@@ -65,7 +65,7 @@ function toolContent(segment: ToolSegment, context: ItemContext): ItemContent {
     case "delete-thread":
       return deleteThreadContent(segment);
     default:
-      return otherContent(segment);
+      return otherContent(segment, context);
   }
 }
 

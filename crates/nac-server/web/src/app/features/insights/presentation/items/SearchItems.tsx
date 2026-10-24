@@ -5,12 +5,13 @@ import {
   showsInput,
   withDuration,
   type ItemContent,
+  type ItemContext,
   type ToolSegment,
 } from "@/app/features/insights/presentation/items/itemContent";
 import { BodyText } from "@/app/features/insights/presentation/items/ItemParts";
 
 /** No favicons: the detail never loads anything from the sites it names. */
-export function webContent(segment: ToolSegment): ItemContent {
+export function webContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const input = segment.presentation?.summary || null;
   const result = segment.presentation?.resultPreview || null;
   const callId = segment.presentation?.callId ?? null;
@@ -27,6 +28,7 @@ export function webContent(segment: ToolSegment): ItemContent {
             showHeading={search}
             shortContent={input}
             source="arguments"
+            sessionId={context.sessionId}
             callId={callId}
           />
         ) : null}
@@ -36,7 +38,7 @@ export function webContent(segment: ToolSegment): ItemContent {
   };
 }
 
-export function fileSearchContent(segment: ToolSegment): ItemContent {
+export function fileSearchContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const pattern = segment.presentation?.summary || null;
   const matches = segment.presentation?.resultPreview || null;
   const callId = segment.presentation?.callId ?? null;
@@ -46,10 +48,22 @@ export function fileSearchContent(segment: ToolSegment): ItemContent {
     body: (state) => (
       <>
         {pattern && showsInput(state) ? (
-          <ItemCodeField title="Input" shortContent={pattern} source="arguments" callId={callId} />
+          <ItemCodeField
+            title="Input"
+            shortContent={pattern}
+            source="arguments"
+            sessionId={context.sessionId}
+            callId={callId}
+          />
         ) : null}
         {matches && isDefault(state) ? (
-          <ItemCodeField title="Output" shortContent={matches} source="output" callId={callId} />
+          <ItemCodeField
+            title="Output"
+            shortContent={matches}
+            source="output"
+            sessionId={context.sessionId}
+            callId={callId}
+          />
         ) : null}
       </>
     ),
