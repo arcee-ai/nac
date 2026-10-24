@@ -731,9 +731,13 @@ test("asks for immutable behavior on every first and new chat", async ({
     "true",
   );
   await page.getByRole("button", { name: "Create chat" }).click();
-  await expect(page).toHaveURL(/\/session\/[^/]+\/files$/);
+  await expect(page).toHaveURL(/\/session\/[^/]+\/insights$/);
   await showSidePanel(page);
-  await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Insights" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.getByRole("tab", { name: "Worksets" })).toBeVisible();
   const orchestratorSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
   expect(orchestratorSessionId).toBeTruthy();
   const orchestratorTitle = "Plan the managed deployment rollout";
@@ -746,9 +750,10 @@ test("asks for immutable behavior on every first and new chat", async ({
   expect(orchestratorPresentation.ok()).toBe(true);
   await page.reload();
   await showSidePanel(page);
-  await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
-  await expect(page.getByText("Threads", { exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Insights" })).toBeVisible();
+  await expect(page.getByText("Insights", { exact: true })).toBeVisible();
   await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
+  await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
 
   await page.keyboard.press(await newChatChord(page));
   await expect(behaviorChoices.filter({ hasText: "NAC orchestrator" }).first()).toHaveAttribute(
@@ -758,7 +763,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   await page.getByRole("radio", { name: /^Direct coding agent / }).click();
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect.poll(() => page.url()).not.toContain(`/session/${orchestratorSessionId}/`);
-  await expect(page).toHaveURL(/\/session\/[^/]+\/files$/);
+  await expect(page).toHaveURL(/\/session\/[^/]+\/insights$/);
   const directSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
   expect(directSessionId).toBeTruthy();
   const directTitle = "Implement connection status feedback";
@@ -784,7 +789,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   await behaviorChoices.filter({ hasText: "Direct + NAC orchestration" }).click();
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect.poll(() => page.url()).not.toContain(`/session/${directSessionId}/`);
-  await expect(page).toHaveURL(/\/session\/[^/]+\/files$/);
+  await expect(page).toHaveURL(/\/session\/[^/]+\/insights$/);
   const hybridSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
   expect(hybridSessionId).toBeTruthy();
   const hybridTitle = "Coordinate release readiness review";
@@ -823,7 +828,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByText(hybridTitle, { exact: true }).first()).toBeVisible();
   try {
     for (const [title, behavior, id, tab] of [
-      [orchestratorTitle, "Orchestrator", orchestratorSessionId, "Threads"],
+      [orchestratorTitle, "Orchestrator", orchestratorSessionId, "Worksets"],
       [directTitle, "Direct", directSessionId, "Subagents"],
     ] as const) {
       const button = page.getByRole("button", { name: `${title}, ${behavior}` });
@@ -842,7 +847,11 @@ test("asks for immutable behavior on every first and new chat", async ({
         )
         .toBe(true);
       await button.click();
-      await expect(page).toHaveURL(new RegExp(`/session/${id}/files$`));
+      await expect(page).toHaveURL(new RegExp(`/session/${id}/insights$`));
+      await expect(page.getByRole("tab", { name: "Insights" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
       await expect(page.getByRole("tab", { name: tab })).toBeVisible();
     }
   } finally {
@@ -875,19 +884,19 @@ test("shows and persists the optional light model for every chat behavior", asyn
       behavior: "orchestrator",
       label: "NAC orchestrator",
       routingCopy: "Worker models",
-      route: "files",
+      route: "insights",
     },
     {
       behavior: "direct",
       label: "Direct coding agent",
       routingCopy: "Optional light model",
-      route: "files",
+      route: "insights",
     },
     {
       behavior: "direct-with-orchestrator",
       label: "Direct + NAC orchestration",
       routingCopy: "Orchestrator models",
-      route: "files",
+      route: "insights",
     },
   ] as const) {
     const dialog = page.getByRole("dialog");
@@ -937,7 +946,7 @@ test("uses the unified catalog for a cross-provider New Chat override", async ({
   await page.getByPlaceholder("Search models…").fill("deepseek-v4-flash");
   await page.getByText("deepseek-v4-flash", { exact: true }).click();
   await dialog.getByRole("button", { name: "Create chat" }).click();
-  await expect(page).toHaveURL(/\/session\/[^/]+\/files$/);
+  await expect(page).toHaveURL(/\/session\/[^/]+\/insights$/);
   const sessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
   expect(sessionId).toBeTruthy();
   const config = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
@@ -1101,7 +1110,7 @@ test("uses an Advanced saved provider account for the light model without exposi
   });
   expect(JSON.stringify(body)).not.toContain(canary);
 
-  await expect(page).toHaveURL(/\/session\/[^/]+\/files$/);
+  await expect(page).toHaveURL(/\/session\/[^/]+\/insights$/);
   const sessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
   expect(sessionId).toBeTruthy();
   const config = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
@@ -1137,8 +1146,8 @@ test("converges concurrent required-first-chat tabs and refreshes deleted owners
       second.getByRole("button", { name: "Create chat" }).click(),
     ]);
     await Promise.all([
-      expect(page).toHaveURL(/\/session\/([^/]+)\/files$/),
-      expect(second).toHaveURL(/\/session\/([^/]+)\/files$/),
+      expect(page).toHaveURL(/\/session\/([^/]+)\/insights$/),
+      expect(second).toHaveURL(/\/session\/([^/]+)\/insights$/),
     ]);
     const firstSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
     const secondSessionId = second.url().match(/\/session\/([^/]+)\//)?.[1];
@@ -1242,7 +1251,7 @@ test("steers an active classic orchestrator from the ordinary composer", async (
     steeredBoundary,
   );
   const sessionId = await createSession(request, harness, "orchestrator");
-  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/threads`);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/insights`);
 
   const composer = page.getByRole("combobox", { name: "Message" });
   await composer.fill("E2E_CLASSIC_STEER_TOKEN");
@@ -1734,6 +1743,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(page.getByRole("button", { name: /goal/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Insights" })).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
 
@@ -1742,6 +1752,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   const mobilePanel = page.getByRole("dialog");
   await expect(mobilePanel).toBeVisible();
   await expect(mobilePanel.getByRole("tab", { name: "Sessions" })).toHaveCount(0);
+  await expect(mobilePanel.getByRole("tab", { name: "Insights" })).toBeVisible();
   await expect(mobilePanel.getByRole("tab", { name: "Files" })).toBeVisible();
   await expect(mobilePanel.getByRole("tab", { name: "History" })).toBeVisible();
   await expect(mobilePanel.getByRole("tab", { name: "Threads" })).toHaveCount(0);
@@ -1779,13 +1790,13 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(page.getByText("Managed NAC orchestrator", { exact: true })).toBeVisible();
   await expect(page.getByText("Coordinate the compatibility audit", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Insights" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Worksets" })).toBeVisible();
 
   // Auto-follow can move a transcript badge between pointer-down and up.
   // Native keyboard activation also verifies these retained links are accessible.
-  await page.getByRole("button", { name: "Worksets_managed-release" }).focus();
+  await page.getByRole("button", { name: "Worksets_managed-release", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/worksets$`));
   await expect(
@@ -1793,7 +1804,8 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   ).toBeVisible();
   await page.getByRole("button", { name: /managed-ui/i }).focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/threads$`));
+  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/insights$`));
+  await expect(page.getByRole("group", { name: "Thread detail view" })).toBeVisible();
   await expect(page.getByText("managed worker completed", { exact: true })).toBeVisible();
 
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
@@ -1806,7 +1818,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await page.getByRole("button", { name: "Open panel" }).click();
   const managedMobilePanel = page.getByRole("dialog");
   await expect(managedMobilePanel.getByRole("tab", { name: "Sessions" })).toHaveCount(0);
-  await expect(managedMobilePanel.getByRole("tab", { name: "Threads" })).toBeVisible();
+  await expect(managedMobilePanel.getByRole("tab", { name: "Insights" })).toBeVisible();
   await expect(managedMobilePanel.getByRole("tab", { name: "Files" })).toBeVisible();
   await expect(managedMobilePanel.getByRole("tab", { name: "Worksets" })).toBeVisible();
   await expect(managedMobilePanel.getByRole("tab", { name: "History" })).toBeVisible();
