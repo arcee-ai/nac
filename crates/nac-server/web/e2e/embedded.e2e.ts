@@ -184,8 +184,7 @@ test("terminates one exact live terminal through the ordinary session API", asyn
   await composer.fill("E2E_TERMINAL_STOP_TOKEN");
   await page.getByRole("button", { name: "Send" }).click();
   await harness.provider.waitForRequestCount(1);
-  const card = page.locator('[data-tool-call-id="terminal-stop-e2e-1"]');
-  await expect(card).toContainText("Awaiting approval");
+  await expect(page.getByRole("button", { name: "Awaiting approval…", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Allow once" }).click();
   await harness.provider.waitForRequestCount(2);
   await completion.accepted;
@@ -233,32 +232,48 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
     );
 
     const sessionId = await createSession(request, harness, behavior);
-    await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+    await page.goto(`${harness.baseUrl}/#/session/${sessionId}/insights`);
+    await showSidePanel(page);
     const composer = page.getByRole("combobox", { name: "Message" });
     await composer.fill(`ALL1_${behavior}_TOKEN`);
     await page.getByRole("button", { name: "Send" }).click();
     await harness.provider.waitForRequestCount(1);
 
-    const card = page.locator(`[data-tool-call-id="${callId}"]`);
-    await expect(card).toContainText("Run command");
-    await expect(card).toContainText(command);
-    await expect(card).toContainText("Awaiting approval");
+    // The transcript sums the call up in a badge; Insights lists it with its details.
+    const row = (status?: string) =>
+      page.getByRole("button", {
+        name: [command, "Exec", status].filter(Boolean).join(", "),
+        exact: true,
+      });
+    const item = page.getByRole("group", { name: command, exact: true });
+    await expect(
+      page.getByRole("button", { name: "Awaiting approval…", exact: true }),
+    ).toBeVisible();
+    await expect(row("pending")).toBeVisible();
+    await expect(
+      page.getByRole("group", { name: "Awaiting approval…", exact: true }),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Allow once" }).click();
-    await expect(card).toContainText("Running");
+    await expect(
+      page.getByRole("button", { name: `Running ${command}…`, exact: true }),
+    ).toBeVisible();
 
     await harness.provider.waitForRequestCount(2);
     await waitForRunIdle(request, harness, sessionId);
-    await expect(card).toContainText("Succeeded");
-    await expect(card).toContainText("ALL1_TOOL_COMPLETE");
+    const badge = page.getByRole("button", { name: "Run command", exact: true });
+    await expect(row()).toBeVisible();
+    await expect(item).toContainText(command);
+    await expect(item).toContainText("ALL1_TOOL_COMPLETE");
     await expect(page.getByText(`${behavior} rich tool complete`)).toBeVisible();
+    await badge.click();
+    await expect(badge).toHaveAttribute("aria-pressed", "true");
+    await expect(row()).toHaveAttribute("aria-pressed", "true");
 
     await page.reload();
-    const reloaded = page.locator(`[data-tool-call-id="${callId}"]`);
-    await expect(reloaded).toContainText("Run command");
-    await expect(reloaded).toContainText(command);
-    await expect(reloaded).toContainText("Succeeded");
-    await expect(reloaded).toContainText("ALL1_TOOL_COMPLETE");
-    await expect(reloaded).toHaveCount(1);
+    await expect(badge).toHaveCount(1);
+    await expect(row()).toBeVisible();
+    await expect(item).toContainText(command);
+    await expect(item).toContainText("ALL1_TOOL_COMPLETE");
     harness.provider.assertConsumed();
   });
 }
@@ -292,18 +307,24 @@ test("renders a per-call command deadline distinctly through settlement and relo
   await page.getByRole("button", { name: "Send" }).click();
   await harness.provider.waitForRequestCount(1);
 
-  const card = page.locator(`[data-tool-call-id="${callId}"]`);
-  await expect(card).toContainText("Awaiting approval");
+  await expect(page.getByRole("button", { name: "Awaiting approval…", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Allow once" }).click();
   await harness.provider.waitForRequestCount(2);
   await waitForRunIdle(request, harness, sessionId);
-  await expect(card).toContainText("Timed out");
   await expect(page.getByText("deadline observed")).toBeVisible();
 
+  const badge = page.getByRole("button", { name: "Run command", exact: true });
+  const failedRow = page.getByRole("button", { name: "Run command, failed", exact: true });
+  const item = page.getByRole("group", { name: "sleep 30", exact: true });
+  await badge.click();
+  await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/insights$`));
+  await expect(failedRow).toHaveAttribute("aria-pressed", "true");
+  await expect(item).toContainText("Timed out");
+
   await page.reload();
-  const reloaded = page.locator(`[data-tool-call-id="${callId}"]`);
-  await expect(reloaded).toContainText("Timed out");
-  await expect(reloaded).toHaveCount(1);
+  await expect(badge).toHaveCount(1);
+  await expect(failedRow).toBeVisible();
+  await expect(item).toContainText("Timed out");
   harness.provider.assertConsumed();
 });
 
@@ -353,18 +374,21 @@ test("keeps approval state and actions reachable with many remembered permission
   await page.getByRole("combobox", { name: "Message" }).fill("ALL14_ALL15_PERMISSION_TOKEN");
   await page.getByRole("button", { name: "Send" }).click();
 
+  // Every read lands in one transcript badge, so the request names the step.
+  const awaiting = page.getByRole("button", { name: "Awaiting approval…", exact: true });
+  const requested = page.getByRole("region", { name: "Requested access" });
   for (let index = 0; index < rememberedRequests; index += 1) {
     await harness.provider.waitForRequestCount(index + 1);
-    const card = page.locator(`[data-tool-call-id="permission-read-${index}"]`);
-    await expect(card).toContainText("Awaiting approval");
+    await expect(requested).toContainText(`dependency-${index}-`);
+    await expect(awaiting).toBeVisible();
     await expect(page.getByRole("button", { name: "Always allow" })).toBeEnabled();
     await page.getByRole("button", { name: "Always allow" }).click();
   }
 
   await harness.provider.waitForRequestCount(rememberedRequests + 1);
-  const pendingCard = page.locator(`[data-tool-call-id="permission-read-${rememberedRequests}"]`);
-  await expect(pendingCard).toContainText("Awaiting approval");
-  await expect(pendingCard).not.toContainText("Running");
+  await expect(requested).toContainText(`dependency-${rememberedRequests}-`);
+  await expect(awaiting).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Reading .*…$/ })).toHaveCount(0);
 
   const dialog = page.getByRole("dialog");
   const scrollBody = dialog.locator(":scope > .overflow-auto");
@@ -388,15 +412,21 @@ test("keeps approval state and actions reachable with many remembered permission
 
   await page.mouse.click(4, 4);
   await expect(dialog).toBeHidden();
-  await expect(pendingCard).toContainText("Awaiting approval");
+  await expect(awaiting).toBeVisible();
   await page.getByRole("button", { name: "Permissions (1)" }).click();
   await expect(dialog).toBeVisible();
   await page.getByRole("button", { name: "Allow once" }).click();
 
   await harness.provider.waitForRequestCount(rememberedRequests + 2);
   await waitForRunIdle(request, harness, sessionId);
-  await expect(pendingCard).toContainText("Succeeded");
   await expect(page.getByText("permission journey complete")).toBeVisible();
+  await page.getByRole("button", { name: "Read File", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: `Read File, ${rememberedRequests + 1}`, exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("group", { name: "File Read", exact: true })).toHaveCount(
+    rememberedRequests + 1,
+  );
 
   await page.getByRole("button", { name: /^Permissions \(\d+\)$/ }).click();
   const manager = page.getByRole("dialog");
@@ -463,9 +493,7 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   await page.getByRole("combobox", { name: "Message" }).fill("ALL16_AUTO_APPROVE_TOKEN");
   await page.getByRole("button", { name: "Send" }).click();
   await harness.provider.waitForRequestCount(1);
-  await expect(page.locator('[data-tool-call-id="auto-approve-first"]')).toContainText(
-    "Awaiting approval",
-  );
+  await expect(page.getByRole("button", { name: "Awaiting approval…", exact: true })).toBeVisible();
 
   await page.getByRole("switch", { name: "Approve all automatically" }).click();
   await expect(
@@ -473,16 +501,19 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   ).toBeVisible();
   await harness.provider.waitForRequestCount(3);
   await waitForRunIdle(request, harness, sessionId);
-  await expect(page.locator('[data-tool-call-id="auto-approve-first"]')).toContainText("Succeeded");
-  await expect(page.locator('[data-tool-call-id="auto-approve-second"]')).toContainText(
-    "Succeeded",
-  );
   await expect(page.getByText("automatic approvals complete")).toBeVisible();
 
   await page.reload();
   await expect(
     page.getByRole("button", { name: "Auto-approve on — open permissions" }),
   ).toBeVisible();
+  // Both reads settle in one badge; Insights lists the group as two successful reads.
+  await page.getByRole("button", { name: "Read File", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Read File, 2", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("group", { name: "File Read", exact: true })).toHaveCount(2);
   await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
   const toggle = page.getByRole("switch", {
     name: "Approve all automatically",
@@ -511,8 +542,7 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   await page.getByRole("combobox", { name: "Message" }).fill("ALL16_MANUAL_TOKEN");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await harness.provider.waitForRequestCount(4);
-  const manualCard = page.locator('[data-tool-call-id="manual-after-disable"]');
-  await expect(manualCard).toContainText("Awaiting approval");
+  await expect(page.getByRole("button", { name: "Awaiting approval…", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Allow once" }).click();
   await harness.provider.waitForRequestCount(5);
   await waitForRunIdle(request, harness, sessionId);
@@ -693,14 +723,19 @@ test("renders an unknown primary tool failure safely after reload", async ({
   await harness.provider.waitForRequestCount(2);
   await waitForRunIdle(request, harness, sessionId);
 
-  const card = page.locator('[data-tool-call-id="all1-unknown"]');
-  await expect(card).toContainText("MCP · Dangerous tool");
-  await expect(card).toContainText("Failed");
+  const badge = page.getByRole("button", { name: "MCP · Dangerous tool", exact: true });
+  const failedRow = page.getByRole("button", { name: "MCP · Dangerous tool, failed", exact: true });
+  await badge.click();
+  await expect(failedRow).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("group", { name: "MCP · Dangerous tool", exact: true }),
+  ).toBeVisible();
+  // Checked with the call's Insights details open, since they render its input too.
   await expect(page.locator("body")).not.toContainText("RAW_SECRET_MUST_NOT_RENDER");
   await expect(page.locator("body")).not.toContainText("UNBOUNDED_RAW_BODY_MUST_NOT_RENDER");
   await page.reload();
-  await expect(page.locator('[data-tool-call-id="all1-unknown"]')).toContainText("Failed");
-  await expect(page.locator('[data-tool-call-id="all1-unknown"]')).toHaveCount(1);
+  await expect(badge).toHaveCount(1);
+  await expect(failedRow).toBeVisible();
   harness.provider.assertConsumed();
 });
 
@@ -1578,7 +1613,11 @@ test("shows live background delegated work, terminal events, cancellation, and g
   for (const label of ["Coding agent completed", "Coding agent failed", "Coding agent cancelled"]) {
     const event = page.getByLabel(label, { exact: true });
     await expect(event).toHaveCount(1);
-    for (const name of ["Resend", "Revert to this snapshot", "Create fork"]) {
+    for (const name of [
+      "Regenerate from original prompt",
+      "Revert to this snapshot",
+      "Create fork",
+    ]) {
       await expect(event.getByRole("button", { name, exact: true })).toHaveCount(0);
     }
   }
@@ -1610,8 +1649,13 @@ test("shows live background delegated work, terminal events, cancellation, and g
     .toBe(2);
   continued.release();
   await expect(composer.getByText("Completed", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Coding agent completed").last()).toContainText("Generation 2");
-  await expect(page.getByRole("button", { name: "Open exact transcript" }).last()).toBeVisible();
+  // Each generation delivers its own card; they all lead to the one child session.
+  const completed = page.getByLabel("Coding agent completed");
+  await expect(completed).toHaveCount(2);
+  await expect(completed.last()).toContainText("Background success");
+  await expect(
+    completed.last().getByRole("link", { name: "Go to session Background success" }),
+  ).toHaveAttribute("href", `#/session/${successChild.child_session_id}/insights`);
   expect(successChild.child_session_id).toBeTruthy();
   await awaitParentReceipt("observe-generation-2");
   expect(harness.provider.requests.map((entry) => entry.matchedStep)).toEqual([
@@ -1796,6 +1840,12 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
 
   // Auto-follow can move a transcript badge between pointer-down and up.
   // Native keyboard activation also verifies these retained links are accessible.
+  // The workset definition sits in a badge whose Insights details link the workset.
+  const worksetBadge = page.getByRole("button", { name: "Workset", exact: true });
+  await worksetBadge.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/insights$`));
+  await expect(worksetBadge).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Worksets_managed-release", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/worksets$`));
@@ -1810,7 +1860,9 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
 
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Resend" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Regenerate from original prompt" })).toHaveCount(
+    0,
+  );
   await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
 
