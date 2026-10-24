@@ -21,7 +21,7 @@ describe("session behavior picker", () => {
     expect(orchestrator.textContent).toMatch(/planner/i);
     expect(orchestrator.textContent).toMatch(/does not edit directly/i);
     expect(orchestrator.textContent).toMatch(/retained NAC worker threads/i);
-    expect(orchestrator.textContent).toMatch(/Threads and Worksets/i);
+    expect(orchestrator.textContent).toMatch(/Insights and Worksets/i);
 
     const direct = screen.getByRole("radio", { name: /^Direct coding agent /i });
     expect(direct.textContent).toMatch(/persistent coding agent/i);

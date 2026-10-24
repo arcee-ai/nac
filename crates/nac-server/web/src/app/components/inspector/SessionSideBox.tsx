@@ -14,12 +14,12 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { TerminalWorkspace } from "@/app/features/terminal-selection/TerminalWorkspace";
+import { InsightsView } from "@/app/features/insights/presentation/InsightsView";
 import { FilesView } from "@/app/components/inspector/FilesView";
 import { PanelCountBadge } from "@/app/components/inspector/PanelCountBadge";
 import { panelBadgeCount, PANEL_ICON } from "@/app/components/inspector/sessionPanelIcons";
 import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { HistoryView } from "@/app/components/inspector/HistoryView";
-import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useSessionFetching } from "@/app/hooks/useSessionFetching";
@@ -59,7 +59,7 @@ function SideBoxProgress({ sessionId }: { sessionId: string }) {
 }
 
 /**
- * The right half of the session screen: one box with the Threads / Files /
+ * The right half of the session screen: one box with the Insights / Files /
  * Worksets / Subagents panels, sized by the shared layout store. Session
  * switching lives in the left sidebar. On a phone the panels are the body of
  * the modal box that SessionPage puts them in, and its chrome — header, bottom
@@ -75,19 +75,16 @@ export function SessionSideBox({
   const {
     useSidePanelExpanded,
     useSelectedWorkset,
-    useSelectedThread,
     useSelectedRevision,
     toggleSidePanelExpanded,
     toggleSidePanelCollapsed,
     showSidePanelList,
     selectWorkset,
-    selectThread,
     selectRevision,
   } = useNativeRuntime().stores.sessionLayoutStore;
 
   const expanded = useSidePanelExpanded();
   const isMobile = useIsMobile();
-  const selectedThread = useSelectedThread();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
   const behavior =
@@ -119,6 +116,14 @@ export function SessionSideBox({
 
   const body = (
     <>
+      {active === "insights" ? (
+        <InsightsView
+          sessionId={sessionId}
+          snapshot={snapshot}
+          topology={direct ? "direct" : "orchestrator"}
+          canSteerWorkers={behavior === "orchestrator" && !delegatedTranscript}
+        />
+      ) : null}
       {active === "files" ? (
         <FilesView
           sessionId={sessionId}
@@ -135,14 +140,6 @@ export function SessionSideBox({
       ) : null}
       {active === "worksets" ? (
         <WorksetsView snapshot={snapshot} selected={selectedWorkset} onSelect={selectWorkset} />
-      ) : null}
-      {active === "threads" ? (
-        <ThreadsView
-          snapshot={snapshot}
-          selected={selectedThread}
-          onSelect={selectThread}
-          canSteerWorkers={behavior === "orchestrator" && !delegatedTranscript}
-        />
       ) : null}
       {active === "history" ? (
         <HistoryView sessionId={sessionId} selected={selectedRevision} onSelect={selectRevision} />

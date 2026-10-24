@@ -91,7 +91,7 @@ function useAutoSshConnect(
   }, [target, status, connect, sshTargetKey, markSshConnected, markSshDisconnected]);
 }
 
-/** Session screen: the Files/Worksets/Threads box beside a permanent chat. */
+/** Session screen: the Insights/Files/Worksets box beside a permanent chat. */
 export default function SessionPage() {
   const {
     useSidePanelExpanded,
@@ -140,7 +140,7 @@ export default function SessionPage() {
   const isMobile = useIsMobile();
 
   // An omitted behavior on a loaded session is the legacy orchestrator. An
-  // unloaded session is not that default: painting Threads/Files/Worksets and
+  // unloaded session is not that default: painting Insights/Files/Worksets and
   // then replacing them is a flash.
   const behaviorKnown = entry != null || snapshot != null;
   const behavior: SessionBehavior | null = behaviorKnown
@@ -155,11 +155,13 @@ export default function SessionPage() {
     behavior == null ? null : sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
   const sessionPanels = panelPolicy?.mobilePanels ?? [];
   const requestedPanel = isSessionPanel(panel) ? panel : DEFAULT_SESSION_PANEL;
+  // Insights took over the Threads panel; an old link keeps the selected thread.
+  const routedPanel = requestedPanel === "threads" ? "insights" : requestedPanel;
   const effectivePanel =
     panelPolicy == null
-      ? requestedPanel
-      : panelPolicy.mobilePanels.includes(requestedPanel)
-        ? requestedPanel
+      ? routedPanel
+      : panelPolicy.mobilePanels.includes(routedPanel)
+        ? routedPanel
         : panelPolicy.defaultPanel;
 
   useEffect(() => {

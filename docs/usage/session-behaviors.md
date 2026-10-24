@@ -2,9 +2,9 @@
 
 Every session has one immutable persisted behavior. The shipped web UI defaults
 to a persistent direct coding agent: every creation entrypoint sends explicit
-`behavior: "direct"`, and orchestration choices, Threads/Worksets, managed
+`behavior: "direct"`, and orchestration choices, Worksets, managed
 orchestrator controls, mode badges, and unused light-model controls are hidden.
-Direct Files/History, traditional children, permissions, goals, queueing,
+Direct Insights/Files/History, traditional children, permissions, goals, queueing,
 compaction, tool results, and local/SSH/sandbox/managed execution remain available.
 Hidden light-model settings and saved presets are preserved; direct light-model
 execution remains deferred.
@@ -40,11 +40,11 @@ instead. Explicit New Chat always remains a request for another session.
 The wire values are:
 
 - `orchestrator` — NAC's established planner and worker-thread topology. It
-  retains the Threads and Worksets navigation and remains the default when an
-  API client or legacy database row omits `behavior`.
+  retains the Worksets navigation, lists its threads in Insights, and remains
+  the default when an API client or legacy database row omits `behavior`.
 - `direct` — a persistent coding agent with native file and terminal tools,
-  durable goals, and traditional child coding agents. Its primary side panel is
-  Delegated work rather than empty orchestrator Threads or Worksets.
+  durable goals, and traditional child coding agents. Its side panel opens on
+  Insights and offers Delegated work instead of orchestrator Worksets.
 - `direct-with-orchestrator` — the same direct coding agent plus native controls
   for separate managed NAC orchestrator sessions. Delegated work keeps
   traditional coding agents and managed orchestrators in distinct sections.

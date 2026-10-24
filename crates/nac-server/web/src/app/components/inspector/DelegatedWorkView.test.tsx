@@ -165,7 +165,7 @@ describe("delegated work", () => {
     mount("direct");
 
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    expect(screen.getByTestId("location").textContent).toBe("/session/child-1/files");
+    expect(screen.getByTestId("location").textContent).toBe("/session/child-1/insights");
     expect(screen.queryByRole("button", { name: "New Orchestrator" })).toBeNull();
   });
 
