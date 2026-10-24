@@ -70,7 +70,10 @@ export function ViewPills({
   );
 }
 
-/** Compact Command Log / Overview pills for the desktop detail header. */
+/**
+ * Compact Command Log / Overview pills for the desktop detail header. They are
+ * toggle buttons rather than tabs, so the set is a named group.
+ */
 export function ViewSwitcher({
   view,
   onChange,
@@ -79,11 +82,7 @@ export function ViewSwitcher({
   onChange: (view: ThreadDetailView) => void;
 }) {
   return (
-    <div
-      className="flex items-center gap-2 shrink-0"
-      role="tablist"
-      aria-label="Thread detail view"
-    >
+    <div className="flex items-center gap-2 shrink-0" role="group" aria-label="Thread detail view">
       {THREAD_DETAIL_VIEWS.map((name) => (
         <Button
           key={name}
