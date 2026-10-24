@@ -40,6 +40,8 @@ export { default as TextArea, TextAreaSize } from "./input/TextArea";
 export {
   default as InsightItem,
   InsightCodeBox,
+  InsightItemCodeDisplayer,
+  InsightItemCodeDisplayerState,
   InsightItemState,
   InsightLinkButton,
 } from "./insight-item";
