@@ -1,8 +1,8 @@
 import { standalonePreferenceStorage } from "@/app/lib/store";
 import { useSyncExternalStore } from "react";
 
-// Shared across Files / Worksets / Threads and every session — a viewing
-// preference, not something that belongs to a particular chat.
+// Shared across Insights / Files / Worksets / Subagents and every session — a
+// viewing preference, not something that belongs to a particular chat.
 
 const STORAGE_KEY = "nac-panel-list-width";
 
@@ -60,7 +60,7 @@ export function createPanelWidth(storage?: Pick<Storage, "getItem" | "setItem">)
     listeners.forEach((listener) => listener());
   }
 
-  /** Width of the left list column inside every side-box panel. */
+  /** Width of the list column on the right of every side-box panel. */
   function usePanelListWidth(): number {
     return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   }

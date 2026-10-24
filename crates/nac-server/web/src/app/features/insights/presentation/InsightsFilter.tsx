@@ -51,7 +51,7 @@ export function InsightsFilter({
         onValueChange={select}
         size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
         variant={ButtonVariant.Secondary}
-        placement={isMobile ? AnchorPlacement.TopRight : AnchorPlacement.BottomRight}
+        placement={isMobile ? AnchorPlacement.TopRight : AnchorPlacement.BottomLeft}
         sticky={isMobile}
       />
     </div>

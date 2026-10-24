@@ -28,8 +28,8 @@ import {
 } from "@/app/hooks/usePanelListWidth";
 
 /**
- * The shape all three side-box panels share: a narrow list of rows on the left
- * and the detail of whatever is selected on the right.
+ * The shape every side-box panel shares: the detail of whatever is selected,
+ * with a narrow list of rows in a column on its right.
  *
  * Below the desktop width there is no room for both, so the panel opens on the
  * row it has selected and the list is reached from a control of its own: a
@@ -105,7 +105,7 @@ export function PanelSplit({
     const onMove = (moveEvent: PointerEvent) => {
       if (!dragging.current || moveEvent.pointerId !== event.pointerId) return;
       const rect = container.getBoundingClientRect();
-      const next = moveEvent.clientX - rect.left;
+      const next = rect.right - moveEvent.clientX;
       setPanelListWidth(clampPanelListWidth(next, rect.width * PANEL_LIST_MAX_RATIO));
     };
 
@@ -200,14 +200,17 @@ export function PanelSplit({
 
   return (
     <div ref={containerRef} className="flex flex-1 min-h-0 w-full">
+      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
       <div
-        className="relative flex flex-col shrink-0 min-h-0 border-r border-muted bg-elevation-ground"
+        className="relative flex flex-col shrink-0 min-h-0 border-l border-muted bg-elevation-ground"
         style={{ width: listWidth }}
       >
         {listToolbar}
         <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-4 px-1 [&>*]:shrink-0">
           {list}
         </div>
+        {/* The handle sits on the list's leading edge, so dragging or arrowing
+            left widens the list. */}
         <div
           role="separator"
           aria-orientation="vertical"
@@ -216,27 +219,26 @@ export function PanelSplit({
           aria-valuemax={Math.round(maxWidth)}
           aria-valuenow={listWidth}
           tabIndex={0}
-          className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none"
+          className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none"
           onPointerDown={onPointerDown}
           onKeyDown={(event) => {
             const step = event.shiftKey ? 24 : 8;
             if (event.key === "ArrowLeft") {
               event.preventDefault();
-              setPanelListWidth(clampPanelListWidth(listWidth - step, maxWidth));
+              setPanelListWidth(clampPanelListWidth(listWidth + step, maxWidth));
             } else if (event.key === "ArrowRight") {
               event.preventDefault();
-              setPanelListWidth(clampPanelListWidth(listWidth + step, maxWidth));
+              setPanelListWidth(clampPanelListWidth(listWidth - step, maxWidth));
             }
           }}
         />
       </div>
-      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
     </div>
   );
 }
 
 /**
- * Row of the left list, sized to the 24px tree row in the design — and to the
+ * Row of the list column, sized to the 24px tree row in the design — and to the
  * 48px touch row on a phone, where a finger has none of a pointer's precision.
  */
 export function PanelRow({
@@ -282,7 +284,7 @@ export function PanelRow({
  * Placeholder for a panel waiting on its first payload: rows the size of the
  * ones on their way, rather than the word "Loading".
  *
- * Laid out as the split it is loading into — a short list beside a taller body
+ * Laid out as the split it is loading into — a taller body beside a short list
  * — so the columns and the divider are already where the rows will land, and
  * arriving data fills the panel instead of rebuilding it.
  */
