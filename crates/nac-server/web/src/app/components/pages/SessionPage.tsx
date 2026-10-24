@@ -21,6 +21,7 @@ import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { RightSidebarRail } from "@/app/components/inspector/RightSidebarRail";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
+import { TranscriptModelProvider } from "@/app/components/inspector/transcript/TranscriptModelProvider";
 import { TopSingleSessionHeader } from "@/app/components/inspector/TopSingleSessionHeader";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
@@ -460,8 +461,10 @@ export default function SessionPage() {
   );
 
   return (
-    <InsightsNavigationProvider sessionId={id} panels={sessionPanels} focusPanel={focusPanel}>
-      {page}
-    </InsightsNavigationProvider>
+    <TranscriptModelProvider sessionId={id} snapshot={snapshot}>
+      <InsightsNavigationProvider sessionId={id} panels={sessionPanels} focusPanel={focusPanel}>
+        {page}
+      </InsightsNavigationProvider>
+    </TranscriptModelProvider>
   );
 }

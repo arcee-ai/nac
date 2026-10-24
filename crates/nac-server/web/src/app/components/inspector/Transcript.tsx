@@ -26,7 +26,7 @@ import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { RunFailureRecovery } from "@/app/components/inspector/RunFailureRecovery";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
-import { useTranscriptModel } from "@/app/components/inspector/transcript/useTranscriptModel";
+import { useTranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
 import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
 import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
@@ -210,7 +210,7 @@ export function Transcript({
     pendingSkills,
     showPending,
     streamingTurn,
-  } = useTranscriptModel(sessionId, snapshot);
+  } = useTranscriptModelContext();
   useLayoutEffect(() => {
     hadPending.current = false;
     sendFollowReady.current = false;

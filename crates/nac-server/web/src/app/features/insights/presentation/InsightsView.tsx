@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { PanelEmpty } from "@/app/components/inspector/PanelSplit";
-import { useTranscriptModel } from "@/app/components/inspector/transcript/useTranscriptModel";
+import { useTranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
 import { entryRow } from "@/app/features/insights/model/labels";
 import {
   buildInsightTimeline,
@@ -37,10 +37,10 @@ function sectionHeading(section: InsightTurnSection): string {
 }
 
 /** The Insights panel: what the session did, grouped by the prompt that asked for it. */
-export function InsightsView({ sessionId, snapshot, topology }: InsightsViewProps) {
+export function InsightsView({ topology }: InsightsViewProps) {
   const { useInsightsFilter, useSelectedInsight, useSelectedThread, useSelectedThreadEpisode } =
     useNativeRuntime().stores.sessionLayoutStore;
-  const { turns } = useTranscriptModel(sessionId, snapshot);
+  const { turns } = useTranscriptModelContext();
   const filter = useInsightsFilter();
   const selected = useSelectedInsight();
   const selectedThread = useSelectedThread();
