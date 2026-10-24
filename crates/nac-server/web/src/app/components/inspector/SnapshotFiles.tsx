@@ -44,8 +44,8 @@ function FileChip({
 }
 
 /**
- * The files a snapshot touched, each opening in the files panel. Sits above the
- * snapshot badge so the turn says what it changed before it says how much.
+ * The files a snapshot touched, each opening in the files panel. Listed under
+ * the snapshot's header, which carries their totals.
  */
 export function SnapshotFiles({
   files,

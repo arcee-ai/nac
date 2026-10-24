@@ -1,13 +1,15 @@
 import { Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
 import { ThreadLogTail } from "@/app/components/inspector/ThreadLogTail";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import type { ThreadState, TranscriptThread } from "@/app/lib/transcript";
+
+type SelectThread = (name: string, episodeKey: string) => void;
 
 interface ThreadBoxProps {
   thread: TranscriptThread;
   selected: boolean;
-  onSelect: (name: string, episodeKey: string) => void;
+  /** Without it the card only shows the thread. */
+  onSelect?: SelectThread;
 }
 
 const STATE_ORDER = {
@@ -18,28 +20,54 @@ const STATE_ORDER = {
   done: 4,
 } satisfies Record<ThreadState, number>;
 
+const ICON_SIZE = "size-4 xl:size-5";
+
+/** Two lines of summary fill the body exactly. */
+const SUMMARY_BODY = "h-11 w-full p-1.5 xl:h-12 xl:p-2";
+
+/** The log runs past the top edge, so its oldest line shows only in part. */
+const LOG_BODY = "h-11 w-full px-1.5 pb-1.5 xl:h-12 xl:px-2 xl:pb-2";
+
 function StateIcon({ state }: { state: ThreadState }) {
   if (state === "running") {
-    return <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />;
+    return (
+      <Loader
+        size={LoaderSize.Small}
+        variant={LoaderVariant.Neutral}
+        className="shrink-0 [&_svg]:size-4 xl:[&_svg]:size-5"
+      />
+    );
   }
   if (state === "pending") {
-    return <Icon iconName={IconName.Timelaps} size={20} className="[&>path]:!fill-basic-muted" />;
+    return (
+      <Icon
+        iconName={IconName.Timelaps}
+        className={cn(ICON_SIZE, "shrink-0 [&>path]:!fill-basic-muted")}
+      />
+    );
   }
   if (state === "error") {
     return (
       <Icon
         iconName={IconName.Danger}
-        size={20}
         // Beat `.btn-ghost .icon path { fill: … }` from atoms.css.
-        className="[&>path]:!fill-error-primary"
+        className={cn(ICON_SIZE, "shrink-0 [&>path]:!fill-error-primary")}
       />
     );
   }
   if (state === "cancelled") {
-    return <Icon iconName={IconName.Close} size={20} className="[&>path]:!fill-basic-muted" />;
+    return (
+      <Icon
+        iconName={IconName.Close}
+        className={cn(ICON_SIZE, "shrink-0 [&>path]:!fill-basic-muted")}
+      />
+    );
   }
   return (
-    <Icon iconName={IconName.CheckCircle} size={20} className="[&>path]:!fill-basic-primary" />
+    <Icon
+      iconName={IconName.CheckCircle}
+      className={cn(ICON_SIZE, "shrink-0 [&>path]:!fill-basic-primary")}
+    />
   );
 }
 
@@ -50,9 +78,8 @@ function worstState(threads: TranscriptThread[]): ThreadState {
   );
 }
 
-/** One dispatched thread: name, live state and the newest line it produced. */
+/** One dispatched thread: name, live state and the newest lines it produced. */
 function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
-  const isMobile = useIsMobile();
   const running = thread.state === "running";
   const pending = thread.state === "pending";
   const cancelled = thread.state === "cancelled";
@@ -71,60 +98,70 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
           isError: false,
         },
       ];
+  const content = (
+    <>
+      <div className="flex w-full shrink-0 items-center gap-1 px-1.5 py-2 xl:gap-2.5 xl:p-2">
+        <StateIcon state={thread.state} />
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-xs/4 font-medium xl:text-sm/5",
+            running
+              ? "text-shimmer-basic"
+              : pending
+                ? "text-basic-muted"
+                : thread.state === "error"
+                  ? "text-error-primary"
+                  : "text-basic-primary",
+          )}
+        >
+          {thread.name}
+        </span>
+        {thread.weight && (
+          <span className="shrink-0 rounded-[3px] bg-elevation-level-3 px-1 text-[9px] uppercase tracking-wide text-basic-muted">
+            {thread.weight}
+          </span>
+        )}
+      </div>
+      {running || cancelled ? (
+        <ThreadLogTail lines={tail} className={LOG_BODY} />
+      ) : (
+        // Chrome blockifies `-webkit-box` flex items, so the clamped text
+        // needs a plain wrapper to stay clamped.
+        <div className={SUMMARY_BODY}>
+          <span className="line-clamp-2 text-micro text-basic-muted">
+            {pending ? "Pending..." : thread.summary}
+          </span>
+        </div>
+      )}
+    </>
+  );
+  const surface = "flex h-full w-full flex-col items-start text-left";
 
   return (
     // The ghost button paints its own transparent background, so the elevation
     // has to live on a wrapper underneath it.
     <div
       className={cn(
-        "shrink-0 h-[84px] max-w-full overflow-hidden rounded-[4px]",
-        isMobile ? "w-[172px]" : "w-[220px]",
-        "bg-elevation-ground",
+        "w-[180px] shrink-0 overflow-hidden rounded-[4px] shadow-convex xl:w-[220px]",
+        running ? "bg-elevation-level-2" : "bg-elevation-level-1",
       )}
     >
-      <button
-        type="button"
-        className={cn(
-          "flex flex-col items-start w-full h-full text-left",
-          selected ? "btn-ghost-highlighted" : "btn-ghost",
-        )}
-        aria-pressed={selected}
-        onClick={() => onSelect(thread.name, thread.key)}
-      >
-        <div className="flex items-center gap-2 shrink-0 p-2 w-full">
-          <StateIcon state={thread.state} />
-          <span
-            className={cn(
-              "flex-1 min-w-0 truncate label-small",
-              running
-                ? "text-shimmer-basic"
-                : pending
-                  ? "text-basic-muted"
-                  : thread.state === "error"
-                    ? "text-error-primary"
-                    : "text-basic-primary",
-            )}
-          >
-            {thread.name}
-          </span>
-          {thread.weight && (
-            <span className="shrink-0 rounded-[3px] bg-elevation-level-3 px-1 text-[9px] uppercase tracking-wide text-basic-muted">
-              {thread.weight}
-            </span>
+      {onSelect ? (
+        <button
+          type="button"
+          className={cn(
+            surface,
+            "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
+            selected ? "btn-ghost-highlighted" : "btn-ghost",
           )}
-        </div>
-        {running || cancelled ? (
-          <ThreadLogTail lines={tail} className="flex-1 min-h-0 w-full px-2 pb-2" />
-        ) : (
-          // Chrome blockifies `-webkit-box` flex items, so the clamped text
-          // needs a plain wrapper to stay clamped.
-          <div className="w-full px-2 pt-2">
-            <span className="line-clamp-2 text-micro text-basic-muted !my-0 !text-[11px]">
-              {pending ? "Pending..." : thread.summary}
-            </span>
-          </div>
-        )}
-      </button>
+          aria-pressed={selected}
+          onClick={() => onSelect(thread.name, thread.key)}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className={surface}>{content}</div>
+      )}
     </div>
   );
 }
@@ -132,12 +169,13 @@ function ThreadBox({ thread, selected, onSelect }: ThreadBoxProps) {
 interface WaveRowProps {
   threads: TranscriptThread[];
   selected: string | null;
-  onSelect: (name: string, episodeKey: string) => void;
+  onSelect?: SelectThread;
 }
 
 /**
- * One topological DAG level: threads that can run concurrently. The tiles wrap
- * within this level while the rail on the left carries its aggregate state.
+ * One topological DAG level: threads that can run concurrently. The cards
+ * scroll sideways within this level while the rail on the left carries its
+ * aggregate state.
  */
 function WaveRow({ threads, selected, onSelect }: WaveRowProps) {
   const state = worstState(threads);
@@ -145,23 +183,26 @@ function WaveRow({ threads, selected, onSelect }: WaveRowProps) {
   return (
     <div
       className={cn(
-        "pl-4 py-3 w-full min-w-0 border-l-2 border-solid",
+        "w-full min-w-0 border-l-2 border-solid py-2 xl:py-3",
         state === "error"
           ? "border-error-primary"
           : state === "running"
             ? "border-primary"
-            : "border-tertiary",
+            : "border-muted",
       )}
     >
-      <div className="flex flex-wrap items-start gap-1 w-full min-w-0">
-        {threads.map((thread) => (
-          <ThreadBox
-            key={thread.key}
-            thread={thread}
-            selected={selected === thread.key}
-            onSelect={onSelect}
-          />
-        ))}
+      {/* The cards cut off under the fade are what tells there is more. */}
+      <div className="scrollbar-none overflow-x-auto overflow-y-hidden overscroll-x-contain [mask-image:linear-gradient(to_right,black_calc(100%-40px),transparent)]">
+        <div className="flex w-max items-start gap-1 pr-8 pl-3 xl:pl-4">
+          {threads.map((thread) => (
+            <ThreadBox
+              key={thread.key}
+              thread={thread}
+              selected={selected === thread.key}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -172,7 +213,8 @@ interface ThreadWaveProps {
   rows: TranscriptThread[][];
   /** Episode key of the card the panels are pointing at, if it is one of these. */
   selected: string | null;
-  onSelect: (name: string, episodeKey: string) => void;
+  /** Without it the cards only show their threads. */
+  onSelect?: SelectThread;
 }
 
 /**
@@ -181,7 +223,7 @@ interface ThreadWaveProps {
  */
 export function ThreadWave({ rows, selected, onSelect }: ThreadWaveProps) {
   return (
-    <div className="my-8 w-full flex flex-col items-start">
+    <div className="flex w-full flex-col items-start">
       {rows.map((threads, index) => (
         <WaveRow
           key={threads.map((thread) => thread.key).join("|") || `row-${index}`}

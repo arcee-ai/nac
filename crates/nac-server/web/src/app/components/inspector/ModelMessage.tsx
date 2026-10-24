@@ -19,16 +19,18 @@ import {
 import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { partitionModelTurn } from "@/app/features/insights/model/segments";
+import { formatMessageDate } from "@/app/features/insights/transcript/messageDate";
 import { TranscriptGroupBadge } from "@/app/features/insights/transcript/TranscriptGroupBadge";
 import { TranscriptSessionCard } from "@/app/features/insights/transcript/TranscriptSessionCard";
-import { usePreviousTurn } from "@/app/features/insights/transcript/transcriptTurns";
+import {
+  usePreviousTurn,
+  usePromptCreatedAt,
+} from "@/app/features/insights/transcript/transcriptTurns";
 import { cn } from "@/app/lib/cn";
-import { formatDurationShort } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
 import { RUN_CANCELLED_MARKER, type ModelTurn, type TranscriptTurn } from "@/app/lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /** Visible prose from the turn — what Copy puts on the clipboard. */
 function modelCopyText(turn: ModelTurn): string {
@@ -61,7 +63,7 @@ function RunStatusBadge({ label }: { label: string }) {
 interface ModelMessageProps {
   turn: ModelTurn;
   model: string;
-  /** Draws the spinner ring while this turn is the one still producing output. */
+  /** This turn is the one still producing output, so it has no actions yet. */
   active: boolean;
   /**
    * What the run is doing right now, of which only the compaction status is
@@ -117,9 +119,15 @@ interface ModelMessageProps {
   interactive?: boolean;
 }
 
+interface ModelMessageBodyProps extends ModelMessageProps {
+  previous: TranscriptTurn | undefined;
+  date: string | null;
+}
+
 const ModelMessageBody = memo(function ModelMessageBody({
   turn,
   previous,
+  date,
   model,
   active,
   activity,
@@ -140,7 +148,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
   snapshotRevision = null,
   filesPanel = null,
   interactive = true,
-}: ModelMessageProps & { previous: TranscriptTurn | undefined }) {
+}: ModelMessageBodyProps) {
   perfRender("ModelMessage");
   const items = useMemo(() => partitionModelTurn(turn, previous), [turn, previous]);
   const compacting = active && activity === COMPACTION_ACTIVITY;
@@ -154,135 +162,122 @@ const ModelMessageBody = memo(function ModelMessageBody({
   const cancelled = turn.blocks.some(
     (block) => block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
   );
-  const isMobile = useIsMobile();
   return (
     <div
       className={cn(
-        "group/model-msg flex gap-1 items-start w-full max-w-full py-8 relative",
+        "group/model-msg flex flex-col items-start gap-6 w-full max-w-full min-w-0 py-6",
         isLast && "min-h-[calc(70vh-316px)]",
       )}
     >
-      <div className="flex flex-col flex-grow gap-1 pt-2 md:max-w-[calc(100%-36px)] min-w-0">
-        <div className="flex gap-3 items-center mb-4 min-w-0">
-          <ModelPill active={active} />
-          <span className="label-small text-basic-primary truncate">{model}</span>
-          {/* The header carries whichever of the two is available: what the run
-              is doing now, or how long it took once it is over. */}
-          {active && activity ? (
-            <>
-              {" "}
-              {/*<span className="label-micro text-shimmer-basic min-w-0 truncate max-w-[120px]">
-              {activity}
-            </span>*/}
-            </>
-          ) : turn.durationMs != null ? (
-            <span className="label-micro text-basic-muted shrink-0 fade">
-              {formatDurationShort(turn.durationMs)}
-            </span>
-          ) : null}
+      {model ? (
+        <div className="flex items-center w-full min-w-0">
+          <ModelPill>{model}</ModelPill>
         </div>
+      ) : null}
 
-        <div className="flex w-full min-w-0 flex-col items-start gap-6 md:pl-2">
-          {items.map((item, index) => {
-            if (item.kind === "group") {
-              return (
-                <TranscriptGroupBadge
-                  key={item.id}
-                  group={item.group}
-                  active={active}
-                  trailing={!compacting && index === items.length - 1}
-                  selected={item.id === selectedGroupId}
-                  interactive={interactive}
-                />
-              );
-            }
-            if (item.kind === "session") {
-              return <TranscriptSessionCard key={item.id} entry={item} interactive={interactive} />;
-            }
-            const { block } = item;
-            if (block.kind === "wave") {
-              return (
-                <ThreadWave
-                  key={block.key}
-                  rows={block.rows}
-                  selected={selectedThreadEpisode}
-                  onSelect={onSelectThread}
-                />
-              );
-            }
-            if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
+      {/* Nothing in here clips: a badge's focus ring reaches 4px past it, which
+          the inset keeps inside the chat's scroll area. */}
+      <div className="flex flex-col items-start gap-6 w-full min-w-0 md:pl-2">
+        {items.map((item, index) => {
+          if (item.kind === "group") {
             return (
-              <Markdown
-                key={block.key}
-                streaming={active}
-                // The prose skin's paragraph margins would add to the gap between items.
-                className="[&>:first-child]:!mt-0 [&>:last-child]:!mb-0"
-              >
-                {block.text}
-              </Markdown>
-            );
-          })}
-          {/* Compaction runs between model calls, so nothing above moves while it
-              does; the shell stands in for a run that has produced nothing yet. */}
-          {compacting ? (
-            <RunStatusBadge label={COMPACTION_ACTIVITY} />
-          ) : active && items.length === 0 ? (
-            <RunStatusBadge label="Thinking…" />
-          ) : null}
-          {!active && snapshotRevision && filesPanel ? (
-            <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
-          ) : null}
-          {cancelled ? (
-            <ChatSessionMessage
-              variant={ChatSessionMessageVariant.Danger}
-              title="Run cancelled by user"
-            />
-          ) : null}
-        </div>
-
-        {!readOnly && forks.length > 0 ? (
-          <div className="flex flex-col gap-2 pt-4 md:pl-3 [&>*]:shrink-0">
-            {forks.map((fork) => (
-              <ForkSessionItem
-                key={fork.session_id}
-                sessionId={fork.session_id}
-                title={fork.title}
-                deleted={fork.deleted}
-                onOpen={onOpenFork ? () => onOpenFork(fork.session_id) : undefined}
-                onDismiss={
-                  onDismissFork && fork.deleted ? () => onDismissFork(fork.session_id) : undefined
-                }
+              <TranscriptGroupBadge
+                key={item.id}
+                group={item.group}
+                active={active}
+                trailing={!compacting && index === items.length - 1}
+                selected={item.id === selectedGroupId}
+                interactive={interactive}
               />
-            ))}
-          </div>
+            );
+          }
+          if (item.kind === "session") {
+            return <TranscriptSessionCard key={item.id} entry={item} interactive={interactive} />;
+          }
+          const { block } = item;
+          if (block.kind === "wave") {
+            return (
+              <ThreadWave
+                key={block.key}
+                rows={block.rows}
+                selected={selectedThreadEpisode}
+                onSelect={interactive ? onSelectThread : undefined}
+              />
+            );
+          }
+          if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
+          return (
+            <Markdown
+              key={block.key}
+              streaming={active}
+              // The prose skin's paragraph margins would add to the gap between items.
+              className="[&>:first-child]:!mt-0 [&>:last-child]:!mb-0"
+            >
+              {block.text}
+            </Markdown>
+          );
+        })}
+        {/* Compaction runs between model calls, so nothing above moves while it
+            does; the shell stands in for a run that has produced nothing yet. */}
+        {compacting ? (
+          <RunStatusBadge label={COMPACTION_ACTIVITY} />
+        ) : active && items.length === 0 ? (
+          <RunStatusBadge label="Thinking…" />
         ) : null}
+        {!active && snapshotRevision && filesPanel ? (
+          <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
+        ) : null}
+        {cancelled ? (
+          <ChatSessionMessage
+            variant={ChatSessionMessageVariant.Danger}
+            title="Run cancelled by user"
+          />
+        ) : null}
+      </div>
 
-        {/* Same resend / revert endpoints as the user bubble above — they always
-            address that prompt. Hidden while this turn is still streaming. */}
-        {!active ? (
-          <div
-            className={cn(
-              "flex items-center justify-start gap-3 pt-4 md:pl-3",
-              "opacity-0 pointer-events-none transition-opacity duration-150",
-              "group-hover/model-msg:opacity-100 group-hover/model-msg:pointer-events-auto",
-              "group-focus-within/model-msg:opacity-100 group-focus-within/model-msg:pointer-events-auto",
-              // Nothing hovers on a touch screen, so the row simply stays out.
-              "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
-            )}
-          >
+      {!readOnly && forks.length > 0 ? (
+        <div className="flex flex-col gap-2 w-full min-w-0 md:pl-2 [&>*]:shrink-0">
+          {forks.map((fork) => (
+            <ForkSessionItem
+              key={fork.session_id}
+              sessionId={fork.session_id}
+              title={fork.title}
+              deleted={fork.deleted}
+              onOpen={onOpenFork ? () => onOpenFork(fork.session_id) : undefined}
+              onDismiss={
+                onDismissFork && fork.deleted ? () => onDismissFork(fork.session_id) : undefined
+              }
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {/* Same resend / revert endpoints as the user bubble above — they always
+          address that prompt. Hidden while this turn is still streaming. */}
+      {!active ? (
+        <div
+          className={cn(
+            "flex items-center gap-6 w-full min-w-0",
+            "opacity-0 pointer-events-none transition-opacity duration-150",
+            "group-hover/model-msg:opacity-100 group-hover/model-msg:pointer-events-auto",
+            "group-focus-within/model-msg:opacity-100 group-focus-within/model-msg:pointer-events-auto",
+            // Nothing hovers on a touch screen, so the row simply stays out.
+            "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
+          )}
+        >
+          <div className="flex items-center gap-3 shrink-0">
             {canRefresh ? (
               <Tooltip
                 title="Regenerate from the original prompt (rewinds later transcript and workspace changes)"
                 position={TooltipPosition.BottomRight}
               >
                 <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Ghost}
                   content={ButtonContent.Icon}
                   aria-label="Regenerate from original prompt"
                   disabled={actionsDisabled}
                   onClick={() => onRefresh(userMessageIndex)}
-                  className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
                 >
                   <Icon iconName={IconName.Refresh} size={16} />
                 </Button>
@@ -292,13 +287,12 @@ const ModelMessageBody = memo(function ModelMessageBody({
             {canRevert ? (
               <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomRight}>
                 <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Ghost}
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
                   disabled={actionsDisabled}
                   onClick={() => onRevert(userMessageIndex, userText)}
-                  className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
                 >
                   <Icon iconName={IconName.TurnLeft} size={16} />
                 </Button>
@@ -310,12 +304,11 @@ const ModelMessageBody = memo(function ModelMessageBody({
               >
                 <span className="inline-flex">
                   <Button
-                    size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                    variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                    size={ButtonSize.Small}
+                    variant={ButtonVariant.Ghost}
                     content={ButtonContent.Icon}
                     aria-label="Revert to this snapshot"
                     disabled
-                    className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
                   >
                     <Icon iconName={IconName.TurnLeft} size={16} />
                   </Button>
@@ -326,13 +319,12 @@ const ModelMessageBody = memo(function ModelMessageBody({
             {!readOnly && onFork != null && forkIndex != null ? (
               <Tooltip title="Create fork" position={TooltipPosition.BottomRight}>
                 <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Ghost}
                   content={ButtonContent.Icon}
                   aria-label="Create fork"
                   disabled={actionsDisabled}
                   onClick={() => onFork(forkIndex)}
-                  className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
                 >
                   <Icon iconName={IconName.Scheme} size={16} />
                 </Button>
@@ -341,15 +333,20 @@ const ModelMessageBody = memo(function ModelMessageBody({
 
             <CopyButton
               value={copyText}
-              size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-              variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+              size={ButtonSize.Small}
+              variant={ButtonVariant.Ghost}
               title="Copy message"
               position={TooltipPosition.BottomRight}
-              className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
             />
           </div>
-        ) : null}
-      </div>
+
+          {date ? (
+            <span className="min-w-0 label-micro text-basic-muted whitespace-nowrap truncate">
+              {date}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 });
@@ -361,5 +358,8 @@ const ModelMessageBody = memo(function ModelMessageBody({
  */
 export const ModelMessage = memo(function ModelMessage(props: ModelMessageProps) {
   const previous = usePreviousTurn(props.turn);
-  return <ModelMessageBody {...props} previous={previous} />;
+  const promptCreatedAt = usePromptCreatedAt(props.userMessageIndex);
+  // The exchange is dated by what the turn answers: a prompt, or a completion.
+  const createdAt = previous && previous.kind !== "model" ? previous.createdAt : promptCreatedAt;
+  return <ModelMessageBody {...props} previous={previous} date={formatMessageDate(createdAt)} />;
 });

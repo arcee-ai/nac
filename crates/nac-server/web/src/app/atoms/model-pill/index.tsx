@@ -1,67 +1,41 @@
 import type React from "react";
 import { cn } from "../../lib/cn";
-import Icon, { IconName } from "../icon";
-import CircularLoader from "../loader/CircularLoader";
-import { LoaderSize } from "../loader";
 
-/** Pixel diameters of the avatar. */
+/** Line heights of the label. */
 export enum ModelPillSize {
   Small = 24,
-  Medium = 32,
+  Medium = 28,
 }
 
-interface ModelPillProps extends React.HTMLAttributes<HTMLDivElement> {
+interface ModelPillProps extends React.HTMLAttributes<HTMLSpanElement> {
   size?: ModelPillSize;
-  /** Swaps the static rim for a spinner while the orchestrator is working. */
-  active?: boolean;
+  /** The model's name. */
+  children: React.ReactNode;
 }
 
-const sizeIconPx = {
-  [ModelPillSize.Medium]: 16,
-  [ModelPillSize.Small]: 18,
-} satisfies Record<ModelPillSize, number>;
+// `.code` sets its own line height outside the utility layer.
+const sizeText = {
+  [ModelPillSize.Medium]: "text-base !leading-7",
+  [ModelPillSize.Small]: "text-sm !leading-6",
+} satisfies Record<ModelPillSize, string>;
 
-const sizeLoaderSize = {
-  [ModelPillSize.Medium]: LoaderSize.Large,
-  [ModelPillSize.Small]: LoaderSize.Small,
-} satisfies Record<ModelPillSize, LoaderSize>;
-
-/** Round avatar for the orchestrator, shown beside every model message. */
+/** The model behind a reply, as the mono label that heads it. */
 const ModelPill: React.FC<ModelPillProps> & { Size: typeof ModelPillSize } = ({
   size = ModelPillSize.Medium,
-  active = false,
   className = "",
+  children,
   ...props
 }) => (
-  <div
+  <span
     className={cn(
-      "relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full",
-      size === ModelPillSize.Medium ? "border" : "border",
-      active ? "border-transparent" : "border-secondary",
+      "code min-w-0 truncate font-medium text-basic-primary",
+      sizeText[size],
       className,
     )}
-    style={{ width: size, height: size }}
     {...props}
   >
-    {/* Active pills already carry the spinning CircularLoader as their visual
-        anchor, so we drop the brand gradient there to avoid layering two
-        attention-grabbing effects on top of each other. */}
-    {!active ? (
-      <div
-        aria-hidden
-        className="absolute inset-0 rounded-full bg-gradient-to-b from-[var(--color-fill-basic-muted)] to-transparent [html.light_&]:bg-gradient-to-t"
-      />
-    ) : null}
-    <Icon
-      iconName={IconName.Brain}
-      size={sizeIconPx[size]}
-      color="var(--color-fill-basic-primary)"
-      className="relative"
-    />
-    {active ? (
-      <CircularLoader size={sizeLoaderSize[size]} className="absolute inset-0 m-auto" />
-    ) : null}
-  </div>
+    {children}
+  </span>
 );
 
 ModelPill.Size = ModelPillSize;
