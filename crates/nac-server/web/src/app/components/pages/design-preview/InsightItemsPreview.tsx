@@ -132,6 +132,7 @@ const DISPLAYER_SAMPLES: ({ label: string } & ComponentProps<typeof InsightItemC
     onShowFull: ignore,
   },
   { label: "Default, without Show full", title: "Input", shortContent: INDENT_PREVIEW },
+  { label: "Default, without a preview", title: "Input", shortContent: "", onShowFull: ignore },
   {
     label: "Default, the load failed (Show full retries)",
     title: "Input",

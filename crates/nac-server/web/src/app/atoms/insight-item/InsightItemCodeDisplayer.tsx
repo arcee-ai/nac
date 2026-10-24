@@ -17,7 +17,7 @@ interface InsightItemCodeDisplayerProps {
   /** Some types draw the field without its heading; the title still names it. */
   showHeading?: boolean;
   state?: InsightItemCodeDisplayerState;
-  /** Shown in Default and Loading. */
+  /** Shown in Default and Loading. Empty leaves the heading and the link. */
   shortContent: string;
   /** Shown, and copied, in Expanded. */
   fullContent?: string | null;
@@ -81,6 +81,7 @@ const InsightItemCodeDisplayer: React.FC<InsightItemCodeDisplayerProps> = ({
         aria-busy={loading || undefined}
         className={cn(
           CONTENT_TYPE,
+          "empty:hidden",
           loading ? "text-shimmer-basic motion-reduce:animate-none" : "text-basic-tertiary",
         )}
       >
