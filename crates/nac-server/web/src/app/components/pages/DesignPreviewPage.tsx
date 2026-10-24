@@ -7,6 +7,7 @@ import { ChoicesSection } from "@/app/components/pages/design-preview/ChoicesSec
 import { CodeBlockSection } from "@/app/components/pages/design-preview/CodeBlockSection";
 import { DatesSection } from "@/app/components/pages/design-preview/DatesSection";
 import { InputsSection } from "@/app/components/pages/design-preview/InputsSection";
+import { ModelLoaderSection } from "@/app/components/pages/design-preview/ModelLoaderSection";
 import { NoticesSection } from "@/app/components/pages/design-preview/NoticesSection";
 import { NumericInputsSection } from "@/app/components/pages/design-preview/NumericInputsSection";
 import { PopoverSection } from "@/app/components/pages/design-preview/PopoverSection";
@@ -37,6 +38,7 @@ export default function DesignPreviewPage() {
         <NoticesSection />
         <SessionAvatarsSection />
         <SessionIdentitySection />
+        <ModelLoaderSection />
         <AvatarsSection />
         <NumericInputsSection />
         <DatesSection />

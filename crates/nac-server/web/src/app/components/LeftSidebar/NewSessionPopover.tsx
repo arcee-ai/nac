@@ -3,8 +3,13 @@ import { creationBehavior } from "@/app/features/ui-policy/policy";
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Popover, PopoverPlacement, PopoverSize, TabButton } from "@/app/atoms";
-import SessionBehaviorIcon from "@/app/atoms/session-behavior-icon";
+import {
+  Popover,
+  PopoverPlacement,
+  PopoverSize,
+  SessionBehaviorIcon,
+  TabButton,
+} from "@/app/atoms";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";

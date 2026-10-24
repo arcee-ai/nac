@@ -8,8 +8,9 @@ import {
   ForkSessionItem,
   ProjectButton,
   ProjectButtonVariant,
+  SessionBehaviorIcon,
+  SessionBehaviorIconSize,
 } from "@/app/atoms";
-import SessionBehaviorIcon, { SessionBehaviorIconSize } from "@/app/atoms/session-behavior-icon";
 import { SAMPLE_IDS } from "@/app/components/pages/design-preview/samples";
 import { ChatSessionActions } from "@/app/components/projects/ChatSessionActions";
 import { cn } from "@/app/lib/cn";

@@ -1,10 +1,11 @@
 import { Fragment } from "react";
-import { BoxSurface } from "@/app/atoms";
-import ModelLoader, {
+import {
+  BoxSurface,
+  ModelLoader,
   type ModelLoaderFrame,
   ModelLoaderSize,
   ModelLoaderVariant,
-} from "@/app/atoms/model-loader";
+} from "@/app/atoms";
 
 const VARIANTS = [
   { variant: ModelLoaderVariant.Default, label: "Default" },
