@@ -504,6 +504,38 @@ fn key_argument_preview_is_family_aware_and_fail_closed() {
 }
 
 #[test]
+fn file_path_preview_keeps_the_end_of_long_paths() {
+    let preview_of = |name: &str, key: &str, value: &str| {
+        let args = serde_json::json!({ key: value }).to_string();
+        key_arg_preview(name, Some(&args), &args)
+    };
+
+    let long = format!(
+        "{}crates/nac-core/src/agent/preview.rs",
+        "workspace/".repeat(15)
+    );
+    let preview = preview_of("read", "path", &long);
+    assert_eq!(preview.chars().count(), 120, "{preview}");
+    assert!(preview.starts_with('…'), "{preview}");
+    assert!(preview.ends_with("/agent/preview.rs"), "{preview}");
+
+    let multibyte = format!("{}/notes.md", "é".repeat(200));
+    let preview = preview_of("read", "path", &multibyte);
+    assert_eq!(preview.chars().count(), 120, "{preview}");
+    assert!(preview.ends_with("é/notes.md"), "{preview}");
+
+    let exact = format!("{}.rs", "a".repeat(117));
+    assert_eq!(exact.chars().count(), 120);
+    assert_eq!(preview_of("read", "path", &exact), exact);
+
+    let pattern = format!("needle{}", "x".repeat(200));
+    assert_eq!(
+        preview_of("grep", "pattern", &pattern),
+        format!("needle{}…", "x".repeat(114))
+    );
+}
+
+#[test]
 fn exec_command_result_preview_includes_nonzero_exit() {
     let result = ToolResult {
         content: (serde_json::json!({

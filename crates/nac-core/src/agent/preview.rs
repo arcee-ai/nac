@@ -72,6 +72,18 @@ fn truncate_string(s: &str, max: usize) -> String {
     }
 }
 
+/// Keeps the end of a long path, where the file name is, as `…` plus the last
+/// characters; unlike `truncate_string`, `max` counts the `…`.
+fn truncate_path(path: &str, max: usize) -> String {
+    let count = path.chars().count();
+    if count <= max {
+        path.to_string()
+    } else {
+        let tail: String = path.chars().skip(count + 1 - max).collect();
+        format!("…{tail}")
+    }
+}
+
 /// Extract a short human-readable preview of the key argument for a tool call.
 /// This survives sanitization and is used by the UI for compact display.
 pub(crate) fn key_arg_preview(
@@ -91,7 +103,7 @@ pub(crate) fn key_arg_preview(
 
     match tool_name {
         "read" | "write" | "edit" => get_str("path")
-            .map(|value| truncate_string(&value, 120))
+            .map(|value| truncate_path(&value, 120))
             .unwrap_or_default(),
         "exec_command" => get_str("cmd")
             .or_else(|| get_str("command"))
