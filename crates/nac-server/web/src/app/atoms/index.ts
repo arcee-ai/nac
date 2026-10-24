@@ -16,6 +16,11 @@ export { default as ChatSessionOrphanAvatar } from "./chat-session-orphan-avatar
 export { default as ChatSessionTab, ChatSessionTabSkeleton } from "./chat-session-tab";
 export { default as Checkbox } from "./checkbox";
 export { default as CodeBlock, CodeBlockSize } from "./code-block";
+export {
+  default as CodeDisplayer,
+  type CodeDisplayerLine,
+  type CodeDisplayerLineKind,
+} from "./code-displayer";
 export { default as CoverBackground } from "./cover-background";
 export { default as DatePicker, type DateRange } from "./date-picker";
 export { default as DateSelector, type DateString, type DateStringRange } from "./date-selector";

@@ -1,13 +1,17 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   BoxSurface,
   CodeChangesBadge,
   CodeChangesBadgeSize,
+  CodeDisplayer,
+  type CodeDisplayerLine,
   FileButton,
   FileButtonSize,
   FileButtonsList,
   type FileButtonsListFile,
 } from "@/app/atoms";
+import { type CodeToken, highlightDiff } from "@/app/lib/highlight";
+import type { WorkspaceDiffLine, WorkspaceDiffSection } from "@/app/types/api";
 
 const SIZES = [
   { size: FileButtonSize.Large, badge: CodeChangesBadgeSize.Large, title: "Large" },
@@ -58,7 +62,62 @@ const LIST_FILES: FileButtonsListFile[] = [
   { path: LONG_PATH, additions: 1204, deletions: 377 },
 ];
 
-/** The Insights detail column's ground, where these buttons sit. */
+const DIFF_PATH = "src/app/lib/parser.ts";
+
+const diffLine = (
+  kind: string,
+  old_lineno: number | null,
+  new_lineno: number | null,
+  content: string,
+  has_trailing_newline = true,
+): WorkspaceDiffLine => ({ kind, old_lineno, new_lineno, content, has_trailing_newline });
+
+const DIFF: WorkspaceDiffSection = {
+  stage: "unstaged",
+  status: "modified",
+  additions: 3,
+  deletions: 2,
+  binary: false,
+  too_large: false,
+  truncated: false,
+  error: null,
+  hunks: [
+    {
+      function_context: null,
+      old_start: 1,
+      old_lines: 3,
+      new_start: 1,
+      new_lines: 3,
+      lines: [
+        diffLine("context", 1, 1, 'import { tokenize } from "./lexer";'),
+        diffLine("delete", 2, null, 'import type { Token } from "./lexer";'),
+        diffLine("insert", null, 2, 'import { type Token, TokenKind } from "./lexer";'),
+        diffLine("context", 3, 3, ""),
+      ],
+    },
+    {
+      function_context: null,
+      old_start: 24,
+      old_lines: 3,
+      new_start: 24,
+      new_lines: 4,
+      lines: [
+        diffLine("context", 24, 24, "export function parse(source: string): Token[] {"),
+        diffLine("delete", 25, null, "  return tokenize(source);"),
+        diffLine("insert", null, 25, "  const tokens = tokenize(source);"),
+        diffLine(
+          "insert",
+          null,
+          26,
+          "  return tokens.filter((token) => token.kind !== TokenKind.Whitespace && token.kind !== TokenKind.Comment);",
+        ),
+        diffLine("context", 26, 27, "}", false),
+      ],
+    },
+  ],
+};
+
+/** The Insights detail column's ground, where these atoms sit. */
 const GROUND = "bg-elevation-ground p-2";
 
 const noop = () => {};
@@ -194,6 +253,57 @@ function ListsPreview() {
   );
 }
 
+/** A deleted line keeps its number in the old file, as Files numbers it. */
+const displayerLine = (
+  line: WorkspaceDiffLine,
+  tokens: CodeToken[] | undefined,
+): CodeDisplayerLine => ({
+  kind: line.kind === "insert" || line.kind === "delete" ? line.kind : "context",
+  number: line.kind === "delete" ? line.old_lineno : (line.new_lineno ?? line.old_lineno),
+  content: line.content,
+  tokens,
+  trailing: line.has_trailing_newline ? null : (
+    <span className="italic text-basic-muted"> No newline at end of file</span>
+  ),
+});
+
+function CodeDisplayerPreview() {
+  const [highlighted, setHighlighted] = useState<Map<WorkspaceDiffLine, CodeToken[]>>(
+    () => new Map(),
+  );
+  useEffect(() => {
+    let active = true;
+    void highlightDiff(DIFF_PATH, [DIFF]).then((result) => {
+      if (active) setHighlighted(result);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const samples = [
+    { title: "Code displayer, two hunks", tokens: highlighted },
+    { title: "Code displayer without tokens", tokens: null },
+  ];
+  return (
+    <div className="flex flex-wrap items-start gap-6">
+      {samples.map(({ title, tokens }) => (
+        <div key={title} className="flex w-[480px] flex-col gap-2">
+          <span className="label-micro text-basic-muted">{title}</span>
+          <div className={GROUND}>
+            <CodeDisplayer
+              aria-label={`Changes to ${DIFF_PATH}`}
+              hunks={DIFF.hunks.map((hunk) =>
+                hunk.lines.map((line) => displayerLine(line, tokens?.get(line))),
+              )}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function FilesAtomsSection() {
   return (
     <BoxSurface title="Files">
@@ -202,6 +312,7 @@ export function FilesAtomsSection() {
         <TruncationPreview />
         <BadgePreview />
         <ListsPreview />
+        <CodeDisplayerPreview />
       </div>
     </BoxSurface>
   );
