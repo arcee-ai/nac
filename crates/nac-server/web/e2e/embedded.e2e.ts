@@ -708,6 +708,7 @@ test("renders an unknown primary tool failure safely after reload", async ({
   page,
   request,
 }) => {
+  const body = "RAW_BODY_RENDERS_ONLY_ON_REQUEST";
   harness.provider.enqueue(
     "all1-unknown-call",
     { token: "ALL1_UNKNOWN_TOKEN" },
@@ -717,7 +718,7 @@ test("renders an unknown primary tool failure safely after reload", async ({
       callId: "all1-unknown",
       arguments: {
         authorization: "Bearer RAW_SECRET_MUST_NOT_RENDER",
-        body: "UNBOUNDED_RAW_BODY_MUST_NOT_RENDER",
+        body,
       },
       stream: true,
     },
@@ -738,12 +739,16 @@ test("renders an unknown primary tool failure safely after reload", async ({
   const failedRow = page.getByRole("button", { name: "MCP · Dangerous tool, failed", exact: true });
   await badge.click();
   await expect(failedRow).toHaveAttribute("aria-pressed", "true");
-  await expect(
-    page.getByRole("group", { name: "MCP · Dangerous tool", exact: true }),
-  ).toBeVisible();
+  const item = page.getByRole("group", { name: "MCP · Dangerous tool", exact: true });
+  await expect(item).toBeVisible();
   // Checked with the call's Insights details open, since they render its input too.
   await expect(page.locator("body")).not.toContainText("RAW_SECRET_MUST_NOT_RENDER");
-  await expect(page.locator("body")).not.toContainText("UNBOUNDED_RAW_BODY_MUST_NOT_RENDER");
+  await expect(page.locator("body")).not.toContainText(body);
+  // On request the input renders in full as the server redacted it, no longer valid JSON.
+  const input = item.getByRole("group", { name: "Input", exact: true });
+  await input.getByRole("button", { name: "Show full" }).click();
+  await expect(input).toContainText(`{"authorization: [REDACTED]","body":"${body}"}`);
+  await expect(page.locator("body")).not.toContainText("RAW_SECRET_MUST_NOT_RENDER");
   await page.reload();
   await expect(badge).toHaveCount(1);
   await expect(failedRow).toBeVisible();
