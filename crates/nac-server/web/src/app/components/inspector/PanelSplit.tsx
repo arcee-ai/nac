@@ -1,6 +1,7 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -23,6 +24,8 @@ import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import {
   clampPanelListWidth,
+  defaultPanelListWidth,
+  PANEL_LIST_DEFAULT_WIDTH,
   PANEL_LIST_MAX_RATIO,
   PANEL_LIST_MIN_WIDTH,
 } from "@/app/hooks/usePanelListWidth";
@@ -78,7 +81,10 @@ export function PanelSplit({
   const releaseDrag = useRef<(() => void) | null>(null);
   useEffect(() => () => releaseDrag.current?.(), []);
 
-  useEffect(() => {
+  // Measured before paint: an unresized list is a share of this width, and a
+  // first frame at the floor would visibly jump. The container only exists in
+  // the desktop split, so a change of layout measures again.
+  useLayoutEffect(() => {
     const element = containerRef.current;
     if (!element) return undefined;
     const measure = () => setContainerWidth(element.clientWidth);
@@ -86,10 +92,16 @@ export function PanelSplit({
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [isMobile, isTablet]);
 
-  const maxWidth = containerWidth > 0 ? containerWidth * PANEL_LIST_MAX_RATIO : storedWidth;
-  const listWidth = clampPanelListWidth(storedWidth, maxWidth);
+  const maxWidth =
+    containerWidth > 0
+      ? containerWidth * PANEL_LIST_MAX_RATIO
+      : (storedWidth ?? PANEL_LIST_DEFAULT_WIDTH);
+  const listWidth = clampPanelListWidth(
+    storedWidth ?? defaultPanelListWidth(containerWidth),
+    maxWidth,
+  );
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;

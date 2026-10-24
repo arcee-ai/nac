@@ -7,18 +7,25 @@ import { useSyncExternalStore } from "react";
 const STORAGE_KEY = "nac-panel-list-width";
 
 export const PANEL_LIST_MIN_WIDTH = 180;
+/** Floor of the width a list takes before the user resizes it. */
 export const PANEL_LIST_DEFAULT_WIDTH = 208;
+export const PANEL_LIST_DEFAULT_RATIO = 1 / 3;
 export const PANEL_LIST_MAX_RATIO = 0.75;
 
+/** The list's share of a panel this wide until the user resizes it. */
+export function defaultPanelListWidth(containerWidth: number): number {
+  return Math.max(PANEL_LIST_DEFAULT_WIDTH, Math.round(containerWidth * PANEL_LIST_DEFAULT_RATIO));
+}
+
 export function createPanelWidth(storage?: Pick<Storage, "getItem" | "setItem">) {
-  function readStoredWidth(): number {
+  function readStoredWidth(): number | null {
     try {
       const raw = storage?.getItem(STORAGE_KEY);
       const parsed = raw == null ? NaN : Number(raw);
-      if (!Number.isFinite(parsed)) return PANEL_LIST_DEFAULT_WIDTH;
+      if (!Number.isFinite(parsed)) return null;
       return Math.max(PANEL_LIST_MIN_WIDTH, Math.round(parsed));
     } catch {
-      return PANEL_LIST_DEFAULT_WIDTH;
+      return null;
     }
   }
 
@@ -32,12 +39,12 @@ export function createPanelWidth(storage?: Pick<Storage, "getItem" | "setItem">)
     };
   }
 
-  function getSnapshot(): number {
+  function getSnapshot(): number | null {
     return width;
   }
 
-  function getServerSnapshot(): number {
-    return PANEL_LIST_DEFAULT_WIDTH;
+  function getServerSnapshot(): number | null {
+    return null;
   }
 
   /** Clamp to the hard floor; the caller supplies the container-relative ceiling. */
@@ -60,14 +67,17 @@ export function createPanelWidth(storage?: Pick<Storage, "getItem" | "setItem">)
     listeners.forEach((listener) => listener());
   }
 
-  /** Width of the list column on the right of every side-box panel. */
-  function usePanelListWidth(): number {
+  /**
+   * Width the user gave the list column on the right of every side-box panel,
+   * or null while it keeps its default share of the panel.
+   */
+  function usePanelListWidth(): number | null {
     return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   }
 
   return {
     release: () => {
-      width = PANEL_LIST_DEFAULT_WIDTH;
+      width = null;
       listeners.forEach((listener) => listener());
     },
     clampPanelListWidth,
