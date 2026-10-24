@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 
 import {
   Button,
@@ -12,31 +12,23 @@ import {
   Icon,
   IconName,
   ModelPill,
+  ToolsAndReasoningBadge,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { ChatBadge } from "@/app/components/inspector/ChatBadge";
 import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
-import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
+import { partitionModelTurn } from "@/app/features/insights/model/segments";
+import { TranscriptGroupBadge } from "@/app/features/insights/transcript/TranscriptGroupBadge";
+import { TranscriptSessionCard } from "@/app/features/insights/transcript/TranscriptSessionCard";
+import { usePreviousTurn } from "@/app/features/insights/transcript/transcriptTurns";
 import { cn } from "@/app/lib/cn";
-import { formatDurationShort, formatSeconds } from "@/app/lib/format";
+import { formatDurationShort } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
-import { RUN_CANCELLED_MARKER, type ModelTurn } from "@/app/lib/transcript";
+import { RUN_CANCELLED_MARKER, type ModelTurn, type TranscriptTurn } from "@/app/lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-
-/**
- * "Thinking" for reasoning that is still arriving, so the badge names what the
- * model is doing rather than what it produced. Once it is over the badge carries
- * how long the model spent on it, whenever the backend timed the call.
- */
-function thoughtsLabel(block: { streaming: boolean; durationMs: number | null }): string {
-  if (block.streaming) return "Thinking";
-  if (block.durationMs == null) return "Thoughts";
-  return `Thoughts, ${formatSeconds(block.durationMs)}`;
-}
 
 /** Visible prose from the turn — what Copy puts on the clipboard. */
 function modelCopyText(turn: ModelTurn): string {
@@ -47,23 +39,44 @@ function modelCopyText(turn: ModelTurn): string {
     .trim();
 }
 
+/** Must match the activity the runtime store sets when orchestrator compaction starts. */
+const COMPACTION_ACTIVITY = "Compacting context…";
+
+/**
+ * What the run is busy with when nothing in the turn shows it. The badge only
+ * lends its look: with nothing to open it stays inert, and the status carries
+ * the label.
+ */
+function RunStatusBadge({ label }: { label: string }) {
+  return (
+    <div role="status">
+      <span className="sr-only">{label}</span>
+      <div inert className="flex">
+        <ToolsAndReasoningBadge label={label} inProgress />
+      </div>
+    </div>
+  );
+}
+
 interface ModelMessageProps {
   turn: ModelTurn;
   model: string;
   /** Draws the spinner ring while this turn is the one still producing output. */
   active: boolean;
   /**
-   * What the run is doing right now. Only the active turn is given it, so the
-   * finished ones are not re-rendered every time the line changes.
+   * What the run is doing right now, of which only the compaction status is
+   * shown: live badges and thread waves already name tools and threads. Only
+   * the active turn is given it, so the finished ones are not re-rendered every
+   * time the line changes.
    */
   activity?: string;
   /** Stretches the last bubble so stick-to-bottom lands below the fold. */
   isLast?: boolean;
   /** Episode key of the thread card the panels are pointing at, if any. */
   selectedThreadEpisode: string | null;
-  selectedWorkset: string | null;
+  /** Id of the group the panels are pointing at, if any. */
+  selectedGroupId?: string | null;
   onSelectThread: (name: string, episodeKey: string) => void;
-  onSelectWorkset: (id: string) => void;
   /**
    * Snapshot index of the user prompt this model turn answers. Regenerate and
    * revert address that prompt — same endpoints as the user bubble above.
@@ -97,22 +110,23 @@ interface ModelMessageProps {
   snapshotRevision?: WorkspaceRevision | null;
   /** Where a click on the snapshot or one of its files should land. */
   filesPanel?: FilesPanelLink | null;
+  /**
+   * Badges and cards open what they stand for. Off where the turns belong to
+   * a transcript the session page is not showing, which they then only sum up.
+   */
+  interactive?: boolean;
 }
 
-/**
- * Everything the orchestrator did for one prompt, in the order it happened:
- * reasoning, prose, the worksets it defined and the waves of threads it ran.
- */
-export const ModelMessage = memo(function ModelMessage({
+const ModelMessageBody = memo(function ModelMessageBody({
   turn,
+  previous,
   model,
   active,
   activity,
   isLast = false,
   selectedThreadEpisode,
-  selectedWorkset,
+  selectedGroupId = null,
   onSelectThread,
-  onSelectWorkset,
   userMessageIndex,
   userText = "",
   onRefresh = null,
@@ -125,8 +139,11 @@ export const ModelMessage = memo(function ModelMessage({
   readOnly = false,
   snapshotRevision = null,
   filesPanel = null,
-}: ModelMessageProps) {
+  interactive = true,
+}: ModelMessageProps & { previous: TranscriptTurn | undefined }) {
   perfRender("ModelMessage");
+  const items = useMemo(() => partitionModelTurn(turn, previous), [turn, previous]);
+  const compacting = active && activity === COMPACTION_ACTIVITY;
   const canRefresh = !readOnly && onRefresh != null && userMessageIndex != null;
   const canRevert = !readOnly && onRevert != null && userMessageIndex != null;
   const forkIndex = turn.messageIndex;
@@ -165,73 +182,54 @@ export const ModelMessage = memo(function ModelMessage({
           ) : null}
         </div>
 
-        <div
-          className={cn(
-            "chat-response chat-response-content paragraph-medium text-basic-secondary relative w-full min-w-0 md:pl-3",
-            active && "streaming",
-          )}
-        >
-          {turn.blocks.map((block) => {
-            switch (block.kind) {
-              case "thoughts":
-                // Empty reasoning (e.g. stripped tool-call markup, or a bare
-                // thinking signal with no text) should not leave a hollow badge.
-                if (!block.text.trim()) return null;
-                return (
-                  <ChatBadge
-                    key={block.key}
-                    label={thoughtsLabel(block)}
-                    pending={block.streaming}
-                    body={block.text}
-                  />
-                );
-              case "text":
-                if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
-                return (
-                  <Markdown key={block.key} streaming={active}>
-                    {block.text}
-                  </Markdown>
-                );
-              case "workset":
-                return (
-                  <ChatBadge
-                    key={block.key}
-                    label={
-                      block.worksetId
-                        ? `Worksets_${block.worksetId}`
-                        : block.pending
-                          ? "Defining worksets…"
-                          : "Worksets"
-                    }
-                    pending={block.pending}
-                    active={selectedWorkset === block.worksetId}
-                    onClick={() => onSelectWorkset(block.worksetId)}
-                  />
-                );
-              case "tool":
-                return (
-                  <ChatBadge
-                    key={block.key}
-                    label={block.pending ? `${block.name}…` : block.name}
-                    pending={block.pending}
-                  />
-                );
-              case "tool-detail":
-                return <ToolCallDetail key={block.key} tool={block.presentation} />;
-              case "wave":
-                return (
-                  <ThreadWave
-                    key={block.key}
-                    rows={block.rows}
-                    selected={selectedThreadEpisode}
-                    onSelect={onSelectThread}
-                  />
-                );
-              default:
-                return null;
+        <div className="flex w-full min-w-0 flex-col items-start gap-6 md:pl-2">
+          {items.map((item, index) => {
+            if (item.kind === "group") {
+              return (
+                <TranscriptGroupBadge
+                  key={item.id}
+                  group={item.group}
+                  active={active}
+                  trailing={!compacting && index === items.length - 1}
+                  selected={item.id === selectedGroupId}
+                  interactive={interactive}
+                />
+              );
             }
+            if (item.kind === "session") {
+              return <TranscriptSessionCard key={item.id} entry={item} interactive={interactive} />;
+            }
+            const { block } = item;
+            if (block.kind === "wave") {
+              return (
+                <ThreadWave
+                  key={block.key}
+                  rows={block.rows}
+                  selected={selectedThreadEpisode}
+                  onSelect={onSelectThread}
+                />
+              );
+            }
+            if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
+            return (
+              <Markdown
+                key={block.key}
+                streaming={active}
+                // The prose skin's paragraph margins would add to the gap between items.
+                className="[&>:first-child]:!mt-0 [&>:last-child]:!mb-0"
+              >
+                {block.text}
+              </Markdown>
+            );
           })}
-          {snapshotRevision && filesPanel ? (
+          {/* Compaction runs between model calls, so nothing above moves while it
+              does; the shell stands in for a run that has produced nothing yet. */}
+          {compacting ? (
+            <RunStatusBadge label={COMPACTION_ACTIVITY} />
+          ) : active && items.length === 0 ? (
+            <RunStatusBadge label="Thinking…" />
+          ) : null}
+          {!active && snapshotRevision && filesPanel ? (
             <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
           ) : null}
           {cancelled ? (
@@ -354,4 +352,14 @@ export const ModelMessage = memo(function ModelMessage({
       </div>
     </div>
   );
+});
+
+/**
+ * Everything the model did for one prompt, in the order it happened: groups of
+ * reasoning and tool calls, prose, the sessions it launched and the waves of
+ * threads it ran.
+ */
+export const ModelMessage = memo(function ModelMessage(props: ModelMessageProps) {
+  const previous = usePreviousTurn(props.turn);
+  return <ModelMessageBody {...props} previous={previous} />;
 });

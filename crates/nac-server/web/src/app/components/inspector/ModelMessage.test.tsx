@@ -25,9 +25,7 @@ describe("transcript topology badge navigation", () => {
         model="gpt-5.6-sol"
         active={false}
         selectedThreadEpisode={null}
-        selectedWorkset={null}
         onSelectThread={vi.fn()}
-        onSelectWorkset={vi.fn()}
         userMessageIndex={0}
         onRefresh={refresh}
       />,
@@ -37,8 +35,7 @@ describe("transcript topology badge navigation", () => {
     expect(refresh).toHaveBeenCalledWith(0);
   });
 
-  it("selects the referenced workset and thread episode", () => {
-    const onSelectWorkset = vi.fn();
+  it("sums the workset up in a badge and selects the thread episode", () => {
     const onSelectThread = vi.fn();
     const turn: ModelTurn = {
       kind: "model",
@@ -73,14 +70,11 @@ describe("transcript topology badge navigation", () => {
         model="gpt-5.6-sol"
         active={false}
         selectedThreadEpisode={null}
-        selectedWorkset={null}
         onSelectThread={onSelectThread}
-        onSelectWorkset={onSelectWorkset}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Worksets_release" }));
-    expect(onSelectWorkset).toHaveBeenCalledWith("release");
+    fireEvent.click(screen.getByRole("button", { name: "Workset" }));
 
     fireEvent.click(screen.getByRole("button", { name: /api/i }));
     expect(onSelectThread).toHaveBeenCalledWith("api", "api:0");
@@ -101,9 +95,7 @@ describe("transcript topology badge navigation", () => {
         model="gpt-5.6-sol"
         active={false}
         selectedThreadEpisode={null}
-        selectedWorkset={null}
         onSelectThread={vi.fn()}
-        onSelectWorkset={vi.fn()}
         userMessageIndex={0}
         onRefresh={vi.fn()}
         onRevert={vi.fn()}

@@ -122,12 +122,10 @@ export function Transcript({
   } = useNativeRuntime().stores.runtimeStore;
 
   const {
-    useSelectedWorkset,
     useSelectedThreadEpisode,
     useSelectedInsight,
     useSelectedRevision,
     useSelectedFile,
-    selectWorkset,
     selectRevision,
     selectFile,
   } = useNativeRuntime().stores.sessionLayoutStore;
@@ -140,7 +138,7 @@ export function Transcript({
   const selectedInsight = useSelectedInsight();
   const threadEpisode = useSelectedThreadEpisode();
   const selectedThreadEpisode = selectedInsight?.kind === "thread" ? threadEpisode : null;
-  const selectedWorkset = useSelectedWorkset();
+  const selectedGroupId = selectedInsight?.kind === "group" ? selectedInsight.groupId : null;
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const toast = useToast();
@@ -334,13 +332,6 @@ export function Transcript({
   const showModelPending = (running || showPending) && !liveTurn;
 
   const { openThread } = useInsightsNavigation();
-  const focusWorkset = useCallback(
-    (id: string) => {
-      selectWorkset(id);
-      onFocusPanel("worksets");
-    },
-    [onFocusPanel, selectWorkset],
-  );
   // Opening a snapshot points the panel at that run's revision rather than at
   // the working tree: the run is what the badge describes, and the tree has
   // usually moved on — or been committed — since.
@@ -561,9 +552,8 @@ export function Transcript({
                   isLast={lastIsThisRun && !showModelPending}
                   activity={running && lastIsThisRun ? activity : undefined}
                   selectedThreadEpisode={panel === "insights" ? selectedThreadEpisode : null}
-                  selectedWorkset={panel === "worksets" ? selectedWorkset : null}
+                  selectedGroupId={panel === "insights" ? selectedGroupId : null}
                   onSelectThread={openThread}
-                  onSelectWorkset={focusWorkset}
                   userMessageIndex={precedingUser?.messageIndex}
                   userText={precedingUser?.text}
                   actionsDisabled={actionsBusy}
@@ -639,9 +629,7 @@ export function Transcript({
               active
               isLast
               selectedThreadEpisode={panel === "insights" ? selectedThreadEpisode : null}
-              selectedWorkset={panel === "worksets" ? selectedWorkset : null}
               onSelectThread={openThread}
-              onSelectWorkset={focusWorkset}
             />
           ) : null}
 

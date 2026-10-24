@@ -1,0 +1,133 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { memo } from "react";
+import { useHref } from "react-router-dom";
+
+import { SubagentCardStatus, SubagentTranscriptCard } from "@/app/atoms";
+import { cardStatus, type CardStatus } from "@/app/features/delegation/presentation/cardStatus";
+import type { InsightSessionEntry } from "@/app/features/insights/model/types";
+import { useTranscriptSessionId } from "@/app/features/insights/transcript/transcriptTurns";
+import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
+import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
+import { routes } from "@/app/lib/routes";
+import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
+import { queryKeys } from "@/app/services/queries/keys";
+import type { ManagedOrchestratorRecord, TraditionalChildRecord } from "@/app/types/api";
+
+type LaunchedRecord = TraditionalChildRecord | ManagedOrchestratorRecord;
+
+const LINEAGE = {
+  "spawn-agent": "traditional-child",
+  "spawn-orchestrator": "managed-orchestrator",
+} as const;
+
+function recordId(record: LaunchedRecord): string {
+  return "child_session_id" in record ? record.child_session_id : record.orchestrator_session_id;
+}
+
+function launchedRecord(
+  records: readonly LaunchedRecord[] | undefined,
+  spawnedId: string | undefined,
+): LaunchedRecord | undefined {
+  return spawnedId ? records?.find((record) => recordId(record) === spawnedId) : undefined;
+}
+
+/**
+ * The parent's delegated sessions of the launched kind. They are fetched until
+ * they are known, and then only while the launch or the session it started is
+ * still running, so a long transcript of settled cards polls nothing.
+ */
+function useLaunchedRecords(entry: InsightSessionEntry, parentId: string | null) {
+  const client = useQueryClient();
+  const agent = entry.action === "spawn-agent";
+  const parent = parentId ?? "";
+  const known = client.getQueryState<LaunchedRecord[]>(
+    agent ? queryKeys.traditionalChildren(parent) : queryKeys.managedOrchestrators(parent),
+  );
+  const unsettled = entry.status === "running" || entry.status === "pending";
+  const live =
+    parentId !== null &&
+    (unsettled ||
+      (known?.data === undefined && known?.status !== "error") ||
+      launchedRecord(known?.data, entry.presentation.spawnedSessionId)?.status === "running");
+  const agents = useTraditionalChildren(parent, agent && live);
+  const orchestrators = useManagedOrchestrators(parent, !agent && live);
+  return agent ? agents : orchestrators;
+}
+
+interface CardState extends CardStatus {
+  title: string;
+  /** The launch resolved to one of the parent's own sessions, which may be opened. */
+  sessionId: string | null;
+}
+
+/**
+ * The launch reports the session it started, but the model can put anything
+ * in that report, so only a session the parent really has is shown as such.
+ */
+function cardState(
+  entry: InsightSessionEntry,
+  records: readonly LaunchedRecord[] | undefined,
+  loading: boolean,
+): CardState {
+  const record = launchedRecord(records, entry.presentation.spawnedSessionId);
+  if (record) {
+    return {
+      ...cardStatus(record.status),
+      title: record.description.trim() || entry.title,
+      sessionId: recordId(record),
+    };
+  }
+  const { title } = entry;
+  if (entry.status === "running")
+    return { status: SubagentCardStatus.Running, title, sessionId: null };
+  if (entry.status === "pending") {
+    return {
+      status: SubagentCardStatus.Running,
+      label: entry.presentation.statusLabel,
+      title,
+      sessionId: null,
+    };
+  }
+  if (entry.status === "failed") {
+    return {
+      status: SubagentCardStatus.Failed,
+      label: entry.presentation.statusLabel,
+      title,
+      sessionId: null,
+    };
+  }
+  if (loading) return { status: SubagentCardStatus.Ready, title, sessionId: null };
+  return { status: SubagentCardStatus.NotFound, title, sessionId: null };
+}
+
+/**
+ * A session the turn launched, with its live status. Opens it in Subagents and
+ * links to its own page; without `interactive` it is a plain summary.
+ */
+export const TranscriptSessionCard = memo(function TranscriptSessionCard({
+  entry,
+  interactive,
+}: {
+  entry: InsightSessionEntry;
+  interactive: boolean;
+}) {
+  const parentId = useTranscriptSessionId();
+  const query = useLaunchedRecords(entry, parentId);
+  const state = cardState(entry, query.data, query.isPending && query.fetchStatus === "fetching");
+  const showBehaviorIcon = useSessionBehaviorIconVisible();
+  const { openSubagent } = useInsightsNavigation();
+  const sessionHref = useHref(routes.session(state.sessionId ?? ""));
+  // The row key is built from the report, which resolved to this very session.
+  const rowKey = interactive && state.sessionId !== null ? entry.rowKey : null;
+  return (
+    <SubagentTranscriptCard
+      title={state.title}
+      status={state.status}
+      statusLabel={state.label}
+      lineage={LINEAGE[entry.action]}
+      showBehaviorIcon={showBehaviorIcon}
+      onOpen={rowKey ? () => openSubagent(rowKey) : undefined}
+      sessionHref={rowKey ? sessionHref : null}
+    />
+  );
+});

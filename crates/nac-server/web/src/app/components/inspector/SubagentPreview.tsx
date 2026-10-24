@@ -30,7 +30,6 @@ import {
 import { useLoadOlderMessages, useSessionSnapshot } from "@/app/services/queries";
 
 function ignoreThread(): void {}
-function ignoreWorkset(): void {}
 
 /** Text of the newest user bubble, or null when the chat opens with the model. */
 function lastUserText(turns: TranscriptTurn[]): string | null {
@@ -230,10 +229,10 @@ export function SubagentPreview({
                     active={running && lastIsThisRun}
                     isLast={false}
                     selectedThreadEpisode={null}
-                    selectedWorkset={null}
+                    selectedGroupId={null}
                     onSelectThread={ignoreThread}
-                    onSelectWorkset={ignoreWorkset}
                     readOnly
+                    interactive={false}
                   />
                 );
                 return streamingTurn && turn.key === STREAMING_TURN_KEY ? (
@@ -266,10 +265,9 @@ export function SubagentPreview({
                   active
                   isLast={false}
                   selectedThreadEpisode={null}
-                  selectedWorkset={null}
                   onSelectThread={ignoreThread}
-                  onSelectWorkset={ignoreWorkset}
                   readOnly
+                  interactive={false}
                 />
               ) : null}
               {turns.length === 0 && !running && fallbackText ? (
