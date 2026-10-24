@@ -10,6 +10,29 @@ import { STREAMING_TURN_KEY } from "@/app/lib/transcript";
 const LEADING_HEADING = "Earlier messages";
 const STREAMING_HEADING = "New prompt";
 
+function verticalScroller(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+  }
+  return null;
+}
+
+/**
+ * `scrollIntoView({ block: "nearest" })` limited to the list's own scroller.
+ * The native call also scrolls every clipping ancestor, and the collapsed side
+ * panel sits off-screen inside one: revealing a row there shifted the session.
+ */
+function revealRow(row: HTMLElement): void {
+  const scroller = verticalScroller(row);
+  if (!scroller) return;
+  const viewTop = scroller.getBoundingClientRect().top + scroller.clientTop;
+  const viewBottom = viewTop + scroller.clientHeight;
+  const { top, bottom } = row.getBoundingClientRect();
+  if (top < viewTop) scroller.scrollTop += top - viewTop;
+  else if (bottom > viewBottom) scroller.scrollTop += Math.min(bottom - viewBottom, top - viewTop);
+}
+
 export function InsightsList({
   sections,
   pendingPrompt,
@@ -29,7 +52,8 @@ export function InsightsList({
 
   useEffect(() => {
     const picked = listRef.current?.querySelectorAll<HTMLElement>('[aria-pressed="true"]');
-    picked?.[picked.length - 1]?.scrollIntoView?.({ block: "nearest" });
+    const row = picked?.[picked.length - 1];
+    if (row) revealRow(row);
   }, [focusNonce]);
 
   if (!sections.length) {
