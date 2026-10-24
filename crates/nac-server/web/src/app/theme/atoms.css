@@ -686,13 +686,140 @@
 }
 
 /* ============================ TABS ============================ */
+/* Tab buttons keep the matrix's fixed height and inline padding, so rows with
+   two lines of content still fit, and take their own colours below: the
+   Figma tab button binds other state tokens than the ghost buttons. */
 .tab-btn {
   justify-content: flex-start;
 }
-/* Only the touch-sized rows are used, and the design spaces their 24px icons
-   further from the label than `.btn-large`'s 8px. */
+.tab-btn.btn-small {
+  height: 28px;
+  gap: 4px;
+}
 .tab-btn.btn-large {
   gap: 12px;
+}
+
+.tab-btn-regular {
+  color: var(--color-text-btn-secondary);
+  background-color: var(--color-bg-btn-ghost);
+}
+.tab-btn-regular:hover {
+  color: var(--color-text-btn-secondary-hovered);
+  background-color: var(--color-bg-btn-secondary-hovered);
+}
+.tab-btn-regular:active {
+  color: var(--color-text-btn-secondary-pressed);
+  background-color: var(--color-bg-btn-secondary-pressed);
+}
+.tab-btn-regular.tab-btn-active {
+  color: var(--color-text-btn-secondary-highlighted);
+  background-color: var(--color-bg-btn-secondary-highlighted);
+}
+.tab-btn-regular.tab-btn-active:hover {
+  background-color: var(--color-bg-btn-ghost-highlighted-hovered);
+}
+.tab-btn-regular.tab-btn-active:active {
+  color: var(--color-text-btn-secondary-pressed-highlighted);
+  background-color: var(--color-bg-btn-ghost-highlighted-pressed);
+}
+
+/* Accent and destructive labels and icons keep their resting colour. */
+.tab-btn-accent {
+  color: var(--color-text-btn-accent);
+  background-color: var(--color-bg-btn-ghost-accent);
+}
+.tab-btn-accent:hover {
+  background-color: var(--color-bg-btn-ghost-accent-hovered);
+}
+.tab-btn-accent:active {
+  background-color: var(--color-bg-btn-secondary-accent-pressed);
+}
+.tab-btn-accent.tab-btn-active {
+  background-color: var(--color-bg-btn-secondary-accent-highlighted);
+}
+.tab-btn-accent.tab-btn-active:hover {
+  background-color: var(--color-bg-btn-secondary-accent-highlighted-hovered);
+}
+.tab-btn-accent.tab-btn-active:active {
+  background-color: var(--color-bg-btn-secondary-accent-pressed);
+}
+
+.tab-btn-destructive {
+  color: var(--color-text-btn-destructive);
+  background-color: var(--color-bg-btn-ghost-destructive);
+}
+.tab-btn-destructive:hover {
+  background-color: var(--color-bg-btn-ghost-destructive-hovered);
+}
+.tab-btn-destructive:active {
+  background-color: var(--color-bg-btn-ghost-destructive-pressed);
+}
+.tab-btn-destructive.tab-btn-active {
+  background-color: var(--color-bg-btn-secondary-destructive);
+}
+.tab-btn-destructive.tab-btn-active:hover {
+  background-color: var(--color-bg-btn-secondary-destructive-hovered);
+}
+.tab-btn-destructive.tab-btn-active:active {
+  background-color: var(--color-bg-btn-secondary-destructive-pressed);
+}
+
+.tab-btn.btn-disabled,
+.tab-btn.btn-disabled:hover,
+.tab-btn.btn-disabled:active {
+  background-color: var(--color-bg-btn-ghost-disabled);
+}
+.tab-btn-regular.btn-disabled,
+.tab-btn-regular.btn-disabled:hover,
+.tab-btn-regular.btn-disabled:active {
+  color: var(--color-text-btn-secondary-disabled);
+}
+.tab-btn-regular.tab-btn-active.btn-disabled,
+.tab-btn-regular.tab-btn-active.btn-disabled:hover,
+.tab-btn-regular.tab-btn-active.btn-disabled:active {
+  color: var(--color-text-btn-secondary-disabled-highlighted);
+  background-color: var(--color-bg-btn-ghost-highlighted-disabled);
+}
+.tab-btn-accent.btn-disabled {
+  color: var(--color-text-btn-accent-disabled);
+}
+.tab-btn-destructive.btn-disabled {
+  color: var(--color-text-btn-destructive-disabled);
+}
+
+.tab-btn-regular .icon path {
+  fill: var(--color-fill-btn-secondary);
+}
+.tab-btn-regular:hover .icon path {
+  fill: var(--color-fill-btn-secondary-hovered);
+}
+.tab-btn-regular:active .icon path {
+  fill: var(--color-fill-btn-secondary-pressed);
+}
+.tab-btn-regular.tab-btn-active .icon path {
+  fill: var(--color-fill-btn-secondary-highlighted);
+}
+.tab-btn-regular.tab-btn-active:active .icon path {
+  fill: var(--color-fill-btn-secondary-pressed-highlighted);
+}
+.tab-btn-accent .icon path {
+  fill: var(--color-fill-btn-accent);
+}
+.tab-btn-destructive .icon path {
+  fill: var(--color-fill-btn-destructive);
+}
+.tab-btn-regular.btn-disabled .icon path {
+  fill: var(--color-fill-btn-secondary-disabled);
+}
+.tab-btn-regular.tab-btn-active.btn-disabled .icon path {
+  fill: var(--color-fill-btn-secondary-disabled-highlighted);
+}
+.tab-btn-accent.btn-disabled .icon path {
+  fill: var(--color-fill-btn-accent-muted);
+}
+.tab-btn-destructive.btn-disabled .icon path {
+  fill: var(--color-fill-btn-destructive-disabled);
 }
 
 /* The 2px underline sits inside the box, so an inset shadow keeps the label
