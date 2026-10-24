@@ -26,6 +26,7 @@ import {
   webContent,
 } from "@/app/features/insights/presentation/items/SearchItems";
 import { sessionContent } from "@/app/features/insights/presentation/items/SessionItems";
+import { useErrorLine } from "@/app/features/insights/presentation/items/useErrorLine";
 import {
   deleteThreadContent,
   worksetContent,
@@ -81,13 +82,6 @@ function loadingTitle(segment: InsightSegment, status: ActionStatus): string {
   return inProgressLabel(segment).replace(TRAILING_ELLIPSIS, "");
 }
 
-function errorMessage(segment: InsightSegment): string | null {
-  if (segment.kind !== "tool" || !segment.presentation) return null;
-  const { status, statusLabel, resultPreview } = segment.presentation;
-  if (status === "error") return resultPreview || statusLabel;
-  return resultPreview ? `${statusLabel}: ${resultPreview}` : statusLabel;
-}
-
 export function InsightSegmentItem({
   segment,
   active,
@@ -100,6 +94,7 @@ export function InsightSegmentItem({
   const status = segmentStatus(segment);
   const state = itemState(status);
   const content = segmentContent(segment, context);
+  const error = useErrorLine(segment, context.sessionId, state === InsightItemState.Error);
   return (
     <InsightItem
       icon={detailIcon(segmentAction(segment))}
@@ -107,7 +102,8 @@ export function InsightSegmentItem({
       state={state}
       active={active}
       copyText={content.copyText}
-      errorMessage={state === InsightItemState.Error ? errorMessage(segment) : null}
+      errorMessage={error.message}
+      errorAction={error.action}
     >
       {content.body?.(state)}
     </InsightItem>
