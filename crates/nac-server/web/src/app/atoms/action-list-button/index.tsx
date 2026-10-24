@@ -15,7 +15,7 @@ export enum ActionListButtonStatus {
 interface ActionListButtonProps {
   /**
    * Type icon, shown while Ready. The other statuses bring their own glyph,
-   * and a Ready group row shows its disclosure chevron instead.
+   * and a group row shows its disclosure chevron in every status instead.
    */
   icon: IconName;
   label: string;
@@ -43,6 +43,19 @@ const STATUS_NAME: Record<ActionListButtonStatus, string | null> = {
   [ActionListButtonStatus.Failed]: "failed",
 };
 
+function Chevron({ expanded }: { expanded: boolean }) {
+  return (
+    <Icon
+      iconName={IconName.Right}
+      size={16}
+      className={cn(
+        "shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none",
+        expanded && "rotate-90",
+      )}
+    />
+  );
+}
+
 function StatusGlyph({
   icon,
   status,
@@ -52,6 +65,7 @@ function StatusGlyph({
   status: ActionListButtonStatus;
   expanded: boolean | undefined;
 }) {
+  if (expanded !== undefined) return <Chevron expanded={expanded} />;
   // The `!` fills beat `.btn-ghost .icon path { fill: … }` from atoms.css, hover included.
   switch (status) {
     case ActionListButtonStatus.Running:
@@ -73,14 +87,7 @@ function StatusGlyph({
         />
       );
     default:
-      if (expanded === undefined) return <Icon iconName={icon} size={16} className="shrink-0" />;
-      return (
-        <Icon
-          iconName={IconName.Right}
-          size={16}
-          className={cn("shrink-0 transition-transform", expanded && "rotate-90")}
-        />
-      );
+      return <Icon iconName={icon} size={16} className="shrink-0" />;
   }
 }
 
