@@ -156,6 +156,7 @@ const VERBATIM_ACTIONS: ReadonlySet<ActionKind> = new Set([
 const COMMAND_LABEL_LIMIT = 40;
 const TRAILING_ELLIPSIS = /\s*…+$/u;
 const AWAITING_APPROVAL_LABEL = "Awaiting approval…";
+const GROUP_RUNNING_LABEL = "Working…";
 
 function basename(path: string): string | null {
   const trimmed = path.replace(/[\\/]+$/, "");
@@ -257,7 +258,7 @@ export function groupSummaryLabel(group: InsightGroup): string {
   return labels.length > 2 ? `${shown} and more` : shown;
 }
 
-/** Transcript badge label once the group has settled. */
+/** Label of a settled group, on its transcript badge and its Insights row. */
 export function doneLabel(group: InsightGroup): string {
   if (group.durationMs === null) return groupSummaryLabel(group);
   return `Worked for ${formatBadgeDuration(group.durationMs)}`;
@@ -328,11 +329,10 @@ export function entryRow(entry: InsightEntry): InsightRow {
   }
   const { group } = entry;
   if (group.segments.length === 1) return segmentRow(group.segments[0]);
-  const summary = groupSummaryLabel(group);
   return stateRow(null, group.status, {
-    ready: summary,
+    ready: doneLabel(group),
     meta: entryMeta(entry),
-    failed: summary,
-    running: `${summary}…`,
+    failed: groupSummaryLabel(group),
+    running: GROUP_RUNNING_LABEL,
   });
 }

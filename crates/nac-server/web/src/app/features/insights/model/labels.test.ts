@@ -262,7 +262,7 @@ describe("insight labels", () => {
     });
     expect(entryRow(running)).toEqual({
       action: null,
-      label: "Thoughts, Edit File…",
+      label: "Working…",
       meta: null,
       status: "running",
     });
