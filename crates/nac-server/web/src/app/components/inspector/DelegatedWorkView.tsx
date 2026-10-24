@@ -195,7 +195,12 @@ export function DelegatedWorkView({
   );
 
   return (
-    <PanelSplit listTitle="Subagents" title={selected?.description} list={list}>
+    <PanelSplit
+      listTitle="Subagents"
+      title={selected?.description}
+      listClassName="py-6"
+      list={list}
+    >
       <div className="flex min-h-0 flex-1 flex-col">
         {selected ? (
           <>

@@ -171,7 +171,7 @@ export function SubagentPreview({
           onClick={() => navigate(routes.session(sessionId))}
         >
           Open
-          <Icon iconName={IconName.Right} />
+          <Icon iconName={IconName.External} />
         </Button>
       </div>
       <div className="relative min-h-0 flex-1">
