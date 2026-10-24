@@ -17,6 +17,11 @@ import { ScriptGate } from "./scripted-provider";
 
 const WORKED_FOR_BADGE = /^Worked for \d+\.\ds$/;
 
+/** The Insights row of a measured group, named by its time and its step count or failure. */
+function workedForRow(meta: number | "failed"): RegExp {
+  return new RegExp(`^Worked for \\d+\\.\\ds, ${meta}$`);
+}
+
 /** Match the page's browser profile, which can differ from the test host. */
 async function newChatChord(page: Page): Promise<string> {
   const isMac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
@@ -246,7 +251,7 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
     const row = (status?: string) =>
       status
         ? page.getByRole("button", { name: `${command}, Exec, ${status}`, exact: true })
-        : page.getByRole("button", { name: "Run command, 1", exact: true });
+        : page.getByRole("button", { name: workedForRow(1) });
     const item = page.getByRole("group", { name: command, exact: true });
     await expect(
       page.getByRole("button", { name: "Awaiting approval…", exact: true }),
@@ -316,7 +321,7 @@ test("renders a per-call command deadline distinctly through settlement and relo
   await expect(page.getByText("deadline observed")).toBeVisible();
 
   const badge = page.getByRole("button", { name: WORKED_FOR_BADGE });
-  const failedRow = page.getByRole("button", { name: "Run command, failed", exact: true });
+  const failedRow = page.getByRole("button", { name: workedForRow("failed") });
   const item = page.getByRole("group", { name: "sleep 30", exact: true });
   await badge.click();
   await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/insights$`));
@@ -424,7 +429,7 @@ test("keeps approval state and actions reachable with many remembered permission
   await expect(page.getByText("permission journey complete")).toBeVisible();
   await page.getByRole("button", { name: WORKED_FOR_BADGE }).click();
   await expect(
-    page.getByRole("button", { name: `Read File, ${rememberedRequests + 1}`, exact: true }),
+    page.getByRole("button", { name: workedForRow(rememberedRequests + 1) }),
   ).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("group", { name: "File Read", exact: true })).toHaveCount(
     rememberedRequests + 1,
@@ -511,7 +516,7 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   ).toBeVisible();
   // Both reads settle in one badge; Insights lists the group as two successful reads.
   await page.getByRole("button", { name: WORKED_FOR_BADGE }).click();
-  await expect(page.getByRole("button", { name: "Read File, 2", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: workedForRow(2) })).toHaveAttribute(
     "aria-pressed",
     "true",
   );

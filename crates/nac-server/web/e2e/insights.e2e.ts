@@ -163,7 +163,7 @@ test("opens a transcript group in Insights from its badge", async ({ harness, pa
   const readBadge = badges.nth(0);
   const searchBadge = badges.nth(1);
   const readRow = page.getByRole("button", { name: /^Worked for \d+\.\ds, 1$/ });
-  const searchRow = page.getByRole("button", { name: "Find files, Read File, 2", exact: true });
+  const searchRow = page.getByRole("button", { name: /^Worked for \d+\.\ds, 2$/ });
   const fileRead = page.getByRole("group", { name: "File Read", exact: true });
   const findFiles = page.getByRole("group", { name: "Find files", exact: true });
 
