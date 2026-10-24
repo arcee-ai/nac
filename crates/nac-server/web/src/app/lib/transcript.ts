@@ -355,7 +355,7 @@ function eventsForEpisode(
  * here: the run ended without them, so a checkmark would claim work that never
  * ran.
  */
-export function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string> {
+function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string> {
   const cancelled = new Set<string>();
   messages.forEach((message, index) => {
     if (message.role !== "assistant") return;

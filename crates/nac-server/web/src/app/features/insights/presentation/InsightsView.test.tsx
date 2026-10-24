@@ -5,7 +5,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ThreadsView } from "@/app/components/inspector/ThreadsView";
+import { TranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
+import type { TranscriptModel } from "@/app/components/inspector/transcript/useTranscriptModel";
+import { InsightsView } from "@/app/features/insights/presentation/InsightsView";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import { resetRuntime, runtimeStore } from "@/app/store/runtimeStore";
@@ -21,6 +23,19 @@ vi.mock("@/app/hooks/useMediaQuery", () => ({
 
 const getThreadEvents = vi.spyOn(api, "getThreadEvents");
 const steerThread = vi.spyOn(api, "steerThread");
+
+/** No turns: the detail shows the thread the chat pointed Insights at. */
+const MODEL: TranscriptModel = {
+  turns: [],
+  snapshotTurns: [],
+  running: false,
+  optimisticPrompt: null,
+  submitted: null,
+  pendingText: "",
+  pendingSkills: null,
+  showPending: false,
+  streamingTurn: false,
+};
 
 function NavigateAway() {
   const navigate = useNavigate();
@@ -73,6 +88,12 @@ function mount({
           }
         : {},
   });
+  // What a thread card in the chat does through useInsightsNavigation.
+  sessionLayoutStore.setState({
+    selectedThread: "worker",
+    selectedThreadEpisode: null,
+    selectedInsight: { kind: "thread" },
+  });
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -81,12 +102,14 @@ function mount({
       <MemoryRouter>
         <ToastProvider>
           <NavigateAway />
-          <ThreadsView
-            snapshot={snapshot(phase === "terminal" ? [] : ["worker"])}
-            selected="worker"
-            onSelect={vi.fn()}
-            canSteerWorkers={canSteerWorkers}
-          />
+          <TranscriptModelContext.Provider value={MODEL}>
+            <InsightsView
+              sessionId="session"
+              snapshot={snapshot(phase === "terminal" ? [] : ["worker"])}
+              topology="orchestrator"
+              canSteerWorkers={canSteerWorkers}
+            />
+          </TranscriptModelContext.Provider>
         </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -120,10 +143,15 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetRuntime(null);
+  sessionLayoutStore.setState({
+    selectedThread: null,
+    selectedThreadEpisode: null,
+    selectedInsight: null,
+  });
   vi.unstubAllGlobals();
 });
 
-describe("classic worker steering", () => {
+describe("classic worker steering from the Insights thread detail", () => {
   it.each([
     ["desktop", false, false],
     ["tablet", false, true],
@@ -265,22 +293,28 @@ describe("classic worker steering", () => {
     expect(within(controls).getByRole("button", { name: "Steer" })).toBeTruthy();
   });
 
+  // Each case first checks the detail shows the worker, so a missing Steer is
+  // the capability boundary rather than an empty panel.
   it("hides steering for pending, terminal, and read-only workers", () => {
     mount({ phase: "pending" });
+    expect(screen.getByText("worker")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
 
     cleanup();
     mount({ phase: "terminal" });
+    expect(screen.getByText("worker")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
 
     cleanup();
     mount({ canSteerWorkers: false });
+    expect(screen.getByText("worker")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
   });
 
   it("does not treat an active snapshot entry as steerable while SSE reconnects", () => {
     mount({ phase: "pending", streamStatus: "reconnecting" });
 
+    expect(screen.getByText("worker")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
   });
 });
