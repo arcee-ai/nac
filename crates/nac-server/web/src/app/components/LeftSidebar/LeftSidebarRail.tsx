@@ -20,8 +20,9 @@ export function LeftSidebarRail({
   variant: "session" | "projects";
 }) {
   const projectsPage = variant === "projects";
+  // The border takes a pixel of the right inset, so the buttons keep a 36px column.
   return (
-    <div className="flex h-full flex-col justify-between p-2">
+    <div className="flex h-full flex-col justify-between border-r border-tertiary py-2 pr-[7px] pl-2">
       <div className="flex flex-col items-center gap-4 [&>*]:shrink-0">
         <button
           type="button"
