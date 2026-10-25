@@ -58,6 +58,7 @@ async fn assert_successor_delivery(
     assert_eq!(successor.child_session_id, original.child_session_id);
     assert_eq!(successor.generation, original.generation + 1);
     assert_ne!(successor.run_id, original.run_id);
+    assert_eq!(successor.execution_mode, item.child_execution_mode);
     tokio::time::timeout(Duration::from_secs(5), async {
         while service.has_active_operation() {
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -85,11 +86,27 @@ async fn assert_successor_delivery(
         .unwrap()
         .unwrap();
     assert_eq!(terminal.run_id, successor.run_id);
+    assert_eq!(terminal.execution_mode, item.child_execution_mode);
     assert_eq!(
         terminal.status,
         crate::store::TraditionalChildStatus::Completed
     );
     assert_eq!(terminal.report.as_deref(), Some("successor report"));
+    let completions = owner.list_session_inbox("parent".into()).await.unwrap();
+    if item.child_execution_mode == Some(TraditionalChildExecutionMode::Foreground) {
+        assert!(
+            completions.is_empty(),
+            "foreground result must not also be delivered as a background completion"
+        );
+        assert!(terminal.completion_inbox_id.is_none());
+    } else {
+        assert_eq!(
+            completions.len(),
+            1,
+            "background completion must be delivered exactly once"
+        );
+        assert_eq!(terminal.completion_inbox_id, Some(completions[0].id));
+    }
     // A later wait must still attribute this exact item to its delivered run.
     assert_eq!(
         service
@@ -178,6 +195,10 @@ async fn foreground_child_input_recovers_peer_exit_before_successor_admission() 
     let item = queued_input(&owner).await;
     assert_eq!(item.status, crate::store::InboxStatus::Pending);
     assert_eq!(item.target_run_id, original.run_id);
+    assert_eq!(
+        item.child_execution_mode,
+        Some(TraditionalChildExecutionMode::Foreground)
+    );
     assert!(!waiting.is_finished());
     assert!(service
         .start_next_direct_inbox_item()
@@ -280,6 +301,54 @@ async fn queued_child_input_survives_waiter_exit_and_recovery_crash_windows() {
         owner.shutdown().await.unwrap();
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
+}
+
+#[tokio::test]
+async fn recovered_background_child_input_retains_exactly_one_parent_completion() {
+    let server = successor_server();
+    let (service, path, original) = abandoned_child_with_client(
+        "background_child_peer_exit",
+        Some("relationship-run"),
+        ModelClient::new_for_test_server(server.base_url.clone()),
+    );
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    let accepted = service
+        .submit_or_steer_traditional_child(
+            "parent",
+            QUEUED_PROMPT.into(),
+            TraditionalChildExecutionMode::Background,
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted.generation, original.generation);
+    let item = queued_input(&owner).await;
+    assert_eq!(
+        item.child_execution_mode,
+        Some(TraditionalChildExecutionMode::Background)
+    );
+    drop(peer);
+    service
+        .start_next_direct_inbox_item()
+        .await
+        .unwrap()
+        .unwrap();
+    let successor = service
+        .wait_for_child_input_delivery(item.id)
+        .await
+        .unwrap();
+    assert_successor_delivery(
+        &service,
+        &owner,
+        &original,
+        &item,
+        successor,
+        crate::store::TraditionalChildStatus::Interrupted,
+        server,
+    )
+    .await;
+    owner.shutdown().await.unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[tokio::test]

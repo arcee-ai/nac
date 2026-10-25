@@ -128,7 +128,7 @@ fn migration_35_seeds_only_available_terminal_generations_and_is_restartable() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        35
+        crate::store::schema_version()
     );
     assert!(connection
         .prepare("PRAGMA foreign_key_check")

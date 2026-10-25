@@ -513,6 +513,7 @@ impl SessionService {
                     Some(lease),
                     RunAdmissionKind {
                         inbox_item_id: Some(item.id),
+                        child_execution_mode: item.child_execution_mode,
                         terminal_selection: item.terminal_selection,
                         ..RunAdmissionKind::default()
                     },

@@ -173,13 +173,12 @@ impl SessionService {
                 return Ok(ChildInputTransition::Finishing(run.settlement.subscribe()));
             }
             Some(ActiveSessionOperation::Run(run)) => {
-                let input = crate::store::create_session_inbox_item(
+                let input = crate::store::create_traditional_child_inbox_item(
                     &self.metadata.store_path,
                     session_id,
-                    crate::store::InboxDelivery::Steer,
                     &prompt,
                     Some(run.snapshot.run_id.as_str()),
-                    None,
+                    execution_mode,
                 )?;
                 return Ok(ChildInputTransition::Queued(child, input.id));
             }
@@ -191,13 +190,12 @@ impl SessionService {
                     session_id,
                 ) {
                     Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                        let input = crate::store::create_session_inbox_item(
+                        let input = crate::store::create_traditional_child_inbox_item(
                             &self.metadata.store_path,
                             session_id,
-                            crate::store::InboxDelivery::Steer,
                             &prompt,
                             child.run_id.as_deref(),
-                            None,
+                            execution_mode,
                         )?;
                         return Ok(ChildInputTransition::Queued(child, input.id));
                     }
