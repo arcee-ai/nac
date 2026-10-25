@@ -6,7 +6,11 @@ use crate::store::{TraditionalChildExecutionMode, TraditionalChildRecord};
 
 enum ChildInputTransition {
     Accepted(TraditionalChildRecord),
-    Queued(TraditionalChildRecord, i64),
+    Queued(
+        TraditionalChildRecord,
+        i64,
+        Option<sessions::ChildInputWaitLease>,
+    ),
     Finishing(watch::Receiver<bool>),
     Recovering(sessions::SessionOperationLease),
 }
@@ -34,7 +38,7 @@ impl SessionService {
                 ChildInputTransition::Accepted(child) => {
                     return Ok(child);
                 }
-                ChildInputTransition::Queued(child, item_id) => {
+                ChildInputTransition::Queued(child, item_id, _wait_lease) => {
                     self.start_next_direct_inbox_item().await?;
                     if execution_mode == TraditionalChildExecutionMode::Background {
                         return Ok(child);
@@ -173,14 +177,18 @@ impl SessionService {
                 return Ok(ChildInputTransition::Finishing(run.settlement.subscribe()));
             }
             Some(ActiveSessionOperation::Run(run)) => {
+                let wait_lease = (execution_mode == TraditionalChildExecutionMode::Foreground)
+                    .then(|| sessions::ChildInputWaitLease::new(&self.metadata.store_path))
+                    .transpose()?;
                 let input = crate::store::create_traditional_child_inbox_item(
                     &self.metadata.store_path,
                     session_id,
                     &prompt,
                     Some(run.snapshot.run_id.as_str()),
                     execution_mode,
+                    wait_lease.as_ref().map(sessions::ChildInputWaitLease::id),
                 )?;
-                return Ok(ChildInputTransition::Queued(child, input.id));
+                return Ok(ChildInputTransition::Queued(child, input.id, wait_lease));
             }
             None if child.status == crate::store::TraditionalChildStatus::Running => {
                 // A busy OS lease, rather than a missing local task, proves a
@@ -190,14 +198,19 @@ impl SessionService {
                     session_id,
                 ) {
                     Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                        let wait_lease = (execution_mode
+                            == TraditionalChildExecutionMode::Foreground)
+                            .then(|| sessions::ChildInputWaitLease::new(&self.metadata.store_path))
+                            .transpose()?;
                         let input = crate::store::create_traditional_child_inbox_item(
                             &self.metadata.store_path,
                             session_id,
                             &prompt,
                             child.run_id.as_deref(),
                             execution_mode,
+                            wait_lease.as_ref().map(sessions::ChildInputWaitLease::id),
                         )?;
-                        return Ok(ChildInputTransition::Queued(child, input.id));
+                        return Ok(ChildInputTransition::Queued(child, input.id, wait_lease));
                     }
                     Err(error) => return Err(error.into()),
                     Ok(lease) => {

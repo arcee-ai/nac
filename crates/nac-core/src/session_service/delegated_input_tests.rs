@@ -58,14 +58,23 @@ async fn assert_successor_delivery(
     assert_eq!(successor.child_session_id, original.child_session_id);
     assert_eq!(successor.generation, original.generation + 1);
     assert_ne!(successor.run_id, original.run_id);
-    assert_eq!(successor.execution_mode, item.child_execution_mode);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while service.has_active_operation() {
+
+    let terminal = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(terminal) = owner
+                .load_traditional_child_terminal_receipt("child".into(), successor.generation)
+                .await
+                .unwrap()
+            {
+                if !service.has_active_operation() {
+                    return terminal;
+                }
+            }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
     .await
-    .expect("successor must settle");
+    .expect("successor must durably settle, including peer-owned runs");
     let inbox = owner.list_session_inbox("child".to_owned()).await.unwrap();
     assert_eq!(inbox.len(), 1, "recovery must never requeue submitted text");
     assert_eq!(inbox[0].id, item.id);
@@ -80,20 +89,15 @@ async fn assert_successor_delivery(
         .unwrap();
     assert_eq!(old.run_id, original.run_id);
     assert_eq!(old.status, old_status);
-    let terminal = owner
-        .load_traditional_child_terminal_receipt("child".into(), successor.generation)
-        .await
-        .unwrap()
-        .unwrap();
     assert_eq!(terminal.run_id, successor.run_id);
-    assert_eq!(terminal.execution_mode, item.child_execution_mode);
+    assert_eq!(terminal.execution_mode, successor.execution_mode);
     assert_eq!(
         terminal.status,
         crate::store::TraditionalChildStatus::Completed
     );
     assert_eq!(terminal.report.as_deref(), Some("successor report"));
     let completions = owner.list_session_inbox("parent".into()).await.unwrap();
-    if item.child_execution_mode == Some(TraditionalChildExecutionMode::Foreground) {
+    if successor.execution_mode == Some(TraditionalChildExecutionMode::Foreground) {
         assert!(
             completions.is_empty(),
             "foreground result must not also be delivered as a background completion"
@@ -115,7 +119,18 @@ async fn assert_successor_delivery(
             .unwrap(),
         terminal
     );
-    let messages = service.messages_snapshot().await.unwrap();
+    let path = service.metadata.store_path.clone();
+    let messages = crate::store::spawn_blocking_store_caller(move || {
+        let mut messages = sessions::load_session(&path, "child").unwrap().messages;
+        let tail = crate::store::TranscriptLogWriter::new(&path)
+            .unwrap()
+            .read_tail_from("child", messages.len() as u64)
+            .unwrap();
+        messages.extend(tail.into_iter().map(|(_, message)| message));
+        messages
+    })
+    .await
+    .unwrap();
     assert_eq!(
         messages
             .iter()
@@ -225,6 +240,10 @@ async fn foreground_child_input_recovers_peer_exit_before_successor_admission() 
         .expect("peer exit must unblock foreground input")
         .unwrap()
         .unwrap();
+    assert_eq!(
+        successor.execution_mode,
+        Some(TraditionalChildExecutionMode::Foreground)
+    );
     assert_successor_delivery(
         &service,
         &owner,
@@ -279,11 +298,16 @@ async fn queued_child_input_survives_waiter_exit_and_recovery_crash_windows() {
             .await
             .unwrap()
             .unwrap();
-        let successor = service
-            .wait_for_child_input_delivery(item.id)
+        let successor = owner
+            .load_traditional_child("child".into())
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(successor.run_id.as_deref(), Some(run.run_id.as_str()));
+        assert_eq!(
+            successor.execution_mode,
+            Some(TraditionalChildExecutionMode::Background)
+        );
         assert_successor_delivery(
             &service,
             &owner,
@@ -337,6 +361,10 @@ async fn recovered_background_child_input_retains_exactly_one_parent_completion(
         .wait_for_child_input_delivery(item.id)
         .await
         .unwrap();
+    assert_eq!(
+        successor.execution_mode,
+        Some(TraditionalChildExecutionMode::Background)
+    );
     assert_successor_delivery(
         &service,
         &owner,
@@ -502,3 +530,6 @@ async fn child_input_recovery_accepts_a_terminal_pre_prompt_projection() {
     assert!(sessions::SessionOperationLease::try_acquire(&path, "child").is_ok());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[path = "delegated_input_wait_tests.rs"]
+mod waiter_tests;

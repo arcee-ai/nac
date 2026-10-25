@@ -64,6 +64,9 @@ impl std::str::FromStr for InboxStatus {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionInboxRecord {
+    #[serde(skip)]
+    #[cfg_attr(feature = "openapi", schema(ignore))]
+    pub child_wait_id: Option<String>,
     /// Durable child continuation mode; internal admission metadata only.
     #[serde(skip)]
     #[cfg_attr(feature = "openapi", schema(ignore))]
@@ -90,7 +93,7 @@ pub struct SessionInboxRecord {
 
 pub(crate) const INBOX_RECORD_COLUMNS: &str =
     "id, session_id, delivery, status, content, target_run_id, client_id, \
-     delivered_run_id, created_at, updated_at, delivered_at, cancelled_at, version, admission_id, admission_digest, child_execution_mode";
+     delivered_run_id, created_at, updated_at, delivered_at, cancelled_at, version, admission_id, admission_digest, child_execution_mode, child_wait_id";
 
 pub(crate) fn row_to_inbox_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionInboxRecord> {
     let delivery: String = row.get(2)?;
@@ -109,6 +112,7 @@ pub(crate) fn row_to_inbox_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<S
         rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, error.into())
     })?;
     Ok(SessionInboxRecord {
+        child_wait_id: row.get(16)?,
         child_execution_mode: row
             .get::<_, Option<String>>(15)?
             .map(|mode| mode.parse())
@@ -172,16 +176,24 @@ pub fn create_traditional_child_inbox_item(
     content: &str,
     target_run_id: Option<&str>,
     execution_mode: TraditionalChildExecutionMode,
+    wait_id: Option<&str>,
 ) -> Result<SessionInboxRecord> {
-    create_inbox_item(path, session_id, InboxDelivery::Steer, content, target_run_id, None, Some(execution_mode))
+    if let Some(id) = wait_id {
+        uuid::Uuid::parse_str(id)?;
+        if execution_mode != TraditionalChildExecutionMode::Foreground {
+            return Err(anyhow!("only foreground child input can own a waiter"));
+        }
+    }
+    create_inbox_item(path, session_id, InboxDelivery::Steer, content, target_run_id, None, Some((execution_mode, wait_id)))
 }
 command CreateTraditionalChildInboxItemCommand {
     session_id: String = session_id.to_owned(),
     content: String = content.to_owned(),
     target_run_id: Option<String> = target_run_id.map(str::to_owned),
     execution_mode: TraditionalChildExecutionMode = execution_mode,
+    wait_id: Option<String> = wait_id.map(str::to_owned),
 }
-call |command| (&command.session_id, &command.content, command.target_run_id.as_deref(), command.execution_mode)
+call |command| (&command.session_id, &command.content, command.target_run_id.as_deref(), command.execution_mode, command.wait_id.as_deref())
 correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
 port public;
 }
@@ -193,7 +205,7 @@ fn create_inbox_item(
     content: &str,
     target_run_id: Option<&str>,
     client_id: Option<&str>,
-    child_execution_mode: Option<TraditionalChildExecutionMode>,
+    child_admission: Option<(TraditionalChildExecutionMode, Option<&str>)>,
 ) -> Result<SessionInboxRecord> {
     let session_id = session_id.trim();
     let content = content.trim();
@@ -211,8 +223,8 @@ fn create_inbox_item(
     connection.execute(
         "INSERT INTO session_inbox
          (session_id, delivery, status, content, target_run_id, client_id,
-          created_at, updated_at, child_execution_mode)
-         VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?6, ?7)",
+          created_at, updated_at, child_execution_mode, child_wait_id)
+         VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?6, ?7, ?8)",
         params![
             session_id,
             delivery.as_str(),
@@ -220,7 +232,8 @@ fn create_inbox_item(
             target_run_id,
             client_id,
             now,
-            child_execution_mode.map(TraditionalChildExecutionMode::as_str),
+            child_admission.map(|(mode, _)| mode.as_str()),
+            child_admission.and_then(|(_, wait_id)| wait_id),
         ],
     )?;
     load_session_inbox_item_with_connection(&connection, session_id, connection.last_insert_rowid())

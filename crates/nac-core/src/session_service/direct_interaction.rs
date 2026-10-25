@@ -506,6 +506,26 @@ impl SessionService {
         if let Some(item) =
             crate::store::next_pending_session_inbox_item(&self.metadata.store_path, session_id)?
         {
+            // Select mode at the successor-admission boundary, under its
+            // operation lease and without an intervening async yield. A lost
+            // waiter leaves the same durable input eligible for background
+            // delivery. Once admitted, the generation's mode is immutable.
+            let child_execution_mode = match item.child_execution_mode {
+                Some(crate::store::TraditionalChildExecutionMode::Foreground) => {
+                    match item.child_wait_id.as_deref().map(|id| {
+                        sessions::ChildInputWaitLease::try_acquire(&self.metadata.store_path, id)
+                    }) {
+                        Some(Err(sessions::SessionOperationLeaseError::Busy(_))) => {
+                            item.child_execution_mode
+                        }
+                        Some(Err(error)) => return Err(error.into()),
+                        Some(Ok(_)) | None => {
+                            Some(crate::store::TraditionalChildExecutionMode::Background)
+                        }
+                    }
+                }
+                mode => mode,
+            };
             return self
                 .try_submit_prompt_inner(
                     None,
@@ -513,7 +533,7 @@ impl SessionService {
                     Some(lease),
                     RunAdmissionKind {
                         inbox_item_id: Some(item.id),
-                        child_execution_mode: item.child_execution_mode,
+                        child_execution_mode,
                         terminal_selection: item.terminal_selection,
                         ..RunAdmissionKind::default()
                     },
