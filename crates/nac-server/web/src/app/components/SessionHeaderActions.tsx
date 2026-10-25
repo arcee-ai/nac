@@ -11,7 +11,7 @@ import { sessionIdFromPath } from "@/app/lib/routes";
  * session's own actions are reached from the composer and the list.
  */
 export function SessionHeaderActions() {
-  const { toggleSidePanelExpanded } = useNativeRuntime().stores.sessionLayoutStore;
+  const { openSidePanelList } = useNativeRuntime().stores.sessionLayoutStore;
 
   const { pathname } = useLocation();
   const sessionId = sessionIdFromPath(pathname);
@@ -26,7 +26,7 @@ export function SessionHeaderActions() {
       content={ButtonContent.Icon}
       className="btn-round"
       aria-label="Open panel"
-      onClick={toggleSidePanelExpanded}
+      onClick={openSidePanelList}
     >
       <Icon iconName={IconName.OpenMobileModal} />
     </Button>

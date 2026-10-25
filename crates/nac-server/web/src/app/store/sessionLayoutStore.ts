@@ -183,6 +183,11 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     setState(expanded ? { expanded, panelList: false } : { expanded });
   }
 
+  /** Bring the side box up as a phone's dialog, on the list of its panel's rows. */
+  function openSidePanelList(): void {
+    setState({ expanded: true, panelList: true });
+  }
+
   /** Slide the side box down to its icon rail, or bring the panel back. */
   function toggleSidePanelCollapsed(): void {
     applyCollapsed(!getState().collapsed);
@@ -360,6 +365,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     bindSidePanelProject,
     unbindSidePanelProject,
     toggleSidePanelExpanded,
+    openSidePanelList,
     toggleSidePanelCollapsed,
     showSidePanelList,
     toggleSidePanelList,
@@ -403,6 +409,7 @@ export const {
   bindSidePanelProject,
   unbindSidePanelProject,
   toggleSidePanelExpanded,
+  openSidePanelList,
   toggleSidePanelCollapsed,
   showSidePanelList,
   toggleSidePanelList,

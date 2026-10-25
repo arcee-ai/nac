@@ -49,7 +49,8 @@ for (const [name, viewport, mobile] of [
       page.getByRole("alert").filter({ hasText: "Subagents could not be loaded" }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "Open list", exact: true }).click();
+    // A phone opens the panel on its list; a tablet reaches it from the detail's header.
+    if (!mobile) await page.getByRole("button", { name: "Open list", exact: true }).click();
     const list = subagentList(page, mobile);
     const alert = list.getByRole("alert").filter({ hasText: "Subagents could not be loaded" });
     await expect(alert).toBeVisible();
@@ -142,11 +143,12 @@ for (const [name, viewport, mobile] of [
     await page.setViewportSize(viewport);
     await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
     await showSubagents(page, mobile);
-    if (mobile) await page.getByRole("button", { name: "Open list", exact: true }).click();
-    // The newest child opens by default; pick the other one.
-    await subagentList(page, mobile)
-      .getByRole("button", { name: "Older child", exact: true })
-      .click();
+    // The newest child opens by default, and a phone opens on the list; pick the other one.
+    const olderRow = subagentList(page, mobile).getByRole("button", {
+      name: "Older child",
+      exact: true,
+    });
+    await olderRow.click();
     // The panel's composer, not the parent's own.
     const composer = page.locator("form").filter({
       has: page.getByRole("switch", { name: "Run in the background" }),
@@ -166,6 +168,8 @@ for (const [name, viewport, mobile] of [
     await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
     await showSubagents(page, mobile);
     await expect(page.getByText("Older child", { exact: true }).first()).toBeVisible();
+    // A phone reopens the panel on its list; the row brings back its composer.
+    if (mobile) await olderRow.click();
     await expect(draft).toHaveValue("E2E_PANEL_CONTINUATION continue from the panel");
 
     const starts: string[] = [];
@@ -195,6 +199,7 @@ for (const [name, viewport, mobile] of [
     await expect(childDraft).toBeEnabled();
     await page.getByRole("button", { name: "Parent chat" }).click();
     await showSubagents(page, mobile);
+    if (mobile) await olderRow.click();
     // A running composer has no background switch; its Steer field is the only one on the page.
     const steer = page.getByRole("textbox", { name: "Send a message" });
     await expect(steer).toHaveValue("");

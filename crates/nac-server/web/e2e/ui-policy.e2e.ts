@@ -164,8 +164,6 @@ for (const orchestration of [null, "0"] as const) {
           "aria-selected",
           "true",
         );
-        // A phone keeps the subagent rows in a list dialog of their own.
-        if (mobile) await page.getByRole("button", { name: "Open list", exact: true }).click();
         await expect(
           page.getByRole("button", { name: "Direct child policy", exact: true }),
         ).toBeVisible();

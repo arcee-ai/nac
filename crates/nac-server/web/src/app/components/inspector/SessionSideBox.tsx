@@ -17,6 +17,7 @@ import { TerminalWorkspace } from "@/app/features/terminal-selection/TerminalWor
 import { InsightsView } from "@/app/features/insights/presentation/InsightsView";
 import { FilesView } from "@/app/components/inspector/FilesView";
 import { PanelCountBadge } from "@/app/components/inspector/PanelCountBadge";
+import { PanelPhoneScreen } from "@/app/components/inspector/PanelPhoneScreen";
 import { panelBadgeCount, PANEL_ICON } from "@/app/components/inspector/sessionPanelIcons";
 import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { HistoryView } from "@/app/components/inspector/HistoryView";
@@ -62,8 +63,8 @@ function SideBoxProgress({ sessionId }: { sessionId: string }) {
  * The right column of the session screen: one box with the Insights / Files /
  * Worksets / Subagents panels, sized by the shared layout store. Session
  * switching lives in the left sidebar. On a phone the panels are the body of
- * the modal box that SessionPage puts them in, and its chrome — header, bottom
- * bar — belongs to the dialog rather than to this box.
+ * the modal box that SessionPage puts them in, each screen heading itself with
+ * the way out and the tab bar the dialog lends it.
  */
 export function SessionSideBox({
   sessionId,
@@ -149,7 +150,24 @@ export function SessionSideBox({
   );
 
   if (isMobile) {
-    return <div className="flex flex-col flex-1 min-h-0">{body}</div>;
+    // A panel without rows to list is a list screen of its own; the others
+    // draw both of their screens through their split.
+    return (
+      <div className="flex flex-col flex-1 min-h-0 bg-elevation-ground">
+        {active === "terminal" || active === "history" ? (
+          <PanelPhoneScreen title={SESSION_PANEL_LABEL[active]} bar>
+            {/* History scrolls under the header; the terminal keeps its own frame. */}
+            {active === "terminal" ? (
+              <div className="flex flex-col flex-1 min-h-0 pt-14">{body}</div>
+            ) : (
+              body
+            )}
+          </PanelPhoneScreen>
+        ) : (
+          body
+        )}
+      </div>
+    );
   }
 
   return (

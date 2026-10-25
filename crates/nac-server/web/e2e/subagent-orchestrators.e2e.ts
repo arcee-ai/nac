@@ -50,7 +50,6 @@ for (const [name, viewport, mobile] of [
     await page.setViewportSize(viewport);
     await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
     await showSubagents(page, mobile);
-    if (mobile) await page.getByRole("button", { name: "Open list", exact: true }).click();
     const list = mobile
       ? page.getByRole("dialog", { name: "Subagents", exact: true })
       : page.locator("body");
@@ -88,6 +87,8 @@ for (const [name, viewport, mobile] of [
     await expect(page.getByRole("textbox", { name: "Send a message" })).toHaveValue("");
     await page.getByRole("button", { name: "Parent chat" }).click();
     await showSubagents(page, mobile);
+    // A phone reopens the panel on its list; the row brings back its composer.
+    if (mobile) await list.getByRole("button", { name: "Older coordinator", exact: true }).click();
     const screenshot = testInfo.outputPath("subagent-running.png");
     await page.screenshot({ path: screenshot, animations: "disabled" });
     await testInfo.attach("Existing managed orchestrator during a foreground continuation", {

@@ -1904,6 +1904,11 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(
     page.getByText("Coordinate the compatibility audit", { exact: true }).first(),
   ).toBeVisible();
+  // A phone opens the panel on its list; the row brings back its composer and draft.
+  await page
+    .getByRole("dialog", { name: "Subagents", exact: true })
+    .getByRole("button", { name: "Coordinate the compatibility audit", exact: true })
+    .click();
   await expect(panelComposer.getByRole("textbox", { name: "Send a message" })).toHaveValue(
     "Unsent follow-up for the orchestrator",
   );
