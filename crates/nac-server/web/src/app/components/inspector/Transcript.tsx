@@ -422,7 +422,7 @@ export function Transcript({
           revealed ? "opacity-0" : "opacity-100 delay-200",
         )}
       >
-        <div className="mx-auto w-full max-w-[720px]">
+        <div className="mx-auto w-full max-w-[640px]">
           <ShimmerLoader rows={3} rowClassName="h-[48px]" />
         </div>
       </div>
@@ -437,7 +437,7 @@ export function Transcript({
             fade,
           )}
         >
-          <div className="m-auto w-full max-w-[720px]">
+          <div className="m-auto w-full max-w-[640px]">
             <InitialPrompts />
           </div>
         </div>
@@ -452,7 +452,7 @@ export function Transcript({
             "flex flex-col pt-[96px] md:pt-[90px] [&>*]:shrink-0 px-4 md:px-0",
             // The phone's input is a bare pill rather than a padded card, so
             // the run-out under the last message shrinks with it.
-            isMobile ? "pb-[180px]" : "pb-[320px] mx-auto max-w-[720px]",
+            isMobile ? "pb-[180px]" : "pb-[320px] mx-auto max-w-[640px]",
           )}
         >
           {snapshot?.message_page?.has_older ? (

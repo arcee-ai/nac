@@ -316,7 +316,7 @@ export default function SessionPage() {
                 "absolute bottom-0 left-0 right-0",
                 // The phone composer paints its own ground fade and owns its
                 // padding, so it has to reach past the column's inset.
-                isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[720px]",
+                isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[640px]",
               )}
             >
               <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
