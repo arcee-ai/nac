@@ -1,20 +1,24 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   Badge,
   BadgeColor,
-  Button,
-  ButtonContent,
-  ButtonSize,
   ButtonVariant,
   Icon,
   IconName,
   Switch,
+  SwitchSize,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { cn } from "@/app/lib/cn";
+import {
+  ComposerFrame,
+  ComposerIconButton,
+  ComposerPill,
+  ComposerSendButton,
+} from "@/app/components/inspector/composer/ComposerFrame";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { cn } from "@/app/lib/cn";
 import type { TraditionalChildStatus } from "@/app/types/api";
 
 const BACKGROUND_HINT =
@@ -26,6 +30,12 @@ const STATUS_BADGE: Partial<Record<TraditionalChildStatus, { text: string; color
   failed: { text: "Failed", color: BadgeColor.Red },
   interrupted: { text: "Interrupted", color: BadgeColor.Yellow },
 };
+
+/** One line of the field on a phone, which is also its collapsed height. */
+const MOBILE_ROW_PX = 40;
+
+/** How far the field grows before it starts scrolling instead. */
+const MAX_HEIGHT_PX = 180;
 
 export interface SubagentChatInputBoxProps {
   value: string;
@@ -41,6 +51,11 @@ export interface SubagentChatInputBoxProps {
   /** A start is still pending: nothing more is sent until the target is running. */
   starting?: boolean;
   permission?: ReactNode;
+  /**
+   * Over a child transcript it floats on the faded ground, as the main
+   * composer does. A panel already insets and backs it.
+   */
+  floating?: boolean;
 }
 
 /**
@@ -60,11 +75,15 @@ export function SubagentChatInputBox({
   busy = false,
   starting = false,
   permission,
+  floating = false,
 }: SubagentChatInputBoxProps) {
-  const field = useRef<HTMLTextAreaElement>(null);
   const isMobile = useIsMobile();
+  const field = useRef<HTMLTextAreaElement>(null);
+  const [focused, setFocused] = useState(false);
   const filled = value.trim().length > 0;
   const sendable = filled && (running || !starting);
+  // A phone keeps a message it is not editing to one truncated line.
+  const collapsed = isMobile && !focused && filled;
   const placeholder = running ? "Steer a message" : "Send a message";
   const badge = !running && status ? STATUS_BADGE[status] : undefined;
   const runLabel = running
@@ -72,76 +91,102 @@ export function SubagentChatInputBox({
       ? "Running in the background"
       : "Regular run"
     : "Run in the background";
+  // A run's Stop rides at the end of the pill, as the goal flag does in the
+  // main composer.
+  const textInset = isMobile
+    ? running
+      ? "py-2 pr-2 pl-3"
+      : "px-3 py-2"
+    : running
+      ? "py-3 pr-2 pl-4"
+      : "px-4 py-3";
 
   useLayoutEffect(() => {
     const element = field.current;
     if (!element) return;
+    if (collapsed) {
+      element.style.height = `${MOBILE_ROW_PX}px`;
+      return;
+    }
     element.style.height = "auto";
-    element.style.height = `${element.scrollHeight}px`;
-  }, [value]);
+    element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT_PX)}px`;
+  }, [collapsed, value]);
 
   return (
-    <form
-      className="flex w-full flex-col gap-4 rounded-[8px] bg-elevation-level-2 p-4 shadow-2xl"
+    <ComposerFrame
+      compact={isMobile}
+      faded={floating}
+      className={floating ? undefined : "p-0"}
       onSubmit={(event) => {
         event.preventDefault();
         if (busy) return;
         if (sendable) onSubmit();
       }}
     >
-      <div
-        className={cn(
-          "relative flex items-end rounded-[4px] bg-input pl-2 shadow-concave",
-          running ? "pr-24" : "pr-12",
-        )}
-      >
-        <textarea
-          ref={field}
-          rows={1}
-          value={value}
-          placeholder={placeholder}
-          aria-label={placeholder}
-          disabled={busy}
-          className="max-h-40 w-full resize-none bg-transparent px-2 py-3 text-medium text-input outline-none placeholder:text-input-placeholder"
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
-            if (event.key !== "Enter" || event.shiftKey) return;
-            if (isMobile && !event.metaKey && !event.ctrlKey) return;
-            event.preventDefault();
-            if (sendable && !busy) onSubmit();
-          }}
-        />
-        <Button
+      <div className="flex items-end gap-2">
+        <ComposerPill compact={isMobile} outline={focused ? "focus" : undefined}>
+          <div className="relative min-w-0 flex-1">
+            <textarea
+              ref={field}
+              rows={1}
+              value={value}
+              placeholder={placeholder}
+              aria-label={placeholder}
+              disabled={busy}
+              className={cn(
+                "block w-full resize-none bg-transparent text-medium text-input outline-none placeholder:text-input-placeholder",
+                textInset,
+                // The line below stands in for it, because a textarea cannot
+                // ellipsize its own overflow.
+                collapsed && "overflow-hidden opacity-0",
+              )}
+              onChange={(event) => onChange(event.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key !== "Enter" || event.shiftKey) return;
+                if (isMobile && !event.metaKey && !event.ctrlKey) return;
+                event.preventDefault();
+                if (sendable && !busy) onSubmit();
+              }}
+            />
+            {collapsed ? (
+              <div
+                aria-hidden
+                className={cn("pointer-events-none absolute inset-0 flex items-center", textInset)}
+              >
+                <span className="w-full truncate text-medium text-input">{value}</span>
+              </div>
+            ) : null}
+          </div>
+          {running ? (
+            <ComposerIconButton
+              compact={isMobile}
+              type="button"
+              variant={ButtonVariant.Ghost}
+              disabled={busy}
+              onClick={onStop}
+              aria-label="Stop"
+            >
+              <Icon iconName={IconName.Stop} size={24} />
+            </ComposerIconButton>
+          ) : null}
+        </ComposerPill>
+        <ComposerSendButton
+          compact={isMobile}
           type="submit"
-          size={ButtonSize.Large}
-          variant={ButtonVariant.Primary}
-          content={ButtonContent.Icon}
-          className="absolute right-0 bottom-0"
           disabled={busy || !sendable}
           aria-label={running ? "Steer" : "Send"}
         >
           <Icon iconName={IconName.ArrowTop} />
-        </Button>
-        {running ? (
-          <Button
-            type="button"
-            size={ButtonSize.Large}
-            variant={ButtonVariant.Ghost}
-            content={ButtonContent.Icon}
-            className="absolute right-12 bottom-0"
-            disabled={busy}
-            onClick={onStop}
-            aria-label="Stop"
-          >
-            <Icon iconName={IconName.Stop} />
-          </Button>
-        ) : null}
+        </ComposerSendButton>
       </div>
-      <div className="flex items-center gap-2.5 h-6">
+      <div className="flex min-h-6 items-center gap-2.5">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {running ? null : (
             <Switch
+              size={isMobile ? SwitchSize.Large : SwitchSize.Medium}
               checked={background}
               disabled={busy || starting}
               aria-label="Run in the background"
@@ -150,7 +195,8 @@ export function SubagentChatInputBox({
           )}
           <span
             className={cn(
-              "label-micro truncate",
+              "truncate",
+              isMobile ? "label-small" : "label-micro",
               running && background
                 ? "text-info-primary"
                 : running
@@ -173,6 +219,6 @@ export function SubagentChatInputBox({
         </div>
         {permission}
       </div>
-    </form>
+    </ComposerFrame>
   );
 }
