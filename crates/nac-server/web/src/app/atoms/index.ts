@@ -1,5 +1,6 @@
 export {
   default as ActionListButton,
+  ActionListButtonSize,
   ActionListButtonStatus,
   ActionListSegment,
 } from "./action-list-button";

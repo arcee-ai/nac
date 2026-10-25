@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import {
   ActionListButton,
+  ActionListButtonSize,
   ActionListButtonStatus,
   ActionListSegment,
   BoxSurface,
@@ -231,10 +232,20 @@ const WAVE_THREADS = ["impl/calendar", "impl/recurring-events", "review/calendar
 /** A side panel list column: 252px rows on the panel ground. */
 const LIST_COLUMN = "flex w-[268px] flex-col gap-1 bg-elevation-ground p-2";
 
+/** A phone's list screen: 364px rows inside the screen's 8px inset. */
+const PHONE_LIST_COLUMN = "flex w-[380px] flex-col gap-1 bg-elevation-ground p-2";
+
 function sampleLabel(sample: ActionSample, status: ActionListButtonStatus): string {
   if (status === ActionListButtonStatus.Running) return sample.runningLabel ?? sample.label;
   if (status === ActionListButtonStatus.Failed) return sample.failedLabel ?? sample.label;
   return sample.label;
+}
+
+/** As the list fills it: only a thread keeps its meta while running or after failing. */
+function sampleMeta(sample: ActionSample, status: ActionListButtonStatus): string | undefined {
+  const live =
+    status === ActionListButtonStatus.Running || status === ActionListButtonStatus.Failed;
+  return live && sample.type !== "Thread" ? undefined : sample.meta;
 }
 
 function ActionStatesGrid() {
@@ -264,7 +275,7 @@ function ActionStatesGrid() {
               key={status}
               icon={sample.icon}
               label={sampleLabel(sample, status)}
-              meta={sample.meta}
+              meta={sampleMeta(sample, status)}
               status={status}
               selected={active || undefined}
               expanded={sample.group ? active : undefined}
@@ -392,6 +403,73 @@ function LongLabelsPreview() {
   );
 }
 
+/** A phone's list: Large rows, a wave in every status and an open group. */
+function PhoneListPreview() {
+  const [expanded, setExpanded] = useState(true);
+  const [selected, setSelected] = useState("review/calendar");
+  const large = ActionListButtonSize.Large;
+
+  return (
+    <div className={PHONE_LIST_COLUMN}>
+      <ActionListButton size={large} icon={IconName.Brain} label="Thoughts" meta="13.8 s" />
+      <ActionListSegment className="py-2">
+        <ActionListButton
+          size={large}
+          icon={IconName.Chat}
+          label="impl/calendar"
+          meta="Thread, 3"
+          status={ActionListButtonStatus.Running}
+        />
+        <ActionListButton
+          size={large}
+          icon={IconName.Chat}
+          label="impl/recurring-events"
+          meta="Thread, 2"
+          status={ActionListButtonStatus.Failed}
+        />
+        <ActionListButton
+          size={large}
+          icon={IconName.Chat}
+          label="docs/calendar"
+          meta="Thread, 1"
+          status={ActionListButtonStatus.Pending}
+        />
+        <ActionListButton
+          size={large}
+          icon={IconName.Chat}
+          label="review/calendar"
+          meta="Thread, 3"
+          selected={selected === "review/calendar"}
+          onClick={() => setSelected("review/calendar")}
+        />
+      </ActionListSegment>
+      <ActionListButton
+        size={large}
+        icon={IconName.Right}
+        label="Worked for 13.3s"
+        meta={String(GROUP_CHILDREN.length)}
+        expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+      />
+      {expanded ? (
+        <ActionListSegment>
+          {GROUP_CHILDREN.map((child) => (
+            <ActionListButton
+              key={child.key}
+              size={large}
+              icon={child.icon}
+              label={child.label}
+              meta={child.meta}
+              selected={selected === child.key}
+              onClick={() => setSelected(child.key)}
+            />
+          ))}
+        </ActionListSegment>
+      ) : null}
+    </div>
+  );
+}
+
 export function InsightsAtomsSection() {
   return (
     <BoxSurface title="Insights">
@@ -401,6 +479,7 @@ export function InsightsAtomsSection() {
           <GroupSegmentPreview />
           <ThreadWavePreview />
           <LongLabelsPreview />
+          <PhoneListPreview />
         </div>
         <InsightItemsPreview />
       </div>
