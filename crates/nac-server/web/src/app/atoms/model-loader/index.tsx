@@ -1,6 +1,7 @@
 import type React from "react";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 
+import { pinToTimeline } from "../../lib/animationPhase";
 import { cn } from "../../lib/cn";
 
 /** Box sizes from the Figma ModelLoader: 16, 20 and 24px. */
@@ -105,6 +106,16 @@ const dotKeyframes = (level: number): Keyframe[] =>
   }));
 
 /**
+ * Drawn once and shared, with every loader pinned to the document timeline: a
+ * loader that replaces another one, as a status badge gives way to the group
+ * it announced, then shows the very same frame instead of starting over.
+ */
+const DOT_KEYFRAMES = FRAMES[REST_FRAME].map(dotKeyframes);
+
+/** Dots that change in unison read as a stutter. */
+const DOT_DELAYS = FRAMES[REST_FRAME].map(() => Math.random() * TICK_MS);
+
+/**
  * The "model is working" indicator: a 4×4 dot grid whose dots reshuffle their
  * opacity every tick. The box never changes size, so swapping it in for an
  * icon of the same size does not move the layout.
@@ -130,17 +141,17 @@ const ModelLoader: React.FC<ModelLoaderProps> & {
   );
   const animated = frame === undefined && !reducedMotion;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const grid = gridRef.current;
     if (!animated || typeof grid?.animate !== "function") return;
     const animations = Array.from(grid.children, (dot, index) =>
-      dot.animate(dotKeyframes(FRAMES[REST_FRAME][index]), {
+      dot.animate(DOT_KEYFRAMES[index], {
         duration: LOOP_TICKS * TICK_MS,
-        // Dots that change in unison read as a stutter.
-        delay: Math.random() * TICK_MS,
+        delay: DOT_DELAYS[index],
         iterations: Infinity,
       }),
     );
+    pinToTimeline(grid);
     return () => animations.forEach((animation) => animation.cancel());
   }, [animated]);
 

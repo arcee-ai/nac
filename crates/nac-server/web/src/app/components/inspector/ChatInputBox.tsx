@@ -311,7 +311,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const readOnly = lineage != null;
   const ownershipKnown = entry !== null || snapshot !== null;
   const inboxQuery = useSessionInbox(sessionId, direct && !readOnly);
-  const goalQuery = useSessionGoal(sessionId, direct && !readOnly);
+  // Read while rendering, or its one-second poll re-renders the whole box each
+  // time a fetch starts or ends rather than only when the goal changes.
+  const { data: storedGoal, refetch: refetchGoal } = useSessionGoal(sessionId, direct && !readOnly);
   const createGoal = useCreateGoal();
   const updateGoal = useUpdateGoal();
   const clearGoal = useClearGoal();
@@ -355,7 +357,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     contextTokens,
     resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
   );
-  const now = useNow(1000, running);
+  // Only the phone's status row shows the clock, and every tick re-renders the box.
+  const now = useNow(1000, running && isMobile);
   const runStartedAt = useRunStartedAt();
   const lastElapsedMs = useLastElapsedMs();
   // Stop freezes the clock at click; Stopping must not keep adding cleanup time.
@@ -643,9 +646,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     async (text: string) => {
       if (!direct) throw new Error("Durable goals are available only in direct chats");
       const current = captureRuntimeActivation(sessionId);
-      let goal = goalQuery.data;
+      let goal = storedGoal;
       if (goal === undefined) {
-        const result = await goalQuery.refetch();
+        const result = await refetchGoal();
         if (!current()) return false;
         if (result.error) throw result.error;
         goal = result.data;
@@ -690,7 +693,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       clearGoal,
       createGoal,
       direct,
-      goalQuery,
+      storedGoal,
+      refetchGoal,
       isMobile,
       sessionId,
       updateGoal,
@@ -1356,21 +1360,24 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             </Button>
           ) : null}
 
-          <ModelPicker
-            sessionId={sessionId}
-            metadata={snapshot?.metadata ?? null}
-            label={metrics.model}
-            disabled={busy}
-          />
-
-          {isMobile ? null : <div className="flex-1" />}
+          {/* Breaks the line at a fixed width and grows back to its own, so
+              Queue Next shortens the model label for the run instead of
+              wrapping the row and moving the box when a run starts and ends. */}
+          <div className={cn("flex min-w-0", !isMobile && "grow basis-[160px] max-w-fit")}>
+            <ModelPicker
+              sessionId={sessionId}
+              metadata={snapshot?.metadata ?? null}
+              label={metrics.model}
+              disabled={busy}
+            />
+          </div>
 
           {/* Gear, hairline, and the current permission setting sit together.
               A phone keeps the gear inside the message pill. */}
           {isMobile ? (
             <PermissionControls sessionId={sessionId} behavior={behavior} />
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-2">
               {settingsButton}
               {direct ? <span aria-hidden className="h-6 w-px shrink-0 bg-divider-muted" /> : null}
               <PermissionControls sessionId={sessionId} behavior={behavior} />

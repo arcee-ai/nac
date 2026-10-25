@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { memo, useEffect, useRef, type ReactNode } from "react";
 
 import type { InsightsEmptyCopy, InsightTurnSection } from "@/app/features/insights/model/types";
 import {
@@ -33,7 +33,7 @@ function revealRow(row: HTMLElement): void {
   else if (bottom > viewBottom) scroller.scrollTop += Math.min(bottom - viewBottom, top - viewTop);
 }
 
-export function InsightsList({
+export const InsightsList = memo(function InsightsList({
   sections,
   pendingPrompt,
   emptyCopy,
@@ -83,4 +83,4 @@ export function InsightsList({
       {footer}
     </div>
   );
-}
+});

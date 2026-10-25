@@ -4,6 +4,7 @@ import {
   isValidElement,
   memo,
   use,
+  useState,
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react";
@@ -333,16 +334,21 @@ const StreamedBlock = memo(function StreamedBlock({ source }: { source: string }
  *
  * A live message is parsed block by block so a delta only costs the block it
  * landed in; a finished one is parsed as a single document, which is both the
- * canonical reading of the text and cheap now that it is parsed once.
+ * canonical reading of the text and cheap now that it is parsed once. A message
+ * that streamed in this view stays in blocks once it settles: switching would
+ * remount every paragraph and code block the moment the stream ends, and the
+ * code would repaint plain before it is highlighted again.
  */
 const MarkdownRenderer = memo(function MarkdownRenderer({
   children,
   streaming = false,
 }: MarkdownRendererProps) {
   perfRender("Markdown");
+  const [streamed, setStreamed] = useState(streaming);
+  if (streaming && !streamed) setStreamed(true);
   return (
     <PerfProfiler id="markdown">
-      {streaming ? (
+      {streamed ? (
         splitMarkdownBlocks(children).map((source, index) => (
           // Blocks are append-only, so their position is their identity.
           <StreamedBlock key={index} source={source} />

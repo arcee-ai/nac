@@ -107,3 +107,12 @@ export function segmentSelected(
   if (segment.kind === "workset") return undefined;
   return shown?.kind === "group" && shown.entry.id === entry.id && shown.segmentKey === segment.key;
 }
+
+/** Both point at the same row, which is all `entrySelected` and `segmentSelected` read. */
+export function sameInsight(a: ShownInsight | null, b: ShownInsight | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.kind === "group") {
+    return b.kind === "group" && a.entry.id === b.entry.id && a.segmentKey === b.segmentKey;
+  }
+  return b.kind === "thread" && a.name === b.name && a.episode === b.episode;
+}

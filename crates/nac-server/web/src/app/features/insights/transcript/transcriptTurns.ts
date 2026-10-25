@@ -1,13 +1,12 @@
 import { createContext, use } from "react";
 import { useParams } from "react-router-dom";
 
-import { TranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
-import { STREAMING_TURN_KEY, type ModelTurn, type TranscriptTurn } from "@/app/lib/transcript";
+import type { ModelTurn, TranscriptTurn } from "@/app/lib/transcript";
 
 /**
- * A transcript drawn inside the session page that is not the page's own, such
- * as a child's preview. `turns` are its snapshot turns, which keep their
- * identity across stream deltas.
+ * The transcript a row belongs to: the session page's own, or one drawn inside
+ * it such as a child's preview. `turns` leave the stream out, so they keep
+ * their identity across deltas and a row reading them is not re-rendered.
  */
 interface TranscriptTurnsSource {
   sessionId: string;
@@ -39,23 +38,16 @@ function indexTurns(turns: readonly TranscriptTurn[]): TurnIndex {
   return index;
 }
 
-/**
- * Snapshot turns rather than the streamed ones: rows keep reading the same
- * objects while a reply streams, so their memoized bodies stay untouched.
- */
 function useSnapshotTurns(): readonly TranscriptTurn[] {
-  const source = use(TranscriptTurnsContext);
-  // A preview must not subscribe to the page's model, let alone read its turns.
-  if (source) return source.turns;
-  return use(TranscriptModelContext)?.snapshotTurns ?? EMPTY;
+  return use(TranscriptTurnsContext)?.turns ?? EMPTY;
 }
 
 /** The turn before `turn` in its transcript, as `partitionModelTurn` expects it. */
 export function usePreviousTurn(turn: ModelTurn): TranscriptTurn | undefined {
   const index = indexTurns(useSnapshotTurns());
   if (index.previous.has(turn.key)) return index.previous.get(turn.key);
-  // A stream that had to open a turn of its own follows the whole snapshot.
-  return turn.key === STREAMING_TURN_KEY ? index.last : undefined;
+  // A stream that had to open a turn of its own follows all the others.
+  return turn.messageIndex === null ? index.last : undefined;
 }
 
 /** When the prompt at this snapshot index entered the transcript, if known. */

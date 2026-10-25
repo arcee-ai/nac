@@ -1,5 +1,7 @@
 import type React from "react";
+import { useRef } from "react";
 
+import { useTimelinePhase } from "../../lib/animationPhase";
 import { cn } from "../../lib/cn";
 import Icon, { IconName } from "../icon";
 import ModelLoader, { ModelLoaderSize, ModelLoaderVariant } from "../model-loader";
@@ -68,6 +70,9 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
 }) => {
   const labelTone = selected ? LABEL_TONE.selected : inProgress ? LABEL_TONE.live : LABEL_TONE.done;
   const iconTone = selected ? ICON_TONE.selected : ICON_TONE.basic;
+  const shimmering = inProgress && !selected;
+  const labelRef = useRef<HTMLSpanElement>(null);
+  useTimelinePhase(labelRef, shimmering);
 
   return (
     <button
@@ -96,7 +101,7 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
           className="group-disabled:opacity-50"
         />
       ) : null}
-      <span className={cn("label-small min-w-0 truncate", inProgress && !selected && SHIMMER)}>
+      <span ref={labelRef} className={cn("label-small min-w-0 truncate", shimmering && SHIMMER)}>
         {label}
       </span>
       {avatarUrl || leadingIcon ? (

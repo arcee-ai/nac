@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { ActionListButton, ActionListSegment } from "@/app/atoms";
 import type {
   InsightEntry,
@@ -75,7 +77,7 @@ function EntryRows({
   );
 }
 
-export function InsightsTurnSection({
+export const InsightsTurnSection = memo(function InsightsTurnSection({
   section,
   fallbackPrompt,
   controller,
@@ -109,4 +111,4 @@ export function InsightsTurnSection({
       </div>
     </div>
   );
-}
+});

@@ -482,14 +482,14 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
         return "snapshot";
       case "run_completed":
         // The run's own answer is the authoritative version of whatever the
-        // stream last held, so it takes over until the snapshot lands. The run
-        // outlives every worker it dispatched, so a thread still marked running
-        // here only means its own finish event never arrived.
+        // stream last held, so it takes over until the snapshot lands; the
+        // reasoning behind it stays too, or its group would drop out of both
+        // panes until then. The run outlives every worker it dispatched, so a
+        // thread still marked running here only means its finish never arrived.
         setState((state) => ({
           running: false,
           activity: "",
           streamText: event.response,
-          streamReasoning: "",
           streamSettled: true,
           runFailure: null,
           modelRetryAttempt: null,
