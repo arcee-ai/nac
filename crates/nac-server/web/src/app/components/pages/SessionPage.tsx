@@ -44,6 +44,11 @@ import {
   useWorkspaceRevisionChanges,
 } from "@/app/services/queries";
 
+// 80% of the row, between 480px and 800px. The bounds sit inside `clamp()`
+// rather than in `min-w` / `max-w`, which would stop the collapse tween dead at
+// a bound.
+const SIDE_PANEL_WIDTH = "w-[clamp(480px,80%,800px)]";
+
 /**
  * Opens an SSH browse handshake once when landing on a remote session that is
  * not already marked connected. A failed attempt stays disconnected so the
@@ -334,7 +339,7 @@ export default function SessionPage() {
               className={cn(
                 "relative h-full shrink-0",
                 animateSidePanel && "transition-[width] duration-300 ease-out",
-                collapsed ? "w-[52px]" : "w-1/2",
+                collapsed ? "w-[52px]" : SIDE_PANEL_WIDTH,
               )}
               style={animateSidePanel ? undefined : { transition: "none" }}
             >
@@ -359,7 +364,8 @@ export default function SessionPage() {
           */}
             <div
               className={cn(
-                "absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0 w-1/2",
+                "absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0",
+                SIDE_PANEL_WIDTH,
                 animateSidePanel && "transition-transform duration-300 ease-out",
                 collapsed && "translate-x-full",
               )}
@@ -368,7 +374,7 @@ export default function SessionPage() {
               inert={collapsed}
             >
               <div className="flex flex-col flex-1 min-h-0">
-                {/* While the dialog is up it owns the panels, so this half stays
+                {/* While the dialog is up it owns the panels, so this column stays
                   empty behind the scrim instead of running them twice. */}
                 <div className="flex-1 min-h-0">{expanded ? null : sideBox}</div>
               </div>
