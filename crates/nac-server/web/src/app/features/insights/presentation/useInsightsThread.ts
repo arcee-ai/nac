@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 import {
   useThreadEventLog,
@@ -12,7 +12,6 @@ import { flattenInsightEntries } from "@/app/features/insights/model/timeline";
 import type { InsightTurnSection } from "@/app/features/insights/model/types";
 import type { ThreadLogLine } from "@/app/lib/threadLog";
 import { dispatchActions } from "@/app/lib/transcript";
-import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type { EpisodeSnapshot, SessionSnapshotResponse, ThreadSnapshot } from "@/app/types/api";
 
 export interface InsightsThreadPane {
@@ -72,28 +71,17 @@ export function useThreadOwnership(
   );
 }
 
-/**
- * The thread the detail shows, picked or the newest one, is published to the
- * layout store: the phone dialog titles itself after it and shimmers with it.
- */
+/** The thread the detail shows, picked or the newest one. */
 export function useInsightsThreadPane(
   snapshot: SessionSnapshotResponse | null,
   name: string | null,
   { liveThreads, runningNames }: ThreadRunState,
   canSteerWorkers: boolean,
 ): InsightsThreadPane | null {
-  const { setShownThread } = useNativeRuntime().stores.sessionLayoutStore;
   const messages = snapshot?.messages;
   const actions = useMemo(() => dispatchActions(messages ?? []), [messages]);
   const eventLog = useThreadEventLog(snapshot, name);
   const running = Boolean(name && runningNames.has(name));
-  const shownName = snapshot ? name : null;
-
-  // Before paint, so the dialog never titles a thread the detail has left.
-  useLayoutEffect(() => {
-    setShownThread(shownName ? { name: shownName, running } : null);
-    return () => setShownThread(null);
-  }, [shownName, running, setShownThread]);
 
   if (!snapshot || !name) return null;
   const thread =

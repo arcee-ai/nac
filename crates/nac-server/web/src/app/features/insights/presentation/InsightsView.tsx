@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode
 
 import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
-import { TaskButton } from "@/app/components/inspector/TaskPreview";
+import { TaskButton, TaskPill } from "@/app/components/inspector/TaskPreview";
 import { ThreadSteeringModal } from "@/app/components/inspector/ThreadSteeringModal";
 import { ThreadDetail } from "@/app/components/inspector/threads/ThreadDetail";
 import {
@@ -53,6 +53,8 @@ import {
   useInsightsDetailFocus,
   useInsightsNavigation,
 } from "@/app/features/insights/useInsightsNavigation";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { cn } from "@/app/lib/cn";
 import { useSharedValue, useStructuralSharing } from "@/app/lib/useSharedValue";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type { SessionSnapshotResponse } from "@/app/types/api";
@@ -223,6 +225,7 @@ export function InsightsView({
   );
   const [threadView, setThreadView] = useState<ThreadDetailView>("log");
   const [steeringThread, setSteeringThread] = useState<string | null>(null);
+  const isMobile = useIsMobile();
   const threadPane = useInsightsThreadPane(
     snapshot,
     shown?.kind === "thread" ? shown.name : null,
@@ -260,11 +263,13 @@ export function InsightsView({
 
   if (!snapshot) return <PanelLoading listTitle="Insights" />;
 
-  let title: string | undefined;
+  let title: ReactNode;
   let detail: ReactNode;
   if (shown?.kind === "thread" && threadPane) {
     const { thread, eventLog } = threadPane;
-    title = thread.name;
+    // The panel truncates the title on its own box, which leaves this one free
+    // to shimmer.
+    title = <span className={cn(threadPane.running && "text-shimmer-basic")}>{thread.name}</span>;
     detail = (
       <ThreadDetail
         key={`${sessionId}:${thread.name}`}
@@ -314,9 +319,16 @@ export function InsightsView({
         listToolbar={<InsightsFilter options={options} value={filter} onChange={changeFilter} />}
         listClassName="p-2"
         title={title}
-        titleAction={threadPane?.action ? <TaskButton action={threadPane.action} /> : null}
+        titleAction={
+          threadPane?.action && !isMobile ? <TaskButton action={threadPane.action} /> : null
+        }
         actions={
-          threadPane ? (
+          // A phone's thread detail floats Steer and the view switch itself.
+          isMobile ? (
+            threadPane?.action ? (
+              <TaskPill action={threadPane.action} />
+            ) : null
+          ) : threadPane ? (
             <div className="flex items-center gap-2">
               {threadPane.canSteer ? (
                 <Button
