@@ -1612,15 +1612,15 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await expect(composer.getByRole("textbox", { name: "Steer a message" })).toBeVisible();
   await subagent("Background cancellation").click();
   await composer.getByRole("button", { name: "Stop" }).click();
-  await expect(composer.getByText("Cancelled", { exact: true })).toBeVisible();
+  await expect(composer.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   cancelled.release();
   await subagent("Background failure").click();
-  await expect(composer.getByText("Failed", { exact: true })).toBeVisible();
+  await expect(composer.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await awaitParentReceipt("observe-cancel");
 
   success.release();
   await subagent("Background success").click();
-  await expect(composer.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(composer.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await expect(page.getByLabel("Coding agent completed")).toContainText("Background success");
   await expect(page.getByLabel("Coding agent failed")).toContainText("Background failure");
   await expect(page.getByLabel("Coding agent cancelled")).toContainText("Background cancellation");
@@ -1664,7 +1664,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
     })
     .toBe(2);
   continued.release();
-  await expect(composer.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(composer.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   // Each generation delivers its own card; they all lead to the one child session.
   const completed = page.getByLabel("Coding agent completed");
   await expect(completed).toHaveCount(2);
@@ -1794,7 +1794,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
   await showSidePanel(page);
   await page.getByRole("button", { name: "Inspect the child lifecycle" }).click();
-  await expect(page.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
@@ -1833,7 +1833,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   ).toBeVisible();
   await expect(orchestratorComposer.getByRole("button", { name: "Stop" })).toBeVisible();
   orchestratorCompletion.release();
-  await expect(page.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await expect(page.getByLabel("NAC orchestrator completed")).toContainText(
     "Coordinate the compatibility audit",
   );

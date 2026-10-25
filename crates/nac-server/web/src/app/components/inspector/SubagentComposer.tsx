@@ -205,7 +205,6 @@ export function SubagentComposer({
         running={running}
         background={running ? target.background : background}
         onBackgroundChange={setBackground}
-        status={target.status}
         busy={busy}
         starting={starting}
         floating={floating}

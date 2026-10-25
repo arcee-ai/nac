@@ -235,8 +235,7 @@ describe("delegated work", () => {
       ]);
     });
 
-    await waitFor(() => expect(screen.getByText("Completed")).toBeTruthy());
-    expect(screen.getByText("The permissions audit passed.")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("The permissions audit passed.")).toBeTruthy());
     expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
@@ -349,7 +348,6 @@ describe("selection and drafts", () => {
 
     act(() => client.remount());
 
-    expect(screen.getByText("Completed")).toBeTruthy();
     expect(draftBox("Send a message").value).toBe("Next audit pass");
   });
 

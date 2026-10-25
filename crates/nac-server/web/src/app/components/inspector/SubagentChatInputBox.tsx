@@ -1,8 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import {
-  Badge,
-  BadgeColor,
   ButtonVariant,
   Icon,
   IconName,
@@ -19,17 +17,9 @@ import {
 } from "@/app/components/inspector/composer/ComposerFrame";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
-import type { TraditionalChildStatus } from "@/app/types/api";
 
 const BACKGROUND_HINT =
   "The subagent keeps working after you leave this chat. Steer or stop it from here.";
-
-const STATUS_BADGE: Partial<Record<TraditionalChildStatus, { text: string; color: BadgeColor }>> = {
-  completed: { text: "Completed", color: BadgeColor.Green },
-  cancelled: { text: "Cancelled", color: BadgeColor.Yellow },
-  failed: { text: "Failed", color: BadgeColor.Red },
-  interrupted: { text: "Interrupted", color: BadgeColor.Yellow },
-};
 
 /** One line of the field on a phone, which is also its collapsed height. */
 const MOBILE_ROW_PX = 40;
@@ -46,7 +36,6 @@ export interface SubagentChatInputBoxProps {
   /** Foreground runs keep the switch off and say "Regular run" while they work. */
   background: boolean;
   onBackgroundChange: (background: boolean) => void;
-  status?: TraditionalChildStatus | null;
   busy?: boolean;
   /** A start is still pending: nothing more is sent until the target is running. */
   starting?: boolean;
@@ -71,7 +60,6 @@ export function SubagentChatInputBox({
   running,
   background,
   onBackgroundChange,
-  status = null,
   busy = false,
   starting = false,
   permission,
@@ -85,7 +73,6 @@ export function SubagentChatInputBox({
   // A phone keeps a message it is not editing to one truncated line.
   const collapsed = isMobile && !focused && filled;
   const placeholder = running ? "Steer a message" : "Send a message";
-  const badge = !running && status ? STATUS_BADGE[status] : undefined;
   const runLabel = running
     ? background
       ? "Running in the background"
@@ -215,7 +202,6 @@ export function SubagentChatInputBox({
               <Icon iconName={IconName.Info} size={16} />
             </span>
           </Tooltip>
-          {badge ? <Badge text={badge.text} color={badge.color} /> : null}
         </div>
         {permission}
       </div>
