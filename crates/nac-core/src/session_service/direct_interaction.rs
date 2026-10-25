@@ -460,6 +460,29 @@ impl SessionService {
         &self,
         lease: sessions::SessionOperationLease,
     ) -> Result<Option<SessionRunHandle>> {
+        if self.has_active_operation() {
+            return Ok(None);
+        }
+        let service = self.clone();
+        let abandoned_child =
+            crate::store::call_legacy_store(&self.metadata.store_path, move || {
+                let Some(session_id) = service.metadata.session_id.as_deref() else {
+                    return Ok::<_, anyhow::Error>(false);
+                };
+                Ok(
+                    crate::store::load_traditional_child(&service.metadata.store_path, session_id)?
+                        .is_some_and(|child| {
+                            child.status == crate::store::TraditionalChildStatus::Running
+                        }),
+                )
+            })
+            .await??;
+        if abandoned_child {
+            // A peer can exit after attachment or input queueing. Keep this
+            // lease through run/relationship recovery and successor admission;
+            // the existing inbox item remains the sole delivery authority.
+            self.recover_child_input_for_admission(&lease).await?;
+        }
         let service = self.clone();
         crate::store::spawn_blocking_store_caller(move || {
             service.start_next_direct_inbox_item_with_lease(lease)

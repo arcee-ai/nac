@@ -57,7 +57,7 @@ impl SessionService {
         }
     }
 
-    async fn recover_child_input_for_admission(
+    pub(super) async fn recover_child_input_for_admission(
         &self,
         lease: &sessions::SessionOperationLease,
     ) -> Result<()> {
