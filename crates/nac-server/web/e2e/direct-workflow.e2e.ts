@@ -95,9 +95,9 @@ for (const mobile of [false, true]) {
       // canonical snapshot rather than accepting the pre-snapshot placeholder.
       await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
       if (!mobile) {
-        await page.getByText("Run details", { exact: true }).click();
+        await page.getByRole("button", { name: "Usage", exact: true }).click();
         await expect(page.getByText("Context tokens", { exact: true })).toBeVisible();
-        await page.getByText("Run details", { exact: true }).click();
+        await page.getByRole("button", { name: "Usage", exact: true }).click();
       }
     }
     const boundary = new ScriptGate();

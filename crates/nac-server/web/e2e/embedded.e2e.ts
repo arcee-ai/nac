@@ -1781,7 +1781,6 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(page.getByText("Completed", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
-  await expect(page.getByText("Inspect the child lifecycle", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /goal/i })).toHaveCount(0);
@@ -1832,7 +1831,6 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
     .fill("Unsent follow-up for the orchestrator");
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByText("Managed NAC orchestrator", { exact: true })).toBeVisible();
-  await expect(page.getByText("Coordinate the compatibility audit", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Insights" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();

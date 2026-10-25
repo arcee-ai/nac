@@ -1,5 +1,4 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { RunDetails } from "@/app/features/direct-session/RunDetails";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -9,6 +8,7 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
+  CodeChangesBadge,
   Icon,
   IconName,
   PopoverPlacement,
@@ -17,13 +17,12 @@ import {
 } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
+import { SessionUsage } from "@/app/components/inspector/SessionUsage";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
-import { useNow } from "@/app/hooks/useNow";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { routes } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import {
-  formatClock,
   formatCostMicros,
   formatTokensCompact,
   runMetrics,
@@ -49,48 +48,27 @@ const BEHAVIOR_BADGE: Record<SessionBehavior, string> = {
 };
 
 /**
- * Context reading against the catalog's window. The figure on the chip stays
- * the live total; the window only appears in the hover, the way the composer
- * explains the same number.
+ * How much of the catalog's window the context fills, or null while either
+ * figure is unknown. A model the catalog does not know is measured against its
+ * provider's default window, and the reading says so.
  */
-function contextTitle(
+function contextShare(
   used: number | null,
   resolved: ReturnType<typeof resolveCatalogModel>,
-): string {
+): string | null {
   const window = resolved.contextWindow;
-  if (!window || used == null) return "Context tokens";
+  if (!window || used == null) return null;
+  const share = `${Math.round((used / window) * 100)}%`;
   if (resolved.estimated) {
-    return `Context against ${resolved.provider?.id ?? "the provider"}'s default window — the catalog does not know this model, so the limit is an estimate`;
+    return `${share} of ${resolved.provider?.id ?? "the provider"}'s default window. The catalog does not know this model, so the limit is an estimate.`;
   }
-  return `Context — ${Math.round((used / window) * 100)}% of the model's context window`;
-}
-
-function Metric({
-  iconName,
-  value,
-  title,
-  className,
-  labelClassName,
-}: {
-  iconName: IconName;
-  value: string;
-  title: string;
-  className?: string;
-  labelClassName: string;
-}) {
-  return (
-    <Tooltip title={title} position={TooltipPosition.BottomCenter}>
-      <div className={cn("flex items-center gap-0.5 whitespace-nowrap", className)}>
-        <Icon iconName={iconName} size={14} />
-        <span className={labelClassName}>{value}</span>
-      </div>
-    </Tooltip>
-  );
+  return `${share} of the model's context window`;
 }
 
 /**
- * The single-session bar above the transcript: title and behavior, the live
- * token and cost reading, then the checkout the chat is working in.
+ * The single-session bar above the transcript: the title with its behavior or
+ * parent, the usage readings behind one button, then the checkout the chat is
+ * working in.
  */
 export function TopSingleSessionHeader({
   sessionId,
@@ -130,15 +108,8 @@ export function TopSingleSessionHeader({
   const catalog = useModelCatalog();
   const persistedUsage = tokenUsage(snapshot);
   const contextTokens = metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
-  const context = contextTitle(
-    contextTokens,
-    resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
-  );
-  const now = useNow(1000, running);
   const runStartedAt = useRunStartedAt();
   const lastElapsedMs = useLastElapsedMs();
-  const liveElapsed = running && runStartedAt != null ? Math.max(0, now - runStartedAt) : null;
-  const elapsedMs = liveElapsed ?? lastElapsedMs ?? metrics.lastResponseMs;
 
   const selectedRevision = useSelectedRevision();
   const changes = useWorkspaceRevisionChanges(sessionId, selectedRevision);
@@ -168,112 +139,61 @@ export function TopSingleSessionHeader({
   };
   const policy = useUiPolicy();
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
+  const badge =
+    relationship ?? (behavior && policy.orchestrationEnabled ? BEHAVIOR_BADGE[behavior] : null);
   const title = sessionTitle(entry?.summary);
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col justify-center px-4 py-2 bg-elevation-ground">
-      <div className="pointer-events-auto flex w-full flex-col">
+    // Wider than its column by the column's own inset, so the rule under it
+    // runs from the sidebar to the side panel the way the design draws it.
+    <div className="pointer-events-none absolute -inset-x-2 top-0 z-20 flex flex-col border-b border-muted bg-elevation-ground px-4 pt-4 pb-[15px]">
+      <div className="pointer-events-auto flex w-full flex-col gap-1.5">
         <div className="flex w-full items-center gap-4">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
             {lineage ? (
               <>
                 <Button
-                  size={ButtonSize.Large}
-                  variant={ButtonVariant.Ghost}
-                  content={ButtonContent.Icon}
-                  className="!h-6 !w-6 !min-h-0 !p-0"
-                  aria-label="Parent chat"
-                  onClick={openParent}
-                >
-                  <Icon iconName={IconName.Left} />
-                </Button>
-                <button
-                  type="button"
-                  className="label-medium max-w-[120px] truncate text-btn-secondary"
+                  variant={ButtonVariant.Tertiary}
+                  size={ButtonSize.Medium}
+                  className="min-w-0 max-w-[120px]"
+                  aria-label={`${parentTitle}, parent chat`}
                   title={parentTitle}
                   onClick={openParent}
                 >
-                  {parentTitle}
-                </button>
+                  <span className="truncate underline">{parentTitle}</span>
+                </Button>
                 <Icon iconName={IconName.Right} size={16} className="shrink-0 text-btn-secondary" />
               </>
             ) : null}
-            <p
-              className={cn(
-                "header-md min-w-0 truncate",
-                running ? "text-shimmer-basic" : "text-basic-primary",
-              )}
-            >
-              {title}
-            </p>
-            {relationship ? (
-              <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-1 py-[2px] text-basic-tertiary">
-                {relationship}
-              </span>
-            ) : behavior && policy.orchestrationEnabled ? (
-              <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-1 py-[2px] text-basic-tertiary">
-                {BEHAVIOR_BADGE[behavior]}
-              </span>
-            ) : null}
-          </div>
-          {behavior === "direct" || behavior === "direct-with-orchestrator" ? (
-            <RunDetails
-              context={formatTokensCompact(contextTokens)}
-              input={formatTokensCompact(metrics.usage?.input_tokens)}
-              output={formatTokensCompact(metrics.usage?.output_tokens)}
-              cost={formatCostMicros(metrics.usage?.cost?.total)}
-              elapsed={formatClock(elapsedMs)}
-            />
-          ) : (
-            <>
-              {metrics.usage || contextTokens ? (
-                <div className="shrink-0 items-center gap-0.5 hidden xl:flex">
-                  <Metric
-                    iconName={IconName.Timelaps}
-                    value={formatTokensCompact(contextTokens)}
-                    title={context}
-                    className="text-info-primary"
-                    labelClassName="label-micro"
-                  />
-                  {metrics.usage ? (
-                    <>
-                      <Metric
-                        iconName={IconName.ArrowTop}
-                        value={formatTokensCompact(metrics.usage.input_tokens)}
-                        title="Input tokens"
-                        className="text-info-secondary opacity-75"
-                        labelClassName="text-micro"
-                      />
-                      <Metric
-                        iconName={IconName.ArrowDown}
-                        value={formatTokensCompact(metrics.usage.output_tokens)}
-                        title="Output tokens"
-                        className="text-info-secondary opacity-75"
-                        labelClassName="text-micro"
-                      />
-                    </>
-                  ) : null}
-                </div>
+            <div className="flex min-w-0 items-center gap-2">
+              <p
+                className={cn(
+                  "header-sm min-w-0 truncate",
+                  running ? "text-shimmer-basic" : "text-basic-primary",
+                )}
+              >
+                {title}
+              </p>
+              {badge ? (
+                <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-2 py-[3px] text-basic-tertiary">
+                  {badge}
+                </span>
               ) : null}
-              <div className="flex shrink-0 items-center">
-                {metrics.usage ? (
-                  <Tooltip title="Session cost" position={TooltipPosition.BottomCenter}>
-                    <span className="text-micro whitespace-nowrap text-basic-primary">
-                      {formatCostMicros(metrics.usage.cost?.total)}
-                    </span>
-                  </Tooltip>
-                ) : null}
-                <Tooltip
-                  title={running ? "Run elapsed" : "Last response time"}
-                  position={TooltipPosition.BottomRight}
-                >
-                  <span className="label-micro flex h-6 w-14 items-center justify-end text-basic-tertiary">
-                    {formatClock(elapsedMs)}
-                  </span>
-                </Tooltip>
-              </div>
-            </>
-          )}
+            </div>
+          </div>
+          <SessionUsage
+            context={formatTokensCompact(contextTokens)}
+            contextShare={contextShare(
+              contextTokens,
+              resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
+            )}
+            input={formatTokensCompact(metrics.usage?.input_tokens)}
+            output={formatTokensCompact(metrics.usage?.output_tokens)}
+            cost={formatCostMicros(metrics.usage?.cost?.total)}
+            running={running}
+            startedAt={runStartedAt}
+            lastElapsedMs={lastElapsedMs ?? metrics.lastResponseMs}
+          />
           {onShowPanel ? (
             <Tooltip title="Show panel" position={TooltipPosition.BottomLeft}>
               <Button
@@ -288,48 +208,37 @@ export function TopSingleSessionHeader({
             </Tooltip>
           ) : null}
         </div>
-        <div className="flex w-full items-center gap-2">
-          <div className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden">
-            {lineage?.description ? (
-              <span className="label-micro min-w-0 truncate text-basic-secondary">
-                {lineage.description}
-              </span>
-            ) : null}
-            {repo ? (
-              <div className="flex shrink-0 items-center gap-0.5">
-                <span className="label-micro max-w-[120px] truncate text-basic-tertiary">
-                  {repo}
-                </span>
-                <span className="tag-label text-basic-muted">
-                  {sessionEnvLabel(entry?.summary)}
-                </span>
-              </div>
-            ) : null}
-            {branch && !readOnly ? (
-              <BranchPicker
-                sessionId={sessionId}
-                branch={branch}
-                placement={PopoverPlacement.BottomRight}
-              />
-            ) : null}
-            {branch && readOnly ? (
-              <span className="label-micro flex min-w-0 items-center gap-1.5 text-btn-secondary">
-                <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
-                <span className="truncate">{branch}</span>
-              </span>
-            ) : null}
-          </div>
+        {/* Clipped sideways only: the buttons are as tall as the row, and
+            their focus rings reach past it. */}
+        <div className="flex w-full min-w-0 items-center gap-4 overflow-x-clip">
+          {repo ? (
+            <div className="flex shrink-0 items-center gap-0.5">
+              <span className="label-micro max-w-[120px] truncate text-basic-tertiary">{repo}</span>
+              <span className="tag-label text-basic-muted">{sessionEnvLabel(entry?.summary)}</span>
+            </div>
+          ) : null}
+          {branch && !readOnly ? (
+            <BranchPicker
+              sessionId={sessionId}
+              branch={branch}
+              placement={PopoverPlacement.BottomRight}
+              tertiary
+            />
+          ) : null}
+          {branch && readOnly ? (
+            <span className="label-micro flex min-w-0 items-center gap-1.5 text-btn-secondary">
+              <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
+              <span className="truncate">{branch}</span>
+            </span>
+          ) : null}
           <RevisionPicker
             sessionId={sessionId}
             selected={selectedRevision}
             onSelect={selectRevision}
-            placement={PopoverPlacement.BottomLeft}
+            placement={PopoverPlacement.BottomRight}
           />
           {additions || deletions ? (
-            <div className="code code-small flex shrink-0 items-center gap-2">
-              <span className="text-success-primary">+{additions}</span>
-              <span className="text-error-primary">-{deletions}</span>
-            </div>
+            <CodeChangesBadge additions={additions} deletions={deletions} />
           ) : null}
         </div>
       </div>
