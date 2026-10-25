@@ -4,7 +4,6 @@ import { shellInput } from "@/app/features/human-shell/input";
 import { useShellPresentation } from "@/app/features/human-shell/presentationLifetime";
 import { useSubmitShellCommand } from "@/app/features/human-shell/queries";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-
 import {
   Button,
   ButtonContent,
@@ -13,35 +12,35 @@ import {
   Icon,
   IconName,
   KeyboardShortcut,
-  Loader,
-  LoaderSize,
-  StickyButton,
   Popover,
   PopoverPlacement,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import {
+  ComposerFrame,
+  ComposerPill,
+  ComposerSendButton,
+} from "@/app/components/inspector/composer/ComposerFrame";
 import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
-import { GoalControls } from "@/app/components/inspector/GoalControls";
 import { GoalEditor, GoalFlag } from "@/app/components/inspector/GoalComposer";
+import { SessionUsage } from "@/app/components/inspector/SessionUsage";
 import { SubagentSessionComposer } from "@/app/components/inspector/SubagentComposer";
 import { SshBadge } from "@/app/components/SshBadge";
-import { resolveCatalogModel, type ResolvedCatalogModel } from "@/app/lib/catalog";
+import { contextShare, resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
   displayPromptFromMessageText,
   ENV_SSH,
-  formatClock,
   formatCostMicros,
   formatTokensCompact,
   runMetrics,
   sessionEnvLabel,
   tokenUsage,
 } from "@/app/lib/format";
-import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
-import { useNow } from "@/app/hooks/useNow";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { usePromptHistoryPreview } from "@/app/hooks/usePromptHistoryPreview";
 import { perfRender } from "@/app/lib/perfDebug";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
@@ -87,7 +86,7 @@ const HISTORY_PLACEHOLDER = "Ask anything, or press ↑ for an earlier prompt";
 const ROW_PX = { mobile: 40, wide: 48 };
 
 /** How far the field grows before it starts scrolling instead. */
-const MAX_HEIGHT_PX = { mobile: 128, wide: 200 };
+const MAX_HEIGHT_PX = 180;
 
 interface SlashCommandQuery {
   leadingWhitespace: string;
@@ -169,82 +168,15 @@ function highlightedSkillText(segments: SkillReferenceSegment[]) {
   );
 }
 
-/**
- * TopBar's HeaderSurface upside down. The phone composer floats over the
- * transcript rather than sitting in a card, so the ground fades in beneath it
- * and takes the scrolling messages with it.
- */
-const GROUND_FADE_UP = {
-  backgroundImage:
-    "linear-gradient(to top, var(--color-bg-elevation-ground), var(--color-bg-elevation-ground-transparent))",
-};
-
 interface ChatInputBoxProps {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
   entry: ManagedSessionSummary | null;
 }
 
-function StatBadge({
-  iconName,
-  prefix,
-  value,
-  iconSize = 14,
-  className,
-  title,
-  showIcon = true,
-  labelClassName = "label-micro",
-}: {
-  iconName?: IconName;
-  prefix?: string;
-  value: string;
-  iconSize?: 14 | 16;
-  className?: string;
-  title: string;
-  showIcon?: boolean;
-  labelClassName?: string;
-}) {
-  return (
-    <Tooltip title={title} position={TooltipPosition.TopCenter}>
-      <div className={cn("flex items-center gap-[2px] py-1 whitespace-nowrap", className)}>
-        {prefix ? (
-          <span className={labelClassName}>{prefix}</span>
-        ) : showIcon && iconName ? (
-          <Icon iconName={iconName} size={iconSize} />
-        ) : null}
-        <span className={labelClassName}>{value}</span>
-      </div>
-    </Tooltip>
-  );
-}
-
 /**
- * Context reading against the catalog's window: "6.8K / 200K" for a model the
- * catalog knows, and the same with an "est." marker and no percentage when the
- * window is only the provider's default — the figure itself is a guess then.
- */
-function contextGauge(used: number | null, resolved: ResolvedCatalogModel) {
-  const tokens = formatTokensCompact(used);
-  const window = resolved.contextWindow;
-  if (!window || used == null) {
-    return { value: tokens, title: "Orchestrator context" };
-  }
-  const limit = formatTokensCompact(window);
-  if (resolved.estimated) {
-    return {
-      value: `${tokens} / ${limit} est.`,
-      title: `Orchestrator context against ${resolved.provider?.id ?? "the provider"}'s default window — the catalog does not know this model, so the limit is an estimate`,
-    };
-  }
-  return {
-    value: `${tokens} / ${limit}`,
-    title: `Orchestrator context — ${Math.round((used / window) * 100)}% of the model's context window`,
-  };
-}
-
-/**
- * Message field plus the run status bar that replaced the old metrics grid:
- * model, environment, cumulative token usage and the run timer.
+ * Message pill plus the row of session controls under it: model, settings and
+ * permissions, and on a phone, which has no session header, the usage readings.
  */
 export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) {
   const runtime = useNativeRuntime();
@@ -278,10 +210,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     [drafts, sessionId],
   );
   const isMobile = useIsMobile();
-  const isTablet = useIsTablet();
-  // Everything narrower than the desktop column drops what will not fit there:
-  // the model name, the per-direction token columns and the timer's glyph.
-  const narrow = isMobile || isTablet;
   // A phone keeps the message on one truncated line until the field is focused,
   // then grows the pill over the transcript.
   const [focused, setFocused] = useState(false);
@@ -293,7 +221,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const [hoveredSuggestion, setHoveredSuggestion] = useState<number | null>(null);
   const collapsed = isMobile && !focused;
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
-  const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
   const running = useRunning(sessionId);
   const stopping = useCancelArmed(sessionId);
   const toast = useToast();
@@ -317,7 +244,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const createGoal = useCreateGoal();
   const updateGoal = useUpdateGoal();
   const clearGoal = useClearGoal();
-  const [goalOpenRequest, setGoalOpenRequest] = useState(0);
   const [goalEditing, setGoalEditing] = useState(false);
   const [goalSessionId, setGoalSessionId] = useState(sessionId);
   if (goalSessionId !== sessionId) {
@@ -353,17 +279,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   // A fork inherits context but not spend, so the gauge must not depend on
   // billed usage being present.
   const contextTokens = metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
-  const context = contextGauge(
-    contextTokens,
-    resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
-  );
-  // Only the phone's status row shows the clock, and every tick re-renders the box.
-  const now = useNow(1000, running && isMobile);
   const runStartedAt = useRunStartedAt();
   const lastElapsedMs = useLastElapsedMs();
-  // Stop freezes the clock at click; Stopping must not keep adding cleanup time.
-  const liveElapsed = running && runStartedAt != null ? Math.max(0, now - runStartedAt) : null;
-  const elapsedMs = liveElapsed ?? lastElapsedMs ?? metrics.lastResponseMs;
 
   const sshTarget = sshTargetFromSummary(entry?.summary);
   const sshStatus = useSshConnectionStatus(sshTarget);
@@ -411,8 +328,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     const el = ref.current;
     if (!el) return;
     el.style.height = `${rowPx}px`;
-    el.style.height = `${Math.min(el.scrollHeight, maxHeightPx)}px`;
-  }, [rowPx, maxHeightPx]);
+    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
+  }, [rowPx]);
 
   useLayoutEffect(() => {
     const caret = completionCaretRef.current;
@@ -656,8 +573,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
       const argument = text.trim().slice("/goal".length).trim();
       if (argument === "" || argument === "edit") {
-        if (isMobile) setGoalOpenRequest((request) => request + 1);
-        else setGoalEditing(true);
+        setGoalEditing(true);
         return;
       }
       if (argument === "clear") {
@@ -695,7 +611,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       direct,
       storedGoal,
       refetchGoal,
-      isMobile,
       sessionId,
       updateGoal,
     ],
@@ -873,68 +788,42 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     await actions.stopRun(sessionId);
   }, [actions, sessionId]);
 
-  const settingsButton = (
-    <Tooltip title="Session settings" position={TooltipPosition.TopLeft}>
-      <Button
-        // A phone gets the design's 40px circle around a 24px glyph; the status
-        // bar it sits in elsewhere has room for the 24px square only.
-        className={isMobile ? "btn-round" : undefined}
-        size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-        variant={ButtonVariant.Ghost}
-        content={ButtonContent.Icon}
-        aria-label="Session settings"
-        onClick={() => actions.settings(sessionId)}
-      >
-        <Icon iconName={IconName.Gear} size={isMobile ? undefined : 16} />
-      </Button>
-    </Tooltip>
-  );
-
   const filled = Boolean(value.trim());
   // An empty field during a run is the stop control. Text turns it back into send.
   const stopFromSend = (running || stopping) && !filled;
-  const sendIcon = <Icon iconName={stopFromSend ? IconName.Stop : IconName.ArrowTop} />;
-  const sendLabel = stopping
-    ? "Stopping run"
-    : running && !filled
-      ? "Stop run"
-      : runningInteractive
-        ? "Steer active run"
-        : "Send";
-  const sendType = stopFromSend ? "button" : "submit";
-  const sendDisabled = stopping || (!stopFromSend && !canSend);
-  const onSend = running && !filled && !stopping ? () => void stop() : undefined;
-
-  const sendButton = isMobile ? (
-    <StickyButton
-      className="shrink-0"
-      variant={ButtonVariant.Primary}
-      content={ButtonContent.Icon}
-      type={sendType}
-      disabled={sendDisabled}
+  const sendButton = (
+    <ComposerSendButton
+      compact={isMobile}
+      type={stopFromSend ? "button" : "submit"}
+      disabled={stopping || (!stopFromSend && !canSend)}
       loading={stopping}
-      aria-label={sendLabel}
+      aria-label={
+        stopping
+          ? "Stopping run"
+          : running && !filled
+            ? "Stop run"
+            : runningInteractive
+              ? "Steer active run"
+              : "Send"
+      }
       onPointerDown={preserveSuggestionFocus}
-      onClick={onSend}
+      onClick={running && !filled && !stopping ? () => void stop() : undefined}
     >
-      {sendIcon}
-    </StickyButton>
-  ) : (
-    <Button
-      className="absolute bottom-0 right-0"
-      size={ButtonSize.Large}
-      variant={ButtonVariant.Primary}
-      content={ButtonContent.Icon}
-      type={sendType}
-      disabled={sendDisabled}
-      loading={stopping}
-      aria-label={sendLabel}
-      onPointerDown={preserveSuggestionFocus}
-      onClick={onSend}
-    >
-      {sendIcon}
-    </Button>
+      <Icon iconName={stopFromSend ? IconName.Stop : IconName.ArrowTop} />
+    </ComposerSendButton>
   );
+
+  // A phone gives the goal button to an empty pill at rest, and the whole
+  // width to anything being written.
+  const sideButtons = direct && (!isMobile || (!focused && !value));
+  // The text, its skill mirror and the lines drawn over it share one inset.
+  const textInset = isMobile
+    ? sideButtons
+      ? "py-2 pr-2 pl-3"
+      : "px-3 py-2"
+    : sideButtons
+      ? "py-3 pr-2 pl-4"
+      : "px-4 py-3";
 
   const suggestionStatus = suggestionsOpen
     ? suggestionKind === "slash"
@@ -953,19 +842,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     : "";
 
   const field = (
-    <div
-      className={cn(
-        "relative flex items-end",
-        isMobile
-          ? cn(
-              "flex-1 min-w-0 rounded-[20px] bg-elevation-level-3 shadow-2xl overflow-hidden",
-              // The reserved lane is the settings glyph's, so an expanded pill
-              // — which hides that glyph — takes the width back.
-              collapsed && "pr-[40px]",
-            )
-          : cn("rounded-[4px] bg-input shadow-concave", direct ? "pr-[96px]" : "pr-[48px]"),
-      )}
-    >
+    <ComposerPill compact={isMobile} outline={focused ? "focus" : undefined}>
       <div className="relative flex-1 min-w-0">
         <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {suggestionStatus}
@@ -976,7 +853,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             aria-hidden="true"
             className={cn(
               "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-medium text-input [scrollbar-gutter:stable]",
-              isMobile ? "px-4 py-2" : "p-3",
+              textInset,
             )}
           >
             {highlightedSkillText(skillSegments)}
@@ -987,7 +864,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           ref={ref}
           className={cn(
             "relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap [scrollbar-gutter:stable]",
-            isMobile ? "px-4 py-2" : "p-3",
+            textInset,
             // The line below stands in for it while it is a single row, because
             // a textarea cannot ellipsize its own overflow.
             collapsed && "opacity-0 pointer-events-none",
@@ -1016,7 +893,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           value={value}
           style={{
             minHeight: `${rowPx}px`,
-            maxHeight: `${maxHeightPx}px`,
+            maxHeight: `${MAX_HEIGHT_PX}px`,
             color: mirrorActive ? "transparent" : undefined,
             caretColor: mirrorActive ? "var(--color-text-input)" : undefined,
           }}
@@ -1115,7 +992,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             {/* The preview is drawn here rather than left to the native
                 placeholder, which cannot be measured — this way the key that
                 takes it sits against the end of the text however long it is. */}
-            <div className="pointer-events-none absolute inset-0 flex items-center gap-2 px-3">
+            <div
+              className={cn(
+                "pointer-events-none absolute inset-0 flex items-center gap-2",
+                textInset,
+              )}
+            >
               <span className="min-w-0 truncate text-medium text-input-placeholder">
                 {history.previewText}
               </span>
@@ -1124,7 +1006,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           </>
         ) : null}
         {collapsed ? (
-          <div className="absolute inset-0 flex items-center px-4 cursor-text" onClick={focusEnd}>
+          <div
+            className={cn("absolute inset-0 flex items-center cursor-text", textInset)}
+            onClick={focusEnd}
+          >
             <span
               className={cn(
                 "w-full truncate text-medium",
@@ -1136,21 +1021,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           </div>
         ) : null}
       </div>
-      {/* On a phone the settings glyph rides inside the pill until the field
-          takes over the width, and Send always sits outside it. */}
-      {!isMobile && direct ? (
-        <GoalFlag
-          className="absolute right-[48px] bottom-0"
-          sessionId={sessionId}
-          onOpen={() => setGoalEditing(true)}
-        />
+      {sideButtons ? (
+        <GoalFlag compact={isMobile} sessionId={sessionId} onOpen={() => setGoalEditing(true)} />
       ) : null}
-      {!isMobile ? (
-        sendButton
-      ) : collapsed ? (
-        <div className="absolute top-0 right-0">{settingsButton}</div>
-      ) : null}
-    </div>
+    </ComposerPill>
   );
 
   const suggestions = (
@@ -1218,7 +1092,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       sticky
       closeOnEscape={false}
       sheetOnMobile={false}
-      className={isMobile ? "flex-1 min-w-0" : "w-full"}
+      className="min-w-0 flex-1"
       size="w-[min(400px,calc(100vw-16px))]"
       panelClassName="max-h-[min(40vh,320px)] overflow-y-auto"
     >
@@ -1228,20 +1102,28 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   if (!ownershipKnown) {
     return (
-      <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
-        <span className="flex-1">Loading session controls…</span>
-        {running && (
-          <Button
-            size={ButtonSize.Small}
-            variant={ButtonVariant.GhostDestructive}
-            content={ButtonContent.Text}
-            aria-label="Stop run"
-            onClick={() => void stop()}
-          >
-            Stop
-          </Button>
-        )}
-      </div>
+      <ComposerFrame compact={isMobile} onSubmit={(event) => event.preventDefault()}>
+        <div
+          className={cn(
+            "flex items-center gap-3 bg-elevation-level-3 text-small text-basic-secondary shadow-xl",
+            isMobile ? "min-h-10 rounded-[20px] px-3 py-1" : "min-h-12 rounded-[24px] px-4 py-2",
+          )}
+        >
+          <span className="flex-1">Loading session controls…</span>
+          {running && (
+            <Button
+              type="button"
+              size={ButtonSize.Small}
+              variant={ButtonVariant.GhostDestructive}
+              content={ButtonContent.Text}
+              aria-label="Stop run"
+              onClick={() => void stop()}
+            >
+              Stop
+            </Button>
+          )}
+        </div>
+      </ComposerFrame>
     );
   }
 
@@ -1258,16 +1140,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   }
 
   return (
-    <form
-      className={cn(
-        "flex flex-col",
-        isMobile
-          ? "gap-3 px-4 pt-8 pb-8"
-          : isTablet
-            ? "gap-3 px-2 pt-2 pb-4 rounded-[12px] bg-elevation-level-1 shadow-2xl"
-            : "gap-4 p-4 rounded-[8px] bg-elevation-level-1 shadow-2xl",
-      )}
-      style={isMobile ? GROUND_FADE_UP : undefined}
+    <ComposerFrame
+      compact={isMobile}
       onSubmit={(event) => {
         event.preventDefault();
         if (goalEditing) return;
@@ -1278,15 +1152,17 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         void submit();
       }}
     >
-      {isMobile ? (
+      {goalEditing && direct ? (
+        <GoalEditor
+          sessionId={sessionId}
+          compact={isMobile}
+          onClose={() => setGoalEditing(false)}
+        />
+      ) : (
         <div className="flex items-end gap-2">
           {fieldWithSuggestions}
           {sendButton}
         </div>
-      ) : goalEditing && direct ? (
-        <GoalEditor sessionId={sessionId} onClose={() => setGoalEditing(false)} />
-      ) : (
-        fieldWithSuggestions
       )}
 
       {pendingInbox.length ? (
@@ -1338,16 +1214,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         </div>
       ) : null}
 
-      {/* The status line wraps rather than letting its `shrink-0` chips run
-          into each other once the chat column is narrow. */}
-      <div
-        className={cn(
-          "flex flex-wrap items-center gap-[10px]",
-          // The glyph inside the pill already carries the row's left margin.
-          isMobile && "pl-2",
-        )}
-      >
-        <div className="flex flex-1 min-w-0 flex-wrap items-center gap-y-1 gap-x-4">
+      {/* The row wraps rather than letting its `shrink-0` controls run into
+          each other: on a phone the model keeps its line and the settings
+          move under it. */}
+      <div className="flex flex-wrap items-center gap-x-[10px] gap-y-1">
+        <div className="flex grow min-w-0 flex-wrap items-center gap-y-1 gap-x-4">
           {runningDirect ? (
             <Button
               type="button"
@@ -1363,7 +1234,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           {/* Breaks the line at a fixed width and grows back to its own, so
               Queue Next shortens the model label for the run instead of
               wrapping the row and moving the box when a run starts and ends. */}
-          <div className={cn("flex min-w-0", !isMobile && "grow basis-[160px] max-w-fit")}>
+          <div className="flex min-w-0 grow basis-[160px] max-w-fit">
             <ModelPicker
               sessionId={sessionId}
               metadata={snapshot?.metadata ?? null}
@@ -1372,115 +1243,54 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             />
           </div>
 
-          {/* Gear, hairline, and the current permission setting sit together.
-              A phone keeps the gear inside the message pill. */}
-          {isMobile ? (
-            <PermissionControls sessionId={sessionId} behavior={behavior} />
-          ) : (
-            <div className="ml-auto flex items-center gap-2">
-              {settingsButton}
-              {direct ? <span aria-hidden className="h-6 w-px shrink-0 bg-divider-muted" /> : null}
-              <PermissionControls sessionId={sessionId} behavior={behavior} />
-            </div>
-          )}
-          {isMobile ? (
-            <GoalControls sessionId={sessionId} behavior={behavior} openRequest={goalOpenRequest} />
-          ) : null}
-
           {isSsh ? (
             <SshBadge
               state={sshStatus === "connected" ? "connected" : "reconnect"}
               onReconnect={() => void reconnectSsh()}
             />
-          ) : isMobile ? (
-            <span className="text-[10px] leading-[12px] font-medium uppercase text-basic-tertiary shrink-0">
-              {metrics.env}
-            </span>
-          ) : null}
-
-          {isMobile && (metrics.usage || contextTokens) ? (
-            <div className="flex items-center gap-[2px] min-w-0">
-              {/* The backend reports the live context window here, not a sum
-                  of the columns beside it. A fork can have context without
-                  billed spend, so this badge is not gated on usage. */}
-              <StatBadge
-                iconName={IconName.Timelaps}
-                value={context.value}
-                className="text-info-primary"
-                title={context.title}
-                labelClassName="tag-label"
-              />
-              {/* The per-direction columns go with the model name, leaving the
-                  narrow row the reading that matters. */}
-              {metrics.usage && !narrow ? (
-                <>
-                  <StatBadge
-                    iconName={IconName.ArrowTop}
-                    value={formatTokensCompact(metrics.usage.input_tokens)}
-                    className="text-info-secondary opacity-75"
-                    title="Input tokens"
-                    labelClassName="tag-label"
-                  />
-                  {metrics.usage.cache_read_tokens > 0 ? (
-                    <StatBadge
-                      prefix="C"
-                      value={formatTokensCompact(metrics.usage.cache_read_tokens)}
-                      className="text-info-secondary opacity-75"
-                      title="Cache read tokens"
-                      labelClassName="tag-label"
-                    />
-                  ) : null}
-                  <StatBadge
-                    iconName={IconName.ArrowDown}
-                    value={formatTokensCompact(metrics.usage.output_tokens)}
-                    className="text-info-secondary opacity-75"
-                    title="Output tokens"
-                    labelClassName="tag-label"
-                  />
-                </>
-              ) : null}
-            </div>
           ) : null}
         </div>
 
-        {isMobile ? (
-          <div className="flex items-center gap-[10px] shrink-0">
-            {/* Priced from the model catalog, so a model the catalog has no
-              rates for shows "--" rather than a misleading zero. */}
-            {metrics.usage ? (
-              <StatBadge
-                iconName={IconName.Price}
-                iconSize={16}
-                value={formatCostMicros(metrics.usage.cost?.total)}
-                className="text-basic-primary"
-                title="Session cost"
-                showIcon={false}
-              />
-            ) : null}
-
-            <Tooltip
-              title={running ? "Run elapsed" : "Last response time"}
-              position={TooltipPosition.TopRight}
+        {/* Gear, hairline, and the current permission setting sit together. */}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {isMobile ? (
+            <SessionUsage
+              compact
+              context={formatTokensCompact(contextTokens)}
+              contextShare={contextShare(
+                contextTokens,
+                resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
+              )}
+              input={formatTokensCompact(metrics.usage?.input_tokens)}
+              output={formatTokensCompact(metrics.usage?.output_tokens)}
+              cacheRead={
+                metrics.usage?.cache_read_tokens
+                  ? formatTokensCompact(metrics.usage.cache_read_tokens)
+                  : null
+              }
+              cost={formatCostMicros(metrics.usage?.cost?.total)}
+              running={running}
+              startedAt={runStartedAt}
+              lastElapsedMs={lastElapsedMs ?? metrics.lastResponseMs}
+              environment={metrics.env}
+            />
+          ) : null}
+          <Tooltip title="Session settings" position={TooltipPosition.TopLeft}>
+            <Button
+              type="button"
+              size={ButtonSize.Small}
+              variant={ButtonVariant.Ghost}
+              content={ButtonContent.Icon}
+              aria-label="Session settings"
+              onClick={() => actions.settings(sessionId)}
             >
-              <div
-                className={cn(
-                  "flex items-center gap-1 p-1 shrink-0 label-micro",
-                  running ? "text-basic-primary" : "text-basic-tertiary",
-                )}
-              >
-                {/* The narrow row reads as the bare clock, with the Stop
-                  affordance beside the field carrying the run's state. */}
-                {narrow ? null : running ? (
-                  <Loader size={LoaderSize.Small} />
-                ) : (
-                  <Icon iconName={IconName.History} size={16} />
-                )}
-                <span className="block w-[40px] text-center">{formatClock(elapsedMs)}</span>
-              </div>
-            </Tooltip>
-          </div>
-        ) : null}
+              <Icon iconName={IconName.Gear} size={16} />
+            </Button>
+          </Tooltip>
+          {direct ? <span aria-hidden className="h-6 w-px shrink-0 bg-divider-muted" /> : null}
+          <PermissionControls sessionId={sessionId} behavior={behavior} />
+        </div>
       </div>
-    </form>
+    </ComposerFrame>
   );
 }
