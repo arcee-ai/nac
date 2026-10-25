@@ -209,10 +209,12 @@ export function TopSingleSessionHeader({
           ) : null}
         </div>
         {/* Clipped sideways only: the buttons are as tall as the row, and
-            their focus rings reach past it. */}
-        <div className="flex w-full min-w-0 items-center gap-4 overflow-x-clip">
+            their focus rings reach past it. Next to the side panel the chat
+            can drop to a fifth of the row, so under 24rem the row keeps only
+            the pickers' icons rather than clip them. */}
+        <div className="@container flex w-full min-w-0 items-center gap-4 overflow-x-clip">
           {repo ? (
-            <div className="flex shrink-0 items-center gap-0.5">
+            <div className="flex shrink-0 items-center gap-0.5 @max-sm:hidden">
               <span className="label-micro max-w-[120px] truncate text-basic-tertiary">{repo}</span>
               <span className="tag-label text-basic-muted">{sessionEnvLabel(entry?.summary)}</span>
             </div>
@@ -223,12 +225,13 @@ export function TopSingleSessionHeader({
               branch={branch}
               placement={PopoverPlacement.BottomRight}
               tertiary
+              labelClassName="@max-sm:hidden"
             />
           ) : null}
           {branch && readOnly ? (
             <span className="label-micro flex min-w-0 items-center gap-1.5 text-btn-secondary">
               <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
-              <span className="truncate">{branch}</span>
+              <span className="truncate @max-sm:sr-only">{branch}</span>
             </span>
           ) : null}
           <RevisionPicker
@@ -236,6 +239,7 @@ export function TopSingleSessionHeader({
             selected={selectedRevision}
             onSelect={selectRevision}
             placement={PopoverPlacement.BottomRight}
+            labelClassName="@max-sm:hidden"
           />
           {additions || deletions ? (
             <CodeChangesBadge additions={additions} deletions={deletions} />

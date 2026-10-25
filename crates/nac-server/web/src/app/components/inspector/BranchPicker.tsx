@@ -20,6 +20,7 @@ import {
   TabButton,
   TabButtonSize,
 } from "@/app/atoms";
+import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useBranches, useSwitchBranch } from "@/app/services/queries";
 
@@ -92,6 +93,7 @@ export function BranchPicker({
   branch,
   placement = PopoverPlacement.TopRight,
   tertiary = false,
+  labelClassName,
 }: {
   sessionId: string;
   branch: string;
@@ -102,6 +104,8 @@ export function BranchPicker({
    * dialog title keeps the padded chip, the bigger target for a finger.
    */
   tertiary?: boolean;
+  /** Classes for the tertiary button's branch name; its accessible name stays. */
+  labelClassName?: string;
 }) {
   const { useRunning } = useNativeRuntime().stores.runtimeStore;
 
@@ -237,7 +241,9 @@ export function BranchPicker({
           onClick={toggle}
         >
           <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
-          <span className="truncate max-w-[64px] xl:max-w-[128px]">{branch}</span>
+          <span className={cn("truncate max-w-[64px] xl:max-w-[128px]", labelClassName)}>
+            {branch}
+          </span>
         </Button>
       ) : (
         <button
