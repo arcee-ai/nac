@@ -19,7 +19,7 @@ import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { SessionUsage } from "@/app/components/inspector/SessionUsage";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
-import { resolveCatalogModel } from "@/app/lib/catalog";
+import { contextShare, resolveCatalogModel } from "@/app/lib/catalog";
 import { routes } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import {
@@ -46,24 +46,6 @@ const BEHAVIOR_BADGE: Record<SessionBehavior, string> = {
   "direct-with-orchestrator": "Agent + NAC",
   orchestrator: "Orchestrator",
 };
-
-/**
- * How much of the catalog's window the context fills, or null while either
- * figure is unknown. A model the catalog does not know is measured against its
- * provider's default window, and the reading says so.
- */
-function contextShare(
-  used: number | null,
-  resolved: ReturnType<typeof resolveCatalogModel>,
-): string | null {
-  const window = resolved.contextWindow;
-  if (!window || used == null) return null;
-  const share = `${Math.round((used / window) * 100)}%`;
-  if (resolved.estimated) {
-    return `${share} of ${resolved.provider?.id ?? "the provider"}'s default window. The catalog does not know this model, so the limit is an estimate.`;
-  }
-  return `${share} of the model's context window`;
-}
 
 /**
  * The single-session bar above the transcript: the title with its behavior or
@@ -193,6 +175,11 @@ export function TopSingleSessionHeader({
             )}
             input={formatTokensCompact(metrics.usage?.input_tokens)}
             output={formatTokensCompact(metrics.usage?.output_tokens)}
+            cacheRead={
+              metrics.usage?.cache_read_tokens
+                ? formatTokensCompact(metrics.usage.cache_read_tokens)
+                : null
+            }
             cost={formatCostMicros(metrics.usage?.cost?.total)}
             running={running}
             startedAt={runStartedAt}
