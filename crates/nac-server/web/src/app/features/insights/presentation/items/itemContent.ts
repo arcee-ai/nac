@@ -14,6 +14,10 @@ export interface ItemContext {
   resolveSession: SessionResolver;
   openSubagent: (rowKey: DelegatedRowKey) => void;
   openWorkset: (worksetId: string) => void;
+  /** The session's roots an absolute tool path may start with, as chat links strip them. */
+  workspaceRoots: (string | null | undefined)[];
+  /** Opens a workspace-relative path in Files. */
+  openFile: (path: string) => void;
 }
 
 export interface ItemContent {

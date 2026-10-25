@@ -195,14 +195,19 @@ export function InsightsView({
     toggleInsightGroup,
   ]);
 
+  const hostRoot = snapshot?.workspace?.host_root;
+  const workspaceHostPath = snapshot?.metadata.workspace_host_path;
+  const cwd = snapshot?.metadata.cwd;
   const itemContext = useMemo<ItemContext>(
     () => ({
       sessionId,
       resolveSession,
       openSubagent: navigation.openSubagent,
       openWorkset: navigation.openWorkset,
+      workspaceRoots: [hostRoot, workspaceHostPath, cwd],
+      openFile: navigation.openFile,
     }),
-    [sessionId, resolveSession, navigation],
+    [sessionId, resolveSession, navigation, hostRoot, workspaceHostPath, cwd],
   );
   const [threadView, setThreadView] = useState<ThreadDetailView>("log");
   const [steeringThread, setSteeringThread] = useState<string | null>(null);

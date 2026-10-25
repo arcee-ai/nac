@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 
-import { FileIcon, InsightLinkButton } from "@/app/atoms";
+import { InsightLinkButton } from "@/app/atoms";
 import type { ItemContext } from "@/app/features/insights/presentation/items/itemContent";
 import type { SessionLink } from "@/app/features/insights/presentation/useDelegatedSessions";
 import { Markdown } from "@/app/lib/markdown";
@@ -14,18 +14,6 @@ export function BodyText({ children }: { children: ReactNode }) {
 
 export function SuccessText({ children }: { children: ReactNode }) {
   return <p className="text-small text-success-primary">{children}</p>;
-}
-
-export function FileChip({ path, name }: { path: string; name: string }) {
-  return (
-    <span
-      title={path}
-      className="flex max-w-full items-center gap-2 self-start rounded-[4px] py-1 pl-2 pr-1 label-micro text-btn-secondary"
-    >
-      <FileIcon path={path} size={16} />
-      <span className="min-w-0 truncate">{name}</span>
-    </span>
-  );
 }
 
 /** Rendered only for a session the delegation records confirm. */

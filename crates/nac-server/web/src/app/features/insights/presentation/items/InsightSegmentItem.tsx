@@ -39,7 +39,7 @@ function toolContent(segment: ToolSegment, context: ItemContext): ItemContent {
     case "read-file":
     case "write-file":
     case "edit-file":
-      return fileContent(segment);
+      return fileContent(segment, context);
     case "web-search":
     case "web-fetch":
       return webContent(segment, context);
