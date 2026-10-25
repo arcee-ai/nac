@@ -9,6 +9,11 @@ import {
   FileButtonSize,
   FileButtonsList,
   type FileButtonsListFile,
+  FileListTabButton,
+  FileListTabButtonSize,
+  FileListTabButtonVariant,
+  GitStatus,
+  GitStatusLabel,
 } from "@/app/atoms";
 import { type CodeToken, highlightDiff } from "@/app/lib/highlight";
 import type { WorkspaceDiffLine, WorkspaceDiffSection } from "@/app/types/api";
@@ -60,6 +65,32 @@ const LIST_FILES: FileButtonsListFile[] = [
   { path: "Dockerfile", additions: 1, deletions: 1 },
   { path: "src/app/styles/calendar.scss", additions: 19, deletions: 22 },
   { path: LONG_PATH, additions: 1204, deletions: 377 },
+];
+
+const GIT_STATES: { title: string; status: GitStatus | null }[] = [
+  { title: "Default", status: null },
+  { title: "Changed", status: GitStatus.Changed },
+  { title: "Added", status: GitStatus.Added },
+  { title: "Deleted", status: GitStatus.Deleted },
+  { title: "Changed name", status: GitStatus.ChangedName },
+  { title: "Copied", status: GitStatus.Copied },
+  { title: "Changed type", status: GitStatus.ChangedType },
+  { title: "Conflict", status: GitStatus.Conflict },
+  { title: "Not tracked", status: GitStatus.NotTracked },
+  { title: "Ignored", status: GitStatus.Ignored },
+];
+
+const LIST_ROW_STATES: {
+  title: string;
+  variant: FileListTabButtonVariant;
+  active?: boolean;
+  disabled?: boolean;
+}[] = [
+  { title: "File", variant: FileListTabButtonVariant.File },
+  { title: "File, active", variant: FileListTabButtonVariant.File, active: true },
+  { title: "File, disabled", variant: FileListTabButtonVariant.File, disabled: true },
+  { title: "Folder", variant: FileListTabButtonVariant.Folder },
+  { title: "Folder, open", variant: FileListTabButtonVariant.Folder, active: true },
 ];
 
 const DIFF_PATH = "src/app/lib/parser.ts";
@@ -253,6 +284,70 @@ function ListsPreview() {
   );
 }
 
+function GitStatusLabelsPreview() {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="label-micro text-basic-muted">Git status labels</span>
+      <div className={`flex w-fit gap-3 ${GROUND}`}>
+        {Object.values(GitStatus).map((status) => (
+          <GitStatusLabel key={status} status={status} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const listRowName = (variant: FileListTabButtonVariant) =>
+  variant === FileListTabButtonVariant.Folder ? "components" : "index.tsx";
+
+function FileListRowsPreview() {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="label-micro text-basic-muted">File list tab button, Small</span>
+      <div className="grid w-fit grid-cols-[auto_repeat(5,160px)] items-center gap-x-3 gap-y-1">
+        <span />
+        {LIST_ROW_STATES.map(({ title }) => (
+          <span key={title} className="label-micro text-basic-muted">
+            {title}
+          </span>
+        ))}
+        {GIT_STATES.map(({ title, status }) => (
+          <Fragment key={title}>
+            <span className="label-micro text-basic-tertiary">{title}</span>
+            {LIST_ROW_STATES.map((row) => (
+              <div key={row.title} className={GROUND}>
+                <FileListTabButton
+                  name={listRowName(row.variant)}
+                  variant={row.variant}
+                  status={status}
+                  active={row.active}
+                  disabled={row.disabled}
+                  onClick={noop}
+                />
+              </div>
+            ))}
+          </Fragment>
+        ))}
+      </div>
+      <span className="label-micro text-basic-muted">File list tab button, Large</span>
+      <div className="flex flex-wrap items-start gap-4">
+        {LIST_ROW_STATES.filter((row) => !row.disabled).map((row) => (
+          <div key={row.title} className={`w-[280px] ${GROUND}`}>
+            <FileListTabButton
+              name={listRowName(row.variant)}
+              variant={row.variant}
+              size={FileListTabButtonSize.Large}
+              status={GitStatus.Changed}
+              active={row.active}
+              onClick={noop}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** A deleted line keeps its number in the old file, as Files numbers it. */
 const displayerLine = (
   line: WorkspaceDiffLine,
@@ -312,6 +407,8 @@ export function FilesAtomsSection() {
         <TruncationPreview />
         <BadgePreview />
         <ListsPreview />
+        <GitStatusLabelsPreview />
+        <FileListRowsPreview />
         <CodeDisplayerPreview />
       </div>
     </BoxSurface>

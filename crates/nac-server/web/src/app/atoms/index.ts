@@ -34,7 +34,13 @@ export {
 } from "./file-button/FileButtonsList";
 export { default as FileIcon, fileIconName } from "./file-icon";
 export { default as FileInput, type FileInputFile } from "./file-input";
+export {
+  default as FileListTabButton,
+  FileListTabButtonSize,
+  FileListTabButtonVariant,
+} from "./file-list-tab-button";
 export { default as ForkSessionItem } from "./fork-session-item";
+export { default as GitStatusLabel, GitStatus, gitStatusOf } from "./git-status-label";
 export { default as Hint } from "./hint";
 export {
   default as HorizontalTabsItem,
