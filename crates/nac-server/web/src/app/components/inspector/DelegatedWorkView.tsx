@@ -2,17 +2,35 @@ import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { Button, ButtonSize, ButtonVariant, ChatSessionButton, Icon, IconName } from "@/app/atoms";
+import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
+  ChatSessionButton,
+  Icon,
+  IconName,
+  StickyButton,
+} from "@/app/atoms";
 import { SubagentComposer } from "@/app/components/inspector/SubagentComposer";
+import { SubagentRowActions } from "@/app/components/inspector/SubagentListControls";
 import { SubagentPreview } from "@/app/components/inspector/SubagentPreview";
 import { PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
+import { cn } from "@/app/lib/cn";
 import { groupByRecency } from "@/app/lib/projects";
+import { routes } from "@/app/lib/routes";
 import { sessionBehaviorIcon } from "@/app/lib/sessionBehavior";
+import { usePanelPhoneChrome } from "@/app/providers/PanelPhoneChrome";
 
-import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
+import {
+  useManagedOrchestrators,
+  useSessions,
+  useTraditionalChildren,
+} from "@/app/services/queries";
 import type {
   ManagedOrchestratorRecord,
   SessionBehavior,
@@ -100,11 +118,14 @@ export function DelegatedWorkView({
   const isTablet = useIsTablet();
   const narrow = isMobile || isTablet;
 
+  const navigate = useNavigate();
+  const phoneChrome = usePanelPhoneChrome();
   const supportsOrchestrators =
     useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
   const showBehaviorIcon = useSessionBehaviorIconVisible();
   const children = useTraditionalChildren(sessionId, true);
   const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
+  const sessions = useSessions();
   const now = useNow(60_000);
   const selectedKey = useSelectedSubagent(sessionId);
 
@@ -127,9 +148,23 @@ export function DelegatedWorkView({
   useEffect(() => {
     if (selectedKey == null && newestKey != null) selectSubagent(sessionId, newestKey);
   }, [newestKey, selectSubagent, selectedKey, sessionId]);
+
+  // A delegated session is in the session list too, with the name and pin given
+  // to it there.
+  const summaries = useMemo(
+    () => new Map((sessions.data ?? []).map((entry) => [entry.summary.session_id, entry.summary])),
+    [sessions.data],
+  );
+  const rowTitle = (row: SubagentRow) => nonempty(summaries.get(row.id)?.title) ?? row.description;
+
   const groups = useMemo(
-    () => groupByRecency(rows, (row) => ({ updatedAt: row.updatedAt, pinned: false }), now),
-    [rows, now],
+    () =>
+      groupByRecency(
+        rows,
+        (row) => ({ updatedAt: row.updatedAt, pinned: Boolean(summaries.get(row.id)?.pinned) }),
+        now,
+      ),
+    [rows, summaries, now],
   );
 
   const chooseRow = (key: string) => {
@@ -172,46 +207,111 @@ export function DelegatedWorkView({
       {listState}
       {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-2">
-          <div className="flex items-baseline gap-2 px-2">
+          <div className={cn("flex items-baseline gap-2", isMobile ? "px-3" : "px-2")}>
             <span className="tag-label shrink-0 text-basic-muted">{group.label}</span>
             <span className="h-px min-w-0 flex-1 bg-divider-muted" />
           </div>
           <div className="flex flex-col gap-1">
-            {group.items.map((row) => (
-              <ChatSessionButton
-                key={row.key}
-                title={row.description}
-                lineage={MODE_LINEAGE[row.mode]}
-                showBehaviorIcon={showBehaviorIcon}
-                running={row.status === "running"}
-                active={selected?.key === row.key}
-                onClick={() => chooseRow(row.key)}
-              />
-            ))}
+            {group.items.map((row) => {
+              const title = rowTitle(row);
+              const summary = summaries.get(row.id);
+              return (
+                <ChatSessionButton
+                  key={row.key}
+                  title={title}
+                  lineage={MODE_LINEAGE[row.mode]}
+                  showBehaviorIcon={showBehaviorIcon}
+                  running={row.status === "running"}
+                  active={selected?.key === row.key}
+                  isMobile={isMobile}
+                  onClick={() => chooseRow(row.key)}
+                  actions={
+                    summary ? (
+                      <SubagentRowActions summary={summary} title={title} isMobile={isMobile} />
+                    ) : null
+                  }
+                />
+              );
+            })}
           </div>
         </div>
       ))}
     </div>
   );
 
+  const openDetail = (id: string) => {
+    // A phone's dialog outlives route changes and would cover the chat opened.
+    phoneChrome?.close();
+    navigate(routes.session(id));
+  };
+  const openButton = !selected ? null : isMobile ? (
+    <StickyButton
+      variant={ButtonVariant.Ghost}
+      content={ButtonContent.IconRight}
+      aria-label="Open"
+      onClick={() => openDetail(selected.id)}
+    >
+      Open
+      <Icon iconName={IconName.External} />
+    </StickyButton>
+  ) : isTablet ? (
+    <Button
+      size={ButtonSize.Small}
+      variant={ButtonVariant.Ghost}
+      content={ButtonContent.IconRight}
+      aria-label="Open"
+      onClick={() => openDetail(selected.id)}
+    >
+      Open
+      <Icon iconName={IconName.External} />
+    </Button>
+  ) : null;
+
   return (
     <PanelSplit
       listTitle="Subagents"
-      title={selected?.description}
+      title={
+        selected ? (
+          <span
+            className={cn(
+              isTablet && "font-medium",
+              selected.status === "running" && "text-shimmer-basic",
+            )}
+          >
+            {rowTitle(selected)}
+          </span>
+        ) : undefined
+      }
+      actions={openButton}
       listClassName="py-6"
-      list={list}
+      list={
+        isMobile ? (
+          // A phone opens the panel on its list, so that is where it says
+          // nothing has been delegated yet.
+          loaded && rows.length === 0 ? (
+            <NoSubagents />
+          ) : (
+            <div className="pt-6">{list}</div>
+          )
+        ) : isTablet ? (
+          // The desktop column's insets, out of the tablet list's own 8px.
+          <div className="-mx-1 -mt-2 py-6">{list}</div>
+        ) : (
+          list
+        )
+      }
     >
       <div className="flex min-h-0 flex-1 flex-col">
         {selected ? (
           <>
             <SubagentPreview
               sessionId={selected.id}
-              title={selected.description}
+              title={rowTitle(selected)}
               fallbackText={selected.fallbackText}
               icon={sessionBehaviorIcon(null, MODE_LINEAGE[selected.mode])}
+              header={!narrow}
             />
-            {/* A phone's tab bar floats over the bottom of the panel, as for Files and Threads. */}
-            <div className="shrink-0 p-2 pb-[104px] md:pb-2">
+            <div className="shrink-0 px-4 pt-4 pb-8">
               <SubagentComposer
                 key={`${selected.mode}:${selected.id}`}
                 parentSessionId={sessionId}

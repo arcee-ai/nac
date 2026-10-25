@@ -16,6 +16,7 @@ import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/
 import { ChildTranscriptScope } from "@/app/features/insights/transcript/ChildTranscriptScope";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useDelegatedPreviewStream } from "@/app/hooks/useDelegatedPreviewStream";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
@@ -51,13 +52,17 @@ export function SubagentPreview({
   title,
   fallbackText,
   icon,
+  header = true,
 }: {
   sessionId: string;
   title: string;
   fallbackText: string | null;
   icon: IconName;
+  /** Below the desktop width the panel's own header names it and carries Open. */
+  header?: boolean;
 }) {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const showBehaviorIcon = useSessionBehaviorIconVisible();
   const snapshot = useSessionSnapshot(sessionId, { retry: false });
   const live = useDelegatedPreviewStream(sessionId);
@@ -151,35 +156,38 @@ export function SubagentPreview({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-muted bg-elevation-ground px-4">
-        {showBehaviorIcon ? (
-          <Icon iconName={icon} size={20} className="shrink-0 text-basic-secondary" />
-        ) : null}
-        <p
-          className={cn(
-            "label-small min-w-0 flex-1 truncate",
-            running ? "text-shimmer-basic" : "text-basic-primary",
-          )}
-        >
-          {title}
-        </p>
-        <Button
-          size={ButtonSize.Small}
-          variant={ButtonVariant.Ghost}
-          content={ButtonContent.IconRight}
-          aria-label="Open"
-          onClick={() => navigate(routes.session(sessionId))}
-        >
-          Open
-          <Icon iconName={IconName.External} />
-        </Button>
-      </div>
+      {header ? (
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-muted bg-elevation-ground px-4">
+          {showBehaviorIcon ? (
+            <Icon iconName={icon} size={20} className="shrink-0 text-basic-secondary" />
+          ) : null}
+          <p
+            className={cn(
+              "label-small min-w-0 flex-1 truncate",
+              running ? "text-shimmer-basic" : "text-basic-primary",
+            )}
+          >
+            {title}
+          </p>
+          <Button
+            size={ButtonSize.Small}
+            variant={ButtonVariant.Ghost}
+            content={ButtonContent.IconRight}
+            aria-label="Open"
+            onClick={() => navigate(routes.session(sessionId))}
+          >
+            Open
+            <Icon iconName={IconName.External} />
+          </Button>
+        </div>
+      ) : null}
       <div className="relative min-h-0 flex-1">
         <div
           role="status"
           aria-label={revealed ? undefined : "Loading conversation"}
           className={cn(
-            "pointer-events-none absolute inset-0 px-4 pt-4 transition-opacity duration-150 ease-in-out",
+            "pointer-events-none absolute inset-0 px-4 transition-opacity duration-150 ease-in-out",
+            isMobile ? "pt-18" : "pt-4",
             revealed ? "opacity-0" : "opacity-100 delay-200",
           )}
         >
@@ -189,7 +197,11 @@ export function SubagentPreview({
           ref={scrollRef}
           className={cn("h-full overflow-y-auto", fade, !revealed && "invisible")}
         >
-          <div ref={contentRef} className="flex flex-col px-4 pt-2 pb-6 [&>*]:shrink-0">
+          {/* A phone's header floats over the top 56px of the scroller. */}
+          <div
+            ref={contentRef}
+            className={cn("flex flex-col px-4 pb-6 [&>*]:shrink-0", isMobile ? "pt-16" : "pt-2")}
+          >
             <ChildTranscriptScope sessionId={sessionId} turns={snapshotTurns}>
               {olderFailed && hasOlder ? (
                 <div role="alert" className="mb-4 flex items-center gap-2">

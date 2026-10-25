@@ -81,9 +81,8 @@ for (const [name, viewport, mobile] of [
     // The transcript and panel share draft ownership, without replaying the pending continuation.
     await page.getByRole("button", { name: "Open", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${targetId}/`));
-    if (mobile) {
-      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
-    }
+    // Open closes the phone's panel, so it does not cover the chat it opened.
+    if (mobile) await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Send a message" })).toHaveValue("");
     await page.getByRole("button", { name: "Parent chat" }).click();
     await showSubagents(page, mobile);

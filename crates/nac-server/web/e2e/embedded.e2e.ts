@@ -1794,7 +1794,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
   await showSidePanel(page);
-  await page.getByRole("button", { name: "Inspect the child lifecycle" }).click();
+  await page.getByRole("button", { name: "Inspect the child lifecycle", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
@@ -1825,7 +1825,9 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await page.getByRole("button", { name: "Parent chat" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
   await showSidePanel(page);
-  await page.getByRole("button", { name: "Coordinate the compatibility audit" }).click();
+  await page
+    .getByRole("button", { name: "Coordinate the compatibility audit", exact: true })
+    .click();
   const orchestratorComposer = page.locator("form").filter({
     has: page.getByRole("textbox", { name: "Send a message" }),
   });

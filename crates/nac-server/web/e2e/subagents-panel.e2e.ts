@@ -158,12 +158,8 @@ for (const [name, viewport, mobile] of [
 
     await page.getByRole("button", { name: "Open", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${olderId}/`));
-    if (mobile) {
-      // The phone's panel stays open over the transcript it opened.
-      const panel = page.getByRole("dialog");
-      await panel.getByRole("button", { name: "Close", exact: true }).click();
-      await expect(panel).toHaveCount(0);
-    }
+    // Open closes the phone's panel, so it does not cover the chat it opened.
+    if (mobile) await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.getByRole("button", { name: "Parent chat" }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
     await showSubagents(page, mobile);
@@ -188,11 +184,7 @@ for (const [name, viewport, mobile] of [
     // The sent message left the field; the running child's composers take the next one.
     await page.getByRole("button", { name: "Open", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${olderId}/`));
-    if (mobile) {
-      const panel = page.getByRole("dialog");
-      await panel.getByRole("button", { name: "Close", exact: true }).click();
-      await expect(panel).toHaveCount(0);
-    }
+    if (mobile) await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
     const childDraft = page.getByRole("textbox", { name: "Send a message" });
     await expect(childDraft).toHaveValue("");
