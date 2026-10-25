@@ -56,7 +56,7 @@ export function TopBar() {
       <header
         className={cn(
           "fixed top-0 right-0 z-10 flex items-center justify-between py-2 shrink-0",
-          "transition-[left] duration-500 ease-in-out",
+          "transition-[left] duration-300 ease-out",
           isMobile ? "h-16 px-3 gap-4" : isTablet ? "h-[52px] px-3" : "h-[52px] px-4",
         )}
         style={{ left: sidebarOffset }}

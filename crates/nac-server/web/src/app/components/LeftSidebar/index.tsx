@@ -58,7 +58,7 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
     <div
       data-sidebar="true"
       className={cn(
-        "relative h-full shrink-0 transition-[width] duration-500 ease-in-out",
+        "relative h-full shrink-0 transition-[width] duration-300 ease-out",
         isOpen ? "w-[320px]" : "w-[52px]",
       )}
     >
@@ -74,7 +74,7 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
       )}
       <div
         className={cn(
-          "absolute inset-y-0 z-[1] h-full w-[320px] transition-[left] duration-500 ease-in-out",
+          "absolute inset-y-0 z-[1] h-full w-[320px] transition-[left] duration-300 ease-out",
           isOpen ? "left-0" : "left-[-320px]",
         )}
         aria-hidden={!isOpen}

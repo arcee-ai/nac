@@ -330,7 +330,7 @@ export default function SessionPage() {
             <div
               className={cn(
                 "relative h-full shrink-0",
-                animateSidePanel && "transition-[width] duration-500 ease-in-out",
+                animateSidePanel && "transition-[width] duration-300 ease-out",
                 collapsed ? "w-[52px]" : "w-1/2",
               )}
               style={animateSidePanel ? undefined : { transition: "none" }}
@@ -357,7 +357,7 @@ export default function SessionPage() {
             <div
               className={cn(
                 "absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0 w-1/2",
-                animateSidePanel && "transition-transform duration-500 ease-in-out",
+                animateSidePanel && "transition-transform duration-300 ease-out",
                 collapsed && "translate-x-full",
               )}
               style={animateSidePanel ? undefined : { transition: "none" }}
