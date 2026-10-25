@@ -258,8 +258,8 @@ export function PanelSplit({
 }
 
 /**
- * Row of the list column, sized to the 24px tree row in the design — and to the
- * 48px touch row on a phone, where a finger has none of a pointer's precision.
+ * Row of the list column, as tall as a file list row — 28px, or the 48px touch
+ * row on a phone, where a finger has none of a pointer's precision.
  */
 export function PanelRow({
   label,
@@ -267,7 +267,6 @@ export function PanelRow({
   disabled = false,
   icon,
   trailing,
-  labelClassName,
   title,
   onClick,
 }: {
@@ -277,8 +276,6 @@ export function PanelRow({
   disabled?: boolean;
   icon?: ReactNode;
   trailing?: ReactNode;
-  /** Overrides the label colour, e.g. to mark a file's git status. */
-  labelClassName?: string;
   title?: string;
   onClick?: () => void;
 }) {
@@ -287,7 +284,6 @@ export function PanelRow({
     <TabButton
       type="button"
       size={isMobile ? TabButtonSize.Large : TabButtonSize.Small}
-      className={isMobile ? undefined : "!h-6"}
       active={active}
       disabled={disabled}
       aria-pressed={active}
@@ -295,7 +291,7 @@ export function PanelRow({
       onClick={onClick}
     >
       {icon}
-      <span className={cn("flex-1 min-w-0 truncate text-left", labelClassName)}>{label}</span>
+      <span className="flex-1 min-w-0 truncate text-left">{label}</span>
       {trailing}
     </TabButton>
   );
@@ -315,7 +311,7 @@ export function PanelLoading({ listTitle }: { listTitle?: string }) {
       listTitle={listTitle}
       list={
         <div className="px-1">
-          <ShimmerLoader rows={2} rowClassName="h-6" />
+          <ShimmerLoader rows={2} rowClassName="h-7" />
         </div>
       }
     >

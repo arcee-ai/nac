@@ -8,22 +8,21 @@ import {
   ButtonSize,
   ButtonVariant,
   FileIcon,
+  FileListTabButton,
+  FileListTabButtonSize,
+  FileListTabButtonVariant,
+  GitStatus,
+  gitStatusOf,
   Icon,
   IconName,
   Loader,
   LoaderSize,
 } from "@/app/atoms";
 import { CommitPopover } from "@/app/components/inspector/CommitPopover";
-import {
-  PanelEmpty,
-  PanelLoading,
-  PanelRow,
-  PanelSplit,
-} from "@/app/components/inspector/PanelSplit";
+import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useLiveWorkspace } from "@/app/hooks/useLiveWorkspace";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
-import { statusLabelClass } from "@/app/lib/fileStatus";
 import {
   buildFileTree,
   changedDirPaths,
@@ -49,12 +48,30 @@ import type {
   WorkspaceFileDiff,
 } from "@/app/types/api";
 
-function Chevron({ open }: { open: boolean }) {
+const rowSize = (isMobile: boolean) =>
+  isMobile ? FileListTabButtonSize.Large : FileListTabButtonSize.Small;
+
+/** A file in the tree or the changed list, tinted and lettered by its git status. */
+function FileRow({
+  file,
+  size,
+  selected,
+  onSelect,
+}: {
+  file: FileNode;
+  size: FileListTabButtonSize;
+  selected: string | null;
+  onSelect: (path: string) => void;
+}) {
   return (
-    <Icon
-      iconName={IconName.Right}
-      size={16}
-      className={cn("shrink-0 transition-transform", open && "rotate-90")}
+    <FileListTabButton
+      name={fileLabel(file.path)}
+      path={file.path}
+      size={size}
+      active={selected === file.path}
+      status={gitStatusOf(file.status)}
+      title={file.path}
+      onClick={() => onSelect(file.path)}
     />
   );
 }
@@ -86,11 +103,13 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
         const expanded = open.has(child.path);
         return (
           <div key={child.path} className="flex flex-col gap-[2px] w-full">
-            <PanelRow
-              label={child.name}
-              icon={<Chevron open={expanded} />}
+            <FileListTabButton
+              name={child.name}
+              variant={FileListTabButtonVariant.Folder}
+              size={rowSize(isMobile)}
+              active={expanded}
               // Collapsed folders would otherwise hide where the work is.
-              labelClassName={child.hasChanges ? "text-danger-primary" : undefined}
+              status={child.hasChanges ? GitStatus.Changed : null}
               onClick={() => onToggle(child.path)}
             />
             {expanded ? (
@@ -107,16 +126,12 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
         );
       })}
       {dir.files.map((file) => (
-        <PanelRow
+        <FileRow
           key={file.path}
-          label={fileLabel(file.path)}
-          active={selected === file.path}
-          title={file.path}
-          labelClassName={statusLabelClass(file.status)}
-          // The status letter used to sit here; the label colour already says
-          // as much, so the slot shows what kind of file it is instead.
-          icon={<FileIcon path={file.path} size={isMobile ? 24 : 16} />}
-          onClick={() => onSelect(file.path)}
+          file={file}
+          size={rowSize(isMobile)}
+          selected={selected}
+          onSelect={onSelect}
         />
       ))}
     </div>
@@ -141,14 +156,12 @@ function ChangedList({
   return (
     <div className="flex flex-col gap-[2px]">
       {files.map((file) => (
-        <PanelRow
+        <FileRow
           key={file.path}
-          label={fileLabel(file.path)}
-          active={selected === file.path}
-          title={file.path}
-          labelClassName={statusLabelClass(file.status)}
-          icon={<FileIcon path={file.path} size={isMobile ? 24 : 16} />}
-          onClick={() => onSelect(file.path)}
+          file={file}
+          size={rowSize(isMobile)}
+          selected={selected}
+          onSelect={onSelect}
         />
       ))}
     </div>
