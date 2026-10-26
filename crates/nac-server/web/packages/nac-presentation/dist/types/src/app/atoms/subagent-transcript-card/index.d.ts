@@ -16,6 +16,8 @@ interface SubagentTranscriptCardProps {
      * failed card's name ends with it, lowercased.
      */
     statusLabel?: string;
+    /** Why a failed card's call did not go through, under the title. */
+    error?: string | null;
     /** Session type, drawn in the header while the child is ready. */
     behavior?: SessionBehavior | null;
     /** A delegated session's relationship, which decides over its behavior. */
@@ -26,6 +28,8 @@ interface SubagentTranscriptCardProps {
     onOpen?: () => void;
     /** The child session route behind "Go to session". Without it there is no link. */
     sessionHref?: string | null;
+    /** Follows "Go to session" in the caller's router instead of loading the href. */
+    onSessionLinkClick?: React.MouseEventHandler<HTMLAnchorElement>;
     className?: string;
 }
 /**

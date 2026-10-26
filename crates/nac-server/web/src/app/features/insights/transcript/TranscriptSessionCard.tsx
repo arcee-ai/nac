@@ -135,6 +135,7 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
       title={state.title}
       status={state.status}
       statusLabel={state.label}
+      error={entry.status === "failed" ? entry.presentation.resultPreview : null}
       lineage={LINEAGE[entry.action]}
       showBehaviorIcon={showBehaviorIcon}
       onOpen={rowKey ? () => openSubagent(rowKey) : undefined}
