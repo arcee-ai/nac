@@ -236,9 +236,10 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
             </Button>
           </div>
         ) : null}
-        {/* Two halves, so the slider lines up whether or not "Disabled" shows. */}
-        <div className="flex items-center gap-2">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
+        {/* Two halves, so the slider lines up whether or not "Disabled" shows.
+            The labels never clip; on a narrow card their half widens instead. */}
+        <div className="flex items-center">
+          <div className="flex min-w-fit flex-1 items-center gap-2">
             <Switch
               checked={budgetOn}
               disabled={busy}
@@ -247,17 +248,16 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
             />
             <span className="label-micro shrink-0 text-basic-primary">Token Budget</span>
             {budgetOn ? null : (
-              <span className="label-micro min-w-0 truncate text-basic-muted">Disabled</span>
+              <span className="label-micro shrink-0 text-basic-muted">Disabled</span>
             )}
           </div>
-          {/* The knob centres on its value, so near the minimum half of it
-              hangs past the track; a phone's larger knob needs the wider gap. */}
-          <div className={cn("flex min-w-0 flex-1 items-center", compact ? "gap-3" : "gap-2")}>
-            <span className="code code-small w-[60px] shrink-0 truncate text-right text-btn-secondary">
-              {budgetAmount.toLocaleString()}
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="code code-small w-[60px] shrink-0 truncate text-right font-medium !leading-4 text-btn-secondary">
+              {budgetAmount}
             </span>
             <RangeInput
               className="min-w-0 flex-1"
+              smallKnob
               min={BUDGET_MIN}
               max={BUDGET_MAX}
               step={BUDGET_STEP}

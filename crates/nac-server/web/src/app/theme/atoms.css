@@ -1009,7 +1009,8 @@
   background-color: var(--color-fill-basic-muted);
 }
 
-/* Range track is 4px. The knob is 12px on desktop and 20px on the phone. */
+/* Range track is 4px. The knob is 12px on desktop and 20px on the phone,
+   unless the slider keeps its small knob. */
 .range-input {
   height: 12px;
   outline: none;
@@ -1024,10 +1025,10 @@
   box-shadow: var(--shadow-range-knob);
 }
 @media (max-width: 767.98px) {
-  .range-input {
+  .range-input:not(.range-input-small) {
     height: 20px;
   }
-  .range-knob {
+  .range-input:not(.range-input-small) .range-knob {
     width: 20px;
     height: 20px;
   }
