@@ -234,7 +234,9 @@ test("opens a launched session in Subagents and on its own page from its card", 
 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
   await expect(page.getByText("parent saw the card")).toBeVisible();
-  await page.getByRole("button", { name: `Open ${title} in Subagents`, exact: true }).click();
+  await page
+    .getByRole("button", { name: `Open ${title} in Subagents, Coding agent`, exact: true })
+    .click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
   await expect(page.getByRole("tab", { name: "Subagents" })).toHaveAttribute(
     "aria-selected",

@@ -62,7 +62,7 @@ describe("delegated completion card", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Open Audit persistence in Subagents",
+        name: "Open Audit persistence in Subagents, Coding agent",
       }),
     );
     expect(focusPanel).toHaveBeenCalledWith("delegated");
