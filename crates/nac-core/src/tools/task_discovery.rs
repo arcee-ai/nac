@@ -418,7 +418,8 @@ impl NativeTool for FindTasksTool {
                     visible.push(candidate);
                 }
             }
-            let withheld = matched - visible.len();
+            let withheld = visible.len() < matched;
+            let ambiguous = filtered && visible.len() > 1;
             let candidates = visible
                 .into_iter()
                 .map(|candidate| {
@@ -431,7 +432,7 @@ impl NativeTool for FindTasksTool {
             result(with_receipt(json!({
                 "status": "ok",
                 "scope": {"project_id": project_id, "explicit": explicit},
-                "ambiguous": filtered && matched > 1,
+                "ambiguous": ambiguous,
                 "candidates": candidates,
                 "withheld": withheld,
                 "next_after": page.next_after,

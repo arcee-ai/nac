@@ -242,8 +242,8 @@ async fn search_withholds_candidates_whose_session_is_not_plainly_allowed() {
     ]);
     let found = value(&runtime, "find_tasks", json!({"reference":"ALL-469"})).await;
     assert_eq!(found["candidates"], json!([]));
-    assert_eq!(found["withheld"], 2);
-    assert_eq!(found["ambiguous"], true);
+    assert_eq!(found["withheld"], true);
+    assert_eq!(found["ambiguous"], false);
     assert!(!found.to_string().contains("attempt"));
     cleanup(&runtime);
 }

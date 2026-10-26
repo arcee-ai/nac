@@ -56,4 +56,5 @@ default-scope search or exact read also evaluates the resolved `project:<id>`, s
 rules on a concrete project apply whether or not `project_id` was passed.
 Configured Deny applies, and Ask fails closed without an interactive approver.
 Search candidates whose `session:<id>` is not allowed without a prompt are left
-out and counted in `withheld`.
+out; `withheld` is then true. Neither `ambiguous` nor the `next_after` cursor
+reveals anything about withheld sessions.

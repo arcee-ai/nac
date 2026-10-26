@@ -186,7 +186,10 @@ fn pages_are_bounded_and_cursor_resumes_without_duplicates() {
         assert!(page.candidates.len() <= 2);
         seen.extend(ids(&page).into_iter().map(str::to_owned));
         match page.next_after {
-            Some(cursor) => request.after = Some(cursor),
+            Some(cursor) => {
+                assert!(!cursor.contains('s'), "cursor names a session: {cursor}");
+                request.after = Some(cursor);
+            }
             None => break,
         }
     }

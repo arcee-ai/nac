@@ -144,14 +144,15 @@ fn matched_fields(
     .collect()
 }
 
-fn encode_cursor(updated_at: &str, session_id: &str) -> String {
-    format!("{updated_at}|{session_id}")
+/// Positions by row ID rather than session ID so a cursor never names a session.
+fn encode_cursor(updated_at: &str, row_id: i64) -> String {
+    format!("{updated_at}|{row_id}")
 }
 
-pub fn decode_task_cursor(cursor: &str) -> Option<(&str, &str)> {
-    cursor
-        .split_once('|')
-        .filter(|(updated_at, session_id)| !updated_at.is_empty() && !session_id.is_empty())
+pub fn decode_task_cursor(cursor: &str) -> Option<(&str, i64)> {
+    let (updated_at, row_id) = cursor.split_once('|')?;
+    let row_id = row_id.parse().ok().filter(|row_id: &i64| *row_id >= 0)?;
+    (!updated_at.is_empty()).then_some((updated_at, row_id))
 }
 
 fn current_run(conn: &Connection, session_id: &str) -> Result<Option<TaskRunState>> {
@@ -204,14 +205,14 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
     }
     let mut statement = tx.prepare(&format!(
         "SELECT s.session_id, s.behavior, p.title, s.last_user_prompt, s.run_count,
-                s.created_at, s.updated_at
+                s.created_at, s.updated_at, s.rowid
          FROM session_projects sp
          JOIN sessions s ON s.session_id = sp.session_id
          LEFT JOIN session_presentations p ON p.session_id = s.session_id
          WHERE sp.project_id = ?1 AND {INDEPENDENT_TASK}
            AND (?2 IS NULL OR s.session_id <> ?2)
-           AND (?3 IS NULL OR s.updated_at < ?3 OR (s.updated_at = ?3 AND s.session_id < ?4))
-         ORDER BY s.updated_at DESC, s.session_id DESC
+           AND (?3 IS NULL OR s.updated_at < ?3 OR (s.updated_at = ?3 AND s.rowid < ?4))
+         ORDER BY s.updated_at DESC, s.rowid DESC
          LIMIT ?5"
     ))?;
     let rows = statement
@@ -220,7 +221,7 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
                 search.project_id,
                 search.exclude_session_id,
                 after.map(|(updated_at, _)| updated_at),
-                after.map(|(_, session_id)| session_id),
+                after.map(|(_, row_id)| row_id),
                 TASK_SEARCH_SCAN_LIMIT as i64 + 1
             ],
             |row| {
@@ -232,6 +233,7 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
                     row.get::<_, i64>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
                 ))
             },
         )?
@@ -242,7 +244,7 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
     let mut scanned_rows = 0;
     let mut last_scanned = None;
     let mut more = false;
-    for (session_id, behavior, title, prompt, run_count, created_at, updated_at) in rows {
+    for (session_id, behavior, title, prompt, run_count, created_at, updated_at, row_id) in rows {
         let matched = match (&search.reference, &search.text) {
             (Some(reference), _) => {
                 matched_fields(title.as_deref(), prompt.as_deref(), |value| {
@@ -256,7 +258,7 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
         };
         if (search.reference.is_some() || search.text.is_some()) && matched.is_empty() {
             scanned_rows += 1;
-            last_scanned = Some(encode_cursor(&updated_at, &session_id));
+            last_scanned = Some(encode_cursor(&updated_at, row_id));
             continue;
         }
         if candidates.len() == limit {
@@ -264,7 +266,7 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
             break;
         }
         scanned_rows += 1;
-        last_scanned = Some(encode_cursor(&updated_at, &session_id));
+        last_scanned = Some(encode_cursor(&updated_at, row_id));
         candidates.push(TaskCandidate {
             current_run: current_run(&tx, &session_id)?,
             goal: goal_summary(&tx, &session_id)?,
