@@ -43,7 +43,7 @@ export function useErrorLine(
   const presentation = failed && segment.kind === "tool" ? segment.presentation : null;
   const preview = presentation?.resultPreview ?? null;
   const callId = preview?.endsWith(CUT_PREVIEW) ? presentation?.callId || null : null;
-  const full = useFullContent(sessionId, callId);
+  const full = useFullContent(sessionId, callId, true);
   if (!presentation) return { message: null, action: null };
   const output = full.content?.output;
   const message = errorMessage(presentation, output == null ? preview : errorText(output));

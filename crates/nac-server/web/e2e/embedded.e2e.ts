@@ -744,10 +744,10 @@ test("renders an unknown primary tool failure safely after reload", async ({
   // Checked with the call's Insights details open, since they render its input too.
   await expect(page.locator("body")).not.toContainText("RAW_SECRET_MUST_NOT_RENDER");
   await expect(page.locator("body")).not.toContainText(body);
-  // On request the input renders in full as the server redacted it, no longer valid JSON.
+  // On request the input renders in full as the server redacted it, still valid JSON.
   const input = item.getByRole("group", { name: "Input", exact: true });
   await input.getByRole("button", { name: "Show full" }).click();
-  await expect(input).toContainText(`{"authorization: [REDACTED]","body":"${body}"}`);
+  await expect(input).toContainText(`"authorization": "[REDACTED]", "body": "${body}"`);
   await expect(page.locator("body")).not.toContainText("RAW_SECRET_MUST_NOT_RENDER");
   await page.reload();
   await expect(badge).toHaveCount(1);

@@ -30,7 +30,9 @@ impl SessionService {
                 return Ok(None);
             };
             let secrets = exact_secrets(provider.as_deref())?;
-            let redact = |text: &str| crate::model::redact_credentials(&secrets.redact(text), &[]);
+            let redact_text =
+                |text: &str| crate::model::redact_credentials(&secrets.redact(text), &[]);
+            let redact = |text: &str| redact_document(text, &redact_text);
             let (arguments, arguments_truncated) = bounded(redact(arguments));
             let (output, output_truncated) =
                 match output.map(|content| bounded(redact(&result_text(content)))) {
@@ -46,6 +48,183 @@ impl SessionService {
             }))
         })
         .await?
+    }
+}
+
+/// A JSON object or array is redacted through its decoded strings, so it still
+/// parses: a pattern run over the encoded text can swallow the backslash of an
+/// escaped quote, or run past `\n` escapes into the lines after it. Encoding
+/// again respells numbers (1e5 as 100000.0, and past 64 bits as a float), so a
+/// document with nothing to redact comes back as written; otherwise its
+/// members keep their order and the document its compact or pretty layout.
+/// Any other text is redacted as it stands.
+fn redact_document(text: &str, redact: &dyn Fn(&str) -> String) -> String {
+    let document = match serde_json::from_str::<Document>(text) {
+        Ok(document @ (Document::Object(_) | Document::Array(_))) => document,
+        _ => return redact(text),
+    };
+    let changed = std::cell::Cell::new(false);
+    let document = document.redacted(&|part: &str| {
+        let redacted = redact(part);
+        if redacted != part {
+            changed.set(true);
+        }
+        redacted
+    });
+    if !changed.get() {
+        return text.to_owned();
+    }
+    let encoded = if text.contains('\n') {
+        serde_json::to_string_pretty(&document)
+    } else {
+        serde_json::to_string(&document)
+    };
+    encoded.unwrap_or_else(|_| redact(text))
+}
+
+/// A JSON value whose object members stay in their written order, which
+/// `serde_json::Value` sorts.
+enum Document {
+    Null,
+    Bool(bool),
+    Number(serde_json::Number),
+    String(String),
+    Array(Vec<Document>),
+    Object(Vec<(String, Document)>),
+}
+
+impl Document {
+    fn redacted(self, redact: &dyn Fn(&str) -> String) -> Self {
+        match self {
+            Self::String(text) => Self::String(redact(&text)),
+            Self::Number(number) => {
+                let text = number.to_string();
+                if redact(&text) == text {
+                    Self::Number(number)
+                } else {
+                    Self::String(crate::model::REDACTED.to_owned())
+                }
+            }
+            Self::Array(items) => Self::Array(
+                items
+                    .into_iter()
+                    .map(|item| item.redacted(redact))
+                    .collect(),
+            ),
+            Self::Object(members) => Self::Object(
+                members
+                    .into_iter()
+                    .map(|(key, value)| {
+                        let value = match value {
+                            Self::String(text) => Self::String(redact_member(&key, &text, redact)),
+                            value => value.redacted(redact),
+                        };
+                        (redact(&key), value)
+                    })
+                    .collect(),
+            ),
+            value @ (Self::Null | Self::Bool(_)) => value,
+        }
+    }
+}
+
+/// The encoded `"key": "value"` text let a pattern read the key as a credential
+/// cue, such as a header name. A value that reads as a credential only after
+/// its key is masked whole.
+fn redact_member(key: &str, text: &str, redact: &dyn Fn(&str) -> String) -> String {
+    let alone = redact(text);
+    if redact(&format!("{key}: {text}")) == format!("{key}: {alone}") {
+        alone
+    } else {
+        crate::model::REDACTED.to_owned()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Document {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(DocumentVisitor)
+    }
+}
+
+struct DocumentVisitor;
+
+impl<'de> serde::de::Visitor<'de> for DocumentVisitor {
+    type Value = Document;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON value")
+    }
+
+    fn visit_unit<E>(self) -> Result<Document, E> {
+        Ok(Document::Null)
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Document, E> {
+        Ok(Document::Bool(value))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Document, E> {
+        Ok(Document::Number(value.into()))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Document, E> {
+        Ok(Document::Number(value.into()))
+    }
+
+    fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Document, E> {
+        serde_json::Number::from_f64(value)
+            .map(Document::Number)
+            .ok_or_else(|| E::custom("a JSON number is finite"))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Document, E> {
+        Ok(Document::String(value.to_owned()))
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Document, E> {
+        Ok(Document::String(value))
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Document, A::Error> {
+        let mut items = Vec::new();
+        while let Some(item) = seq.next_element()? {
+            items.push(item);
+        }
+        Ok(Document::Array(items))
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Document, A::Error> {
+        let mut members = Vec::new();
+        while let Some(member) = map.next_entry()? {
+            members.push(member);
+        }
+        Ok(Document::Object(members))
+    }
+}
+
+impl serde::Serialize for Document {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{SerializeMap, SerializeSeq};
+        match self {
+            Self::Null => serializer.serialize_unit(),
+            Self::Bool(value) => serializer.serialize_bool(*value),
+            Self::Number(value) => serde::Serialize::serialize(value, serializer),
+            Self::String(value) => serializer.serialize_str(value),
+            Self::Array(items) => {
+                let mut seq = serializer.serialize_seq(Some(items.len()))?;
+                for item in items {
+                    seq.serialize_element(item)?;
+                }
+                seq.end()
+            }
+            Self::Object(members) => {
+                let mut map = serializer.serialize_map(Some(members.len()))?;
+                for (key, value) in members {
+                    map.serialize_entry(key, value)?;
+                }
+                map.end()
+            }
+        }
     }
 }
 

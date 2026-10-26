@@ -169,6 +169,8 @@ export function FileChange({ path, callId, context }: FileChangeProps) {
   );
   const diff = change?.diff?.hunks.length ? change.diff : null;
   const filePath = change?.path ?? path;
+  // The result lands once the call's batch of parallel calls is done.
+  const awaitingResult = data?.output === null;
   // Without data a new fetch starts over as pending, which would swap the
   // retry button out from under focus.
   const failed = !data && (query.isError || (query.errorUpdateCount > 0 && query.isFetching));
@@ -182,7 +184,7 @@ export function FileChange({ path, callId, context }: FileChangeProps) {
           deletions={diff?.deletions}
         />
       ) : null}
-      {query.isPending && !failed ? (
+      {(query.isPending || awaitingResult) && !failed ? (
         <div role="status" className="flex items-center gap-2 text-micro text-basic-muted">
           <Loader size={LoaderSize.XSmall} aria-hidden />
           Loading the change…
@@ -191,7 +193,7 @@ export function FileChange({ path, callId, context }: FileChangeProps) {
       {failed ? (
         <LoadFailure retrying={query.isFetching} onRetry={() => void query.refetch()} />
       ) : null}
-      {change && !change.diff ? (
+      {change && !change.diff && !awaitingResult ? (
         <p className="break-words text-micro text-basic-muted">
           This change is too large to show here.
         </p>

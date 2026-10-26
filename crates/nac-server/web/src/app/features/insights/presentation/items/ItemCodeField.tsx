@@ -81,7 +81,7 @@ export function ItemCodeField({
   sessionId,
   callId,
 }: ItemCodeFieldProps) {
-  const full = useFullContent(sessionId, callId);
+  const full = useFullContent(sessionId, callId, source === "output");
   const { content } = full;
   const fullContent = useMemo(() => {
     if (!content) return null;

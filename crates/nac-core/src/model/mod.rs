@@ -84,6 +84,7 @@ pub use providers::{
 };
 pub(crate) use redact::{
     redact_credentials, redact_credentials_with_extra_headers, redact_json_body_with_extra_headers,
+    REDACTED,
 };
 
 /// Resolve the API key a backend would use at run time.
