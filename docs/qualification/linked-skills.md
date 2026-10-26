@@ -37,6 +37,16 @@ audit observed **12 installed packages**. Existing installed package bytes were
 unchanged. Requalification at these new revisions passed **30 native reads**.
 The catalog and real installation remained read-only throughout this task.
 
+On October 26, this lane was refreshed onto verified `dev`
+**`87faf08bb6201980f7eb5c030e019fb3ce2ce61e`**. All four existing qualification
+commits rebased byte-identically. The skill loader, prompts, permissions, runtime
+construction and repository skill bytes were unchanged across this base update.
+Fresh focused cases and exact-source qualification passed on macOS arm64 with
+Rust 1.98.0 and Python 3.15.0. The catalog remained clean at `510877f8` with the
+same 12 installed links; all 15 skills expanded and **30 native reads** matched
+their source bytes. This refresh adds integration evidence for the new base;
+the workflow and backend limits below still apply.
+
 The catalog manager's read-only `catalog --client nac` output includes partial
 NAC declarations elsewhere, including `allisoneer/linear-reporting`; that package
 was **not installed** in either snapshot. Of the latest 12 installed packages, only
@@ -68,8 +78,9 @@ NAC's native `read`, including every listed resource. These results are
 | stacked-prs | `contributors/allisoneer/skills/stacked-prs` | codex, claude-code, cursor | Git/gh stack workflow unexercised |
 | vertical-slices | `contributors/allisoneer/skills/vertical-slices` | codex | Planning/execution composition unexercised |
 
-Repository `qa`, `release`, and `triage` were exported from `90be848b` initially
-and `57e97a84` on requalification into the temporary project's `.agents/skills`.
+Repository `qa`, `release`, and `triage` were exported from `90be848b` initially,
+`57e97a84` on requalification and `87faf08b` on refresh into the temporary
+project's `.agents/skills`.
 Their committed bytes are identical. All three were discovered,
 expanded and read, with no supporting `scripts/`, `references/` or `assets/`
 files at that revision. Their full workflows were deliberately not executed:
@@ -143,7 +154,7 @@ env NAC_QUALIFY_CATALOG=/absolute/reviewed/catalog \
   NAC_QUALIFY_INSTALLED=/absolute/installed/skills \
   NAC_QUALIFY_SOURCE=/absolute/nac/checkout \
   NAC_QUALIFY_CATALOG_REV=510877f8adfb18214ea82522fe581d5a39164377 \
-  NAC_QUALIFY_SOURCE_REV=57e97a84f996a5e440f61be6213939825bb0ce2d \
+  NAC_QUALIFY_SOURCE_REV=87faf08bb6201980f7eb5c030e019fb3ce2ce61e \
   cargo test --locked -p nac-core \
   skills::qualification::sources::exact_catalog_links_and_repository_skills_are_discovered_expanded_and_read \
   -- --ignored --exact --nocapture
