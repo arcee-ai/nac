@@ -11,15 +11,13 @@ export interface SubagentChatInputBoxProps {
     onBackgroundChange: (background: boolean) => void;
     status?: TraditionalChildStatus | null;
     busy?: boolean;
+    /** A start is still pending: nothing more is sent until the target is running. */
+    starting?: boolean;
     permission?: ReactNode;
-    /** Put the caret in the field once this composer is shown. */
-    autoFocus?: boolean;
-    /** Changes whenever a new launch should take the caret again. */
-    focusRequest?: number;
 }
 /**
  * The short composer under a child transcript and inside the Subagents preview.
  * It sends, steers, or stops. It does not carry the parent composer's model,
  * effort, or goal controls.
  */
-export declare function SubagentChatInputBox({ value, onChange, onSubmit, onStop, running, background, onBackgroundChange, status, busy, permission, autoFocus, focusRequest, }: SubagentChatInputBoxProps): import("react").JSX.Element;
+export declare function SubagentChatInputBox({ value, onChange, onSubmit, onStop, running, background, onBackgroundChange, status, busy, starting, permission, }: SubagentChatInputBoxProps): import("react").JSX.Element;

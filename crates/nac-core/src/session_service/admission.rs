@@ -235,10 +235,6 @@ impl SessionService {
         clippy::result_large_err,
         reason = "admission errors carry the complete active-operation conflict snapshot"
     )]
-    #[expect(
-        clippy::expect_used,
-        reason = "successful run admission installs the prompt-commit channel before returning"
-    )]
     pub(super) fn try_submit_prompt_inner(
         &self,
         client_id: Option<SessionClientId>,
@@ -246,8 +242,39 @@ impl SessionService {
         operation_lease: Option<sessions::SessionOperationLease>,
         admission: RunAdmissionKind,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        let active_run =
-            self.try_begin_run_with_lease(client_id, &expanded_prompt, operation_lease, admission)?;
+        self.try_submit_prompt_with_guard(
+            client_id,
+            expanded_prompt,
+            operation_lease,
+            admission,
+            None,
+        )
+    }
+
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission carries the active conflict snapshot"
+    )]
+    #[expect(
+        clippy::expect_used,
+        reason = "admission installs the prompt commit channel"
+    )]
+    pub(super) fn try_submit_prompt_with_guard<'a>(
+        &'a self,
+        client_id: Option<SessionClientId>,
+        expanded_prompt: String,
+        operation_lease: Option<sessions::SessionOperationLease>,
+        admission: RunAdmissionKind,
+        guard: Option<super::operation_state::ActiveOperationGuard<'a>>,
+    ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
+        let active_run = self.try_begin_run_inner_with_guard(
+            client_id,
+            &expanded_prompt,
+            operation_lease,
+            true,
+            admission,
+            guard,
+        )?;
         let run_id = active_run.run_id.clone();
         let task_run_id = run_id.clone();
         let run_client_id = active_run.client_id.clone();
@@ -358,6 +385,7 @@ impl SessionService {
         clippy::result_large_err,
         reason = "admission errors carry the complete active-operation conflict snapshot"
     )]
+    #[cfg(test)]
     pub(super) fn try_begin_run_with_lease(
         &self,
         client_id: Option<SessionClientId>,
@@ -372,6 +400,7 @@ impl SessionService {
         clippy::result_large_err,
         reason = "admission errors carry the complete active-operation conflict snapshot"
     )]
+    #[cfg(test)]
     pub(super) fn try_begin_run_inner(
         &self,
         client_id: Option<SessionClientId>,
@@ -379,6 +408,29 @@ impl SessionService {
         supplied_lease: Option<sessions::SessionOperationLease>,
         enforce_coordination: bool,
         admission: RunAdmissionKind,
+    ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
+        self.try_begin_run_inner_with_guard(
+            client_id,
+            expanded_prompt,
+            supplied_lease,
+            enforce_coordination,
+            admission,
+            None,
+        )
+    }
+
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission carries the active conflict snapshot"
+    )]
+    fn try_begin_run_inner_with_guard<'a>(
+        &'a self,
+        client_id: Option<SessionClientId>,
+        expanded_prompt: &str,
+        supplied_lease: Option<sessions::SessionOperationLease>,
+        enforce_coordination: bool,
+        admission: RunAdmissionKind,
+        guard: Option<super::operation_state::ActiveOperationGuard<'a>>,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         let _host_admission = (enforce_coordination && self.managed_admission_enabled)
             .then(|| match self.managed_identity.as_deref() {
@@ -401,7 +453,7 @@ impl SessionService {
             child_execution_mode,
             managed_orchestrator_execution_mode,
         } = admission;
-        let mut guard = self.lock_active_operation();
+        let mut guard = guard.unwrap_or_else(|| self.lock_active_operation());
         if self
             .stopping_admission
             .load(std::sync::atomic::Ordering::Acquire)
@@ -637,6 +689,7 @@ impl SessionService {
             finishing: false,
             task: None,
             prompt_commit,
+            settlement: watch::channel(false).0,
             transcript_baseline: None,
             command_cancellation,
             inbox_item_id,

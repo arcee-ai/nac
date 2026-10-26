@@ -626,6 +626,10 @@
     right: calc(var(--spacing) * 4);
   }
 
+[data-nac-runtime]:is(.right-12), [data-nac-runtime] .right-12 {
+    right: calc(var(--spacing) * 12);
+  }
+
 [data-nac-runtime]:is(.right-\[48px\]), [data-nac-runtime] .right-\[48px\] {
     right: 48px;
   }
@@ -794,6 +798,10 @@
     margin: 0 !important;
   }
 
+[data-nac-runtime]:is(.m-2), [data-nac-runtime] .m-2 {
+    margin: calc(var(--spacing) * 2);
+  }
+
 [data-nac-runtime]:is(.m-auto), [data-nac-runtime] .m-auto {
     margin: auto;
   }
@@ -836,10 +844,6 @@
 
 [data-nac-runtime]:is(.my-8), [data-nac-runtime] .my-8 {
     margin-block: calc(var(--spacing) * 8);
-  }
-
-[data-nac-runtime]:is(.mt-0\.5), [data-nac-runtime] .mt-0\.5 {
-    margin-top: calc(var(--spacing) * .5);
   }
 
 [data-nac-runtime]:is(.mt-1), [data-nac-runtime] .mt-1 {
@@ -1216,8 +1220,16 @@
     height: 1px;
   }
 
+[data-nac-runtime]:is(.max-h-32), [data-nac-runtime] .max-h-32 {
+    max-height: calc(var(--spacing) * 32);
+  }
+
 [data-nac-runtime]:is(.max-h-40), [data-nac-runtime] .max-h-40 {
     max-height: calc(var(--spacing) * 40);
+  }
+
+[data-nac-runtime]:is(.max-h-48), [data-nac-runtime] .max-h-48 {
+    max-height: calc(var(--spacing) * 48);
   }
 
 [data-nac-runtime]:is(.max-h-56), [data-nac-runtime] .max-h-56 {
@@ -1806,10 +1818,6 @@
 
 [data-nac-runtime]:is(.rotate-0), [data-nac-runtime] .rotate-0 {
     rotate: 0deg;
-  }
-
-[data-nac-runtime]:is(.rotate-45), [data-nac-runtime] .rotate-45 {
-    rotate: 45deg;
   }
 
 [data-nac-runtime]:is(.rotate-90), [data-nac-runtime] .rotate-90 {
@@ -2971,6 +2979,10 @@
     padding-right: calc(var(--spacing) * 12);
   }
 
+[data-nac-runtime]:is(.pr-24), [data-nac-runtime] .pr-24 {
+    padding-right: calc(var(--spacing) * 24);
+  }
+
 [data-nac-runtime]:is(.pr-\[40px\]), [data-nac-runtime] .pr-\[40px\] {
     padding-right: 40px;
   }
@@ -3027,6 +3039,10 @@
     padding-bottom: 96px;
   }
 
+[data-nac-runtime]:is(.pb-\[104px\]), [data-nac-runtime] .pb-\[104px\] {
+    padding-bottom: 104px;
+  }
+
 [data-nac-runtime]:is(.pb-\[128px\]), [data-nac-runtime] .pb-\[128px\] {
     padding-bottom: 128px;
   }
@@ -3077,10 +3093,6 @@
 
 [data-nac-runtime]:is(.pl-12), [data-nac-runtime] .pl-12 {
     padding-left: calc(var(--spacing) * 12);
-  }
-
-[data-nac-runtime]:is(.pl-\[48px\]), [data-nac-runtime] .pl-\[48px\] {
-    padding-left: 48px;
   }
 
 [data-nac-runtime]:is(.text-center), [data-nac-runtime] .text-center {

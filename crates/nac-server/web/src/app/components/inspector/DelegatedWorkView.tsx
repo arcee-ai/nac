@@ -1,21 +1,13 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 
-import {
-  Button,
-  ButtonSize,
-  ButtonVariant,
-  ChatSessionButton,
-  Icon,
-  IconName,
-  TabButton,
-} from "@/app/atoms";
-import { SubagentComposer, type SubagentTarget } from "@/app/components/inspector/SubagentComposer";
+import { Button, ButtonSize, ButtonVariant, ChatSessionButton, Icon, IconName } from "@/app/atoms";
+import { SubagentComposer } from "@/app/components/inspector/SubagentComposer";
 import { SubagentPreview } from "@/app/components/inspector/SubagentPreview";
 import { PanelSplit } from "@/app/components/inspector/PanelSplit";
+import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
-import { cn } from "@/app/lib/cn";
 import { groupByRecency } from "@/app/lib/projects";
 
 import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
@@ -36,14 +28,6 @@ interface SubagentRow {
   updatedAt: string;
   fallbackText: string | null;
   icon: IconName;
-}
-
-function parseRowKey(key: string): { mode: "child" | "orchestrator"; id: string } | null {
-  if (key.startsWith("child:")) return { mode: "child", id: key.slice("child:".length) };
-  if (key.startsWith("orchestrator:")) {
-    return { mode: "orchestrator", id: key.slice("orchestrator:".length) };
-  }
-  return null;
 }
 
 function nonempty(value: string | null | undefined): string | null {
@@ -83,26 +67,16 @@ function rowFromOrchestrator(orchestrator: ManagedOrchestratorRecord): SubagentR
   };
 }
 
-const LAUNCH_COPY = {
-  agent: {
-    title: "Launch Subagent",
-    body: "Start a fresh-context coding agent. Browse, steer, continue, and cancel it from this chat.",
-    icon: IconName.Plane,
-  },
-  orchestrator: {
-    title: "Launch Suborchestrator",
-    body: "Start a separate NAC planning session. Browse, steer, continue, and cancel it from this chat.",
-    icon: IconName.Orchestrator,
-  },
-} as const;
-
-function LaunchEmpty({ kind }: { kind: "agent" | "orchestrator" }) {
-  const copy = LAUNCH_COPY[kind];
+/** Subagents are started by the agent; the panel only shows and manages them. */
+function NoSubagents() {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4">
-      <Icon iconName={copy.icon} size={32} className="text-basic-primary" />
-      <p className="label-big mt-2 text-center text-basic-primary">{copy.title}</p>
-      <p className="label-small mt-2 max-w-[311px] text-center text-basic-tertiary">{copy.body}</p>
+      <Icon iconName={IconName.Plane} size={32} className="text-basic-primary" />
+      <p className="label-big mt-2 text-center text-basic-primary">No subagents yet</p>
+      <p className="label-small mt-2 max-w-[311px] text-center text-basic-tertiary">
+        Ask the agent to delegate work. Subagents it starts appear here, where you can browse,
+        steer, continue, and cancel them.
+      </p>
     </div>
   );
 }
@@ -114,28 +88,19 @@ export function DelegatedWorkView({
   sessionId: string;
   behavior: SessionBehavior;
 }) {
-  const {
-    useSubagentLaunch,
-    showSidePanelList,
-    useSubagentLaunchRequest,
-    openSubagentLaunch,
-    clearSubagentLaunch,
-  } = useNativeRuntime().stores.sessionLayoutStore;
+  const { showSidePanelList, selectSubagent, useSelectedSubagent } =
+    useNativeRuntime().stores.sessionLayoutStore;
+  // Below the desktop width the list and the detail are never both on screen.
+  const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
+  const narrow = isMobile || isTablet;
 
   const supportsOrchestrators =
     useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
   const children = useTraditionalChildren(sessionId, true);
   const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
-  const storedLaunch = useSubagentLaunch();
-  const launch = !supportsOrchestrators && storedLaunch === "orchestrator" ? null : storedLaunch;
-  const launchRequest = useSubagentLaunchRequest();
   const now = useNow(60_000);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [seenSession, setSeenSession] = useState(sessionId);
-  if (seenSession !== sessionId) {
-    setSeenSession(sessionId);
-    setSelectedKey(null);
-  }
+  const selectedKey = useSelectedSubagent(sessionId);
 
   const rows = useMemo(() => {
     const childRows = (children.data ?? []).map(rowFromChild);
@@ -147,61 +112,33 @@ export function DelegatedWorkView({
 
   const newestKey =
     [...rows].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.key ?? null;
-  // Keep a just-launched key even before the children list refetches. Falling
-  // back to `newestKey` the moment the id is missing would snap back to the
-  // previous row and stay there once the list catches up.
-  const allowedSelectedKey =
-    !supportsOrchestrators && selectedKey?.startsWith("orchestrator:") ? null : selectedKey;
-  const resolvedKey = launch ? null : (allowedSelectedKey ?? newestKey);
+  // A hidden or vanished choice is kept; the newest row stands in until it returns.
+  const selected =
+    rows.find((row) => row.key === selectedKey) ??
+    rows.find((row) => row.key === newestKey) ??
+    null;
+  // Pin the first default, so another subagent updating does not move it.
   useEffect(() => {
-    if (!supportsOrchestrators && storedLaunch === "orchestrator") clearSubagentLaunch();
-  }, [supportsOrchestrators, storedLaunch, clearSubagentLaunch]);
-  if (!supportsOrchestrators && selectedKey?.startsWith("orchestrator:")) setSelectedKey(null);
-  if (!launch && selectedKey == null && newestKey != null) setSelectedKey(newestKey);
-
-  const selected = rows.find((row) => row.key === resolvedKey) ?? null;
-  const pending = !launch && !selected && resolvedKey ? parseRowKey(resolvedKey) : null;
+    if (selectedKey == null && newestKey != null) selectSubagent(sessionId, newestKey);
+  }, [newestKey, selectSubagent, selectedKey, sessionId]);
   const groups = useMemo(
     () => groupByRecency(rows, (row) => ({ updatedAt: row.updatedAt, pinned: false }), now),
     [rows, now],
   );
 
-  const chooseLaunch = (kind: "agent" | "orchestrator") => {
-    openSubagentLaunch(kind);
-    showSidePanelList(false);
-  };
   const chooseRow = (key: string) => {
-    clearSubagentLaunch();
-    setSelectedKey(key);
+    selectSubagent(sessionId, key);
     showSidePanelList(false);
   };
-
-  const target: SubagentTarget = launch
-    ? { mode: launch === "agent" ? "new-agent" : "new-orchestrator" }
-    : selected
-      ? {
-          mode: selected.mode,
-          id: selected.id,
-          description: selected.description,
-          status: selected.status,
-          background: selected.background,
-        }
-      : pending
-        ? {
-            mode: pending.mode,
-            id: pending.id,
-            description: "Subagent",
-            status: "running",
-            background: false,
-          }
-        : { mode: "new-agent" };
 
   // A failed poll keeps the last successful payload. Only an empty failure
   // replaces the list; otherwise the rows would vanish on a dropped refetch.
   const failed =
     rows.length === 0 && (children.isError || (supportsOrchestrators && orchestrators.isError));
-  const list = failed ? (
-    <div role="alert" className="rounded-[6px] border border-error-primary p-3">
+  // "None yet" is only true once every list the panel shows has answered.
+  const loaded = children.isSuccess && (!supportsOrchestrators || orchestrators.isSuccess);
+  const loadError = (
+    <div role="alert" className="m-2 rounded-[6px] border border-error-primary p-3">
       <div className="text-small text-error-primary">Subagents could not be loaded.</div>
       <Button
         className="mt-2"
@@ -215,8 +152,18 @@ export function DelegatedWorkView({
         Try again
       </Button>
     </div>
-  ) : (
+  );
+  // In the list too, so a narrow list opened over a failed load still offers the retry.
+  const listState = failed ? (
+    loadError
+  ) : rows.length === 0 && !loaded ? (
+    <p role="status" className="label-small m-auto text-basic-tertiary">
+      Loading subagents…
+    </p>
+  ) : null;
+  const list = (
     <div className="flex flex-col gap-8">
+      {listState}
       {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-2">
           <div className="flex items-baseline gap-2 px-2">
@@ -230,7 +177,7 @@ export function DelegatedWorkView({
                 title={row.description}
                 icon={row.icon}
                 running={row.status === "running"}
-                active={!launch && selected?.key === row.key}
+                active={selected?.key === row.key}
                 onClick={() => chooseRow(row.key)}
               />
             ))}
@@ -241,72 +188,35 @@ export function DelegatedWorkView({
   );
 
   return (
-    <PanelSplit
-      listTitle="Subagents"
-      title={launch ? LAUNCH_COPY[launch].title : selected?.description}
-      listToolbar={
-        <div className="flex flex-col gap-1 border-b border-muted p-2">
-          <TabButton active={launch === "agent"} onClick={() => chooseLaunch("agent")}>
-            <Icon iconName={IconName.Add} />
-            <span className="min-w-0 flex-1 truncate text-left">New Agent</span>
-          </TabButton>
-          {supportsOrchestrators ? (
-            <TabButton
-              active={launch === "orchestrator"}
-              onClick={() => chooseLaunch("orchestrator")}
-            >
-              <Icon iconName={IconName.Add} />
-              <span className="min-w-0 flex-1 truncate text-left">New Orchestrator</span>
-            </TabButton>
-          ) : null}
-        </div>
-      }
-      list={list}
-    >
+    <PanelSplit listTitle="Subagents" title={selected?.description} list={list}>
       <div className="flex min-h-0 flex-1 flex-col">
-        {launch ? (
-          <LaunchEmpty kind={launch} />
-        ) : selected ? (
-          <SubagentPreview
-            sessionId={selected.id}
-            title={selected.description}
-            fallbackText={selected.fallbackText}
-            icon={selected.icon}
-          />
-        ) : pending ? (
-          <SubagentPreview
-            sessionId={pending.id}
-            title="Subagent"
-            fallbackText={null}
-            icon={pending.mode === "orchestrator" ? IconName.Orchestrator : IconName.Plane}
-          />
+        {selected ? (
+          <>
+            <SubagentPreview
+              sessionId={selected.id}
+              title={selected.description}
+              fallbackText={selected.fallbackText}
+              icon={selected.icon}
+            />
+            {/* A phone's tab bar floats over the bottom of the panel, as for Files and Threads. */}
+            <div className="shrink-0 p-2 pb-[104px] md:pb-2">
+              <SubagentComposer
+                key={`${selected.mode}:${selected.id}`}
+                parentSessionId={sessionId}
+                target={selected}
+                permissionSessionId={selected.id}
+                permissionBehavior={selected.mode === "orchestrator" ? "orchestrator" : "direct"}
+                showPermissions={false}
+              />
+            </div>
+          </>
+        ) : listState ? (
+          narrow ? (
+            listState
+          ) : null
         ) : (
-          <LaunchEmpty kind="agent" />
+          <NoSubagents />
         )}
-        <div className={cn("shrink-0 p-2")}>
-          <SubagentComposer
-            key={`${target.mode}:${"id" in target ? target.id : "new"}:${"status" in target ? target.status : ""}`}
-            autoFocus={launch != null}
-            focusRequest={launchRequest}
-            parentSessionId={sessionId}
-            target={target}
-            permissionSessionId={"id" in target ? target.id : sessionId}
-            permissionBehavior={
-              target.mode === "orchestrator" || target.mode === "new-orchestrator"
-                ? "orchestrator"
-                : "direct"
-            }
-            showPermissions={false}
-            onStarted={(id) => {
-              clearSubagentLaunch();
-              setSelectedKey(
-                target.mode === "new-orchestrator" || target.mode === "orchestrator"
-                  ? `orchestrator:${id}`
-                  : `child:${id}`,
-              );
-            }}
-          />
-        </div>
       </div>
     </PanelSplit>
   );

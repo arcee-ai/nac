@@ -113,6 +113,8 @@ impl SessionService {
         };
         self.settle_traditional_child_run(run_id, child_status, child_report, child_failure)
             .await;
+        #[cfg(any(test, feature = "test-support"))]
+        self.wait_child_terminal_release_for_test().await;
 
         self.settle_direct_goal_run(run_id, goal_usage, goal_disposition, run_failure.as_ref())
             .await;
@@ -603,7 +605,11 @@ impl SessionService {
                     if &active_run.snapshot.run_id == run_id && active_run.finishing
             )
         }) {
-            *guard = None;
+            if let Some(ActiveSessionOperation::Run(run)) = guard.take() {
+                run.settlement.send_replace(true);
+                // Drop the run's operation lease before publishing the idle slot.
+                drop(run);
+            }
         }
     }
 

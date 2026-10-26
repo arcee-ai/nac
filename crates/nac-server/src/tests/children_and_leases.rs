@@ -154,6 +154,97 @@ async fn traditional_child_http_api_runs_foreground_then_delivers_background_com
 }
 
 #[tokio::test]
+async fn foreground_child_steering_preserves_exact_generation_result() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("traditional_child_concurrent_input");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("traditional-child-steering-key"));
+    let (base_url, requests, arrived, release) = scripted_direct_responses_holding(
+        &[
+            "first pass done",
+            "continuation done",
+            "steering executed",
+            "later generation",
+        ],
+        1,
+    );
+    seed_direct_session_with_base_url(&root, "direct", base_url);
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
+    let post = |body: serde_json::Value| {
+        app.clone().oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/direct/children")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+    };
+    let first = post(serde_json::json!({"profile":"general", "description":"steered child", "prompt":"first pass", "background":false})).await.unwrap();
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first: TraditionalChildRecord =
+        serde_json::from_slice(&response_body(first).await).unwrap();
+    let body = |prompt: &str, background: bool| serde_json::json!({"profile":"general", "description":"steered child", "prompt":prompt, "background":background, "child_session_id":first.child_session_id});
+    let continued = tokio::spawn(post(body("continue", false)));
+    tokio::task::spawn_blocking(move || arrived.recv_timeout(Duration::from_secs(5)).unwrap())
+        .await
+        .unwrap();
+    let steered = post(body("actual concurrent steering", true))
+        .await
+        .unwrap();
+    assert_eq!(
+        steered.status(),
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&response_body(steered).await)
+    );
+    let inbox =
+        nac_core::store::list_session_inbox(&root.join("store.db"), &first.child_session_id)
+            .unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].content, "actual concurrent steering");
+    release.send(()).unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(5), continued)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(reply.status(), StatusCode::CREATED);
+    let child: TraditionalChildRecord =
+        serde_json::from_slice(&response_body(reply).await).unwrap();
+    assert_eq!(child.generation, 2);
+    assert_eq!(child.report.as_deref(), Some("steering executed"));
+    let inbox =
+        nac_core::store::list_session_inbox(&root.join("store.db"), &first.child_session_id)
+            .unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].delivered_run_id, child.run_id);
+    let next = post(body("next generation", false)).await.unwrap();
+    assert_eq!(next.status(), StatusCode::CREATED);
+    let next: TraditionalChildRecord = serde_json::from_slice(&response_body(next).await).unwrap();
+    assert_eq!(next.generation, 3);
+    let original = nac_core::traditional_children::controller_for(&root.join("store.db"))
+        .unwrap()
+        .wait(&first.child_session_id, child.generation)
+        .await
+        .unwrap();
+    assert_eq!(original, child);
+    tokio::task::spawn_blocking(move || {
+        for index in 0..4 {
+            assert_eq!(
+                requests.recv_timeout(Duration::from_secs(5)).unwrap(),
+                index
+            );
+        }
+    })
+    .await
+    .unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn traditional_child_cancel_endpoint_propagates_to_active_generation() {
     let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("traditional_child_cancel");
@@ -835,6 +926,106 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
 }
 
 #[tokio::test]
+async fn foreground_orchestrator_steering_preserves_exact_generation_result() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_concurrent_input");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("managed-steering-key"));
+    let (base_url, requests, arrived, release) = scripted_direct_responses_holding(
+        &["first answer", "steering executed", "later generation"],
+        0,
+    );
+    seed_direct_with_orchestrator_session_with_base_url(&root, "delegating", base_url);
+    let manager = test_manager(&root);
+    let id = manager
+        .create_managed_orchestrator_session("delegating", "steered orchestrator")
+        .await
+        .unwrap();
+    let app = router(manager.clone());
+    let post = |prompt: &str, background: bool| {
+        app.clone().oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/delegating/orchestrators")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({"description":"steered orchestrator", "prompt":prompt,
+            "background":background, "orchestrator_session_id":id})
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+    };
+    let foreground = tokio::spawn(post("original input", false));
+    tokio::task::spawn_blocking(move || arrived.recv_timeout(Duration::from_secs(5)).unwrap())
+        .await
+        .unwrap();
+    let steering = post("actual concurrent steering", true).await.unwrap();
+    assert_eq!(
+        steering.status(),
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&response_body(steering).await)
+    );
+    release.send(()).unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(5), foreground)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let original: ManagedOrchestratorRecord =
+        serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(original.generation, 1);
+    assert_eq!(original.report.as_deref(), Some("steering executed"));
+    let connection = rusqlite::Connection::open(root.join("store.db")).unwrap();
+    let steering_ids = connection
+        .prepare("SELECT id FROM thread_steering WHERE session_id = ?1")
+        .unwrap()
+        .query_map([&id], |row| row.get::<_, i64>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(steering_ids.len(), 1);
+    let steering =
+        nac_core::store::load_thread_steering(&root.join("store.db"), &id, steering_ids[0])
+            .unwrap()
+            .unwrap();
+    assert_eq!(steering.status, "delivered");
+    assert_eq!(steering.instruction, "actual concurrent steering");
+    drop(connection);
+    let response = post("next generation", false).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let next: ManagedOrchestratorRecord =
+        serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(next.generation, 2);
+    assert_eq!(
+        manager
+            .monitor_managed_orchestrator(&id, original.generation)
+            .await
+            .unwrap(),
+        original
+    );
+    let missing = manager
+        .monitor_managed_orchestrator("missing-orchestrator", 1)
+        .await
+        .unwrap_err();
+    assert!(missing.to_string().contains("was not found"), "{missing}");
+    tokio::task::spawn_blocking(move || {
+        for index in 0..3 {
+            assert_eq!(
+                requests.recv_timeout(Duration::from_secs(5)).unwrap(),
+                index
+            );
+        }
+    })
+    .await
+    .unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn managed_monitor_treats_peer_lease_as_live() {
     let root = temp_root("managed_peer_lease_live");
     seed_direct_with_orchestrator_session_with_base_url(
@@ -1220,5 +1411,243 @@ async fn operation_lease_store_failures_are_path_safe_for_submit_patch_and_delet
     let stored = sessions::load_session(&root.join("store.db"), "session").unwrap();
     assert_eq!(stored.model, "model-a");
     assert!(lock_dir.is_file());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn child_http_input_at_terminal_commit_waits_for_real_admission_release() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("child_terminal_input_handoff");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("child-terminal-handoff-key"));
+    let (base_url, requests) = scripted_direct_responses(&[
+        "initial generation",
+        "original foreground result",
+        "new input result",
+    ]);
+    seed_direct_session_with_base_url(&root, "direct", base_url);
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
+    let post = |body: serde_json::Value| {
+        app.clone().oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/direct/children")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+    };
+    let first = post(
+        serde_json::json!({"profile":"general", "description":"handoff child",
+        "prompt":"initial", "background":false}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first: TraditionalChildRecord =
+        serde_json::from_slice(&response_body(first).await).unwrap();
+    let service = manager
+        .attach_session(&first.child_session_id)
+        .await
+        .unwrap();
+    service.await_finishing_run().await.unwrap();
+    let (terminal_committed, input_waiting, release) =
+        service.hold_next_child_terminal_release_for_test();
+    let body = |prompt: &str| {
+        serde_json::json!({"profile":"general", "description":"handoff child",
+        "prompt":prompt, "background":false, "child_session_id":first.child_session_id})
+    };
+    let continued = tokio::spawn(post(body("original foreground continuation")));
+    tokio::time::timeout(Duration::from_secs(5), terminal_committed.notified())
+        .await
+        .unwrap();
+    let terminal =
+        nac_core::store::load_traditional_child(&root.join("store.db"), &first.child_session_id)
+            .unwrap()
+            .unwrap();
+    assert_eq!(terminal.generation, 2);
+    assert!(terminal.status.is_terminal());
+    let following = tokio::spawn(post(body("input during terminal cleanup")));
+    tokio::time::timeout(Duration::from_secs(5), input_waiting.notified())
+        .await
+        .unwrap();
+    assert!(
+        !following.is_finished(),
+        "new input was admitted before the exact run released its lease"
+    );
+    release.notify_one();
+    let continued = tokio::time::timeout(Duration::from_secs(5), continued)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let following = tokio::time::timeout(Duration::from_secs(5), following)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(continued.status(), StatusCode::CREATED);
+    assert_eq!(
+        following.status(),
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&response_body(following).await)
+    );
+    let continued: TraditionalChildRecord =
+        serde_json::from_slice(&response_body(continued).await).unwrap();
+    // The preceding assertion consumes following only on failure.
+    assert_eq!(continued.generation, 2);
+    assert_eq!(
+        continued.report.as_deref(),
+        Some("original foreground result")
+    );
+    let final_child =
+        nac_core::store::load_traditional_child(&root.join("store.db"), &first.child_session_id)
+            .unwrap()
+            .unwrap();
+    assert_eq!(final_child.generation, 3);
+    assert_eq!(final_child.report.as_deref(), Some("new input result"));
+    tokio::task::spawn_blocking(move || {
+        for index in 0..3 {
+            assert_eq!(
+                requests.recv_timeout(Duration::from_secs(5)).unwrap(),
+                index
+            );
+        }
+    })
+    .await
+    .unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn foreground_managed_steering_reports_exact_expired_input() {
+    let root = temp_root("managed_expired_steering_receipt");
+    seed_direct_with_orchestrator_session_with_base_url(
+        &root,
+        "delegating",
+        "https://example.invalid/v1".to_owned(),
+    );
+    let manager = test_manager(&root);
+    let id = manager
+        .create_managed_orchestrator_session("delegating", "expired steering")
+        .await
+        .unwrap();
+    let path = root.join("store.db");
+    nac_core::store::begin_managed_orchestrator_run(
+        &path,
+        &id,
+        "finished-dispatch",
+        ManagedOrchestratorExecutionMode::Foreground,
+    )
+    .unwrap();
+    let expired = nac_core::store::queue_managed_orchestrator_steering(
+        &path,
+        "delegating",
+        &id,
+        "recover this exact message",
+    )
+    .unwrap();
+    nac_core::store::expire_thread_steering(&path, &id, "finished-dispatch").unwrap();
+    let error = crate::delegation_runtime::wait_for_managed_steering(&manager, &id, expired.id)
+        .await
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("before this steering message was delivered"));
+    let receipt = nac_core::store::load_thread_steering(&path, &id, expired.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(receipt.status, "expired");
+    assert_eq!(receipt.instruction, "recover this exact message");
+    let missing =
+        crate::delegation_runtime::wait_for_managed_steering(&manager, "wrong-session", expired.id)
+            .await
+            .unwrap_err();
+    assert!(missing.to_string().contains("not found"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn foreground_managed_steering_recovers_after_peer_lease_disappears() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_steering_peer_recovery");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("managed-steering-recovery-key"));
+    seed_direct_with_orchestrator_session_with_base_url(
+        &root,
+        "delegating",
+        "https://example.invalid/v1".to_owned(),
+    );
+    let manager = test_manager(&root);
+    let id = manager
+        .create_managed_orchestrator_session("delegating", "peer recovery")
+        .await
+        .unwrap();
+    let path = root.join("store.db");
+    let relation = nac_core::store::begin_managed_orchestrator_run(
+        &path,
+        &id,
+        "peer-steering-run",
+        ManagedOrchestratorExecutionMode::Foreground,
+    )
+    .unwrap();
+    nac_core::store::TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            &id,
+            0,
+            &Message::User {
+                content: "peer input".to_owned(),
+            },
+            "peer-steering-run",
+        )
+        .unwrap();
+    let lease = sessions::SessionOperationLease::try_acquire(&path, &id).unwrap();
+    let input = nac_core::store::queue_managed_orchestrator_steering(
+        &path,
+        "delegating",
+        &id,
+        "not consumed by the peer",
+    )
+    .unwrap();
+    nac_core::store::claim_thread_steering(&path, &id, "peer-steering-run").unwrap();
+    let peer_observed = manager.inner.managed_monitor_peer_observed.notified();
+    let wait_manager = manager.clone();
+    let wait_id = id.clone();
+    let wait = tokio::spawn(async move {
+        crate::delegation_runtime::wait_for_managed_steering(&wait_manager, &wait_id, input.id)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), peer_observed)
+        .await
+        .unwrap();
+    assert!(!wait.is_finished());
+    drop(lease);
+    let error = tokio::time::timeout(Duration::from_secs(5), wait)
+        .await
+        .expect("foreground steering must drive recovery after the peer disappears")
+        .unwrap()
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("before this steering message was delivered"),
+        "{error:#}"
+    );
+    let settled = nac_core::store::load_managed_orchestrator(&path, &id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(settled.generation, relation.generation);
+    assert_eq!(settled.run_id.as_deref(), Some("peer-steering-run"));
+    assert!(settled.status.is_terminal());
+    let receipt = nac_core::store::load_thread_steering(&path, &id, input.id)
+        .unwrap()
+        .unwrap();
+    assert_ne!(receipt.status, "delivered");
+    assert_eq!(receipt.instruction, "not consumed by the peer");
     let _ = std::fs::remove_dir_all(root);
 }

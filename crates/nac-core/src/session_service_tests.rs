@@ -315,7 +315,14 @@ pub(super) fn test_direct_active_service(
     session_id: &str,
     client: ModelClient,
 ) -> (SessionServiceParts, PathBuf) {
-    let store_path = test_store_path(label);
+    test_direct_active_service_at(session_id, client, test_store_path(label))
+}
+
+pub(super) fn test_direct_active_service_at(
+    session_id: &str,
+    client: ModelClient,
+    store_path: PathBuf,
+) -> (SessionServiceParts, PathBuf) {
     let agent = build_test_agent(
         client.clone(),
         store_path.clone(),
@@ -338,7 +345,13 @@ pub(super) fn test_direct_active_service(
         BTreeMap::new(),
     );
     snapshot.behavior = sessions::SessionBehavior::Direct;
-    sessions::create_session(&store_path, &snapshot).unwrap();
+    let snapshot = match sessions::load_session(&store_path, session_id) {
+        Ok(stored) => stored,
+        Err(_) => {
+            sessions::create_session(&store_path, &snapshot).unwrap();
+            snapshot
+        }
+    };
     let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
         agent,
         client,

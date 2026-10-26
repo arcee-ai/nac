@@ -44,6 +44,7 @@ function instance(name: string) {
       return Response.json({ orchestration_enabled: false, diagnostic: null });
     if (path === "/projects") return Response.json({ projects: [] });
     if (path.startsWith("/sessions?") || path === "/sessions") return Response.json([]);
+    if (path === "/sessions/same/children") return Response.json([]);
     if (path === "/managed/status") return Response.json({ error: "unmanaged" }, { status: 404 });
     return Response.json({
       source: name,

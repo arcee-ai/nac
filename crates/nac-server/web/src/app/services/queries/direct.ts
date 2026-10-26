@@ -18,6 +18,34 @@ import type {
   UpdateGoalRequest,
 } from "@/app/types/api";
 
+/** Foreground responses can settle after a newer run or cancellation was polled. */
+function acceptSubagentRecord<T extends { generation: number; version: number }>(
+  records: T[],
+  incoming: T,
+  id: (record: T) => string,
+): T[] {
+  const current = records.find((record) => id(record) === id(incoming));
+  if (current && (current.generation > incoming.generation || current.version > incoming.version))
+    return records;
+  return current
+    ? records.map((record) => (id(record) === id(incoming) ? incoming : record))
+    : [...records, incoming];
+}
+
+/** List membership is authoritative; an older in-flight poll cannot rewind a known record. */
+function acceptSubagentList<T extends { generation: number; version: number }>(
+  previous: T[] | undefined,
+  incoming: T[],
+  id: (record: T) => string,
+): T[] {
+  return incoming.map((record) => {
+    const current = previous?.find((candidate) => id(candidate) === id(record));
+    return current && (current.generation > record.generation || current.version > record.version)
+      ? current
+      : record;
+  });
+}
+
 export function useSessionPermissions(sessionId: string, enabled: boolean) {
   const { api } = useNativeRuntime();
 
@@ -156,6 +184,12 @@ export function useTraditionalChildren(sessionId: string, enabled: boolean) {
     enabled,
     refetchInterval: enabled ? 1_000 : false,
     retry: false,
+    structuralSharing: (previous, incoming) =>
+      acceptSubagentList(
+        previous as TraditionalChildRecord[] | undefined,
+        incoming as TraditionalChildRecord[],
+        (record) => record.child_session_id,
+      ),
   });
 }
 
@@ -174,12 +208,8 @@ export function useStartTraditionalChild() {
     onSuccess: (child, variables) => {
       client.setQueryData<TraditionalChildRecord[]>(
         queryKeys.traditionalChildren(variables.sessionId),
-        (children = []) => {
-          const without = children.filter(
-            (candidate) => candidate.child_session_id !== child.child_session_id,
-          );
-          return [...without, child];
-        },
+        (children = []) =>
+          acceptSubagentRecord(children, child, (record) => record.child_session_id),
       );
     },
   });
@@ -196,9 +226,7 @@ export function useCancelTraditionalChild() {
       client.setQueryData<TraditionalChildRecord[]>(
         queryKeys.traditionalChildren(variables.sessionId),
         (children = []) =>
-          children.map((candidate) =>
-            candidate.child_session_id === child.child_session_id ? child : candidate,
-          ),
+          acceptSubagentRecord(children, child, (record) => record.child_session_id),
       );
     },
   });
@@ -215,6 +243,12 @@ export function useManagedOrchestrators(sessionId: string, enabled: boolean) {
     enabled,
     refetchInterval: enabled ? 1_000 : false,
     retry: false,
+    structuralSharing: (previous, incoming) =>
+      acceptSubagentList(
+        previous as ManagedOrchestratorRecord[] | undefined,
+        incoming as ManagedOrchestratorRecord[],
+        (record) => record.orchestrator_session_id,
+      ),
   });
 }
 
@@ -233,13 +267,12 @@ export function useStartManagedOrchestrator() {
     onSuccess: (orchestrator, variables) => {
       client.setQueryData<ManagedOrchestratorRecord[]>(
         queryKeys.managedOrchestrators(variables.sessionId),
-        (orchestrators = []) => {
-          const without = orchestrators.filter(
-            (candidate) =>
-              candidate.orchestrator_session_id !== orchestrator.orchestrator_session_id,
-          );
-          return [...without, orchestrator];
-        },
+        (orchestrators = []) =>
+          acceptSubagentRecord(
+            orchestrators,
+            orchestrator,
+            (record) => record.orchestrator_session_id,
+          ),
       );
     },
   });
@@ -256,10 +289,10 @@ export function useCancelManagedOrchestrator() {
       client.setQueryData<ManagedOrchestratorRecord[]>(
         queryKeys.managedOrchestrators(variables.sessionId),
         (orchestrators = []) =>
-          orchestrators.map((candidate) =>
-            candidate.orchestrator_session_id === orchestrator.orchestrator_session_id
-              ? orchestrator
-              : candidate,
+          acceptSubagentRecord(
+            orchestrators,
+            orchestrator,
+            (record) => record.orchestrator_session_id,
           ),
       );
     },

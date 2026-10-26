@@ -3,6 +3,11 @@ use std::ops::Deref;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+mod delegation_receipts;
+
+#[cfg(test)]
+#[path = "schema/child_input_migration_tests.rs"]
+mod child_input_migration_tests;
 mod managed_tables;
 mod migration_status;
 mod model_configurations;
@@ -47,6 +52,10 @@ mod future_schema_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 37 binds queued foreground intent to crash-safe exact-input waiting authority.
+// 36 retains requested child execution mode with queued input across recovery.
+// 35 retains terminal results for each delegated generation independently of
+// the mutable current child/managed-orchestrator relationship.
 // 34 unifies both historical v33 shapes without rewriting their durable facts:
 // identified terminal-selection inbox admission and the human shell journal.
 // 33 independently introduced each of those additions on its owning branch.
@@ -75,7 +84,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 34;
+const STORE_SCHEMA_VERSION: i64 = 37;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -768,8 +777,8 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | STORE_SCHEMA_VERSION => {
-        }
+        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36
+        | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -903,6 +912,18 @@ fn open_connection_with_hooks(
         "TEXT CHECK (admission_id IS NULL OR length(admission_id)=36)",
     )?;
     ensure_column(&transaction, "session_inbox", "admission_digest", "TEXT CHECK ((admission_digest IS NULL) = (admission_id IS NULL)) CHECK (admission_digest IS NULL OR (length(admission_digest)=64 AND admission_digest NOT GLOB '*[^0-9a-f]*'))")?;
+    ensure_column(
+        &transaction,
+        "session_inbox",
+        "child_execution_mode",
+        "TEXT CHECK (child_execution_mode IN ('foreground', 'background'))",
+    )?;
+    ensure_column(
+        &transaction,
+        "session_inbox",
+        "child_wait_id",
+        "TEXT CHECK (child_wait_id IS NULL OR length(child_wait_id) = 36)",
+    )?;
     transaction.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS idx_session_inbox_admission ON session_inbox(session_id,admission_id) WHERE admission_id IS NOT NULL")?;
     create_permission_grants_table(&transaction)?;
     create_session_goals_table(&transaction)?;
@@ -921,6 +942,7 @@ fn open_connection_with_hooks(
     ensure_column(&transaction, "session_goals", "last_failure_json", "TEXT")?;
     create_traditional_children_table(&transaction)?;
     create_managed_orchestrators_table(&transaction)?;
+    delegation_receipts::create_and_seed(&transaction)?;
     // Execution mode records how a generation was admitted and must remain
     // immutable. Deletion suppresses completion delivery independently.
     ensure_column(
@@ -1821,6 +1843,8 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "permission_grants",
         "traditional_children",
         "managed_orchestrators",
+        "traditional_child_terminal_receipts",
+        "managed_orchestrator_terminal_receipts",
         "session_forks",
         "terminal_remote_cleanups",
         "projects",

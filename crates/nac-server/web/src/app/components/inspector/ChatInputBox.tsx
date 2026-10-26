@@ -4,7 +4,6 @@ import { shellInput } from "@/app/features/human-shell/input";
 import { useShellPresentation } from "@/app/features/human-shell/presentationLifetime";
 import { useSubmitShellCommand } from "@/app/features/human-shell/queries";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import {
   Button,
@@ -22,18 +21,14 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { AgentSpawnButton } from "@/app/components/inspector/AgentSpawnMenu";
 import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { GoalControls } from "@/app/components/inspector/GoalControls";
 import { GoalEditor, GoalFlag } from "@/app/components/inspector/GoalComposer";
-import { ChildControls } from "@/app/components/inspector/ChildControls";
-import { OrchestratorControls } from "@/app/components/inspector/OrchestratorControls";
 import { SubagentSessionComposer } from "@/app/components/inspector/SubagentComposer";
 import { SshBadge } from "@/app/components/SshBadge";
 import { resolveCatalogModel, type ResolvedCatalogModel } from "@/app/lib/catalog";
-import { routes } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import {
   displayPromptFromMessageText,
@@ -269,12 +264,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     captureRuntimeActivation,
   } = useNativeRuntime().stores.runtimeStore;
 
-  const { revealSidePanel, openSubagentLaunch } = useNativeRuntime().stores.sessionLayoutStore;
-
   const { consumePromptRequests, consumeDraftRequests, shellIntents } =
     useNativeRuntime().stores.composerStore;
 
-  const navigate = useNavigate();
   perfRender("ChatInputBox");
   const drafts = runtime.stores.promptDraftStore;
   const { text: value } = drafts.useDraft(sessionId);
@@ -967,10 +959,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               // — which hides that glyph — takes the width back.
               collapsed && "pr-[40px]",
             )
-          : cn(
-              "rounded-[4px] bg-input shadow-concave",
-              direct ? "pl-[48px] pr-[96px]" : "pr-[48px]",
-            ),
+          : cn("rounded-[4px] bg-input shadow-concave", direct ? "pr-[96px]" : "pr-[48px]"),
       )}
     >
       <div className="relative flex-1 min-w-0">
@@ -1145,23 +1134,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       </div>
       {/* On a phone the settings glyph rides inside the pill until the field
           takes over the width, and Send always sits outside it. */}
-      {!isMobile && direct ? (
-        <AgentSpawnButton
-          className="absolute bottom-0 left-0"
-          sessionId={sessionId}
-          behavior={behavior}
-          onCreateSubagent={() => {
-            openSubagentLaunch("agent");
-            revealSidePanel(isMobile);
-            navigate(routes.session(sessionId, "delegated"));
-          }}
-          onCreateOrchestrator={() => {
-            openSubagentLaunch("orchestrator");
-            revealSidePanel(isMobile);
-            navigate(routes.session(sessionId, "delegated"));
-          }}
-        />
-      ) : null}
       {!isMobile && direct ? (
         <GoalFlag
           className="absolute right-[48px] bottom-0"
@@ -1404,22 +1376,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               <PermissionControls sessionId={sessionId} behavior={behavior} />
             </div>
           )}
-          {!isMobile && direct ? (
-            <>
-              <ChildControls sessionId={sessionId} behavior={behavior} showTrigger={false} />
-              <OrchestratorControls sessionId={sessionId} behavior={behavior} showTrigger={false} />
-            </>
-          ) : null}
           {isMobile ? (
-            <>
-              <GoalControls
-                sessionId={sessionId}
-                behavior={behavior}
-                openRequest={goalOpenRequest}
-              />
-              <ChildControls sessionId={sessionId} behavior={behavior} />
-              <OrchestratorControls sessionId={sessionId} behavior={behavior} />
-            </>
+            <GoalControls sessionId={sessionId} behavior={behavior} openRequest={goalOpenRequest} />
           ) : null}
 
           {isSsh ? (

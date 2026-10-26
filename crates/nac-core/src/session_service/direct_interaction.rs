@@ -16,6 +16,11 @@ impl SessionService {
         self.cancel_goal_retry_wake();
         self.coordinate_local(|service| {
             let operation = service.lock_active_operation();
+            if let Some(ActiveSessionOperation::Run(run)) = operation.as_ref() {
+                // Wake finishing-input observers so they revalidate the closed
+                // admission gate even when cleanup cannot finish during shutdown.
+                run.settlement.send_replace(false);
+            }
             if let Some(ActiveSessionOperation::HumanShell(command)) = operation.as_ref() {
                 command.cancel_for_shutdown();
             }
@@ -455,6 +460,29 @@ impl SessionService {
         &self,
         lease: sessions::SessionOperationLease,
     ) -> Result<Option<SessionRunHandle>> {
+        if self.has_active_operation() {
+            return Ok(None);
+        }
+        let service = self.clone();
+        let abandoned_child =
+            crate::store::call_legacy_store(&self.metadata.store_path, move || {
+                let Some(session_id) = service.metadata.session_id.as_deref() else {
+                    return Ok::<_, anyhow::Error>(false);
+                };
+                Ok(
+                    crate::store::load_traditional_child(&service.metadata.store_path, session_id)?
+                        .is_some_and(|child| {
+                            child.status == crate::store::TraditionalChildStatus::Running
+                        }),
+                )
+            })
+            .await??;
+        if abandoned_child {
+            // A peer can exit after attachment or input queueing. Keep this
+            // lease through run/relationship recovery and successor admission;
+            // the existing inbox item remains the sole delivery authority.
+            self.recover_child_input_for_admission(&lease).await?;
+        }
         let service = self.clone();
         crate::store::spawn_blocking_store_caller(move || {
             service.start_next_direct_inbox_item_with_lease(lease)
@@ -478,6 +506,26 @@ impl SessionService {
         if let Some(item) =
             crate::store::next_pending_session_inbox_item(&self.metadata.store_path, session_id)?
         {
+            // Select mode at the successor-admission boundary, under its
+            // operation lease and without an intervening async yield. A lost
+            // waiter leaves the same durable input eligible for background
+            // delivery. Once admitted, the generation's mode is immutable.
+            let child_execution_mode = match item.child_execution_mode {
+                Some(crate::store::TraditionalChildExecutionMode::Foreground) => {
+                    match item.child_wait_id.as_deref().map(|id| {
+                        sessions::ChildInputWaitLease::try_acquire(&self.metadata.store_path, id)
+                    }) {
+                        Some(Err(sessions::SessionOperationLeaseError::Busy(_))) => {
+                            item.child_execution_mode
+                        }
+                        Some(Err(error)) => return Err(error.into()),
+                        Some(Ok(_)) | None => {
+                            Some(crate::store::TraditionalChildExecutionMode::Background)
+                        }
+                    }
+                }
+                mode => mode,
+            };
             return self
                 .try_submit_prompt_inner(
                     None,
@@ -485,6 +533,7 @@ impl SessionService {
                     Some(lease),
                     RunAdmissionKind {
                         inbox_item_id: Some(item.id),
+                        child_execution_mode,
                         terminal_selection: item.terminal_selection,
                         ..RunAdmissionKind::default()
                     },

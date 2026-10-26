@@ -183,3 +183,98 @@ it("persists text without request claims and keeps stale claims away from a new 
   expect(restored.isSubmitting("a")).toBe(true);
   next();
 });
+
+describe("submitted prompt text recovery", () => {
+  it("keeps local recovery IDs distinct after reload without secure-context crypto", () => {
+    vi.stubGlobal("crypto", {});
+    try {
+      const adapter = storage();
+      const first = createPromptDraftStore(scope, adapter);
+      const original = first.retainSubmission("child", first.update("child", "A"))!;
+      first.release();
+      const next = createPromptDraftStore(scope, adapter);
+      const second = next.retainSubmission("child", next.update("child", "B"))!;
+      expect(second.id).not.toBe(original.id);
+      expect(next.getRecoveries("child").map((entry) => entry.text)).toEqual(["A", "B"]);
+      expect(next.restoreRecovery("child", second)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("retains pending text on reload as uncertain alongside the newer draft without request claims", () => {
+    const adapter = storage();
+    const first = createPromptDraftStore(scope, adapter);
+    const draft = first.update("child", "  original\nexact text  ");
+    const recovery = first.retainSubmission("child", draft)!;
+    first.acknowledge("child", draft);
+    first.claimSubmission("child");
+    first.update("child", "newer draft");
+    first.release();
+    const next = createPromptDraftStore(scope, adapter);
+    expect(next.get("child").text).toBe("newer draft");
+    expect(next.getRecoveries("child")).toEqual([{ ...recovery, status: "uncertain" }]);
+    expect(next.isSubmitting("child")).toBe(false);
+    expect(JSON.parse([...adapter.values.values()][0]).recoveries).toEqual([
+      ["child", recovery.id, "  original\nexact text  "],
+    ]);
+    first.settleSubmission("child", recovery, "confirmed");
+    expect(next.getRecoveries("child")).toHaveLength(1);
+    expect(next.restoreRecovery("child", next.getRecoveries("child")[0])).toBe(false);
+    expect(next.get("child").text).toBe("newer draft");
+    next.update("child", "");
+    expect(next.restoreRecovery("child", next.getRecoveries("child")[0])).toBe(true);
+    expect(next.get("child").text).toBe("  original\nexact text  ");
+    expect(next.getRecoveries("child")).toEqual([]);
+  });
+
+  it.each([true, false])(
+    "settles concurrent messages independently in either order (reverse=%s)",
+    (reverse) => {
+      const drafts = createPromptDraftStore();
+      const firstDraft = drafts.update("child", "A");
+      const a = drafts.retainSubmission("child", firstDraft)!;
+      drafts.acknowledge("child", firstDraft);
+      const secondDraft = drafts.update("child", "B");
+      const b = drafts.retainSubmission("child", secondDraft)!;
+      drafts.acknowledge("child", secondDraft);
+      drafts.update("child", "C");
+      const confirmations = [
+        () => drafts.settleSubmission("child", a, "confirmed"),
+        () => drafts.settleSubmission("child", b, "not-sent"),
+      ];
+      for (const settle of reverse ? confirmations.reverse() : confirmations) settle();
+      expect(drafts.get("child").text).toBe("C");
+      expect(drafts.getRecoveries("child")).toEqual([{ ...b, status: "not-sent" }]);
+      drafts.settleSubmission("child", b, "confirmed");
+      expect(drafts.getRecoveries("child")).toHaveLength(1);
+    },
+  );
+
+  it("fences deleted/replaced checkpoints and purges scoped evidence without resurrecting it", () => {
+    const adapter = storage();
+    const drafts = createPromptDraftStore(scope, adapter);
+    const a = drafts.retainSubmission("child", drafts.update("child", "A"))!;
+    drafts.purgeSessions(["child"]);
+    drafts.settleSubmission("child", a, "uncertain");
+    expect(drafts.getRecoveries("child")).toEqual([]);
+    drafts.retainSubmission("child", drafts.update("child", "B"));
+    expect(
+      createPromptDraftStore({ ...scope, owner: "other" }, adapter).getRecoveries("child"),
+    ).toEqual([]);
+    drafts.purgeAll();
+    expect(createPromptDraftStore(scope, adapter).getRecoveries("child")).toEqual([]);
+  });
+
+  it("refuses additional sends before losing text when retained recovery reaches its bound", () => {
+    const drafts = createPromptDraftStore();
+    for (let i = 0; i < 100; i++)
+      drafts.retainSubmission("child", drafts.update("child", String(i)));
+    const next = drafts.update("child", "keep this draft");
+    expect(() => drafts.retainSubmission("child", next)).toThrow(
+      "Unconfirmed message storage is full",
+    );
+    expect(drafts.get("child").text).toBe("keep this draft");
+    expect(drafts.getRecoveries("child")).toHaveLength(100);
+  });
+});

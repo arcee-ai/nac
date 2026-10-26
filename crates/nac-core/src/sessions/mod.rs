@@ -11,6 +11,7 @@ use crate::model::{BackendKind, ReasoningEffort};
 use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
 
+mod child_input_wait;
 mod codec;
 mod db;
 mod operation_lease;
@@ -18,6 +19,7 @@ mod snapshot;
 mod store_process_lease;
 mod summary;
 
+pub(crate) use child_input_wait::ChildInputWaitLease;
 pub use db::MALFORMED_LIGHT_MODEL_DIAGNOSTIC;
 pub(crate) use db::{
     compare_and_update_permission_approval_state, insert_new_session_in_transaction,

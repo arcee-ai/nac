@@ -36,6 +36,9 @@ mod admission;
 mod attachment;
 mod cancellation;
 mod creation;
+mod delegated_input;
+#[cfg(any(test, feature = "test-support"))]
+mod delegated_input_test_support;
 mod direct_interaction;
 mod frontend_projection;
 mod manual_compaction;
@@ -710,6 +713,7 @@ struct ActiveRunState {
     finishing: bool,
     task: Option<JoinHandle<()>>,
     prompt_commit: watch::Sender<RunPromptCommitStatus>,
+    settlement: watch::Sender<bool>,
     /// Visible-response count of the store transcript at run start,
     /// captured by the run task before its first append (step 4,
     /// never-fold): the diff base for the run-end token/timing bookkeeping.
