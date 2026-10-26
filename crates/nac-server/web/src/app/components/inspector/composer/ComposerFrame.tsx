@@ -82,16 +82,18 @@ export function ComposerIconButton({ compact, className, ...props }: ComposerIco
 }
 
 /**
- * Send stands outside the pill on its own shadow. The wrapper carries it: the
- * primary fill's convex shadow would win over a utility on the button itself.
+ * Send stands outside the pill on a shadow of its own, which replaces the
+ * primary fill's convex one; that unlayered rule beats a plain utility.
  */
 export function ComposerSendButton({
   className,
   ...props
 }: Omit<ComposerIconButtonProps, "variant">) {
   return (
-    <span className={cn("inline-flex shrink-0 rounded-full shadow-xl", className)}>
-      <ComposerIconButton variant={ButtonVariant.Primary} {...props} />
-    </span>
+    <ComposerIconButton
+      variant={ButtonVariant.Primary}
+      className={cn("!shadow-composer-send", className)}
+      {...props}
+    />
   );
 }
