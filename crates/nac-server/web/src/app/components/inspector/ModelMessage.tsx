@@ -162,16 +162,28 @@ const ModelMessageBody = memo(function ModelMessageBody({
   const cancelled = turn.blocks.some(
     (block) => block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
   );
+  const frame = cn(
+    "flex flex-col items-start gap-6 w-full max-w-full min-w-0 py-6",
+    isLast && "min-h-[calc(70vh-316px)]",
+  );
+  // Until the run shows anything, the reply is only the word that it is working.
+  if (active && items.length === 0 && !compacting) {
+    return (
+      <div className={frame}>
+        <p role="status" className="label-small text-shimmer-primary">
+          Working…
+        </p>
+      </div>
+    );
+  }
   return (
-    <div
-      className={cn(
-        "group/model-msg flex flex-col items-start gap-6 w-full max-w-full min-w-0 py-6",
-        isLast && "min-h-[calc(70vh-316px)]",
-      )}
-    >
-      {model ? (
-        <div className="flex items-center w-full min-w-0">
-          <ModelPill>{model}</ModelPill>
+    <div className={frame}>
+      {model || date ? (
+        <div className="flex items-center gap-3 w-full min-w-0">
+          <ModelPill className="flex-1">{model}</ModelPill>
+          {date ? (
+            <span className="shrink-0 label-2xs text-basic-muted whitespace-nowrap">{date}</span>
+          ) : null}
         </div>
       ) : null}
 
@@ -217,13 +229,8 @@ const ModelMessageBody = memo(function ModelMessageBody({
             </Markdown>
           );
         })}
-        {/* Compaction runs between model calls, so nothing above moves while it
-            does; the shell stands in for a run that has produced nothing yet. */}
-        {compacting ? (
-          <RunStatusBadge label={COMPACTION_ACTIVITY} />
-        ) : active && items.length === 0 ? (
-          <RunStatusBadge label="Thinking…" />
-        ) : null}
+        {/* Compaction runs between model calls, so nothing above moves while it does. */}
+        {compacting ? <RunStatusBadge label={COMPACTION_ACTIVITY} /> : null}
         {!active && snapshotRevision && filesPanel ? (
           <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
         ) : null}
@@ -255,16 +262,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
       {/* Same resend / revert endpoints as the user bubble above — they always
           address that prompt. Hidden while this turn is still streaming. */}
       {!active ? (
-        <div
-          className={cn(
-            "flex items-center gap-6 w-full min-w-0",
-            "opacity-0 pointer-events-none transition-opacity duration-150",
-            "group-hover/model-msg:opacity-100 group-hover/model-msg:pointer-events-auto",
-            "group-focus-within/model-msg:opacity-100 group-focus-within/model-msg:pointer-events-auto",
-            // Nothing hovers on a touch screen, so the row simply stays out.
-            "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
-          )}
-        >
+        <div className="flex items-center w-full min-w-0">
           <div className="flex items-center gap-3 shrink-0">
             {canRefresh ? (
               <Tooltip
@@ -339,12 +337,6 @@ const ModelMessageBody = memo(function ModelMessageBody({
               position={TooltipPosition.BottomRight}
             />
           </div>
-
-          {date ? (
-            <span className="min-w-0 label-micro text-basic-muted whitespace-nowrap truncate">
-              {date}
-            </span>
-          ) : null}
         </div>
       ) : null}
     </div>
