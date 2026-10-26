@@ -31,6 +31,8 @@ interface PermissionControlsProps {
   label?: string;
   autoApprovalAvailable?: boolean;
   requesterLabel?: string;
+  /** The trigger drops its mode label but keeps any pending count; its accessible name stays. */
+  compact?: boolean;
 }
 
 /** Subscription lifetime is independent of dialog visibility and request selection. */
@@ -81,6 +83,7 @@ export function PermissionControls({
   label = "Permissions",
   autoApprovalAvailable = true,
   requesterLabel,
+  compact = false,
 }: PermissionControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const queue = usePermissionQueue(sessionId, direct, requesterLabel);
@@ -187,8 +190,7 @@ export function PermissionControls({
         <Button
           size={ButtonSize.Small}
           variant={requests.length ? ButtonVariant.GhostHighlightedAccent : ButtonVariant.Ghost}
-          content={ButtonContent.IconLeft}
-          className="pr-3"
+          content={compact && !requests.length ? ButtonContent.Icon : ButtonContent.IconLeft}
           aria-label={
             autoApprove
               ? inheritedAutoApproval
@@ -199,7 +201,9 @@ export function PermissionControls({
           onClick={() => setManuallyOpen(true)}
         >
           <Icon iconName={IconName.Private} size={16} />
-          <span className="label-micro">{autoApprove ? "Accept all" : "Manually"}</span>
+          {compact ? null : (
+            <span className="label-micro">{autoApprove ? "Accept all" : "Manually"}</span>
+          )}
           {requests.length ? (
             <span className="label-micro">({requests.length} pending)</span>
           ) : null}

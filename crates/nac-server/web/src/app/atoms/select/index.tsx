@@ -34,8 +34,8 @@ interface SelectProps {
    */
   sticky?: boolean;
   className?: string;
-  /** Glyph after the label. Forms keep the disclosure chevron. */
-  trailingIcon?: IconName;
+  /** Glyph after the label, or `null` for a trigger of text alone. Forms keep the disclosure chevron. */
+  trailingIcon?: IconName | null;
   /**
    * Applied to the trigger button. The wrapper stretching is not enough on its
    * own — the button hugs its label — so a select that has to fill a form
@@ -118,7 +118,7 @@ const Select: React.FC<SelectProps> = ({
         variant={variant}
         size={size}
         disabled={disabled}
-        content={ButtonContent.IconRight}
+        content={trailingIcon ? ButtonContent.IconRight : ButtonContent.Text}
         className={`${triggerClassName} overflow-hidden max-w-full`}
         onClick={() => !disabled && changeOpen(!open)}
         aria-expanded={open}
@@ -127,13 +127,15 @@ const Select: React.FC<SelectProps> = ({
         <span className="text-left flex-grow truncate md:max-w-full">
           {selected?.label ?? placeholder}
         </span>
-        <Icon
-          iconName={trailingIcon}
-          className={cn(
-            trailingIcon === IconName.Down && "transition-transform duration-150 ease-out",
-            trailingIcon === IconName.Down && (open ? "rotate-180" : "rotate-0"),
-          )}
-        />
+        {trailingIcon ? (
+          <Icon
+            iconName={trailingIcon}
+            className={cn(
+              trailingIcon === IconName.Down && "transition-transform duration-150 ease-out",
+              trailingIcon === IconName.Down && (open ? "rotate-180" : "rotate-0"),
+            )}
+          />
+        ) : null}
       </Button>
     </Popover>
   );

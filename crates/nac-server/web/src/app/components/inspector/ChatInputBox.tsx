@@ -1215,10 +1215,16 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       ) : null}
 
       {/* The row wraps rather than letting its `shrink-0` controls run into
-          each other: on a phone the model keeps its line and the settings
-          move under it. */}
-      <div className="flex flex-wrap items-center gap-x-[10px] gap-y-1">
-        <div className="flex grow min-w-0 flex-wrap items-center gap-y-1 gap-x-4">
+          each other, which a run's Queue Next makes them do on a phone. */}
+      <div
+        className={cn("flex flex-wrap items-center gap-y-1", isMobile ? "gap-x-2" : "gap-x-2.5")}
+      >
+        <div
+          className={cn(
+            "flex grow min-w-0 flex-wrap items-center gap-y-1",
+            isMobile ? "gap-x-1" : "gap-x-2",
+          )}
+        >
           {runningDirect ? (
             <Button
               type="button"
@@ -1251,8 +1257,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           ) : null}
         </div>
 
-        {/* Gear, hairline, and the current permission setting sit together. */}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className={cn("ml-auto flex shrink-0 items-center", isMobile ? "gap-3" : "gap-4")}>
           {isMobile ? (
             <SessionUsage
               compact
@@ -1287,8 +1292,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               <Icon iconName={IconName.Gear} size={16} />
             </Button>
           </Tooltip>
-          {direct ? <span aria-hidden className="h-6 w-px shrink-0 bg-divider-muted" /> : null}
-          <PermissionControls sessionId={sessionId} behavior={behavior} />
+          <PermissionControls sessionId={sessionId} behavior={behavior} compact={isMobile} />
         </div>
       </div>
     </ComposerFrame>

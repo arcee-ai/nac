@@ -12,7 +12,9 @@ import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
+import { cn } from "@/app/lib/cn";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
 import { useModelCatalog, useReadyProviderModels, useUpdateConfig } from "@/app/services/queries";
@@ -60,7 +62,7 @@ const EFFORT_ROW_HINTS: Record<string, { title: string; description: string }> =
 };
 
 const COMPOSER_EFFORT_OPTIONS: SelectItem[] = [
-  { id: "", label: "Default effort", hoverHint: { ...EFFORT_ROW_HINTS[""], muted: true } },
+  { id: "", label: "Default", hoverHint: { ...EFFORT_ROW_HINTS[""], muted: true } },
   ...EFFORT_LEVEL_OPTIONS.map((item) => ({
     ...item,
     hoverHint: { ...EFFORT_ROW_HINTS[item.id], muted: true },
@@ -85,6 +87,7 @@ export function ModelPicker({
   /** A run is in flight, and the server refuses a config change until it ends. */
   disabled: boolean;
 }) {
+  const isMobile = useIsMobile();
   const toast = useToast();
   const catalog = useModelCatalog();
   const managedModel = useManagedModelProfile();
@@ -105,7 +108,7 @@ export function ModelPicker({
     [resolved.supportedEfforts, currentEffort],
   );
   const selectedEffort = effortItems.find((item) => item.id === currentEffort)?.label;
-  const effortLabel = typeof selectedEffort === "string" ? selectedEffort : "Default effort";
+  const effortLabel = typeof selectedEffort === "string" ? selectedEffort : "Default";
   const [effortOpen, setEffortOpen] = useState(false);
 
   const chooseModel = async (pick: CatalogPick) => {
@@ -165,7 +168,7 @@ export function ModelPicker({
   };
 
   return (
-    <div className="flex min-w-0 items-center">
+    <div className={cn("flex min-w-0 items-center", isMobile ? "gap-1" : "gap-2")}>
       <CatalogModelPicker
         catalog={catalog.data}
         loading={catalog.isLoading}
@@ -176,7 +179,6 @@ export function ModelPicker({
         value={currentPick}
         onSelect={(pick) => void chooseModel(pick)}
       />
-      <span aria-hidden className="h-6 w-px shrink-0 bg-divider-muted" />
       <Tooltip
         title={`Effort: ${effortLabel}`}
         description="How much the model reasons before it answers."
@@ -187,11 +189,10 @@ export function ModelPicker({
         <SmallSelect
           items={effortItems}
           value={currentEffort}
-          placeholder="Default effort"
+          placeholder="Default"
           disabled={disabled || !metadata || updateConfig.isPending}
           size={ButtonSize.Small}
-          trailingIcon={IconName.Right}
-          triggerClassName="!gap-1.5 !pl-3"
+          trailingIcon={isMobile ? null : IconName.Right}
           placement={PopoverPlacement.TopCenter}
           onOpenChange={setEffortOpen}
           onValueChange={(effort) => void chooseEffort(effort)}
