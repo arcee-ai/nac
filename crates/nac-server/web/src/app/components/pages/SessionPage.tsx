@@ -6,7 +6,7 @@ import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { Button, ButtonSize, ButtonVariant, Modal } from "@/app/atoms";
+import { Button, Modal } from "@/app/atoms";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { RightSidebarRail } from "@/app/components/inspector/RightSidebarRail";
@@ -251,21 +251,6 @@ export default function SessionPage() {
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
         <div className="flex flex-col items-center flex-1 min-w-0 h-full">
           <div ref={setChatColumn} className="flex flex-col flex-1 min-h-0 w-full relative">
-            {isMobile && (entry?.lineage ?? snapshot?.lineage) ? (
-              <div className="pointer-events-none absolute inset-x-0 top-16 z-20 flex items-center px-3 pt-2">
-                <Button
-                  className="pointer-events-auto relative"
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Ghost}
-                  onClick={() => {
-                    const parentId = (entry?.lineage ?? snapshot?.lineage)?.parent_session_id;
-                    if (parentId) navigate(routes.session(parentId, "delegated"));
-                  }}
-                >
-                  Parent chat
-                </Button>
-              </div>
-            ) : null}
             {isMobile ? null : (
               <TopSingleSessionHeader sessionId={id} snapshot={snapshot} entry={entry} />
             )}

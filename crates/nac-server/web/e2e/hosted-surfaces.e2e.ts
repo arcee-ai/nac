@@ -349,6 +349,7 @@ for (const mobile of [false, true]) {
       await page.keyboard.press("Escape");
       if (mobile) await page.keyboard.press("Escape");
       await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
+      if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
       await page.getByRole("button", { name: /^MCP servers/ }).click();
       if (mobile) await page.getByRole("button", { name: "renamed_fixture", exact: true }).click();
       await expect(page.getByPlaceholder("my_server")).toHaveValue("renamed_fixture");

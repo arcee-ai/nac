@@ -436,7 +436,7 @@ export function Transcript({
         role="status"
         aria-label={revealed ? undefined : "Loading conversation"}
         className={cn(
-          "pointer-events-none absolute inset-x-0 top-[96px] px-4 transition-opacity duration-150 ease-in-out md:top-[90px] md:px-0",
+          "pointer-events-none absolute inset-x-0 top-[72px] px-4 transition-opacity duration-150 ease-in-out md:top-[90px] md:px-0",
           revealed ? "opacity-0" : "opacity-100 delay-200",
         )}
       >
@@ -450,7 +450,7 @@ export function Transcript({
       {showInitialPrompts ? (
         <div
           className={cn(
-            "absolute inset-x-0 top-[96px] flex overflow-auto px-4 md:top-[90px] md:px-0",
+            "absolute inset-x-0 top-[72px] flex overflow-auto px-4 md:top-[90px] md:px-0",
             isMobile ? "bottom-[128px]" : "bottom-[136px]",
             fade,
           )}
@@ -467,7 +467,7 @@ export function Transcript({
         <div
           ref={contentRef}
           className={cn(
-            "flex flex-col pt-[96px] md:pt-[90px] [&>*]:shrink-0 px-4 md:px-0",
+            "flex flex-col pt-[72px] md:pt-[90px] [&>*]:shrink-0 px-4 md:px-0",
             // The phone's input is a bare pill rather than a padded card, so
             // the run-out under the last message shrinks with it. A long
             // draft, the goal editor or queued messages make the composer
