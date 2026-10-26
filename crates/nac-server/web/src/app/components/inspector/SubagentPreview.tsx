@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import {
   Button,
@@ -21,7 +20,6 @@ import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
 import { displayPromptFromMessageText, invokedSkillNames } from "@/app/lib/format";
-import { routes } from "@/app/lib/routes";
 import {
   STREAMING_TURN_KEY,
   buildTranscript,
@@ -53,6 +51,7 @@ export function SubagentPreview({
   fallbackText,
   icon,
   header = true,
+  onOpen,
 }: {
   sessionId: string;
   title: string;
@@ -60,8 +59,9 @@ export function SubagentPreview({
   icon: IconName;
   /** Below the desktop width the panel's own header names it and carries Open. */
   header?: boolean;
+  /** Leaves for the session's own page. */
+  onOpen: () => void;
 }) {
-  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const showBehaviorIcon = useSessionBehaviorIconVisible();
   const snapshot = useSessionSnapshot(sessionId, { retry: false });
@@ -174,7 +174,7 @@ export function SubagentPreview({
             variant={ButtonVariant.Ghost}
             content={ButtonContent.IconRight}
             aria-label="Open"
-            onClick={() => navigate(routes.session(sessionId))}
+            onClick={onOpen}
           >
             Open
             <Icon iconName={IconName.External} />

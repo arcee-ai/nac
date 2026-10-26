@@ -24,8 +24,6 @@ import { cn } from "@/app/lib/cn";
 import { groupByRecency } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { sessionBehaviorIcon } from "@/app/lib/sessionBehavior";
-import { usePanelPhoneChrome } from "@/app/providers/PanelPhoneChrome";
-
 import {
   useManagedOrchestrators,
   useSessions,
@@ -111,15 +109,20 @@ export function DelegatedWorkView({
   sessionId: string;
   behavior: SessionBehavior;
 }) {
-  const { showSidePanelList, selectSubagent, useSelectedSubagent } =
-    useNativeRuntime().stores.sessionLayoutStore;
+  const {
+    showSidePanelList,
+    selectSubagent,
+    useSelectedSubagent,
+    useSidePanelExpanded,
+    toggleSidePanelExpanded,
+  } = useNativeRuntime().stores.sessionLayoutStore;
   // Below the desktop width the list and the detail are never both on screen.
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   const narrow = isMobile || isTablet;
 
   const navigate = useNavigate();
-  const phoneChrome = usePanelPhoneChrome();
+  const expanded = useSidePanelExpanded();
   const supportsOrchestrators =
     useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
   const showBehaviorIcon = useSessionBehaviorIconVisible();
@@ -240,8 +243,9 @@ export function DelegatedWorkView({
   );
 
   const openDetail = (id: string) => {
-    // A phone's dialog outlives route changes and would cover the chat opened.
-    phoneChrome?.close();
+    // The expanded side box outlives route changes and would cover the chat
+    // opened, on a phone and on a wider screen alike.
+    if (expanded) toggleSidePanelExpanded();
     navigate(routes.session(id));
   };
   const openButton = !selected ? null : isMobile ? (
@@ -310,6 +314,7 @@ export function DelegatedWorkView({
               fallbackText={selected.fallbackText}
               icon={sessionBehaviorIcon(null, MODE_LINEAGE[selected.mode])}
               header={!narrow}
+              onOpen={() => openDetail(selected.id)}
             />
             <div className="shrink-0 px-4 pt-4 pb-8">
               <SubagentComposer
