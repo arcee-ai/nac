@@ -114,7 +114,7 @@ export function SubagentChatInputBox({
               aria-label={PLACEHOLDER}
               disabled={busy}
               className={cn(
-                "block w-full resize-none bg-transparent text-medium text-input outline-none placeholder:text-input-placeholder",
+                "block w-full resize-none bg-transparent text-medium text-input outline-none placeholder:text-input-placeholder focus:placeholder:text-transparent",
                 textInset,
                 // The line below stands in for it, because a textarea cannot
                 // ellipsize its own overflow.
