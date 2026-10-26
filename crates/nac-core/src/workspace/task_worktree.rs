@@ -88,10 +88,7 @@ impl TaskGit {
             "invalid request: project default must directly name a configured Git branch"
         );
         let symbolic = target
-            .output(
-                target.root(),
-                &["symbolic-ref", "--quiet", "--no-recurse", &branch],
-            )
+            .output(target.root(), &["symbolic-ref", "--quiet", &branch])
             .await?;
         anyhow::ensure!(
             symbolic.status.code() == Some(1),
@@ -209,7 +206,7 @@ impl TaskGit {
             let symbolic = source_target
                 .output(
                     source_target.root(),
-                    &["symbolic-ref", "--quiet", "--no-recurse", &default_ref],
+                    &["symbolic-ref", "--quiet", &default_ref],
                 )
                 .await?;
             anyhow::ensure!(
