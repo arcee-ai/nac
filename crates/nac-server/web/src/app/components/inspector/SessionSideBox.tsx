@@ -263,10 +263,11 @@ export function SessionSideBox({
                 showSidePanelList(false);
                 onPanelChange(name);
               };
+              const iconsOnly = isTablet || !tabLabelsFit;
               const tab = (
                 <HorizontalTabsItem
                   size={HorizontalTabsItemSize.Medium}
-                  content={tabLabelsFit ? undefined : HorizontalTabsItemContent.IconOnly}
+                  content={iconsOnly ? HorizontalTabsItemContent.IconOnly : undefined}
                   active={selected}
                   iconName={PANEL_ICON[name]}
                   role="tab"
@@ -279,36 +280,17 @@ export function SessionSideBox({
               );
               return (
                 <span key={name} className="relative shrink-0">
-                  {/* The tablet's narrower box draws the tabs as icon circles,
-                      and a desktop box too narrow for the labels keeps only
-                      the icons. */}
-                  {isTablet ? (
-                    <Tooltip
-                      title={SESSION_PANEL_LABEL[name]}
-                      position={TooltipPosition.BottomCenter}
-                    >
-                      <Button
-                        className="!rounded-full"
-                        size={ButtonSize.Medium}
-                        variant={selected ? ButtonVariant.Primary : ButtonVariant.Ghost}
-                        content={ButtonContent.Icon}
-                        role="tab"
-                        aria-selected={selected}
-                        aria-label={SESSION_PANEL_LABEL[name]}
-                        onClick={open}
-                      >
-                        <Icon iconName={PANEL_ICON[name]} />
-                      </Button>
-                    </Tooltip>
-                  ) : tabLabelsFit ? (
-                    tab
-                  ) : (
+                  {/* The tablet's narrower box, and a desktop box too narrow
+                      for the labels, keep only the tabs' icons. */}
+                  {iconsOnly ? (
                     <Tooltip
                       title={SESSION_PANEL_LABEL[name]}
                       position={TooltipPosition.BottomCenter}
                     >
                       {tab}
                     </Tooltip>
+                  ) : (
+                    tab
                   )}
                   {badge > 0 ? <PanelCountBadge count={badge} className="top-0" /> : null}
                 </span>
