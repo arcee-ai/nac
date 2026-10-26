@@ -146,6 +146,11 @@ export const STREAMING_TURN_KEY = "model-streaming";
 export interface StreamedOutput {
   text: string;
   reasoning: string;
+  /**
+   * No more of it is coming, as its call was committed or its run ended, so
+   * once the snapshot holds its answer it holds all of it.
+   */
+  settled?: boolean;
 }
 
 function parseArguments(call: ToolCall): JsonObject {
@@ -541,8 +546,11 @@ export function withStreamedOutput(
     ? { ...last, blocks: last.blocks.slice() }
     : { kind: "model", key, blocks: [], durationMs: null, messageIndex: null };
 
+  // Some providers store no reasoning text, so settled reasoning would
+  // otherwise trail the answer that the snapshot already shows.
+  const landed = stream.settled === true && text !== "" && holdsStreamed(turn.blocks, "text", text);
   let appended = false;
-  if (reasoning && !holdsStreamed(turn.blocks, "thoughts", reasoning)) {
+  if (reasoning && !landed && !holdsStreamed(turn.blocks, "thoughts", reasoning)) {
     turn.blocks.push({
       kind: "thoughts",
       key: `thoughts-${nextOrdinal(turn.blocks, "thoughts")}`,
@@ -550,7 +558,7 @@ export function withStreamedOutput(
       durationMs: null,
       // Prose arriving means the model has stopped thinking and started
       // answering, even though this reasoning is not committed yet.
-      streaming: !text,
+      streaming: !text && !stream.settled,
     });
     appended = true;
   }

@@ -160,14 +160,23 @@ export function useTranscriptModel(
   // turn under the new prompt and read as that prompt's answer.
   const stale = streamSettled && !running;
   const turns = useMemo(() => {
-    const stream = { text: streamText, reasoning: streamReasoning };
+    const stream = { text: streamText, reasoning: streamReasoning, settled: streamSettled };
     if (!stale || baseTurns === snapshotTurns) {
       return withStreamedOutput(baseTurns, stream, false, reply);
     }
     const own = replyKey(snapshotTurns, windowStart);
     const folded = withStreamedOutput(snapshotTurns, stream, false, own);
     return folded === snapshotTurns ? baseTurns : [...folded, baseTurns[baseTurns.length - 1]];
-  }, [baseTurns, snapshotTurns, streamText, streamReasoning, stale, reply, windowStart]);
+  }, [
+    baseTurns,
+    snapshotTurns,
+    streamText,
+    streamReasoning,
+    streamSettled,
+    stale,
+    reply,
+    windowStart,
+  ]);
   perfMark("transcript:turns", {
     fields: { turns: turns.length, streamChars: streamText.length },
     throttleMs: 1000,
