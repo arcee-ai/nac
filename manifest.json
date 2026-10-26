@@ -1,0 +1,170 @@
+{
+  "captured": "2026-10-26",
+  "method": "Unmodified committed assets; CUA Chrome captures; deterministic local model responses driving real NAC native tools; isolated stores/workspaces; no production data.",
+  "baseBackend": "87faf08bb6201980f7eb5c030e019fb3ce2ce61e",
+  "topBackend": "ea0d56ac4319e205af704cc05b5b85515c114fb6",
+  "desktopCSS": {
+    "width": 1440,
+    "height": 960
+  },
+  "phoneCSS": {
+    "width": 390,
+    "height": 844
+  },
+  "prs": [
+    {
+      "number": 421,
+      "base": "87faf08bb6201980f7eb5c030e019fb3ce2ce61e",
+      "head": "ee241b6a50dceeb617a0d799a09859412b99c247",
+      "n": 421,
+      "label": "Button variants and states",
+      "before": "pr421-before-buttons.jpg",
+      "after": "pr421-after-buttons.jpg",
+      "extra": [
+        {
+          "label": "Session row — before",
+          "file": "pr421-before-desktop.jpg"
+        },
+        {
+          "label": "Session row — after",
+          "file": "pr421-after-desktop.jpg"
+        }
+      ],
+      "note": "The design gallery gains a complete button state matrix. The runtime images also show the session row."
+    },
+    {
+      "number": 422,
+      "base": "ee241b6a50dceeb617a0d799a09859412b99c247",
+      "head": "8c277a9cf5d4989101fb9813b02f1f3a1a8e26b6",
+      "n": 422,
+      "label": "New design-preview atoms",
+      "before": "pr422-before-gallery.jpg",
+      "after": "pr422-after-gallery.jpg",
+      "extra": [],
+      "note": "The baseline shows the preceding Model loader gallery section; the new Tools and reasoning badge section does not exist there. This layer adds preview-only atoms; production surfaces are wired by later layers."
+    },
+    {
+      "number": 423,
+      "base": "8c277a9cf5d4989101fb9813b02f1f3a1a8e26b6",
+      "head": "c6e4fc50c89e8d90b271735169875ec51f74bd32",
+      "n": 423,
+      "label": "Existing session after the model extraction",
+      "before": "revision-2-desktop.jpg",
+      "after": "revision-3-desktop.jpg",
+      "extra": [],
+      "note": "No visual change is expected: this layer extracts shared model derivation. Matching runtime screenshots are included as a baseline; tests and source review cover the behavior."
+    },
+    {
+      "number": 424,
+      "base": "c6e4fc50c89e8d90b271735169875ec51f74bd32",
+      "head": "8bd0a062d2044f70f96ad046cf08825d1fc321a2",
+      "n": 424,
+      "label": "Files/default panel → Insights action detail",
+      "before": "pr424-before-panel.jpg",
+      "after": "pr424-after-panel.jpg",
+      "extra": [],
+      "note": "The before view opens the existing Files panel; the after view opens the new default Insights panel on the same tool group."
+    },
+    {
+      "number": 425,
+      "base": "8bd0a062d2044f70f96ad046cf08825d1fc321a2",
+      "head": "bf4011a3d4f88e50749f1bd0669140025955d9ee",
+      "n": 425,
+      "label": "Transcript and Insights layout",
+      "before": "pr425-before-panel.jpg",
+      "after": "pr425-after-panel.jpg",
+      "extra": [],
+      "note": "The same completed native tool sequence is shown before and after segmentation into a transcript badge and the revised session layout."
+    },
+    {
+      "number": 426,
+      "base": "bf4011a3d4f88e50749f1bd0669140025955d9ee",
+      "head": "99d8f748adcf12049fcb21d87b43395430fe8441",
+      "n": 426,
+      "label": "Tool metadata in the existing Insights UI",
+      "before": "pr426-before-panel.jpg",
+      "after": "pr426-after-panel.jpg",
+      "extra": [],
+      "note": "Backend-only comparison. This head does not change the committed frontend bundle, so the visible layout remains the same. Before uses the base backend; after replays the same native tool sequence on the stack-tip backend, which includes this layer's measured durations/path previews. This is illustrative runtime evidence, not an exact per-layer backend build or a timing benchmark."
+    },
+    {
+      "number": 427,
+      "base": "99d8f748adcf12049fcb21d87b43395430fe8441",
+      "head": "0d7a62bb8f9cc75ef1e61f5ebe1bd4e66f704467",
+      "n": 427,
+      "label": "Full-content controls, file links, and edit diff",
+      "before": "pr427-before-panel.jpg",
+      "after": "pr427-after-panel.jpg",
+      "extra": [
+        {
+          "label": "After: full tool output expanded",
+          "file": "pr427-after-expanded.jpg"
+        }
+      ],
+      "note": "Both sides use the same real tool transcript and stack-tip backend so the incremental frontend behavior is isolated. The after view has Show full, clickable files, line counts, and the native edit diff."
+    },
+    {
+      "number": 428,
+      "base": "0d7a62bb8f9cc75ef1e61f5ebe1bd4e66f704467",
+      "head": "b8ea6771407b5ba2629b859140b2a85f36b368f0",
+      "n": 428,
+      "label": "Active run / waiting for reply",
+      "before": "pr428-before-stream.jpg",
+      "after": "pr428-after-stream.jpg",
+      "extra": [
+        {
+          "label": "Settled session — before",
+          "file": "revision-7-desktop.jpg"
+        },
+        {
+          "label": "Settled session — after",
+          "file": "revision-8-desktop.jpg"
+        }
+      ],
+      "note": "The active-run pair uses one genuine running session with the same prompt and backend. It captures the waiting state, not continuous video; still images cannot establish absence of flicker, scroll jumps, or animation resets. The settled pair also shows the prompt date/actions."
+    },
+    {
+      "number": 429,
+      "base": "b8ea6771407b5ba2629b859140b2a85f36b368f0",
+      "head": "1680b602f66597af5f70baee9d54e6d15a3d8e74",
+      "n": 429,
+      "label": "Real Git conflict and type change",
+      "before": "pr429-before-status.jpg",
+      "after": "pr429-after-status.jpg",
+      "extra": [],
+      "note": "The two disposable workspaces have identical actual Git states: README.md is a type change ( T), review-checklist.md is a genuine merge conflict (UU). The base backend labels them M/M; the stack-tip backend labels them T/U. The immediate-base/head frontend bundles are identical, isolating the backend projection. Other backend layers are present in the after runtime; this is not an exact per-layer backend build."
+    },
+    {
+      "number": 430,
+      "base": "1680b602f66597af5f70baee9d54e6d15a3d8e74",
+      "head": "f3fe5f79f6bafe583c3a4347afa11edef1cd9984",
+      "n": 430,
+      "label": "Desktop composer",
+      "before": "pr430-before-desktop.jpg",
+      "after": "pr430-after-desktop.jpg",
+      "extra": [],
+      "phone": {
+        "label": "Phone composer",
+        "before": "pr430-before-phone.jpg",
+        "after": "pr430-after-phone.jpg"
+      },
+      "note": "Same saved session and stack-tip backend on both sides. Desktop is 1440×960 CSS pixels; phone is 390×844."
+    },
+    {
+      "number": 431,
+      "base": "f3fe5f79f6bafe583c3a4347afa11edef1cd9984",
+      "head": "ea0d56ac4319e205af704cc05b5b85515c114fb6",
+      "n": 431,
+      "label": "Phone session header and chat",
+      "before": "pr431-before-phone.jpg",
+      "after": "pr431-after-phone.jpg",
+      "extra": [],
+      "phone": {
+        "label": "Phone Insights panel",
+        "before": "pr431-before-phone-panel.jpg",
+        "after": "pr431-after-phone-panel.jpg"
+      },
+      "note": "Same saved session and stack-tip backend, 390×844 CSS pixels. The second pair shows the phone panel moving from the older detail-first view to the new list screen."
+    }
+  ]
+}
