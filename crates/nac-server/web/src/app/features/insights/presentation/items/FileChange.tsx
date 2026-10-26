@@ -157,21 +157,23 @@ interface FileChangeProps {
 }
 
 /**
- * Whether the element has been on screen since it mounted. The server reads
- * the session's whole transcript to answer for one call, so a group of many
- * changes asks only for those shown. Without IntersectionObserver every
- * element counts as seen.
+ * Whether the element holding `anchor` has been on screen since it mounted.
+ * The server reads the session's whole transcript to answer for one call, so
+ * a group of many changes asks only for those shown. The anchor has no box of
+ * its own: in flow it would add a gap, and out of flow it would not scroll
+ * with the column. Without IntersectionObserver every element counts as seen.
  */
-function useSeen(element: Element | null): boolean {
+function useSeen(anchor: Element | null): boolean {
   const [seen, setSeen] = useState(() => typeof IntersectionObserver === "undefined");
   useEffect(() => {
+    const element = anchor?.parentElement;
     if (seen || !element) return undefined;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) setSeen(true);
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [element, seen]);
+  }, [anchor, seen]);
   return seen;
 }
 
@@ -198,7 +200,7 @@ export function FileChange({ path, callId, context }: FileChangeProps) {
   const failed = !data && (query.isError || (query.errorUpdateCount > 0 && query.isFetching));
   return (
     <>
-      <span ref={setAnchor} aria-hidden className="absolute size-0" />
+      <span ref={setAnchor} hidden />
       {filePath ? (
         <ItemFileButton
           path={filePath}
