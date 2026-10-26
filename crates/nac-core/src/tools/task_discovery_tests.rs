@@ -414,3 +414,44 @@ async fn unreadable_store_fails_closed_without_task_data() {
     assert!(!text.contains("attempt one"));
     cleanup(&runtime);
 }
+
+#[tokio::test]
+async fn observing_reads_never_become_an_interactive_approver() {
+    let runtime = runtime(vec![PermissionRule::new(
+        "task_read",
+        "session:peer-b",
+        PermissionEffect::Ask,
+    )]);
+    let bus = crate::events::SessionEventBus::new(Some(CALLER.into()));
+    runtime
+        .permission_broker
+        .as_ref()
+        .unwrap()
+        .attach_event_bus(bus.clone());
+
+    value(&runtime, "find_tasks", json!({"reference":"ALL-469"})).await;
+    value(&runtime, "read_task", json!({"session_id":"peer-a"})).await;
+    assert!(!bus.has_subscribers());
+    let result = call(&runtime, "read_task", json!({"session_id":"peer-b"})).await;
+    assert!(result.is_error, "{}", result.content);
+    assert!(!bus.has_interactive_subscribers());
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn store_failure_after_admission_is_reported_unavailable() {
+    let runtime = runtime(Vec::new());
+    let conn = crate::store::open_runtime_connection(&runtime.store_path).unwrap();
+    conn.execute_batch(
+        "DROP TABLE session_run_outcomes; CREATE VIEW session_run_outcomes AS SELECT 1 AS id;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let result = call(&runtime, "read_task", json!({"session_id":"peer-a"})).await;
+    assert!(result.is_error);
+    let reported: Value = serde_json::from_str(result.content.as_text().unwrap()).unwrap();
+    assert_eq!(reported["status"], "unavailable");
+    assert!(!reported.to_string().contains("attempt one"));
+    cleanup(&runtime);
+}
