@@ -32,7 +32,15 @@ impl SessionService {
             let secrets = exact_secrets(provider.as_deref())?;
             let redact_text =
                 |text: &str| crate::model::redact_credentials(&secrets.redact(text), &[]);
-            let redact = |text: &str| redact_document(text, &redact_text);
+            let redact_string = |text: &str| {
+                secrets
+                    .redact(text)
+                    .split('\n')
+                    .map(|line| crate::model::redact_credentials(line, &[]))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            let redact = |text: &str| redact_document(text, &redact_text, &redact_string);
             let (arguments, arguments_truncated) = bounded(redact(arguments));
             let (output, output_truncated) =
                 match output.map(|content| bounded(redact(&result_text(content)))) {
@@ -53,20 +61,26 @@ impl SessionService {
 
 /// A JSON object or array is redacted through its decoded strings, so it still
 /// parses: a pattern run over the encoded text can swallow the backslash of an
-/// escaped quote, or run past `\n` escapes into the lines after it. Encoding
-/// again respells numbers (1e5 as 100000.0, and past 64 bits as a float), so a
-/// document with nothing to redact comes back as written; otherwise its
-/// members keep their order and the document its compact or pretty layout.
-/// A member under a credential key, such as `password` or `token`, is masked
-/// whole at any depth, whatever it holds. Any other text is redacted as it
-/// stands.
-fn redact_document(text: &str, redact: &dyn Fn(&str) -> String) -> String {
+/// escaped quote, or run past `\n` escapes into the lines after it. Within a
+/// decoded string the patterns run one line at a time, so they cannot take a
+/// line break either and merge the rows of a diff; the exact secrets are still
+/// matched across the whole string. Encoding again respells numbers (1e5 as
+/// 100000.0, and past 64 bits as a float), so a document with nothing to redact
+/// comes back as written; otherwise its members keep their order and the
+/// document its compact or pretty layout. A member under a credential key, such
+/// as `password` or `token`, is masked whole at any depth, whatever it holds.
+/// Any other text is redacted as it stands.
+fn redact_document(
+    text: &str,
+    redact: &dyn Fn(&str) -> String,
+    redact_string: &dyn Fn(&str) -> String,
+) -> String {
     let document = match serde_json::from_str::<Document>(text) {
         Ok(document @ (Document::Object(_) | Document::Array(_))) => document,
         _ => return redact(text),
     };
     let redaction = Redaction {
-        redact,
+        redact: redact_string,
         changed: std::cell::Cell::new(false),
     };
     let document = document.redacted(&redaction);

@@ -245,3 +245,34 @@ async fn a_call_id_held_twice_names_no_call() {
     drop(parts);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
+
+#[tokio::test]
+async fn a_diff_keeps_its_rows_when_a_row_ends_in_a_credential_cue() {
+    let (parts, store_path) = test_active_service("tool_call_content_rows", "session");
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[("call-write", r#"{"path":".env"}"#)]),
+            result(
+                "call-write",
+                r#"{"path":".env","diff":"@@ -0,0 +1,3 @@\n+APIKEY=\n+PORT=3000\n+x-api-key: sk-live-diff-789\n"}"#,
+            ),
+        ],
+    )
+    .await;
+
+    let content = parts
+        .service
+        .tool_call_content("call-write")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        content.output.as_deref(),
+        Some(
+            r#"{"path":".env","diff":"@@ -0,0 +1,3 @@\n+APIKEY=\n+PORT=3000\n+x-api-key: [REDACTED]\n"}"#
+        )
+    );
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
