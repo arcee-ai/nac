@@ -17,6 +17,7 @@ import CodeBlock, { CodeBlockSize } from "@/app/atoms/code-block";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { splitMarkdownBlocks } from "@/app/lib/markdown-blocks";
+import { FENCE, closesFence } from "@/app/lib/markdown-lines";
 import { scopeMathjaxStyles } from "@/app/lib/mathjax-styles";
 import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundary";
 import { normalizeMath } from "@/app/lib/math-source";
@@ -328,6 +329,28 @@ const StreamedBlock = memo(function StreamedBlock({ source }: { source: string }
   return <Parsed source={source} streaming />;
 });
 
+/** A line that may define a link reference or a footnote, also inside a quote. */
+const DEFINITION = /^ {0,3}(?:> ?)*\[[^\]\n]+\]:/;
+
+/**
+ * Whether the text may define a link reference or a footnote. Fenced code is
+ * skipped: lines such as `[key: string]: T;` define nothing there, and a false
+ * match would cost the reply the steady settle.
+ */
+function mayDefine(source: string): boolean {
+  let fence: string | null = null;
+  for (const line of source.split("\n")) {
+    if (fence !== null) {
+      if (closesFence(line, fence)) fence = null;
+      continue;
+    }
+    const opener = FENCE.exec(line);
+    if (opener) fence = opener[1];
+    else if (DEFINITION.test(line)) return true;
+  }
+  return false;
+}
+
 /**
  * Heavy half of the markdown support: the parser plus the syntax highlighter.
  * Always reach it through `lib/markdown`, which loads this chunk on demand.
@@ -337,7 +360,9 @@ const StreamedBlock = memo(function StreamedBlock({ source }: { source: string }
  * canonical reading of the text and cheap now that it is parsed once. A message
  * that streamed in this view stays in blocks once it settles: switching would
  * remount every paragraph and code block the moment the stream ends, and the
- * code would repaint plain before it is highlighted again.
+ * code would repaint plain before it is highlighted again. One that may define
+ * a link reference or a footnote switches all the same, as only the whole
+ * document resolves those.
  */
 const MarkdownRenderer = memo(function MarkdownRenderer({
   children,
@@ -346,9 +371,10 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
   perfRender("Markdown");
   const [streamed, setStreamed] = useState(streaming);
   if (streaming && !streamed) setStreamed(true);
+  const blocks = streaming || (streamed && !mayDefine(children));
   return (
     <PerfProfiler id="markdown">
-      {streamed ? (
+      {blocks ? (
         splitMarkdownBlocks(children).map((source, index) => (
           // Blocks are append-only, so their position is their identity.
           <StreamedBlock key={index} source={source} />
