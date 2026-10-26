@@ -94,6 +94,7 @@ export function BranchPicker({
   placement = PopoverPlacement.TopRight,
   tertiary = false,
   labelClassName,
+  iconClassName,
 }: {
   sessionId: string;
   branch: string;
@@ -106,6 +107,8 @@ export function BranchPicker({
   tertiary?: boolean;
   /** Classes for the tertiary button's branch name; its accessible name stays. */
   labelClassName?: string;
+  /** Classes for the tertiary button's branch icon. */
+  iconClassName?: string;
 }) {
   const { useRunning } = useNativeRuntime().stores.runtimeStore;
 
@@ -240,7 +243,7 @@ export function BranchPicker({
           aria-label={`Branch: ${branch}`}
           onClick={toggle}
         >
-          <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
+          <Icon iconName={IconName.Scheme} size={16} className={cn("shrink-0", iconClassName)} />
           <span className={cn("truncate max-w-[64px] xl:max-w-[128px]", labelClassName)}>
             {branch}
           </span>

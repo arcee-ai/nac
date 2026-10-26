@@ -72,6 +72,7 @@ export function RevisionPicker({
   onSelect,
   placement = PopoverPlacement.TopRight,
   labelClassName,
+  iconClassName,
 }: {
   sessionId: string;
   selected: number | null;
@@ -80,6 +81,8 @@ export function RevisionPicker({
   placement?: PopoverPlacement;
   /** Classes for the snapshot's name; the button's accessible name stays. */
   labelClassName?: string;
+  /** Classes for the button's icon. */
+  iconClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -152,7 +155,7 @@ export function RevisionPicker({
         aria-label={`Snapshot: ${label}`}
         onClick={() => setOpen(!open)}
       >
-        <Icon iconName={IconName.History} size={16} className="shrink-0" />
+        <Icon iconName={IconName.History} size={16} className={cn("shrink-0", iconClassName)} />
         {/* The button's own colour cannot be overridden, so a picked snapshot
             tints the label it holds instead. */}
         <span className={cn("truncate", selected != null && "text-info-primary", labelClassName)}>

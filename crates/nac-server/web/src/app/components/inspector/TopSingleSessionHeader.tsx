@@ -213,9 +213,10 @@ export function TopSingleSessionHeader({
           ) : null}
         </div>
         {/* Clipped sideways only: the buttons are as tall as the row, and
-            their focus rings reach past it. Next to the side panel the chat
-            can drop to 200px, so under 24rem the row keeps only the pickers'
-            icons rather than clip them. */}
+            their focus rings reach past it. The pickers are their names
+            alone, but next to the side panel the chat can drop to 200px, so
+            under 24rem they keep only their icons rather than clip. `.icon`
+            sets its display outside the utility layer. */}
         <div className="@container flex w-full min-w-0 items-center gap-4 overflow-x-clip">
           {repo ? (
             <div className="flex shrink-0 items-center gap-0.5 @max-sm:hidden">
@@ -230,11 +231,12 @@ export function TopSingleSessionHeader({
               placement={PopoverPlacement.BottomRight}
               tertiary
               labelClassName="@max-sm:hidden"
+              iconClassName="@sm:!hidden"
             />
           ) : null}
           {branch && readOnly ? (
             <span className="label-micro flex min-w-0 items-center gap-1.5 text-btn-secondary">
-              <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
+              <Icon iconName={IconName.Scheme} size={16} className="shrink-0 @sm:!hidden" />
               <span className="truncate @max-sm:sr-only">{branch}</span>
             </span>
           ) : null}
@@ -244,6 +246,7 @@ export function TopSingleSessionHeader({
             onSelect={selectRevision}
             placement={PopoverPlacement.BottomRight}
             labelClassName="@max-sm:hidden"
+            iconClassName="@sm:!hidden"
           />
           {additions || deletions ? (
             <CodeChangesBadge additions={additions} deletions={deletions} />
