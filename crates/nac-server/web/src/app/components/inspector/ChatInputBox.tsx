@@ -244,6 +244,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     setGoalSessionId(sessionId);
     setGoalEditing(false);
   }
+  // The editor replaces the field, which may never fire its blur.
+  const openGoalEditor = useCallback(() => {
+    setFocused(false);
+    setGoalEditing(true);
+  }, []);
   const {
     data: commandDefinitions,
     isError: commandsFailed,
@@ -537,7 +542,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
       const argument = text.trim().slice("/goal".length).trim();
       if (argument === "" || argument === "edit") {
-        setGoalEditing(true);
+        openGoalEditor();
         return;
       }
       if (argument === "clear") {
@@ -573,6 +578,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       clearGoal,
       createGoal,
       direct,
+      openGoalEditor,
       storedGoal,
       refetchGoal,
       sessionId,
@@ -962,7 +968,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         ) : null}
       </div>
       {sideButtons ? (
-        <GoalFlag compact={isMobile} sessionId={sessionId} onOpen={() => setGoalEditing(true)} />
+        <GoalFlag compact={isMobile} sessionId={sessionId} onOpen={openGoalEditor} />
       ) : null}
     </ComposerPill>
   );

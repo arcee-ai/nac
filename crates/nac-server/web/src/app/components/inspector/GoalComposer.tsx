@@ -95,7 +95,9 @@ interface GoalEditorProps {
 /**
  * Inline durable-goal editor that stands in for the message field: the goal
  * card above, the objective in the pill. The token budget switch off means no
- * limit; on means the slider value.
+ * limit; on means the slider value. An update leaves the budget alone until
+ * the user changes it, so a stored figure the slider cannot hold survives an
+ * objective edit.
  */
 export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
   const goalQuery = useSessionGoal(sessionId, true);
@@ -106,9 +108,8 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
   const goal = goalQuery.data ?? null;
   const [objective, setObjective] = useState(goal?.objective ?? "");
   const [budgetOn, setBudgetOn] = useState(goal?.token_budget != null);
-  const [budgetAmount, setBudgetAmount] = useState(
-    clampBudget(goal?.token_budget ?? BUDGET_DEFAULT),
-  );
+  const [budgetAmount, setBudgetAmount] = useState(goal?.token_budget ?? BUDGET_DEFAULT);
+  const budgetEdited = useRef(false);
   const seeded = useRef(goalQuery.data !== undefined);
 
   useEffect(() => {
@@ -117,7 +118,8 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
     const loaded = goalQuery.data ?? null;
     setObjective(loaded?.objective ?? "");
     setBudgetOn(loaded?.token_budget != null);
-    setBudgetAmount(clampBudget(loaded?.token_budget ?? BUDGET_DEFAULT));
+    setBudgetAmount(loaded?.token_budget ?? BUDGET_DEFAULT);
+    budgetEdited.current = false;
   }, [goalQuery.data, goalQuery.isPending]);
 
   const field = useRef<HTMLTextAreaElement>(null);
@@ -148,7 +150,7 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
           payload: {
             expected_version: goal.version,
             objective: objective.trim(),
-            token_budget: tokenBudget,
+            ...(budgetEdited.current ? { token_budget: tokenBudget } : {}),
           },
         });
       } else {
@@ -190,6 +192,7 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
       setObjective("");
       setBudgetOn(false);
       setBudgetAmount(BUDGET_DEFAULT);
+      budgetEdited.current = false;
     } catch (error) {
       fail("Unable to clear goal", error);
     }
@@ -244,7 +247,10 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
               checked={budgetOn}
               disabled={busy}
               aria-label="Token budget"
-              onChange={setBudgetOn}
+              onChange={(checked) => {
+                budgetEdited.current = true;
+                setBudgetOn(checked);
+              }}
             />
             <span className="label-micro shrink-0 text-basic-primary">Token Budget</span>
             {budgetOn ? null : (
@@ -261,10 +267,11 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
               min={BUDGET_MIN}
               max={BUDGET_MAX}
               step={BUDGET_STEP}
-              value={budgetAmount}
+              value={clampBudget(budgetAmount)}
               disabled={busy}
               label="Token budget"
               onChange={(value) => {
+                budgetEdited.current = true;
                 setBudgetAmount(value);
                 setBudgetOn(true);
               }}
@@ -292,6 +299,8 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
                 return;
               }
               if (event.key !== "Enter" || event.shiftKey) return;
+              // A phone keyboard has no Shift+Enter, so Return starts a new line there.
+              if (compact && !event.metaKey && !event.ctrlKey) return;
               event.preventDefault();
               void save(goal == null || goal.status === "complete");
             }}
