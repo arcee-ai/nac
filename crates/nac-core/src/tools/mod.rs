@@ -52,8 +52,9 @@ pub(crate) use thread_lifecycle::ThreadCancellation;
 pub struct ToolResult {
     pub content: ToolContent,
     pub is_error: bool,
-    /// Wall-clock time of backend execution, set only by the execution kernel
-    /// once an authorized call has run. Calls that never ran leave it empty.
+    /// Wall-clock time of the call's work, set by the execution kernel once an
+    /// authorized call has run, or by a thread or workset control tool once
+    /// its authorized work has started. Every exit before that leaves it empty.
     pub(crate) execution_duration_ms: Option<u64>,
 }
 
