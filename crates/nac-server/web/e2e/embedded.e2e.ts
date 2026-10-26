@@ -1605,22 +1605,23 @@ test("shows live background delegated work, terminal events, cancellation, and g
 
   const subagent = (name: string) => page.getByRole("button", { name, exact: true });
   const composer = page.locator("form").filter({
-    has: page.getByRole("textbox", { name: /Steer a message|Send a message/ }),
+    has: page.getByRole("textbox", { name: "Send a message" }),
   });
+  const idle = composer.getByRole("button", { name: "Send", exact: true });
   await subagent("Background success").click();
   await expect(composer.locator("span", { hasText: "Running in the background" })).toBeVisible();
-  await expect(composer.getByRole("textbox", { name: "Steer a message" })).toBeVisible();
+  await expect(composer.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
   await subagent("Background cancellation").click();
   await composer.getByRole("button", { name: "Stop" }).click();
-  await expect(composer.getByRole("textbox", { name: "Send a message" })).toBeVisible();
+  await expect(idle).toBeVisible();
   cancelled.release();
   await subagent("Background failure").click();
-  await expect(composer.getByRole("textbox", { name: "Send a message" })).toBeVisible();
+  await expect(idle).toBeVisible();
   await awaitParentReceipt("observe-cancel");
 
   success.release();
   await subagent("Background success").click();
-  await expect(composer.getByRole("textbox", { name: "Send a message" })).toBeVisible();
+  await expect(idle).toBeVisible();
   await expect(page.getByLabel("Coding agent completed")).toContainText("Background success");
   await expect(page.getByLabel("Coding agent failed")).toContainText("Background failure");
   await expect(page.getByLabel("Coding agent cancelled")).toContainText("Background cancellation");
@@ -1664,7 +1665,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
     })
     .toBe(2);
   continued.release();
-  await expect(composer.getByRole("textbox", { name: "Send a message" })).toBeVisible();
+  await expect(idle).toBeVisible();
   // Each generation delivers its own card; they all lead to the one child session.
   const completed = page.getByLabel("Coding agent completed");
   await expect(completed).toHaveCount(2);
@@ -1826,14 +1827,16 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await showSidePanel(page);
   await page.getByRole("button", { name: "Coordinate the compatibility audit" }).click();
   const orchestratorComposer = page.locator("form").filter({
-    has: page.getByRole("textbox", { name: "Steer a message" }),
+    has: page.getByRole("textbox", { name: "Send a message" }),
   });
   await expect(
     orchestratorComposer.locator("span", { hasText: "Running in the background" }),
   ).toBeVisible();
   await expect(orchestratorComposer.getByRole("button", { name: "Stop" })).toBeVisible();
   orchestratorCompletion.release();
-  await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
+  await expect(
+    orchestratorComposer.getByRole("button", { name: "Send", exact: true }),
+  ).toBeVisible();
   await expect(page.getByLabel("NAC orchestrator completed")).toContainText(
     "Coordinate the compatibility audit",
   );

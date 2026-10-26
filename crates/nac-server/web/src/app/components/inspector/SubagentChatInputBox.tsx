@@ -1,14 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
-import {
-  ButtonVariant,
-  Icon,
-  IconName,
-  Switch,
-  SwitchSize,
-  Tooltip,
-  TooltipPosition,
-} from "@/app/atoms";
+import { ButtonVariant, HoverHint, Icon, IconName, Switch, SwitchSize } from "@/app/atoms";
 import {
   ComposerFrame,
   ComposerIconButton,
@@ -17,6 +9,8 @@ import {
 } from "@/app/components/inspector/composer/ComposerFrame";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
+
+const PLACEHOLDER = "Send a message";
 
 const BACKGROUND_HINT =
   "The subagent keeps working after you leave this chat. Steer or stop it from here.";
@@ -72,7 +66,6 @@ export function SubagentChatInputBox({
   const sendable = filled && (running || !starting);
   // A phone keeps a message it is not editing to one truncated line.
   const collapsed = isMobile && !focused && filled;
-  const placeholder = running ? "Steer a message" : "Send a message";
   const runLabel = running
     ? background
       ? "Running in the background"
@@ -117,8 +110,8 @@ export function SubagentChatInputBox({
               ref={field}
               rows={1}
               value={value}
-              placeholder={placeholder}
-              aria-label={placeholder}
+              placeholder={PLACEHOLDER}
+              aria-label={PLACEHOLDER}
               disabled={busy}
               className={cn(
                 "block w-full resize-none bg-transparent text-medium text-input outline-none placeholder:text-input-placeholder",
@@ -193,15 +186,7 @@ export function SubagentChatInputBox({
           >
             {runLabel}
           </span>
-          <Tooltip
-            title={runLabel}
-            description={BACKGROUND_HINT}
-            position={TooltipPosition.TopCenter}
-          >
-            <span className="inline-flex text-basic-tertiary">
-              <Icon iconName={IconName.Info} size={16} />
-            </span>
-          </Tooltip>
+          <HoverHint title={runLabel} description={BACKGROUND_HINT} muted />
         </div>
         {permission}
       </div>

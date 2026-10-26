@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { SubagentChatInputBox } from "./SubagentChatInputBox";
 
@@ -37,7 +38,11 @@ function mount(mobile = false) {
       />
     );
   }
-  render(<Composer />);
+  render(
+    <MemoryRouter>
+      <Composer />
+    </MemoryRouter>,
+  );
   return { submit, stop, field: screen.getByRole("textbox") };
 }
 
