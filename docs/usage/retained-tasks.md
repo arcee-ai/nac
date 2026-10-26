@@ -5,6 +5,12 @@ separate direct task in its own retained checkout. Supply a title and initial
 brief. On the first launch, save the project's exact default branch. Model
 settings come from the destination project's existing defaults.
 
+Use a direct branch name for the saved default, such as `main`,
+`refs/heads/main` or `refs/remotes/origin/main`. The binding retains the canonical
+branch identity. Dynamic spellings (`HEAD`, `@`, checkout-history expressions)
+and symbolic branch aliases cannot be saved as defaults. An explicit per-launch
+Git ref of `HEAD` remains supported.
+
 An explicit Git branch, tag or commit takes precedence. Without one, a launch
 from a task in the same project uses that task's committed HEAD; a launch from
 elsewhere uses the destination's saved default branch. The selected ref resolves
@@ -34,6 +40,11 @@ action. Merely reading preparation status does not resume work or wake an agent.
 An existing checkout without its durable materialization checkpoint remains
 failed for inspection: Git may have registered HEAD before populating files.
 Resume never treats that partial state as ready, fills it in, or resets it.
+
+Complete graceful server shutdown stops new preparation, terminates/reaps its
+Git processes and waits for accepted preparation and publication before draining
+persistence. A brief committed just before shutdown remains pending for the
+next serving lifetime; it is not started by late cache publication or observation.
 
 Session publication and the first durable inbox item commit together. A lost
 response cannot create a second session or brief. Cancellation before publication

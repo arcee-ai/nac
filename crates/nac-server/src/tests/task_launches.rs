@@ -15,7 +15,7 @@ fn git(root: &std::path::Path, args: &[&str]) {
     );
 }
 
-async fn fixture(root: &std::path::Path, manager: &SessionManager) -> TaskLaunchRequest {
+pub(super) async fn fixture(root: &std::path::Path, manager: &SessionManager) -> TaskLaunchRequest {
     let repo = root.join("repo");
     std::fs::create_dir_all(repo.join("nested")).unwrap();
     git(&repo, &["init", "-b", "dev"]);
@@ -75,7 +75,7 @@ async fn fixture(root: &std::path::Path, manager: &SessionManager) -> TaskLaunch
     }
 }
 
-async fn launch_status(app: Router, id: &str) -> TaskLaunchRecord {
+pub(super) async fn launch_status(app: Router, id: &str) -> TaskLaunchRecord {
     let response = get_response(app, &format!("/task-launches/{id}"), None).await;
     assert_eq!(response.status(), StatusCode::OK);
     serde_json::from_slice(&response_body(response).await).unwrap()
@@ -264,8 +264,10 @@ async fn retained_task_restart_refuses_partial_checkout_without_admitting_initia
     )
     .unwrap()
     .project;
-    let source =
-        nac_core::workspace::task_worktree::resolve_source(&project, &request, None, None).unwrap();
+    let source = nac_core::workspace::task_worktree::TaskGit::default()
+        .resolve_source(&project, &request, None, None)
+        .await
+        .unwrap();
     let record =
         nac_core::store::reserve_task_launch(&manager.inner.store_path, request.clone(), source)
             .unwrap();
@@ -415,8 +417,10 @@ async fn retained_task_bound_missing_git_source_never_advertises_existing_checko
     )
     .unwrap()
     .project;
-    let source =
-        nac_core::workspace::task_worktree::resolve_source(&project, &request, None, None).unwrap();
+    let source = nac_core::workspace::task_worktree::TaskGit::default()
+        .resolve_source(&project, &request, None, None)
+        .await
+        .unwrap();
     nac_core::store::reserve_task_launch(&manager.inner.store_path, request.clone(), source)
         .unwrap();
     std::fs::rename(root.join("repo/.git"), root.join("retained-git-metadata")).unwrap();

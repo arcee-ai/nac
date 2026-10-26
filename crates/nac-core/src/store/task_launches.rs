@@ -234,12 +234,25 @@ pub fn reserve_task_launch(path: &Path, request: TaskLaunchRequest, source: Task
     let bound: Option<String> = tx.query_row("SELECT source_json FROM project_git_sources WHERE project_id=?1",
         params![request.project_id], |row| row.get(0)).optional()?;
     if let Some(bound) = bound {
-        let bound: TaskLaunchSource = serde_json::from_str(&bound)?;
+        let mut bound: TaskLaunchSource = serde_json::from_str(&bound)?;
+        // Older named bindings stored Git's short spelling. The adapter has
+        // validated its direct branch identity outside this transaction. Anchor
+        // that representation once; historical launch receipts/checkpoints stay
+        // byte-for-byte unchanged so exact retries retain their original proof.
+        let same_default = bound.default_ref == source.default_ref
+            || ["refs/heads/", "refs/remotes/"].iter().any(|prefix| {
+                source.default_ref.strip_prefix(prefix) == Some(bound.default_ref.as_str())
+            });
         anyhow::ensure!(bound.project_cwd == source.project_cwd && bound.source_cwd == source.source_cwd
             && bound.repo_root == source.repo_root && bound.common_git_dir == source.common_git_dir
             && bound.repository_identity == source.repository_identity
-            && bound.subdirectory == source.subdirectory && bound.default_ref == source.default_ref,
+            && bound.subdirectory == source.subdirectory && same_default,
             "conflict: saved project Git binding changed");
+        if bound.default_ref != source.default_ref {
+            bound.default_ref = source.default_ref.clone();
+            tx.execute("UPDATE project_git_sources SET source_json=?2 WHERE project_id=?1",
+                params![request.project_id,serde_json::to_string(&bound)?])?;
+        }
     } else {
         tx.execute("INSERT INTO project_git_sources(project_id,source_json) VALUES (?1,?2)",
             params![request.project_id,serde_json::to_string(&source)?])?;

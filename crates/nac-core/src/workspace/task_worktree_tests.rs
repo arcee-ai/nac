@@ -1,4 +1,31 @@
 use super::*;
+use crate::workspace::{run_git, GitTarget};
+
+fn run<T>(future: impl std::future::Future<Output = T>) -> T {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(future)
+}
+fn is_git_project(cwd: &Path) -> Result<bool> {
+    run(TaskGit::default().is_git_project(cwd))
+}
+fn resolve_common_git_dir(cwd: &Path) -> Result<PathBuf> {
+    run(TaskGit::default().resolve_common_git_dir(cwd))
+}
+fn resolve_source(
+    project: &crate::projects::ProjectRecord,
+    request: &TaskLaunchRequest,
+    bound: Option<&TaskLaunchSource>,
+    invoking: Option<&crate::sessions::SessionSnapshot>,
+) -> Result<TaskLaunchSource> {
+    run(TaskGit::default().resolve_source(project, request, bound, invoking))
+}
+fn prepare_workspace(launch: &TaskLaunchRecord) -> Result<PathBuf> {
+    run(TaskGit::default().prepare_workspace(launch))
+}
+
 use crate::store::{self, NewProject};
 
 fn git(root: &Path, args: &[&str]) -> String {
@@ -424,5 +451,192 @@ fn retained_commit_pin_obeys_configured_deny_and_executes_no_reference_hook() {
         assert!(!marker.exists());
         assert_eq!(std::fs::read(root.join("repo/.git/index")).unwrap(), index);
     }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn saved_default_rejects_dynamic_and_symbolic_aliases_but_explicit_head_is_valid() {
+    let (root, project, mut request) = fixture();
+    let repo = root.join("repo");
+    git(
+        &repo,
+        &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/heads/dev"],
+    );
+    git(
+        &repo,
+        &["symbolic-ref", "refs/heads/alias", "refs/heads/dev"],
+    );
+    for name in [
+        "HEAD",
+        "@",
+        "@{-1}",
+        "origin/HEAD",
+        "refs/remotes/origin/HEAD",
+        "alias",
+    ] {
+        request.default_ref = Some(name.into());
+        assert!(
+            resolve_source(&project, &request, None, None).is_err(),
+            "{name}"
+        );
+    }
+    request.default_ref = Some("dev".into());
+    request.git_ref = Some("HEAD".into());
+    let source = resolve_source(&project, &request, None, None).unwrap();
+    assert_eq!(source.default_ref, "refs/heads/dev");
+    assert_eq!(source.selected_ref, "HEAD");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn saved_branch_identity_survives_checkout_switch_and_resolves_moving_branch() {
+    let (root, project, mut request) = fixture();
+    let repo = root.join("repo");
+    request.git_ref = None;
+    let source = resolve_source(&project, &request, None, None).unwrap();
+    let first =
+        store::reserve_task_launch(&root.join("store.db"), request.clone(), source).unwrap();
+    git(&repo, &["checkout", "-b", "unrelated"]);
+    std::fs::write(repo.join("nested/file"), "unrelated commit").unwrap();
+    git(&repo, &["add", "."]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "unrelated",
+        ],
+    );
+    request.request_id = uuid::Uuid::new_v4().to_string();
+    request.default_ref = Some("refs/heads/dev".into());
+    let second = resolve_source(&project, &request, Some(&first.source), None).unwrap();
+    assert_eq!(second.commit, first.source.commit);
+    assert_eq!(second.selected_ref, "refs/heads/dev");
+    git(&repo, &["checkout", "--detach", "HEAD"]);
+    assert_eq!(
+        resolve_source(&project, &request, Some(&first.source), None)
+            .unwrap()
+            .commit,
+        first.source.commit
+    );
+    let moved = git(&repo, &["rev-parse", "HEAD"]);
+    git(&repo, &["update-ref", "refs/heads/dev", &moved]);
+    assert_eq!(
+        resolve_source(&project, &request, Some(&first.source), None)
+            .unwrap()
+            .commit,
+        moved
+    );
+    assert_eq!(
+        store::reserve_task_launch(&root.join("store.db"), first.request.clone(), second).unwrap(),
+        first
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn legacy_named_binding_is_anchored_without_rewriting_old_receipts_or_proof() {
+    let (root, project, mut request) = fixture();
+    let path = root.join("store.db");
+    let source = resolve_source(&project, &request, None, None).unwrap();
+    let mut legacy = source.clone();
+    legacy.default_ref = "dev".into();
+    let first = store::reserve_task_launch(&path, request.clone(), legacy).unwrap();
+    let cwd = prepare_workspace(&first).unwrap();
+    std::fs::write(cwd.join("file"), "newer task edits").unwrap();
+    request.request_id = uuid::Uuid::new_v4().to_string();
+    let source = resolve_source(&project, &request, Some(&first.source), None).unwrap();
+    store::reserve_task_launch(&path, request, source).unwrap();
+    assert_eq!(
+        store::load_project_git_source(&path, &project.project_id)
+            .unwrap()
+            .unwrap()
+            .default_ref,
+        "refs/heads/dev"
+    );
+    assert_eq!(
+        store::load_task_launch(&path, &first.request.request_id)
+            .unwrap()
+            .unwrap(),
+        first
+    );
+    assert_eq!(prepare_workspace(&first).unwrap(), cwd);
+    assert_eq!(
+        std::fs::read_to_string(cwd.join("file")).unwrap(),
+        "newer task edits"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn remote_default_keeps_its_namespace_and_explicit_ref_survives_deleted_default() {
+    let (root, project, mut request) = fixture();
+    let repo = root.join("repo");
+    git(&repo, &["update-ref", "refs/remotes/origin/dev", "HEAD"]);
+    request.default_ref = Some("origin/dev".into());
+    request.git_ref = None;
+    let source = resolve_source(&project, &request, None, None).unwrap();
+    assert_eq!(source.default_ref, "refs/remotes/origin/dev");
+    git(&repo, &["checkout", "-b", "origin/dev"]);
+    std::fs::write(repo.join("nested/file"), "other").unwrap();
+    git(&repo, &["add", "."]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "other",
+        ],
+    );
+    assert_eq!(
+        resolve_source(&project, &request, Some(&source), None)
+            .unwrap()
+            .commit,
+        source.commit
+    );
+    git(&repo, &["update-ref", "-d", "refs/remotes/origin/dev"]);
+    request.git_ref = Some("HEAD".into());
+    assert_eq!(
+        resolve_source(&project, &request, Some(&source), None)
+            .unwrap()
+            .commit,
+        git(&repo, &["rev-parse", "HEAD"])
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn deleted_legacy_default_allows_explicit_ref_without_guessing_or_rebinding() {
+    let (root, project, mut request) = fixture();
+    let path = root.join("store.db");
+    let mut legacy = resolve_source(&project, &request, None, None).unwrap();
+    legacy.default_ref = "dev".into();
+    let first = store::reserve_task_launch(&path, request.clone(), legacy).unwrap();
+    let repo = root.join("repo");
+    git(&repo, &["checkout", "--detach", "HEAD"]);
+    git(&repo, &["branch", "-D", "dev"]);
+    request.request_id = uuid::Uuid::new_v4().to_string();
+    request.default_ref = None;
+    request.git_ref = Some("HEAD".into());
+    let source = resolve_source(&project, &request, Some(&first.source), None).unwrap();
+    assert_eq!(source.commit, first.source.commit);
+    assert_eq!(source.default_ref, "dev");
+    store::reserve_task_launch(&path, request.clone(), source).unwrap();
+    request.git_ref = None;
+    assert!(resolve_source(&project, &request, Some(&first.source), None).is_err());
+    assert_eq!(
+        store::load_task_launch(&path, &first.request.request_id)
+            .unwrap()
+            .unwrap(),
+        first
+    );
     std::fs::remove_dir_all(root).unwrap();
 }

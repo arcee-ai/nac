@@ -35,3 +35,4 @@ pub(crate) mod execution_observation;
 pub(crate) mod terminal_control;
 
 pub(crate) mod task_launches;
+pub(crate) mod task_preparations;

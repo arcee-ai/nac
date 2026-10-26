@@ -280,6 +280,14 @@ Local direct task, never an existing-checkout fallback. The source repository,
 effective subdirectory and destination path are derived and validated by the
 service; clients cannot supply arbitrary paths, a backend or trusted origin.
 The destination project's ordinary model defaults apply.
+Saved defaults bind canonical direct branch refs; symbolic/dynamic defaults
+are rejected. `git_ref: "HEAD"` remains valid per-launch intent. Exact retries
+compare their original arguments and return their original receipt.
+
+Accepted preparation, including source resolution and supervised Git processes,
+remains owned through complete server shutdown before persistence drains.
+Stopping fences late publication/wake-up; already committed pending input stays
+restartable without duplication.
 
 Identical retries return the original pin/session/input receipt. Changed
 arguments with the same request identity return 409. Two intentional identities

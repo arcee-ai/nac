@@ -1,6 +1,6 @@
 //! Human task-launch use case over the existing prepared-session lifecycle.
 use crate::SessionManager;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use nac_core::{
     sessions,
     store::{self, TaskLaunchPhase, TaskLaunchRecord, TaskLaunchRequest},
@@ -22,15 +22,27 @@ impl<'a> TaskLaunchApplication<'a> {
     }
 
     pub(crate) async fn source_info(&self, project_id: String) -> Result<TaskLaunchSourceInfo> {
-        let path = self.manager.inner.store_path.clone();
-        let unmanaged = self.manager.managed_host().is_none();
-        store::spawn_blocking_store_caller(move || {
-            let project =
-                nac_core::projects::load_project_launch_context(&path, &project_id)?.project;
-            let bound = store::load_project_git_source(&path, &project_id)?;
-            let eligible = unmanaged
+        let admission = self.manager.inner.task_preparations.admit().await?;
+        let manager = self.manager.clone();
+        tokio::spawn(async move {
+            let _admission = admission;
+            let path = manager.inner.store_path.clone();
+            let (project, bound) = store::spawn_blocking_store_caller(move || -> Result<_> {
+                let project =
+                    nac_core::projects::load_project_launch_context(&path, &project_id)?.project;
+                let bound = store::load_project_git_source(&path, &project_id)?;
+                Ok((project, bound))
+            })
+            .await??;
+            let eligible = manager.managed_host().is_none()
                 && project.ssh_host.is_none()
-                && (bound.is_some() || task_worktree::is_git_project(&project.cwd)?);
+                && (bound.is_some()
+                    || manager
+                        .inner
+                        .task_preparations
+                        .git
+                        .is_git_project(&project.cwd)
+                        .await?);
             Ok(TaskLaunchSourceInfo {
                 eligible,
                 default_ref: bound.map(|b| b.default_ref),
@@ -41,52 +53,34 @@ impl<'a> TaskLaunchApplication<'a> {
 
     pub(crate) async fn start(&self, request: TaskLaunchRequest) -> Result<TaskLaunchRecord> {
         request.validate()?;
-        // Keep existing serving/host admission effective. Local retained task
-        // workspaces are deliberately absent from managed-host deployment.
         anyhow::ensure!(
             self.manager.managed_host().is_none(),
             "invalid request: retained tasks require an unmanaged Local host"
         );
+        let admission = self.manager.inner.task_preparations.admit().await?;
         let manager = self.manager.clone();
-        let prepared = store::spawn_blocking_store_caller(move || -> Result<_> {
-            let path = &manager.inner.store_path;
-            let lease_id = format!("task-launch:{}", request.request_id);
-            let lease = match sessions::SessionOperationLease::try_acquire(path, &lease_id) {
-                Ok(lease) => lease,
-                Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                    let existing = store::load_task_launch(path, &request.request_id)?
-                        .ok_or_else(|| anyhow!("conflict: launch source resolution is in progress; retry the same request"))?;
-                    anyhow::ensure!(existing.request == request, "conflict: launch identity reused with different arguments");
-                    return Ok((existing, None));
+        let (reply, response) = tokio::sync::oneshot::channel();
+        // Register before source resolution. HTTP cancellation cannot detach
+        // blocking store calls, Git, or publication from the serving lifetime.
+        tokio::spawn(async move {
+            let _admission = admission;
+            let prepared = Self::resolve_and_reserve(&manager, request).await;
+            let (record, lease) = match prepared {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    let _ = reply.send(Err(error));
+                    return;
                 }
-                Err(error) => return Err(error.into()),
             };
-            if let Some(existing) = store::load_task_launch(path, &request.request_id)? {
-                anyhow::ensure!(existing.request == request, "conflict: launch identity reused with different arguments");
-                return Ok((existing, Some(lease)));
-            }
-            let project = nac_core::projects::load_project_launch_context(path, &request.project_id)?.project;
-            let bound = store::load_project_git_source(path, &request.project_id)?;
-            let invoking = request.invoking_session_id.as_deref().map(|id| sessions::load_session(path,id)).transpose()?;
-            let source = task_worktree::resolve_source(&project, &request, bound.as_ref(), invoking.as_ref())?;
-            let record = store::reserve_task_launch(path, request, source)?;
-            Ok((record, Some(lease)))
-        }).await??;
-        let (record, lease) = prepared;
-        if let Some(lease) = lease {
-            if !matches!(
-                record.phase,
-                TaskLaunchPhase::Ready | TaskLaunchPhase::Cancelled
-            ) {
-                let manager = self.manager.clone();
-                let launch = record.clone();
-                // The request may disappear; the preparation owns its lease and
-                // durable receipt through publication, never the HTTP waiter.
-                tokio::spawn(async move {
-                    let result = Self::prepare(&manager, launch.clone()).await;
-                    if let Err(error) = result {
+            let _ = reply.send(Ok(record.clone()));
+            if let Some(_lease) = lease {
+                if !matches!(
+                    record.phase,
+                    TaskLaunchPhase::Ready | TaskLaunchPhase::Cancelled
+                ) {
+                    if let Err(error) = Self::prepare(&manager, record.clone()).await {
                         let path = manager.inner.store_path.clone();
-                        let id = launch.request.request_id.clone();
+                        let id = record.request.request_id;
                         let _ = store::spawn_blocking_store_caller(move || {
                             store::update_task_launch(
                                 &path,
@@ -97,11 +91,69 @@ impl<'a> TaskLaunchApplication<'a> {
                         })
                         .await;
                     }
-                    drop(lease);
-                });
+                }
             }
+        });
+        response.await.context("task launch response stopped")?
+    }
+
+    async fn resolve_and_reserve(
+        manager: &SessionManager,
+        request: TaskLaunchRequest,
+    ) -> Result<(TaskLaunchRecord, Option<sessions::SessionOperationLease>)> {
+        manager.inner.task_preparations.git.check_running()?;
+        let path = manager.inner.store_path.clone();
+        let intent = request.clone();
+        let (lease, existing, context) =
+            store::spawn_blocking_store_caller(move || -> Result<_> {
+                let lease_id = format!("task-launch:{}", intent.request_id);
+                let lease = match sessions::SessionOperationLease::try_acquire(&path, &lease_id) {
+                    Ok(lease) => Some(lease),
+                    Err(sessions::SessionOperationLeaseError::Busy(_)) => None,
+                    Err(error) => return Err(error.into()),
+                };
+                let existing = store::load_task_launch(&path, &intent.request_id)?;
+                if let Some(existing) = &existing {
+                    anyhow::ensure!(
+                        existing.request == intent,
+                        "conflict: launch identity reused with different arguments"
+                    );
+                    return Ok((lease, Some(existing.clone()), None));
+                }
+                anyhow::ensure!(
+                    lease.is_some(),
+                    "conflict: launch source resolution is in progress; retry the same request"
+                );
+                let project =
+                    nac_core::projects::load_project_launch_context(&path, &intent.project_id)?
+                        .project;
+                let bound = store::load_project_git_source(&path, &intent.project_id)?;
+                let invoking = intent
+                    .invoking_session_id
+                    .as_deref()
+                    .map(|id| sessions::load_session(&path, id))
+                    .transpose()?;
+                Ok((lease, None, Some((project, bound, invoking))))
+            })
+            .await??;
+        if let Some(existing) = existing {
+            return Ok((existing, lease));
         }
-        Ok(record)
+        let (project, bound, invoking) =
+            context.ok_or_else(|| anyhow!("launch source context missing"))?;
+        let source = manager
+            .inner
+            .task_preparations
+            .git
+            .resolve_source(&project, &request, bound.as_ref(), invoking.as_ref())
+            .await?;
+        manager.inner.task_preparations.git.check_running()?;
+        let path = manager.inner.store_path.clone();
+        let record = store::spawn_blocking_store_caller(move || {
+            store::reserve_task_launch(&path, request, source)
+        })
+        .await??;
+        Ok((record, lease))
     }
 
     async fn phase(
@@ -122,15 +174,20 @@ impl<'a> TaskLaunchApplication<'a> {
         if launch.phase == TaskLaunchPhase::Cancelled {
             return Ok(());
         }
+        manager.inner.task_preparations.git.check_running()?;
         let path = manager.inner.store_path.clone();
         let work = launch.clone();
         store::spawn_blocking_store_caller(move || -> Result<()> {
             let config = nac_core::runtime::NacConfig::load_from_cwd(&work.source.project_cwd)?;
-            task_worktree::authorize_human_preparation(&work, &config, &path)?;
-            task_worktree::prepare_workspace(&work)?;
-            Ok(())
+            task_worktree::authorize_human_preparation(&work, &config, &path)
         })
         .await??;
+        manager
+            .inner
+            .task_preparations
+            .git
+            .prepare_workspace(&launch)
+            .await?;
         let launch = Self::phase(manager, &launch, TaskLaunchPhase::PreparingRuntime).await?;
         if launch.phase == TaskLaunchPhase::Cancelled {
             return Ok(());
@@ -147,7 +204,11 @@ impl<'a> TaskLaunchApplication<'a> {
         // owns its idempotent promotion; reattachment recovers pending input.
         let service = manager.inner.active_sessions.read().await.get(&id).cloned();
         if let Some(service) = service {
-            manager.wake_direct_inbox(&service).await?;
+            if manager.inner.task_preparations.git.check_running().is_ok() {
+                manager.wake_direct_inbox(&service).await?;
+            } else {
+                service.stop_run_admission().await?;
+            }
         }
         Ok(())
     }

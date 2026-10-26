@@ -1077,3 +1077,7 @@ mod task_launches;
 
 #[path = "tests/openapi.rs"]
 mod openapi_contract;
+
+#[cfg(unix)]
+#[path = "tests/task_launch_shutdown.rs"]
+mod task_launch_shutdown;

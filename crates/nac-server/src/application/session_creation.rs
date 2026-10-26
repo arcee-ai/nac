@@ -435,6 +435,9 @@ impl<'a> SessionCreationApplication<'a> {
             sandbox: sandbox_options(request.sandbox),
             ssh: location.ssh,
         };
+        if retained.is_some() {
+            self.manager.inner.task_preparations.git.check_running()?;
+        }
         let preparation = async {
             if let Some(launch) = &retained {
                 runtime::prepare_retained_task_run_config(options, &config, launch).await
@@ -488,6 +491,9 @@ impl<'a> SessionCreationApplication<'a> {
                     gate.resume.notified().await;
                 }
             }
+            if retained.is_some() {
+                self.manager.inner.task_preparations.git.check_running()?;
+            }
             Ok::<_, anyhow::Error>(service)
         }
         .await;
@@ -513,6 +519,31 @@ impl<'a> SessionCreationApplication<'a> {
             }
             None => service.persist_new_session_with_snapshot(resources).await?,
         };
+        #[cfg(test)]
+        if retained.is_some() {
+            let gate = self
+                .manager
+                .inner
+                .session_creation_after_persistence
+                .lock()
+                .unwrap()
+                .clone();
+            if let Some(gate) = gate {
+                gate.reached.notify_one();
+                gate.resume.notified().await;
+            }
+        }
+        if retained.is_some()
+            && self
+                .manager
+                .inner
+                .task_preparations
+                .git
+                .check_running()
+                .is_err()
+        {
+            service.stop_run_admission().await?;
+        }
         let session_id = snapshot
             .metadata
             .session_id
