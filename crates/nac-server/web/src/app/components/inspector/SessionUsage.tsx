@@ -57,6 +57,7 @@ export function SessionUsage({
     <Popover
       open={open}
       onClose={() => setOpen(false)}
+      sticky
       placement={PopoverPlacement.BottomLeft}
       size={PopoverSize.Small}
       className="shrink-0"
