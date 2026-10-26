@@ -91,7 +91,16 @@ impl PermissionBroker {
             event_bus: StdMutex::new(None),
             state: StdMutex::new(PermissionBrokerState::default()),
             approval_observer: tokio::sync::Mutex::new(PermissionApprovalObserver::default()),
+            caller_project: std::sync::OnceLock::new(),
         }
+    }
+
+    pub(crate) fn remember_caller_project(&self, project_id: &str) {
+        let _ = self.caller_project.set(project_id.to_owned());
+    }
+
+    pub(crate) fn caller_project(&self) -> Option<&str> {
+        self.caller_project.get().map(String::as_str)
     }
 
     pub(crate) fn attach_event_bus(&self, bus: crate::events::SessionEventBus) {

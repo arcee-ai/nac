@@ -981,6 +981,7 @@ fn open_connection_with_hooks(
         "INTEGER NOT NULL DEFAULT 0",
     )?;
     super::shell_commands::create_shell_commands_table(&transaction)?;
+    ensure_column(&transaction, "session_goals", "last_run_id", "TEXT")?;
     super::task_evidence::create_task_evidence_tables(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 

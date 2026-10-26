@@ -88,6 +88,8 @@ pub struct DirectTaskSnapshot {
     pub current_run: Option<TaskRunState>,
     pub pending_inbox_items: u64,
     pub goal: Option<SessionGoalRecord>,
+    /// The last run that settled against the current goal, when one did.
+    pub goal_last_run_id: Option<String>,
     /// Newest first, bounded by `RETAINED_GOAL_OUTCOMES`.
     pub prior_goals: Vec<GoalOutcomeRecord>,
     /// Newest first, bounded by `RETAINED_RUN_OUTCOMES`.
@@ -388,6 +390,14 @@ pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
             goal.objective = redact(&goal.objective);
             goal
         }),
+        goal_last_run_id: tx
+            .query_row(
+                "SELECT last_run_id FROM session_goals WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten(),
         prior_goals: super::task_evidence::load_goal_outcomes_with_connection(&tx, session_id)?
             .into_iter()
             .map(|mut goal| {

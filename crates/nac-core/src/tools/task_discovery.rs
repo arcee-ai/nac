@@ -9,10 +9,12 @@ use super::ToolResult;
 use crate::permissions::PermissionBroker;
 use crate::store::{self, TaskLookup, TaskSearch};
 use crate::types::{FunctionDef, ToolDefinition};
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 
 const MAX_ID_BYTES: usize = 160;
 const DEFAULT_LIMIT: usize = 10;
+const MAX_LIVE_CURSORS: usize = 256;
 const APPROVALS_UNKNOWN: &str = "Approval requests live only in the target's live owner process and are not visible to a passive durable read. Absence here never means none are pending; open the task to see them.";
 
 #[derive(Debug, Deserialize)]
@@ -24,6 +26,8 @@ pub(crate) struct FindTasksInput {
     project_id: Option<String>,
     after: Option<String>,
     limit: Option<usize>,
+    #[serde(skip)]
+    authorized_project: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +35,8 @@ pub(crate) struct FindTasksInput {
 pub(crate) struct ReadTaskInput {
     session_id: String,
     project_id: Option<String>,
+    #[serde(skip)]
+    authorized_project: Option<String>,
 }
 
 fn definition(name: &str, description: &str, parameters: Value) -> ToolDefinition {
@@ -54,6 +60,45 @@ fn unavailable(error: impl std::fmt::Display) -> ToolResult {
             .to_string(),
         true,
     )
+}
+
+/// Store positions stay in-process; callers see only a token bound to chat and project.
+struct SealedCursor {
+    token: String,
+    caller: String,
+    project_id: String,
+    position: String,
+}
+
+static CURSORS: LazyLock<StdMutex<VecDeque<SealedCursor>>> =
+    LazyLock::new(|| StdMutex::new(VecDeque::new()));
+
+fn seal_cursor(caller: &str, project_id: &str, position: String) -> String {
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let mut cursors = CURSORS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if cursors.len() == MAX_LIVE_CURSORS {
+        cursors.pop_front();
+    }
+    cursors.push_back(SealedCursor {
+        token: token.clone(),
+        caller: caller.to_owned(),
+        project_id: project_id.to_owned(),
+        position,
+    });
+    token
+}
+
+fn open_cursor(caller: &str, project_id: &str, token: &str) -> Option<String> {
+    CURSORS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .find(|cursor| {
+            cursor.token == token && cursor.caller == caller && cursor.project_id == project_id
+        })
+        .map(|cursor| cursor.position.clone())
 }
 
 fn result(value: Value) -> ToolResult {
@@ -110,7 +155,7 @@ fn task_resource(session_id: &str) -> PermissionResource {
     PermissionResource::new("task_read", format!("session:{session_id}"))
 }
 
-/// `project:current` is the caller's own project, stable because membership is immutable.
+/// `project:current` stands in only until the caller's project is known to the broker.
 fn project_resource(project_id: Option<&str>) -> PermissionResource {
     PermissionResource::new(
         "task_read",
@@ -118,14 +163,26 @@ fn project_resource(project_id: Option<&str>) -> PermissionResource {
     )
 }
 
-/// Applies concrete `project:<id>` rules to a project resolved after kernel authorization.
+/// The project resource the kernel actually authorized for this invocation.
+fn authorized_project(resources: &[PermissionResource]) -> Option<String> {
+    resources
+        .iter()
+        .find_map(|resource| resource.resource.strip_prefix("project:"))
+        .map(str::to_owned)
+}
+
+/// Applies concrete `project:<id>` rules unless the kernel already authorized that project.
 async fn authorize_project(
     tool: &str,
     services: ToolServices<'_>,
-    broker: &Arc<PermissionBroker>,
+    (broker, authorized): (&Arc<PermissionBroker>, Option<&str>),
     context: &ToolCallContext,
     project_id: &str,
 ) -> Result<(), ToolResult> {
+    broker.remember_caller_project(project_id);
+    if authorized == Some(project_id) {
+        return Ok(());
+    }
     match broker
         .authorize(
             tool,
@@ -157,6 +214,7 @@ fn found_task(snapshot: store::DirectTaskSnapshot) -> Value {
             "current_run": snapshot.current_run,
             "pending_inbox_items": snapshot.pending_inbox_items,
             "goal": snapshot.goal,
+            "goal_last_run_id": snapshot.goal_last_run_id,
             "prior_goals": snapshot.prior_goals,
             "run_outcomes": snapshot.run_outcomes,
             "created_at": snapshot.created_at,
@@ -173,7 +231,7 @@ async fn exact_lookup(
     context: &ToolCallContext,
     (caller, broker): (String, Arc<PermissionBroker>),
     session_id: String,
-    explicit_project: Option<String>,
+    (explicit_project, authorized): (Option<String>, Option<String>),
 ) -> Result<Value, ToolResult> {
     let target = session_id.clone();
     let (caller_project, target_project, lookup) = store_call(services, move |path| {
@@ -217,7 +275,14 @@ async fn exact_lookup(
         }),
         TaskLookup::Found(snapshot) => {
             if let (None, Some(project)) = (&explicit_project, &snapshot.project_id) {
-                authorize_project(tool, services, &broker, context, project).await?;
+                authorize_project(
+                    tool,
+                    services,
+                    (&broker, authorized.as_deref()),
+                    context,
+                    project,
+                )
+                .await?;
             }
             json!({"status": "found", "task": found_task(*snapshot)})
         }
@@ -299,7 +364,7 @@ impl NativeTool for FindTasksTool {
         if input
             .after
             .as_deref()
-            .is_some_and(|after| after.len() > 512 || store::decode_task_cursor(after).is_none())
+            .is_some_and(|after| after.is_empty() || after.len() > 512)
         {
             return Err(invalid(
                 "after must be a next_after value from a previous page",
@@ -322,12 +387,23 @@ impl NativeTool for FindTasksTool {
         input: &Self::Input,
         services: ToolServices<'_>,
     ) -> Result<Vec<PermissionResource>, ToolResult> {
-        caller(services)?;
-        let mut resources = vec![project_resource(input.project_id.as_deref())];
+        let (_, broker) = caller(services)?;
+        let project = input.project_id.as_deref().or(broker.caller_project());
+        let mut resources = vec![project_resource(project)];
         if let Some(session_id) = &input.session_id {
             resources.push(task_resource(session_id));
         }
         Ok(resources)
+    }
+
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        resources: &[PermissionResource],
+        _services: ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        input.authorized_project = authorized_project(resources);
+        Ok(())
     }
 
     fn execute<'a>(
@@ -348,7 +424,7 @@ impl NativeTool for FindTasksTool {
                     context,
                     identity,
                     session_id,
-                    input.project_id,
+                    (input.project_id, input.authorized_project),
                 )
                 .await
                 {
@@ -381,8 +457,14 @@ impl NativeTool for FindTasksTool {
                 }
             };
             if !explicit {
-                if let Err(error) =
-                    authorize_project("find_tasks", services, &broker, context, &project_id).await
+                if let Err(error) = authorize_project(
+                    "find_tasks",
+                    services,
+                    (&broker, input.authorized_project.as_deref()),
+                    context,
+                    &project_id,
+                )
+                .await
                 {
                     return error;
                 }
@@ -390,12 +472,21 @@ impl NativeTool for FindTasksTool {
             let Some(filter) = broker.passive_read_filter().await else {
                 return unavailable("permission grants could not be read");
             };
+            let after = match input.after.as_deref() {
+                Some(token) => match open_cursor(&caller, &project_id, token) {
+                    Some(position) => Some(position),
+                    None => return invalid(
+                        "after must be a next_after value from a previous page of this same search in this chat; cursors do not survive a restart",
+                    ),
+                },
+                None => None,
+            };
             let search = TaskSearch {
                 project_id: project_id.clone(),
                 reference: input.reference,
                 text: input.text,
-                exclude_session_id: Some(caller),
-                after: input.after,
+                exclude_session_id: Some(caller.clone()),
+                after,
                 limit: input.limit.unwrap_or(DEFAULT_LIMIT),
                 visible: Some(Arc::new(move |session_id: &str| {
                     filter.allows(&[task_resource(session_id)])
@@ -438,7 +529,7 @@ impl NativeTool for FindTasksTool {
                 "scope": {"project_id": project_id, "explicit": explicit},
                 "ambiguous": ambiguous,
                 "candidates": candidates,
-                "next_after": page.next_after,
+                "next_after": page.next_after.map(|position| seal_cursor(&caller, &project_id, position)),
                 "scanned_rows": page.scanned_rows,
                 "scan_limit_reached": page.scan_limit_reached,
             })))
@@ -486,12 +577,22 @@ impl NativeTool for ReadTaskTool {
         input: &Self::Input,
         services: ToolServices<'_>,
     ) -> Result<Vec<PermissionResource>, ToolResult> {
-        caller(services)?;
+        let (_, broker) = caller(services)?;
         let mut resources = vec![task_resource(&input.session_id)];
-        if input.project_id.is_some() {
-            resources.push(project_resource(input.project_id.as_deref()));
+        if let Some(project) = input.project_id.as_deref().or(broker.caller_project()) {
+            resources.push(project_resource(Some(project)));
         }
         Ok(resources)
+    }
+
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        resources: &[PermissionResource],
+        _services: ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        input.authorized_project = authorized_project(resources);
+        Ok(())
     }
 
     fn execute<'a>(
@@ -511,7 +612,7 @@ impl NativeTool for ReadTaskTool {
                 context,
                 identity,
                 input.session_id,
-                input.project_id,
+                (input.project_id, input.authorized_project),
             )
             .await
             {

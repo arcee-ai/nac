@@ -712,7 +712,7 @@ fn settle_goal_terminal_state(
     connection.execute(
         "UPDATE session_goals
          SET status = ?1, tokens_used = ?2, time_used_ms = ?3,
-             accounting_run_id = NULL, accounting_token_baseline = NULL,
+             last_run_id = accounting_run_id, accounting_run_id = NULL, accounting_token_baseline = NULL,
              accounting_started_at_epoch_ms = NULL, continuation_run_id = NULL,
              consecutive_transient_failures = ?4, next_attempt_at_epoch_ms = ?5,
              last_failure_json = ?6, updated_at = ?7, version = version + 1
@@ -803,7 +803,7 @@ pub(crate) fn reconcile_session_goal_terminal_with_connection(
     };
     connection.execute(
         "UPDATE session_goals
-         SET status = ?1, accounting_run_id = NULL,
+         SET status = ?1, last_run_id = accounting_run_id, accounting_run_id = NULL,
              accounting_token_baseline = NULL,
              accounting_started_at_epoch_ms = NULL,
              continuation_run_id = NULL, updated_at = ?2, version = version + 1
@@ -832,7 +832,8 @@ pub fn reconcile_session_goal_run(
     require_direct_session(&connection, session_id)?;
     connection.execute(
         "UPDATE session_goals
-         SET accounting_run_id = NULL, accounting_token_baseline = NULL,
+         SET last_run_id = accounting_run_id, accounting_run_id = NULL,
+             accounting_token_baseline = NULL,
              accounting_started_at_epoch_ms = NULL, continuation_run_id = NULL,
              updated_at = ?1, version = version + 1
          WHERE session_id = ?2 AND accounting_run_id IS NOT NULL",

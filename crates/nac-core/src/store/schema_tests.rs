@@ -246,6 +246,7 @@ fn assert_current_schema(conn: &Connection) {
             "created_at",
             "updated_at",
             "version",
+            "last_run_id",
         ]
     );
     assert_eq!(
@@ -855,6 +856,7 @@ fn v19_store_adds_durable_session_goals() {
             "created_at",
             "updated_at",
             "version",
+            "last_run_id",
         ]
     );
     assert_eq!(

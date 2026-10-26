@@ -22,7 +22,9 @@ is never collapsed into one duplicate; a match is discovery evidence rather than
 identity. `ambiguous` is `true` when a page shows several matches, `false` only
 when a single page covered the whole search with at most one match, and `null`
 (unknown) on any other page of a multi-page search. Pages hold at most 20
-candidates and examine at most 500 sessions; continue with `next_after`.
+candidates and examine at most 500 sessions; continue with `next_after`, an
+opaque token that resumes only the same chat's search of the same project and
+does not survive a restart.
 `scan_limit_reached` means rows remain unexamined, not that nothing matched.
 
 ## Reading a task
@@ -30,8 +32,9 @@ candidates and examine at most 500 sessions; continue with `next_after`.
 `read_task` returns one bounded snapshot read in a single store transaction:
 
 - `durable`: run count, current durable run, pending inbox items, the current
-  goal with ID, version and status, the last 8 replaced or cleared goals with
-  their final status, and the last 8 run outcomes with a result excerpt of up to
+  goal with ID, version and status (plus `goal_last_run_id`, the last run that
+  settled against it), the last 8 replaced or cleared goals with their final
+  status and last settling run, and the last 8 run outcomes with a result excerpt of up to
   2,000 characters or the failure. Stored excerpts and failures, prompt
   excerpts and goal objectives are credential-redacted.
 - `ephemeral.approvals`: always `unknown`. Approval requests live in the
@@ -62,5 +65,7 @@ the `task_read` action with resources `project:<id>` and `session:<id>`. A
 default-scope search or exact read also evaluates the resolved `project:<id>`, so
 rules on a concrete project apply whether or not `project_id` was passed.
 Configured Deny applies, and Ask fails closed without an interactive approver.
+Once the chat's project is known, its concrete `project:<id>` is the resource
+checked, so one Ask covers the call.
 Sessions whose `session:<id>` is not allowed without a prompt are skipped before
 matching, so they affect no candidate, flag or cursor.

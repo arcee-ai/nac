@@ -294,6 +294,31 @@ fn replaced_and_cleared_goals_remain_provable_after_reopen() {
     project(&path, "p1", "/tmp/project");
     task(&path, "p1", "t", "x", "", "2026-01-01T00:00:01Z");
     let first = create_session_goal(&path, "t", "ship it", None, None).unwrap();
+    let bind = |run_id: &str| {
+        bind_session_goal_run(
+            &path,
+            "t",
+            &GoalRunBaseline {
+                run_id: run_id.into(),
+                billable_tokens: 0,
+                started_at_epoch_ms: 10,
+                continuation: false,
+            },
+        )
+        .unwrap()
+        .unwrap();
+    };
+    bind("run-1");
+    settle_session_goal_run_with_connection(
+        &open_runtime_connection(&path).unwrap(),
+        "t",
+        "run-1",
+        0,
+        20,
+        GoalRunDisposition::Completed,
+        None,
+    )
+    .unwrap();
     let completed =
         update_session_goal_by_model(&path, "t", &first.goal_id, GoalStatus::Complete).unwrap();
     let second = create_session_goal(&path, "t", "next", None, None).unwrap();
@@ -326,6 +351,20 @@ fn replaced_and_cleared_goals_remain_provable_after_reopen() {
         ]
     );
     assert_eq!(snapshot.prior_goals[1].version, completed.version);
+    assert_eq!(
+        snapshot.prior_goals[1].last_run_id.as_deref(),
+        Some("run-1")
+    );
+    assert_eq!(snapshot.prior_goals[0].last_run_id, None);
+
+    // A stale claim cleared at restart still names its run on the current goal.
+    create_session_goal(&path, "t", "third", None, None).unwrap();
+    bind("run-2");
+    reconcile_session_goal_run(&path, "t").unwrap();
+    let TaskLookup::Found(snapshot) = load_direct_task(&path, "t").unwrap() else {
+        panic!("task should be found");
+    };
+    assert_eq!(snapshot.goal_last_run_id.as_deref(), Some("run-2"));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

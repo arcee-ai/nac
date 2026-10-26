@@ -37,6 +37,9 @@ impl SessionService {
             .configure_permission_broker(config_version.unwrap_or(0));
         if let Some(broker) = &permission_broker {
             broker.attach_event_bus(event_bus.clone());
+            if let Some(project_id) = &project_id {
+                broker.remember_caller_project(project_id);
+            }
         }
         if let Some((run_id, failure)) = run_config.agent.take_recovered_run_failure() {
             event_bus.emit_with_context(

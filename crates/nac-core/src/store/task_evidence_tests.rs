@@ -24,6 +24,7 @@ fn v34_store_adds_bounded_task_evidence_without_rewriting_goals() {
              VALUES ('direct', 'goal-1', 'kept', 'complete', 'then', 'then', 3);
              DROP TABLE session_run_outcomes;
              DROP TABLE session_goal_outcomes;
+             ALTER TABLE session_goals DROP COLUMN last_run_id;
              PRAGMA user_version = 34;",
         )
         .unwrap();
@@ -60,16 +61,17 @@ fn v34_store_adds_bounded_task_evidence_without_rewriting_goals() {
             "updated_at",
             "retired_at",
             "retirement",
+            "last_run_id",
         ]
     );
-    let goal: (String, i64) = migrated
+    let goal: (String, i64, Option<String>) = migrated
         .query_row(
-            "SELECT goal_id, version FROM session_goals WHERE session_id = 'direct'",
+            "SELECT goal_id, version, last_run_id FROM session_goals WHERE session_id = 'direct'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
-    assert_eq!(goal, ("goal-1".to_owned(), 3));
+    assert_eq!(goal, ("goal-1".to_owned(), 3, None));
     assert_eq!(
         migrated
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))

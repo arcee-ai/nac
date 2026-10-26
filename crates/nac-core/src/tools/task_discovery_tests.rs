@@ -392,6 +392,24 @@ async fn ambiguity_is_unknown_until_the_last_page_when_one_match_is_visible() {
         second["candidates"][0]["session_id"]
     );
     assert_eq!(second["ambiguous"], Value::Null);
+
+    // The cursor is opaque and resumes only this chat's search of this project.
+    let token = first["next_after"].as_str().unwrap();
+    assert!(token.chars().all(|c| c.is_ascii_hexdigit()), "{token}");
+    let crossed = call(
+        &runtime,
+        "find_tasks",
+        json!({"reference":"ALL-469","project_id":"p2","after":token}),
+    )
+    .await;
+    assert!(crossed.is_error, "{}", crossed.content);
+    let forged = call(
+        &runtime,
+        "find_tasks",
+        json!({"after":"2026-01-01T00:00:00Z|1"}),
+    )
+    .await;
+    assert!(forged.is_error, "{}", forged.content);
     cleanup(&runtime);
 }
 
@@ -499,5 +517,48 @@ async fn store_failure_after_admission_is_reported_unavailable() {
     let reported: Value = serde_json::from_str(result.content.as_text().unwrap()).unwrap();
     assert_eq!(reported["status"], "unavailable");
     assert!(!reported.to_string().contains("attempt one"));
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn a_wildcard_ask_prompts_once_for_the_callers_own_project() {
+    let runtime = runtime(vec![PermissionRule::new(
+        "task_read",
+        "*",
+        PermissionEffect::Ask,
+    )]);
+    let broker = Arc::clone(runtime.permission_broker.as_ref().unwrap());
+    broker.remember_caller_project("p1");
+    let bus = crate::events::SessionEventBus::new(Some(CALLER.into()));
+    let _approver = bus.subscribe_assistant_deltas();
+    broker.attach_event_bus(bus);
+
+    for (name, input) in [
+        ("find_tasks", json!({"reference":"ALL-469"})),
+        ("read_task", json!({"session_id":"peer-a"})),
+    ] {
+        let call = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move { value(&runtime, name, input).await })
+        };
+        let mut answered = 0;
+        while !call.is_finished() {
+            for request in broker.pending() {
+                broker
+                    .reply(&request.id, crate::permissions::PermissionReply::Once)
+                    .unwrap();
+                answered += 1;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            call.await.unwrap()["status"],
+            json!(match name {
+                "find_tasks" => "ok",
+                _ => "found",
+            })
+        );
+        assert_eq!(answered, 1, "{name} asked {answered} times");
+    }
     cleanup(&runtime);
 }

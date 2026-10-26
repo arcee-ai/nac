@@ -89,6 +89,8 @@ pub struct GoalOutcomeRecord {
     pub updated_at: String,
     pub retired_at: String,
     pub retirement: GoalRetirement,
+    /// The last run that settled against this goal, when one did.
+    pub last_run_id: Option<String>,
 }
 
 pub(super) fn create_task_evidence_tables(conn: &Connection) -> Result<()> {
@@ -124,6 +126,7 @@ pub(super) fn create_task_evidence_tables(conn: &Connection) -> Result<()> {
              updated_at TEXT NOT NULL,
              retired_at TEXT NOT NULL,
              retirement TEXT NOT NULL CHECK (retirement IN ('replaced', 'cleared')),
+             last_run_id TEXT,
              UNIQUE (session_id, goal_id)
          );
          CREATE INDEX IF NOT EXISTS idx_session_goal_outcomes_session
@@ -214,8 +217,9 @@ pub(super) fn retain_goal_outcome_with_connection(
     conn.execute(
         "INSERT OR IGNORE INTO session_goal_outcomes
          (session_id, goal_id, objective, status, version, tokens_used, time_used_ms,
-          last_failure_json, created_at, updated_at, retired_at, retirement)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+          last_failure_json, created_at, updated_at, retired_at, retirement, last_run_id)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, last_run_id
+         FROM session_goals WHERE session_id = ?1 AND goal_id = ?2",
         params![
             goal.session_id,
             goal.goal_id,
@@ -285,7 +289,7 @@ pub(crate) fn load_goal_outcomes_with_connection(
 ) -> Result<Vec<GoalOutcomeRecord>> {
     let mut statement = conn.prepare(
         "SELECT goal_id, objective, status, version, tokens_used, time_used_ms,
-                last_failure_json, created_at, updated_at, retired_at, retirement
+                last_failure_json, created_at, updated_at, retired_at, retirement, last_run_id
          FROM session_goal_outcomes WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
     )?;
     let rows = statement.query_map(params![session_id, RETAINED_GOAL_OUTCOMES as i64], |row| {
@@ -313,6 +317,7 @@ pub(crate) fn load_goal_outcomes_with_connection(
                     ))
                 }
             },
+            last_run_id: row.get(11)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
