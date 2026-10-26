@@ -106,6 +106,10 @@ impl ConnectionState {
 
     /// The identity a new session mounts `server_name` under, or `None` while it is disconnected.
     pub(super) fn mount(&self, server_name: &str) -> Result<Option<u64>> {
+        let record = self.read()?;
+        if let Some(identity) = record.names.get(server_name) {
+            return Ok(record.admitted.contains(identity).then_some(*identity));
+        }
         self.with_record(Unreadable::Fail, |record| {
             let identity = record.identity(server_name, true);
             record.admitted.contains(&identity).then_some(identity)
