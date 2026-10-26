@@ -17,6 +17,7 @@ import { TerminalWorkspace } from "@/app/features/terminal-selection/TerminalWor
 import { InsightsView } from "@/app/features/insights/presentation/InsightsView";
 import { FilesView } from "@/app/components/inspector/FilesView";
 import { PanelCountBadge } from "@/app/components/inspector/PanelCountBadge";
+import { PanelListNote } from "@/app/components/inspector/PanelMessages";
 import { PanelPhoneScreen } from "@/app/components/inspector/PanelPhoneScreen";
 import { panelBadgeCount, PANEL_ICON } from "@/app/components/inspector/sessionPanelIcons";
 import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
@@ -151,10 +152,18 @@ export function SessionSideBox({
 
   if (isMobile) {
     // A panel without rows to list is a list screen of its own; the others
-    // draw both of their screens through their split.
+    // draw both of their screens through their split. Until the session's
+    // behavior is known there is no panel at all, but the dialog still needs a
+    // screen with its way out.
     return (
       <div className="flex flex-col flex-1 min-h-0 bg-elevation-ground">
-        {active === "terminal" || active === "history" ? (
+        {active === null ? (
+          <PanelPhoneScreen title={SESSION_PANEL_LABEL[panel]} bar>
+            <div className="pt-14">
+              <PanelListNote>The panels show once the session has loaded.</PanelListNote>
+            </div>
+          </PanelPhoneScreen>
+        ) : active === "terminal" || active === "history" ? (
           <PanelPhoneScreen title={SESSION_PANEL_LABEL[active]} bar>
             {/* History scrolls under the header; the terminal keeps its own frame. */}
             {active === "terminal" ? (
