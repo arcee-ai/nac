@@ -265,27 +265,34 @@ fn exact_secrets(
     Ok(secrets)
 }
 
-/// Provider call ids are not guaranteed unique across turns: the newest call
-/// wins, and only the tool rows contiguous with its assistant turn hold its result.
+/// Provider call ids are not guaranteed unique across turns, and an id the
+/// session holds more than once names no single call, so it finds none rather
+/// than another call's content. Only the tool rows contiguous with its
+/// assistant turn hold its result.
 fn find_tool_call<'a>(
     messages: &'a [Message],
     call_id: &str,
 ) -> Option<(&'a str, Option<&'a ToolContent>)> {
-    let (index, call) = messages
+    let mut found = messages
         .iter()
         .enumerate()
-        .rev()
-        .find_map(|(index, message)| {
-            let Message::Assistant {
+        .filter_map(|(index, message)| match message {
+            Message::Assistant {
                 tool_calls: Some(calls),
                 ..
-            } = message
-            else {
-                return None;
-            };
-            let call = calls.iter().find(|call| call.id == call_id)?;
-            Some((index, call))
-        })?;
+            } => Some((index, calls)),
+            _ => None,
+        })
+        .flat_map(|(index, calls)| {
+            calls
+                .iter()
+                .filter(move |call| call.id == call_id)
+                .map(move |call| (index, call))
+        });
+    let (index, call) = found.next()?;
+    if found.next().is_some() {
+        return None;
+    }
     let output = messages[index + 1..]
         .iter()
         .take_while(|message| !matches!(message, Message::Assistant { .. } | Message::User { .. }))

@@ -215,3 +215,33 @@ async fn members_under_credential_keys_are_masked_at_any_depth() {
     drop(parts);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
+
+#[tokio::test]
+async fn a_call_id_held_twice_names_no_call() {
+    let (parts, store_path) = test_active_service("tool_call_content_reused", "session");
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[("call_0", r#"{"path":"a.txt"}"#)]),
+            result("call_0", "first"),
+            assistant(&[("call_0", r#"{"path":"b.txt"}"#), ("call_1", "{}")]),
+            result("call_0", "second"),
+            result("call_1", "ok"),
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        parts.service.tool_call_content("call_0").await.unwrap(),
+        None
+    );
+    let unique = parts
+        .service
+        .tool_call_content("call_1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(unique.output.as_deref(), Some("ok"));
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
