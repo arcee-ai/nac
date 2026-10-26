@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 
 import {
   ButtonSize,
-  IconName,
   PopoverPlacement,
   Tooltip,
   TooltipPosition,
@@ -192,7 +191,7 @@ export function ModelPicker({
           placeholder="Default"
           disabled={disabled || !metadata || updateConfig.isPending}
           size={ButtonSize.Small}
-          trailingIcon={isMobile ? null : IconName.Right}
+          trailingIcon={null}
           placement={PopoverPlacement.TopCenter}
           onOpenChange={setEffortOpen}
           onValueChange={(effort) => void chooseEffort(effort)}
