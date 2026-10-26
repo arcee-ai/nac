@@ -315,28 +315,8 @@ impl PermissionBroker {
         .await
     }
 
-    async fn authorize_invocation(
-        self: &Arc<Self>,
-        tool: &str,
-        resources: &[PermissionResource],
-        context: &crate::tools::kernel::ToolCallContext,
-        cancellation: &crate::tools::ThreadCancellation,
-        human_submitted: bool,
-    ) -> AuthorizationOutcome {
-        if resources.is_empty() {
-            return AuthorizationOutcome::Denied(format!(
-                "tool '{tool}' did not declare canonical permission resources"
-            ));
-        }
-        let owner = match crate::store::coordinator::owner_for(&self.store_path) {
-            Ok(owner) => owner,
-            Err(error) => {
-                return AuthorizationOutcome::Denied(format!(
-                    "permission grants could not be read: {error}"
-                ))
-            }
-        };
-        let grants = match &owner {
+    async fn remembered_allows(&self) -> anyhow::Result<Vec<PermissionRule>> {
+        let grants = match crate::store::coordinator::owner_for(&self.store_path)? {
             Some(owner) => {
                 owner
                     .list_effective_permission_grants(
@@ -352,18 +332,47 @@ impl PermissionBroker {
                 self.backend,
                 self.session_config_version,
             ),
+        }?;
+        Ok(grants
+            .into_iter()
+            .map(|grant| PermissionRule::new(grant.action, grant.resource, PermissionEffect::Allow))
+            .collect())
+    }
+
+    /// Allow without a prompt; filters passive read results and never asks.
+    pub(crate) async fn allows_without_prompt(&self, resources: &[PermissionResource]) -> bool {
+        let Ok(remembered) = self.remembered_allows().await else {
+            return false;
         };
-        let remembered = match grants {
-            Ok(grants) => grants
-                .into_iter()
-                .map(|grant| {
-                    PermissionRule::new(grant.action, grant.resource, PermissionEffect::Allow)
-                })
-                .collect::<Vec<_>>(),
+        match self.policy.evaluate(resources, &remembered).effect {
+            PermissionEffect::Allow => true,
+            PermissionEffect::Deny => false,
+            PermissionEffect::Ask => matches!(
+                self.load_approval_state().await,
+                Ok((PermissionApprovalMode::AutoApprove, _, _))
+            ),
+        }
+    }
+
+    async fn authorize_invocation(
+        self: &Arc<Self>,
+        tool: &str,
+        resources: &[PermissionResource],
+        context: &crate::tools::kernel::ToolCallContext,
+        cancellation: &crate::tools::ThreadCancellation,
+        human_submitted: bool,
+    ) -> AuthorizationOutcome {
+        if resources.is_empty() {
+            return AuthorizationOutcome::Denied(format!(
+                "tool '{tool}' did not declare canonical permission resources"
+            ));
+        }
+        let remembered = match self.remembered_allows().await {
+            Ok(remembered) => remembered,
             Err(error) => {
                 return AuthorizationOutcome::Denied(format!(
                     "permission grants could not be read: {error}"
-                ));
+                ))
             }
         };
         let decision = self.policy.evaluate(resources, &remembered);
@@ -413,9 +422,10 @@ impl PermissionBroker {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
-        let child = match &owner {
-            Some(owner) => owner.load_traditional_child(self.session_id.clone()).await,
-            None => crate::store::load_traditional_child(&self.store_path, &self.session_id),
+        let child = match crate::store::coordinator::owner_for(&self.store_path) {
+            Ok(Some(owner)) => owner.load_traditional_child(self.session_id.clone()).await,
+            Ok(None) => crate::store::load_traditional_child(&self.store_path, &self.session_id),
+            Err(error) => Err(error),
         };
         let delegated_child = match child {
             Ok(child) => child.is_some(),

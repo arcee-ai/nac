@@ -216,6 +216,39 @@ async fn configured_deny_and_headless_ask_fail_closed_before_any_read() {
 }
 
 #[tokio::test]
+async fn concrete_project_rules_apply_to_the_default_scope_and_exact_reads() {
+    let runtime = runtime(vec![PermissionRule::new(
+        "task_read",
+        "project:p1",
+        PermissionEffect::Deny,
+    )]);
+    for (tool, input) in [
+        ("find_tasks", json!({})),
+        ("find_tasks", json!({"session_id":"peer-a"})),
+        ("read_task", json!({"session_id":"peer-a"})),
+    ] {
+        let result = call(&runtime, tool, input.clone()).await;
+        assert!(result.is_error, "{tool} {input}: {}", result.content);
+        assert!(!result.content.as_text().unwrap().contains("attempt one"));
+    }
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn search_withholds_candidates_whose_session_is_not_plainly_allowed() {
+    let runtime = runtime(vec![
+        PermissionRule::new("task_read", "session:peer-b", PermissionEffect::Deny),
+        PermissionRule::new("task_read", "session:peer-a", PermissionEffect::Ask),
+    ]);
+    let found = value(&runtime, "find_tasks", json!({"reference":"ALL-469"})).await;
+    assert_eq!(found["candidates"], json!([]));
+    assert_eq!(found["withheld"], 2);
+    assert_eq!(found["ambiguous"], true);
+    assert!(!found.to_string().contains("attempt"));
+    cleanup(&runtime);
+}
+
+#[tokio::test]
 async fn reads_leave_pending_inbox_and_active_goal_untouched() {
     let runtime = runtime(Vec::new());
     let path = runtime.store_path.clone();

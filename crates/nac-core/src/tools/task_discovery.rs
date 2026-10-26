@@ -116,6 +116,35 @@ fn project_resource(project_id: Option<&str>) -> PermissionResource {
     )
 }
 
+/// Applies concrete `project:<id>` rules to a project resolved after kernel authorization.
+async fn authorize_project(
+    tool: &str,
+    services: ToolServices<'_>,
+    context: &ToolCallContext,
+    project_id: &str,
+) -> Result<(), ToolResult> {
+    let broker = services
+        .runtime
+        .permission_broker
+        .as_ref()
+        .ok_or_else(|| ToolResult::text("Error: task discovery is unavailable", true))?;
+    match broker
+        .authorize(
+            tool,
+            &[project_resource(Some(project_id))],
+            context,
+            context.cancellation(services.runtime),
+        )
+        .await
+    {
+        crate::permissions::AuthorizationOutcome::Allowed => Ok(()),
+        crate::permissions::AuthorizationOutcome::Denied(reason) => Err(ToolResult::text(
+            format!("Error: permission denied for {tool}: {reason}"),
+            true,
+        )),
+    }
+}
+
 fn found_task(snapshot: store::DirectTaskSnapshot) -> Value {
     json!({
         "session_id": snapshot.session_id,
@@ -141,7 +170,9 @@ fn found_task(snapshot: store::DirectTaskSnapshot) -> Value {
 
 /// Withholds a target outside the caller's project unless that project is named.
 async fn exact_lookup(
+    tool: &str,
     services: ToolServices<'_>,
+    context: &ToolCallContext,
     caller: String,
     session_id: String,
     explicit_project: Option<String>,
@@ -172,6 +203,9 @@ async fn exact_lookup(
                 None => snapshot.project_id == caller_project,
             };
             if in_scope {
+                if let (None, Some(project)) = (&explicit_project, &snapshot.project_id) {
+                    authorize_project(tool, services, context, project).await?;
+                }
                 json!({"status": "found", "task": found_task(*snapshot)})
             } else {
                 json!({
@@ -297,7 +331,7 @@ impl NativeTool for FindTasksTool {
         &'a self,
         input: Self::Input,
         services: ToolServices<'a>,
-        _context: &'a ToolCallContext,
+        context: &'a ToolCallContext,
     ) -> BoxFuture<'a, ToolResult> {
         Box::pin(async move {
             let caller = match caller(services) {
@@ -305,44 +339,63 @@ impl NativeTool for FindTasksTool {
                 Err(error) => return error,
             };
             if let Some(session_id) = input.session_id {
-                return match exact_lookup(services, caller, session_id, input.project_id).await {
+                return match exact_lookup(
+                    "find_tasks",
+                    services,
+                    context,
+                    caller,
+                    session_id,
+                    input.project_id,
+                )
+                .await
+                {
                     Ok(value) => result(with_receipt(value)),
                     Err(error) => error,
                 };
             }
             let explicit = input.project_id.is_some();
             let filtered = input.reference.is_some() || input.text.is_some();
-            let caller_session = caller.clone();
-            let outcome = store_call(services, move |path| {
-                let project_id = match input.project_id {
-                    Some(project_id) => project_id,
-                    None => match store::load_session_project_id(path, &caller_session)? {
-                        Some(project_id) => project_id,
-                        None => return Ok(Err(())),
-                    },
-                };
-                let page = store::search_direct_tasks(
-                    path,
-                    &TaskSearch {
-                        project_id: project_id.clone(),
-                        reference: input.reference,
-                        text: input.text,
-                        exclude_session_id: Some(caller_session),
-                        after: input.after,
-                        limit: input.limit.unwrap_or(DEFAULT_LIMIT),
-                    },
-                )?;
-                Ok(Ok((project_id, page)))
-            })
-            .await;
-            let (project_id, page) = match outcome {
-                Ok(Ok(found)) => found,
-                Ok(Err(())) => {
-                    return ToolResult::text(
-                        json!({"status":"no_project","detail":"This chat is not in a saved project. Pass project_id to choose which project to search."}).to_string(),
-                        true,
-                    )
+            let project_id = match input.project_id {
+                Some(project_id) => project_id,
+                None => {
+                    let caller_session = caller.clone();
+                    match store_call(services, move |path| {
+                        store::load_session_project_id(path, &caller_session)
+                    })
+                    .await
+                    {
+                        Ok(Some(project_id)) => project_id,
+                        Ok(None) => {
+                            return ToolResult::text(
+                                json!({"status":"no_project","detail":"This chat is not in a saved project. Pass project_id to choose which project to search."}).to_string(),
+                                true,
+                            )
+                        }
+                        Err(error) => return error,
+                    }
                 }
+            };
+            if !explicit {
+                if let Err(error) =
+                    authorize_project("find_tasks", services, context, &project_id).await
+                {
+                    return error;
+                }
+            }
+            let search = TaskSearch {
+                project_id: project_id.clone(),
+                reference: input.reference,
+                text: input.text,
+                exclude_session_id: Some(caller),
+                after: input.after,
+                limit: input.limit.unwrap_or(DEFAULT_LIMIT),
+            };
+            let page = match store_call(services, move |path| {
+                store::search_direct_tasks(path, &search)
+            })
+            .await
+            {
+                Ok(page) => page,
                 Err(error) => return error,
             };
             let Some(page) = page else {
@@ -352,8 +405,21 @@ impl NativeTool for FindTasksTool {
                     "detail": "No saved project with this ID exists in this store.",
                 })));
             };
-            let candidates = page
-                .candidates
+            let Some(broker) = services.runtime.permission_broker.as_ref() else {
+                return ToolResult::text("Error: task discovery is unavailable", true);
+            };
+            let matched = page.candidates.len();
+            let mut visible = Vec::with_capacity(matched);
+            for candidate in page.candidates {
+                if broker
+                    .allows_without_prompt(&[task_resource(&candidate.session_id)])
+                    .await
+                {
+                    visible.push(candidate);
+                }
+            }
+            let withheld = matched - visible.len();
+            let candidates = visible
                 .into_iter()
                 .map(|candidate| {
                     let navigation = navigation(&candidate.session_id);
@@ -365,8 +431,9 @@ impl NativeTool for FindTasksTool {
             result(with_receipt(json!({
                 "status": "ok",
                 "scope": {"project_id": project_id, "explicit": explicit},
-                "ambiguous": filtered && candidates.len() > 1,
+                "ambiguous": filtered && matched > 1,
                 "candidates": candidates,
+                "withheld": withheld,
                 "next_after": page.next_after,
                 "scanned_rows": page.scanned_rows,
                 "scan_limit_reached": page.scan_limit_reached,
@@ -427,14 +494,23 @@ impl NativeTool for ReadTaskTool {
         &'a self,
         input: Self::Input,
         services: ToolServices<'a>,
-        _context: &'a ToolCallContext,
+        context: &'a ToolCallContext,
     ) -> BoxFuture<'a, ToolResult> {
         Box::pin(async move {
             let caller = match caller(services) {
                 Ok(caller) => caller,
                 Err(error) => return error,
             };
-            match exact_lookup(services, caller, input.session_id, input.project_id).await {
+            match exact_lookup(
+                "read_task",
+                services,
+                context,
+                caller,
+                input.session_id,
+                input.project_id,
+            )
+            .await
+            {
                 Ok(value) => result(with_receipt(value)),
                 Err(error) => error,
             }

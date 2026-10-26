@@ -51,6 +51,9 @@ Neither tool attaches, recovers or wakes a session, consumes inbox input,
 acquires a lease or subscribes to session events, so an idle task with pending
 inbox work or an active goal stays exactly as it was. Both tools are available
 only to a persisted direct primary and use ordinary permission evaluation under
-the `task_read` action with resources `project:<id>`, `project:current` (this
-chat's own immutable project) and `session:<id>`. Configured Deny applies, and
-Ask fails closed without an interactive approver.
+the `task_read` action with resources `project:<id>` and `session:<id>`. A
+default-scope search or exact read also evaluates the resolved `project:<id>`, so
+rules on a concrete project apply whether or not `project_id` was passed.
+Configured Deny applies, and Ask fails closed without an interactive approver.
+Search candidates whose `session:<id>` is not allowed without a prompt are left
+out and counted in `withheld`.
