@@ -212,9 +212,9 @@ describe("insight labels", () => {
     const [session] = entries([toolDetail("subagent", { summary: "Fix the flaky test" })]);
 
     expect(entryMeta(many)).toBe("3");
-    expect(entryMeta(single)).toBe("13.8 s");
-    expect(entryMeta(unknown)).toBeNull();
-    expect(entryMeta(entries([toolDetail("read")])[0])).toBe("Read");
+    expect(entryMeta(single)).toBe("1");
+    expect(entryMeta(unknown)).toBe("1");
+    expect(entryMeta(entries([toolDetail("read")])[0])).toBe("1");
     expect(threads.map(entryMeta)).toEqual(["Thread, 2", "Thread, 2"]);
     expect(entryMeta(session)).toBe("Spawn");
   });
@@ -271,8 +271,8 @@ describe("insight labels", () => {
     });
     expect(entryRow(single)).toEqual({
       action: "grep",
-      label: "useNow",
-      meta: "Grep",
+      label: "Search files",
+      meta: "1",
       status: "ready",
     });
   });

@@ -276,12 +276,11 @@ export function groupLiveLabel(group: InsightGroup): string | null {
   return group.status === "pending" ? AWAITING_APPROVAL_LABEL : null;
 }
 
-/** Ready row meta of an entry. */
+/** Ready row meta of an entry; a group counts its steps. */
 export function entryMeta(entry: InsightEntry): string | null {
   if (entry.kind === "thread") return `Thread, ${entry.episodes}`;
   if (entry.kind === "session") return actionMeta(entry.action);
-  const { segments } = entry.group;
-  return segments.length === 1 ? segmentMeta(segments[0]) : String(segments.length);
+  return String(entry.group.segments.length);
 }
 
 interface RowCopy {
@@ -328,11 +327,16 @@ export function entryRow(entry: InsightEntry): InsightRow {
     });
   }
   const { group } = entry;
-  if (group.segments.length === 1) return segmentRow(group.segments[0]);
-  return stateRow(null, group.status, {
+  const [only] = group.segments.length === 1 ? group.segments : [];
+  // A single step names itself while it is live. Settled, every group reads
+  // as its transcript badge does.
+  if (only && (group.status === "running" || group.status === "pending")) {
+    return segmentRow(only);
+  }
+  return stateRow(only ? segmentAction(only) : null, group.status, {
     ready: doneLabel(group),
     meta: entryMeta(entry),
-    failed: groupSummaryLabel(group),
+    failed: doneLabel(group),
     running: GROUP_RUNNING_LABEL,
   });
 }
