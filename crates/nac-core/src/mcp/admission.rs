@@ -19,8 +19,8 @@ struct ConnectionRecord {
     epoch: u64,
     rebuilt: bool,
     names: BTreeMap<String, u64>,
-    /// Every identity each name has held; identities are issued in increasing order.
-    history: BTreeMap<String, BTreeSet<u64>>,
+    /// Every identity each name has held, keyed by when it received it.
+    history: BTreeMap<String, BTreeMap<u64, u64>>,
     /// Identities sessions may use; any other identity is refused.
     admitted: BTreeSet<u64>,
     next: u64,
@@ -52,10 +52,11 @@ impl ConnectionRecord {
     }
 
     fn record_holder(&mut self, name: &str, identity: u64) {
+        let sequence = self.mint(false);
         self.history
             .entry(name.to_string())
             .or_default()
-            .insert(identity);
+            .insert(sequence, identity);
     }
 
     fn bind(&mut self, name: &str, identity: u64) {
@@ -106,7 +107,7 @@ impl ConnectionRecord {
             .get(&mount.name)?
             .range(mount.watermark..)
             .next()
-            .copied()
+            .map(|(_, identity)| *identity)
     }
 }
 

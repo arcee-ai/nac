@@ -398,6 +398,29 @@ async fn a_registry_held_mid_load_across_rename_and_disconnect_does_not_mount_th
 }
 
 #[tokio::test]
+async fn a_name_renamed_onto_after_mount_is_resolved_by_when_it_was_bound() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let home = TestHome::with_server(
+        "nac-mcp-rename-onto",
+        "recorded",
+        "http://127.0.0.1:9/mcp",
+        "[mcp_servers.other]\ntransport = \"streamable_http\"\nurl = \"http://127.0.0.1:9/other\"\n",
+    );
+    let state = admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    let config = home.path.join("config.toml");
+    // `other` receives its identity before the session loads `recorded`, which has none yet.
+    runtime.claim_connection("other").unwrap();
+    let mounted = state.snapshot().unwrap().mount("recorded");
+
+    file_config::delete_mcp_server_configuration(&config, "recorded").unwrap();
+    rename_config(&config, "other", "recorded");
+    runtime.rename_connection("other", "recorded").unwrap();
+    runtime.disconnect("recorded").await.unwrap();
+    assert!(!state.is_admitted(&mounted).unwrap());
+}
+
+#[tokio::test]
 async fn disconnecting_a_name_added_back_by_hand_stops_its_sessions() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let home = TestHome::new("nac-mcp-hand-added", "recorded", "http://127.0.0.1:9/mcp");
