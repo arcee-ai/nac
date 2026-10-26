@@ -153,11 +153,9 @@ pub(crate) fn record_run_outcome_with_connection(
 ) -> Result<()> {
     let (excerpt, truncated) = match result {
         Some(result) => {
-            let (excerpt, truncated) = truncate_chars(result, RUN_RESULT_EXCERPT_CHARS);
-            (
-                Some(crate::model::redact_credentials(excerpt, &[])),
-                truncated,
-            )
+            let redacted = crate::model::redact_credentials(result, &[]);
+            let (excerpt, truncated) = truncate_chars(&redacted, RUN_RESULT_EXCERPT_CHARS);
+            (Some(excerpt.to_owned()), truncated)
         }
         None => (None, false),
     };
