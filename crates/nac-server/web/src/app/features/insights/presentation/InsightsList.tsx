@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import type { InsightsEmptyCopy, InsightTurnSection } from "@/app/features/insights/model/types";
 import {
@@ -39,6 +39,7 @@ export function InsightsList({
   emptyCopy,
   focusNonce,
   controller,
+  footer,
 }: {
   sections: readonly InsightTurnSection[];
   /** The prompt a streamed turn answers before the snapshot shows it. */
@@ -47,6 +48,8 @@ export function InsightsList({
   /** Bumps on every pick; the picked row is scrolled into view. */
   focusNonce: number;
   controller: InsightsRowController;
+  /** After the oldest section, and under the empty copy too. */
+  footer?: ReactNode;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -57,7 +60,12 @@ export function InsightsList({
   }, [focusNonce]);
 
   if (!sections.length) {
-    return <p className="p-1 label-micro text-basic-muted">{emptyCopy.title}</p>;
+    return (
+      <>
+        <p className="p-1 label-micro text-basic-muted">{emptyCopy.title}</p>
+        {footer}
+      </>
+    );
   }
   const pending = pendingPrompt.replace(/\s+/g, " ").trim();
   return (
@@ -72,6 +80,7 @@ export function InsightsList({
           controller={controller}
         />
       ))}
+      {footer}
     </div>
   );
 }

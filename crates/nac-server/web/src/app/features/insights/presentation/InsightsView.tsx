@@ -27,6 +27,7 @@ import type {
 import { InsightsDetail } from "@/app/features/insights/presentation/InsightsDetail";
 import { InsightsFilter } from "@/app/features/insights/presentation/InsightsFilter";
 import { InsightsList } from "@/app/features/insights/presentation/InsightsList";
+import { InsightsLoadOlder } from "@/app/features/insights/presentation/InsightsLoadOlder";
 import type { InsightsRowController } from "@/app/features/insights/presentation/InsightsTurnSection";
 import type { ItemContext } from "@/app/features/insights/presentation/items/itemContent";
 import {
@@ -302,6 +303,9 @@ export function InsightsView({
             emptyCopy={emptyCopy}
             focusNonce={focusNonce}
             controller={controller}
+            footer={
+              snapshot.message_page?.has_older ? <InsightsLoadOlder sessionId={sessionId} /> : null
+            }
           />
         }
       >
