@@ -74,6 +74,7 @@ export function useTranscriptModel(
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
   const streamSettled = runtimeStore.useStore((state) => state.streamSettled);
+  const streamPredatesPrompt = runtimeStore.useStore((state) => state.streamPredatesPrompt);
   const optimisticPrompt = useOptimisticUserPrompt();
   const direct =
     snapshot?.metadata.behavior === "direct" ||
@@ -157,8 +158,10 @@ export function useTranscriptModel(
   const reply = replyKey(baseTurns, windowStart);
   // Between Send and the run starting, the buffers still hold the previous
   // run's output. It may add to the turn it came from, but it must not open a
-  // turn under the new prompt and read as that prompt's answer.
-  const stale = streamSettled && !running;
+  // turn under the new prompt and read as that prompt's answer. `running`
+  // cannot tell: a snapshot may report the run before `run_started` arrives,
+  // and a short run may end before the snapshot shows its prompt.
+  const stale = streamSettled && streamPredatesPrompt;
   const turns = useMemo(() => {
     const stream = { text: streamText, reasoning: streamReasoning, settled: streamSettled };
     if (!stale || baseTurns === snapshotTurns) {

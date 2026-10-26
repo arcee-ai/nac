@@ -87,6 +87,11 @@ export interface RuntimeState {
    */
   streamSettled: boolean;
   /**
+   * The buffers hold output from before the prompt sent last, and its run has
+   * neither started nor streamed since, so none of that output answers it.
+   */
+  streamPredatesPrompt: boolean;
+  /**
    * Prompt shown in the chat from the moment Send is pressed until the
    * snapshot (or active_run) catches up. Without this the model pill appears
    * first and jumps down when the user bubble finally lands.
@@ -153,6 +158,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       streamText: "",
       streamReasoning: "",
       streamSettled: false,
+      streamPredatesPrompt: false,
       optimisticUserPrompt: null,
       runUsage: null,
       sessionSpend: null,
@@ -195,6 +201,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       streamText: "",
       streamReasoning: "",
       streamSettled: false,
+      streamPredatesPrompt: false,
       optimisticUserPrompt: null,
       runUsage: null,
       sessionSpend: null,
@@ -229,7 +236,8 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
 
   /** Paint the user bubble immediately on submit; cleared once the transcript owns it. */
   function setOptimisticUserPrompt(prompt: string | null): void {
-    setState({ optimisticUserPrompt: prompt });
+    if (prompt === null) setState({ optimisticUserPrompt: null });
+    else setState({ optimisticUserPrompt: prompt, streamPredatesPrompt: true });
   }
 
   /**
@@ -241,6 +249,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
     if (delta.reset) {
       setState({
         streamSettled: false,
+        streamPredatesPrompt: false,
         streamText: "",
         streamReasoning: "",
         modelRetryAttempt: delta.retry_attempt ?? null,
@@ -256,6 +265,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           };
       return {
         streamSettled: false,
+        streamPredatesPrompt: false,
         streamText: base.streamText + (delta.text ?? ""),
         streamReasoning: base.streamReasoning + (delta.reasoning ?? ""),
       };
@@ -461,6 +471,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           streamText: "",
           streamReasoning: "",
           streamSettled: false,
+          streamPredatesPrompt: false,
           // Only this run's live delta resets. Session spend lives on the
           // snapshot, including unattributed usage from cancelled or rewound turns.
           runUsage: null,
