@@ -57,7 +57,7 @@ function EntryRows({
         {...view}
         selected={controller.entrySelected(entry)}
         expanded={children ? expanded : undefined}
-        onClick={controller.entryAction(entry) ?? undefined}
+        onClick={controller.entryAction(entry)}
       />
       {expanded && entry.kind === "group" ? (
         <ActionListSegment>
@@ -66,7 +66,7 @@ function EntryRows({
               key={segment.key}
               {...controller.segmentView(segment)}
               selected={controller.segmentSelected(entry, segment)}
-              onClick={controller.segmentAction(entry, segment) ?? undefined}
+              onClick={controller.segmentAction(entry, segment)}
             />
           ))}
         </ActionListSegment>
