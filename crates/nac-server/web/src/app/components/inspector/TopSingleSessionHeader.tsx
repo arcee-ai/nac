@@ -144,9 +144,7 @@ export function TopSingleSessionHeader({
   const title = sessionTitle(entry?.summary);
 
   return (
-    // Wider than its column by the column's own inset, so the rule under it
-    // runs from the sidebar to the side panel the way the design draws it.
-    <div className="pointer-events-none absolute -inset-x-2 top-0 z-20 flex flex-col border-b border-muted bg-elevation-ground px-4 pt-4 pb-[15px]">
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col border-b border-muted bg-elevation-ground px-4 pt-4 pb-4">
       <div className="pointer-events-auto flex w-full flex-col gap-1.5">
         <div className="flex w-full items-center gap-4">
           <div className="flex min-w-0 flex-1 items-center gap-1">

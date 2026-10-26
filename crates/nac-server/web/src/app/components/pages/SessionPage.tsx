@@ -283,12 +283,7 @@ export default function SessionPage() {
   const page = (
     <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground">
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
-        <div
-          className={cn(
-            "flex flex-col items-center flex-1 min-w-0 h-full",
-            isMobile ? "px-0" : "px-2",
-          )}
-        >
+        <div className="flex flex-col items-center flex-1 min-w-0 h-full">
           <div className="flex flex-col flex-1 min-h-0 w-full relative">
             {isMobile && (entry?.lineage ?? snapshot?.lineage) ? (
               <div className="pointer-events-none absolute inset-x-0 top-16 z-20 flex items-center px-3 pt-2">
