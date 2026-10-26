@@ -7,7 +7,7 @@ export interface SubagentTarget {
     background: boolean;
 }
 /** Sends, steers, or stops one existing parent-owned subagent. */
-export declare function SubagentComposer({ parentSessionId, target, permissionSessionId, permissionBehavior, requesterLabel, showPermissions, floating, }: {
+export declare function SubagentComposer({ parentSessionId, target, permissionSessionId, permissionBehavior, requesterLabel, showPermissions, }: {
     parentSessionId: string;
     target: SubagentTarget;
     permissionSessionId: string;
@@ -18,7 +18,6 @@ export declare function SubagentComposer({ parentSessionId, target, permissionSe
      * dialogs. The panel composer must not open a second copy of the same ask.
      */
     showPermissions?: boolean;
-    floating?: boolean;
 }): import("react").JSX.Element;
 /** Composer on a child session page. Steering goes back through the parent. */
 export declare function SubagentSessionComposer({ parentSessionId, sessionId, kind, description, behavior, }: {

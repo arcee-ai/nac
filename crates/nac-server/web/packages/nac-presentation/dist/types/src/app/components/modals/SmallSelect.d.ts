@@ -6,7 +6,7 @@ export declare function SmallSelect({ items, value, onValueChange, placeholder, 
     placeholder?: string;
     disabled?: boolean;
     size?: ButtonSize;
-    trailingIcon?: IconName | null;
+    trailingIcon?: IconName;
     triggerClassName?: string;
     placement?: PopoverPlacement;
     onOpenChange?: (open: boolean) => void;

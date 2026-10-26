@@ -12,11 +12,11 @@ interface SessionSideBoxProps {
     onPanelChange: (panel: SessionPanel) => void;
 }
 /**
- * The right column of the session screen: one box with the Insights / Files /
+ * The right half of the session screen: one box with the Threads / Files /
  * Worksets / Subagents panels, sized by the shared layout store. Session
  * switching lives in the left sidebar. On a phone the panels are the body of
- * the modal box that SessionPage puts them in, each screen heading itself with
- * the way out and the tab bar the dialog lends it.
+ * the modal box that SessionPage puts them in, and its chrome — header, bottom
+ * bar — belongs to the dialog rather than to this box.
  */
 export declare function SessionSideBox({ sessionId, snapshot, behavior: behaviorProp, panel, onPanelChange, }: SessionSideBoxProps): import("react").JSX.Element;
 export {};

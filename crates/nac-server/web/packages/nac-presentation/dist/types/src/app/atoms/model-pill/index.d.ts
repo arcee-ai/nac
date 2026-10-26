@@ -1,16 +1,15 @@
 import type React from "react";
-/** Line heights of the label. */
+/** Pixel diameters of the avatar. */
 export declare enum ModelPillSize {
-    /** Figma "Code/Code-small", the name over a reply. */
-    Small = 20,
-    Medium = 28
+    Small = 24,
+    Medium = 32
 }
-interface ModelPillProps extends React.HTMLAttributes<HTMLSpanElement> {
+interface ModelPillProps extends React.HTMLAttributes<HTMLDivElement> {
     size?: ModelPillSize;
-    /** The model's name. */
-    children: React.ReactNode;
+    /** Swaps the static rim for a spinner while the orchestrator is working. */
+    active?: boolean;
 }
-/** The model behind a reply, as the mono label that heads it. */
+/** Round avatar for the orchestrator, shown beside every model message. */
 declare const ModelPill: React.FC<ModelPillProps> & {
     Size: typeof ModelPillSize;
 };

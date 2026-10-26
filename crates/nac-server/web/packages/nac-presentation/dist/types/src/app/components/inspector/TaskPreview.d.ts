@@ -5,12 +5,15 @@
  * thing about a running thread that can be read before it has produced
  * anything.
  */
-export declare function TaskButton({ action }: {
+export declare function TaskButton({ action, large, }: {
     action: string;
+    /** The phone header, where the touch target and its label are a size up. */
+    large?: boolean;
 }): import("react").JSX.Element;
 /**
- * The same panel from a floating pill, for a phone's header — where an
- * underlined label among its sticky buttons would read as a stray link.
+ * The same panel from a pill, for the phone's floating view switch — where an
+ * underlined label beside two solid pills would read as a stray link rather
+ * than as the third control of the set.
  */
 export declare function TaskPill({ action }: {
     action: string;

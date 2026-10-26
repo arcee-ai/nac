@@ -1,26 +1,23 @@
 import { type FilesPanelLink } from "./SnapshotBadge";
-import { type SelectThread } from "./ThreadWave";
 import { type ModelTurn } from "../../lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "../../types/api";
 interface ModelMessageProps {
     turn: ModelTurn;
     model: string;
-    /** This turn is the one still producing output, so it has no actions yet. */
+    /** Draws the spinner ring while this turn is the one still producing output. */
     active: boolean;
     /**
-     * What the run is doing right now, of which only the compaction status is
-     * shown: live badges and thread waves already name tools and threads. Only
-     * the active turn is given it, so the finished ones are not re-rendered every
-     * time the line changes.
+     * What the run is doing right now. Only the active turn is given it, so the
+     * finished ones are not re-rendered every time the line changes.
      */
     activity?: string;
     /** Stretches the last bubble so stick-to-bottom lands below the fold. */
     isLast?: boolean;
     /** Episode key of the thread card the panels are pointing at, if any. */
     selectedThreadEpisode: string | null;
-    /** Id of the group the panels are pointing at, if any. */
-    selectedGroupId?: string | null;
-    onSelectThread: SelectThread;
+    selectedWorkset: string | null;
+    onSelectThread: (name: string, episodeKey: string) => void;
+    onSelectWorkset: (id: string) => void;
     /**
      * Snapshot index of the user prompt this model turn answers. Regenerate and
      * revert address that prompt — same endpoints as the user bubble above.
@@ -54,16 +51,10 @@ interface ModelMessageProps {
     snapshotRevision?: WorkspaceRevision | null;
     /** Where a click on the snapshot or one of its files should land. */
     filesPanel?: FilesPanelLink | null;
-    /**
-     * Badges and cards open what they stand for. Off where the turns belong to
-     * a transcript the session page is not showing, which they then only sum up.
-     */
-    interactive?: boolean;
 }
 /**
- * Everything the model did for one prompt, in the order it happened: groups of
- * reasoning and tool calls, prose, the sessions it launched and the waves of
- * threads it ran.
+ * Everything the orchestrator did for one prompt, in the order it happened:
+ * reasoning, prose, the worksets it defined and the waves of threads it ran.
  */
-export declare const ModelMessage: import("react").MemoExoticComponent<(props: ModelMessageProps) => import("react").JSX.Element>;
+export declare const ModelMessage: import("react").MemoExoticComponent<({ turn, model, active, activity, isLast, selectedThreadEpisode, selectedWorkset, onSelectThread, onSelectWorkset, userMessageIndex, userText, onRefresh, onRevert, onFork, forks, onOpenFork, onDismissFork, actionsDisabled, readOnly, snapshotRevision, filesPanel, }: ModelMessageProps) => import("react").JSX.Element>;
 export {};

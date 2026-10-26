@@ -61,11 +61,6 @@ export interface RuntimeState {
      */
     streamSettled: boolean;
     /**
-     * The buffers hold output from before the prompt sent last, and its run has
-     * neither started nor streamed since, so none of that output answers it.
-     */
-    streamPredatesPrompt: boolean;
-    /**
      * Prompt shown in the chat from the moment Send is pressed until the
      * snapshot (or active_run) catches up. Without this the model pill appears
      * first and jumps down when the user bubble finally lands.
@@ -114,7 +109,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     resetRuntime: (sessionId: string | null) => void;
     clearRuntimeThreads: () => void;
     liftSessionSpend: (persisted: TokenUsage | null | undefined) => void;
-    setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void;
+    setOptimisticUserPrompt: (prompt: string | null) => void;
     applyAssistantDelta: (delta: AssistantStreamDelta) => void;
     setStreamStatus: (streamStatus: StreamStatus) => void;
     syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void;
@@ -293,7 +288,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useOptimisticUserPrompt: () => string | null;
     getRuntimeState: () => RuntimeState;
 };
-export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, clearRuntimeThreads: () => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
+export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, clearRuntimeThreads: () => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null) => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
     attempt_count: number;
     diagnostic: string;
     http_status?: number | null;

@@ -32,12 +32,6 @@ export interface ResolvedCatalogModel {
  */
 export declare function resolveCatalogModel(catalog: ModelCatalog | undefined, backend: string | null | undefined, model: string | null | undefined): ResolvedCatalogModel;
 /**
- * How much of the catalog's window the context fills, or null while either
- * figure is unknown. A model the catalog does not know is measured against its
- * provider's default window, and the reading says so.
- */
-export declare function contextShare(used: number | null, resolved: ResolvedCatalogModel): string | null;
-/**
  * The provider carrying an entry for this model id, mirroring
  * `ModelCatalog::provider_for_model`: an exact match wins, and a collision
  * prefers the first provider that is not a managed login.

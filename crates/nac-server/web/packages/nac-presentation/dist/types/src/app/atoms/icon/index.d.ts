@@ -88,7 +88,6 @@ export declare enum IconName {
     Danger = "danger",
     Download = "download",
     Stop = "stop",
-    Pause = "pause",
     JSON = "code",
     File = "attachment",
     Remove = "remove",
@@ -140,13 +139,7 @@ export declare enum IconName {
     OpenMobileModal = "openMobileModal",
     ChatGpt = "chatGpt",
     Orchestrator = "orchestrator",
-    Robot = "robot",
-    ReadFile = "readFile",
-    SearchFile = "searchFile",
-    SearchFiles = "searchFiles",
-    WriteCommand = "writeCommand",
-    Clock = "clock",
-    AddChat = "addChat"
+    Robot = "robot"
 }
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
     iconName: IconName;

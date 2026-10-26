@@ -1,13 +1,10 @@
-import { type InsightsOpenOptions } from "../../features/insights/useInsightsNavigation";
 import type { TranscriptThread } from "../../lib/transcript";
-export type SelectThread = (name: string, episodeKey: string, options?: InsightsOpenOptions) => void;
 interface ThreadWaveProps {
     /** Topological levels from one assistant dispatch batch (DAG waves). */
     rows: TranscriptThread[][];
     /** Episode key of the card the panels are pointing at, if it is one of these. */
     selected: string | null;
-    /** Without it the cards only show their threads. */
-    onSelect?: SelectThread;
+    onSelect: (name: string, episodeKey: string) => void;
 }
 /**
  * One orchestrator dispatch batch, possibly split into stacked DAG levels.

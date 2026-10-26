@@ -5,5 +5,6 @@ interface ShimmerLoaderProps {
     className?: string;
     rowClassName?: string;
 }
-declare const _default: React.NamedExoticComponent<ShimmerLoaderProps>;
-export default _default;
+/** Skeleton rows for content whose shape is known before the data arrives. */
+declare const ShimmerLoader: React.FC<ShimmerLoaderProps>;
+export default ShimmerLoader;

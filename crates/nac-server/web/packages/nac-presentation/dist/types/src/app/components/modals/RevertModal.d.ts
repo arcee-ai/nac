@@ -12,5 +12,5 @@ interface RevertModalProps {
  * after this prompt and the file changes they made are both discarded, and
  * neither comes back.
  */
-export declare const RevertModal: import("react").MemoExoticComponent<({ open, onClose, sessionId, messageIdx, prompt, }: RevertModalProps) => import("react").JSX.Element>;
+export declare function RevertModal({ open, onClose, sessionId, messageIdx, prompt }: RevertModalProps): import("react").JSX.Element;
 export {};

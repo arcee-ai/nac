@@ -12,7 +12,7 @@ export interface FilesPanelLink {
     onOpenPanel: (revision: number) => void;
 }
 /**
- * What one run changed: its totals, then its files. The revision is a commit
+ * What one run changed: its files, then its totals. The revision is a commit
  * nac captured on the side when the run finished, so this keeps describing that
  * run after the checkout moves on — including after the work is committed.
  */

@@ -1,5 +1,5 @@
 import type React from "react";
-import type { SessionBehavior } from "../../types/api";
+import { IconName } from "../icon";
 interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> {
     title: string;
     active?: boolean;
@@ -7,10 +7,8 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
     running?: boolean;
     /** Display title of the chat this session was forked from. */
     forkedFromTitle?: string | null;
-    /** Session type, drawn immediately before the title. */
-    behavior?: SessionBehavior | null;
-    /** Figma `isNacEnable`: whether the behavior glyph is drawn at all. */
-    showBehaviorIcon?: boolean;
+    /** Compact identity shown immediately before the title. */
+    behaviorIcon?: IconName;
     /** Full accessible and hover/focus meaning of the behavior icon. */
     behaviorLabel?: string;
     /** Takes the tab off the strip. The chat itself is untouched. */

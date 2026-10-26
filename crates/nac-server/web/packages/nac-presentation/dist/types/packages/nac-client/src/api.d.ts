@@ -997,13 +997,6 @@ export declare function createNacApi(nacClient: NacClient): {
         next_before_id?: number | null;
         thread_event_boundary?: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"] | null;
     }>;
-    getToolCallContent: (id: string, callId: string, signal?: AbortSignal) => Promise<{
-        arguments: string;
-        arguments_truncated: boolean;
-        call_id: string;
-        output: string | null;
-        output_truncated: boolean;
-    }>;
     getWorkspaceDiff: (id: string, path: string, { stage, context, revision, signal }?: WorkspaceDiffOptions) => Promise<{
         error: string | null;
         old_path: string | null;

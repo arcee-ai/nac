@@ -131,19 +131,36 @@ fn cancellation_is_durable_and_late_preparation_cannot_reopen_it() {
 
 #[test]
 fn migrates_previous_store_without_touching_existing_session_identity() {
-    let (path, _, _) = fixture();
-    insert_test_session(&path, "legacy");
-    let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch(
-        "DROP TABLE task_launches; DROP TABLE project_git_sources; PRAGMA user_version=34;",
-    )
-    .unwrap();
-    drop(conn);
-    initialize(&path).unwrap();
-    assert!(crate::sessions::session_exists(&path, "legacy").unwrap());
-    assert!(list_task_launches(&path, "project").unwrap().is_empty());
-    initialize(&path).unwrap();
-    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    for previous_version in [34, 37] {
+        let (path, _, _) = fixture();
+        insert_test_session(&path, "legacy");
+        let waiter = crate::sessions::ChildInputWaitLease::new(&path).unwrap();
+        let input = create_traditional_child_inbox_item(
+            &path,
+            "legacy",
+            "preserve delegated input",
+            Some("old-run"),
+            TraditionalChildExecutionMode::Foreground,
+            Some(waiter.id()),
+        )
+        .unwrap();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("DROP TABLE task_launches; DROP TABLE project_git_sources;")
+            .unwrap();
+        conn.pragma_update(None, "user_version", previous_version)
+            .unwrap();
+        drop(conn);
+        initialize(&path).unwrap();
+        assert!(crate::sessions::session_exists(&path, "legacy").unwrap());
+        assert_eq!(
+            load_session_inbox_item(&path, "legacy", input.id).unwrap(),
+            input
+        );
+        assert!(list_task_launches(&path, "project").unwrap().is_empty());
+        initialize(&path).unwrap();
+        drop(waiter);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
 }
 
 #[test]

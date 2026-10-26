@@ -1,4 +1,4 @@
-import type { WorkspaceDiffLine } from "../types/api";
+import type { WorkspaceDiffLine, WorkspaceDiffSection } from "../types/api";
 export interface CodeToken {
     text: string;
     /** CSS color, typically a `var(--color-…)` from the nac theme. */
@@ -27,12 +27,7 @@ export declare function highlightSource(language: string, text: string): Promise
  */
 export declare function highlightCode(path: string, text: string): Promise<CodeToken[][] | null>;
 /**
- * Highlight every hunk of a file diff: the Files panel's sections, or a diff
- * parsed from a tool's result. Keyed by line object, so a caller can look each
- * rendered row up and fall back to plain text when it is missing.
+ * Highlight every hunk of a file diff. Keyed by line object, so a caller can
+ * look each rendered row up and fall back to plain text when it is missing.
  */
-export declare function highlightDiff<Line extends WorkspaceDiffLine>(path: string, sections: readonly {
-    hunks: readonly {
-        lines: readonly Line[];
-    }[];
-}[]): Promise<Map<Line, CodeToken[]>>;
+export declare function highlightDiff(path: string, sections: WorkspaceDiffSection[]): Promise<Map<WorkspaceDiffLine, CodeToken[]>>;
