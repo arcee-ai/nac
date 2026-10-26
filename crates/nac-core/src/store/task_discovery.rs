@@ -118,14 +118,21 @@ fn redact(text: &str) -> String {
     crate::model::redact_credentials(text, &[])
 }
 
+/// Title and prompt as every caller sees them, so matching cannot probe redacted secrets.
+fn redacted_text(
+    title: Option<String>,
+    prompt: Option<String>,
+) -> (Option<String>, Option<String>) {
+    (title.as_deref().map(redact), prompt.as_deref().map(redact))
+}
+
 fn excerpt(text: Option<String>) -> Option<String> {
-    text.map(|text| {
-        let text = redact(&text);
-        match super::task_evidence::truncate_chars(&text, PROMPT_EXCERPT_CHARS) {
+    text.map(
+        |text| match super::task_evidence::truncate_chars(&text, PROMPT_EXCERPT_CHARS) {
             (kept, true) => format!("{kept}…"),
             (_, false) => text,
-        }
-    })
+        },
+    )
 }
 
 fn contains_token(haystack: &str, token: &str) -> bool {
@@ -267,6 +274,7 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
             last_scanned = Some(encode_cursor(&updated_at, row_id));
             continue;
         }
+        let (title, prompt) = redacted_text(title, prompt);
         let matched = match (&search.reference, &search.text) {
             (Some(reference), _) => {
                 matched_fields(title.as_deref(), prompt.as_deref(), |value| {
@@ -350,6 +358,7 @@ pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
     else {
         return Ok(TaskLookup::NotFound);
     };
+    let (title, prompt) = redacted_text(title, prompt);
     let relationship: Option<String> = tx
         .query_row(
             "SELECT 'child' FROM traditional_children WHERE child_session_id = ?1

@@ -35,8 +35,9 @@ does not survive a restart.
   goal with ID, version and status (plus `goal_last_run_id`, the last run that
   settled against it), the last 8 replaced or cleared goals with their final
   status and last settling run, and the last 8 run outcomes with a result excerpt of up to
-  2,000 characters or the failure. Stored excerpts and failures, prompt
-  excerpts and goal objectives are credential-redacted.
+  2,000 characters or the failure. Stored excerpts and failures, titles,
+  prompt excerpts and goal objectives are credential-redacted, and search
+  matches only the redacted text, so it cannot be used to guess a secret.
 - `ephemeral.approvals`: always `unknown`. Approval requests live in the
   target's live owner process, so their absence from a passive read never means
   none are pending.

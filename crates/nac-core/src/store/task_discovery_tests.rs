@@ -655,5 +655,22 @@ fn returned_prompt_and_goal_text_is_credential_redacted() {
     let returned = format!("{snapshot:?} {page:?}");
     assert!(returned.contains("Bearer"), "{returned}");
     assert!(!returned.contains("sk-live-abcdef"), "{returned}");
+
+    // Search cannot be used to guess a redacted secret one prefix at a time.
+    for probe in ["sk-live", "sk-live-a"] {
+        for request in [
+            TaskSearch {
+                text: Some(probe.into()),
+                ..search(&path, "p1")
+            },
+            TaskSearch {
+                reference: Some(probe.into()),
+                ..search(&path, "p1")
+            },
+        ] {
+            let page = search_direct_tasks(&path, &request).unwrap().unwrap();
+            assert!(page.candidates.is_empty(), "{probe}: {page:?}");
+        }
+    }
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
