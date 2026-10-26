@@ -365,6 +365,20 @@ fn replaced_and_cleared_goals_remain_provable_after_reopen() {
         panic!("task should be found");
     };
     assert_eq!(snapshot.goal_last_run_id.as_deref(), Some("run-2"));
+
+    // Completed and replaced inside one still-running run keeps that run.
+    let third = snapshot.goal.unwrap();
+    bind("run-3");
+    update_session_goal_by_model(&path, "t", &third.goal_id, GoalStatus::Complete).unwrap();
+    create_session_goal(&path, "t", "fourth", None, None).unwrap();
+    let TaskLookup::Found(snapshot) = load_direct_task(&path, "t").unwrap() else {
+        panic!("task should be found");
+    };
+    assert_eq!(snapshot.prior_goals[0].goal_id, third.goal_id);
+    assert_eq!(
+        snapshot.prior_goals[0].last_run_id.as_deref(),
+        Some("run-3")
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

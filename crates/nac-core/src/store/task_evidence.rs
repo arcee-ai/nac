@@ -218,7 +218,8 @@ pub(super) fn retain_goal_outcome_with_connection(
         "INSERT OR IGNORE INTO session_goal_outcomes
          (session_id, goal_id, objective, status, version, tokens_used, time_used_ms,
           last_failure_json, created_at, updated_at, retired_at, retirement, last_run_id)
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, last_run_id
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                coalesce(accounting_run_id, last_run_id)
          FROM session_goals WHERE session_id = ?1 AND goal_id = ?2",
         params![
             goal.session_id,

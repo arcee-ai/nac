@@ -14,7 +14,8 @@ use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 
 const MAX_ID_BYTES: usize = 160;
 const DEFAULT_LIMIT: usize = 10;
-const MAX_LIVE_CURSORS: usize = 256;
+const MAX_CURSORS_PER_CHAT: usize = 32;
+const MAX_CURSORS: usize = 4_096;
 const APPROVALS_UNKNOWN: &str = "Approval requests live only in the target's live owner process and are not visible to a passive durable read. Absence here never means none are pending; open the task to see them.";
 
 #[derive(Debug, Deserialize)]
@@ -78,7 +79,16 @@ fn seal_cursor(caller: &str, project_id: &str, position: String) -> String {
     let mut cursors = CURSORS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if cursors.len() == MAX_LIVE_CURSORS {
+    if cursors
+        .iter()
+        .filter(|cursor| cursor.caller == caller)
+        .count()
+        == MAX_CURSORS_PER_CHAT
+    {
+        let oldest = cursors.iter().position(|cursor| cursor.caller == caller);
+        oldest.map(|index| cursors.remove(index));
+    }
+    if cursors.len() == MAX_CURSORS {
         cursors.pop_front();
     }
     cursors.push_back(SealedCursor {
