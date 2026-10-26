@@ -387,6 +387,55 @@ async fn authorization_completing_across_logout_cannot_restore_credentials() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn authorization_setup_paused_across_logout_cannot_publish_callback_state() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let (_home, _restore) = test_environment("setup-across-logout");
+    let endpoint = "https://mcp.example.test/mcp";
+    configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
+    let path = oauth_store_path(Path::new("/workspace")).unwrap();
+    let adapter = |logout_generation| OAuthProfileStore {
+        path: path.clone(),
+        server_name: "slack".into(),
+        endpoint: normalize_endpoint(endpoint).unwrap(),
+        expected_client_id: Some("public-test-client".into()),
+        save_mode: CredentialSaveMode::Independent,
+        logout_generation,
+    };
+    let state: StoredAuthorizationState = serde_json::from_value(serde_json::json!({
+        "pkce_verifier": "pre-logout-verifier",
+        "csrf_token": "pre-logout-state",
+        "created_at": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+        "requested_scopes": []
+    }))
+    .unwrap();
+    let started_before_logout = adapter(test_support::logout_generation(&path, "slack"));
+
+    clear_mcp_oauth(Path::new("/workspace"), "slack").unwrap();
+    let error = StateStore::save(&started_before_logout, "pre-logout-state", state)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("logged out"));
+    assert!(record_mcp_oauth_pending_authorization_url(
+        Path::new("/workspace"),
+        "slack",
+        endpoint,
+        "https://auth.example.test/authorize?state=pre-logout-state".into(),
+    )
+    .is_err());
+
+    let callback = adapter(test_support::logout_generation(&path, "slack"));
+    assert!(StateStore::load(&callback, "pre-logout-state")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(
+        mcp_oauth_pending_authorization_url(Path::new("/workspace"), "slack", endpoint)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn authorization_completing_across_delete_and_recreate_cannot_save() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
     let (_home, _restore) = test_environment("completion-across-recreate");

@@ -17,12 +17,15 @@ Disconnect in MCP settings stops NAC from using a server:
   it is connected again.
 - The state is saved in the NAC home and survives a restart. Connect or Reload
   clears it as soon as you ask, even if the settings page's own connection
-  then fails. Renaming a disconnected server keeps it disconnected, and its old
-  name stays disconnected too, because running sessions keep the name they
-  mounted; a new server added under that old name starts disconnected.
+  then fails.
+- Running sessions follow a server through renames in MCP settings: disconnecting
+  it under its new name stops sessions that mounted the old name, and Connect
+  lets them use it again. A new server added under a deleted or old name is a
+  different server; it starts connected and does not affect those sessions.
 - If the saved state cannot be read, every server counts as disconnected and
   MCP settings say so. Connecting a server rewrites the record, admitting only
-  that server.
+  that server for new sessions. Sessions that were already running stay
+  blocked from every server; start a new session to use them again.
 
 ## Log out
 
@@ -31,8 +34,9 @@ pending authorization state that NAC saved on this computer. After log out:
 
 - Sessions stop sending requests to the server. A request fails with an
   authorization error instead of going out without credentials.
-- An authorization that was already completing cannot save its tokens, even if
-  the server is deleted and added again under the same name. A token refresh
+- An authorization that was already starting or completing cannot save its
+  sign-in state or tokens, even if the server is deleted and added again under
+  the same name. A token refresh
   already in progress finishes first, and log out then clears its result.
 - A token that has expired and cannot be refreshed is treated the same way.
 - The OAuth configuration stays, so Authenticate signs in again. Running

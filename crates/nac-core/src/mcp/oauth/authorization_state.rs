@@ -21,6 +21,14 @@ pub(super) fn publish_pending_authorization(profile: &mut OAuthProfile, url: Str
     Ok(())
 }
 
+/// Refuses work an authorization started before the latest logout.
+pub(super) fn ensure_not_logged_out(profile: &OAuthProfile, logout_generation: u64) -> Result<()> {
+    if profile.logout_generation != logout_generation {
+        bail!("MCP OAuth was logged out while this authorization was in progress");
+    }
+    Ok(())
+}
+
 pub(super) fn merge_pending_scopes(current: &mut Vec<String>, requested: &[String]) {
     for scope in requested {
         if !current.contains(scope) {

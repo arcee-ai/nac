@@ -215,24 +215,40 @@ async fn a_call_interrupted_across_disconnect_is_not_replayed() {
     drop(registry);
 }
 
+fn blocked(statuses: &[McpRuntimeStatus], name: &str) -> bool {
+    statuses
+        .iter()
+        .find(|status| status.name == name)
+        .unwrap()
+        .sessions_blocked
+}
+
 #[tokio::test]
-async fn an_unreadable_disconnect_record_fails_closed_until_connect_repairs_it() {
+async fn an_unreadable_disconnect_record_keeps_every_mounted_session_blocked() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let server = RecordingMcpServer::start();
     let home = TestHome::with_server(
         "nac-mcp-unreadable-state",
         "recorded",
         &server.url,
-        "[mcp_servers.other]\ntransport = \"streamable_http\"\nurl = \"http://127.0.0.1:9/mcp\"\n",
+        "[mcp_servers.deleted]\ntransport = \"streamable_http\"\nurl = \"http://127.0.0.1:9/deleted\"\n\
+         [mcp_servers.other]\ntransport = \"streamable_http\"\nurl = \"http://127.0.0.1:9/other\"\n",
     );
     let cwd = std::env::current_dir().unwrap();
     let registry = load(&cwd).await.registry.expect("server mounts");
     let capture = registry.capture_tool("mcp__recorded__echo").unwrap();
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    // A disconnected server that was then deleted is no longer in the configuration.
+    let deleted_state =
+        admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
+    let deleted = deleted_state.mount("deleted").unwrap().unwrap();
+    runtime.disconnect("deleted").await.unwrap();
+    file_config::delete_mcp_server_configuration(&home.path.join("config.toml"), "deleted")
+        .unwrap();
+    runtime.forget_connection("deleted").unwrap();
     fs::write(home.path.join("mcp_disconnected.json"), "not json").unwrap();
     assert!(capture.call(json!({}), false).await.is_error);
-    assert!(server.authorizations("tools/call").is_empty());
 
-    let runtime = McpRuntimeManager::new(home.path.clone());
     let statuses = runtime.statuses().await.unwrap();
     assert_eq!(statuses.len(), 2);
     assert!(statuses.iter().all(|status| status.sessions_blocked
@@ -241,40 +257,73 @@ async fn an_unreadable_disconnect_record_fails_closed_until_connect_repairs_it()
             .as_deref()
             .is_some_and(|error| error.contains("unreadable"))));
 
-    runtime.connect("recorded").await.unwrap();
-    assert!(!capture.call(json!({}), false).await.is_error);
+    let _ = runtime.connect("other").await;
+    assert!(!deleted_state.is_admitted(deleted).unwrap());
     let statuses = runtime.statuses().await.unwrap();
-    let blocked = |name: &str| {
-        statuses
-            .iter()
-            .find(|status| status.name == name)
-            .unwrap()
-            .sessions_blocked
-    };
-    assert!(!blocked("recorded"));
-    assert!(blocked("other"), "repairing one server re-admitted another");
+    assert!(!blocked(&statuses, "other"));
+    assert!(
+        blocked(&statuses, "recorded"),
+        "repairing one server re-admitted another"
+    );
+
+    // Connect admits new sessions; the record no longer vouches for sessions mounted before it was lost.
+    runtime.connect("recorded").await.unwrap();
+    assert!(capture.call(json!({}), false).await.is_error);
+    assert!(server.authorizations("tools/call").is_empty());
+    let fresh = load(&cwd).await.registry.expect("server mounts again");
+    let fresh_capture = fresh.capture_tool("mcp__recorded__echo").unwrap();
+    assert!(!fresh_capture.call(json!({}), false).await.is_error);
     runtime.forget("recorded").await;
-    drop(registry);
+    drop((registry, fresh));
 }
 
 #[tokio::test]
-async fn renaming_a_disconnected_server_keeps_both_names_disconnected() {
+async fn disconnecting_a_renamed_server_stops_sessions_that_mounted_its_old_name() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let home = TestHome::new(
-        "nac-mcp-rename-disconnected",
-        "recorded",
-        "http://127.0.0.1:9/mcp",
-    );
+    let server = RecordingMcpServer::start();
+    let home = TestHome::new("nac-mcp-rename-disconnect", "recorded", &server.url);
+    let cwd = std::env::current_dir().unwrap();
+    let registry = load(&cwd).await.registry.expect("server mounts");
+    let capture = registry.capture_tool("mcp__recorded__echo").unwrap();
+    let config = home.path.join("config.toml");
     let runtime = McpRuntimeManager::new(home.path.clone());
-    runtime.disconnect("recorded").await.unwrap();
+    let rename = |from: &str, to: &str| {
+        let (mut record, _) =
+            file_config::load_mcp_server_configuration_snapshot(&config, from).unwrap();
+        record.name = to.to_string();
+        file_config::update_mcp_server_configuration(&config, from, record).unwrap();
+        runtime.rename_connection(from, to).unwrap();
+    };
 
-    runtime
-        .keep_disconnected_after_rename("recorded", "renamed")
-        .unwrap();
-    let state = admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
-    assert!(state.is_disconnected("renamed").unwrap());
-    // Running sessions keep the name they mounted.
-    assert!(state.is_disconnected("recorded").unwrap());
+    rename("recorded", "renamed");
+    assert!(!capture.call(json!({}), false).await.is_error);
+    runtime.disconnect("renamed").await.unwrap();
+    assert!(capture.call(json!({}), false).await.is_error);
+
+    // Disconnect state follows the server through another rename.
+    rename("renamed", "recorded");
+    assert!(blocked(&runtime.statuses().await.unwrap(), "recorded"));
+    rename("recorded", "renamed");
+    runtime.connect("renamed").await.unwrap();
+    assert!(!capture.call(json!({}), false).await.is_error);
+    assert_eq!(server.authorizations("tools/call").len(), 2);
+
+    // A new server under a deleted name starts connected and leaves the old sessions alone.
+    runtime.disconnect("renamed").await.unwrap();
+    file_config::delete_mcp_server_configuration(&config, "renamed").unwrap();
+    runtime.forget_connection("renamed").unwrap();
+    fs::write(
+        &config,
+        format!(
+            "[mcp_servers.renamed]\ntransport = \"streamable_http\"\nurl = \"{}\"\napproval = \"allow\"\n",
+            server.url
+        ),
+    )
+    .unwrap();
+    assert!(!blocked(&runtime.statuses().await.unwrap(), "renamed"));
+    assert!(capture.call(json!({}), false).await.is_error);
+    runtime.forget("renamed").await;
+    drop(registry);
 }
 
 const PROCESS_DIR: &str = "NAC_TEST_MCP_SESSION_DIR";

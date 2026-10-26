@@ -55,6 +55,7 @@ pub(super) struct McpServer {
     pub(super) connection_generation: std::sync::atomic::AtomicU64,
     pub(super) cwd: PathBuf,
     pub(super) connection_state: super::admission::ConnectionState,
+    pub(super) connection_identity: u64,
     pub(super) startup_timeout: Duration,
     pub(super) catalog_timeout: Duration,
     pub(super) execution_timeout: Duration,
@@ -82,7 +83,10 @@ impl McpServer {
     }
 
     pub(super) fn admit(&self) -> Result<()> {
-        if self.connection_state.is_disconnected(&self.name)? {
+        if !self
+            .connection_state
+            .is_admitted(self.connection_identity)?
+        {
             bail!(
                 "MCP server '{}' was disconnected; connect it in MCP settings to use it again",
                 self.name
@@ -270,22 +274,28 @@ impl McpRegistry {
             if !server_config.enabled {
                 continue;
             }
-            let disconnected = match connection_state.is_disconnected(&server_name) {
-                Ok(false) => None,
-                Ok(true) => Some("disconnected; connect it in MCP settings to use it".to_string()),
-                Err(error) => Some(format!("connection state is unreadable: {error:#}")),
-            };
-            if let Some(reason) = disconnected {
-                if server_config.required {
-                    close_mounted_services(&mut mounted_services).await;
-                    bail!("required MCP server '{server_name}' cannot mount: {reason}");
-                }
-                skipped.push(McpSkippedServer {
-                    name: server_name,
-                    reason,
+            let mounted = connection_state
+                .mount(&server_name)
+                .map_err(|error| format!("connection state is unreadable: {error:#}"))
+                .and_then(|identity| {
+                    identity.ok_or_else(|| {
+                        "disconnected; connect it in MCP settings to use it".to_string()
+                    })
                 });
-                continue;
-            }
+            let connection_identity = match mounted {
+                Ok(identity) => identity,
+                Err(reason) => {
+                    if server_config.required {
+                        close_mounted_services(&mut mounted_services).await;
+                        bail!("required MCP server '{server_name}' cannot mount: {reason}");
+                    }
+                    skipped.push(McpSkippedServer {
+                        name: server_name,
+                        reason,
+                    });
+                    continue;
+                }
+            };
             let redaction_values = redaction_values(&server_config)?;
             let redactor = McpRedactor::new(redaction_values.clone());
             // Two names for the same endpoint would mount the same advertised
@@ -472,6 +482,7 @@ impl McpRegistry {
                 connection_generation: std::sync::atomic::AtomicU64::new(0),
                 cwd: cwd.to_path_buf(),
                 connection_state: connection_state.clone(),
+                connection_identity,
                 startup_timeout,
                 catalog_timeout,
                 execution_timeout,

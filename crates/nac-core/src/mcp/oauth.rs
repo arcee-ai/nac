@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 pub(crate) use authorization_state::discard_mcp_oauth_pending_authorization;
 use authorization_state::{
-    authorization_state, failed_authorization_start, merge_pending_scopes,
+    authorization_state, ensure_not_logged_out, failed_authorization_start, merge_pending_scopes,
     pending_authorization_is_live, publish_pending_authorization,
 };
 use base64::Engine;
@@ -722,10 +722,8 @@ impl CredentialStore for OAuthProfileStore {
                 .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
             validate_profile_binding(profile, &self.endpoint)?;
             // Refresh saves hold the credential lock from load to save, so logout cannot interleave.
-            if matches!(self.save_mode, CredentialSaveMode::Independent)
-                && profile.logout_generation != self.logout_generation
-            {
-                bail!("MCP OAuth was logged out while this authorization was in progress");
+            if matches!(self.save_mode, CredentialSaveMode::Independent) {
+                ensure_not_logged_out(profile, self.logout_generation)?;
             }
             profile.binding.issuer = credentials.issuer.clone();
             if matches!(self.save_mode, CredentialSaveMode::Independent) {
@@ -801,6 +799,7 @@ impl StateStore for OAuthProfileStore {
                 .get_mut(&self.server_name)
                 .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
             validate_profile_binding(profile, &self.endpoint)?;
+            ensure_not_logged_out(profile, self.logout_generation)?;
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -1072,12 +1071,14 @@ pub async fn begin_mcp_oauth_authorization(
         }
     };
     let path = oauth_store_path(cwd)?;
+    let logout_generation = profile.logout_generation;
     let publication = edit_store(&path, |store| {
         let profile = store
             .profiles
             .get_mut(server_name)
             .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
         validate_profile_binding(profile, endpoint)?;
+        ensure_not_logged_out(profile, logout_generation)?;
         profile.redirect_uri = Some(redirect_uri.clone());
         publish_pending_authorization(profile, authorization_url.clone())?;
         merge_pending_scopes(&mut profile.pending_scopes, &pending_scopes);

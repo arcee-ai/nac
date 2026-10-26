@@ -195,9 +195,14 @@ impl McpRuntimeManager {
         Ok(status)
     }
 
-    /// After a committed rename, also disconnects the new name; runs under the config write lease.
-    pub fn keep_disconnected_after_rename(&self, old_name: &str, new_name: &str) -> Result<()> {
-        self.connection_state()?.copy_mark(old_name, new_name)
+    /// After a committed rename, moves sessions that mounted the old name to the new one.
+    pub fn rename_connection(&self, old_name: &str, new_name: &str) -> Result<()> {
+        self.connection_state()?.rename(old_name, new_name)
+    }
+
+    /// After a committed delete, lets a new server reuse the name without inheriting its sessions.
+    pub fn forget_connection(&self, name: &str) -> Result<()> {
+        self.connection_state()?.forget(name)
     }
 
     pub async fn reload(&self, name: &str) -> Result<McpRuntimeStatus> {

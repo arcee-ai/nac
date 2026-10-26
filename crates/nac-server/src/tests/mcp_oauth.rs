@@ -216,9 +216,33 @@ async fn renaming_a_disconnected_server_keeps_it_blocked_for_sessions() {
 
     assert_eq!(rename("teams").await.unwrap().status(), StatusCode::OK);
     let statuses =
-        response_json(get_response(app, "/mcp_library/servers/status", None).await).await;
+        response_json(get_response(app.clone(), "/mcp_library/servers/status", None).await).await;
     assert_eq!(blocked(&statuses, "teams"), true);
     assert_eq!(blocked(&statuses, "github"), false);
+
+    let recreated = post_json(
+        app.clone(),
+        "/mcp_library/servers",
+        serde_json::json!({
+            "name": "slack",
+            "enabled": true,
+            "transport": "streamable_http",
+            "url": "https://mcp.slack.com/mcp",
+            "headers": {},
+            "args": [],
+            "env": {}
+        }),
+    )
+    .await;
+    assert_eq!(recreated.status(), StatusCode::CREATED);
+    let statuses =
+        response_json(get_response(app, "/mcp_library/servers/status", None).await).await;
+    assert_eq!(
+        blocked(&statuses, "slack"),
+        false,
+        "a new server inherited the renamed server's disconnect"
+    );
+    assert_eq!(blocked(&statuses, "teams"), true);
 }
 
 #[tokio::test]

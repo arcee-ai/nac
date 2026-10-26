@@ -915,7 +915,7 @@ pub async fn update_server_handler(
     if server_name != record.name {
         manager
             .mcp_runtime()
-            .keep_disconnected_after_rename(&server_name, &record.name)
+            .rename_connection(&server_name, &record.name)
             .map_err(|error| {
                 ApiError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -967,6 +967,15 @@ pub async fn delete_server_handler(
             "MCP OAuth cleanup failed",
         )
     })?;
+    manager
+        .mcp_runtime()
+        .forget_connection(&server_name)
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("MCP disconnect state could not be updated: {error:#}"),
+            )
+        })?;
     manager.mcp_runtime().forget(&server_name).await;
     Ok(StatusCode::NO_CONTENT)
 }
