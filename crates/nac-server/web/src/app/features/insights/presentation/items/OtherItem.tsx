@@ -5,6 +5,7 @@ import {
   showsInput,
   type ItemContent,
   type ItemContext,
+  segmentCall,
   type ToolSegment,
 } from "@/app/features/insights/presentation/items/itemContent";
 
@@ -15,19 +16,19 @@ import {
 export function otherContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const input = segment.presentation?.summary || null;
   const output = segment.presentation?.resultPreview || null;
-  const callId = segment.presentation?.callId ?? null;
+  const call = segmentCall(segment);
   return {
     title: segmentTitle(segment),
     copyText: input ?? output,
     body: (state) => (
       <>
-        {(input || callId) && showsInput(state) ? (
+        {(input || call) && showsInput(state) ? (
           <ItemCodeField
             title="Input"
             shortContent={input ?? ""}
             source="arguments"
             sessionId={context.sessionId}
-            callId={callId}
+            call={call}
           />
         ) : null}
         {output && isDefault(state) ? (
@@ -36,7 +37,7 @@ export function otherContent(segment: ToolSegment, context: ItemContext): ItemCo
             shortContent={output}
             source="output"
             sessionId={context.sessionId}
-            callId={callId}
+            call={call}
           />
         ) : null}
       </>

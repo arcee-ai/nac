@@ -5,6 +5,7 @@ import {
   showsInput,
   type ItemContent,
   type ItemContext,
+  segmentCall,
   type ToolSegment,
 } from "@/app/features/insights/presentation/items/itemContent";
 import { BodyText } from "@/app/features/insights/presentation/items/ItemParts";
@@ -20,7 +21,7 @@ export function goalChangeContent(segment: ToolSegment): ItemContent {
 
 export function getGoalContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const result = segment.presentation?.resultPreview || null;
-  const callId = segment.presentation?.callId ?? null;
+  const call = segmentCall(segment);
   return {
     title: actionTypeLabel("get-goal"),
     copyText: result,
@@ -31,7 +32,7 @@ export function getGoalContent(segment: ToolSegment, context: ItemContext): Item
           shortContent={result}
           source="output"
           sessionId={context.sessionId}
-          callId={callId}
+          call={call}
         />
       ) : null,
   };

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 import { InsightItemCodeDisplayer } from "@/app/atoms";
 import { useFullContent } from "@/app/features/insights/presentation/items/useFullContent";
+import type { ToolCallRef } from "@/app/services/queries/toolCalls";
 
 /** The part of a tool call a field shows. */
 export type ItemCodeFieldSource = "arguments" | "output";
@@ -19,8 +20,8 @@ interface ItemCodeFieldProps {
   shortContent: string;
   source: ItemCodeFieldSource;
   sessionId: string;
-  /** `presentation.callId`; null for the compact tool blocks of orchestrator sessions. */
-  callId: string | null;
+  /** `segmentCall(segment)`; null for the compact tool blocks of orchestrator sessions. */
+  call: ToolCallRef | null;
 }
 
 /**
@@ -79,9 +80,9 @@ export function ItemCodeField({
   shortContent,
   source,
   sessionId,
-  callId,
+  call,
 }: ItemCodeFieldProps) {
-  const full = useFullContent(sessionId, callId, source === "output");
+  const full = useFullContent(sessionId, call, source === "output");
   const { content } = full;
   const fullContent = useMemo(() => {
     if (!content) return null;
@@ -96,7 +97,7 @@ export function ItemCodeField({
       state={full.state}
       shortContent={shortContent}
       fullContent={fullContent}
-      onShowFull={callId ? full.showFull : undefined}
+      onShowFull={call ? full.showFull : undefined}
       onHide={full.hide}
       error={full.failed ? `Could not load the full ${noun}.` : null}
       note={cut ? `The server cut this ${noun} at ${CONTENT_LIMIT}.` : null}

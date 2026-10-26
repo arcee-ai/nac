@@ -6,6 +6,7 @@ import {
   isDefault,
   type ItemContent,
   type ItemContext,
+  segmentCall,
   type ToolSegment,
 } from "@/app/features/insights/presentation/items/itemContent";
 import { ItemFileButton } from "@/app/features/insights/presentation/items/ItemFileButton";
@@ -26,12 +27,12 @@ export function fileContent(segment: ToolSegment, context: ItemContext): ItemCon
   const file = path ? segmentTitle(segment) : null;
   const done = segmentStatus(segment) === "ready";
   const named = file ? NAMED_TITLES[segment.action]?.(file, done) : undefined;
-  const changeCallId = segment.action === "read-file" ? null : segment.presentation?.callId || null;
+  const changeCall = segment.action === "read-file" ? null : segmentCall(segment);
   return {
     title: segment.action === "read-file" ? "File Read" : (named ?? segmentTypeLabel(segment)),
     body: (state) => {
       if (!isDefault(state)) return null;
-      if (changeCallId) return <FileChange path={path} callId={changeCallId} context={context} />;
+      if (changeCall) return <FileChange path={path} call={changeCall} context={context} />;
       return path ? <ItemFileButton path={path} context={context} /> : null;
     },
   };

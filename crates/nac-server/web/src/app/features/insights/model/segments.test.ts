@@ -252,7 +252,7 @@ describe("partitionModelTurn", () => {
     expect(groupIds(before)).toEqual(["user-0:thoughts-0"]);
     expect(groupIds(after)).toEqual(["user-0:thoughts-0"]);
     expect(shape(partitionModelTurn(modelAt(after, 1), after[0]))).toEqual([
-      "group:thoughts-0,tool-call-read,thoughts-1",
+      "group:thoughts-0,tool-1-call-read,thoughts-1",
       "block:text-0",
     ]);
   });

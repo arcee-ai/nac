@@ -4,6 +4,7 @@ import { InsightItemState } from "@/app/atoms";
 import type { DelegatedRowKey, InsightSegment } from "@/app/features/insights/model/types";
 import type { SessionResolver } from "@/app/features/insights/presentation/useDelegatedSessions";
 import { formatSeconds } from "@/app/lib/format";
+import type { ToolCallRef } from "@/app/services/queries/toolCalls";
 
 export type ReasoningSegment = Extract<InsightSegment, { kind: "reasoning" }>;
 export type ToolSegment = Extract<InsightSegment, { kind: "tool" }>;
@@ -29,6 +30,12 @@ export interface ItemContent {
 }
 
 export const isDefault = (state: InsightItemState) => state === InsightItemState.Default;
+
+/** The call whose full content a segment can load; none for a compact tool block. */
+export function segmentCall(segment: ToolSegment): ToolCallRef | null {
+  const id = segment.presentation?.callId;
+  return id ? { id, blockKey: segment.key } : null;
+}
 
 /** Inputs stay visible after a failure; nothing shows while the call runs. */
 export const showsInput = (state: InsightItemState) => state !== InsightItemState.Loading;

@@ -18,7 +18,7 @@ import { ItemFileButton } from "@/app/features/insights/presentation/items/ItemF
 import { cn } from "@/app/lib/cn";
 import { type CodeToken, highlightDiff } from "@/app/lib/highlight";
 import { parseUnifiedDiff, type UnifiedDiff, type UnifiedDiffLine } from "@/app/lib/unifiedDiff";
-import { useToolCallContent } from "@/app/services/queries/toolCalls";
+import { type ToolCallRef, useToolCallContent } from "@/app/services/queries/toolCalls";
 
 /** Rows a diff shows before "Show full". */
 const PREVIEW_ROWS = 40;
@@ -152,7 +152,7 @@ function LoadFailure({ retrying, onRetry }: { retrying: boolean; onRetry: () => 
 interface FileChangeProps {
   /** `presentation.summary`: as the model wrote it, or cut short. */
   path: string | null;
-  callId: string;
+  call: ToolCallRef;
   context: ItemContext;
 }
 
@@ -182,10 +182,10 @@ function useSeen(anchor: Element | null): boolean {
  * removed, then the call's own diff. Both come from the call's result, which
  * loads once the change is on screen.
  */
-export function FileChange({ path, callId, context }: FileChangeProps) {
+export function FileChange({ path, call, context }: FileChangeProps) {
   const [anchor, setAnchor] = useState<HTMLSpanElement | null>(null);
   const seen = useSeen(anchor);
-  const query = useToolCallContent(context.sessionId, callId, seen);
+  const query = useToolCallContent(context.sessionId, call, seen);
   const { data } = query;
   const change = useMemo(
     () => (data ? readChange(data.output, data.output_truncated) : null),

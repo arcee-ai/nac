@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { InsightItemCodeDisplayerState } from "@/app/atoms";
-import { useToolCallContent } from "@/app/services/queries/toolCalls";
+import { type ToolCallRef, useToolCallContent } from "@/app/services/queries/toolCalls";
 
 /**
  * "Show full" over one call's content: Loading until the server answers, then
@@ -10,9 +10,9 @@ import { useToolCallContent } from "@/app/services/queries/toolCalls";
  * store only once the call's whole batch of parallel calls is done, so a view
  * of the output stays Loading until the answer has one.
  */
-export function useFullContent(sessionId: string, callId: string | null, needsOutput: boolean) {
+export function useFullContent(sessionId: string, call: ToolCallRef | null, needsOutput: boolean) {
   const [open, setOpen] = useState(false);
-  const query = useToolCallContent(sessionId, callId, open);
+  const query = useToolCallContent(sessionId, call, open);
   const failed = open && query.isError && !query.isFetching;
   const data = open ? query.data : undefined;
   const content = data && (!needsOutput || data.output !== null) ? data : undefined;

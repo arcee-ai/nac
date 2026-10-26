@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { InsightItemCodeDisplayerState, InsightShowFullButton } from "@/app/atoms";
 import type { InsightSegment } from "@/app/features/insights/model/types";
+import { segmentCall } from "@/app/features/insights/presentation/items/itemContent";
 import { useFullContent } from "@/app/features/insights/presentation/items/useFullContent";
 import type { ToolPresentation } from "@/app/lib/toolPresentation";
 
@@ -40,14 +41,15 @@ export function useErrorLine(
   sessionId: string,
   failed: boolean,
 ): { message: string | null; action: ReactNode } {
-  const presentation = failed && segment.kind === "tool" ? segment.presentation : null;
+  const tool = failed && segment.kind === "tool" ? segment : null;
+  const presentation = tool?.presentation ?? null;
   const preview = presentation?.resultPreview ?? null;
-  const callId = preview?.endsWith(CUT_PREVIEW) ? presentation?.callId || null : null;
-  const full = useFullContent(sessionId, callId, true);
+  const call = tool && preview?.endsWith(CUT_PREVIEW) ? segmentCall(tool) : null;
+  const full = useFullContent(sessionId, call, true);
   if (!presentation) return { message: null, action: null };
   const output = full.content?.output;
   const message = errorMessage(presentation, output == null ? preview : errorText(output));
-  if (!callId) return { message, action: null };
+  if (!call) return { message, action: null };
   const expanded = full.state === InsightItemCodeDisplayerState.Expanded;
   return {
     message,

@@ -5,13 +5,14 @@ import {
   showsInput,
   type ItemContent,
   type ItemContext,
+  segmentCall,
   type ToolSegment,
 } from "@/app/features/insights/presentation/items/itemContent";
 
 export function runCommandContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const input = segment.presentation?.summary || null;
   const output = segment.presentation?.resultPreview || null;
-  const callId = segment.presentation?.callId ?? null;
+  const call = segmentCall(segment);
   return {
     title: segmentTitle(segment),
     copyText: input,
@@ -23,7 +24,7 @@ export function runCommandContent(segment: ToolSegment, context: ItemContext): I
             shortContent={input}
             source="arguments"
             sessionId={context.sessionId}
-            callId={callId}
+            call={call}
           />
         ) : null}
         {output && isDefault(state) ? (
@@ -32,7 +33,7 @@ export function runCommandContent(segment: ToolSegment, context: ItemContext): I
             shortContent={output}
             source="output"
             sessionId={context.sessionId}
-            callId={callId}
+            call={call}
           />
         ) : null}
       </>
@@ -42,7 +43,7 @@ export function runCommandContent(segment: ToolSegment, context: ItemContext): I
 
 export function writeCommandContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const input = segment.presentation?.summary || null;
-  const callId = segment.presentation?.callId ?? null;
+  const call = segmentCall(segment);
   return {
     title: segmentTitle(segment),
     copyText: input,
@@ -54,7 +55,7 @@ export function writeCommandContent(segment: ToolSegment, context: ItemContext):
           shortContent={input}
           source="arguments"
           sessionId={context.sessionId}
-          callId={callId}
+          call={call}
         />
       ) : null,
   };
@@ -62,7 +63,7 @@ export function writeCommandContent(segment: ToolSegment, context: ItemContext):
 
 export function readOutputContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const output = segment.presentation?.resultPreview || null;
-  const callId = segment.presentation?.callId ?? null;
+  const call = segmentCall(segment);
   return {
     title: "Read output",
     copyText: output,
@@ -73,7 +74,7 @@ export function readOutputContent(segment: ToolSegment, context: ItemContext): I
           shortContent={output}
           source="output"
           sessionId={context.sessionId}
-          callId={callId}
+          call={call}
         />
       ) : null,
   };
