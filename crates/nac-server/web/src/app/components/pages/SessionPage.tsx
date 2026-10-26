@@ -31,12 +31,11 @@ import {
 import { PanelPhoneChromeProvider } from "@/app/providers/PanelPhoneChrome";
 import { useSessionSnapshot, useSessionSummary, useSshConnect } from "@/app/services/queries";
 
-// 80% of the row, between 480px and 800px, but never so wide that the chat
-// beside it gets less than the 200px it has in a 1280px window with the
-// sidebar open, or less than half of a narrower row. The bounds sit inside the
-// width rather than in `min-w` / `max-w`, which would stop the collapse tween
-// dead at a bound.
-const SIDE_PANEL_WIDTH = "w-[min(clamp(480px,80%,800px),max(50%,100%_-_200px))]";
+// 80% as wide as the chat beside it, so 4/9 of the row, between 480px and
+// 800px, but never so wide that the chat gets less than 200px, or less than
+// half of a row under 400px. The bounds sit inside the width rather than in
+// `min-w` / `max-w`, which would stop the collapse tween dead at a bound.
+const SIDE_PANEL_WIDTH = "w-[min(clamp(480px,calc(100%*4/9),800px),max(50%,100%_-_200px))]";
 
 /**
  * Opens an SSH browse handshake once when landing on a remote session that is
