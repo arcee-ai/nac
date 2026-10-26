@@ -1,6 +1,4 @@
-//! Bounded terminal evidence for independent direct tasks. A later run or goal
-//! never rewrites an earlier outcome: rows are insert-once per identity and
-//! retention prunes only the oldest rows of the same session.
+//! Insert-once, per-session bounded run and goal outcomes for independent tasks.
 use super::*;
 
 /// Terminal runs retained per session for exact passive reads.
@@ -143,8 +141,7 @@ fn prune(conn: &Connection, table: &str, session_id: &str, keep: usize) -> Resul
     Ok(())
 }
 
-/// Records one terminal run inside the caller's settlement transaction. A
-/// replayed settlement for the same run keeps the first committed outcome.
+/// Records a terminal run in the settlement transaction; a replay keeps the first outcome.
 pub(crate) fn record_run_outcome_with_connection(
     conn: &Connection,
     session_id: &str,

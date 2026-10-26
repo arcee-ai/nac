@@ -785,8 +785,7 @@ enum DurableRunTerminal {
     Failed,
 }
 
-/// What a terminal run leaves behind besides its disposition: the final
-/// response of a completed run or the redacted failure of a failed one.
+/// Final response or redacted failure a terminal run leaves behind.
 enum RunTerminalEvidence {
     None,
     Response(String),

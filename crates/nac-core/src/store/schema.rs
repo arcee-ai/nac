@@ -52,8 +52,7 @@ mod future_schema_tests;
 
 use wal_preflight::read_schema_version_header;
 
-// 38 retains bounded terminal run and replaced/cleared goal evidence for
-// passive independent-task reads.
+// 38 retains bounded run and replaced/cleared goal outcomes for task reads.
 // 37 binds queued foreground intent to crash-safe exact-input waiting authority.
 // 36 retains requested child execution mode with queued input across recovery.
 // 35 retains terminal results for each delegated generation independently of

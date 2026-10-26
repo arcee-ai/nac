@@ -172,8 +172,7 @@ pub struct SessionRunStateUpdate {
     /// Goal settlement committed in the same SQLite transaction as the run
     /// terminal checkpoint. `None` for sessions/runs without a bound goal.
     pub goal_settlement: Option<crate::store::GoalRunSettlement>,
-    /// Final response of a completed run, retained as bounded insert-once
-    /// evidence beside the terminal checkpoint.
+    /// Final response of a completed run, retained as bounded evidence.
     pub finished_run_result: Option<String>,
     pub updated_at: String,
 }

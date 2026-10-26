@@ -1,6 +1,4 @@
-//! Passive discovery and exact reads of independent direct tasks. Every read
-//! goes straight to committed store state: nothing attaches, recovers, wakes,
-//! subscribes to events, acquires a lease or consumes inbox input.
+//! Task discovery tools that read committed store state only, never live sessions.
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -81,8 +79,7 @@ fn navigation(session_id: &str) -> String {
     route
 }
 
-/// The caller must be an attached direct primary with a persisted identity;
-/// workers, children and unpersisted runtimes never discover peers.
+/// Only an attached, persisted direct primary may discover peers.
 fn caller(services: ToolServices<'_>) -> Result<String, ToolResult> {
     match (
         services.runtime.permission_broker.as_ref(),
@@ -111,9 +108,7 @@ fn task_resource(session_id: &str) -> PermissionResource {
     PermissionResource::new("task_read", format!("session:{session_id}"))
 }
 
-/// `project:current` names the caller's own saved project. Session project
-/// membership is immutable, so the resource binds the same project at
-/// execution as at approval.
+/// `project:current` is the caller's own project, stable because membership is immutable.
 fn project_resource(project_id: Option<&str>) -> PermissionResource {
     PermissionResource::new(
         "task_read",
@@ -144,8 +139,7 @@ fn found_task(snapshot: store::DirectTaskSnapshot) -> Value {
     })
 }
 
-/// Resolves one exact session within the caller's scope. A target outside the
-/// caller's project is withheld unless the matching project was named.
+/// Withholds a target outside the caller's project unless that project is named.
 async fn exact_lookup(
     services: ToolServices<'_>,
     caller: String,

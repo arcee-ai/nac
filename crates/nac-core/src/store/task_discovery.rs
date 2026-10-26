@@ -1,7 +1,4 @@
-//! Passive discovery and snapshots of independent direct tasks. An independent
-//! task is a visible direct session: traditional children and managed
-//! orchestrators keep their own topologies and are never returned as tasks.
-//! These reads open no lease, attach nothing and write nothing.
+//! Passive reads of independent tasks: visible direct sessions, never children or managed orchestrators.
 use super::*;
 
 /// Candidates returned by one search page.
@@ -183,9 +180,7 @@ fn goal_summary(conn: &Connection, session_id: &str) -> Result<Option<TaskGoalSu
 }
 
 coordinated_command! {
-/// One bounded page of independent tasks in a saved project, newest activity
-/// first. Matches are discovery evidence; every candidate is a separate attempt.
-/// `None` means the project does not exist in this store.
+/// One bounded page of a project's tasks, newest first; `None` when the project is missing.
 pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<TaskSearchPage>> {
     let limit = search.limit.clamp(1, MAX_TASK_SEARCH_LIMIT);
     let after = match search.after.as_deref() {
@@ -301,8 +296,7 @@ port public;
 }
 
 coordinated_command! {
-/// Exact passive snapshot of one session, classified before any task data is
-/// read so a non-task session discloses only its topology kind.
+/// Exact snapshot; a non-task session discloses only its topology kind.
 pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction()?;

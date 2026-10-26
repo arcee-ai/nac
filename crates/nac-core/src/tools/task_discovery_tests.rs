@@ -154,8 +154,6 @@ async fn exact_reads_distinguish_found_missing_foreign_and_other_topologies() {
     let missing = value(&runtime, "read_task", json!({"session_id":"gone"})).await;
     assert_eq!(missing["status"], "not_found");
 
-    // Another project's task is withheld without disclosing its project or
-    // contents until the caller names that project explicitly.
     let foreign = value(&runtime, "read_task", json!({"session_id":"foreign"})).await;
     assert_eq!(foreign["status"], "outside_scope");
     assert!(foreign.get("task").is_none());

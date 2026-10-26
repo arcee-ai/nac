@@ -26,8 +26,6 @@ fn project(path: &Path, project_id: &str, cwd: &str) {
     .unwrap();
 }
 
-/// A direct session in `project_id` (whose cwd is /tmp/project) with the given
-/// title, prompt and activity time.
 fn task(path: &Path, project_id: &str, session_id: &str, title: &str, prompt: &str, at: &str) {
     insert_test_session(path, session_id);
     let conn = open_runtime_connection(path).unwrap();
