@@ -77,12 +77,9 @@ import type {
   SessionSnapshotResponse,
 } from "@/app/types/api";
 
-const PLACEHOLDER = "Ask anything…";
+const PLACEHOLDER = "Send a message";
 
-/** Says the key is there, on a session that has prompts to walk back through. */
-const HISTORY_PLACEHOLDER = "Ask anything, or press ↑ for an earlier prompt";
-
-/** One line of the field, which is also its collapsed height. */
+/** One line of the field. */
 const ROW_PX = { mobile: 40, wide: 48 };
 
 /** How far the field grows before it starts scrolling instead. */
@@ -210,8 +207,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     [drafts, sessionId],
   );
   const isMobile = useIsMobile();
-  // A phone keeps the message on one truncated line until the field is focused,
-  // then grows the pill over the transcript.
   const [focused, setFocused] = useState(false);
   const [selection, setSelection] = useState<TextSelection>({ start: 0, end: 0 });
   const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
@@ -219,7 +214,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   // The pointer's row is held apart from the keyboard's so that leaving the list
   // takes the highlight with it instead of stranding it on the last row crossed.
   const [hoveredSuggestion, setHoveredSuggestion] = useState<number | null>(null);
-  const collapsed = isMobile && !focused;
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
   const running = useRunning(sessionId);
   const stopping = useCancelArmed(sessionId);
@@ -356,8 +350,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const history = usePromptHistoryPreview({
     prompts: sentPrompts,
     value,
-    // A phone has no key to walk with, and its placeholder is already standing
-    // in for the collapsed line.
+    // A phone has no key to walk with.
     enabled: !isMobile,
     setValue,
     textareaRef: ref,
@@ -515,38 +508,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     if (!mirrorActive || !textarea || !mirror) return;
     mirror.scrollTop = textarea.scrollTop;
     mirror.scrollLeft = textarea.scrollLeft;
-  }, [collapsed, mirrorActive, value]);
+  }, [mirrorActive, value]);
 
-  // A collapsed field is one line whatever it holds, which is a height it
-  // cannot work out for itself; leaving the collapse restores the content's.
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (collapsed) {
-      el.style.height = `${ROW_PX.mobile}px`;
-      el.style.overflow = "hidden";
-    } else {
-      el.style.overflow = "";
-      resize();
-    }
-  }, [collapsed, resize, value]);
-
-  /** Tapping the collapsed line means "carry on typing", so the caret goes last. */
-  const focusEnd = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.focus();
-    // iOS Safari honours the properties but not setSelectionRange here, and
-    // only once the field has actually taken the focus.
-    requestAnimationFrame(() => {
-      if (!ref.current) return;
-      const end = ref.current.value.length;
-      ref.current.selectionStart = end;
-      ref.current.selectionEnd = end;
-      setSelection({ start: end, end });
-      ref.current.scrollTop = ref.current.scrollHeight;
-    });
-  }, []);
+  useEffect(() => resize(), [resize, value]);
 
   const reconnectSsh = useCallback(async () => {
     if (!sshTarget || connectSsh.isPending) return;
@@ -847,7 +811,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {suggestionStatus}
         </span>
-        {mirrorActive && !collapsed ? (
+        {mirrorActive ? (
           <div
             ref={mirrorRef}
             aria-hidden="true"
@@ -865,9 +829,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           className={cn(
             "relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap [scrollbar-gutter:stable]",
             textInset,
-            // The line below stands in for it while it is a single row, because
-            // a textarea cannot ellipsize its own overflow.
-            collapsed && "opacity-0 pointer-events-none",
           )}
           rows={1}
           role="combobox"
@@ -882,13 +843,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           // A preview stands where the placeholder would, rather than in the
           // field, so an earlier prompt can be read before it is taken. The row
           // below draws it, hence the blank here.
-          placeholder={
-            history.active
-              ? ""
-              : history.hasHistory && value === ""
-                ? HISTORY_PLACEHOLDER
-                : PLACEHOLDER
-          }
+          placeholder={history.active ? "" : PLACEHOLDER}
           spellCheck={false}
           value={value}
           style={{
@@ -1004,21 +959,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               <KeyboardShortcut keys={["tab"]} spelled className="shrink-0" />
             </div>
           </>
-        ) : null}
-        {collapsed ? (
-          <div
-            className={cn("absolute inset-0 flex items-center cursor-text", textInset)}
-            onClick={focusEnd}
-          >
-            <span
-              className={cn(
-                "w-full truncate text-medium",
-                value ? "text-input" : "text-input-placeholder",
-              )}
-            >
-              {value ? highlightedSkillText(skillSegments) : PLACEHOLDER}
-            </span>
-          </div>
         ) : null}
       </div>
       {sideButtons ? (
