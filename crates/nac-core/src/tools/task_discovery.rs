@@ -354,6 +354,7 @@ impl NativeTool for FindTasksTool {
             let (caller, broker) = identity;
             let explicit = input.project_id.is_some();
             let filtered = input.reference.is_some() || input.text.is_some();
+            let continuation = input.after.is_some();
             let project_id = match input.project_id {
                 Some(project_id) => project_id,
                 None => {
@@ -410,10 +411,11 @@ impl NativeTool for FindTasksTool {
                     "detail": "No saved project with this ID exists in this store.",
                 })));
             };
-            // Unknown (null) while one match is visible and unscanned rows remain.
-            let ambiguous = match (filtered, page.candidates.len(), &page.next_after) {
-                (true, 2.., _) => json!(true),
-                (true, _, Some(_)) => Value::Null,
+            // False only when one page covered the whole search; otherwise unknown.
+            let ambiguous = match page.candidates.len() {
+                _ if !filtered => json!(false),
+                2.. => json!(true),
+                _ if continuation || page.next_after.is_some() => Value::Null,
                 _ => json!(false),
             };
             let candidates = page

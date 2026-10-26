@@ -345,7 +345,7 @@ async fn ambiguity_is_unknown_until_the_last_page_when_one_match_is_visible() {
         first["candidates"][0]["session_id"],
         second["candidates"][0]["session_id"]
     );
-    assert_eq!(second["ambiguous"], false);
+    assert_eq!(second["ambiguous"], Value::Null);
     cleanup(&runtime);
 }
 

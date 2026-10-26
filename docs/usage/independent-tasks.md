@@ -19,8 +19,9 @@ at most one selector:
 
 With no selector it lists recent tasks. Every candidate is a separate attempt and
 is never collapsed into one duplicate; a match is discovery evidence rather than
-identity. `ambiguous` is `true` once a page shows several matches, `null` while a
-single visible match leaves more rows to page through, and `false` otherwise. Pages hold at most 20
+identity. `ambiguous` is `true` when a page shows several matches, `false` only
+when a single page covered the whole search with at most one match, and `null`
+(unknown) on any other page of a multi-page search. Pages hold at most 20
 candidates and examine at most 500 sessions; continue with `next_after`.
 `scan_limit_reached` means rows remain unexamined, not that nothing matched.
 
