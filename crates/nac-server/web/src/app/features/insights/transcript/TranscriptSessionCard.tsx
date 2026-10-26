@@ -63,11 +63,13 @@ interface CardState extends CardStatus {
 /**
  * The launch reports the session it started, but the model can put anything
  * in that report, so only a session the parent really has is shown as such.
+ * Only a list that arrived can say the session is missing: while there is none
+ * (loading, failed, or never fetched without NAC orchestration) the launch
+ * shows as it reported itself, with nothing to open.
  */
 function cardState(
   entry: InsightSessionEntry,
   records: readonly LaunchedRecord[] | undefined,
-  loading: boolean,
 ): CardState {
   const record = launchedRecord(records, entry.presentation.spawnedSessionId);
   if (record) {
@@ -96,7 +98,7 @@ function cardState(
       sessionId: null,
     };
   }
-  if (loading) return { status: SubagentCardStatus.Ready, title, sessionId: null };
+  if (records === undefined) return { status: SubagentCardStatus.Ready, title, sessionId: null };
   return { status: SubagentCardStatus.NotFound, title, sessionId: null };
 }
 
@@ -113,7 +115,7 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
 }) {
   const parentId = useTranscriptSessionId();
   const query = useLaunchedRecords(entry, parentId);
-  const state = cardState(entry, query.data, query.isPending && query.fetchStatus === "fetching");
+  const state = cardState(entry, query.data);
   const showBehaviorIcon = useSessionBehaviorIconVisible();
   const { openSubagent } = useInsightsNavigation();
   const sessionHref = useHref(routes.session(state.sessionId ?? ""));
