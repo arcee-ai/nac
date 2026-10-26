@@ -182,3 +182,36 @@ async fn unknown_call_id_yields_none() {
     drop(parts);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
+
+#[tokio::test]
+async fn members_under_credential_keys_are_masked_at_any_depth() {
+    let (parts, store_path) = test_active_service("tool_call_content_keys", "session");
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[(
+                "call-login",
+                r#"{"username":"ada","password":"hunter2","options":{"api_key":"k-123","retries":3,"headers":[{"Token":"t-1"},{"x-api-key":12345678901234567}]}}"#,
+            )]),
+            result("call-login", r#"{"secret":{"value":"s-1"},"status":"ok"}"#),
+        ],
+    )
+    .await;
+
+    let content = parts
+        .service
+        .tool_call_content("call-login")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        content.arguments,
+        r#"{"username":"ada","password":"[REDACTED]","options":{"api_key":"[REDACTED]","retries":3,"headers":[{"Token":"[REDACTED]"},{"x-api-key":"[REDACTED]"}]}}"#
+    );
+    assert_eq!(
+        content.output.as_deref(),
+        Some(r#"{"secret":"[REDACTED]","status":"ok"}"#)
+    );
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}

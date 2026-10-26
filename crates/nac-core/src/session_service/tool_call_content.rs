@@ -57,21 +57,20 @@ impl SessionService {
 /// again respells numbers (1e5 as 100000.0, and past 64 bits as a float), so a
 /// document with nothing to redact comes back as written; otherwise its
 /// members keep their order and the document its compact or pretty layout.
-/// Any other text is redacted as it stands.
+/// A member under a credential key, such as `password` or `token`, is masked
+/// whole at any depth, whatever it holds. Any other text is redacted as it
+/// stands.
 fn redact_document(text: &str, redact: &dyn Fn(&str) -> String) -> String {
     let document = match serde_json::from_str::<Document>(text) {
         Ok(document @ (Document::Object(_) | Document::Array(_))) => document,
         _ => return redact(text),
     };
-    let changed = std::cell::Cell::new(false);
-    let document = document.redacted(&|part: &str| {
-        let redacted = redact(part);
-        if redacted != part {
-            changed.set(true);
-        }
-        redacted
-    });
-    if !changed.get() {
+    let redaction = Redaction {
+        redact,
+        changed: std::cell::Cell::new(false),
+    };
+    let document = document.redacted(&redaction);
+    if !redaction.changed.get() {
         return text.to_owned();
     }
     let encoded = if text.contains('\n') {
@@ -80,6 +79,27 @@ fn redact_document(text: &str, redact: &dyn Fn(&str) -> String) -> String {
         serde_json::to_string(&document)
     };
     encoded.unwrap_or_else(|_| redact(text))
+}
+
+/// Redacts a document's parts and records whether it changed any of them.
+struct Redaction<'a> {
+    redact: &'a dyn Fn(&str) -> String,
+    changed: std::cell::Cell<bool>,
+}
+
+impl Redaction<'_> {
+    fn text(&self, text: &str) -> String {
+        let redacted = (self.redact)(text);
+        if redacted != text {
+            self.changed.set(true);
+        }
+        redacted
+    }
+
+    fn masked(&self) -> Document {
+        self.changed.set(true);
+        Document::String(crate::model::REDACTED.to_owned())
+    }
 }
 
 /// A JSON value whose object members stay in their written order, which
@@ -94,21 +114,21 @@ enum Document {
 }
 
 impl Document {
-    fn redacted(self, redact: &dyn Fn(&str) -> String) -> Self {
+    fn redacted(self, redaction: &Redaction<'_>) -> Self {
         match self {
-            Self::String(text) => Self::String(redact(&text)),
+            Self::String(text) => Self::String(redaction.text(&text)),
             Self::Number(number) => {
                 let text = number.to_string();
-                if redact(&text) == text {
+                if redaction.text(&text) == text {
                     Self::Number(number)
                 } else {
-                    Self::String(crate::model::REDACTED.to_owned())
+                    redaction.masked()
                 }
             }
             Self::Array(items) => Self::Array(
                 items
                     .into_iter()
-                    .map(|item| item.redacted(redact))
+                    .map(|item| item.redacted(redaction))
                     .collect(),
             ),
             Self::Object(members) => Self::Object(
@@ -116,10 +136,13 @@ impl Document {
                     .into_iter()
                     .map(|(key, value)| {
                         let value = match value {
-                            Self::String(text) => Self::String(redact_member(&key, &text, redact)),
-                            value => value.redacted(redact),
+                            _ if crate::model::is_sensitive_json_key(&key) => redaction.masked(),
+                            Self::String(text) => {
+                                Self::String(redact_member(&key, &text, redaction))
+                            }
+                            value => value.redacted(redaction),
                         };
-                        (redact(&key), value)
+                        (redaction.text(&key), value)
                     })
                     .collect(),
             ),
@@ -131,9 +154,9 @@ impl Document {
 /// The encoded `"key": "value"` text let a pattern read the key as a credential
 /// cue, such as a header name. A value that reads as a credential only after
 /// its key is masked whole.
-fn redact_member(key: &str, text: &str, redact: &dyn Fn(&str) -> String) -> String {
-    let alone = redact(text);
-    if redact(&format!("{key}: {text}")) == format!("{key}: {alone}") {
+fn redact_member(key: &str, text: &str, redaction: &Redaction<'_>) -> String {
+    let alone = redaction.text(text);
+    if redaction.text(&format!("{key}: {text}")) == format!("{key}: {alone}") {
         alone
     } else {
         crate::model::REDACTED.to_owned()
