@@ -240,11 +240,11 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
     await harness.provider.waitForRequestCount(1);
 
     // The transcript sums the call up in a badge; Insights lists it with its details.
+    // A waiting call names its own row; settled, it rows as its group, labelled as the badge.
     const row = (status?: string) =>
-      page.getByRole("button", {
-        name: [command, "Exec", status].filter(Boolean).join(", "),
-        exact: true,
-      });
+      status
+        ? page.getByRole("button", { name: `${command}, Exec, ${status}`, exact: true })
+        : page.getByRole("button", { name: "Run command, 1", exact: true });
     const item = page.getByRole("group", { name: command, exact: true });
     await expect(
       page.getByRole("button", { name: "Awaiting approval…", exact: true }),

@@ -161,7 +161,7 @@ test("opens a transcript group in Insights from its badge", async ({ harness, pa
 
   const readBadge = page.getByRole("button", { name: "Read File", exact: true });
   const searchBadge = page.getByRole("button", { name: "Find files, Read File", exact: true });
-  const readRow = page.getByRole("button", { name: "badge-notes.txt, Read", exact: true });
+  const readRow = page.getByRole("button", { name: "Read File, 1", exact: true });
   const searchRow = page.getByRole("button", { name: "Find files, Read File, 2", exact: true });
   const fileRead = page.getByRole("group", { name: "File Read", exact: true });
   const findFiles = page.getByRole("group", { name: "Find files", exact: true });
