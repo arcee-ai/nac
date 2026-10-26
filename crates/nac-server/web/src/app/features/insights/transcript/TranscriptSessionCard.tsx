@@ -32,9 +32,13 @@ function launchedRecord(
 }
 
 /**
- * The parent's delegated sessions of the launched kind. They are fetched until
- * they are known, and then only while the launch or the session it started is
- * still running, so a long transcript of settled cards polls nothing.
+ * The parent's delegated sessions of the launched kind. They are fetched while
+ * the launch runs, then until they list the session it reports, and then only
+ * while that session runs, so a long transcript of settled cards polls nothing.
+ * A launch can settle before a list that has its session arrives, and on a
+ * phone nothing else refreshes that list. A failed list ends the wait; the
+ * gate reads the cache, so it sees the failure only because the card reads
+ * `failed` and re-renders with it.
  */
 function useLaunchedRecords(entry: InsightSessionEntry, parentId: string | null) {
   const client = useQueryClient();
@@ -44,14 +48,18 @@ function useLaunchedRecords(entry: InsightSessionEntry, parentId: string | null)
     agent ? queryKeys.traditionalChildren(parent) : queryKeys.managedOrchestrators(parent),
   );
   const unsettled = entry.status === "running" || entry.status === "pending";
+  const spawnedId = entry.presentation.spawnedSessionId;
+  const record = launchedRecord(known?.data, spawnedId);
   const live =
     parentId !== null &&
     (unsettled ||
-      (known?.data === undefined && known?.status !== "error") ||
-      launchedRecord(known?.data, entry.presentation.spawnedSessionId)?.status === "running");
+      (known?.status !== "error" &&
+        (known?.data === undefined || (spawnedId !== undefined && record === undefined))) ||
+      record?.status === "running");
   const agents = useTraditionalChildren(parent, agent && live);
   const orchestrators = useManagedOrchestrators(parent, !agent && live);
-  return agent ? agents : orchestrators;
+  const query = agent ? agents : orchestrators;
+  return { records: query.data, failed: query.isError };
 }
 
 interface CardState extends CardStatus {
@@ -64,12 +72,13 @@ interface CardState extends CardStatus {
  * The launch reports the session it started, but the model can put anything
  * in that report, so only a session the parent really has is shown as such.
  * Only a list that arrived can say the session is missing: while there is none
- * (loading, failed, or never fetched without NAC orchestration) the launch
- * shows as it reported itself, with nothing to open.
+ * (loading, failed, or never fetched without NAC orchestration) or the latest
+ * fetch failed, the launch shows as it reported itself, with nothing to open.
  */
 function cardState(
   entry: InsightSessionEntry,
   records: readonly LaunchedRecord[] | undefined,
+  failed: boolean,
 ): CardState {
   const record = launchedRecord(records, entry.presentation.spawnedSessionId);
   if (record) {
@@ -98,7 +107,9 @@ function cardState(
       sessionId: null,
     };
   }
-  if (records === undefined) return { status: SubagentCardStatus.Ready, title, sessionId: null };
+  if (records === undefined || failed) {
+    return { status: SubagentCardStatus.Ready, title, sessionId: null };
+  }
   return { status: SubagentCardStatus.NotFound, title, sessionId: null };
 }
 
@@ -114,8 +125,8 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
   interactive: boolean;
 }) {
   const parentId = useTranscriptSessionId();
-  const query = useLaunchedRecords(entry, parentId);
-  const state = cardState(entry, query.data);
+  const { records, failed } = useLaunchedRecords(entry, parentId);
+  const state = cardState(entry, records, failed);
   const showBehaviorIcon = useSessionBehaviorIconVisible();
   const { openSubagent } = useInsightsNavigation();
   const sessionHref = useHref(routes.session(state.sessionId ?? ""));
