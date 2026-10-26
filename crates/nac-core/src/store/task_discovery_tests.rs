@@ -568,5 +568,39 @@ fn invisible_sessions_influence_no_match_or_page() {
     };
     // Matching only the hidden session must look like matching nothing.
     assert_eq!(page("needle"), page("absent-everywhere"));
+    let unfiltered = search_direct_tasks(
+        &path,
+        &TaskSearch {
+            visible: Some(std::sync::Arc::clone(&visible)),
+            ..search(&path, "p1")
+        },
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(ids(&unfiltered), ["shown"]);
+    assert_eq!(unfiltered.scanned_rows, 1);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn returned_prompt_and_goal_text_is_credential_redacted() {
+    let path = test_path("redact_read");
+    initialize(&path).unwrap();
+    project(&path, "p1", "/tmp/project");
+    let leaked = "use Bearer sk-live-abcdef for this";
+    task(&path, "p1", "t", "ALL-1", leaked, "2026-01-01T00:00:01Z");
+    let prior = create_session_goal(&path, "t", leaked, None, None).unwrap();
+    clear_session_goal(&path, "t", &prior.goal_id, prior.version).unwrap();
+    create_session_goal(&path, "t", leaked, None, None).unwrap();
+
+    let TaskLookup::Found(snapshot) = load_direct_task(&path, "t").unwrap() else {
+        panic!("task should be found");
+    };
+    let page = search_direct_tasks(&path, &search(&path, "p1"))
+        .unwrap()
+        .unwrap();
+    let returned = format!("{snapshot:?} {page:?}");
+    assert!(returned.contains("Bearer"), "{returned}");
+    assert!(!returned.contains("sk-live-abcdef"), "{returned}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

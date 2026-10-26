@@ -70,6 +70,7 @@ pub struct TaskSearchPage {
     pub candidates: Vec<TaskCandidate>,
     /// Exclusive cursor for the next page; present when more rows remain.
     pub next_after: Option<String>,
+    /// Visible rows examined; rows hidden by `visible` are never counted.
     pub scanned_rows: usize,
     /// The page stopped at the scan bound rather than at `limit` matches.
     pub scan_limit_reached: bool,
@@ -111,13 +112,18 @@ pub enum TaskLookup {
     NotIndependentTask(NonTaskSession),
 }
 
+fn redact(text: &str) -> String {
+    crate::model::redact_credentials(text, &[])
+}
+
 fn excerpt(text: Option<String>) -> Option<String> {
-    text.map(
-        |text| match super::task_evidence::truncate_chars(&text, PROMPT_EXCERPT_CHARS) {
+    text.map(|text| {
+        let text = redact(&text);
+        match super::task_evidence::truncate_chars(&text, PROMPT_EXCERPT_CHARS) {
             (kept, true) => format!("{kept}…"),
             (_, false) => text,
-        },
-    )
+        }
+    })
 }
 
 fn contains_token(haystack: &str, token: &str) -> bool {
@@ -256,7 +262,6 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
             .as_ref()
             .is_some_and(|visible| !visible(&session_id))
         {
-            scanned_rows += 1;
             last_scanned = Some(encode_cursor(&updated_at, row_id));
             continue;
         }
@@ -379,8 +384,17 @@ pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
         visible_message_count: visible.max(0) as u64,
         current_run: current_run(&tx, session_id)?,
         pending_inbox_items: pending_inbox_items.max(0) as u64,
-        goal: super::session_goals::load_with_connection(&tx, session_id)?,
-        prior_goals: super::task_evidence::load_goal_outcomes_with_connection(&tx, session_id)?,
+        goal: super::session_goals::load_with_connection(&tx, session_id)?.map(|mut goal| {
+            goal.objective = redact(&goal.objective);
+            goal
+        }),
+        prior_goals: super::task_evidence::load_goal_outcomes_with_connection(&tx, session_id)?
+            .into_iter()
+            .map(|mut goal| {
+                goal.objective = redact(&goal.objective);
+                goal
+            })
+            .collect(),
         run_outcomes: super::task_evidence::load_run_outcomes_with_connection(&tx, session_id)?,
         created_at,
         updated_at,

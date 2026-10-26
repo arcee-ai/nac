@@ -32,8 +32,8 @@ candidates and examine at most 500 sessions; continue with `next_after`.
 - `durable`: run count, current durable run, pending inbox items, the current
   goal with ID, version and status, the last 8 replaced or cleared goals with
   their final status, and the last 8 run outcomes with a result excerpt of up to
-  2,000 characters or the failure. Stored excerpts and failures are
-  credential-redacted.
+  2,000 characters or the failure. Stored excerpts and failures, prompt
+  excerpts and goal objectives are credential-redacted.
 - `ephemeral.approvals`: always `unknown`. Approval requests live in the
   target's live owner process, so their absence from a passive read never means
   none are pending.
