@@ -756,6 +756,15 @@ pub async fn create_server_handler(
     let path = config_path(&manager)?;
     let _cross_process = mcp::acquire_mcp_configuration_write_lease(&path)?;
     let record = mcp::insert_mcp_server_configuration(&path, configuration)?;
+    manager
+        .mcp_runtime()
+        .claim_connection(&record.name)
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("MCP disconnect state could not be updated: {error:#}"),
+            )
+        })?;
     Ok((StatusCode::CREATED, Json(view(record))))
 }
 

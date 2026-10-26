@@ -55,7 +55,7 @@ pub(super) struct McpServer {
     pub(super) connection_generation: std::sync::atomic::AtomicU64,
     pub(super) cwd: PathBuf,
     pub(super) connection_state: super::admission::ConnectionState,
-    pub(super) connection_identity: u64,
+    pub(super) connection: super::admission::Mount,
     pub(super) startup_timeout: Duration,
     pub(super) catalog_timeout: Duration,
     pub(super) execution_timeout: Duration,
@@ -83,10 +83,7 @@ impl McpServer {
     }
 
     pub(super) fn admit(&self) -> Result<()> {
-        if !self
-            .connection_state
-            .is_admitted(self.connection_identity)?
-        {
+        if !self.connection_state.is_admitted(&self.connection)? {
             bail!(
                 "MCP server '{}' was disconnected; connect it in MCP settings to use it again",
                 self.name
@@ -277,13 +274,13 @@ impl McpRegistry {
             let mounted = connection_state
                 .mount(&server_name)
                 .map_err(|error| format!("connection state is unreadable: {error:#}"))
-                .and_then(|identity| {
-                    identity.ok_or_else(|| {
+                .and_then(|mount| {
+                    mount.ok_or_else(|| {
                         "disconnected; connect it in MCP settings to use it".to_string()
                     })
                 });
-            let connection_identity = match mounted {
-                Ok(identity) => identity,
+            let connection = match mounted {
+                Ok(mount) => mount,
                 Err(reason) => {
                     if server_config.required {
                         close_mounted_services(&mut mounted_services).await;
@@ -482,7 +479,7 @@ impl McpRegistry {
                 connection_generation: std::sync::atomic::AtomicU64::new(0),
                 cwd: cwd.to_path_buf(),
                 connection_state: connection_state.clone(),
-                connection_identity,
+                connection,
                 startup_timeout,
                 catalog_timeout,
                 execution_timeout,

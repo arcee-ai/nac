@@ -258,7 +258,7 @@ async fn an_unreadable_disconnect_record_keeps_every_mounted_session_blocked() {
             .is_some_and(|error| error.contains("unreadable"))));
 
     let _ = runtime.connect("other").await;
-    assert!(!deleted_state.is_admitted(deleted).unwrap());
+    assert!(!deleted_state.is_admitted(&deleted).unwrap());
     let statuses = runtime.statuses().await.unwrap();
     assert!(!blocked(&statuses, "other"));
     assert!(
@@ -323,6 +323,58 @@ async fn disconnecting_a_renamed_server_stops_sessions_that_mounted_its_old_name
     assert!(!blocked(&runtime.statuses().await.unwrap(), "renamed"));
     assert!(capture.call(json!({}), false).await.is_error);
     runtime.forget("renamed").await;
+    drop(registry);
+}
+
+#[tokio::test]
+async fn a_session_still_loading_across_rename_and_disconnect_does_not_mount_the_old_name() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let home = TestHome::new("nac-mcp-stale-load", "recorded", "http://127.0.0.1:9/mcp");
+    let state = admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
+    let mounted_before = state
+        .mount("recorded")
+        .unwrap()
+        .expect("never disconnected");
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    let config = home.path.join("config.toml");
+    let (mut record, _) =
+        file_config::load_mcp_server_configuration_snapshot(&config, "recorded").unwrap();
+    record.name = "renamed".to_string();
+    file_config::update_mcp_server_configuration(&config, "recorded", record).unwrap();
+    runtime.rename_connection("recorded", "renamed").unwrap();
+    runtime.disconnect("renamed").await.unwrap();
+
+    // A registry that read the configuration before the rename still mounts the old name.
+    assert!(state.mount("recorded").unwrap().is_none());
+    assert!(!state.is_admitted(&mounted_before).unwrap());
+    runtime.connect("renamed").await.unwrap();
+    assert!(state.is_admitted(&mounted_before).unwrap());
+    runtime.forget("renamed").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_home_that_only_allows_config_reads_still_mounts_and_obeys_disconnect() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let server = RecordingMcpServer::start();
+    let home = TestHome::new("nac-mcp-unwritable-home", "recorded", &server.url);
+    let cwd = std::env::current_dir().unwrap();
+    // The first load leaves the writable config lock that later reads reuse.
+    drop(load(&cwd).await);
+    fs::set_permissions(&home.path, fs::Permissions::from_mode(0o555)).unwrap();
+    let outcome = load(&cwd).await;
+    fs::set_permissions(&home.path, fs::Permissions::from_mode(0o755)).unwrap();
+    let registry = outcome.registry.expect("mounting needs no write");
+    let capture = registry.capture_tool("mcp__recorded__echo").unwrap();
+    assert!(!capture.call(json!({}), false).await.is_error);
+
+    McpRuntimeManager::new(home.path.clone())
+        .disconnect("recorded")
+        .await
+        .unwrap();
+    assert!(capture.call(json!({}), false).await.is_error);
+    assert_eq!(server.authorizations("tools/call").len(), 1);
     drop(registry);
 }
 

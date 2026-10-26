@@ -195,6 +195,11 @@ impl McpRuntimeManager {
         Ok(status)
     }
 
+    /// After a committed create, gives the server an identity of its own; runs under the config write lease.
+    pub fn claim_connection(&self, name: &str) -> Result<()> {
+        self.connection_state()?.claim(name)
+    }
+
     /// After a committed rename, moves sessions that mounted the old name to the new one.
     pub fn rename_connection(&self, old_name: &str, new_name: &str) -> Result<()> {
         self.connection_state()?.rename(old_name, new_name)

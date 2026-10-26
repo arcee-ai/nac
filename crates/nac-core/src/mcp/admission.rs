@@ -12,10 +12,15 @@ use super::*;
 
 const DISCONNECTED_FILE: &str = "mcp_disconnected.json";
 
-/// A mounted session keeps the identity it loaded, so rename and delete never change what it may use.
+/// Identities let a running session follow its server through rename and delete; mounting never writes.
 #[derive(Serialize, Deserialize)]
 struct ConnectionRecord {
+    /// Changes when the record is rebuilt, so sessions mounted under an older record stay refused.
+    epoch: u64,
+    rebuilt: bool,
     names: BTreeMap<String, u64>,
+    /// Names a server had before a rename or delete; sessions that mounted them follow its identity.
+    retired: BTreeMap<String, u64>,
     /// Identities sessions may use; any other identity is refused.
     admitted: BTreeSet<u64>,
     next: u64,
@@ -24,26 +29,42 @@ struct ConnectionRecord {
 impl ConnectionRecord {
     /// Seeded from the clock so a rebuilt record never reissues an identity an older session holds.
     fn new() -> Self {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(1, |elapsed| elapsed.as_nanos() as u64);
         Self {
+            epoch: seed,
+            rebuilt: false,
             names: BTreeMap::new(),
+            retired: BTreeMap::new(),
             admitted: BTreeSet::new(),
-            next: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(1, |elapsed| elapsed.as_nanos() as u64),
+            next: seed,
         }
+    }
+
+    fn mint(&mut self, admitted: bool) -> u64 {
+        let identity = self.next;
+        self.next = self.next.wrapping_add(1);
+        if admitted {
+            self.admitted.insert(identity);
+        }
+        identity
     }
 
     fn identity(&mut self, name: &str, admitted: bool) -> u64 {
         if let Some(identity) = self.names.get(name) {
             return *identity;
         }
-        let identity = self.next;
-        self.next = self.next.wrapping_add(1);
+        let identity = self.mint(admitted);
         self.names.insert(name.to_string(), identity);
-        if admitted {
-            self.admitted.insert(identity);
-        }
         identity
+    }
+
+    fn resolve(&self, name: &str) -> Option<u64> {
+        self.names
+            .get(name)
+            .or_else(|| self.retired.get(name))
+            .copied()
     }
 
     fn is_disconnected(&self, name: &str) -> bool {
@@ -51,11 +72,29 @@ impl ConnectionRecord {
             .get(name)
             .is_some_and(|identity| !self.admitted.contains(identity))
     }
+
+    fn admits(&self, mount: &Mount) -> bool {
+        let same_record = match mount.epoch {
+            Some(epoch) => epoch == self.epoch,
+            None => !self.rebuilt,
+        };
+        same_record
+            && mount
+                .identity
+                .or_else(|| self.resolve(&mount.name))
+                .is_none_or(|identity| self.admitted.contains(&identity))
+    }
+}
+
+/// What a session mounted: the record it read and the server's identity there, once one exists.
+pub(super) struct Mount {
+    epoch: Option<u64>,
+    identity: Option<u64>,
+    name: String,
 }
 
 /// What an edit does when the record cannot be read; an unreadable record already blocks every session.
 enum Unreadable<'a> {
-    Fail,
     Skip,
     Rebuild(&'a mut dyn FnMut() -> ConnectionRecord),
 }
@@ -76,10 +115,10 @@ impl ConnectionState {
         })
     }
 
-    fn read(&self) -> Result<ConnectionRecord> {
+    fn read(&self) -> Result<Option<ConnectionRecord>> {
         read_auth_string_from_path(&self.path)?
             .map(|raw| serde_json::from_str(&raw).context("MCP connection state is invalid"))
-            .unwrap_or_else(|| Ok(ConnectionRecord::new()))
+            .transpose()
     }
 
     fn with_record<T: Default>(
@@ -88,9 +127,11 @@ impl ConnectionState {
         change: impl FnOnce(&mut ConnectionRecord) -> T,
     ) -> Result<T> {
         with_credential_lock(&self.path.with_extension("json.lock"), || {
-            let mut record = match (self.read(), unreadable) {
+            let read = self
+                .read()
+                .map(|record| record.unwrap_or_else(ConnectionRecord::new));
+            let mut record = match (read, unreadable) {
                 (Ok(record), _) => record,
-                (Err(error), Unreadable::Fail) => return Err(error),
                 (Err(_), Unreadable::Skip) => return Ok(T::default()),
                 (Err(_), Unreadable::Rebuild(rebuild)) => rebuild(),
             };
@@ -104,24 +145,31 @@ impl ConnectionState {
         })
     }
 
-    /// The identity a new session mounts `server_name` under, or `None` while it is disconnected.
-    pub(super) fn mount(&self, server_name: &str) -> Result<Option<u64>> {
+    /// What a new session mounts `server_name` as, or `None` while it is disconnected.
+    pub(super) fn mount(&self, server_name: &str) -> Result<Option<Mount>> {
         let record = self.read()?;
-        if let Some(identity) = record.names.get(server_name) {
-            return Ok(record.admitted.contains(identity).then_some(*identity));
-        }
-        self.with_record(Unreadable::Fail, |record| {
-            let identity = record.identity(server_name, true);
-            record.admitted.contains(&identity).then_some(identity)
+        let mount = Mount {
+            epoch: record.as_ref().map(|record| record.epoch),
+            identity: record
+                .as_ref()
+                .and_then(|record| record.resolve(server_name)),
+            name: server_name.to_string(),
+        };
+        let admitted = record.as_ref().is_none_or(|record| record.admits(&mount));
+        Ok(admitted.then_some(mount))
+    }
+
+    pub(super) fn is_admitted(&self, mount: &Mount) -> Result<bool> {
+        Ok(match self.read()? {
+            Some(record) => record.admits(mount),
+            None => mount.epoch.is_none(),
         })
     }
 
-    pub(super) fn is_admitted(&self, identity: u64) -> Result<bool> {
-        Ok(self.read()?.admitted.contains(&identity))
-    }
-
     pub(super) fn is_disconnected(&self, server_name: &str) -> Result<bool> {
-        Ok(self.read()?.is_disconnected(server_name))
+        Ok(self
+            .read()?
+            .is_some_and(|record| record.is_disconnected(server_name)))
     }
 
     /// Records one server's state; an unreadable record is rebuilt with every `configured` server disconnected.
@@ -134,6 +182,7 @@ impl ConnectionState {
         let mut configured = Some(configured);
         let mut repair = || {
             let mut record = ConnectionRecord::new();
+            record.rebuilt = true;
             for name in configured.take().into_iter().flatten() {
                 record.identity(name, false);
             }
@@ -149,19 +198,31 @@ impl ConnectionState {
         })
     }
 
+    /// Gives a newly created server its own identity, so it never inherits a retired name's state.
+    pub(super) fn claim(&self, server_name: &str) -> Result<()> {
+        self.with_record(Unreadable::Skip, |record| {
+            record.identity(server_name, true);
+        })
+    }
+
     /// Moves `from`'s identity to `to`, so sessions that mounted `from` follow the renamed server.
     pub(super) fn rename(&self, from: &str, to: &str) -> Result<()> {
         self.with_record(Unreadable::Skip, |record| {
-            if let Some(identity) = record.names.remove(from) {
-                record.names.insert(to.to_string(), identity);
-            }
+            let identity = match record.names.remove(from) {
+                Some(identity) => identity,
+                None => record.mint(true),
+            };
+            record.names.insert(to.to_string(), identity);
+            record.retired.insert(from.to_string(), identity);
         })
     }
 
     /// Releases a deleted server's name; sessions that mounted it keep its last state.
     pub(super) fn forget(&self, server_name: &str) -> Result<()> {
         self.with_record(Unreadable::Skip, |record| {
-            record.names.remove(server_name);
+            if let Some(identity) = record.names.remove(server_name) {
+                record.retired.insert(server_name.to_string(), identity);
+            }
         })
     }
 }
