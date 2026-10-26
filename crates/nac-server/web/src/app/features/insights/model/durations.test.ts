@@ -42,10 +42,11 @@ describe("segment durations", () => {
     ).toBeNull();
   });
 
-  it("sums only when every duration is known", () => {
+  it("sums the durations that are known", () => {
     expect(sumSegmentDurations([reasoning(800), tool({ durationMs: 200 })])).toBe(1_000);
-    expect(sumSegmentDurations([reasoning(800), tool({})])).toBeNull();
-    expect(sumSegmentDurations([reasoning(null), tool({ durationMs: 200 })])).toBeNull();
+    expect(sumSegmentDurations([reasoning(800), tool({})])).toBe(800);
+    expect(sumSegmentDurations([reasoning(null), tool({ durationMs: 200 })])).toBe(200);
+    expect(sumSegmentDurations([reasoning(null), tool({})])).toBeNull();
     expect(sumSegmentDurations([reasoning(0)])).toBe(0);
     expect(sumSegmentDurations([])).toBeNull();
   });

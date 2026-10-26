@@ -166,7 +166,7 @@ describe("insight labels", () => {
     ).toBe("Read File");
   });
 
-  it("says how long a settled group worked when every duration is known", () => {
+  it("says how long a settled group worked from the durations that are known", () => {
     expect(
       doneLabel(
         group([
@@ -177,7 +177,10 @@ describe("insight labels", () => {
     ).toBe("Worked for 12.3s");
     expect(
       doneLabel(group([thoughts("thoughts-0", { durationMs: 900 }), toolDetail("read")])),
-    ).toBe("Thoughts, Read File");
+    ).toBe("Worked for 0.9s");
+    expect(doneLabel(group([thoughts("thoughts-0"), toolDetail("read")]))).toBe(
+      "Thoughts, Read File",
+    );
   });
 
   it("follows the newest live segment in the badge", () => {

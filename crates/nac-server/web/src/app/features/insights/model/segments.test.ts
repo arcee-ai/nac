@@ -173,14 +173,16 @@ describe("partitionModelTurn", () => {
     expect(combineStatuses([])).toBe("ready");
   });
 
-  it("sums the group duration only when every segment's is known", () => {
+  it("sums the group duration from the segments whose duration is known", () => {
     const [known] = groups([
       thoughts("thoughts-0", { durationMs: 800 }),
       toolDetail("exec_command", { status: "timed-out", durationMs: 200 }),
     ]);
-    const [unknown] = groups([thoughts("thoughts-0", { durationMs: 800 }), toolDetail("read")]);
+    const [partial] = groups([thoughts("thoughts-0", { durationMs: 800 }), toolDetail("read")]);
+    const [unknown] = groups([thoughts("thoughts-0"), toolDetail("read")]);
 
     expect(known.group.durationMs).toBe(1_000);
+    expect(partial.group.durationMs).toBe(800);
     expect(unknown.group.durationMs).toBeNull();
   });
 

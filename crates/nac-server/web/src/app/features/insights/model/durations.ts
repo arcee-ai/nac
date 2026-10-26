@@ -6,14 +6,16 @@ export function segmentDurationMs(segment: InsightSegment): number | null {
   return null;
 }
 
-/** Null unless every segment's duration is known, so a total never undercounts. */
+/**
+ * The known durations added up. A segment without one, such as a tool from
+ * before tool times were recorded or a workset, adds nothing, so the total can
+ * undercount; null when no segment has one.
+ */
 export function sumSegmentDurations(segments: readonly InsightSegment[]): number | null {
-  if (!segments.length) return null;
-  let total = 0;
+  let total: number | null = null;
   for (const segment of segments) {
     const duration = segmentDurationMs(segment);
-    if (duration === null) return null;
-    total += duration;
+    if (duration !== null) total = (total ?? 0) + duration;
   }
   return total;
 }
