@@ -88,6 +88,7 @@ export declare enum IconName {
     Danger = "danger",
     Download = "download",
     Stop = "stop",
+    Pause = "pause",
     JSON = "code",
     File = "attachment",
     Remove = "remove",
