@@ -208,8 +208,8 @@ export function TopSingleSessionHeader({
         </div>
         {/* Clipped sideways only: the buttons are as tall as the row, and
             their focus rings reach past it. Next to the side panel the chat
-            can drop to a fifth of the row, so under 24rem the row keeps only
-            the pickers' icons rather than clip them. */}
+            can drop to 200px, so under 24rem the row keeps only the pickers'
+            icons rather than clip them. */}
         <div className="@container flex w-full min-w-0 items-center gap-4 overflow-x-clip">
           {repo ? (
             <div className="flex shrink-0 items-center gap-0.5 @max-sm:hidden">
