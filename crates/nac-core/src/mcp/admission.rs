@@ -78,10 +78,18 @@ impl ConnectionRecord {
             Some(epoch) => epoch == self.epoch,
             None => !self.rebuilt,
         };
+        // A session mounted before its name had an identity belongs to the server that later
+        // gave the name up, not to a new server created under it.
+        let unpinned = || {
+            self.retired
+                .get(&mount.name)
+                .or_else(|| self.names.get(&mount.name))
+                .copied()
+        };
         same_record
             && mount
                 .identity
-                .or_else(|| self.resolve(&mount.name))
+                .or_else(unpinned)
                 .is_none_or(|identity| self.admitted.contains(&identity))
     }
 }

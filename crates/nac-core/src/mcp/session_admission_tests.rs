@@ -347,6 +347,11 @@ async fn a_session_still_loading_across_rename_and_disconnect_does_not_mount_the
     // A registry that read the configuration before the rename still mounts the old name.
     assert!(state.mount("recorded").unwrap().is_none());
     assert!(!state.is_admitted(&mounted_before).unwrap());
+
+    // A new server created under the old name does not take over sessions of the renamed one.
+    runtime.claim_connection("recorded").unwrap();
+    assert!(state.mount("recorded").unwrap().is_some());
+    assert!(!state.is_admitted(&mounted_before).unwrap());
     runtime.connect("renamed").await.unwrap();
     assert!(state.is_admitted(&mounted_before).unwrap());
     runtime.forget("renamed").await;

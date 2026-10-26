@@ -195,7 +195,7 @@ impl McpRuntimeManager {
         Ok(status)
     }
 
-    /// After a committed create, gives the server an identity of its own; runs under the config write lease.
+    /// Before a create commits, gives the server an identity of its own; runs under the config write lease.
     pub fn claim_connection(&self, name: &str) -> Result<()> {
         self.connection_state()?.claim(name)
     }
