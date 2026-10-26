@@ -740,16 +740,25 @@ fn recover_pending_transaction_locked(path: &Path) -> ConfigurationResult<()> {
 /// exposed, so NAC startup, registry loading, and dashboard reads never retain
 /// an unvalidated exchange candidate.
 pub fn read_mcp_configuration_consistently(path: &Path) -> ConfigurationResult<String> {
+    read_mcp_configuration_with(path, || ()).map(|(raw, ())| raw)
+}
+
+/// Also runs `alongside` under the lease, so state that writers update with the config matches it.
+pub(crate) fn read_mcp_configuration_with<T>(
+    path: &Path,
+    alongside: impl FnOnce() -> T,
+) -> ConfigurationResult<(String, T)> {
     let _lease = acquire_mcp_configuration_write_lease(path)?;
-    match read_document_image(path)? {
+    let raw = match read_document_image(path)? {
         Some((raw, _)) => String::from_utf8(raw).map_err(|error| {
             McpServerConfigurationStoreError::InvalidInput(format!(
                 "{} is not valid UTF-8: {error}",
                 path.display()
             ))
-        }),
-        None => Ok(String::new()),
-    }
+        })?,
+        None => String::new(),
+    };
+    Ok((raw, alongside()))
 }
 
 /// Reads only the global `[mcp]` defaults without requiring every server entry

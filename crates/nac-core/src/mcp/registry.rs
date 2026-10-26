@@ -168,52 +168,57 @@ async fn close_mounted_services(services: &mut Vec<SharedMcpService>) {
 fn file_servers_for_policy(
     paths: &PathContext,
     transport_policy: McpTransportPolicy,
+    connection_state: &Result<super::admission::ConnectionState>,
 ) -> (
     McpDefaults,
     BTreeMap<String, McpServerConfig>,
     Option<McpSkippedServer>,
+    Result<super::admission::ConnectionSnapshot>,
 ) {
+    let snapshot = || match connection_state {
+        Ok(state) => state.snapshot(),
+        Err(error) => Err(anyhow!("{error:#}")),
+    };
+    let skipped = |name: String, reason: String| {
+        (
+            McpDefaults::default(),
+            BTreeMap::new(),
+            Some(McpSkippedServer { name, reason }),
+            snapshot(),
+        )
+    };
     let Some(path) = default_config_path(paths) else {
-        return (McpDefaults::default(), BTreeMap::new(), None);
+        return (McpDefaults::default(), BTreeMap::new(), None, snapshot());
     };
     if !super::file_config::mcp_configuration_state_exists(&path) {
-        return (McpDefaults::default(), BTreeMap::new(), None);
+        return (McpDefaults::default(), BTreeMap::new(), None, snapshot());
     }
-    let raw = match super::read_mcp_configuration_consistently(&path) {
-        Ok(raw) => raw,
+    // The connection snapshot shares the config lease, so it matches the servers read here.
+    let (raw, snapshot) = match super::file_config::read_mcp_configuration_with(&path, snapshot) {
+        Ok(read) => read,
         Err(error) => {
-            let reason = format!("could not read config: {error:#}");
             eprintln!(
                 "MCP config at '{}' could not be read; its servers will be skipped: {:#}",
                 path.display(),
                 error
             );
-            return (
-                McpDefaults::default(),
-                BTreeMap::new(),
-                Some(McpSkippedServer {
-                    name: path.display().to_string(),
-                    reason,
-                }),
+            return skipped(
+                path.display().to_string(),
+                format!("could not read config: {error:#}"),
             );
         }
     };
     match mcp_config_for_policy(&raw, transport_policy) {
-        Ok(config) => (config.mcp, config.mcp_servers, None),
+        Ok(config) => (config.mcp, config.mcp_servers, None, snapshot),
         Err(error) => {
-            let reason = format!("invalid config: {error:#}");
             eprintln!(
                 "MCP config at '{}' is invalid; its servers will be skipped: {:#}",
                 path.display(),
                 error
             );
-            (
-                McpDefaults::default(),
-                BTreeMap::new(),
-                Some(McpSkippedServer {
-                    name: path.display().to_string(),
-                    reason,
-                }),
+            skipped(
+                path.display().to_string(),
+                format!("invalid config: {error:#}"),
             )
         }
     }
@@ -241,7 +246,9 @@ impl McpRegistry {
         transport_policy: McpTransportPolicy,
         root_policy: McpRootPolicy,
     ) -> Result<McpLoadOutcome> {
-        let (defaults, servers, config_error) = file_servers_for_policy(paths, transport_policy);
+        let connection_state = super::admission::ConnectionState::for_home(paths);
+        let (defaults, servers, config_error, snapshot) =
+            file_servers_for_policy(paths, transport_policy, &connection_state);
         if let Some(skipped) = config_error {
             return Ok(McpLoadOutcome {
                 registry: None,
@@ -256,7 +263,7 @@ impl McpRegistry {
         }
 
         let roots = mcp_roots_for_policy(cwd, sandbox, root_policy)?;
-        let connection_state = super::admission::ConnectionState::for_home(paths)?;
+        let connection_state = connection_state?;
         let sync = Arc::new(McpSyncState::new());
 
         let mut tools = HashMap::new();
@@ -271,13 +278,18 @@ impl McpRegistry {
             if !server_config.enabled {
                 continue;
             }
-            let mounted = connection_state
-                .mount(&server_name)
+            let mounted = snapshot
+                .as_ref()
                 .map_err(|error| format!("connection state is unreadable: {error:#}"))
-                .and_then(|mount| {
-                    mount.ok_or_else(|| {
-                        "disconnected; connect it in MCP settings to use it".to_string()
-                    })
+                .and_then(|snapshot| {
+                    let mount = snapshot.mount(&server_name);
+                    match connection_state.is_admitted(&mount) {
+                        Ok(true) => Ok(mount),
+                        Ok(false) => {
+                            Err("disconnected; connect it in MCP settings to use it".to_string())
+                        }
+                        Err(error) => Err(format!("connection state is unreadable: {error:#}")),
+                    }
                 });
             let connection = match mounted {
                 Ok(mount) => mount,

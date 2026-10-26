@@ -14,8 +14,8 @@ use std::time::Duration;
 
 #[derive(Default)]
 struct Behavior {
-    /// Holds the first tools/call: signals arrival, then waits for a release.
-    held: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
+    /// Holds the first request for this method: signals arrival, then waits for a release.
+    held: Option<(&'static str, mpsc::Sender<()>, mpsc::Receiver<()>)>,
     /// Answers tools/call carrying this Authorization header with 401, as for a revoked token.
     rejected_authorization: Option<String>,
 }
@@ -34,10 +34,16 @@ impl RecordingMcpServer {
     }
 
     pub(crate) fn start_holding_first_call() -> (Self, mpsc::Receiver<()>, mpsc::Sender<()>) {
+        Self::start_holding_first("tools/call")
+    }
+
+    pub(crate) fn start_holding_first(
+        method: &'static str,
+    ) -> (Self, mpsc::Receiver<()>, mpsc::Sender<()>) {
         let (arrived, arrival) = mpsc::channel();
         let (release_sender, release) = mpsc::channel();
         let server = Self::start_with(Behavior {
-            held: Some((arrived, release)),
+            held: Some((method, arrived, release)),
             ..Behavior::default()
         });
         (server, arrival, release_sender)
@@ -80,6 +86,15 @@ impl RecordingMcpServer {
                     .lock()
                     .unwrap()
                     .push((method.clone(), authorization.clone()));
+                if behavior
+                    .held
+                    .as_ref()
+                    .is_some_and(|(held, _, _)| *held == method)
+                {
+                    let (_, arrived, release) = behavior.held.take().unwrap();
+                    arrived.send(()).unwrap();
+                    release.recv_timeout(Duration::from_secs(10)).unwrap();
+                }
                 let result = match method.as_str() {
                     "initialize" => json!({
                         "protocolVersion": "2025-06-18",
@@ -92,10 +107,6 @@ impl RecordingMcpServer {
                         "inputSchema": {"type": "object", "properties": {}}
                     }]}),
                     "tools/call" => {
-                        if let Some((arrived, release)) = behavior.held.take() {
-                            arrived.send(()).unwrap();
-                            release.recv_timeout(Duration::from_secs(10)).unwrap();
-                        }
                         if authorization.is_some()
                             && authorization == behavior.rejected_authorization
                         {

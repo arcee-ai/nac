@@ -19,8 +19,8 @@ struct ConnectionRecord {
     epoch: u64,
     rebuilt: bool,
     names: BTreeMap<String, u64>,
-    /// Names a server had before a rename or delete; sessions that mounted them follow its identity.
-    retired: BTreeMap<String, u64>,
+    /// Every identity each name has held; identities are issued in increasing order.
+    history: BTreeMap<String, BTreeSet<u64>>,
     /// Identities sessions may use; any other identity is refused.
     admitted: BTreeSet<u64>,
     next: u64,
@@ -36,7 +36,7 @@ impl ConnectionRecord {
             epoch: seed,
             rebuilt: false,
             names: BTreeMap::new(),
-            retired: BTreeMap::new(),
+            history: BTreeMap::new(),
             admitted: BTreeSet::new(),
             next: seed,
         }
@@ -51,20 +51,35 @@ impl ConnectionRecord {
         identity
     }
 
+    fn record_holder(&mut self, name: &str, identity: u64) {
+        self.history
+            .entry(name.to_string())
+            .or_default()
+            .insert(identity);
+    }
+
+    fn bind(&mut self, name: &str, identity: u64) {
+        self.names.insert(name.to_string(), identity);
+        self.record_holder(name, identity);
+    }
+
     fn identity(&mut self, name: &str, admitted: bool) -> u64 {
         if let Some(identity) = self.names.get(name) {
             return *identity;
         }
         let identity = self.mint(admitted);
-        self.names.insert(name.to_string(), identity);
+        self.bind(name, identity);
         identity
     }
 
-    fn resolve(&self, name: &str) -> Option<u64> {
-        self.names
-            .get(name)
-            .or_else(|| self.retired.get(name))
-            .copied()
+    /// Removes `name`, giving a server that never had an identity one, so its sessions keep a state.
+    fn release(&mut self, name: &str) -> u64 {
+        let identity = match self.names.remove(name) {
+            Some(identity) => identity,
+            None => self.mint(true),
+        };
+        self.record_holder(name, identity);
+        identity
     }
 
     fn is_disconnected(&self, name: &str) -> bool {
@@ -78,27 +93,46 @@ impl ConnectionRecord {
             Some(epoch) => epoch == self.epoch,
             None => !self.rebuilt,
         };
-        // A session mounted before its name had an identity belongs to the server that later
-        // gave the name up, not to a new server created under it.
-        let unpinned = || {
-            self.retired
-                .get(&mount.name)
-                .or_else(|| self.names.get(&mount.name))
-                .copied()
-        };
         same_record
             && mount
                 .identity
-                .or_else(unpinned)
+                .or_else(|| self.first_identity_since(mount))
                 .is_none_or(|identity| self.admitted.contains(&identity))
+    }
+
+    /// A server without an identity at mount time takes the first one its name received afterwards.
+    fn first_identity_since(&self, mount: &Mount) -> Option<u64> {
+        self.history
+            .get(&mount.name)?
+            .range(mount.watermark..)
+            .next()
+            .copied()
     }
 }
 
-/// What a session mounted: the record it read and the server's identity there, once one exists.
+/// What a session mounted: the record it read with the configuration, and the server's identity.
 pub(super) struct Mount {
     epoch: Option<u64>,
     identity: Option<u64>,
+    watermark: u64,
     name: String,
+}
+
+/// The record as read together with one configuration revision.
+pub(super) struct ConnectionSnapshot(Option<ConnectionRecord>);
+
+impl ConnectionSnapshot {
+    pub(super) fn mount(&self, server_name: &str) -> Mount {
+        Mount {
+            epoch: self.0.as_ref().map(|record| record.epoch),
+            identity: self
+                .0
+                .as_ref()
+                .and_then(|record| record.names.get(server_name).copied()),
+            watermark: self.0.as_ref().map_or(0, |record| record.next),
+            name: server_name.to_string(),
+        }
+    }
 }
 
 /// What an edit does when the record cannot be read; an unreadable record already blocks every session.
@@ -153,18 +187,9 @@ impl ConnectionState {
         })
     }
 
-    /// What a new session mounts `server_name` as, or `None` while it is disconnected.
-    pub(super) fn mount(&self, server_name: &str) -> Result<Option<Mount>> {
-        let record = self.read()?;
-        let mount = Mount {
-            epoch: record.as_ref().map(|record| record.epoch),
-            identity: record
-                .as_ref()
-                .and_then(|record| record.resolve(server_name)),
-            name: server_name.to_string(),
-        };
-        let admitted = record.as_ref().is_none_or(|record| record.admits(&mount));
-        Ok(admitted.then_some(mount))
+    /// Read under the config lease, so every name maps to the identity it had in that revision.
+    pub(super) fn snapshot(&self) -> Result<ConnectionSnapshot> {
+        self.read().map(ConnectionSnapshot)
     }
 
     pub(super) fn is_admitted(&self, mount: &Mount) -> Result<bool> {
@@ -206,7 +231,7 @@ impl ConnectionState {
         })
     }
 
-    /// Gives a newly created server its own identity, so it never inherits a retired name's state.
+    /// Gives a newly created server its own identity, so it never inherits an earlier holder's state.
     pub(super) fn claim(&self, server_name: &str) -> Result<()> {
         self.with_record(Unreadable::Skip, |record| {
             record.identity(server_name, true);
@@ -216,21 +241,15 @@ impl ConnectionState {
     /// Moves `from`'s identity to `to`, so sessions that mounted `from` follow the renamed server.
     pub(super) fn rename(&self, from: &str, to: &str) -> Result<()> {
         self.with_record(Unreadable::Skip, |record| {
-            let identity = match record.names.remove(from) {
-                Some(identity) => identity,
-                None => record.mint(true),
-            };
-            record.names.insert(to.to_string(), identity);
-            record.retired.insert(from.to_string(), identity);
+            let identity = record.release(from);
+            record.bind(to, identity);
         })
     }
 
     /// Releases a deleted server's name; sessions that mounted it keep its last state.
     pub(super) fn forget(&self, server_name: &str) -> Result<()> {
         self.with_record(Unreadable::Skip, |record| {
-            if let Some(identity) = record.names.remove(server_name) {
-                record.retired.insert(server_name.to_string(), identity);
-            }
+            record.release(server_name);
         })
     }
 }

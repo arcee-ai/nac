@@ -241,7 +241,7 @@ async fn an_unreadable_disconnect_record_keeps_every_mounted_session_blocked() {
     // A disconnected server that was then deleted is no longer in the configuration.
     let deleted_state =
         admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
-    let deleted = deleted_state.mount("deleted").unwrap().unwrap();
+    let deleted = deleted_state.snapshot().unwrap().mount("deleted");
     runtime.disconnect("deleted").await.unwrap();
     file_config::delete_mcp_server_configuration(&home.path.join("config.toml"), "deleted")
         .unwrap();
@@ -326,35 +326,102 @@ async fn disconnecting_a_renamed_server_stops_sessions_that_mounted_its_old_name
     drop(registry);
 }
 
+fn rename_config(config: &Path, from: &str, to: &str) {
+    let (mut record, _) =
+        file_config::load_mcp_server_configuration_snapshot(config, from).unwrap();
+    record.name = to.to_string();
+    file_config::update_mcp_server_configuration(config, from, record).unwrap();
+}
+
 #[tokio::test]
-async fn a_session_still_loading_across_rename_and_disconnect_does_not_mount_the_old_name() {
+async fn a_session_still_loading_across_rename_and_disconnect_stays_on_the_renamed_server() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let home = TestHome::new("nac-mcp-stale-load", "recorded", "http://127.0.0.1:9/mcp");
     let state = admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
-    let mounted_before = state
-        .mount("recorded")
-        .unwrap()
-        .expect("never disconnected");
     let runtime = McpRuntimeManager::new(home.path.clone());
     let config = home.path.join("config.toml");
-    let (mut record, _) =
-        file_config::load_mcp_server_configuration_snapshot(&config, "recorded").unwrap();
-    record.name = "renamed".to_string();
-    file_config::update_mcp_server_configuration(&config, "recorded", record).unwrap();
+    // Registries load the record with the configuration, then mount each server after network awaits.
+    let loaded_before = state.snapshot().unwrap();
+    rename_config(&config, "recorded", "renamed");
     runtime.rename_connection("recorded", "renamed").unwrap();
     runtime.disconnect("renamed").await.unwrap();
+    let stale = loaded_before.mount("recorded");
+    assert!(!state.is_admitted(&stale).unwrap());
 
-    // A registry that read the configuration before the rename still mounts the old name.
-    assert!(state.mount("recorded").unwrap().is_none());
-    assert!(!state.is_admitted(&mounted_before).unwrap());
-
-    // A new server created under the old name does not take over sessions of the renamed one.
+    // Neither a new server under the old name nor deleting it again takes over those sessions.
     runtime.claim_connection("recorded").unwrap();
-    assert!(state.mount("recorded").unwrap().is_some());
-    assert!(!state.is_admitted(&mounted_before).unwrap());
+    let fresh = state.snapshot().unwrap().mount("recorded");
+    assert!(state.is_admitted(&fresh).unwrap());
+    runtime.forget_connection("recorded").unwrap();
+    assert!(!state.is_admitted(&stale).unwrap());
     runtime.connect("renamed").await.unwrap();
-    assert!(state.is_admitted(&mounted_before).unwrap());
+    assert!(state.is_admitted(&stale).unwrap());
     runtime.forget("renamed").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_registry_held_mid_load_across_rename_and_disconnect_does_not_mount_the_old_name() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let (early, arrival, release) = RecordingMcpServer::start_holding_first("initialize");
+    let server = RecordingMcpServer::start();
+    let home = TestHome::with_server(
+        "nac-mcp-held-load",
+        "recorded",
+        &server.url,
+        &format!(
+            "[mcp_servers.aaa_early]\ntransport = \"streamable_http\"\nurl = \"{}\"\n",
+            early.url
+        ),
+    );
+    let cwd = std::env::current_dir().unwrap();
+    let loading = tokio::spawn(async move { load(&cwd).await });
+    tokio::task::spawn_blocking(move || arrival.recv_timeout(std::time::Duration::from_secs(10)))
+        .await
+        .unwrap()
+        .expect("the earlier server's startup is held");
+
+    rename_config(&home.path.join("config.toml"), "recorded", "renamed");
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    runtime.rename_connection("recorded", "renamed").unwrap();
+    runtime.disconnect("renamed").await.unwrap();
+    release.send(()).unwrap();
+
+    let outcome = loading.await.unwrap();
+    assert!(outcome
+        .skipped
+        .iter()
+        .any(|skipped| skipped.name == "recorded" && skipped.reason.contains("disconnected")));
+    if let Some(registry) = outcome.registry.as_ref() {
+        assert!(registry.capture_tool("mcp__recorded__echo").is_none());
+    }
+    assert!(server.authorizations("tools/call").is_empty());
+}
+
+#[tokio::test]
+async fn disconnecting_a_name_added_back_by_hand_stops_its_sessions() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let home = TestHome::new("nac-mcp-hand-added", "recorded", "http://127.0.0.1:9/mcp");
+    let state = admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    let config = home.path.join("config.toml");
+    rename_config(&config, "recorded", "renamed");
+    runtime.rename_connection("recorded", "renamed").unwrap();
+    fs::write(
+        &config,
+        format!(
+            "{}[mcp_servers.recorded]\ntransport = \"streamable_http\"\nurl = \"http://127.0.0.1:9/other\"\n",
+            fs::read_to_string(&config).unwrap()
+        ),
+    )
+    .unwrap();
+    let added = state.snapshot().unwrap().mount("recorded");
+    assert!(state.is_admitted(&added).unwrap());
+
+    runtime.disconnect("recorded").await.unwrap();
+    assert!(!state.is_admitted(&added).unwrap());
+    let statuses = runtime.statuses().await.unwrap();
+    assert!(blocked(&statuses, "recorded"));
+    assert!(!blocked(&statuses, "renamed"));
 }
 
 #[cfg(unix)]
