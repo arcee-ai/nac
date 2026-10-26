@@ -785,6 +785,13 @@ enum DurableRunTerminal {
     Failed,
 }
 
+/// Final response or redacted failure a terminal run leaves behind.
+enum RunTerminalEvidence {
+    None,
+    Response(String),
+    Failure(crate::run_failure::RunFailure),
+}
+
 enum OperationAdmissionPreparationError {
     ExternalBusy { session_id: String },
     Coordination { message: SessionCoordinationError },

@@ -744,7 +744,7 @@ async fn mark_run_finishing_clears_submitted_user_message_before_persistence() {
             Some(42),
             None,
             DurableRunTerminal::Completed,
-            None,
+            RunTerminalEvidence::None,
         )
         .await
         .unwrap();

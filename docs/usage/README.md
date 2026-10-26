@@ -10,6 +10,7 @@ durable direct-session work.
 - [Direct-session permissions](permissions.md)
 - [Recent terminal activity](terminal-history.md)
 - [Durable direct goals](direct-goals.md)
+- [Independent direct tasks](independent-tasks.md)
 - [Traditional child sessions](traditional-children.md)
 - [Managed orchestrator sessions](managed-orchestrators.md)
 - [Native web retrieval](web-retrieval.md)
