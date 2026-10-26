@@ -1,4 +1,4 @@
-import { useHref } from "react-router-dom";
+import { useHref, useLinkClickHandler } from "react-router-dom";
 
 import { SubagentTranscriptCard } from "@/app/atoms";
 import { cardStatus } from "@/app/features/delegation/presentation/cardStatus";
@@ -35,7 +35,9 @@ export function DelegatedCompletionCard({
   const policy = useUiPolicy();
   const showBehaviorIcon = useSessionBehaviorIconVisible();
   const { openSubagent } = useInsightsNavigation();
-  const sessionHref = useHref(routes.session(completion.sessionId));
+  const sessionRoute = routes.session(completion.sessionId);
+  const sessionHref = useHref(sessionRoute);
+  const followSessionLink = useLinkClickHandler<HTMLAnchorElement>(sessionRoute);
   // Without NAC orchestration an orchestrator is no session the user can open.
   const openable =
     interactive && (policy.orchestrationEnabled || completion.kind === "coding-agent");
@@ -51,6 +53,7 @@ export function DelegatedCompletionCard({
         showBehaviorIcon={showBehaviorIcon}
         onOpen={openable ? () => openSubagent(rowKey) : undefined}
         sessionHref={openable ? sessionHref : null}
+        onSessionLinkClick={followSessionLink}
       />
     </div>
   );

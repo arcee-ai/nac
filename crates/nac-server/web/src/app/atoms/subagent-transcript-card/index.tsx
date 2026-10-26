@@ -34,6 +34,8 @@ interface SubagentTranscriptCardProps {
   onOpen?: () => void;
   /** The child session route behind "Go to session". Without it there is no link. */
   sessionHref?: string | null;
+  /** Follows "Go to session" in the caller's router instead of loading the href. */
+  onSessionLinkClick?: React.MouseEventHandler<HTMLAnchorElement>;
   className?: string;
 }
 
@@ -115,6 +117,7 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
   showBehaviorIcon,
   onOpen,
   sessionHref,
+  onSessionLinkClick,
   className,
 }) => {
   const notFound = status === SubagentCardStatus.NotFound;
@@ -180,7 +183,12 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
             <span className="min-w-0 truncate px-1 text-xs text-basic-muted">{label}</span>
           ) : null}
           {href ? (
-            <a href={href} aria-label={`Go to session ${title}`} className={LINK_CLASS}>
+            <a
+              href={href}
+              onClick={onSessionLinkClick}
+              aria-label={`Go to session ${title}`}
+              className={LINK_CLASS}
+            >
               <span className="truncate">Go to session</span>
               <Icon iconName={IconName.Right} size={16} aria-hidden className="shrink-0" />
             </a>

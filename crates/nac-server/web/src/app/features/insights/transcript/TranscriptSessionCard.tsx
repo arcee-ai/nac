@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { memo } from "react";
-import { useHref } from "react-router-dom";
+import { useHref, useLinkClickHandler } from "react-router-dom";
 
 import { SubagentCardStatus, SubagentTranscriptCard } from "@/app/atoms";
 import { cardStatus, type CardStatus } from "@/app/features/delegation/presentation/cardStatus";
@@ -129,7 +129,9 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
   const state = cardState(entry, records, failed);
   const showBehaviorIcon = useSessionBehaviorIconVisible();
   const { openSubagent } = useInsightsNavigation();
-  const sessionHref = useHref(routes.session(state.sessionId ?? ""));
+  const sessionRoute = routes.session(state.sessionId ?? "");
+  const sessionHref = useHref(sessionRoute);
+  const followSessionLink = useLinkClickHandler<HTMLAnchorElement>(sessionRoute);
   // The row key is built from the report, which resolved to this very session.
   const rowKey = interactive && state.sessionId !== null ? entry.rowKey : null;
   return (
@@ -141,6 +143,7 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
       showBehaviorIcon={showBehaviorIcon}
       onOpen={rowKey ? () => openSubagent(rowKey) : undefined}
       sessionHref={rowKey ? sessionHref : null}
+      onSessionLinkClick={followSessionLink}
     />
   );
 });
