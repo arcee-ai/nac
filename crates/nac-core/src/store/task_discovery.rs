@@ -8,6 +8,8 @@ pub const TASK_SEARCH_SCAN_LIMIT: usize = 500;
 pub const MAX_TASK_REFERENCE_BYTES: usize = 64;
 pub const MAX_TASK_TEXT_BYTES: usize = 120;
 const PROMPT_EXCERPT_CHARS: usize = 240;
+/// Characters of each current or retained goal objective a snapshot returns.
+pub const GOAL_OBJECTIVE_CHARS: usize = 1_000;
 
 const INDEPENDENT_TASK: &str = "s.behavior IN ('direct', 'direct-with-orchestrator')
      AND NOT EXISTS (SELECT 1 FROM traditional_children c WHERE c.child_session_id = s.session_id)
@@ -87,7 +89,9 @@ pub struct DirectTaskSnapshot {
     pub visible_message_count: u64,
     pub current_run: Option<TaskRunState>,
     pub pending_inbox_items: u64,
+    /// Its objective is redacted and cut to `GOAL_OBJECTIVE_CHARS`.
     pub goal: Option<SessionGoalRecord>,
+    pub goal_objective_truncated: bool,
     /// The last run that settled against the current goal, when one did.
     pub goal_last_run_id: Option<String>,
     /// Newest first, bounded by `RETAINED_GOAL_OUTCOMES`.
@@ -124,6 +128,15 @@ fn redacted_text(
     prompt: Option<String>,
 ) -> (Option<String>, Option<String>) {
     (title.as_deref().map(redact), prompt.as_deref().map(redact))
+}
+
+/// A redacted objective cut to `GOAL_OBJECTIVE_CHARS`, and whether anything was cut.
+fn bounded_objective(objective: &str) -> (String, bool) {
+    let redacted = redact(objective);
+    match super::task_evidence::truncate_chars(&redacted, GOAL_OBJECTIVE_CHARS) {
+        (kept, true) => (format!("{kept}…"), true),
+        (_, false) => (redacted, false),
+    }
 }
 
 fn excerpt(text: Option<String>) -> Option<String> {
@@ -233,48 +246,39 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
          WHERE sp.project_id = ?1 AND {INDEPENDENT_TASK}
            AND (?2 IS NULL OR s.session_id <> ?2)
            AND (?3 IS NULL OR s.updated_at < ?3 OR (s.updated_at = ?3 AND s.rowid < ?4))
-         ORDER BY s.updated_at DESC, s.rowid DESC
-         LIMIT ?5"
+         ORDER BY s.updated_at DESC, s.rowid DESC"
     ))?;
-    let rows = statement
-        .query_map(
-            params![
-                search.project_id,
-                search.exclude_session_id,
-                after.map(|(updated_at, _)| updated_at),
-                after.map(|(_, row_id)| row_id),
-                TASK_SEARCH_SCAN_LIMIT as i64 + 1
-            ],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, i64>(7)?,
-                ))
-            },
-        )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let unscanned_rows_remain = rows.len() > TASK_SEARCH_SCAN_LIMIT;
-    let rows = rows.into_iter().take(TASK_SEARCH_SCAN_LIMIT);
+    // Hidden rows never touch the scan bound, cursor or flags.
+    let mut rows = statement.query(params![
+        search.project_id,
+        search.exclude_session_id,
+        after.map(|(updated_at, _)| updated_at),
+        after.map(|(_, row_id)| row_id),
+    ])?;
     let mut candidates = Vec::new();
     let mut scanned_rows = 0;
     let mut last_scanned = None;
     let mut more = false;
-    for (session_id, behavior, title, prompt, run_count, created_at, updated_at, row_id) in rows {
+    let mut scan_limit_reached = false;
+    while let Some(row) = rows.next()? {
+        let session_id: String = row.get(0)?;
         if search
             .visible
             .as_ref()
             .is_some_and(|visible| !visible(&session_id))
         {
-            last_scanned = Some(encode_cursor(&updated_at, row_id));
             continue;
         }
-        let (title, prompt) = redacted_text(title, prompt);
+        if scanned_rows == TASK_SEARCH_SCAN_LIMIT {
+            scan_limit_reached = true;
+            break;
+        }
+        let behavior: String = row.get(1)?;
+        let (title, prompt) = redacted_text(row.get(2)?, row.get(3)?);
+        let run_count: i64 = row.get(4)?;
+        let created_at: String = row.get(5)?;
+        let updated_at: String = row.get(6)?;
+        let row_id: i64 = row.get(7)?;
         let matched = match (&search.reference, &search.text) {
             (Some(reference), _) => {
                 matched_fields(title.as_deref(), prompt.as_deref(), |value| {
@@ -311,7 +315,6 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
             updated_at,
         });
     }
-    let scan_limit_reached = !more && unscanned_rows_remain;
     Ok(Some(TaskSearchPage {
         candidates,
         next_after: (more || scan_limit_reached).then_some(last_scanned).flatten(),
@@ -385,6 +388,11 @@ pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
         params![session_id],
         |row| row.get(0),
     )?;
+    let mut goal = super::session_goals::load_with_connection(&tx, session_id)?;
+    let mut goal_objective_truncated = false;
+    if let Some(goal) = goal.as_mut() {
+        (goal.objective, goal_objective_truncated) = bounded_objective(&goal.objective);
+    }
     Ok(TaskLookup::Found(Box::new(DirectTaskSnapshot {
         session_id: session_id.to_owned(),
         project_id,
@@ -395,10 +403,8 @@ pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
         visible_message_count: visible.max(0) as u64,
         current_run: current_run(&tx, session_id)?,
         pending_inbox_items: pending_inbox_items.max(0) as u64,
-        goal: super::session_goals::load_with_connection(&tx, session_id)?.map(|mut goal| {
-            goal.objective = redact(&goal.objective);
-            goal
-        }),
+        goal,
+        goal_objective_truncated,
         goal_last_run_id: tx
             .query_row(
                 "SELECT last_run_id FROM session_goals WHERE session_id = ?1",
@@ -410,7 +416,7 @@ pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
         prior_goals: super::task_evidence::load_goal_outcomes_with_connection(&tx, session_id)?
             .into_iter()
             .map(|mut goal| {
-                goal.objective = redact(&goal.objective);
+                (goal.objective, goal.objective_truncated) = bounded_objective(&goal.objective);
                 goal
             })
             .collect(),

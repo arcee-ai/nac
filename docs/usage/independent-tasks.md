@@ -22,10 +22,11 @@ is never collapsed into one duplicate; a match is discovery evidence rather than
 identity. `ambiguous` is `true` when a page shows several matches, `false` only
 when a single page covered the whole search with at most one match, and `null`
 (unknown) on any other page of a multi-page search. Pages hold at most 20
-candidates and examine at most 500 sessions; continue with `next_after`, an
+candidates and examine at most 500 readable sessions; continue with `next_after`, an
 opaque token that resumes only the same chat's search of the same project and
 does not survive a restart.
-`scan_limit_reached` means rows remain unexamined, not that nothing matched.
+`scan_limit_reached` means readable rows remain unexamined, not that nothing
+matched.
 
 ## Reading a task
 
@@ -35,7 +36,9 @@ does not survive a restart.
   goal with ID, version and status (plus `goal_last_run_id`, the last run that
   settled against it), the last 8 replaced or cleared goals with their final
   status and last settling run, and the last 8 run outcomes with a result excerpt of up to
-  2,000 characters or the failure. Stored excerpts and failures, titles,
+  2,000 characters or the failure. Goal objectives, current and retained, are
+  cut to 1,000 characters, with `goal_objective_truncated` and each prior
+  goal's `objective_truncated` saying when they were. Stored excerpts and failures, titles,
   prompt excerpts and goal objectives are credential-redacted, and search
   matches only the redacted text, so it cannot be used to guess a secret.
 - `ephemeral.approvals`: always `unknown`. Approval requests live in the
@@ -69,4 +72,5 @@ Configured Deny applies, and Ask fails closed without an interactive approver.
 Once the chat's project is known, its concrete `project:<id>` is the resource
 checked, so one Ask covers the call.
 Sessions whose `session:<id>` is not allowed without a prompt are skipped before
-matching, so they affect no candidate, flag or cursor.
+matching and never count toward the 500-row scan, so they affect no
+candidate, count, flag or cursor.

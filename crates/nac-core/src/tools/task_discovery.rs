@@ -224,6 +224,7 @@ fn found_task(snapshot: store::DirectTaskSnapshot) -> Value {
             "current_run": snapshot.current_run,
             "pending_inbox_items": snapshot.pending_inbox_items,
             "goal": snapshot.goal,
+            "goal_objective_truncated": snapshot.goal_objective_truncated,
             "goal_last_run_id": snapshot.goal_last_run_id,
             "prior_goals": snapshot.prior_goals,
             "run_outcomes": snapshot.run_outcomes,

@@ -562,3 +562,67 @@ async fn a_wildcard_ask_prompts_once_for_the_callers_own_project() {
     }
     cleanup(&runtime);
 }
+
+#[tokio::test]
+async fn oversized_goal_objectives_keep_the_snapshot_bounded() {
+    let runtime = runtime(Vec::new());
+    let path = runtime.store_path.clone();
+    let huge = "x".repeat(100_000);
+    let mut retired = Vec::new();
+    for _ in 0..crate::store::RETAINED_GOAL_OUTCOMES {
+        let goal = crate::store::create_session_goal(&path, "peer-a", &huge, None, None).unwrap();
+        crate::store::clear_session_goal(&path, "peer-a", &goal.goal_id, goal.version).unwrap();
+        retired.push(goal.goal_id);
+    }
+    let current = crate::store::create_session_goal(&path, "peer-a", &huge, None, None).unwrap();
+
+    let result = call(&runtime, "read_task", json!({"session_id":"peer-a"})).await;
+    let text = result.content.as_text().unwrap();
+    assert!(!result.is_error, "{text}");
+    assert!(
+        text.len() < 32 * 1024,
+        "read_task returned {} bytes",
+        text.len()
+    );
+    let read: Value = serde_json::from_str(text).unwrap();
+    let durable = &read["task"]["durable"];
+    assert_eq!(durable["goal"]["goal_id"], current.goal_id);
+    assert_eq!(durable["goal"]["version"], current.version);
+    assert_eq!(durable["goal_objective_truncated"], true);
+    let prior = durable["prior_goals"].as_array().unwrap();
+    assert_eq!(prior.len(), crate::store::RETAINED_GOAL_OUTCOMES);
+    assert!(prior.iter().all(|goal| goal["objective_truncated"] == true));
+    assert_eq!(prior[0]["goal_id"], json!(retired.last().unwrap()));
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn denied_sessions_beyond_the_scan_bound_change_no_page_metadata() {
+    let runtime = runtime(vec![PermissionRule::new(
+        "task_read",
+        "session:*",
+        PermissionEffect::Deny,
+    )]);
+    let path = runtime.store_path.clone();
+    let page = || async {
+        let mut page = value(&runtime, "find_tasks", json!({"reference":"ALL-469"})).await;
+        page.as_object_mut().unwrap().remove("as_of");
+        page
+    };
+    let before = page().await;
+    assert_eq!(before["candidates"], json!([]));
+    assert_eq!(before["next_after"], Value::Null);
+    assert_eq!(before["scan_limit_reached"], false);
+    assert_eq!(before["ambiguous"], false);
+
+    for index in 0..=crate::store::TASK_SEARCH_SCAN_LIMIT {
+        session(
+            &path,
+            &format!("denied-{index:04}"),
+            Some("p1"),
+            "ALL-469 hidden",
+        );
+    }
+    assert_eq!(page().await, before);
+    cleanup(&runtime);
+}

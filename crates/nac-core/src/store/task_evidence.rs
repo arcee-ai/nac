@@ -80,6 +80,8 @@ impl GoalRetirement {
 pub struct GoalOutcomeRecord {
     pub goal_id: String,
     pub objective: String,
+    /// Set by snapshot reads that return a cut objective.
+    pub objective_truncated: bool,
     pub status: GoalStatus,
     pub version: i64,
     pub tokens_used: u64,
@@ -297,6 +299,7 @@ pub(crate) fn load_goal_outcomes_with_connection(
         Ok(GoalOutcomeRecord {
             goal_id: row.get(0)?,
             objective: row.get(1)?,
+            objective_truncated: false,
             status: row
                 .get::<_, String>(2)?
                 .parse()
