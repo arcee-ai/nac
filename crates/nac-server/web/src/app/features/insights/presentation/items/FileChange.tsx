@@ -157,11 +157,33 @@ interface FileChangeProps {
 }
 
 /**
+ * Whether the element has been on screen since it mounted. The server reads
+ * the session's whole transcript to answer for one call, so a group of many
+ * changes asks only for those shown. Without IntersectionObserver every
+ * element counts as seen.
+ */
+function useSeen(element: Element | null): boolean {
+  const [seen, setSeen] = useState(() => typeof IntersectionObserver === "undefined");
+  useEffect(() => {
+    if (seen || !element) return undefined;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setSeen(true);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element, seen]);
+  return seen;
+}
+
+/**
  * A finished write or edit: its file button with the lines the call added and
- * removed, then the call's own diff. Both come from the call's result.
+ * removed, then the call's own diff. Both come from the call's result, which
+ * loads once the change is on screen.
  */
 export function FileChange({ path, callId, context }: FileChangeProps) {
-  const query = useToolCallContent(context.sessionId, callId);
+  const [anchor, setAnchor] = useState<HTMLSpanElement | null>(null);
+  const seen = useSeen(anchor);
+  const query = useToolCallContent(context.sessionId, callId, seen);
   const { data } = query;
   const change = useMemo(
     () => (data ? readChange(data.output, data.output_truncated) : null),
@@ -176,6 +198,7 @@ export function FileChange({ path, callId, context }: FileChangeProps) {
   const failed = !data && (query.isError || (query.errorUpdateCount > 0 && query.isFetching));
   return (
     <>
+      <span ref={setAnchor} aria-hidden className="absolute size-0" />
       {filePath ? (
         <ItemFileButton
           path={filePath}
