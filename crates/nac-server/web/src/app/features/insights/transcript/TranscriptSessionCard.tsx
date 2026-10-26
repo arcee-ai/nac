@@ -68,12 +68,22 @@ interface CardState extends CardStatus {
   sessionId: string | null;
 }
 
+/** A call that waits for approval or did not go through, as Insights shows it. */
+function callStatus(entry: InsightSessionEntry): CardStatus | null {
+  const label = entry.presentation.statusLabel;
+  if (entry.status === "pending") return { status: SubagentCardStatus.Running, label };
+  if (entry.status === "failed") return { status: SubagentCardStatus.Failed, label };
+  return null;
+}
+
 /**
  * The launch reports the session it started, but the model can put anything
  * in that report, so only a session the parent really has is shown as such.
  * Only a list that arrived can say the session is missing: while there is none
  * (loading, failed, or never fetched without NAC orchestration) or the latest
  * fetch failed, the launch shows as it reported itself, with nothing to open.
+ * A call that continues a session names it before it runs, so a session the
+ * parent has does not mean the call went through.
  */
 function cardState(
   entry: InsightSessionEntry,
@@ -81,9 +91,10 @@ function cardState(
   failed: boolean,
 ): CardState {
   const record = launchedRecord(records, entry.presentation.spawnedSessionId);
+  const own = callStatus(entry);
   if (record) {
     return {
-      ...cardStatus(record.status),
+      ...(own ?? cardStatus(record.status)),
       title: record.description.trim() || entry.title,
       sessionId: recordId(record),
     };
@@ -91,22 +102,7 @@ function cardState(
   const { title } = entry;
   if (entry.status === "running")
     return { status: SubagentCardStatus.Running, title, sessionId: null };
-  if (entry.status === "pending") {
-    return {
-      status: SubagentCardStatus.Running,
-      label: entry.presentation.statusLabel,
-      title,
-      sessionId: null,
-    };
-  }
-  if (entry.status === "failed") {
-    return {
-      status: SubagentCardStatus.Failed,
-      label: entry.presentation.statusLabel,
-      title,
-      sessionId: null,
-    };
-  }
+  if (own) return { ...own, title, sessionId: null };
   if (records === undefined || failed) {
     return { status: SubagentCardStatus.Ready, title, sessionId: null };
   }
