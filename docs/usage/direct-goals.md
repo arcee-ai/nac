@@ -10,9 +10,12 @@ Open the flag control beside the direct-session composer to create a goal. An
 objective is required; the token budget is optional and has no implicit
 default. The same panel edits the objective or budget and lets the user pause,
 resume, clear, or apply `usage limited` and `budget limited` states. Clearing
-deletes the current generation. Once a goal is complete, creating another goal
+removes the current generation. Once a goal is complete, creating another goal
 starts a fresh ID and zeroed accounting rather than reusing the old generation;
-the completed-goal panel labels that action **Replace and start**.
+the completed-goal panel labels that action **Replace and start**. A cleared or
+replaced goal keeps its ID, final status, version and accounting as bounded
+evidence (the last 8 per session) for [independent task
+reads](independent-tasks.md).
 
 The direct composer also implements literal goal commands. `/goal <objective>`
 creates and activates a new goal, while `/goal edit`, `/goal pause`, `/goal

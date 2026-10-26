@@ -113,7 +113,7 @@ fn human_shell_schema_upgrade_from_32_preserves_existing_sessions() {
         .unwrap();
     drop(connection);
     crate::store::initialize(&path).unwrap();
-    assert_eq!(crate::store::schema_version(), 37);
+    assert_eq!(crate::store::schema_version(), 38);
     let connection = open_runtime_connection(&path).unwrap();
     let after: String = connection
         .query_row(

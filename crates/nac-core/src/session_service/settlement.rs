@@ -82,7 +82,15 @@ impl SessionService {
                 completed_duration_ms,
                 completed_usage,
                 durable_terminal,
-                run_failure.clone(),
+                match (&outcome, run_failure.clone()) {
+                    (RunOutcome::Completed(response, _), _) => {
+                        RunTerminalEvidence::Response(response.clone())
+                    }
+                    (RunOutcome::Failed(..), Some(failure)) => {
+                        RunTerminalEvidence::Failure(failure)
+                    }
+                    (RunOutcome::Failed(..), None) => RunTerminalEvidence::None,
+                },
             )
             .await
         {
@@ -637,8 +645,13 @@ impl SessionService {
         completed_duration_ms: Option<u64>,
         completed_usage: Option<crate::model::TokenUsage>,
         durable_terminal: DurableRunTerminal,
-        failure: Option<crate::run_failure::RunFailure>,
+        evidence: RunTerminalEvidence,
     ) -> Result<()> {
+        let (failure, run_result) = match evidence {
+            RunTerminalEvidence::None => (None, None),
+            RunTerminalEvidence::Response(response) => (None, Some(response)),
+            RunTerminalEvidence::Failure(failure) => (Some(failure), None),
+        };
         let goal_final_billable_tokens = completed_usage
             .as_ref()
             .map_or(0, crate::model::TokenUsage::billable_tokens);
@@ -721,6 +734,7 @@ impl SessionService {
                 failure,
             });
         }
+        update.finished_run_result = run_result;
         let saved_session_id = update.session_id.clone();
         let store_path = self.metadata.store_path.clone();
         crate::store::spawn_blocking_store_caller(move || {
