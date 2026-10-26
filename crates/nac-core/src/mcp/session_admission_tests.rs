@@ -421,6 +421,32 @@ async fn a_name_renamed_onto_after_mount_is_resolved_by_when_it_was_bound() {
 }
 
 #[tokio::test]
+async fn a_server_created_over_a_stale_binding_gets_its_own_identity() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let home = TestHome::new(
+        "nac-mcp-stale-binding",
+        "recorded",
+        "http://127.0.0.1:9/mcp",
+    );
+    let state = admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    runtime.disconnect("recorded").await.unwrap();
+    let mounted = state.snapshot().unwrap().mount("recorded");
+    // Deleted by hand, so the record still binds the name; then created again in settings.
+    let config = home.path.join("config.toml");
+    let (record, _) =
+        file_config::load_mcp_server_configuration_snapshot(&config, "recorded").unwrap();
+    file_config::delete_mcp_server_configuration(&config, "recorded").unwrap();
+    file_config::insert_mcp_server_configuration(&config, record).unwrap();
+
+    runtime.claim_connection("recorded").unwrap();
+    assert!(!state.is_disconnected("recorded").unwrap());
+    runtime.connect("recorded").await.unwrap();
+    assert!(!state.is_admitted(&mounted).unwrap());
+    runtime.forget("recorded").await;
+}
+
+#[tokio::test]
 async fn disconnecting_a_name_added_back_by_hand_stops_its_sessions() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let home = TestHome::new("nac-mcp-hand-added", "recorded", "http://127.0.0.1:9/mcp");

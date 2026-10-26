@@ -235,7 +235,11 @@ impl ConnectionState {
     /// Gives a newly created server its own identity, so it never inherits an earlier holder's state.
     pub(super) fn claim(&self, server_name: &str) -> Result<()> {
         self.with_record(Unreadable::Skip, |record| {
-            record.identity(server_name, true);
+            if record.names.contains_key(server_name) {
+                record.release(server_name);
+            }
+            let identity = record.mint(true);
+            record.bind(server_name, identity);
         })
     }
 
