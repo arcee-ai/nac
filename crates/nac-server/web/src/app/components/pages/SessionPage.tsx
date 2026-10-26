@@ -313,14 +313,7 @@ export default function SessionPage() {
               errorNotice={errorNotice}
             />
 
-            <div
-              className={cn(
-                "pointer-events-none absolute bottom-0",
-                // The composer paints its own ground fade, so on a wide screen
-                // it reaches past the column's inset the way the header does.
-                isMobile ? "inset-x-0" : "-inset-x-2",
-              )}
-            >
+            <div className="pointer-events-none absolute inset-x-0 bottom-0">
               <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
             </div>
           </div>
