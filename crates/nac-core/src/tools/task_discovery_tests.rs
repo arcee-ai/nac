@@ -1,6 +1,6 @@
 use super::*;
 use crate::permissions::{PermissionBackend, PermissionBroker, PermissionEffect, PermissionRule};
-use crate::store::{InboxDelivery, NewProject};
+use crate::store::{GoalStatus, InboxDelivery, NewProject};
 use crate::tools::{execute_tool, ToolRuntime};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -242,8 +242,8 @@ async fn search_withholds_candidates_whose_session_is_not_plainly_allowed() {
     ]);
     let found = value(&runtime, "find_tasks", json!({"reference":"ALL-469"})).await;
     assert_eq!(found["candidates"], json!([]));
-    assert_eq!(found["withheld"], true);
     assert_eq!(found["ambiguous"], false);
+    assert!(found.get("withheld").is_none());
     assert!(!found.to_string().contains("attempt"));
     cleanup(&runtime);
 }
@@ -321,4 +321,96 @@ async fn arguments_are_bounded_and_selectors_are_exclusive() {
 fn navigation_percent_encodes_unexpected_bytes() {
     assert_eq!(navigation("abc-123"), "/session/abc-123");
     assert_eq!(navigation("a/b?c"), "/session/a%2Fb%3Fc");
+}
+
+#[tokio::test]
+async fn ambiguity_is_unknown_until_the_last_page_when_one_match_is_visible() {
+    let runtime = runtime(Vec::new());
+    let first = value(
+        &runtime,
+        "find_tasks",
+        json!({"reference":"ALL-469","limit":1}),
+    )
+    .await;
+    assert_eq!(first["candidates"].as_array().unwrap().len(), 1);
+    assert_eq!(first["ambiguous"], Value::Null);
+    let second = value(
+        &runtime,
+        "find_tasks",
+        json!({"reference":"ALL-469","limit":1,"after":first["next_after"]}),
+    )
+    .await;
+    assert_eq!(second["candidates"].as_array().unwrap().len(), 1);
+    assert_ne!(
+        first["candidates"][0]["session_id"],
+        second["candidates"][0]["session_id"]
+    );
+    assert_eq!(second["ambiguous"], false);
+    cleanup(&runtime);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn results_are_identical_across_store_owner_changes() {
+    let runtime = runtime(Vec::new());
+    let path = runtime.store_path.clone();
+    let goal = crate::store::create_session_goal(&path, "peer-a", "done", None, None).unwrap();
+    crate::store::update_session_goal_by_model(
+        &path,
+        "peer-a",
+        &goal.goal_id,
+        GoalStatus::Complete,
+    )
+    .unwrap();
+    let observe = |mut value: Value| {
+        value.as_object_mut().unwrap().remove("as_of");
+        value
+    };
+    let without_owner = (
+        observe(value(&runtime, "read_task", json!({"session_id":"peer-a"})).await),
+        observe(value(&runtime, "find_tasks", json!({"reference":"ALL-469"})).await),
+    );
+    for _ in 0..2 {
+        let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+        // Goal replacement through the owner keeps the completed goal provable.
+        let replaced =
+            crate::store::create_session_goal(&path, "peer-b", "again", None, None).unwrap();
+        crate::store::clear_session_goal(&path, "peer-b", &replaced.goal_id, replaced.version)
+            .unwrap();
+        let through_owner = (
+            observe(value(&runtime, "read_task", json!({"session_id":"peer-a"})).await),
+            observe(value(&runtime, "find_tasks", json!({"reference":"ALL-469"})).await),
+        );
+        assert_eq!(through_owner.0, without_owner.0);
+        assert_eq!(
+            through_owner.1["candidates"].as_array().unwrap().len(),
+            without_owner.1["candidates"].as_array().unwrap().len()
+        );
+        owner.shutdown().await.unwrap();
+        drop(owner);
+    }
+    let after = observe(value(&runtime, "read_task", json!({"session_id":"peer-b"})).await);
+    assert_eq!(
+        after["task"]["durable"]["prior_goals"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        after["task"]["durable"]["prior_goals"][0]["retirement"],
+        "cleared"
+    );
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn unreadable_store_fails_closed_without_task_data() {
+    let runtime = runtime(Vec::new());
+    std::fs::write(&runtime.store_path, b"not a sqlite database").unwrap();
+    let result = call(&runtime, "read_task", json!({"session_id":"peer-a"})).await;
+    assert!(result.is_error);
+    let text = result.content.as_text().unwrap();
+    assert!(text.contains("could not be read"), "{text}");
+    assert!(!text.contains("attempt one"));
+    cleanup(&runtime);
 }

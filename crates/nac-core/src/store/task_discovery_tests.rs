@@ -446,3 +446,87 @@ fn snapshot_reads_are_passive_over_pending_inbox_and_active_goal() {
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[test]
+fn retained_evidence_is_credential_redacted() {
+    let path = test_path("redact");
+    initialize(&path).unwrap();
+    insert_test_session(&path, "t");
+    let leaked = "the token Bearer sk-live-abcdef was rejected";
+    let failure = crate::run_failure::RunFailure {
+        kind: crate::run_failure::RunFailureKind::Transport,
+        phase: crate::run_failure::RunFailurePhase::Stream,
+        transient: false,
+        partial_output: crate::run_failure::PartialModelOutput::default(),
+        attempt_count: 1,
+        http_status: None,
+        retry_after_ms: None,
+        summary: leaked.into(),
+        diagnostic: leaked.into(),
+        recovery_action: crate::run_failure::RecoveryAction::AutomaticRetry,
+    };
+    let conn = open_runtime_connection(&path).unwrap();
+    record_run_outcome_with_connection(
+        &conn,
+        "t",
+        "failed-run",
+        RunOutcomeDisposition::Failed,
+        None,
+        Some(&failure),
+    )
+    .unwrap();
+    record_run_outcome_with_connection(
+        &conn,
+        "t",
+        "completed-run",
+        RunOutcomeDisposition::Completed,
+        Some(leaked),
+        None,
+    )
+    .unwrap();
+    let stored: Vec<String> = conn
+        .prepare("SELECT coalesce(failure_json, '') || coalesce(result_excerpt, '') FROM session_run_outcomes")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(stored.len(), 2);
+    assert!(
+        stored.iter().all(|row| !row.contains("sk-live-abcdef")),
+        "{stored:?}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn invisible_sessions_influence_no_match_or_page() {
+    let path = test_path("visibility");
+    initialize(&path).unwrap();
+    project(&path, "p1", "/tmp/project");
+    task(
+        &path,
+        "p1",
+        "hidden",
+        "secret needle",
+        "",
+        "2026-01-01T00:00:02Z",
+    );
+    task(&path, "p1", "shown", "plain", "", "2026-01-01T00:00:01Z");
+    let visible: TaskVisibility = std::sync::Arc::new(|session_id: &str| session_id != "hidden");
+    let page = |text: &str| {
+        search_direct_tasks(
+            &path,
+            &TaskSearch {
+                text: Some(text.into()),
+                visible: Some(std::sync::Arc::clone(&visible)),
+                ..search(&path, "p1")
+            },
+        )
+        .unwrap()
+        .unwrap()
+    };
+    // Matching only the hidden session must look like matching nothing.
+    assert_eq!(page("needle"), page("absent-everywhere"));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

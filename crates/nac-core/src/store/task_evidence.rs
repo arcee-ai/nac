@@ -123,10 +123,11 @@ pub(super) fn create_task_evidence_tables(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn bounded_excerpt(result: &str) -> (String, bool) {
-    match result.char_indices().nth(RUN_RESULT_EXCERPT_CHARS) {
-        Some((end, _)) => (result[..end].to_owned(), true),
-        None => (result.to_owned(), false),
+/// The first `limit` characters and whether anything was cut.
+pub(super) fn truncate_chars(text: &str, limit: usize) -> (&str, bool) {
+    match text.char_indices().nth(limit) {
+        Some((end, _)) => (&text[..end], true),
+        None => (text, false),
     }
 }
 
@@ -152,12 +153,18 @@ pub(crate) fn record_run_outcome_with_connection(
 ) -> Result<()> {
     let (excerpt, truncated) = match result {
         Some(result) => {
-            let (excerpt, truncated) = bounded_excerpt(result);
-            (Some(excerpt), truncated)
+            let (excerpt, truncated) = truncate_chars(result, RUN_RESULT_EXCERPT_CHARS);
+            (
+                Some(crate::model::redact_credentials(excerpt, &[])),
+                truncated,
+            )
         }
         None => (None, false),
     };
     let failure_json = failure
+        .cloned()
+        .map(crate::run_failure::RunFailure::sanitized)
+        .as_ref()
         .map(serde_json::to_string)
         .transpose()
         .context("failed to serialize run outcome failure")?;
@@ -191,6 +198,8 @@ pub(super) fn retain_goal_outcome_with_connection(
 ) -> Result<()> {
     let failure_json = goal
         .last_failure
+        .clone()
+        .map(crate::run_failure::RunFailure::sanitized)
         .as_ref()
         .map(serde_json::to_string)
         .transpose()

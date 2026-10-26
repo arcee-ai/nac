@@ -315,8 +315,11 @@ impl PermissionBroker {
         .await
     }
 
-    async fn remembered_allows(&self) -> anyhow::Result<Vec<PermissionRule>> {
-        let grants = match crate::store::coordinator::owner_for(&self.store_path)? {
+    async fn remembered_allows(
+        &self,
+        owner: Option<&Arc<crate::store::StoreCoordinator>>,
+    ) -> anyhow::Result<Vec<PermissionRule>> {
+        let grants = match owner {
             Some(owner) => {
                 owner
                     .list_effective_permission_grants(
@@ -339,19 +342,19 @@ impl PermissionBroker {
             .collect())
     }
 
-    /// Allow without a prompt; filters passive read results and never asks.
-    pub(crate) async fn allows_without_prompt(&self, resources: &[PermissionResource]) -> bool {
-        let Ok(remembered) = self.remembered_allows().await else {
-            return false;
-        };
-        match self.policy.evaluate(resources, &remembered).effect {
-            PermissionEffect::Allow => true,
-            PermissionEffect::Deny => false,
-            PermissionEffect::Ask => matches!(
-                self.load_approval_state().await,
-                Ok((PermissionApprovalMode::AutoApprove, _, _))
-            ),
-        }
+    /// Non-prompting policy snapshot for passive reads; `None` when grants are unreadable.
+    pub(crate) async fn passive_read_filter(&self) -> Option<PassiveReadFilter> {
+        let owner = crate::store::coordinator::owner_for(&self.store_path).ok()?;
+        let remembered = self.remembered_allows(owner.as_ref()).await.ok()?;
+        let auto_approve = matches!(
+            self.load_approval_state().await,
+            Ok((PermissionApprovalMode::AutoApprove, _, _))
+        );
+        Some(PassiveReadFilter {
+            policy: self.policy.clone(),
+            remembered,
+            auto_approve,
+        })
     }
 
     async fn authorize_invocation(
@@ -367,7 +370,15 @@ impl PermissionBroker {
                 "tool '{tool}' did not declare canonical permission resources"
             ));
         }
-        let remembered = match self.remembered_allows().await {
+        let owner = match crate::store::coordinator::owner_for(&self.store_path) {
+            Ok(owner) => owner,
+            Err(error) => {
+                return AuthorizationOutcome::Denied(format!(
+                    "permission grants could not be read: {error}"
+                ))
+            }
+        };
+        let remembered = match self.remembered_allows(owner.as_ref()).await {
             Ok(remembered) => remembered,
             Err(error) => {
                 return AuthorizationOutcome::Denied(format!(
@@ -422,10 +433,9 @@ impl PermissionBroker {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
-        let child = match crate::store::coordinator::owner_for(&self.store_path) {
-            Ok(Some(owner)) => owner.load_traditional_child(self.session_id.clone()).await,
-            Ok(None) => crate::store::load_traditional_child(&self.store_path, &self.session_id),
-            Err(error) => Err(error),
+        let child = match &owner {
+            Some(owner) => owner.load_traditional_child(self.session_id.clone()).await,
+            None => crate::store::load_traditional_child(&self.store_path, &self.session_id),
         };
         let delegated_child = match child {
             Ok(child) => child.is_some(),
@@ -781,4 +791,22 @@ fn epoch_millis_now() -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+/// Allows only what policy and grants allow, or Ask under auto-approve.
+#[derive(Clone)]
+pub(crate) struct PassiveReadFilter {
+    policy: PermissionPolicy,
+    remembered: Vec<PermissionRule>,
+    auto_approve: bool,
+}
+
+impl PassiveReadFilter {
+    pub(crate) fn allows(&self, resources: &[PermissionResource]) -> bool {
+        match self.policy.evaluate(resources, &self.remembered).effect {
+            PermissionEffect::Allow => true,
+            PermissionEffect::Deny => false,
+            PermissionEffect::Ask => self.auto_approve,
+        }
+    }
 }

@@ -6,8 +6,10 @@ use serde_json::{json, Value};
 use super::kernel::{NativeTool, PermissionResource, ToolAdmission, ToolCallContext, ToolServices};
 use super::mutation::argument_error;
 use super::ToolResult;
+use crate::permissions::PermissionBroker;
 use crate::store::{self, TaskLookup, TaskSearch};
 use crate::types::{FunctionDef, ToolDefinition};
+use std::sync::Arc;
 
 const MAX_ID_BYTES: usize = 160;
 const DEFAULT_LIMIT: usize = 10;
@@ -80,12 +82,12 @@ fn navigation(session_id: &str) -> String {
 }
 
 /// Only an attached, persisted direct primary may discover peers.
-fn caller(services: ToolServices<'_>) -> Result<String, ToolResult> {
+fn caller(services: ToolServices<'_>) -> Result<(String, Arc<PermissionBroker>), ToolResult> {
     match (
         services.runtime.permission_broker.as_ref(),
         services.runtime.session_id.as_deref(),
     ) {
-        (Some(_), Some(session_id)) => Ok(session_id.to_owned()),
+        (Some(broker), Some(session_id)) => Ok((session_id.to_owned(), Arc::clone(broker))),
         _ => Err(ToolResult::text(
             "Error: task discovery is available only to a persisted direct chat",
             true,
@@ -120,14 +122,10 @@ fn project_resource(project_id: Option<&str>) -> PermissionResource {
 async fn authorize_project(
     tool: &str,
     services: ToolServices<'_>,
+    broker: &Arc<PermissionBroker>,
     context: &ToolCallContext,
     project_id: &str,
 ) -> Result<(), ToolResult> {
-    let broker = services
-        .runtime
-        .permission_broker
-        .as_ref()
-        .ok_or_else(|| ToolResult::text("Error: task discovery is unavailable", true))?;
     match broker
         .authorize(
             tool,
@@ -173,7 +171,7 @@ async fn exact_lookup(
     tool: &str,
     services: ToolServices<'_>,
     context: &ToolCallContext,
-    caller: String,
+    (caller, broker): (String, Arc<PermissionBroker>),
     session_id: String,
     explicit_project: Option<String>,
 ) -> Result<Value, ToolResult> {
@@ -204,7 +202,7 @@ async fn exact_lookup(
             };
             if in_scope {
                 if let (None, Some(project)) = (&explicit_project, &snapshot.project_id) {
-                    authorize_project(tool, services, context, project).await?;
+                    authorize_project(tool, services, &broker, context, project).await?;
                 }
                 json!({"status": "found", "task": found_task(*snapshot)})
             } else {
@@ -334,8 +332,8 @@ impl NativeTool for FindTasksTool {
         context: &'a ToolCallContext,
     ) -> BoxFuture<'a, ToolResult> {
         Box::pin(async move {
-            let caller = match caller(services) {
-                Ok(caller) => caller,
+            let identity = match caller(services) {
+                Ok(identity) => identity,
                 Err(error) => return error,
             };
             if let Some(session_id) = input.session_id {
@@ -343,7 +341,7 @@ impl NativeTool for FindTasksTool {
                     "find_tasks",
                     services,
                     context,
-                    caller,
+                    identity,
                     session_id,
                     input.project_id,
                 )
@@ -353,6 +351,7 @@ impl NativeTool for FindTasksTool {
                     Err(error) => error,
                 };
             }
+            let (caller, broker) = identity;
             let explicit = input.project_id.is_some();
             let filtered = input.reference.is_some() || input.text.is_some();
             let project_id = match input.project_id {
@@ -377,11 +376,14 @@ impl NativeTool for FindTasksTool {
             };
             if !explicit {
                 if let Err(error) =
-                    authorize_project("find_tasks", services, context, &project_id).await
+                    authorize_project("find_tasks", services, &broker, context, &project_id).await
                 {
                     return error;
                 }
             }
+            let Some(filter) = broker.passive_read_filter().await else {
+                return unavailable("permission grants could not be read");
+            };
             let search = TaskSearch {
                 project_id: project_id.clone(),
                 reference: input.reference,
@@ -389,6 +391,9 @@ impl NativeTool for FindTasksTool {
                 exclude_session_id: Some(caller),
                 after: input.after,
                 limit: input.limit.unwrap_or(DEFAULT_LIMIT),
+                visible: Some(Arc::new(move |session_id: &str| {
+                    filter.allows(&[task_resource(session_id)])
+                })),
             };
             let page = match store_call(services, move |path| {
                 store::search_direct_tasks(path, &search)
@@ -405,22 +410,14 @@ impl NativeTool for FindTasksTool {
                     "detail": "No saved project with this ID exists in this store.",
                 })));
             };
-            let Some(broker) = services.runtime.permission_broker.as_ref() else {
-                return ToolResult::text("Error: task discovery is unavailable", true);
+            // Unknown (null) while one match is visible and unscanned rows remain.
+            let ambiguous = match (filtered, page.candidates.len(), &page.next_after) {
+                (true, 2.., _) => json!(true),
+                (true, _, Some(_)) => Value::Null,
+                _ => json!(false),
             };
-            let matched = page.candidates.len();
-            let mut visible = Vec::with_capacity(matched);
-            for candidate in page.candidates {
-                if broker
-                    .allows_without_prompt(&[task_resource(&candidate.session_id)])
-                    .await
-                {
-                    visible.push(candidate);
-                }
-            }
-            let withheld = visible.len() < matched;
-            let ambiguous = filtered && visible.len() > 1;
-            let candidates = visible
+            let candidates = page
+                .candidates
                 .into_iter()
                 .map(|candidate| {
                     let navigation = navigation(&candidate.session_id);
@@ -434,7 +431,6 @@ impl NativeTool for FindTasksTool {
                 "scope": {"project_id": project_id, "explicit": explicit},
                 "ambiguous": ambiguous,
                 "candidates": candidates,
-                "withheld": withheld,
                 "next_after": page.next_after,
                 "scanned_rows": page.scanned_rows,
                 "scan_limit_reached": page.scan_limit_reached,
@@ -498,15 +494,15 @@ impl NativeTool for ReadTaskTool {
         context: &'a ToolCallContext,
     ) -> BoxFuture<'a, ToolResult> {
         Box::pin(async move {
-            let caller = match caller(services) {
-                Ok(caller) => caller,
+            let identity = match caller(services) {
+                Ok(identity) => identity,
                 Err(error) => return error,
             };
             match exact_lookup(
                 "read_task",
                 services,
                 context,
-                caller,
+                identity,
                 input.session_id,
                 input.project_id,
             )

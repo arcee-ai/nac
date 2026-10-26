@@ -17,9 +17,10 @@ at most one selector:
   case-insensitive token in the title or last prompt (`ALL-4690` does not match).
 - `text`: a case-insensitive substring of the title or last prompt.
 
-With no selector it lists recent tasks. Every candidate is a separate attempt:
-several matches set `ambiguous` and are never collapsed into one duplicate, and a
-match is discovery evidence rather than identity. Pages hold at most 20
+With no selector it lists recent tasks. Every candidate is a separate attempt and
+is never collapsed into one duplicate; a match is discovery evidence rather than
+identity. `ambiguous` is `true` once a page shows several matches, `null` while a
+single visible match leaves more rows to page through, and `false` otherwise. Pages hold at most 20
 candidates and examine at most 500 sessions; continue with `next_after`.
 `scan_limit_reached` means rows remain unexamined, not that nothing matched.
 
@@ -30,7 +31,8 @@ candidates and examine at most 500 sessions; continue with `next_after`.
 - `durable`: run count, current durable run, pending inbox items, the current
   goal with ID, version and status, the last 8 replaced or cleared goals with
   their final status, and the last 8 run outcomes with a result excerpt of up to
-  2,000 characters or the failure.
+  2,000 characters or the failure. Stored excerpts and failures are
+  credential-redacted.
 - `ephemeral.approvals`: always `unknown`. Approval requests live in the
   target's live owner process, so their absence from a passive read never means
   none are pending.
@@ -55,6 +57,5 @@ the `task_read` action with resources `project:<id>` and `session:<id>`. A
 default-scope search or exact read also evaluates the resolved `project:<id>`, so
 rules on a concrete project apply whether or not `project_id` was passed.
 Configured Deny applies, and Ask fails closed without an interactive approver.
-Search candidates whose `session:<id>` is not allowed without a prompt are left
-out; `withheld` is then true. Neither `ambiguous` nor the `next_after` cursor
-reveals anything about withheld sessions.
+Sessions whose `session:<id>` is not allowed without a prompt are skipped before
+matching, so they affect no candidate, flag or cursor.

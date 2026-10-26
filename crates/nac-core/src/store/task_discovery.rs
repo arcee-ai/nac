@@ -20,7 +20,10 @@ pub enum TaskMatchField {
     LastPrompt,
 }
 
-#[derive(Debug, Clone, Default)]
+/// Caller visibility; rejected rows are skipped before matching and affect no output.
+pub type TaskVisibility = std::sync::Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+#[derive(Clone, Default)]
 pub struct TaskSearch {
     pub project_id: String,
     /// Work-unit reference matched as a whole case-insensitive token.
@@ -30,6 +33,7 @@ pub struct TaskSearch {
     pub exclude_session_id: Option<String>,
     pub after: Option<String>,
     pub limit: usize,
+    pub visible: Option<TaskVisibility>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
@@ -108,10 +112,12 @@ pub enum TaskLookup {
 }
 
 fn excerpt(text: Option<String>) -> Option<String> {
-    text.map(|text| match text.char_indices().nth(PROMPT_EXCERPT_CHARS) {
-        Some((end, _)) => format!("{}…", &text[..end]),
-        None => text,
-    })
+    text.map(
+        |text| match super::task_evidence::truncate_chars(&text, PROMPT_EXCERPT_CHARS) {
+            (kept, true) => format!("{kept}…"),
+            (_, false) => text,
+        },
+    )
 }
 
 fn contains_token(haystack: &str, token: &str) -> bool {
@@ -245,6 +251,15 @@ pub fn search_direct_tasks(path: &Path, search: &TaskSearch) -> Result<Option<Ta
     let mut last_scanned = None;
     let mut more = false;
     for (session_id, behavior, title, prompt, run_count, created_at, updated_at, row_id) in rows {
+        if search
+            .visible
+            .as_ref()
+            .is_some_and(|visible| !visible(&session_id))
+        {
+            scanned_rows += 1;
+            last_scanned = Some(encode_cursor(&updated_at, row_id));
+            continue;
+        }
         let matched = match (&search.reference, &search.text) {
             (Some(reference), _) => {
                 matched_fields(title.as_deref(), prompt.as_deref(), |value| {
