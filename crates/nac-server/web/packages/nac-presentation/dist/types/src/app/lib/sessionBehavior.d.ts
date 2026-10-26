@@ -20,6 +20,8 @@ export declare function sessionBehaviorLabel(behavior: SessionBehavior): string;
  * Subagents rows know only which topology they launched.
  */
 export declare function sessionBehaviorIcon(behavior: SessionBehavior | null | undefined, lineage?: SessionLineage["kind"] | null): IconName;
+/** What `sessionBehaviorIcon` draws, for the accessible name beside the glyph. */
+export declare function sessionBehaviorName(behavior: SessionBehavior | null | undefined, lineage?: SessionLineage["kind"] | null): string;
 export interface SessionPanelPolicy {
     widePanels: readonly SessionPanel[];
     mobilePanels: readonly SessionPanel[];

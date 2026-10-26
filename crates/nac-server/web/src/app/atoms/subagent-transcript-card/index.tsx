@@ -1,6 +1,7 @@
 import type React from "react";
 
 import { cn } from "../../lib/cn";
+import { sessionBehaviorName } from "../../lib/sessionBehavior";
 import type { SessionBehavior, SessionLineage } from "../../types/api";
 import Icon, { IconName } from "../icon";
 import ModelLoader, { ModelLoaderSize } from "../model-loader";
@@ -122,7 +123,12 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
   const label = notFound ? undefined : statusLabel;
   const statusName =
     status === SubagentCardStatus.Failed && label ? label.toLowerCase() : STATUS_NAME[status];
-  const openName = [`Open ${title} in Subagents`, statusName].filter(Boolean).join(", ");
+  // The glyph is decorative, so the name carries what it shows.
+  const typeName =
+    status === SubagentCardStatus.Ready && showBehaviorIcon
+      ? sessionBehaviorName(behavior, lineage)
+      : null;
+  const openName = [`Open ${title} in Subagents`, typeName, statusName].filter(Boolean).join(", ");
 
   return (
     <div
@@ -157,6 +163,7 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
         <span className={cn("min-w-0 flex-1 truncate label-small", TITLE_TONE[status])}>
           {notFound ? "Not found" : title}
         </span>
+        {typeName && !openable ? <span className="sr-only">, {typeName}</span> : null}
       </div>
       {notFound ? (
         <div className="relative flex h-7 min-w-0 items-center justify-end p-1">

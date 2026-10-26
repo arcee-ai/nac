@@ -98,6 +98,7 @@
     --font-weight-medium: 500;
     --font-weight-semibold: 600;
     --font-weight-bold: 700;
+    --tracking-normal: 0em;
     --tracking-wide: .025em;
     --radius-sm: .25rem;
     --radius-md: .375rem;
@@ -638,6 +639,10 @@
     right: calc(100% + 8px);
   }
 
+[data-nac-runtime]:is(.-bottom-1), [data-nac-runtime] .-bottom-1 {
+    bottom: calc(var(--spacing) * -1);
+  }
+
 [data-nac-runtime]:is(.-bottom-\[8px\]), [data-nac-runtime] .-bottom-\[8px\] {
     bottom: -8px;
   }
@@ -664,6 +669,10 @@
 
 [data-nac-runtime]:is(.bottom-\[136px\]), [data-nac-runtime] .bottom-\[136px\] {
     bottom: 136px;
+  }
+
+[data-nac-runtime]:is(.-left-1\.5), [data-nac-runtime] .-left-1\.5 {
+    left: calc(var(--spacing) * -1.5);
   }
 
 [data-nac-runtime]:is(.left-0), [data-nac-runtime] .left-0 {
@@ -1094,6 +1103,10 @@
     height: calc(var(--spacing) * 6) !important;
   }
 
+[data-nac-runtime]:is(.\!h-7), [data-nac-runtime] .\!h-7 {
+    height: calc(var(--spacing) * 7) !important;
+  }
+
 [data-nac-runtime]:is(.\!h-auto), [data-nac-runtime] .\!h-auto {
     height: auto !important;
   }
@@ -1124,6 +1137,10 @@
 
 [data-nac-runtime]:is(.h-6), [data-nac-runtime] .h-6 {
     height: calc(var(--spacing) * 6);
+  }
+
+[data-nac-runtime]:is(.h-7), [data-nac-runtime] .h-7 {
+    height: calc(var(--spacing) * 7);
   }
 
 [data-nac-runtime]:is(.h-8), [data-nac-runtime] .h-8 {
@@ -1346,6 +1363,10 @@
     min-height: 0;
   }
 
+[data-nac-runtime]:is(.min-h-4), [data-nac-runtime] .min-h-4 {
+    min-height: calc(var(--spacing) * 4);
+  }
+
 [data-nac-runtime]:is(.min-h-5), [data-nac-runtime] .min-h-5 {
     min-height: calc(var(--spacing) * 5);
   }
@@ -1518,6 +1539,10 @@
     width: 240px;
   }
 
+[data-nac-runtime]:is(.w-\[268px\]), [data-nac-runtime] .w-\[268px\] {
+    width: 268px;
+  }
+
 [data-nac-runtime]:is(.w-\[280px\]), [data-nac-runtime] .w-\[280px\] {
     width: 280px;
   }
@@ -1546,8 +1571,16 @@
     width: 430px;
   }
 
+[data-nac-runtime]:is(.w-\[480px\]), [data-nac-runtime] .w-\[480px\] {
+    width: 480px;
+  }
+
 [data-nac-runtime]:is(.w-\[520px\]), [data-nac-runtime] .w-\[520px\] {
     width: 520px;
+  }
+
+[data-nac-runtime]:is(.w-\[542px\]), [data-nac-runtime] .w-\[542px\] {
+    width: 542px;
   }
 
 [data-nac-runtime]:is(.w-\[min\(400px\,calc\(100vw-16px\)\)\]),[data-nac-runtime] .w-\[min\(400px\,calc\(100vw-16px\)\)\] {
@@ -1973,6 +2006,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+[data-nac-runtime]:is(.grid-cols-3), [data-nac-runtime] .grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
 [data-nac-runtime]:is(.grid-cols-4), [data-nac-runtime] .grid-cols-4 {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -1981,12 +2018,24 @@
     grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
+[data-nac-runtime]:is(.grid-cols-\[64px_repeat\(3\,auto\)\]),[data-nac-runtime] .grid-cols-\[64px_repeat\(3\,auto\)\] {
+    grid-template-columns: 64px repeat(3, auto);
+  }
+
 [data-nac-runtime]:is(.grid-cols-\[120px_repeat\(4\,200px\)\]),[data-nac-runtime] .grid-cols-\[120px_repeat\(4\,200px\)\] {
     grid-template-columns: 120px repeat(4, 200px);
   }
 
 [data-nac-runtime]:is(.grid-cols-\[120px_repeat\(4\,240px\)\]),[data-nac-runtime] .grid-cols-\[120px_repeat\(4\,240px\)\] {
     grid-template-columns: 120px repeat(4, 240px);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[136px_repeat\(4\,minmax\(0\,1fr\)\)\]),[data-nac-runtime] .grid-cols-\[136px_repeat\(4\,minmax\(0\,1fr\)\)\] {
+    grid-template-columns: 136px repeat(4, minmax(0, 1fr));
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[160px_repeat\(2\,auto\)\]),[data-nac-runtime] .grid-cols-\[160px_repeat\(2\,auto\)\] {
+    grid-template-columns: 160px repeat(2, auto);
   }
 
 [data-nac-runtime]:is(.grid-cols-\[160px_repeat\(4\,72px\)\]),[data-nac-runtime] .grid-cols-\[160px_repeat\(4\,72px\)\] {
@@ -2001,6 +2050,10 @@
     grid-template-columns: 160px repeat(5, max-content);
   }
 
+[data-nac-runtime]:is(.grid-cols-\[200px_repeat\(2\,320px\)\]),[data-nac-runtime] .grid-cols-\[200px_repeat\(2\,320px\)\] {
+    grid-template-columns: 200px repeat(2, 320px);
+  }
+
 [data-nac-runtime]:is(.grid-cols-\[200px_repeat\(4\,max-content\)\]),[data-nac-runtime] .grid-cols-\[200px_repeat\(4\,max-content\)\] {
     grid-template-columns: 200px repeat(4, max-content);
   }
@@ -2011,6 +2064,14 @@
 
 [data-nac-runtime]:is(.grid-cols-\[auto\,minmax\(0\,1fr\)\]),[data-nac-runtime] .grid-cols-\[auto\,minmax\(0\,1fr\)\] {
     grid-template-columns: auto,minmax(0,1fr);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[auto_repeat\(3\,auto\)\]),[data-nac-runtime] .grid-cols-\[auto_repeat\(3\,auto\)\] {
+    grid-template-columns: auto repeat(3, auto);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[auto_repeat\(5\,160px\)\]),[data-nac-runtime] .grid-cols-\[auto_repeat\(5\,160px\)\] {
+    grid-template-columns: auto repeat(5, 160px);
   }
 
 [data-nac-runtime]:is(.grid-cols-\[repeat\(auto-fill\,minmax\(min\(360px\,100\%\)\,1fr\)\)\]),[data-nac-runtime] .grid-cols-\[repeat\(auto-fill\,minmax\(min\(360px\,100\%\)\,1fr\)\)\] {
@@ -2157,6 +2218,10 @@
     column-gap: calc(var(--spacing) * 6);
   }
 
+[data-nac-runtime]:is(.gap-x-10), [data-nac-runtime] .gap-x-10 {
+    column-gap: calc(var(--spacing) * 10);
+  }
+
 [data-nac-runtime]:is(:where(.space-x-reverse > :not(:last-child))), [data-nac-runtime] :where(.space-x-reverse > :not(:last-child)) {
     --nac-presentation-tw-space-x-reverse: 1;
   }
@@ -2208,6 +2273,10 @@
 
 [data-nac-runtime]:is(.overflow-auto), [data-nac-runtime] .overflow-auto {
     overflow: auto;
+  }
+
+[data-nac-runtime]:is(.overflow-clip), [data-nac-runtime] .overflow-clip {
+    overflow: clip;
   }
 
 [data-nac-runtime]:is(.overflow-hidden), [data-nac-runtime] .overflow-hidden {
@@ -2542,6 +2611,10 @@
     border-color: var(--color-border-info-secondary);
   }
 
+[data-nac-runtime]:is(.border-input), [data-nac-runtime] .border-input {
+    border-color: var(--color-border-input);
+  }
+
 [data-nac-runtime]:is(.border-muted), [data-nac-runtime] .border-muted {
     border-color: var(--color-border-muted);
   }
@@ -2857,6 +2930,10 @@
     padding: 0 !important;
   }
 
+[data-nac-runtime]:is(.\!p-1), [data-nac-runtime] .\!p-1 {
+    padding: var(--spacing) !important;
+  }
+
 [data-nac-runtime]:is(.p-0), [data-nac-runtime] .p-0 {
     padding: 0;
   }
@@ -2887,6 +2964,10 @@
 
 [data-nac-runtime]:is(.p-\[2px\]), [data-nac-runtime] .p-\[2px\] {
     padding: 2px;
+  }
+
+[data-nac-runtime]:is(.p-\[3px\]), [data-nac-runtime] .p-\[3px\] {
+    padding: 3px;
   }
 
 [data-nac-runtime]:is(.p-px), [data-nac-runtime] .p-px {
@@ -3125,6 +3206,10 @@
     padding-bottom: 2px;
   }
 
+[data-nac-runtime]:is(.pb-\[23px\]), [data-nac-runtime] .pb-\[23px\] {
+    padding-bottom: 23px;
+  }
+
 [data-nac-runtime]:is(.pb-\[80px\]), [data-nac-runtime] .pb-\[80px\] {
     padding-bottom: 80px;
   }
@@ -3197,6 +3282,10 @@
     padding-left: calc(var(--spacing) * 12);
   }
 
+[data-nac-runtime]:is(.pl-\[7px\]), [data-nac-runtime] .pl-\[7px\] {
+    padding-left: 7px;
+  }
+
 [data-nac-runtime]:is(.text-center), [data-nac-runtime] .text-center {
     text-align: center;
   }
@@ -3253,6 +3342,21 @@
     font-size: 10px;
   }
 
+[data-nac-runtime]:is(.\!leading-4), [data-nac-runtime] .\!leading-4 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 4) !important;
+    line-height: calc(var(--spacing) * 4) !important;
+  }
+
+[data-nac-runtime]:is(.\!leading-5), [data-nac-runtime] .\!leading-5 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 5) !important;
+    line-height: calc(var(--spacing) * 5) !important;
+  }
+
+[data-nac-runtime]:is(.\!leading-6), [data-nac-runtime] .\!leading-6 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 6) !important;
+    line-height: calc(var(--spacing) * 6) !important;
+  }
+
 [data-nac-runtime]:is(.\!leading-\[12px\]), [data-nac-runtime] .\!leading-\[12px\] {
     --nac-presentation-tw-leading: 12px !important;
     line-height: 12px !important;
@@ -3305,6 +3409,11 @@
 
 [data-nac-runtime]:is(.\[font-weight\:inherit\]), [data-nac-runtime] .\[font-weight\:inherit\] {
     font-weight: inherit;
+  }
+
+[data-nac-runtime]:is(.\!tracking-normal), [data-nac-runtime] .\!tracking-normal {
+    --nac-presentation-tw-tracking: var(--tracking-normal) !important;
+    letter-spacing: var(--tracking-normal) !important;
   }
 
 [data-nac-runtime]:is(.tracking-\[0\.2em\]), [data-nac-runtime] .tracking-\[0\.2em\] {
@@ -3393,6 +3502,14 @@
     color: var(--color-text-btn-secondary);
   }
 
+[data-nac-runtime]:is(.text-btn-secondary-disabled), [data-nac-runtime] .text-btn-secondary-disabled {
+    color: var(--color-text-btn-secondary-disabled);
+  }
+
+[data-nac-runtime]:is(.text-btn-secondary-highlighted), [data-nac-runtime] .text-btn-secondary-highlighted {
+    color: var(--color-text-btn-secondary-highlighted);
+  }
+
 [data-nac-runtime]:is(.text-btn-secondary-pressed), [data-nac-runtime] .text-btn-secondary-pressed {
     color: var(--color-text-btn-secondary-pressed);
   }
@@ -3401,8 +3518,16 @@
     color: var(--color-text-danger-primary);
   }
 
+[data-nac-runtime]:is(.text-danger-secondary), [data-nac-runtime] .text-danger-secondary {
+    color: var(--color-text-danger-secondary);
+  }
+
 [data-nac-runtime]:is(.text-error-primary), [data-nac-runtime] .text-error-primary {
     color: var(--color-text-error-primary);
+  }
+
+[data-nac-runtime]:is(.text-error-secondary), [data-nac-runtime] .text-error-secondary {
+    color: var(--color-text-error-secondary);
   }
 
 [data-nac-runtime]:is(.text-info-primary), [data-nac-runtime] .text-info-primary {
@@ -3806,6 +3931,10 @@
     --nac-presentation-tw-ring-inset: inset;
   }
 
+[data-nac-runtime]:is(.not-last\:pb-2:not(:last-child)), [data-nac-runtime] .not-last\:pb-2:not(:last-child) {
+    padding-bottom: calc(var(--spacing) * 2);
+  }
+
 [data-nac-runtime]:is(.group-focus-within\/model-msg\:pointer-events-auto:is(:where(.group\/model-msg):focus-within *)), [data-nac-runtime] .group-focus-within\/model-msg\:pointer-events-auto:is(:where(.group\/model-msg):focus-within *) {
     pointer-events: auto;
   }
@@ -3846,12 +3975,20 @@
       display: none;
     }
 
+    [data-nac-runtime]:is(.group-hover\:animate-none:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:animate-none:is(:where(.group):hover *) {
+      animation: none;
+    }
+
     [data-nac-runtime]:is(.group-hover\:bg-btn-ghost-hovered:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:bg-btn-ghost-hovered:is(:where(.group):hover *) {
       background-color: var(--color-bg-btn-ghost-hovered);
     }
 
     [data-nac-runtime]:is(.group-hover\:bg-btn-secondary-hovered:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:bg-btn-secondary-hovered:is(:where(.group):hover *) {
       background-color: var(--color-bg-btn-secondary-hovered);
+    }
+
+    [data-nac-runtime]:is(.group-hover\:bg-none:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:bg-none:is(:where(.group):hover *) {
+      background-image: none;
     }
 
     [data-nac-runtime]:is(.group-hover\:pr-8:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:pr-8:is(:where(.group):hover *) {
@@ -3862,8 +3999,16 @@
       color: var(--color-text-btn-secondary-hovered);
     }
 
+    [data-nac-runtime]:is(.group-hover\:text-inherit:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:text-inherit:is(:where(.group):hover *) {
+      color: inherit;
+    }
+
     [data-nac-runtime]:is(.group-hover\:opacity-100:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:opacity-100:is(:where(.group):hover *) {
       opacity: 1;
+    }
+
+    [data-nac-runtime]:is(.group-hover\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):hover *) {
+      -webkit-text-fill-color: currentColor;
     }
 
     [data-nac-runtime]:is(.group-hover\/model-msg\:pointer-events-auto:is(:where(.group\/model-msg):hover *)), [data-nac-runtime] .group-hover\/model-msg\:pointer-events-auto:is(:where(.group\/model-msg):hover *) {
@@ -3883,8 +4028,16 @@
     }
   }
 
+[data-nac-runtime]:is(.group-focus-visible\:block:is(:where(.group):focus-visible *)), [data-nac-runtime] .group-focus-visible\:block:is(:where(.group):focus-visible *) {
+    display: block;
+  }
+
 [data-nac-runtime]:is(.group-focus-visible\:opacity-100:is(:where(.group):focus-visible *)), [data-nac-runtime] .group-focus-visible\:opacity-100:is(:where(.group):focus-visible *) {
     opacity: 1;
+  }
+
+[data-nac-runtime]:is(.group-active\:animate-none:is(:where(.group):active *)), [data-nac-runtime] .group-active\:animate-none:is(:where(.group):active *) {
+    animation: none;
   }
 
 [data-nac-runtime]:is(.group-active\:bg-btn-ghost-pressed:is(:where(.group):active *)), [data-nac-runtime] .group-active\:bg-btn-ghost-pressed:is(:where(.group):active *) {
@@ -3893,6 +4046,42 @@
 
 [data-nac-runtime]:is(.group-active\:bg-btn-secondary-pressed:is(:where(.group):active *)), [data-nac-runtime] .group-active\:bg-btn-secondary-pressed:is(:where(.group):active *) {
     background-color: var(--color-bg-btn-secondary-pressed);
+  }
+
+[data-nac-runtime]:is(.group-active\:bg-none:is(:where(.group):active *)), [data-nac-runtime] .group-active\:bg-none:is(:where(.group):active *) {
+    background-image: none;
+  }
+
+[data-nac-runtime]:is(.group-active\:text-inherit:is(:where(.group):active *)), [data-nac-runtime] .group-active\:text-inherit:is(:where(.group):active *) {
+    color: inherit;
+  }
+
+[data-nac-runtime]:is(.group-active\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):active *)), [data-nac-runtime] .group-active\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):active *) {
+    -webkit-text-fill-color: currentColor;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:animate-none:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:animate-none:is(:where(.group):disabled *) {
+    animation: none;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:bg-none:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:bg-none:is(:where(.group):disabled *) {
+    background-image: none;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:text-inherit:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:text-inherit:is(:where(.group):disabled *) {
+    color: inherit;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:opacity-50:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:opacity-50:is(:where(.group):disabled *) {
+    opacity: .5;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):disabled *) {
+    -webkit-text-fill-color: currentColor;
+  }
+
+[data-nac-runtime]:is(.group-disabled\/file-button\:opacity-50:is(:where(.group\/file-button):disabled *)), [data-nac-runtime] .group-disabled\/file-button\:opacity-50:is(:where(.group\/file-button):disabled *), [data-nac-runtime]:is(.group-disabled\/file-list-tab-button\:opacity-50:is(:where(.group\/file-list-tab-button):disabled *)), [data-nac-runtime] .group-disabled\/file-list-tab-button\:opacity-50:is(:where(.group\/file-list-tab-button):disabled *) {
+    opacity: .5;
   }
 
 [data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:pointer-events-auto:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:pointer-events-auto:is(:where(.group):has(:focus-visible) *) {
@@ -3942,6 +4131,10 @@
     color: var(--color-text-input-placeholder);
   }
 
+[data-nac-runtime]:is(.empty\:hidden:empty), [data-nac-runtime] .empty\:hidden:empty {
+    display: none;
+  }
+
 [data-nac-runtime]:is(.focus-within\:not-sr-only:focus-within), [data-nac-runtime] .focus-within\:not-sr-only:focus-within {
     clip-path: none;
     white-space: normal;
@@ -3978,8 +4171,20 @@
       background-color: var(--color-bg-elevation-sublevel-variant-A);
     }
 
+    [data-nac-runtime]:is(.hover\:text-accent-secondary:hover), [data-nac-runtime] .hover\:text-accent-secondary:hover {
+      color: var(--color-text-accent-secondary);
+    }
+
     [data-nac-runtime]:is(.hover\:text-basic-primary:hover), [data-nac-runtime] .hover\:text-basic-primary:hover {
       color: var(--color-text-basic-primary);
+    }
+
+    [data-nac-runtime]:is(.hover\:text-basic-secondary:hover), [data-nac-runtime] .hover\:text-basic-secondary:hover {
+      color: var(--color-text-basic-secondary);
+    }
+
+    [data-nac-runtime]:is(.hover\:text-btn-secondary-hovered:hover), [data-nac-runtime] .hover\:text-btn-secondary-hovered:hover {
+      color: var(--color-text-btn-secondary-hovered);
     }
 
     [data-nac-runtime]:is(.hover\:underline:hover), [data-nac-runtime] .hover\:underline:hover {
@@ -4013,6 +4218,11 @@
     outline-color: var(--color-border-focus-outline);
   }
 
+[data-nac-runtime]:is(.focus-visible\:outline-none:focus-visible), [data-nac-runtime] .focus-visible\:outline-none:focus-visible {
+    --nac-presentation-tw-outline-style: none;
+    outline-style: none;
+  }
+
 [data-nac-runtime]:is(.active\:cursor-grabbing:active), [data-nac-runtime] .active\:cursor-grabbing:active {
     cursor: grabbing;
   }
@@ -4021,16 +4231,82 @@
     background-color: var(--color-bg-btn-ghost-accent-highlighted-pressed);
   }
 
+[data-nac-runtime]:is(.active\:bg-btn-ghost-pressed:active), [data-nac-runtime] .active\:bg-btn-ghost-pressed:active {
+    background-color: var(--color-bg-btn-ghost-pressed);
+  }
+
+[data-nac-runtime]:is(.active\:text-accent-tertiary:active), [data-nac-runtime] .active\:text-accent-tertiary:active {
+    color: var(--color-text-accent-tertiary);
+  }
+
+[data-nac-runtime]:is(.active\:text-basic-primary:active), [data-nac-runtime] .active\:text-basic-primary:active {
+    color: var(--color-text-basic-primary);
+  }
+
 [data-nac-runtime]:is(.active\:text-btn-secondary-pressed:active), [data-nac-runtime] .active\:text-btn-secondary-pressed:active {
     color: var(--color-text-btn-secondary-pressed);
+  }
+
+@media (hover: hover) {
+    [data-nac-runtime]:is(.enabled\:hover\:bg-btn-ghost-highlighted-hovered:enabled:hover), [data-nac-runtime] .enabled\:hover\:bg-btn-ghost-highlighted-hovered:enabled:hover {
+      background-color: var(--color-bg-btn-ghost-highlighted-hovered);
+    }
+
+    [data-nac-runtime]:is(.enabled\:hover\:bg-btn-ghost-hovered:enabled:hover), [data-nac-runtime] .enabled\:hover\:bg-btn-ghost-hovered:enabled:hover {
+      background-color: var(--color-bg-btn-ghost-hovered);
+    }
+
+    [data-nac-runtime]:is(.enabled\:hover\:text-btn-secondary-hovered:enabled:hover), [data-nac-runtime] .enabled\:hover\:text-btn-secondary-hovered:enabled:hover {
+      color: var(--color-text-btn-secondary-hovered);
+    }
+
+    [data-nac-runtime]:is(.enabled\:hover\:text-btn-secondary-hovered-highlighted:enabled:hover), [data-nac-runtime] .enabled\:hover\:text-btn-secondary-hovered-highlighted:enabled:hover {
+      color: var(--color-text-btn-secondary-hovered-highlighted);
+    }
+  }
+
+[data-nac-runtime]:is(.enabled\:active\:bg-btn-ghost-highlighted-pressed:enabled:active), [data-nac-runtime] .enabled\:active\:bg-btn-ghost-highlighted-pressed:enabled:active {
+    background-color: var(--color-bg-btn-ghost-highlighted-pressed);
+  }
+
+[data-nac-runtime]:is(.enabled\:active\:bg-btn-ghost-pressed:enabled:active), [data-nac-runtime] .enabled\:active\:bg-btn-ghost-pressed:enabled:active {
+    background-color: var(--color-bg-btn-ghost-pressed);
+  }
+
+[data-nac-runtime]:is(.enabled\:active\:text-btn-secondary-pressed:enabled:active), [data-nac-runtime] .enabled\:active\:text-btn-secondary-pressed:enabled:active {
+    color: var(--color-text-btn-secondary-pressed);
+  }
+
+[data-nac-runtime]:is(.enabled\:active\:text-btn-secondary-pressed-highlighted:enabled:active), [data-nac-runtime] .enabled\:active\:text-btn-secondary-pressed-highlighted:enabled:active {
+    color: var(--color-text-btn-secondary-pressed-highlighted);
   }
 
 [data-nac-runtime]:is(.disabled\:cursor-not-allowed:disabled), [data-nac-runtime] .disabled\:cursor-not-allowed:disabled {
     cursor: not-allowed;
   }
 
+[data-nac-runtime]:is(.disabled\:bg-btn-ghost-disabled:disabled), [data-nac-runtime] .disabled\:bg-btn-ghost-disabled:disabled {
+    background-color: var(--color-bg-btn-ghost-disabled);
+  }
+
+[data-nac-runtime]:is(.disabled\:bg-btn-ghost-highlighted-disabled:disabled), [data-nac-runtime] .disabled\:bg-btn-ghost-highlighted-disabled:disabled {
+    background-color: var(--color-bg-btn-ghost-highlighted-disabled);
+  }
+
+[data-nac-runtime]:is(.disabled\:text-accent-muted:disabled), [data-nac-runtime] .disabled\:text-accent-muted:disabled {
+    color: var(--color-text-accent-muted);
+  }
+
+[data-nac-runtime]:is(.disabled\:text-basic-muted:disabled), [data-nac-runtime] .disabled\:text-basic-muted:disabled {
+    color: var(--color-text-basic-muted);
+  }
+
 [data-nac-runtime]:is(.disabled\:text-btn-secondary-disabled:disabled), [data-nac-runtime] .disabled\:text-btn-secondary-disabled:disabled {
     color: var(--color-text-btn-secondary-disabled);
+  }
+
+[data-nac-runtime]:is(.disabled\:text-btn-secondary-disabled-highlighted:disabled), [data-nac-runtime] .disabled\:text-btn-secondary-disabled-highlighted:disabled {
+    color: var(--color-text-btn-secondary-disabled-highlighted);
   }
 
 [data-nac-runtime]:is(.has-\[\>button\:active\]\:bg-btn-ghost-highlighted-pressed:has( > button:active)), [data-nac-runtime] .has-\[\>button\:active\]\:bg-btn-ghost-highlighted-pressed:has( > button:active) {
@@ -4052,6 +4328,28 @@
 [data-nac-runtime]:is(.has-\[\>button\:focus-visible\]\:outline-2:has( > button:focus-visible)), [data-nac-runtime] .has-\[\>button\:focus-visible\]\:outline-2:has( > button:focus-visible) {
     outline-style: var(--nac-presentation-tw-outline-style);
     outline-width: 2px;
+  }
+
+@media (prefers-reduced-motion: reduce) {
+    [data-nac-runtime]:is(.motion-reduce\:animate-none), [data-nac-runtime] .motion-reduce\:animate-none {
+      animation: none;
+    }
+
+    [data-nac-runtime]:is(.motion-reduce\:bg-none), [data-nac-runtime] .motion-reduce\:bg-none {
+      background-image: none;
+    }
+
+    [data-nac-runtime]:is(.motion-reduce\:text-inherit), [data-nac-runtime] .motion-reduce\:text-inherit {
+      color: inherit;
+    }
+
+    [data-nac-runtime]:is(.motion-reduce\:transition-none), [data-nac-runtime] .motion-reduce\:transition-none {
+      transition-property: none;
+    }
+
+    [data-nac-runtime]:is(.motion-reduce\:\[-webkit-text-fill-color\:currentColor\]), [data-nac-runtime] .motion-reduce\:\[-webkit-text-fill-color\:currentColor\] {
+      -webkit-text-fill-color: currentColor;
+    }
   }
 
 @media (min-width: 40rem) {
@@ -4362,6 +4660,14 @@
     }
   }
 
+[data-nac-runtime]:is(.\[\&_path\]\:fill-accent-primary path), [data-nac-runtime] .\[\&_path\]\:fill-accent-primary path {
+    fill: var(--color-fill-accent-primary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-basic-tertiary path), [data-nac-runtime] .\[\&_path\]\:fill-basic-tertiary path {
+    fill: var(--color-fill-basic-tertiary);
+  }
+
 [data-nac-runtime]:is(.\[\&_path\]\:fill-btn-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-btn-secondary path {
     fill: var(--color-fill-btn-secondary);
   }
@@ -4378,10 +4684,42 @@
     fill: var(--color-fill-btn-secondary-pressed);
   }
 
+[data-nac-runtime]:is(.\[\&_path\]\:fill-danger-primary path), [data-nac-runtime] .\[\&_path\]\:fill-danger-primary path {
+    fill: var(--color-fill-danger-primary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-danger-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-danger-secondary path {
+    fill: var(--color-fill-danger-secondary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-error-primary path), [data-nac-runtime] .\[\&_path\]\:fill-error-primary path {
+    fill: var(--color-fill-error-primary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-error-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-error-secondary path {
+    fill: var(--color-fill-error-secondary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-info-primary path), [data-nac-runtime] .\[\&_path\]\:fill-info-primary path {
+    fill: var(--color-fill-info-primary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-info-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-info-secondary path {
+    fill: var(--color-fill-info-secondary);
+  }
+
 @media (hover: hover) {
-    [data-nac-runtime]:is(.group-hover\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group):hover *) path), [data-nac-runtime] .group-hover\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group):hover *) path {
+    [data-nac-runtime]:is(.group-hover\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group):hover *) path), [data-nac-runtime] .group-hover\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group):hover *) path, [data-nac-runtime]:is(.group-hover\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group\/file-list-tab-button):hover *) path), [data-nac-runtime] .group-hover\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group\/file-list-tab-button):hover *) path {
       fill: var(--color-fill-btn-secondary-hovered);
     }
+  }
+
+[data-nac-runtime]:is(.group-active\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group\/file-list-tab-button):active *) path), [data-nac-runtime] .group-active\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group\/file-list-tab-button):active *) path {
+    fill: var(--color-fill-btn-secondary-pressed);
+  }
+
+[data-nac-runtime]:is(.group-disabled\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group\/file-list-tab-button):disabled *) path), [data-nac-runtime] .group-disabled\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group\/file-list-tab-button):disabled *) path {
+    fill: var(--color-fill-btn-secondary-disabled);
   }
 
 [data-nac-runtime]:is(.group-has-\[\>button\:active\]\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group):has( > button:active) *) path), [data-nac-runtime] .group-has-\[\>button\:active\]\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group):has( > button:active) *) path {
@@ -4390,6 +4728,16 @@
 
 [data-nac-runtime]:is(.group-has-\[\>button\:disabled\]\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group):has( > button:disabled) *) path), [data-nac-runtime] .group-has-\[\>button\:disabled\]\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group):has( > button:disabled) *) path {
     fill: var(--color-fill-btn-secondary-disabled);
+  }
+
+@media (hover: hover) {
+    [data-nac-runtime]:is(.hover\:\[\&_path\]\:fill-btn-secondary-hovered:hover path), [data-nac-runtime] .hover\:\[\&_path\]\:fill-btn-secondary-hovered:hover path {
+      fill: var(--color-fill-btn-secondary-hovered);
+    }
+  }
+
+[data-nac-runtime]:is(.active\:\[\&_path\]\:fill-btn-secondary-pressed:active path), [data-nac-runtime] .active\:\[\&_path\]\:fill-btn-secondary-pressed:active path {
+    fill: var(--color-fill-btn-secondary-pressed);
   }
 
 [data-nac-runtime]:is(.\[\&\>\*\]\:pointer-events-auto > *), [data-nac-runtime] .\[\&\>\*\]\:pointer-events-auto > * {
@@ -4432,6 +4780,14 @@
     fill: var(--color-fill-basic-primary) !important;
   }
 
+[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-btn-destructive > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-btn-destructive > path {
+    fill: var(--color-fill-btn-destructive) !important;
+  }
+
+[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-btn-secondary-disabled > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-btn-secondary-disabled > path {
+    fill: var(--color-fill-btn-secondary-disabled) !important;
+  }
+
 [data-nac-runtime]:is(.\[\&\>path\]\:\!fill-error-primary > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-error-primary > path {
     fill: var(--color-fill-error-primary) !important;
   }
@@ -4440,8 +4796,46 @@
     fill: var(--white);
   }
 
+[data-nac-runtime]:is(.\[\&\>path\]\:fill-accent-primary > path), [data-nac-runtime] .\[\&\>path\]\:fill-accent-primary > path {
+    fill: var(--color-fill-accent-primary);
+  }
+
+[data-nac-runtime]:is(.\[\&\>path\]\:fill-basic-primary > path), [data-nac-runtime] .\[\&\>path\]\:fill-basic-primary > path {
+    fill: var(--color-fill-basic-primary);
+  }
+
 [data-nac-runtime]:is(.\[\&\>path\]\:fill-basic-tertiary > path), [data-nac-runtime] .\[\&\>path\]\:fill-basic-tertiary > path {
     fill: var(--color-fill-basic-tertiary);
+  }
+
+[data-nac-runtime]:is(.\[\&\>path\]\:fill-error-primary > path), [data-nac-runtime] .\[\&\>path\]\:fill-error-primary > path {
+    fill: var(--color-fill-error-primary);
+  }
+
+@media (hover: hover) {
+    [data-nac-runtime]:is(.group-hover\:\[\&\>path\]\:fill-accent-secondary:is(:where(.group):hover *) > path), [data-nac-runtime] .group-hover\:\[\&\>path\]\:fill-accent-secondary:is(:where(.group):hover *) > path {
+      fill: var(--color-fill-accent-secondary);
+    }
+
+    [data-nac-runtime]:is(.group-hover\:\[\&\>path\]\:fill-basic-secondary:is(:where(.group):hover *) > path), [data-nac-runtime] .group-hover\:\[\&\>path\]\:fill-basic-secondary:is(:where(.group):hover *) > path {
+      fill: var(--color-fill-basic-secondary);
+    }
+  }
+
+[data-nac-runtime]:is(.group-active\:\[\&\>path\]\:fill-accent-tertiary:is(:where(.group):active *) > path), [data-nac-runtime] .group-active\:\[\&\>path\]\:fill-accent-tertiary:is(:where(.group):active *) > path {
+    fill: var(--color-fill-accent-tertiary);
+  }
+
+[data-nac-runtime]:is(.group-active\:\[\&\>path\]\:fill-basic-primary:is(:where(.group):active *) > path), [data-nac-runtime] .group-active\:\[\&\>path\]\:fill-basic-primary:is(:where(.group):active *) > path {
+    fill: var(--color-fill-basic-primary);
+  }
+
+[data-nac-runtime]:is(.group-disabled\:\[\&\>path\]\:fill-accent-muted:is(:where(.group):disabled *) > path), [data-nac-runtime] .group-disabled\:\[\&\>path\]\:fill-accent-muted:is(:where(.group):disabled *) > path {
+    fill: var(--color-fill-accent-muted);
+  }
+
+[data-nac-runtime]:is(.group-disabled\:\[\&\>path\]\:fill-basic-muted:is(:where(.group):disabled *) > path), [data-nac-runtime] .group-disabled\:\[\&\>path\]\:fill-basic-muted:is(:where(.group):disabled *) > path {
+    fill: var(--color-fill-basic-muted);
   }
 
 @media (hover: none) {
@@ -5131,6 +5525,13 @@
   font-size: .875rem;
   font-weight: 600;
   line-height: 1.25rem;
+}
+
+[data-nac-runtime]:is(.header-2xs), [data-nac-runtime] .header-2xs {
+  font-family: NACPresentationInter;
+  font-size: .6875rem;
+  font-weight: 600;
+  line-height: .875rem;
 }
 
 [data-nac-runtime]:is(.header-2xl), [data-nac-runtime] .header-2xl {
