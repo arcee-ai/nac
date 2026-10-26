@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import {
@@ -6,6 +8,7 @@ import {
   ButtonSize,
   ButtonVariant,
   HorizontalTabsItem,
+  HorizontalTabsItemContent,
   HorizontalTabsItemSize,
   Icon,
   IconName,
@@ -61,6 +64,40 @@ function SideBoxProgress({ sessionId }: { sessionId: string }) {
 }
 
 /**
+ * Whether the tabs fit between the bar's buttons with their labels. Their
+ * labelled width is kept while they show only icons, so the labels come back
+ * once the bar has room for that width rather than flickering at the edge. A
+ * new set of tabs is measured afresh.
+ */
+function useTabLabelsFit(
+  room: RefObject<HTMLElement | null>,
+  strip: RefObject<HTMLElement | null>,
+  tabs: string,
+): boolean {
+  const [fit, setFit] = useState(true);
+  const [measuredTabs, setMeasuredTabs] = useState(tabs);
+  const labelled = useRef(0);
+  if (measuredTabs !== tabs) {
+    setMeasuredTabs(tabs);
+    setFit(true);
+  }
+  useLayoutEffect(() => {
+    const roomElement = room.current;
+    const stripElement = strip.current;
+    if (!roomElement || !stripElement || typeof ResizeObserver === "undefined") return undefined;
+    const measure = () => {
+      if (fit) labelled.current = stripElement.scrollWidth;
+      setFit(labelled.current <= roomElement.clientWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(roomElement);
+    return () => observer.disconnect();
+  }, [room, strip, fit, tabs]);
+  return fit;
+}
+
+/**
  * The right column of the session screen: one box with the Insights / Files /
  * Worksets / Subagents panels, sized by the shared layout store. Session
  * switching lives in the left sidebar. On a phone the panels are the body of
@@ -107,6 +144,9 @@ export function SessionSideBox({
   const subagentCount =
     (children.data?.length ?? 0) +
     (policy.orchestrationEnabled ? (orchestrators.data?.length ?? 0) : 0);
+  const tabRoom = useRef<HTMLDivElement>(null);
+  const tabStrip = useRef<HTMLDivElement>(null);
+  const tabLabelsFit = useTabLabelsFit(tabRoom, tabStrip, `${widePanels.join()}|${isTablet}`);
 
   // History belongs to the phone's bottom bar. On a wide screen the header
   // chip switches revisions, so a link to that panel lands on the default one.
@@ -208,8 +248,8 @@ export function SessionSideBox({
         )}
         {/* Auto margins rather than `justify-center`: tabs wider than the bar
             overflow its trailing end instead of losing their first ones. */}
-        <div className="flex flex-1 min-w-0">
-          <div className="flex min-w-0 items-center gap-2 mx-auto" role="tablist">
+        <div ref={tabRoom} className="flex flex-1 min-w-0">
+          <div ref={tabStrip} className="flex min-w-0 items-center gap-2 mx-auto" role="tablist">
             {widePanels.map((name) => {
               const selected = active === name;
               const badge = panelBadgeCount(
@@ -223,9 +263,25 @@ export function SessionSideBox({
                 showSidePanelList(false);
                 onPanelChange(name);
               };
+              const tab = (
+                <HorizontalTabsItem
+                  size={HorizontalTabsItemSize.Medium}
+                  content={tabLabelsFit ? undefined : HorizontalTabsItemContent.IconOnly}
+                  active={selected}
+                  iconName={PANEL_ICON[name]}
+                  role="tab"
+                  aria-selected={selected}
+                  aria-label={SESSION_PANEL_LABEL[name]}
+                  onClick={open}
+                >
+                  {SESSION_PANEL_LABEL[name]}
+                </HorizontalTabsItem>
+              );
               return (
                 <span key={name} className="relative shrink-0">
-                  {/* The tablet's narrower box draws the tabs as icon circles. */}
+                  {/* The tablet's narrower box draws the tabs as icon circles,
+                      and a desktop box too narrow for the labels keeps only
+                      the icons. */}
                   {isTablet ? (
                     <Tooltip
                       title={SESSION_PANEL_LABEL[name]}
@@ -244,18 +300,15 @@ export function SessionSideBox({
                         <Icon iconName={PANEL_ICON[name]} />
                       </Button>
                     </Tooltip>
+                  ) : tabLabelsFit ? (
+                    tab
                   ) : (
-                    <HorizontalTabsItem
-                      size={HorizontalTabsItemSize.Medium}
-                      active={selected}
-                      iconName={PANEL_ICON[name]}
-                      role="tab"
-                      aria-selected={selected}
-                      aria-label={SESSION_PANEL_LABEL[name]}
-                      onClick={open}
+                    <Tooltip
+                      title={SESSION_PANEL_LABEL[name]}
+                      position={TooltipPosition.BottomCenter}
                     >
-                      {SESSION_PANEL_LABEL[name]}
-                    </HorizontalTabsItem>
+                      {tab}
+                    </Tooltip>
                   )}
                   {badge > 0 ? <PanelCountBadge count={badge} className="top-0" /> : null}
                 </span>

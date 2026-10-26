@@ -828,7 +828,6 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByRole("tab", { name: "Subagents" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("tab", { name: "Subagents" })).toBeVisible();
-  await expect(page.getByText("Subagents", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
 
