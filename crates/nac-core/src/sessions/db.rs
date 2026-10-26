@@ -284,14 +284,7 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
             &tx,
             &update.session_id,
             run_id,
-            match disposition {
-                crate::store::RunTerminalDisposition::Completed => {
-                    crate::store::RunOutcomeDisposition::Completed
-                }
-                crate::store::RunTerminalDisposition::Cancelled => {
-                    crate::store::RunOutcomeDisposition::Cancelled
-                }
-            },
+            disposition.into(),
             update.finished_run_result.as_deref(),
             None,
         )?;

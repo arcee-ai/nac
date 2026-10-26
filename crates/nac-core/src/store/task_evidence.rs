@@ -26,6 +26,15 @@ impl RunOutcomeDisposition {
     }
 }
 
+impl From<RunTerminalDisposition> for RunOutcomeDisposition {
+    fn from(disposition: RunTerminalDisposition) -> Self {
+        match disposition {
+            RunTerminalDisposition::Completed => Self::Completed,
+            RunTerminalDisposition::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
 impl std::str::FromStr for RunOutcomeDisposition {
     type Err = anyhow::Error;
 

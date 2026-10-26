@@ -176,13 +176,33 @@ async fn exact_lookup(
     explicit_project: Option<String>,
 ) -> Result<Value, ToolResult> {
     let target = session_id.clone();
-    let (caller_project, lookup) = store_call(services, move |path| {
+    let (caller_project, target_project, lookup) = store_call(services, move |path| {
         Ok((
             store::load_session_project_id(path, &caller)?,
+            store::load_session_project_id(path, &target)?,
             store::load_direct_task(path, &target)?,
         ))
     })
     .await?;
+    // A found task is scoped by the project in its own snapshot transaction.
+    let target_project = match &lookup {
+        TaskLookup::Found(snapshot) => snapshot.project_id.clone(),
+        _ => target_project,
+    };
+    let in_scope = match explicit_project.as_deref() {
+        Some(project) => target_project.as_deref() == Some(project),
+        None => target_project == caller_project,
+    };
+    if !in_scope && !matches!(lookup, TaskLookup::NotFound) {
+        return Ok(json!({
+            "status": "outside_scope",
+            "session_id": session_id,
+            "detail": match explicit_project {
+                Some(_) => "This task is not in the named project.",
+                None => "This task is not in this chat's saved project. Crossing projects requires naming the task's project_id explicitly.",
+            },
+        }));
+    }
     Ok(match lookup {
         TaskLookup::NotFound => json!({
             "status": "not_found",
@@ -196,25 +216,10 @@ async fn exact_lookup(
             "detail": "This session belongs to another topology and is not an independent direct task.",
         }),
         TaskLookup::Found(snapshot) => {
-            let in_scope = match explicit_project.as_deref() {
-                Some(project) => snapshot.project_id.as_deref() == Some(project),
-                None => snapshot.project_id == caller_project,
-            };
-            if in_scope {
-                if let (None, Some(project)) = (&explicit_project, &snapshot.project_id) {
-                    authorize_project(tool, services, &broker, context, project).await?;
-                }
-                json!({"status": "found", "task": found_task(*snapshot)})
-            } else {
-                json!({
-                    "status": "outside_scope",
-                    "session_id": session_id,
-                    "detail": match explicit_project {
-                        Some(_) => "This task is not in the named project.",
-                        None => "This task is not in this chat's saved project. Crossing projects requires naming the task's project_id explicitly.",
-                    },
-                })
+            if let (None, Some(project)) = (&explicit_project, &snapshot.project_id) {
+                authorize_project(tool, services, &broker, context, project).await?;
             }
+            json!({"status": "found", "task": found_task(*snapshot)})
         }
     })
 }

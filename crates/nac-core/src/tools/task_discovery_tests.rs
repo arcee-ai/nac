@@ -140,10 +140,23 @@ async fn reference_search_defaults_to_the_callers_project_and_reports_every_atte
 }
 
 #[tokio::test]
-async fn exact_reads_distinguish_found_missing_foreign_and_other_topologies() {
+async fn exact_reads_distinguish_found_missing_deleted_foreign_and_other_topologies() {
     let runtime = runtime(Vec::new());
     let path = runtime.store_path.clone();
-    crate::store::insert_test_session(&path, "orchestrator-session");
+    for (session_id, project_id) in [
+        ("orchestrator-session", "p1"),
+        ("foreign-orchestrator", "p2"),
+    ] {
+        crate::store::insert_test_session(&path, session_id);
+        crate::store::open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET cwd = ?2 WHERE session_id = ?1",
+                [session_id, &location(project_id)],
+            )
+            .unwrap();
+        crate::store::assign_session_to_project(&path, project_id, session_id).unwrap();
+    }
 
     let found = value(&runtime, "read_task", json!({"session_id":"peer-a"})).await;
     assert_eq!(found["status"], "found");
@@ -182,6 +195,39 @@ async fn exact_reads_distinguish_found_missing_foreign_and_other_topologies() {
     assert_eq!(other["status"], "not_independent_task");
     assert_eq!(other["kind"], "orchestrator");
     assert!(other.get("task").is_none());
+    // Another project's non-task is reported out of scope before its kind is disclosed.
+    let hidden = value(
+        &runtime,
+        "read_task",
+        json!({"session_id":"foreign-orchestrator"}),
+    )
+    .await;
+    assert_eq!(hidden["status"], "outside_scope");
+    assert!(hidden.get("kind").is_none());
+
+    let conn = crate::store::open_runtime_connection(&path).unwrap();
+    crate::store::record_run_outcome_with_connection(
+        &conn,
+        "peer-b",
+        "run-1",
+        crate::store::RunOutcomeDisposition::Completed,
+        Some("done"),
+        None,
+    )
+    .unwrap();
+    drop(conn);
+    assert!(crate::sessions::delete_session(&path, "peer-b").unwrap());
+    let deleted = value(&runtime, "read_task", json!({"session_id":"peer-b"})).await;
+    assert_eq!(deleted["status"], "not_found");
+    let retained: i64 = crate::store::open_runtime_connection(&path)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM session_run_outcomes WHERE session_id = 'peer-b'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, 0);
     cleanup(&runtime);
 }
 

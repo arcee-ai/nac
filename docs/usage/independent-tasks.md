@@ -42,11 +42,15 @@ candidates and examine at most 500 sessions; continue with `next_after`.
 A task outside this chat's saved project returns `outside_scope` without its
 contents until its `project_id` is named. Missing sessions return `not_found`;
 the store cannot tell a never-created session from a deleted one. Sessions of
-another topology return `not_independent_task` with only their kind.
+another topology in scope return `not_independent_task` with only their kind;
+out of scope they return `outside_scope` like any other session.
 
 A goal-free run ending is a result, not proof that an objective was completed.
-Each run outcome is recorded once at settlement; later follow-up activity adds a
-new outcome and never rewrites an earlier one.
+Each run outcome is recorded once at settlement, or at restart when the
+process stopped before settling; later follow-up activity adds a new outcome and
+never rewrites an earlier one. A run cut off by a restart is recorded as failed
+with an `interrupted` failure, and a run settled at restart has no result
+excerpt.
 
 ## Passivity and permissions
 

@@ -206,7 +206,7 @@ fn pages_are_bounded_and_cursor_resumes_without_duplicates() {
 }
 
 #[test]
-fn scan_bound_yields_a_resumable_cursor_and_measured_cost_stays_small() {
+fn scan_bound_yields_a_resumable_cursor_and_measured_search_and_snapshot_costs_stay_small() {
     let path = test_path("scan");
     initialize(&path).unwrap();
     project(&path, "p1", "/tmp/project");
@@ -243,6 +243,46 @@ fn scan_bound_yields_a_resumable_cursor_and_measured_cost_stays_small() {
     assert_eq!(ids(&second), ["s0000"]);
     assert!(!second.scan_limit_reached);
     eprintln!("task search scanned {TASK_SEARCH_SCAN_LIMIT} rows in {elapsed:?}");
+    assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
+
+    let full = TaskSearch {
+        text: Some("noise".into()),
+        limit: MAX_TASK_SEARCH_LIMIT,
+        ..search(&path, "p1")
+    };
+    let started = std::time::Instant::now();
+    let page = search_direct_tasks(&path, &full).unwrap().unwrap();
+    let elapsed = started.elapsed();
+    assert_eq!(page.candidates.len(), MAX_TASK_SEARCH_LIMIT);
+    eprintln!("full task search page in {elapsed:?}");
+    assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
+
+    let conn = open_runtime_connection(&path).unwrap();
+    for run in 0..=RETAINED_RUN_OUTCOMES {
+        record_run_outcome_with_connection(
+            &conn,
+            "s0001",
+            &format!("run-{run}"),
+            RunOutcomeDisposition::Completed,
+            Some(&"x".repeat(RUN_RESULT_EXCERPT_CHARS * 2)),
+            None,
+        )
+        .unwrap();
+    }
+    drop(conn);
+    for index in 0..=RETAINED_GOAL_OUTCOMES {
+        let goal =
+            create_session_goal(&path, "s0001", &format!("goal {index}"), None, None).unwrap();
+        clear_session_goal(&path, "s0001", &goal.goal_id, goal.version).unwrap();
+    }
+    let started = std::time::Instant::now();
+    let TaskLookup::Found(snapshot) = load_direct_task(&path, "s0001").unwrap() else {
+        panic!("expected a task");
+    };
+    let elapsed = started.elapsed();
+    assert_eq!(snapshot.run_outcomes.len(), RETAINED_RUN_OUTCOMES);
+    assert_eq!(snapshot.prior_goals.len(), RETAINED_GOAL_OUTCOMES);
+    eprintln!("full task snapshot in {elapsed:?}");
     assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
