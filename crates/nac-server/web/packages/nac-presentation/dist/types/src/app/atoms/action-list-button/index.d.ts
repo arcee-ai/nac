@@ -20,7 +20,8 @@ interface ActionListButtonProps {
     selected?: boolean;
     /** Only for group rows, which expand and collapse their children. */
     expanded?: boolean;
-    onClick?: () => void;
+    /** Null for a row with nowhere to go, which then takes no focus. */
+    onClick?: (() => void) | null;
     className?: string;
 }
 /**

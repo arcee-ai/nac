@@ -1,5 +1,5 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { $r as r, Bi as i, Li as a, Lr as o, Nr as s, cr as c, d as l, i as u, lr as d, t as f, u as p, ur as m, zi as h } from "./PerfProfiler-aerDG_CP.js";
+import { $r as r, Bi as i, Lr as a, Nr as o, Ri as s, Vi as c, cr as l, d as u, i as d, lr as f, t as p, u as m, ur as h } from "./PerfProfiler-7qOYjfXd.js";
 import { a as g, c as _, l as v, o as y, r as b, s as x, t as S } from "./lib-rX7C_D5H.js";
 import { Suspense as C, isValidElement as w, memo as T, use as E } from "react";
 import { useQueryClient as ee } from "@tanstack/react-query";
@@ -6566,13 +6566,13 @@ function gl(e, t = []) {
 var _l = /* @__PURE__ */ e({ default: () => Ml }), vl = [Bc], yl = /* @__PURE__ */ new Map();
 function bl(e) {
 	let t = yl.get(e);
-	return t || (t = import("./markdown-mathjax-DrjtJEad.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-Hu4F1bFf.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...vl, n],
 		rehype: [t(e)]
 	})), yl.set(e, t)), t;
 }
 function xl(e) {
-	return i(e) ? e : h(e) ? String(e) : Array.isArray(e) ? e.map(xl).join("") : w(e) ? xl(e.props.children) : "";
+	return c(e) ? e : i(e) ? String(e) : Array.isArray(e) ? e.map(xl).join("") : w(e) ? xl(e.props.children) : "";
 }
 function Sl(e) {
 	if (!w(e)) return "plaintext";
@@ -6581,11 +6581,11 @@ function Sl(e) {
 }
 function Cl({ children: e }) {
 	let t = xl(e).replace(/\n$/, ""), n = Sl(e);
-	return /* @__PURE__ */ k(d, {
+	return /* @__PURE__ */ k(f, {
 		code: t,
 		language: n === "plaintext" ? void 0 : n,
 		title: n,
-		size: m.Small,
+		size: h.Small,
 		copyable: !0,
 		expandable: !0,
 		className: "my-6"
@@ -6603,12 +6603,12 @@ function wl(e) {
 	return `${e.length.toString(36)}-${(t >>> 0).toString(36)}`;
 }
 function Tl({ href: e, children: t, ...n }) {
-	let { selectRevision: i, selectFileListing: a, selectFile: o, revealSidePanel: d } = r().stores.sessionLayoutStore, { api: f } = r(), m = O(), h = D(), g = s(), _ = u(), v = ee(), y = l(h.pathname), b = y ? v.getQueryData(c.sessionSnapshot(y)) : void 0, x = gl(e, [
+	let { selectRevision: i, selectFileListing: a, selectFile: s, revealSidePanel: c } = r().stores.sessionLayoutStore, { api: f } = r(), p = O(), h = D(), g = o(), _ = d(), v = ee(), y = u(h.pathname), b = y ? v.getQueryData(l.sessionSnapshot(y)) : void 0, x = gl(e, [
 		b?.workspace?.host_root,
 		b?.metadata.workspace_host_path,
 		b?.metadata.cwd
 	]), S = (e) => {
-		y && (i(null), a("tree"), o(e), d(g), m(p.session(y, "files")));
+		y && (i(null), a("tree"), s(e), c(g), p(m.session(y, "files")));
 	};
 	return x.kind === "workspace" && y ? /* @__PURE__ */ k("a", {
 		...n,
@@ -6642,7 +6642,7 @@ function El(e) {
 			children: /* @__PURE__ */ k("table", { ...e })
 		}),
 		style: ({ children: e }) => {
-			let t = i(e) ? e : "";
+			let t = c(e) ? e : "";
 			return t ? /* @__PURE__ */ k("style", {
 				href: `mathjax-${wl(t)}`,
 				precedence: "mathjax",
@@ -6700,18 +6700,18 @@ function kl({ source: e, streaming: t }) {
 	}) : i;
 }
 function Al({ source: e, components: t }) {
-	let n = r(), a = E(bl(n.assets?.mathjaxFontUrl)), s = o(), c = n.assets ? {
+	let n = r(), i = E(bl(n.assets?.mathjaxFontUrl)), o = a(), s = n.assets ? {
 		...t,
 		style: ({ children: e }) => {
-			let t = i(e) ? e : "";
-			return t && n.id !== void 0 ? /* @__PURE__ */ k("style", { children: $c(t, n.id, s) }) : null;
+			let t = c(e) ? e : "";
+			return t && n.id !== void 0 ? /* @__PURE__ */ k("style", { children: $c(t, n.id, o) }) : null;
 		}
 	} : t;
 	return /* @__PURE__ */ k(za, {
-		remarkPlugins: a.remark,
-		rehypePlugins: a.rehype,
+		remarkPlugins: i.remark,
+		rehypePlugins: i.rehype,
 		urlTransform: pl,
-		components: c,
+		components: s,
 		children: e
 	});
 }
@@ -6721,7 +6721,7 @@ var jl = T(function({ source: e }) {
 		streaming: !0
 	});
 }), Ml = T(function({ children: e, streaming: t = !1 }) {
-	return a("Markdown"), /* @__PURE__ */ k(f, {
+	return s("Markdown"), /* @__PURE__ */ k(p, {
 		id: "markdown",
 		children: t ? Zc(e).map((e, t) => /* @__PURE__ */ k(jl, { source: e }, t)) : /* @__PURE__ */ k(kl, {
 			source: e,

@@ -1,2 +1,2 @@
-/** Session screen: the Files/Worksets/Threads box beside a permanent chat. */
+/** Session screen: the Insights/Files/Worksets box beside a permanent chat. */
 export default function SessionPage(): import("react").JSX.Element;

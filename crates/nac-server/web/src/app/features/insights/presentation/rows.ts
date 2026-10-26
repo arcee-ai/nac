@@ -40,9 +40,6 @@ export function segmentRowView(segment: InsightSegment, sources: RowSources): Ro
 }
 
 export function entryRowView(entry: InsightEntry, sources: RowSources): RowView {
-  if (entry.kind === "group" && entry.group.segments.length === 1) {
-    return segmentRowView(entry.group.segments[0], sources);
-  }
   const row = entryRow(entry);
   if (entry.kind === "thread") {
     const count = sources.episodeCounts.get(entry.thread.name);

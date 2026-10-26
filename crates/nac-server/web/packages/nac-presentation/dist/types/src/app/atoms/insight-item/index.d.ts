@@ -1,6 +1,5 @@
 import type React from "react";
 import { IconName } from "../icon";
-export { default as InsightCodeBox } from "./InsightCodeBox";
 export { default as InsightItemCodeDisplayer, InsightItemCodeDisplayerState, } from "./InsightItemCodeDisplayer";
 export { default as InsightLinkButton } from "./InsightLinkButton";
 export { default as InsightShowFullButton } from "./InsightShowFullButton";
