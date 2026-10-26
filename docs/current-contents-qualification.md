@@ -11,7 +11,9 @@ fetched `origin/dev` on October 23, 2026. The review candidate was subsequently
 rebased onto verified `dev` `57e97a84f996a5e440f61be6213939825bb0ce2d` after
 PR #416 landed the shared Tokio/Zod lockfile repair. On October 26, 2026, the
 candidate was refreshed onto verified `dev`
-`87faf08bb6201980f7eb5c030e019fb3ce2ce61e` without conflicts. Workspace helper
+`87faf08bb6201980f7eb5c030e019fb3ce2ce61e`, then onto
+`6f059dcb60c85e62f27f0c09c45d29a12a8a8ed8` after the runtime build-script
+path fix. Both refreshes were conflict-free. Workspace helper
 source is byte-identical across these bases, and the qualification code was
 preserved. Recorded JSON remains the original measurement evidence
 with its original subject/repository SHA and runner fingerprints; it is not
