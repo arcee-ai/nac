@@ -77,7 +77,12 @@ const UserMessageBody = memo(function UserMessageBody({
   const canRefresh = !readOnly && onRefresh != null && messageIndex != null;
   const canRevert = !readOnly && onRevert != null && messageIndex != null;
   return (
-    <div className="group/user-msg flex flex-col items-end w-full max-w-full py-6">
+    <div className="flex flex-col items-end w-full max-w-full py-6">
+      {date ? (
+        <span className="max-w-full min-w-0 pb-2 label-2xs text-basic-muted whitespace-nowrap truncate">
+          {date}
+        </span>
+      ) : null}
       <div
         className={cn(
           "min-w-0 max-w-full p-5 rounded-[12px] bg-elevation-sublevel-variant-B shadow-convex",
@@ -117,20 +122,8 @@ const UserMessageBody = memo(function UserMessageBody({
         className={cn(
           "flex items-center justify-end gap-3 max-w-full min-w-0 pt-2",
           pending && "invisible",
-          // Keep the row hittable while moving from the bubble to the actions.
-          "opacity-0 pointer-events-none transition-opacity duration-150",
-          "group-hover/user-msg:opacity-100 group-hover/user-msg:pointer-events-auto",
-          "group-focus-within/user-msg:opacity-100 group-focus-within/user-msg:pointer-events-auto",
-          // Nothing hovers on a touch screen, so the row simply stays out.
-          "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
         )}
       >
-        {date ? (
-          <span className="min-w-0 label-micro text-basic-muted whitespace-nowrap truncate">
-            {date}
-          </span>
-        ) : null}
-
         {canRefresh ? (
           <Tooltip
             title="Regenerate from the original prompt (rewinds later transcript and workspace changes)"
