@@ -330,9 +330,14 @@ export function Transcript({
   // liveness — its pill spins and its header names the activity. Until then an
   // empty reply stands in, under the optimistic bubble too, or the pill would
   // only appear when `running` flips and the layout would jump. It is keyed as
-  // the reply it stands for, so the stream and the commit fill it in place.
+  // the reply it stands for, so the stream and the commit fill it in place,
+  // and it stands down once that reply is there, even from a run that ended
+  // before the snapshot showed its prompt.
   const lastTurn = turns[turns.length - 1];
-  const showModelPending = (running || showPending) && !(running && lastTurn?.kind === "model");
+  const showModelPending =
+    (running || showPending) &&
+    lastTurn?.key !== replyKey &&
+    !(running && lastTurn?.kind === "model");
   const placeholder = useMemo<ModelTurn>(
     () => ({
       kind: "model",
