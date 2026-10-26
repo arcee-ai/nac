@@ -14,8 +14,12 @@ export interface SessionBehaviorPresentation {
 export declare const SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[];
 export declare function sessionBehaviorPresentation(behavior: SessionBehavior | null | undefined): SessionBehaviorPresentation;
 export declare function sessionBehaviorLabel(behavior: SessionBehavior): string;
-/** Leading glyph on a chat row. Matches the new-session choices. */
-export declare function sessionBehaviorIcon(behavior: SessionBehavior | null | undefined): IconName;
+/**
+ * The session-type glyph, matching the new-session choices. A delegated
+ * session's durable relationship decides over its behavior, because the
+ * Subagents rows know only which topology they launched.
+ */
+export declare function sessionBehaviorIcon(behavior: SessionBehavior | null | undefined, lineage?: SessionLineage["kind"] | null): IconName;
 export interface SessionPanelPolicy {
     widePanels: readonly SessionPanel[];
     mobilePanels: readonly SessionPanel[];

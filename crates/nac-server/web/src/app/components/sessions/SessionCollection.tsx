@@ -11,6 +11,7 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun } from "@/app/lib/format";
 import { buildSessionNavigation, isSessionUnread } from "@/app/lib/sessionNavigation";
 import { routes } from "@/app/lib/routes";
+import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
@@ -50,7 +51,11 @@ function SessionCollectionRow({
         : unread
           ? "Updated"
           : projectLabel;
-  const accessibleState = [status, unread ? "updated since last viewed" : null]
+  // The glyph is decorative, so the name carries what it shows.
+  const behaviorLabel = showBehaviorIcon
+    ? sessionBehaviorPresentation(entry.summary.behavior).label
+    : undefined;
+  const accessibleState = [status, unread ? "updated since last viewed" : null, behaviorLabel]
     .filter(Boolean)
     .join(", ");
 
@@ -59,6 +64,7 @@ function SessionCollectionRow({
       title={title}
       behavior={entry.summary.behavior}
       showBehaviorIcon={showBehaviorIcon}
+      behaviorLabel={behaviorLabel}
       active={active}
       running={running}
       unread={unread}
