@@ -447,3 +447,159 @@ async fn committed_task_input_stays_pending_through_late_publication_and_shutdow
     drop(manager);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+async fn active_observer_survives_creator_publication(shutdown: bool) {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retained_active_observer_publication");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let setup = test_manager(&root);
+    let request = fixture(&root, &setup).await;
+    let provider = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connection = rusqlite::Connection::open(&setup.inner.store_path).unwrap();
+    connection
+        .execute(
+            "UPDATE model_configurations SET base_url=?1 WHERE config_id='task-config'",
+            [format!("http://{}/v1", provider.local_addr().unwrap())],
+        )
+        .unwrap();
+    drop(connection);
+    let received = Arc::new(tokio::sync::Notify::new());
+    let reached = Arc::clone(&received);
+    let endpoint = tokio::spawn(async move {
+        let (mut socket, _) = provider.accept().await.unwrap();
+        let mut request = [0; 1024];
+        assert!(socket.read(&mut request).await.unwrap() > 0);
+        reached.notify_one();
+        std::future::pending::<()>().await;
+    });
+    drop(setup);
+    let manager = owned_manager(&root).await;
+    let gate = Arc::new(application::session_creation::CreationProjectionGate::default());
+    *manager
+        .inner
+        .session_creation_after_persistence
+        .lock()
+        .unwrap() = Some(gate.clone());
+    let app = router(manager.clone());
+    assert_eq!(
+        post_json(
+            app.clone(),
+            "/task-launches",
+            serde_json::to_value(&request).unwrap()
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
+        .await
+        .unwrap();
+    let record = launch_status(app.clone(), &request.request_id).await;
+    assert_eq!(record.phase, TaskLaunchPhase::Ready);
+    assert!(manager.inner.active_sessions.read().await.is_empty());
+    // Observe the real committed session and promote its only initial inbox
+    // item while the creator is still paused before cache publication.
+    let observer = manager.attach_session(&record.session_id).await.unwrap();
+    let run = observer
+        .active_run()
+        .expect("observer started the initial run");
+    tokio::time::timeout(Duration::from_secs(5), received.notified())
+        .await
+        .unwrap();
+    assert!(observer.has_active_operation());
+    gate.resume.notify_one();
+    // The preparation lease is released only after late creator publication
+    // and its normal inbox wake have completed.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match sessions::SessionOperationLease::try_acquire(
+                &manager.inner.store_path,
+                &format!("task-launch:{}", request.request_id),
+            ) {
+                Ok(lease) => {
+                    drop(lease);
+                    break;
+                }
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                    tokio::time::sleep(Duration::from_millis(5)).await
+                }
+                Err(error) => panic!("{error}"),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let cached = manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .get(&record.session_id)
+        .cloned()
+        .unwrap();
+    let same_service = Arc::ptr_eq(&cached, &observer);
+    if shutdown {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            serve_listener_with_shutdown(
+                listener,
+                None,
+                manager.clone(),
+                async {},
+                Duration::from_secs(5),
+                || panic!("shutdown watchdog reached"),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    } else {
+        manager
+            .cancel_active_run_exact(&record.session_id, run.run_id.as_str())
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while observer.has_active_operation() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        manager.stop_local_run_admission().await;
+        manager.quiesce_persistence_callers().await;
+        manager.drain_persistence().await.unwrap();
+    }
+    assert!(
+        !observer.has_active_operation(),
+        "manager settlement must reach the observer's actual run"
+    );
+    assert!(
+        same_service,
+        "late creator publication must preserve the canonical service"
+    );
+    assert!(matches!(
+        sessions::SessionOperationLease::try_acquire(&manager.inner.store_path, &record.session_id),
+        Ok(_)
+    ));
+    let connection = rusqlite::Connection::open(&manager.inner.store_path).unwrap();
+    let (inputs, runs): (i64, i64) = connection.query_row("SELECT (SELECT count(*) FROM session_inbox WHERE session_id=?1),run_count FROM sessions WHERE session_id=?1", [&record.session_id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((inputs, runs), (1, 1));
+    drop(connection);
+    endpoint.abort();
+    drop(app);
+    drop(cached);
+    drop(observer);
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn manager_cancel_reaches_active_observer_after_late_creator_publication() {
+    active_observer_survives_creator_publication(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn complete_shutdown_settles_active_observer_after_late_creator_publication() {
+    active_observer_survives_creator_publication(true).await;
+}

@@ -533,6 +533,25 @@ impl<'a> SessionCreationApplication<'a> {
                 gate.resume.notified().await;
             }
         }
+        let session_id = snapshot
+            .metadata
+            .session_id
+            .clone()
+            .ok_or_else(|| anyhow!("new session did not include a session id"))?;
+        // The durable commit makes this session observable before its creator
+        // reaches cache publication. Attachment may already have published and
+        // started a service; preserve that canonical identity under the same
+        // lifecycle gate used by attachment and configuration changes.
+        let gate = self.manager.lifecycle_gate(&session_id);
+        let _lifecycle = gate.lock().await;
+        let service = {
+            let mut active = self.manager.inner.active_sessions.write().await;
+            Arc::clone(
+                active
+                    .entry(session_id)
+                    .or_insert_with(|| Arc::new(service)),
+            )
+        };
         if retained.is_some()
             && self
                 .manager
@@ -544,17 +563,6 @@ impl<'a> SessionCreationApplication<'a> {
         {
             service.stop_run_admission().await?;
         }
-        let session_id = snapshot
-            .metadata
-            .session_id
-            .clone()
-            .ok_or_else(|| anyhow!("new session did not include a session id"))?;
-        self.manager
-            .inner
-            .active_sessions
-            .write()
-            .await
-            .insert(session_id, Arc::new(service));
         Ok(snapshot)
     }
 }
