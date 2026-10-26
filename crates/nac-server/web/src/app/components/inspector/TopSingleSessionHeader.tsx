@@ -172,8 +172,14 @@ export function TopSingleSessionHeader({
               >
                 {title}
               </p>
+              {/* Beside the side panel the chat can drop to 200px, too narrow
+                  for the title and a whole badge, so the badge truncates
+                  rather than run under Usage. */}
               {badge ? (
-                <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-2 py-[3px] text-basic-tertiary">
+                <span
+                  className="tag-label min-w-0 truncate rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-2 py-[3px] text-basic-tertiary"
+                  title={badge}
+                >
                   {badge}
                 </span>
               ) : null}
