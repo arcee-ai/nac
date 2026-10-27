@@ -193,13 +193,13 @@ async fn authorize_project(
     if authorized == Some(project_id) {
         return Ok(());
     }
-    match broker
-        .authorize(
+    match context
+        .authorize_during_execution(broker.authorize(
             tool,
             &[project_resource(Some(project_id))],
             context,
             context.cancellation(services.runtime),
-        )
+        ))
         .await
     {
         crate::permissions::AuthorizationOutcome::Allowed => Ok(()),

@@ -8,7 +8,8 @@
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::Arc;
+use std::future::Future;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use futures_util::future::BoxFuture;
@@ -115,9 +116,51 @@ pub struct ToolCallContext {
     pub call_id: Option<String>,
     pub thread_name: Option<String>,
     pub(crate) cancellation: Option<super::ThreadCancellation>,
+    pub(crate) execution_timing: Option<Arc<Mutex<InvocationTiming>>>,
+}
+
+/// Private accounting for authorization discovered only during execution.
+#[derive(Default)]
+pub(crate) struct InvocationTiming {
+    authorization: Duration,
+    denied: bool,
+}
+
+struct ExecutionAuthorizationWait {
+    timing: Option<Arc<Mutex<InvocationTiming>>>,
+    started: Instant,
+    denied: bool,
+}
+
+impl Drop for ExecutionAuthorizationWait {
+    fn drop(&mut self) {
+        if let Some(timing) = &self.timing {
+            let mut timing = timing
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            timing.authorization += self.started.elapsed();
+            timing.denied |= self.denied;
+        }
+    }
 }
 
 impl ToolCallContext {
+    /// Only the concrete authorization span is excluded; surrounding store and
+    /// tool work remains timed. Drop also records a cancelled authorization wait.
+    pub(crate) async fn authorize_during_execution(
+        &self,
+        authorization: impl Future<Output = crate::permissions::AuthorizationOutcome>,
+    ) -> crate::permissions::AuthorizationOutcome {
+        let mut wait = ExecutionAuthorizationWait {
+            timing: self.execution_timing.clone(),
+            started: Instant::now(),
+            denied: false,
+        };
+        let outcome = authorization.await;
+        wait.denied = matches!(outcome, crate::permissions::AuthorizationOutcome::Denied(_));
+        outcome
+    }
+
     pub(crate) fn cancellation<'a>(
         &'a self,
         runtime: &'a ToolRuntime,
@@ -343,6 +386,7 @@ impl PreparedToolCall {
             call_id: context.call_id.clone(),
             thread_name: context.thread_name.clone(),
             cancellation: Some(cancellation.clone()),
+            execution_timing: context.execution_timing.clone(),
         };
         let started = Instant::now();
         let mut invocation = Box::pin(self.invoke(services, &call_context));
@@ -871,11 +915,27 @@ impl ToolSnapshot {
                 if let Err(error) = prepared.bind_authorized_resources(&resources, services) {
                     return error;
                 }
+                // Caller contexts may be reused or used concurrently. Each
+                // invocation owns fresh timing, shared only with its bounded child.
+                let timing = Arc::new(Mutex::new(InvocationTiming::default()));
+                let timed_context = ToolCallContext {
+                    execution_timing: Some(Arc::clone(&timing)),
+                    ..context.clone()
+                };
                 let started = Instant::now();
-                prepared
-                    .invoke_bounded(name, services, context)
-                    .await
-                    .executed_since(started)
+                let mut result = prepared
+                    .invoke_bounded(name, services, &timed_context)
+                    .await;
+                let timing = timing
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                result.execution_duration_ms = (!timing.denied).then(|| {
+                    started
+                        .elapsed()
+                        .saturating_sub(timing.authorization)
+                        .as_millis() as u64
+                });
+                result
             }
             Err(error) => error,
         }
