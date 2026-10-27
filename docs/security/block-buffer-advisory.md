@@ -73,6 +73,9 @@ contract tests, plus the retained raw finding to check this exact candidate:
 one match is excepted; neighboring advisory/package/context findings remain
 blocking; evaluation at the exact expiry rejects the policy. No scanner,
 workflow, dependency, trusted-source rule or managed-image exception changes.
+The retained-image rescan unit test uses its own empty policy fixture, so an
+unrelated production exception's expiry does not change that test's scenario.
+Production scans still reject expired entries.
 
 [ALL-496]: https://linear.app/arcee/issue/ALL-496/resolve-block-buffer-advisory-applicability-and-remove-the-temporary
 [raw scan artifact]: https://github.com/arcee-ai/nac/actions/runs/40446997021/artifacts/12708587530

@@ -425,6 +425,8 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(findings[0]["severity"], "Unknown")
 
     def test_daily_selected_red_bundle_is_freshly_evaluated_and_corruption_cannot_fall_back(self):
+        policy = self.root / "policy.json"
+        inv.write_json(policy, {"schema_version": 1, "exceptions": []})
         now = dt.datetime.now(dt.timezone.utc).isoformat()
         newest = {"id": 2, "event": "push", "head_branch": "dev", "path": rescan.PRODUCER,
                   "conclusion": "failure", "created_at": now, "head_sha": "a" * 40,
@@ -461,8 +463,7 @@ class DriverTests(unittest.TestCase):
                 args = argparse.Namespace(image=IMAGE, source_revision="a" * 40,
                     bundle=output / "retained/inventory", output=output / "rescan",
                     tool_cache=self.root, db_cache=self.root,
-                    trusted_policy=scan.ROOT / ".github/security/exceptions.json",
-                    candidate_policy=scan.ROOT / ".github/security/exceptions.json")
+                    trusted_policy=policy, candidate_policy=policy)
                 return SimpleNamespace(returncode=scan.run(args))
             report = {"descriptor": {"name": "grype"}, "distro": {"name": "debian", "version": "12"}, "matches": []}
             finding = {"package": "Go:toolchain", "advisory": "GO-2026-6601", "version": "1.27.0",
