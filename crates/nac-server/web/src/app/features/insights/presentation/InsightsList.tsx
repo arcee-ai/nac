@@ -1,10 +1,12 @@
 import { memo, useEffect, useRef, type ReactNode } from "react";
 
+import { ActionListButtonSize } from "@/app/atoms";
 import type { InsightsEmptyCopy, InsightTurnSection } from "@/app/features/insights/model/types";
 import {
   InsightsTurnSection,
   type InsightsRowController,
 } from "@/app/features/insights/presentation/InsightsTurnSection";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { STREAMING_TURN_KEY } from "@/app/lib/transcript";
 
 const LEADING_HEADING = "Earlier messages";
@@ -22,12 +24,17 @@ function verticalScroller(element: HTMLElement): HTMLElement | null {
  * `scrollIntoView({ block: "nearest" })` limited to the list's own scroller.
  * The native call also scrolls every clipping ancestor, and the collapsed side
  * panel sits off-screen inside one: revealing a row there shifted the session.
+ * The scroller's padding counts as out of view: on a phone it is what keeps the
+ * rows clear of the floating header and tab bar.
  */
 function revealRow(row: HTMLElement): void {
   const scroller = verticalScroller(row);
   if (!scroller) return;
-  const viewTop = scroller.getBoundingClientRect().top + scroller.clientTop;
-  const viewBottom = viewTop + scroller.clientHeight;
+  const style = getComputedStyle(scroller);
+  const padTop = parseFloat(style.paddingTop) || 0;
+  const padBottom = parseFloat(style.paddingBottom) || 0;
+  const viewTop = scroller.getBoundingClientRect().top + scroller.clientTop + padTop;
+  const viewBottom = viewTop + scroller.clientHeight - padTop - padBottom;
   const { top, bottom } = row.getBoundingClientRect();
   if (top < viewTop) scroller.scrollTop += top - viewTop;
   else if (bottom > viewBottom) scroller.scrollTop += Math.min(bottom - viewBottom, top - viewTop);
@@ -52,6 +59,7 @@ export const InsightsList = memo(function InsightsList({
   footer?: ReactNode;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+  const size = useIsMobile() ? ActionListButtonSize.Large : ActionListButtonSize.Small;
 
   useEffect(() => {
     const picked = listRef.current?.querySelectorAll<HTMLElement>('[aria-pressed="true"]');
@@ -78,6 +86,7 @@ export const InsightsList = memo(function InsightsList({
             section.key === STREAMING_TURN_KEY ? pending || STREAMING_HEADING : LEADING_HEADING
           }
           controller={controller}
+          size={size}
         />
       ))}
       {footer}

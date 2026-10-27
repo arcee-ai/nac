@@ -49,7 +49,8 @@ for (const [name, viewport, mobile] of [
       page.getByRole("alert").filter({ hasText: "Subagents could not be loaded" }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "Open list", exact: true }).click();
+    // A phone opens the panel on its list; a tablet reaches it from the detail's header.
+    if (!mobile) await page.getByRole("button", { name: "Open list", exact: true }).click();
     const list = subagentList(page, mobile);
     const alert = list.getByRole("alert").filter({ hasText: "Subagents could not be loaded" });
     await expect(alert).toBeVisible();
@@ -142,11 +143,12 @@ for (const [name, viewport, mobile] of [
     await page.setViewportSize(viewport);
     await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
     await showSubagents(page, mobile);
-    if (mobile) await page.getByRole("button", { name: "Open list", exact: true }).click();
-    // The newest child opens by default; pick the other one.
-    await subagentList(page, mobile)
-      .getByRole("button", { name: "Older child", exact: true })
-      .click();
+    // The newest child opens by default, and a phone opens on the list; pick the other one.
+    const olderRow = subagentList(page, mobile).getByRole("button", {
+      name: "Older child",
+      exact: true,
+    });
+    await olderRow.click();
     // The panel's composer, not the parent's own.
     const composer = page.locator("form").filter({
       has: page.getByRole("switch", { name: "Run in the background" }),
@@ -156,16 +158,14 @@ for (const [name, viewport, mobile] of [
 
     await page.getByRole("button", { name: "Open", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${olderId}/`));
-    if (mobile) {
-      // The phone's panel stays open over the transcript it opened.
-      const panel = page.getByRole("dialog");
-      await panel.getByRole("button", { name: "Close", exact: true }).click();
-      await expect(panel).toHaveCount(0);
-    }
+    // Open closes the phone's panel, so it does not cover the chat it opened.
+    if (mobile) await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.getByRole("button", { name: "Parent chat" }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
     await showSubagents(page, mobile);
     await expect(page.getByText("Older child", { exact: true }).first()).toBeVisible();
+    // A phone reopens the panel on its list; the row brings back its composer.
+    if (mobile) await olderRow.click();
     await expect(draft).toHaveValue("E2E_PANEL_CONTINUATION continue from the panel");
 
     const starts: string[] = [];
@@ -184,17 +184,14 @@ for (const [name, viewport, mobile] of [
     // The sent message left the field; the running child's composers take the next one.
     await page.getByRole("button", { name: "Open", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${olderId}/`));
-    if (mobile) {
-      const panel = page.getByRole("dialog");
-      await panel.getByRole("button", { name: "Close", exact: true }).click();
-      await expect(panel).toHaveCount(0);
-    }
+    if (mobile) await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
     const childDraft = page.getByRole("textbox", { name: "Send a message" });
     await expect(childDraft).toHaveValue("");
     await expect(childDraft).toBeEnabled();
     await page.getByRole("button", { name: "Parent chat" }).click();
     await showSubagents(page, mobile);
+    if (mobile) await olderRow.click();
     // A running composer has no background switch; its Steer field is the only one on the page.
     const steer = page.getByRole("textbox", { name: "Send a message" });
     await expect(steer).toHaveValue("");

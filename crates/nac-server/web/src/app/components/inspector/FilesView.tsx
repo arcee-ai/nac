@@ -3,22 +3,19 @@ import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
+  CodeChangesBadge,
+  CodeChangesBadgeSize,
   FileIcon,
   FileListTabButton,
   FileListTabButtonSize,
   FileListTabButtonVariant,
   GitStatus,
   gitStatusOf,
-  Icon,
-  IconName,
   Loader,
   LoaderSize,
 } from "@/app/atoms";
-import { CommitPopover } from "@/app/components/inspector/CommitPopover";
+import { FilesBranchRow, FilesListToolbar } from "@/app/components/inspector/FilesListControls";
+import { PanelFailure, PanelListNote } from "@/app/components/inspector/PanelMessages";
 import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useLiveWorkspace } from "@/app/hooks/useLiveWorkspace";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -39,7 +36,6 @@ import {
   useWorkspaceFiles,
   useWorkspaceRevisionChanges,
 } from "@/app/services/queries";
-import { type FileListing } from "@/app/store/sessionLayoutStore";
 import type {
   ChangedFileStat,
   SessionSnapshotResponse,
@@ -89,16 +85,7 @@ interface TreeProps {
 function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
   const isMobile = useIsMobile();
   return (
-    // No `w-full`: as a flex child this already stretches, and a full width on
-    // top of the indent margin would push every deep level a few pixels past
-    // the panel and raise a horizontal scrollbar for nothing.
-    <div
-      className={cn(
-        "flex flex-col gap-[2px]",
-        depth > 0 && "mb-2 border-l border-muted",
-        depth > 0 && (isMobile ? "pl-2 ml-2" : "pl-1 ml-1"),
-      )}
-    >
+    <div className={cn("flex flex-col gap-[2px]", depth > 0 && "mb-2 border-l border-muted pl-2")}>
       {dir.dirs.map((child) => {
         const expanded = open.has(child.path);
         return (
@@ -149,12 +136,10 @@ function ChangedList({
   onSelect: (path: string) => void;
 }) {
   const isMobile = useIsMobile();
-  if (files.length === 0) {
-    return <div className="p-1 label-micro text-basic-muted">Nothing has changed here yet.</div>;
-  }
+  if (files.length === 0) return <PanelListNote>Nothing has changed here yet.</PanelListNote>;
 
   return (
-    <div className="flex flex-col gap-[2px]">
+    <div className="flex flex-col gap-1">
       {files.map((file) => (
         <FileRow
           key={file.path}
@@ -168,96 +153,13 @@ function ChangedList({
   );
 }
 
-function ListingButton({
-  iconName,
-  label,
-  active,
-  large = false,
-  onClick,
-}: {
-  iconName: IconName;
-  label: string;
-  active: boolean;
-  /** The phone's 40px circle around a 24px glyph, for the floating pill. */
-  large?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      className="btn-round"
-      size={large ? ButtonSize.Medium : ButtonSize.Small}
-      variant={active ? ButtonVariant.Primary : ButtonVariant.Ghost}
-      content={ButtonContent.Icon}
-      aria-pressed={active}
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-    >
-      <Icon iconName={iconName} />
-    </Button>
-  );
-}
+/**
+ * The design's Plex Mono Medium 12/16 without tracking. `.code` sets a 1.5
+ * line height and tracking in unlayered CSS, which only `!` utilities outrank.
+ */
+const CODE_TYPE = "code code-small font-medium !leading-4 !tracking-normal";
 
-/** How the files are listed, and the commit action. */
-function ListToolbar({
-  sessionId,
-  listing,
-  changed,
-  revision,
-  readOnly,
-}: {
-  sessionId: string;
-  listing: FileListing;
-  changed: ChangedFileStat[];
-  revision: number | null;
-  readOnly: boolean;
-}) {
-  const { selectFileListing } = useNativeRuntime().stores.sessionLayoutStore;
-
-  const isMobile = useIsMobile();
-
-  const listingButtons = (
-    <>
-      <ListingButton
-        iconName={IconName.Folders}
-        label="Show every file"
-        active={listing === "tree"}
-        large={isMobile}
-        onClick={() => selectFileListing("tree")}
-      />
-      <ListingButton
-        iconName={IconName.Scheme}
-        label="Show changed files only"
-        active={listing === "changed"}
-        large={isMobile}
-        onClick={() => selectFileListing("changed")}
-      />
-    </>
-  );
-  const commit = readOnly ? null : (
-    <CommitPopover sessionId={sessionId} changed={changed} revision={revision} />
-  );
-
-  // A phone has no room for a bar of its own above the list, so the design
-  // floats the same two controls over its last rows instead.
-  if (isMobile) {
-    return (
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-4 p-1 rounded-full bg-elevation-level-3 shadow-2xl">
-          {listingButtons}
-        </div>
-        {commit}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-3 h-12 px-3 shrink-0 border-b border-muted @max-[560px]:gap-2 @max-[560px]:px-2">
-      <div className="flex items-center gap-3 flex-1">{listingButtons}</div>
-      {commit}
-    </div>
-  );
-}
+const GUTTER = cn(CODE_TYPE, "shrink-0 w-12 text-right opacity-50 text-basic-muted select-none");
 
 function CodeLine({
   lineNo,
@@ -283,10 +185,13 @@ function CodeLine({
             : "border-transparent",
       )}
     >
-      <span className="shrink-0 w-12 pr-1 text-right opacity-50 code code-small text-basic-muted select-none">
-        {lineNo ?? ""}
-      </span>
-      <span className="flex-1 min-w-0 px-2 code code-small text-basic-primary whitespace-pre-wrap break-words">
+      <span className={GUTTER}>{lineNo ?? ""}</span>
+      <span
+        className={cn(
+          CODE_TYPE,
+          "flex-1 min-w-0 px-2 text-basic-primary whitespace-pre-wrap break-words",
+        )}
+      >
         {tokens
           ? tokens.map((token, index) => (
               <span key={index} style={tokenStyle(token)}>
@@ -352,14 +257,12 @@ function Section({
   if (section.hunks.length === 0) return <Notice>No hunks for this section.</Notice>;
 
   return (
-    <div className="pb-[128px] md:pb-0">
+    <>
       {section.hunks.map((hunk, index) => (
         <div key={index} className="flex flex-col w-full">
           <div className="flex items-start w-full border-l-2 border-transparent bg-info-tertiary">
-            <span className="shrink-0 w-12 pr-1 text-right opacity-50 code code-small text-basic-muted select-none">
-              @@
-            </span>
-            <span className="flex-1 min-w-0 px-2 code code-small text-info-primary truncate">
+            <span className={GUTTER}>@@</span>
+            <span className={cn(CODE_TYPE, "flex-1 min-w-0 px-2 text-info-primary truncate")}>
               {`-${hunk.old_start},${hunk.old_lines} +${hunk.new_start},${hunk.new_lines}`}
               {hunk.function_context ? ` ${hunk.function_context}` : ""}
             </span>
@@ -370,44 +273,97 @@ function Section({
         </div>
       ))}
       {section.truncated ? <Notice>Diff was truncated by the backend.</Notice> : null}
-    </div>
+    </>
   );
 }
 
-/** Header shared by both panes: the file's name, with counts or size beside it. */
+/** The open file as the design heads it on every size: its type icon, then its name. */
+function FileTitle({ path }: { path: string }) {
+  const isMobile = useIsMobile();
+  return (
+    <span className="flex min-w-0 items-center gap-[10px]" title={path}>
+      <FileIcon path={path} size={isMobile ? 24 : 20} />
+      <span className="min-w-0 truncate">{fileLabel(path)}</span>
+    </span>
+  );
+}
+
+/** Header shared by both panes: the file, with its counts or size right after it. */
 function PaneHeader({ path, trailing }: { path: string; trailing: React.ReactNode }) {
-  // On a phone the dialog chrome already names the file and carries the badge,
-  // so this bar would only repeat them.
+  // Below the desktop width the panel's own header names the file instead.
   const isDesktop = useIsDesktop();
   if (!isDesktop) return null;
 
   return (
-    <div
-      className="flex items-center gap-[10px] h-12 px-4 shrink-0 border-b border-muted bg-elevation-ground"
-      title={path}
-    >
-      <div className="flex flex-1 items-center gap-[6px] min-w-0">
-        <FileIcon path={path} />
-        <span className="label-micro text-btn-secondary truncate">{fileLabel(path)}</span>
-      </div>
-      <div className="flex items-center gap-2 shrink-0 code code-small">{trailing}</div>
+    <div className="flex items-center gap-[10px] h-12 px-4 shrink-0 border-b border-muted bg-elevation-ground header-sm text-basic-primary">
+      <FileTitle path={path} />
+      {trailing}
     </div>
   );
 }
 
 function Scroller({ children }: { children: React.ReactNode }) {
+  // A phone's header floats over the top of the code rather than above it.
+  const isMobile = useIsMobile();
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-auto py-2 [&>*]:shrink-0">{children}</div>
+    <div
+      className={cn(
+        "flex flex-col flex-1 min-h-0 overflow-auto [&>*]:shrink-0",
+        isMobile ? "py-16" : "py-2",
+      )}
+    >
+      {children}
+    </div>
   );
+}
+
+interface ChangeCounts {
+  additions: number;
+  deletions: number;
+}
+
+/**
+ * Lines a changed file added and removed. `git diff --numstat` covers only
+ * tracked files, so an untracked one arrives without counts and the diff
+ * itself is the only place they exist.
+ */
+function useChangeCounts(
+  sessionId: string,
+  file: FileNode | undefined,
+  revision: number | null,
+): ChangeCounts | null {
+  const counted = file != null && (file.additions != null || file.deletions != null);
+  const { data: diff, isPlaceholderData } = useWorkspaceDiff(
+    sessionId,
+    file && !counted ? file.path : null,
+    "all",
+    3,
+    revision,
+  );
+  return useMemo(() => {
+    if (!file) return null;
+    if (counted) return { additions: file.additions ?? 0, deletions: file.deletions ?? 0 };
+    // A placeholder is the previous file's diff, whose counts are not this one's.
+    if (!diff || isPlaceholderData) return null;
+    return diff.sections.reduce(
+      (total, section) => ({
+        additions: total.additions + section.additions,
+        deletions: total.deletions + section.deletions,
+      }),
+      { additions: 0, deletions: 0 },
+    );
+  }, [file, counted, diff, isPlaceholderData]);
 }
 
 function DiffPane({
   sessionId,
   file,
+  counts,
   revision,
 }: {
   sessionId: string;
   file: FileNode;
+  counts: ChangeCounts | null;
   revision: number | null;
 }) {
   const {
@@ -416,32 +372,13 @@ function DiffPane({
     error,
   } = useWorkspaceDiff(sessionId, file.path, "all", 3, revision);
 
-  // `git diff --numstat` covers only tracked files, so an untracked one arrives
-  // without counts and the diff itself is the only place they exist.
-  const counts = useMemo(() => {
-    if (file.additions != null || file.deletions != null) {
-      return { additions: file.additions ?? 0, deletions: file.deletions ?? 0 };
-    }
-    if (!diff) return null;
-    return diff.sections.reduce(
-      (total, section) => ({
-        additions: total.additions + section.additions,
-        deletions: total.deletions + section.deletions,
-      }),
-      { additions: 0, deletions: 0 },
-    );
-  }, [file, diff]);
-
   return (
     <>
       <PaneHeader
         path={file.path}
         trailing={
           counts ? (
-            <>
-              <span className="text-success-primary">+{counts.additions}</span>
-              <span className="text-error-primary">-{counts.deletions}</span>
-            </>
+            <CodeChangesBadge additions={counts.additions} deletions={counts.deletions} />
           ) : null
         }
       />
@@ -528,7 +465,13 @@ function FilePane({
     <>
       <PaneHeader
         path={path}
-        trailing={data ? <span className="text-basic-muted">{formatBytes(data.size)}</span> : null}
+        trailing={
+          data ? (
+            <span className={cn(CODE_TYPE, "shrink-0 text-basic-muted")}>
+              {formatBytes(data.size)}
+            </span>
+          ) : null
+        }
       />
       <Scroller>
         {isFetching && !data ? (
@@ -574,6 +517,7 @@ export function FilesView({
     useNativeRuntime().stores.sessionLayoutStore;
 
   const client = useQueryClient();
+  const isMobile = useIsMobile();
   // Shared rather than local: the same panel also renders inside the
   // full-screen dialog, and it has to open on the file you were reading.
   const selected = useSelectedFile();
@@ -631,13 +575,17 @@ export function FilesView({
   // Landing on the first change keeps the panel useful the moment it opens.
   const current = selected ?? changedNodes[0]?.path ?? null;
   const currentChange = current ? changedByPath.get(current) : undefined;
+  const counts = useChangeCounts(sessionId, currentChange, revision);
+  // A phone opens on the list, before any file is open, so only a file you
+  // opened is marked there; the first change is merely where the detail lands.
+  const marked = isMobile ? selected : current;
 
   const failure = error ?? (revision != null ? revisionChanges.error : null);
   if (revision == null && workspace?.error) {
-    return <div className="p-6 label-small text-error-primary">{workspace.error}</div>;
+    return <PanelFailure listTitle="Files">{workspace.error}</PanelFailure>;
   }
   if (failure) {
-    return <div className="p-6 label-small text-error-primary">{errorMessage(failure)}</div>;
+    return <PanelFailure listTitle="Files">{errorMessage(failure)}</PanelFailure>;
   }
   // Only when there is nothing to show at all. A listing already on screen —
   // this revision's, or the one before it while the switch is fetched — stays
@@ -646,20 +594,23 @@ export function FilesView({
     return <PanelLoading listTitle="Files" />;
   }
 
+  const branch = workspace?.branch;
+
   return (
     <PanelSplit
       listTitle="Files"
-      title={current?.split("/").pop()}
-      actions={
-        currentChange && (currentChange.additions || currentChange.deletions) ? (
-          <div className="flex items-center gap-2 shrink-0 code code-small">
-            <span className="text-success-primary">+{currentChange.additions ?? 0}</span>
-            <span className="text-error-primary">-{currentChange.deletions ?? 0}</span>
-          </div>
+      title={current ? <FileTitle path={current} /> : undefined}
+      titleAction={
+        counts ? (
+          <CodeChangesBadge
+            additions={counts.additions}
+            deletions={counts.deletions}
+            size={isMobile ? CodeChangesBadgeSize.Medium : CodeChangesBadgeSize.Small}
+          />
         ) : null
       }
       listToolbar={
-        <ListToolbar
+        <FilesListToolbar
           sessionId={sessionId}
           listing={fileListing}
           changed={changed}
@@ -668,25 +619,28 @@ export function FilesView({
         />
       }
       list={
-        nodes.length === 0 ? (
-          <div className="p-1 label-micro text-basic-muted">No files in the workspace.</div>
-        ) : fileListing === "changed" ? (
-          <ChangedList files={changedNodes} selected={current} onSelect={selectFile} />
-        ) : (
-          <>
-            <Tree
-              dir={tree}
-              depth={0}
-              open={open}
-              selected={current}
-              onToggle={toggleFolder}
-              onSelect={selectFile}
-            />
-            {listing.truncated ? (
-              <div className="p-1 label-micro text-basic-muted">Listing truncated.</div>
-            ) : null}
-          </>
-        )
+        <>
+          {isMobile && branch ? (
+            <FilesBranchRow sessionId={sessionId} branch={branch} readOnly={readOnly} />
+          ) : null}
+          {nodes.length === 0 ? (
+            <PanelListNote>No files in the workspace.</PanelListNote>
+          ) : fileListing === "changed" ? (
+            <ChangedList files={changedNodes} selected={marked} onSelect={selectFile} />
+          ) : (
+            <>
+              <Tree
+                dir={tree}
+                depth={0}
+                open={open}
+                selected={marked}
+                onToggle={toggleFolder}
+                onSelect={selectFile}
+              />
+              {listing.truncated ? <PanelListNote>Listing truncated.</PanelListNote> : null}
+            </>
+          )}
+        </>
       }
     >
       {!current ? (
@@ -694,7 +648,13 @@ export function FilesView({
           {nodes.length === 0 ? "No files in the workspace." : "Select a file to see it."}
         </PanelEmpty>
       ) : currentChange ? (
-        <DiffPane key={current} sessionId={sessionId} file={currentChange} revision={revision} />
+        <DiffPane
+          key={current}
+          sessionId={sessionId}
+          file={currentChange}
+          counts={counts}
+          revision={revision}
+        />
       ) : (
         <FilePane key={current} sessionId={sessionId} path={current} revision={revision} />
       )}

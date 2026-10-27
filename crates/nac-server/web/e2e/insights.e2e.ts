@@ -101,7 +101,7 @@ test("opens old Threads links in Insights on the stored thread", async ({
   await expect(insightsTab).toHaveAttribute("aria-selected", "true");
   await expect(filter.getByRole("button", { name: "All actions" })).toBeVisible();
   await expect(threadDetail).toBeVisible();
-  await expect(threadDetail.getByRole("button", { name: "Command Log" })).toHaveAttribute(
+  await expect(threadDetail.getByRole("button", { name: "Logs" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );

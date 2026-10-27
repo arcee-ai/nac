@@ -79,7 +79,7 @@ export function Episodes({
       <div className={cn("flex flex-1 min-h-0", className)}>
         <p className="p-4 max-w-prose label-small text-basic-muted">
           {running
-            ? "An episode records one dispatch — what the thread was asked to do and what came back. This one is written when the dispatch ends; until then the Command Log is the live view."
+            ? "An episode records one dispatch — what the thread was asked to do and what came back. This one is written when the dispatch ends; until then Logs is the live view."
             : "This thread has not been dispatched yet, so it has no episodes."}
         </p>
       </div>

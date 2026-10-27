@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { AnchorPlacement } from "../../lib/anchor";
 import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
+import StickyButton from "../button/StickyButton";
 import Icon, { IconName } from "../icon";
 import Popover, { PopoverSize } from "../popover";
 import type { HoverHintConfig } from "../label";
@@ -33,6 +34,13 @@ interface SelectProps {
    * of its own belongs in `panelClassName`.
    */
   sticky?: boolean;
+  /**
+   * Draws the trigger as a `StickyButton` of `variant`, for a select floating
+   * over a phone screen. Its rows still follow `size`.
+   */
+  floating?: boolean;
+  /** Trigger text in place of the chosen row's label, for a trigger that words it its own way. */
+  triggerLabel?: React.ReactNode;
   className?: string;
   /** Glyph after the label, or `null` for a trigger of text alone. Forms keep the disclosure chevron. */
   trailingIcon?: IconName | null;
@@ -65,6 +73,8 @@ const Select: React.FC<SelectProps> = ({
   placeholder = "Select...",
   disabled = false,
   sticky = false,
+  floating = false,
+  triggerLabel,
   className = "",
   trailingIcon = IconName.Down,
   triggerClassName = "",
@@ -84,6 +94,32 @@ const Select: React.FC<SelectProps> = ({
     onValueChange?.(id);
     changeOpen(false);
   };
+
+  const trigger = {
+    variant,
+    disabled,
+    content: trailingIcon ? ButtonContent.IconRight : ButtonContent.Text,
+    onClick: () => !disabled && changeOpen(!open),
+    "aria-expanded": open,
+  };
+  const triggerClass = `${triggerClassName} overflow-hidden max-w-full`;
+  const triggerFace = (
+    <>
+      {selected?.icon && triggerLabel === undefined ? <Icon iconName={selected.icon} /> : null}
+      <span className="text-left flex-grow truncate md:max-w-full">
+        {triggerLabel ?? selected?.label ?? placeholder}
+      </span>
+      {trailingIcon ? (
+        <Icon
+          iconName={trailingIcon}
+          className={cn(
+            trailingIcon === IconName.Down && "transition-transform duration-150 ease-out",
+            trailingIcon === IconName.Down && (open ? "rotate-180" : "rotate-0"),
+          )}
+        />
+      ) : null}
+    </>
+  );
 
   return (
     <Popover
@@ -114,29 +150,15 @@ const Select: React.FC<SelectProps> = ({
         </div>
       }
     >
-      <Button
-        variant={variant}
-        size={size}
-        disabled={disabled}
-        content={trailingIcon ? ButtonContent.IconRight : ButtonContent.Text}
-        className={`${triggerClassName} overflow-hidden max-w-full`}
-        onClick={() => !disabled && changeOpen(!open)}
-        aria-expanded={open}
-      >
-        {selected?.icon ? <Icon iconName={selected.icon} /> : null}
-        <span className="text-left flex-grow truncate md:max-w-full">
-          {selected?.label ?? placeholder}
-        </span>
-        {trailingIcon ? (
-          <Icon
-            iconName={trailingIcon}
-            className={cn(
-              trailingIcon === IconName.Down && "transition-transform duration-150 ease-out",
-              trailingIcon === IconName.Down && (open ? "rotate-180" : "rotate-0"),
-            )}
-          />
-        ) : null}
-      </Button>
+      {floating ? (
+        <StickyButton {...trigger} buttonClassName={triggerClass}>
+          {triggerFace}
+        </StickyButton>
+      ) : (
+        <Button {...trigger} size={size} className={triggerClass}>
+          {triggerFace}
+        </Button>
+      )}
     </Popover>
   );
 };

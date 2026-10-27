@@ -12,6 +12,30 @@ export enum ActionListButtonStatus {
   Failed = "failed",
 }
 
+/** The design's RWD: Small is the desktop row, Large the phone's touch row. */
+export enum ActionListButtonSize {
+  Small = "small",
+  Large = "large",
+}
+
+const SIZE_STYLE: Record<
+  ActionListButtonSize,
+  { button: TabButtonSize; box: string | null; glyph: number; loader: LoaderSize }
+> = {
+  [ActionListButtonSize.Small]: {
+    button: TabButtonSize.Small,
+    box: "!h-7 !px-2",
+    glyph: 16,
+    loader: LoaderSize.XSmall,
+  },
+  [ActionListButtonSize.Large]: {
+    button: TabButtonSize.Large,
+    box: null,
+    glyph: 24,
+    loader: LoaderSize.Medium,
+  },
+};
+
 interface ActionListButtonProps {
   /**
    * Type icon, shown while Ready. The other statuses bring their own glyph,
@@ -19,9 +43,10 @@ interface ActionListButtonProps {
    */
   icon: IconName;
   label: string;
-  /** Rendered uppercase. Running and Failed rows drop it. */
+  /** Rendered uppercase, in every status; the caller leaves it out where a row has none. */
   meta?: string;
   status?: ActionListButtonStatus;
+  size?: ActionListButtonSize;
   /** Leave unset on rows that navigate away instead of selecting themselves. */
   selected?: boolean;
   /** Only for group rows, which expand and collapse their children. */
@@ -44,11 +69,11 @@ const STATUS_NAME: Record<ActionListButtonStatus, string | null> = {
   [ActionListButtonStatus.Failed]: "failed",
 };
 
-function Chevron({ expanded }: { expanded: boolean }) {
+function Chevron({ expanded, size }: { expanded: boolean; size: number }) {
   return (
     <Icon
       iconName={IconName.Right}
-      size={16}
+      size={size}
       className={cn(
         "shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none",
         expanded && "rotate-90",
@@ -61,21 +86,24 @@ function StatusGlyph({
   icon,
   status,
   expanded,
+  size,
 }: {
   icon: IconName;
   status: ActionListButtonStatus;
   expanded: boolean | undefined;
+  size: ActionListButtonSize;
 }) {
-  if (expanded !== undefined) return <Chevron expanded={expanded} />;
+  const { glyph, loader } = SIZE_STYLE[size];
+  if (expanded !== undefined) return <Chevron expanded={expanded} size={glyph} />;
   // The `!` fills beat `.btn-ghost .icon path { fill: … }` from atoms.css, hover included.
   switch (status) {
     case ActionListButtonStatus.Running:
-      return <Loader size={LoaderSize.XSmall} className="shrink-0" />;
+      return <Loader size={loader} className="shrink-0" />;
     case ActionListButtonStatus.Failed:
       return (
         <Icon
           iconName={IconName.Close}
-          size={16}
+          size={glyph}
           className="shrink-0 [&>path]:!fill-btn-destructive"
         />
       );
@@ -83,20 +111,21 @@ function StatusGlyph({
       return (
         <Icon
           iconName={IconName.Clock}
-          size={16}
+          size={glyph}
           className="shrink-0 [&>path]:!fill-btn-secondary-disabled"
         />
       );
     default:
-      return <Icon iconName={icon} size={16} className="shrink-0" />;
+      return <Icon iconName={icon} size={glyph} className="shrink-0" />;
   }
 }
 
 /**
  * One row of the Insights list: a thread, a session, a tool call or a group of
  * them. The caller maps the action type to icon, label and meta; the row only
- * knows its status. It is a small `TabButton`, so hover, press, focus and the
- * selected highlight are the tab button's own. `.btn-small.btn-icon` sets its
+ * knows its status. It is a `TabButton`, so hover, press, focus and the
+ * selected highlight are the tab button's own. The phone's Large row is the
+ * large tab button as it stands; `.btn-small.btn-icon` sets the small one's
  * height and padding in unlayered CSS, which the 28px row overrides with `!`.
  */
 const ActionListButton: React.FC<ActionListButtonProps> = ({
@@ -104,34 +133,32 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
   label,
   meta,
   status = ActionListButtonStatus.Ready,
+  size = ActionListButtonSize.Small,
   selected,
   expanded,
   onClick,
   className,
 }) => {
-  const shownMeta =
-    status === ActionListButtonStatus.Running || status === ActionListButtonStatus.Failed
-      ? undefined
-      : meta;
-  const accessibleName = [label, shownMeta, STATUS_NAME[status]].filter(Boolean).join(", ");
+  const style = SIZE_STYLE[size];
+  const accessibleName = [label, meta, STATUS_NAME[status]].filter(Boolean).join(", ");
 
   return (
     <TabButton
       type="button"
-      size={TabButtonSize.Small}
+      size={style.button}
       active={selected === true}
       aria-pressed={selected}
       aria-expanded={expanded}
       aria-label={accessibleName}
       disabled={onClick === null}
       onClick={onClick ?? undefined}
-      className={cn("!h-7 !px-2", className)}
+      className={cn(style.box, className)}
     >
-      <StatusGlyph icon={icon} status={status} expanded={expanded} />
+      <StatusGlyph icon={icon} status={status} expanded={expanded} size={size} />
       <span className={cn("flex-1 min-w-0 truncate text-left", LABEL_TONE[status])}>{label}</span>
-      {shownMeta ? (
+      {meta ? (
         <span className="shrink-0 text-[10px] leading-[12px] uppercase text-basic-muted">
-          {shownMeta}
+          {meta}
         </span>
       ) : null}
     </TabButton>

@@ -147,10 +147,10 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
       {actions ? (
         <div
           className={cn(
-            "flex items-center gap-1 shrink-0",
+            "flex items-center shrink-0",
             isMobile
-              ? null
-              : "sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden",
+              ? "gap-3"
+              : "gap-1 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden",
           )}
         >
           {actions}

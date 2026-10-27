@@ -9,6 +9,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});\n
 
 /** Opens the MCP servers modal on a blank custom-server form and returns its dialog. */
 export async function openCustomMcpServer(page: Page, mobile: boolean) {
+  if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
   await page.getByRole("button", { name: /^MCP servers/ }).click();
   await page
     .getByRole("button", { name: mobile ? "Add server" : "Custom server", exact: true })

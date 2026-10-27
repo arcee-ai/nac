@@ -3,7 +3,7 @@ import type { SessionPanel } from "@/app/lib/routes";
 
 export const PANEL_ICON: Record<SessionPanel, IconName> = {
   sessions: IconName.Chat,
-  insights: IconName.Bolt,
+  insights: IconName.Eye,
   threads: IconName.Flow,
   delegated: IconName.Robot,
   files: IconName.Folders,

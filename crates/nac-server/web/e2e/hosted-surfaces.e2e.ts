@@ -27,34 +27,30 @@ async function showFiles(page: Page, mobile: boolean) {
   await expect(files.last()).toBeVisible();
 }
 
+/** A phone's panel shows one screen at a time: an open file goes back to the list. */
 async function openFileList(page: Page, mobile: boolean) {
-  if (mobile && !(await page.getByRole("dialog", { name: "Files", exact: true }).isVisible()))
-    await page.getByRole("button", { name: "Open list", exact: true }).click();
-}
-async function closeFileList(page: Page, mobile: boolean) {
-  if (!mobile) return;
-  const list = page.getByRole("dialog", { name: "Files", exact: true });
-  await list.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(list).toHaveCount(0);
+  const back = page.getByRole("button", { name: "Open list", exact: true });
+  if (mobile && (await back.isVisible())) await back.click();
 }
 
 async function chooseFile(page: Page, name: string, mobile: boolean) {
+  await openFileList(page, mobile);
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const file = page.getByRole("button", {
     name: new RegExp(
       `^${escapedName}(?:\\s*, (?:Modified|Added|Deleted|Renamed|Copied|Type changed|Conflict|Untracked|Ignored))?$`,
     ),
   });
-  if (mobile && !(await file.isVisible())) {
-    await page.getByRole("button", { name: "Open list", exact: true }).click();
-  }
-  const allFiles = page.getByRole("button", { name: "Show every file", exact: true });
+  const allFiles = page.getByRole("button", { name: "All files", exact: true });
   if ((await allFiles.getAttribute("aria-pressed")) !== "true") await allFiles.click();
   await file.click();
-  if (mobile) await expect(page.getByRole("dialog", { name: "Files", exact: true })).toHaveCount(0);
+  if (mobile)
+    await expect(page.getByRole("button", { name: "Open list", exact: true })).toBeVisible();
 }
 
 async function selectRevision(page: Page, name: RegExp, mobile: boolean) {
+  // The tab bar belongs to a phone's list screens.
+  await openFileList(page, mobile);
   if (mobile) await page.getByRole("tab", { name: "History", exact: true }).last().click();
   else await page.getByRole("button", { name: /^Snapshot:/ }).click();
   await page.getByRole("button", { name }).click();
@@ -123,10 +119,11 @@ for (const mobile of [false, true]) {
       await expect(page.getByText("CAPTURED_BETA", { exact: true })).toHaveCount(0);
       await openFileList(page, mobile);
       await expect(page.getByRole("button", { name: "Commit", exact: true })).toBeDisabled();
-      await closeFileList(page, mobile);
       await selectRevision(page, /^Working tree/, mobile);
       await chooseFile(page, "note.txt", mobile);
       await expect(page.getByText("CAPTURED_BETA", { exact: true })).toBeVisible();
+      // A phone's branch sits atop the file list rather than in the session header.
+      await openFileList(page, mobile);
       await page.getByRole("button", { name: "Branch: main", exact: true }).click();
       await expect(page.getByRole("button", { name: "other", exact: true })).toBeDisabled();
       await page.getByPlaceholder("Find or create a branch").fill("injected-feature");
@@ -139,7 +136,6 @@ for (const mobile of [false, true]) {
       await page.getByPlaceholder("Commit message").fill("injected accepted commit");
       await page.getByPlaceholder("Commit message").press("Control+Enter");
       await expect(page.getByPlaceholder("Commit message")).toHaveCount(0);
-      await closeFileList(page, mobile);
       await expect
         .poll(async () => (await git("log", "-1", "--format=%s")).stdout.trim())
         .toBe("injected accepted commit");
@@ -171,7 +167,11 @@ for (const mobile of [false, true]) {
       expect(fixture.lostResponses).toHaveLength(1);
       expect((await git("log", "-1", "--format=%s")).stdout.trim()).toBe("accepted response lost");
       expect(fixture.lostResponses[0].status).toBe(200);
-      if (mobile) await page.keyboard.press("Escape");
+      // A phone's panel covers the host's own controls until Escape closes it.
+      if (mobile) {
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog", { name: "Files", exact: true })).toHaveCount(0);
+      }
       await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
       await showFiles(page, mobile);
       await chooseFile(page, "note.txt", mobile);
@@ -349,6 +349,7 @@ for (const mobile of [false, true]) {
       await page.keyboard.press("Escape");
       if (mobile) await page.keyboard.press("Escape");
       await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
+      if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
       await page.getByRole("button", { name: /^MCP servers/ }).click();
       if (mobile) await page.getByRole("button", { name: "renamed_fixture", exact: true }).click();
       await expect(page.getByPlaceholder("my_server")).toHaveValue("renamed_fixture");

@@ -7,11 +7,6 @@ export type InsightSelection = {
 } | {
     kind: "thread";
 };
-/** Thread the Insights detail shows, picked or the newest one by default. */
-export interface ShownThread {
-    name: string;
-    running: boolean;
-}
 interface SessionLayoutState {
     /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
     collapsed: boolean;
@@ -39,11 +34,6 @@ interface SessionLayoutState {
      * episode, and only the card clicked belongs highlighted.
      */
     selectedThreadEpisode: string | null;
-    /**
-     * Published by the thread detail pane while it is up. The phone dialog
-     * header names this thread and shimmers while the pane shows it running.
-     */
-    shownThread: ShownThread | null;
     /** Entry the Insights detail shows; null until the panel or the chat picks one. */
     selectedInsight: InsightSelection | null;
     /**
@@ -78,12 +68,12 @@ export declare function createSessionLayoutStore(storage?: Pick<Storage, "getIte
     bindSidePanelProject: (projectId: string) => void;
     unbindSidePanelProject: () => void;
     toggleSidePanelExpanded: () => void;
+    openSidePanelList: () => void;
     toggleSidePanelCollapsed: () => void;
     showSidePanelList: (panelList: boolean) => void;
     toggleSidePanelList: () => void;
     revealSidePanel: (asDialog?: boolean) => void;
     selectThread: (selectedThread: string | null, selectedThreadEpisode?: string | null) => void;
-    setShownThread: (shownThread: ShownThread | null) => void;
     selectInsight: (selectedInsight: InsightSelection | null) => void;
     toggleInsightGroup: (groupId: string, expanded?: boolean) => void;
     selectInsightsFilter: (insightsFilter: InsightsFilter) => void;
@@ -101,7 +91,6 @@ export declare function createSessionLayoutStore(storage?: Pick<Storage, "getIte
     useSidePanelList: () => boolean;
     useSelectedThread: () => string | null;
     useSelectedThreadEpisode: () => string | null;
-    useShownThread: () => ShownThread | null;
     useSelectedInsight: () => InsightSelection | null;
     useInsightFocusNonce: () => number;
     useExpandedInsightGroups: () => ReadonlySet<string>;
@@ -113,5 +102,5 @@ export declare function createSessionLayoutStore(storage?: Pick<Storage, "getIte
     useToggledFolders: () => ReadonlySet<string>;
     useFileListing: () => FileListing;
 };
-export declare const release: () => void, sessionLayoutStore: import("../lib/store").Store<SessionLayoutState>, bindSidePanelProject: (projectId: string) => void, unbindSidePanelProject: () => void, toggleSidePanelExpanded: () => void, toggleSidePanelCollapsed: () => void, showSidePanelList: (panelList: boolean) => void, toggleSidePanelList: () => void, revealSidePanel: (asDialog?: boolean) => void, selectThread: (selectedThread: string | null, selectedThreadEpisode?: string | null) => void, setShownThread: (shownThread: ShownThread | null) => void, selectInsight: (selectedInsight: InsightSelection | null) => void, toggleInsightGroup: (groupId: string, expanded?: boolean) => void, selectInsightsFilter: (insightsFilter: InsightsFilter) => void, selectWorkset: (selectedWorkset: string | null) => void, selectSubagent: (parentSessionId: string, key: string) => void, selectRevision: (selectedRevision: number | null) => void, selectFile: (selectedFile: string | null) => void, toggleFolder: (path: string) => void, selectFileListing: (fileListing: FileListing) => void, setSidePanelAnimate: (sidePanelAnimate: boolean) => void, resetSessionSelection: () => void, useSidePanelCollapsed: () => boolean, useSidePanelAnimate: () => boolean, useSidePanelExpanded: () => boolean, useSidePanelList: () => boolean, useSelectedThread: () => string | null, useSelectedThreadEpisode: () => string | null, useShownThread: () => ShownThread | null, useSelectedInsight: () => InsightSelection | null, useInsightFocusNonce: () => number, useExpandedInsightGroups: () => ReadonlySet<string>, useInsightsFilter: () => InsightsFilter, useSelectedWorkset: () => string | null, useSelectedSubagent: (parentSessionId: string) => string | null, useSelectedRevision: () => number | null, useSelectedFile: () => string | null, useToggledFolders: () => ReadonlySet<string>, useFileListing: () => FileListing;
+export declare const release: () => void, sessionLayoutStore: import("../lib/store").Store<SessionLayoutState>, bindSidePanelProject: (projectId: string) => void, unbindSidePanelProject: () => void, toggleSidePanelExpanded: () => void, openSidePanelList: () => void, toggleSidePanelCollapsed: () => void, showSidePanelList: (panelList: boolean) => void, toggleSidePanelList: () => void, revealSidePanel: (asDialog?: boolean) => void, selectThread: (selectedThread: string | null, selectedThreadEpisode?: string | null) => void, selectInsight: (selectedInsight: InsightSelection | null) => void, toggleInsightGroup: (groupId: string, expanded?: boolean) => void, selectInsightsFilter: (insightsFilter: InsightsFilter) => void, selectWorkset: (selectedWorkset: string | null) => void, selectSubagent: (parentSessionId: string, key: string) => void, selectRevision: (selectedRevision: number | null) => void, selectFile: (selectedFile: string | null) => void, toggleFolder: (path: string) => void, selectFileListing: (fileListing: FileListing) => void, setSidePanelAnimate: (sidePanelAnimate: boolean) => void, resetSessionSelection: () => void, useSidePanelCollapsed: () => boolean, useSidePanelAnimate: () => boolean, useSidePanelExpanded: () => boolean, useSidePanelList: () => boolean, useSelectedThread: () => string | null, useSelectedThreadEpisode: () => string | null, useSelectedInsight: () => InsightSelection | null, useInsightFocusNonce: () => number, useExpandedInsightGroups: () => ReadonlySet<string>, useInsightsFilter: () => InsightsFilter, useSelectedWorkset: () => string | null, useSelectedSubagent: (parentSessionId: string) => string | null, useSelectedRevision: () => number | null, useSelectedFile: () => string | null, useToggledFolders: () => ReadonlySet<string>, useFileListing: () => FileListing;
 export {};

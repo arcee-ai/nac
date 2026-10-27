@@ -17,8 +17,5 @@ export interface InsightsThreadPane {
  * stays in the layout store and must not open here.
  */
 export declare function useThreadOwnership(snapshot: SessionSnapshotResponse | null, timeline: readonly InsightTurnSection[], liveThreads: ThreadRunState["liveThreads"]): (name: string) => boolean;
-/**
- * The thread the detail shows, picked or the newest one, is published to the
- * layout store: the phone dialog titles itself after it and shimmers with it.
- */
+/** The thread the detail shows, picked or the newest one. */
 export declare function useInsightsThreadPane(snapshot: SessionSnapshotResponse | null, name: string | null, { liveThreads, runningNames }: ThreadRunState, canSteerWorkers: boolean): InsightsThreadPane | null;

@@ -1,3 +1,4 @@
+import { ActionListButtonSize } from "../../../atoms";
 import type { InsightEntry, InsightGroupEntry, InsightSegment, InsightTurnSection } from "../model/types";
 import type { RowView } from "./rows";
 export interface InsightsRowController {
@@ -11,9 +12,11 @@ export interface InsightsRowController {
     entryAction(entry: InsightEntry): (() => void) | null;
     segmentAction(entry: InsightGroupEntry, segment: InsightSegment): (() => void) | null;
 }
-export declare const InsightsTurnSection: import("react").MemoExoticComponent<({ section, fallbackPrompt, controller, }: {
+export declare const InsightsTurnSection: import("react").MemoExoticComponent<({ section, fallbackPrompt, controller, size, }: {
     section: InsightTurnSection;
     /** Heading for a section with neither a time nor a prompt of its own. */
     fallbackPrompt: string;
     controller: InsightsRowController;
+    /** Large on a phone, whose waves also take more room above and below. */
+    size: ActionListButtonSize;
 }) => import("react").JSX.Element>;

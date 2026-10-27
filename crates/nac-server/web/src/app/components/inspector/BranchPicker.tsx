@@ -101,8 +101,8 @@ export function BranchPicker({
   /** Footer chips open upward. A header chip opens downward. */
   placement?: PopoverPlacement;
   /**
-   * The desktop session header draws a borderless tertiary button. The phone
-   * dialog title keeps the padded chip, the bigger target for a finger.
+   * The desktop session header draws a borderless tertiary button. A phone's
+   * Files list keeps the padded chip, the bigger target for a finger.
    */
   tertiary?: boolean;
   /** Classes for the tertiary button's branch name; its accessible name stays. */
@@ -257,7 +257,13 @@ export function BranchPicker({
           onClick={toggle}
         >
           <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
-          <span className="label-micro text-btn-secondary truncate max-w-[64px] xl:max-w-[128px]">
+          {/* A phone gives the chip a row of its own, so only the row bounds it. */}
+          <span
+            className={cn(
+              "label-micro text-btn-secondary truncate",
+              !isMobile && "max-w-[64px] xl:max-w-[128px]",
+            )}
+          >
             {branch}
           </span>
         </button>

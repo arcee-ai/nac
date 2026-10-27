@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
-  Button,
-  ButtonSize,
+  ButtonContent,
   ButtonVariant,
   Icon,
   IconName,
   Popover,
   PopoverPlacement,
+  StickyButton,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { Markdown } from "@/app/lib/markdown";
@@ -20,26 +20,17 @@ import { Markdown } from "@/app/lib/markdown";
 const HOVER_CLOSE_DELAY_MS = 160;
 
 /** The task affordance itself: an info glyph and an underlined label. */
-function TaskLabel({
-  text,
-  active,
-  large = false,
-}: {
-  text: string;
-  active: boolean;
-  large?: boolean;
-}) {
+function TaskLabel({ text, active }: { text: string; active: boolean }) {
   return (
     <>
       <Icon
         iconName={IconName.Info}
-        size={large ? 20 : 16}
+        size={16}
         className={cn("shrink-0", active ? "text-basic-primary" : "text-btn-secondary")}
       />
       <span
         className={cn(
-          "underline",
-          large ? "label-small" : "label-micro",
+          "underline label-micro",
           active ? "text-basic-primary" : "text-btn-secondary",
         )}
       >
@@ -90,14 +81,7 @@ function TaskPopover({
  * thing about a running thread that can be read before it has produced
  * anything.
  */
-export function TaskButton({
-  action,
-  large = false,
-}: {
-  action: string;
-  /** The phone header, where the touch target and its label are a size up. */
-  large?: boolean;
-}) {
+export function TaskButton({ action }: { action: string }) {
   const [open, setOpen] = useState(false);
   return (
     <TaskPopover action={action} open={open} onClose={() => setOpen(false)}>
@@ -107,31 +91,29 @@ export function TaskButton({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        {/* Unlike the hover hint, nothing here happens on its own, so the
-            label has to say what the click will do. */}
-        <TaskLabel text="See task" active={open} large={large} />
+        <TaskLabel text="Task" active={open} />
       </button>
     </TaskPopover>
   );
 }
 
 /**
- * The same panel from a pill, for the phone's floating view switch — where an
- * underlined label beside two solid pills would read as a stray link rather
- * than as the third control of the set.
+ * The same panel from a floating pill, for a phone's header — where an
+ * underlined label among its sticky buttons would read as a stray link.
  */
 export function TaskPill({ action }: { action: string }) {
   const [open, setOpen] = useState(false);
   return (
     <TaskPopover action={action} open={open} onClose={() => setOpen(false)}>
-      <Button
-        size={ButtonSize.Medium}
-        variant={open ? ButtonVariant.Primary : ButtonVariant.Secondary}
+      <StickyButton
+        variant={ButtonVariant.Ghost}
+        content={ButtonContent.IconLeft}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
+        <Icon iconName={IconName.Info} />
         Task
-      </Button>
+      </StickyButton>
     </TaskPopover>
   );
 }

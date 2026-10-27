@@ -279,17 +279,16 @@ describe("classic worker steering from the Insights thread detail", () => {
     });
   });
 
-  it("keeps all narrow-mobile thread controls in a horizontal scroll region", () => {
+  it("floats the narrow-mobile thread controls and keeps the task in the header", () => {
     viewport.mobile = true;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
     mount();
 
     const controls = screen.getByRole("toolbar", { name: "Thread controls" });
-    expect(controls.className).toContain("overflow-x-auto");
-    expect(within(controls).getByRole("button", { name: "Command Log" })).toBeTruthy();
-    expect(within(controls).getByRole("button", { name: "Episodes" })).toBeTruthy();
-    expect(within(controls).getByRole("button", { name: "Task" })).toBeTruthy();
+    expect(within(controls).getByRole("button", { name: "Logs" })).toBeTruthy();
     expect(within(controls).getByRole("button", { name: "Steer" })).toBeTruthy();
+    expect(within(controls).queryByRole("button", { name: "Task" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Task" })).toBeTruthy();
   });
 
   // Each case first checks the detail shows the worker, so a missing Steer is

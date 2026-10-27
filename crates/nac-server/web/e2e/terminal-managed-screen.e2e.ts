@@ -109,7 +109,9 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
     observations.maskWidth = "[REDACTED]".length;
     observations.actualCursorColumn = 22;
     const before = await api.getUserTerminal(session, terminal);
-    await page.setViewportSize({ width: 1050, height: 640 });
+    // The side panel keeps its 480px floor at this width and below, so only a
+    // wider window resizes the terminal.
+    await page.setViewportSize({ width: 1600, height: 640 });
     await expect
       .poll(async () => {
         const after = await api.getUserTerminal(session, terminal);

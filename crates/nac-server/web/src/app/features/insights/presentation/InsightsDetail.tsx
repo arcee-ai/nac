@@ -27,9 +27,18 @@ function segmentElement(root: HTMLElement, key: string): HTMLElement | null {
   );
 }
 
-/** Where an element starts in the column's content, wherever the column is scrolled. */
+/**
+ * Where an element starts in the column's content, wherever the column is
+ * scrolled, less the scroll padding a floating header covers.
+ */
 function offsetIn(root: HTMLElement, element: HTMLElement): number {
-  return root.scrollTop + element.getBoundingClientRect().top - root.getBoundingClientRect().top;
+  const covered = parseFloat(getComputedStyle(root).scrollPaddingTop) || 0;
+  return (
+    root.scrollTop +
+    element.getBoundingClientRect().top -
+    root.getBoundingClientRect().top -
+    covered
+  );
 }
 
 /** Key it by group: whether the reader sits at the bottom is remembered per group. */
@@ -108,10 +117,12 @@ export const InsightsDetail = memo(function InsightsDetail({
   const release = () => {
     pinRef.current = null;
   };
+  // A phone's header floats over the top of the column: the content starts
+  // below it, and the scroll padding keeps a picked segment out from under it.
   return (
     <div
       ref={rootRef}
-      className="flex min-h-0 flex-1 flex-col overflow-auto [&>*]:shrink-0"
+      className="flex min-h-0 flex-1 flex-col overflow-auto max-md:scroll-pt-14 [&>*]:shrink-0"
       onScroll={() => {
         const root = rootRef.current;
         if (root) stuckRef.current = distanceFromBottom(root) <= STICK_TOLERANCE_PX;
@@ -120,8 +131,7 @@ export const InsightsDetail = memo(function InsightsDetail({
       onPointerDown={release}
       onKeyDown={release}
     >
-      {/* The phone's tab bar floats over the bottom of the column. */}
-      <div ref={contentRef} className="flex flex-col pb-[128px] md:pb-0">
+      <div ref={contentRef} className="flex flex-col max-md:py-14">
         {group.segments.map((segment) => (
           <div key={segment.key} data-segment-key={segment.key}>
             <InsightSegmentItem
