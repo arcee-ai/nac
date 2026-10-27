@@ -72,6 +72,8 @@ export interface UserTurn {
     messageIndex: number;
     /** When the message entered the transcript log, if the backend knows. */
     createdAt: string | null;
+    /** Submitted but not in the snapshot yet, so its index is only expected. */
+    pending?: true;
 }
 export interface ModelTurn {
     kind: "model";
@@ -104,6 +106,11 @@ export declare const STREAMING_TURN_KEY = "model-streaming";
 export interface StreamedOutput {
     text: string;
     reasoning: string;
+    /**
+     * No more of it is coming, as its call was committed or its run ended, so
+     * once the snapshot holds its answer it holds all of it.
+     */
+    settled?: boolean;
 }
 /** Public for the threads list, which ranks rows by the open DAG batch. */
 export declare function dispatchThreadName(call: ToolCall): string;
@@ -136,7 +143,13 @@ export declare function withStreamedOutput(turns: TranscriptTurn[], stream: Stre
  * this run's output inside that turn and read as its work — its duration, and
  * the snapshot its run captured, would then describe this output too.
  */
-promptUncommitted?: boolean): TranscriptTurn[];
+promptUncommitted?: boolean,
+/**
+ * Key of a turn the output has to open, since its first message is not
+ * persisted yet. The default stays out of the committed namespace; a caller
+ * passes a committed key only when it is the one this turn will be given.
+ */
+key?: string): TranscriptTurn[];
 /**
  * Group the snapshot messages into user bubbles and model messages. Live thread
  * state comes from the SSE store so a wave animates before the snapshot lands.

@@ -1948,6 +1948,7 @@ function br(e) {
 		streamText: "",
 		streamReasoning: "",
 		streamSettled: !1,
+		streamPredatesPrompt: !1,
 		optimisticUserPrompt: null,
 		runUsage: null,
 		sessionSpend: null,
@@ -1977,6 +1978,7 @@ function br(e) {
 			streamText: "",
 			streamReasoning: "",
 			streamSettled: !1,
+			streamPredatesPrompt: !1,
 			optimisticUserPrompt: null,
 			runUsage: null,
 			sessionSpend: null,
@@ -1996,11 +1998,15 @@ function br(e) {
 		});
 	}
 	function d(e) {
-		r({ optimisticUserPrompt: e });
+		r(e === null ? { optimisticUserPrompt: null } : {
+			optimisticUserPrompt: e,
+			streamPredatesPrompt: !0
+		});
 	}
 	function f(e) {
 		e.thread_name || (e.reset ? r({
 			streamSettled: !1,
+			streamPredatesPrompt: !1,
 			streamText: "",
 			streamReasoning: "",
 			modelRetryAttempt: e.retry_attempt ?? null
@@ -2014,6 +2020,7 @@ function br(e) {
 			};
 			return {
 				streamSettled: !1,
+				streamPredatesPrompt: !1,
 				streamText: n.streamText + (e.text ?? ""),
 				streamReasoning: n.streamReasoning + (e.reasoning ?? "")
 			};
@@ -2163,6 +2170,7 @@ function br(e) {
 				streamText: "",
 				streamReasoning: "",
 				streamSettled: !1,
+				streamPredatesPrompt: !1,
 				runUsage: null,
 				finishedToolCalls: {},
 				runStartedAt: n.started_at_epoch_ms,
@@ -2179,7 +2187,6 @@ function br(e) {
 				running: !1,
 				activity: "",
 				streamText: n.response,
-				streamReasoning: "",
 				streamSettled: !0,
 				runFailure: null,
 				modelRetryAttempt: null,

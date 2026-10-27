@@ -11,9 +11,9 @@ export interface InsightsRowController {
     entryAction(entry: InsightEntry): (() => void) | null;
     segmentAction(entry: InsightGroupEntry, segment: InsightSegment): (() => void) | null;
 }
-export declare function InsightsTurnSection({ section, fallbackPrompt, controller, }: {
+export declare const InsightsTurnSection: import("react").MemoExoticComponent<({ section, fallbackPrompt, controller, }: {
     section: InsightTurnSection;
     /** Heading for a section with neither a time nor a prompt of its own. */
     fallbackPrompt: string;
     controller: InsightsRowController;
-}): import("react").JSX.Element;
+}) => import("react").JSX.Element>;

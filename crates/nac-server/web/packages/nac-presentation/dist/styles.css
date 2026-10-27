@@ -898,6 +898,10 @@
     margin-left: calc(var(--spacing) * 2);
   }
 
+[data-nac-runtime]:is(.ml-auto), [data-nac-runtime] .ml-auto {
+    margin-left: auto;
+  }
+
 [data-nac-runtime]:is(.line-clamp-2), [data-nac-runtime] .line-clamp-2 {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -1678,6 +1682,10 @@
     max-width: calc(100vw - 32px);
   }
 
+[data-nac-runtime]:is(.max-w-fit), [data-nac-runtime] .max-w-fit {
+    max-width: fit-content;
+  }
+
 [data-nac-runtime]:is(.max-w-full), [data-nac-runtime] .max-w-full {
     max-width: 100%;
   }
@@ -1752,6 +1760,10 @@
 
 [data-nac-runtime]:is(.basis-48), [data-nac-runtime] .basis-48 {
     flex-basis: calc(var(--spacing) * 48);
+  }
+
+[data-nac-runtime]:is(.basis-\[160px\]), [data-nac-runtime] .basis-\[160px\] {
+    flex-basis: 160px;
   }
 
 [data-nac-runtime]:is(.border-collapse), [data-nac-runtime] .border-collapse {
@@ -3933,14 +3945,6 @@
     --nac-presentation-tw-ring-inset: inset;
   }
 
-[data-nac-runtime]:is(.group-focus-within\/user-msg\:pointer-events-auto:is(:where(.group\/user-msg):focus-within *)), [data-nac-runtime] .group-focus-within\/user-msg\:pointer-events-auto:is(:where(.group\/user-msg):focus-within *) {
-    pointer-events: auto;
-  }
-
-[data-nac-runtime]:is(.group-focus-within\/user-msg\:opacity-100:is(:where(.group\/user-msg):focus-within *)), [data-nac-runtime] .group-focus-within\/user-msg\:opacity-100:is(:where(.group\/user-msg):focus-within *) {
-    opacity: 1;
-  }
-
 @media (hover: hover) {
     [data-nac-runtime]:is(.group-hover\:pointer-events-auto:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:pointer-events-auto:is(:where(.group):hover *) {
       pointer-events: auto;
@@ -3999,14 +4003,6 @@
 
     [data-nac-runtime]:is(.group-hover\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):hover *) {
       -webkit-text-fill-color: currentColor;
-    }
-
-    [data-nac-runtime]:is(.group-hover\/user-msg\:pointer-events-auto:is(:where(.group\/user-msg):hover *)), [data-nac-runtime] .group-hover\/user-msg\:pointer-events-auto:is(:where(.group\/user-msg):hover *) {
-      pointer-events: auto;
-    }
-
-    [data-nac-runtime]:is(.group-hover\/user-msg\:opacity-100:is(:where(.group\/user-msg):hover *)), [data-nac-runtime] .group-hover\/user-msg\:opacity-100:is(:where(.group\/user-msg):hover *) {
-      opacity: 1;
     }
   }
 
@@ -4895,10 +4891,6 @@
   }
 
 @media (hover: none) {
-    [data-nac-runtime]:is(.\[\@media\(hover\:none\)\]\:pointer-events-auto), [data-nac-runtime] .\[\@media\(hover\:none\)\]\:pointer-events-auto {
-      pointer-events: auto;
-    }
-
     [data-nac-runtime]:is(.\[\@media\(hover\:none\)\]\:opacity-100), [data-nac-runtime] .\[\@media\(hover\:none\)\]\:opacity-100 {
       opacity: 1;
     }

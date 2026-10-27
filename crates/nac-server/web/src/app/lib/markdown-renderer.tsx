@@ -329,8 +329,11 @@ const StreamedBlock = memo(function StreamedBlock({ source }: { source: string }
   return <Parsed source={source} streaming />;
 });
 
-/** A line that may define a link reference or a footnote, also inside a quote. */
-const DEFINITION = /^ {0,3}(?:> ?)*\[[^\]\n]+\]:/;
+/**
+ * A line that may define a link reference or a footnote, also inside quotes
+ * and list items, however deeply indented.
+ */
+const DEFINITION = /^[ \t]*(?:(?:>|[-*+]|\d{1,9}[.)])[ \t]*)*\[[^\]\n]+\]:/;
 
 /**
  * Whether the text may define a link reference or a footnote. Fenced code is

@@ -24,3 +24,5 @@ export declare function hiddenByFilter(shown: ShownInsight, sections: readonly I
 /** Undefined for rows that navigate away, which never show as selected. */
 export declare function entrySelected(entry: InsightEntry, shown: ShownInsight | null): boolean | undefined;
 export declare function segmentSelected(entry: InsightGroupEntry, segment: InsightSegment, shown: ShownInsight | null): boolean | undefined;
+/** Both point at the same row, which is all `entrySelected` and `segmentSelected` read. */
+export declare function sameInsight(a: ShownInsight | null, b: ShownInsight | null): boolean;

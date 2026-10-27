@@ -61,6 +61,11 @@ export interface RuntimeState {
      */
     streamSettled: boolean;
     /**
+     * The buffers hold output from before the prompt sent last, and its run has
+     * neither started nor streamed since, so none of that output answers it.
+     */
+    streamPredatesPrompt: boolean;
+    /**
      * Prompt shown in the chat from the moment Send is pressed until the
      * snapshot (or active_run) catches up. Without this the model pill appears
      * first and jumps down when the user bubble finally lands.
