@@ -111,6 +111,11 @@ The owned `1.11.1-r12` is a NAC packaging revision, not an upstream release or a
 claim about supplier epoch 12. It starts at the same upstream release commit
 `a312b43325e3383c865a87bb1d26cb52e3292641` and keeps BSD-3-Clause COPYING verbatim.
 The predecessor archive hash and recipe commit are recorded in the source lock.
+Use the official `libssh2-1.11.1.tar.gz` release archive: the Git snapshot at that
+same release commit still declares `1.11.1_DEV`. The two official download
+locations yielded identical checksum-bound release archives; the release header
+is hashed alongside the corrected sources and checked before building. NAC does
+not rewrite a development banner into an invented release.
 
 The build preserves the supplier's CVE-2026-7598/55199 fixes using Debian's
 1.11.1 adaptations of the same accepted upstream changes, followed by the
