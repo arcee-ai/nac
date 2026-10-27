@@ -7,17 +7,30 @@ const CUT_MARK = "…";
 
 type FileTarget = { kind: "workspace"; path: string } | { kind: "unmapped"; reason: string };
 
-/** Where Files has the file, mapped the way a chat link to a workspace file is. */
-function fileTarget(path: string, roots: ItemContext["workspaceRoots"]): FileTarget {
+/** Map a tool's session-relative path onto Files' repository-relative paths. */
+function fileTarget(path: string, context: ItemContext): FileTarget {
   if (path.startsWith(CUT_MARK)) {
     return {
       kind: "unmapped",
       reason: "Only the end of this path is known, so Files cannot open it.",
     };
   }
-  const link = classifyMarkdownHref(path, roots);
-  return link.kind === "workspace"
-    ? { kind: "workspace", path: link.path }
+  const prefix = context.filePathPrefix;
+  if (prefix == null) {
+    return {
+      kind: "unmapped",
+      reason: "The file's repository location is unknown, so Files cannot open it.",
+    };
+  }
+  // An empty prefix explicitly means the session is at the repository root.
+  // Validate nonempty prefixes just like relative paths, without cwd aliases.
+  const base = prefix === "" ? "" : classifyMarkdownHref(prefix, []);
+  const link = classifyMarkdownHref(path, context.workspaceRoots);
+  return (base === "" || base.kind === "workspace") && link.kind === "workspace"
+    ? {
+        kind: "workspace",
+        path: `${base === "" ? "" : `${base.path.replace(/\/+$/u, "")}/`}${link.path}`,
+      }
     : { kind: "unmapped", reason: "This file is outside the workspace, so Files cannot open it." };
 }
 
@@ -37,7 +50,7 @@ interface ItemFileButtonProps {
  * disabled, with the reason as its tooltip.
  */
 export function ItemFileButton({ path, context, additions, deletions }: ItemFileButtonProps) {
-  const target = fileTarget(path, context.workspaceRoots);
+  const target = fileTarget(path, context);
   const label = fileName(path);
   return (
     <div className="flex w-full flex-col items-start border-l-2 border-muted py-1 pl-4">

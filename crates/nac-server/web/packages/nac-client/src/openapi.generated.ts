@@ -1753,6 +1753,7 @@ export interface components {
       branch?: string | null;
       changed_files: components["schemas"]["ChangedFileStat"][];
       error?: string | null;
+      file_path_prefix?: string | null;
       host_root?: string | null;
       repo_label?: string | null;
       total_additions: number;

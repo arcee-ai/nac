@@ -19,7 +19,9 @@ export interface ItemContext {
     openWorkset: (worksetId: string) => void;
     /** The session's roots an absolute tool path may start with, as chat links strip them. */
     workspaceRoots: (string | null | undefined)[];
-    /** Opens a workspace-relative path in Files. */
+    /** Session-directory prefix relative to the repository root; null when unknown. */
+    filePathPrefix?: string | null;
+    /** Opens a repository-relative path in Files. */
     openFile: (path: string) => void;
 }
 export interface ItemContent {

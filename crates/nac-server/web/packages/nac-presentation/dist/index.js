@@ -22062,10 +22062,15 @@ function Nw(e, t) {
 		kind: "unmapped",
 		reason: "Only the end of this path is known, so Files cannot open it."
 	};
-	let n = $n(e, t);
-	return n.kind === "workspace" ? {
+	let n = t.filePathPrefix;
+	if (n == null) return {
+		kind: "unmapped",
+		reason: "The file's repository location is unknown, so Files cannot open it."
+	};
+	let r = n === "" ? "" : $n(n, []), i = $n(e, t.workspaceRoots);
+	return (r === "" || r.kind === "workspace") && i.kind === "workspace" ? {
 		kind: "workspace",
-		path: n.path
+		path: `${r === "" ? "" : `${r.path.replace(/\/+$/u, "")}/`}${i.path}`
 	} : {
 		kind: "unmapped",
 		reason: "This file is outside the workspace, so Files cannot open it."
@@ -22073,7 +22078,7 @@ function Nw(e, t) {
 }
 var Pw = (e) => e.split(/[\\/]/u).filter(Boolean).pop() ?? e;
 function Fw({ path: e, context: t, additions: n, deletions: r }) {
-	let i = Nw(e, t.workspaceRoots), a = Pw(e);
+	let i = Nw(e, t), a = Pw(e);
 	return /* @__PURE__ */ Y("div", {
 		className: "flex w-full flex-col items-start border-l-2 border-muted py-1 pl-4",
 		children: i.kind === "workspace" ? /* @__PURE__ */ Y(ml, {
@@ -23079,16 +23084,17 @@ function $T({ sessionId: e, snapshot: t, topology: n, canSteerWorkers: r }) {
 		f,
 		p,
 		m
-	]), N = t?.workspace?.host_root, ie = t?.metadata.workspace_host_path, ae = t?.metadata.cwd, oe = G(() => ({
+	]), N = t?.workspace?.host_root, ie = t?.workspace?.file_path_prefix, ae = t?.metadata.workspace_host_path, oe = t?.metadata.cwd, se = G(() => ({
 		sessionId: e,
 		resolveSession: T,
 		openSubagent: g.openSubagent,
 		openWorkset: g.openWorkset,
 		workspaceRoots: [
 			N,
-			ie,
-			ae
+			ae,
+			oe
 		],
+		filePathPrefix: ie,
 		openFile: g.openFile
 	}), [
 		e,
@@ -23096,40 +23102,41 @@ function $T({ sessionId: e, snapshot: t, topology: n, canSteerWorkers: r }) {
 		g,
 		N,
 		ie,
-		ae
-	]), [se, P] = q("log"), [ce, le] = q(null), ue = QT(t, M?.kind === "thread" ? M.name : null, v, r), de = Uv(E, t != null && j != null);
+		ae,
+		oe
+	]), [P, ce] = q("log"), [le, ue] = q(null), de = QT(t, M?.kind === "thread" ? M.name : null, v, r), fe = Uv(E, t != null && j != null);
 	if (!t) return /* @__PURE__ */ Y(vx, { listTitle: "Insights" });
-	let fe = (e) => {
+	let pe = (e) => {
 		d(e), j && e !== "all" && KT(j, iw(S, e)) && u(null);
-	}, pe = cw(x, n), me, he;
-	if (M?.kind === "thread" && ue) {
-		let { thread: t, eventLog: n } = ue;
-		me = t.name, he = /* @__PURE__ */ Y($x, {
+	}, me = cw(x, n), he, ge;
+	if (M?.kind === "thread" && de) {
+		let { thread: t, eventLog: n } = de;
+		he = t.name, ge = /* @__PURE__ */ Y($x, {
 			thread: t,
-			action: ue.action,
-			episodes: ue.episodes,
+			action: de.action,
+			episodes: de.episodes,
 			events: n.events,
-			liveLog: ue.liveLog,
-			running: ue.running,
+			liveLog: de.liveLog,
+			running: de.running,
 			hasOlder: n.hasOlder,
 			loadingOlder: n.loadingOlder,
 			loadingInitial: n.loadingInitial,
 			historyError: n.historyError,
 			onLoadOlder: n.loadOlder,
 			onRetry: n.retry,
-			view: se,
-			canSteer: ue.canSteer,
-			onSteer: () => le(t.name),
-			onViewChange: P
+			view: P,
+			canSteer: de.canSteer,
+			onSteer: () => ue(t.name),
+			onViewChange: ce
 		}, `${e}:${t.name}`);
-	} else M?.kind === "group" ? (me = VT(M.entry, ne).label, he = /* @__PURE__ */ Y(DT, {
+	} else M?.kind === "group" ? (he = VT(M.entry, ne).label, ge = /* @__PURE__ */ Y(DT, {
 		group: M.entry.group,
 		segmentKey: M.segmentKey,
 		focusNonce: k,
-		context: oe
-	}, M.entry.id)) : he = C.length === 0 ? /* @__PURE__ */ Y(yx, {
-		title: pe.title,
-		children: pe.body
+		context: se
+	}, M.entry.id)) : ge = C.length === 0 ? /* @__PURE__ */ Y(yx, {
+		title: me.title,
+		children: me.body
 	}) : /* @__PURE__ */ Y(yx, {
 		title: "No action selected",
 		children: "Select an action in the list to see its details."
@@ -23139,44 +23146,44 @@ function $T({ sessionId: e, snapshot: t, topology: n, canSteerWorkers: r }) {
 		listToolbar: /* @__PURE__ */ Y(OT, {
 			options: y,
 			value: x,
-			onChange: fe
+			onChange: pe
 		}),
 		listClassName: "p-2",
-		title: me,
-		titleAction: ue?.action ? /* @__PURE__ */ Y(Ox, { action: ue.action }) : null,
-		actions: ue ? /* @__PURE__ */ X("div", {
+		title: he,
+		titleAction: de?.action ? /* @__PURE__ */ Y(Ox, { action: de.action }) : null,
+		actions: de ? /* @__PURE__ */ X("div", {
 			className: "flex items-center gap-2",
-			children: [ue.canSteer ? /* @__PURE__ */ Y(H, {
+			children: [de.canSteer ? /* @__PURE__ */ Y(H, {
 				size: _.Small,
 				variant: V.Secondary,
-				onClick: () => le(ue.thread.name),
+				onClick: () => ue(de.thread.name),
 				children: "Steer"
 			}) : null, /* @__PURE__ */ Y(Jx, {
-				view: se,
-				onChange: P
+				view: P,
+				onChange: ce
 			})]
 		}) : null,
 		list: /* @__PURE__ */ Y(IT, {
 			sections: C,
 			pendingPrompt: h.pendingText,
-			emptyCopy: pe,
+			emptyCopy: me,
 			focusNonce: k,
 			controller: re,
 			footer: t.message_page?.has_older ? /* @__PURE__ */ Y(LT, { sessionId: e }) : null
 		}),
 		children: /* @__PURE__ */ Y("div", {
-			ref: de,
+			ref: fe,
 			id: Bv,
 			role: "region",
 			"aria-label": "Insights detail",
 			tabIndex: -1,
 			className: "flex flex-col flex-1 min-w-0 min-h-0 -outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
-			children: he
+			children: ge
 		})
-	}), ce ? /* @__PURE__ */ Y(jx, {
+	}), le ? /* @__PURE__ */ Y(jx, {
 		sessionId: e,
-		threadName: ce,
-		onClose: () => le(null)
+		threadName: le,
+		onClose: () => ue(null)
 	}) : null] });
 }
 // src/app/components/inspector/CommitPopover.tsx

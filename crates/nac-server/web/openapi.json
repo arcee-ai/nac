@@ -19600,6 +19600,13 @@
               "null"
             ]
           },
+          "file_path_prefix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Session-directory prefix for repository-relative Files paths. Empty at\nthe repository root; unavailable when the Git location is unknown."
+          },
           "host_root": {
             "type": [
               "string",
