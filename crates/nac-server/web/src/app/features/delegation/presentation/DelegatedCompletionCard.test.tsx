@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
@@ -70,4 +70,89 @@ describe("delegated completion card", () => {
       "child:child/exact",
     );
   });
+});
+
+function CurrentRoute() {
+  return <output aria-label="Route">{useLocation().pathname}</output>;
+}
+
+it.each([true, false])("keeps generation reports reachable with interactive=%s", (interactive) => {
+  render(
+    <MemoryRouter>
+      <UiPolicyContext.Provider value={{ orchestrationEnabled: false }}>
+        {[1, 2].map((generation) => (
+          <DelegatedCompletionCard
+            key={generation}
+            interactive={interactive}
+            turn={{
+              kind: "delegated-completion",
+              key: `event-${generation}`,
+              messageIndex: generation,
+              createdAt: null,
+              completion: {
+                kind: "nac-orchestrator",
+                sessionId: "orchestrator",
+                generation,
+                status: "failed",
+                description: "Plan changes",
+                outcome: `Failure generation ${generation}`,
+                changes: `Changes generation ${generation}`,
+                verification: `Checks generation ${generation}`,
+              },
+            }}
+          />
+        ))}
+      </UiPolicyContext.Provider>
+    </MemoryRouter>,
+  );
+  for (const generation of [1, 2]) {
+    const summary = screen.getByText(`Generation ${generation} result`);
+    fireEvent.click(summary);
+    const details = summary.closest("details")!;
+    expect(details.textContent).toContain(`Failure generation ${generation}`);
+    expect(details.textContent).toContain(`Changes: Changes generation ${generation}`);
+    expect(details.textContent).toContain(`Verification: Checks generation ${generation}`);
+  }
+  expect(screen.queryByRole("link")).toBeNull();
+});
+
+it("keeps completion links inside a hosted MemoryRouter", () => {
+  render(
+    <MemoryRouter initialEntries={["/session/parent/insights"]}>
+      <CurrentRoute />
+      <DelegatedCompletionCard
+        turn={{
+          kind: "delegated-completion",
+          key: "event",
+          messageIndex: 1,
+          createdAt: null,
+          completion: {
+            kind: "coding-agent",
+            sessionId: "child",
+            generation: 1,
+            status: "completed",
+            description: "Audit",
+            outcome: null,
+            changes: null,
+            verification: null,
+          },
+        }}
+      />
+    </MemoryRouter>,
+  );
+  const link = screen.getByRole("link", { name: "Go to session Audit" });
+  const modified = new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true });
+  let routerPrevented = true;
+  const stopBrowserNavigation = (event: MouseEvent) => {
+    routerPrevented = event.defaultPrevented;
+    event.preventDefault();
+  };
+  document.addEventListener("click", stopBrowserNavigation, { once: true });
+  fireEvent(link, modified);
+  expect(routerPrevented).toBe(false);
+  expect(screen.getByRole("status", { name: "Route" }).textContent).toBe(
+    "/session/parent/insights",
+  );
+  fireEvent.click(link);
+  expect(screen.getByRole("status", { name: "Route" }).textContent).toBe("/session/child/insights");
 });

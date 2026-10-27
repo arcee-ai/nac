@@ -55,6 +55,19 @@ export function DelegatedCompletionCard({
         sessionHref={openable ? sessionHref : null}
         onSessionLinkClick={followSessionLink}
       />
+      <details className="mt-2 w-[320px] max-w-full min-w-0 rounded-[4px] bg-elevation-level-1 p-3 text-xs text-basic-secondary">
+        <summary className="cursor-pointer rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]">
+          Generation {completion.generation} result
+        </summary>
+        <div className="mt-2 flex flex-col gap-2 whitespace-pre-wrap break-words">
+          {completion.outcome ? <p>{completion.outcome}</p> : null}
+          {completion.changes ? <p>Changes: {completion.changes}</p> : null}
+          {completion.verification ? <p>Verification: {completion.verification}</p> : null}
+          {!completion.outcome && !completion.changes && !completion.verification ? (
+            <p>No result details were retained.</p>
+          ) : null}
+        </div>
+      </details>
     </div>
   );
 }

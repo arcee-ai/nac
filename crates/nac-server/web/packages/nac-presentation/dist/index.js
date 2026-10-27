@@ -24021,11 +24021,11 @@ var YE = ci(function({ turn: e, previous: t, date: n, model: r, active: i, activ
 };
 function eD({ turn: e, interactive: t = !0 }) {
 	let { completion: n } = e, r = $E[n.kind], i = mr(), a = fd(), { openSubagent: o } = Vv(), s = jr.session(n.sessionId), c = Ei(s), l = Di(s), u = t && (i.orchestrationEnabled || n.kind === "coding-agent"), d = `${r.row}:${n.sessionId}`, { status: f, label: p } = AE(n.status);
-	return /* @__PURE__ */ Y("div", {
+	return /* @__PURE__ */ X("div", {
 		role: "status",
 		"aria-label": `${r.type} ${n.status}`,
 		className: "py-6 md:pl-2",
-		children: /* @__PURE__ */ Y(td, {
+		children: [/* @__PURE__ */ Y(td, {
 			title: n.description.trim() || r.type,
 			status: f,
 			statusLabel: p,
@@ -24034,7 +24034,25 @@ function eD({ turn: e, interactive: t = !0 }) {
 			onOpen: u ? () => o(d) : void 0,
 			sessionHref: u ? c : null,
 			onSessionLinkClick: l
-		})
+		}), /* @__PURE__ */ X("details", {
+			className: "mt-2 w-[320px] max-w-full min-w-0 rounded-[4px] bg-elevation-level-1 p-3 text-xs text-basic-secondary",
+			children: [/* @__PURE__ */ X("summary", {
+				className: "cursor-pointer rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]",
+				children: [
+					"Generation ",
+					n.generation,
+					" result"
+				]
+			}), /* @__PURE__ */ X("div", {
+				className: "mt-2 flex flex-col gap-2 whitespace-pre-wrap break-words",
+				children: [
+					n.outcome ? /* @__PURE__ */ Y("p", { children: n.outcome }) : null,
+					n.changes ? /* @__PURE__ */ X("p", { children: ["Changes: ", n.changes] }) : null,
+					n.verification ? /* @__PURE__ */ X("p", { children: ["Verification: ", n.verification] }) : null,
+					!n.outcome && !n.changes && !n.verification ? /* @__PURE__ */ Y("p", { children: "No result details were retained." }) : null
+				]
+			})]
+		})]
 	});
 }
 // src/app/features/insights/transcript/ChildTranscriptScope.tsx
