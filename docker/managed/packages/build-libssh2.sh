@@ -23,7 +23,8 @@ patch -p1 --batch --fuzz=0 -i /recipe/libssh2-list-followups.patch
 patch -p1 --batch --fuzz=0 -i /recipe/libssh2-pointer-followup.patch
 jq -r '.libssh2.reviewed_source_files | to_entries[] | [.value, .key] | join("  ")' \
     /recipe/sources.lock.json | sha256sum -c -
-autoreconf -vfi
+# All corrections touch C sources only. Use the checksum-bound official release
+# configure/Makefile inputs; regeneration needlessly imports host gettext data.
 ./configure --prefix=/usr --libdir=/usr/lib --with-crypto=openssl --disable-docker-tests
 make -j2
 # Ordinary upstream standalone and local OpenSSH tests. No new attack fixtures.

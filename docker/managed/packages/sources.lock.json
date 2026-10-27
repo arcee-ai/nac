@@ -284,7 +284,8 @@
       "src/openssl.c": "2df90530491643625921e42abbab3f7c4ffc981ce2276e1d0826cc38e896f484",
       "src/publickey.c": "d5c7ea98aef3c057cad74e7f7c3471be41302a3fc19326620206ad16b814a54e",
       "src/transport.c": "c9315507031a8caf0094b9fef1d07a8e517de919074f7cebb9dfd85aa64214fe",
-      "include/libssh2.h": "86cc9fcfd0daa10ba25442e5ecea23db618027362bc85fdc591ec7f5d9d39a91"
+      "include/libssh2.h": "86cc9fcfd0daa10ba25442e5ecea23db618027362bc85fdc591ec7f5d9d39a91",
+      "configure": "171bf05c065e5c17235adb80dcc3804e807c34587fa0599f4622ea22ce5637ae"
     }
   }
 }
