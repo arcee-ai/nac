@@ -286,21 +286,27 @@ export function dryRunPlan(before) {
 }
 
 function rulesetIdentity(item) {
-  return { id: item.id, source_type: item.source_type, source: item.source, ...payload(item) };
+  const result = { id: item.id, source_type: item.source_type, source: item.source, ...payload(item) };
+  // GitHub/UI may reorder rules; preserve exact rule values and multiplicity.
+  result.rules = [...result.rules].sort((a, b) => digest(a).localeCompare(digest(b)));
+  return result;
 }
 
 // Verify actual observed readback separately from the intended payload. This is
 // also the precondition for rolling back only our added rule, never later edits.
-export function verifyReadback(before, after) {
+export function verifyReadback(before, after, now = Date.now()) {
   validateSnapshot(before);
   validateSnapshot(after);
+  const age = now - Date.parse(after.captured_at);
+  if (!(age >= 0 && age < 60 * 60 * 1000))
+    throw new Error("refresh observed readback within one hour before requesting rollback");
   const proposed = proposal(before);
   const expectedRules = [...before.effective_dev_rules, {
     ...requiredCheckRule(), ruleset_id: targetRuleset,
     ruleset_source_type: "Repository", ruleset_source: before.repository,
   }];
   const expected = before.rulesets.map((item) => item.id === targetRuleset
-    ? { ...rulesetIdentity(item), ...proposed } : rulesetIdentity(item));
+    ? rulesetIdentity({ ...item, ...proposed }) : rulesetIdentity(item));
   const order = (items) => items.map((item) => digest(item)).sort();
   if (digest(order(after.rulesets.map(rulesetIdentity))) !== digest(order(expected)) ||
       digest(order(after.effective_dev_rules)) !== digest(order(expectedRules)) ||

@@ -181,7 +181,9 @@ node .github/scripts/pr-ruleset.mjs verify-readback /tmp/nac-before.json /tmp/na
 
 Readback requires exactly the one rule addition in both the target and effective
 rules, preserving every other ruleset, branch condition, owner, merge method,
-classic protection and CODEOWNERS. Server-generated update timestamps may change.
+classic protection and CODEOWNERS. Server-generated update timestamps and rule ordering may change; every rule's
+parameters and multiplicity must remain identical. Readback older than one hour,
+future or invalid capture times are rejected before a rollback payload is returned.
 Repeat representative fresh success and failed/pending/wrong-App ordinary-actor
 cases, plus last-push/thread rejection and a two-layer base check. Record actual
 observed after state and receipts separately from the intended plan.

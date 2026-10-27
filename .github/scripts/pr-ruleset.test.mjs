@@ -67,7 +67,9 @@ test("readback verifies exactly the addition and returns a guarded original roll
   const after = afterSnapshot();
   // Server-generated timestamps may change; settings/rules must remain equal.
   after.rulesets.find((item) => item.id === targetRuleset).updated_at = "later";
-  const result = verifyReadback(snapshot(), after);
+  after.rulesets.find((item) => item.id === targetRuleset).rules.reverse();
+  after.rulesets.reverse(); after.effective_dev_rules.reverse();
+  const result = verifyReadback(snapshot(), after, now);
   assert.equal(result.verified, true);
   assert.deepEqual(result.rollback_ruleset, dryRunPlan(snapshot()).before_ruleset);
   assert.ok(!result.rollback_ruleset.rules.some((rule) => rule.type === "required_status_checks"));
@@ -82,7 +84,14 @@ test("readback verifies exactly the addition and returns a guarded original roll
     (s) => { s.codeowners = "* @someone\n"; },
   ]) {
     const changed = afterSnapshot(); mutate(changed);
-    assert.throws(() => verifyReadback(snapshot(), changed), /readback/);
+    assert.throws(() => verifyReadback(snapshot(), changed, now), /readback/);
+  }
+});
+
+test("old, future or malformed readback cannot produce a rollback payload", () => {
+  for (const captured of [new Date(now - 3600000).toISOString(), new Date(now + 1).toISOString(), "invalid"]) {
+    const after = afterSnapshot(); after.captured_at = captured;
+    assert.throws(() => verifyReadback(snapshot(), after, now), /refresh observed readback/);
   }
 });
 
