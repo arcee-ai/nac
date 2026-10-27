@@ -73,3 +73,33 @@ Retire each backport when a maintained supplier package demonstrably contains
 the correction and preserves the required runtime profile. Retire the custom curl
 build when the supplier enables the supported options NAC retains. A version
 number or an apparent zero-match scan alone is not retirement evidence.
+
+## Brotli and npm graph corrections (ALL-500)
+
+The runtime pins all three supplier Brotli libraries to `1.2.1-r2`, built from
+upstream `db24a98aed38a16de78cc05ca15cdd8dc2a0d92d` under MIT. Their actual
+downloadable supplier archives, retained recipes and installed-file identities
+are bound by `brotli-supplier.lock.json` and the ordinary runtime provenance.
+The runtime smoke checks the decoder's new block-switch error and shared-library
+versions plus encoder/decoder roundtrip. Supplier epoch 2 runs upstream ctest.
+
+The latest available npm 11 parent is still `11.21.1`; upgrading Node or npm 12
+does not correct this separate bundled Undici copy. `npm-bundle.lock.json` pins
+the existing npm archive and two MIT patch releases: Undici `6.29.1` and
+ip-address `10.7.4`. Their parent requirements remain `node-gyp: ^6.25.0` and
+`socks: ^10.1.1`, respectively. Neither replacement has runtime dependencies.
+The bounded installer checks those predecessor/consumer identities, archive
+checksums, exact metadata and licenses before replacing each directory. It
+retains every corrected installed file's hash and the source lock separately
+from npm's unchanged upstream version; it does not claim an upstream npm release.
+The published npm tarball contains no npm lockfile to update. The pinned parent
+archive plus the correction lock describe the exact downstream graph.
+
+The image build checks the parent Undici failure and corrected behavior in
+isolated loopback processes; runtime smoke rechecks the corrected copy and local
+offline npm packing. No registry installation or script execution resolves a new
+graph. Original vulnerable npm/Undici archives are deleted, and corrected
+libraries replace their supplier files through normal trusted APK installation.
+Retire this npm correction when an actually available same-major parent bundles
+the fixed versions and passes the same compatibility checks. All raw scanner
+findings remain reportable; these checks never grant applicability clearance.

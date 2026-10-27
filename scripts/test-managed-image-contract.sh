@@ -29,7 +29,10 @@ require_literal "$dockerfile" 'gcc=16.2.0-r1 libgcc=16.2.0-r1 libstdc++=16.2.0-r
 require_literal "$dockerfile" 'krb5-libs=1.22.2-r5 cyrus-sasl-heimdal-libs=2.1.28-r58'
 require_literal "$dockerfile" 'python3 check-supplier-packages.py sources.lock.json > supplier-predecessors.json'
 python3 "$repo_root/docker/managed/packages/test_supplier_packages.py"
+python3 "$repo_root/docker/managed/packages/test_npm_bundle.py"
 require_literal "$dockerfile" 'sha256sum -c packages.sha256'
+require_literal "$dockerfile" 'libbrotlicommon1=1.2.1-r2 libbrotlidec1=1.2.1-r2 libbrotlienc1=1.2.1-r2'
+require_literal "$dockerfile" 'python3 /usr/share/nac/npm-runtime-build/correct-npm-bundle.py'
 # Assert the literal shell/Actions template, without expanding it here.
 # shellcheck disable=SC2016
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'python3 - < "$repo_root/scripts/smoke-managed-runtime.py"'
