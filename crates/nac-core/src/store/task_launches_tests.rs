@@ -213,7 +213,7 @@ fn retained_migration_rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::
 }
 
 #[test]
-fn v38_evidence_and_delegated_input_survive_retained_launch_migration_to_39() {
+fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
     let (path, request, source) = fixture();
     for session in ["parent", "child", "orchestrator"] {
         insert_test_session(&path, session);
@@ -353,7 +353,7 @@ fn v38_evidence_and_delegated_input_survive_retained_launch_migration_to_39() {
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        39
+        40
     );
     drop(conn);
     drop(waiter);

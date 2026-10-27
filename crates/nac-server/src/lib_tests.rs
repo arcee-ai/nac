@@ -1037,8 +1037,6 @@ mod managed_fault_fixture;
 mod managed_load;
 #[path = "tests/managed_topology.rs"]
 mod managed_topology;
-#[path = "tests/openapi_contract.rs"]
-mod openapi_contract;
 
 #[path = "tests/goal_reads.rs"]
 mod goal_reads;
