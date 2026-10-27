@@ -5,15 +5,17 @@ import {
   showsInput,
   withDuration,
   type ItemContent,
+  type ItemContext,
+  segmentCall,
   type ToolSegment,
 } from "@/app/features/insights/presentation/items/itemContent";
 import { BodyText } from "@/app/features/insights/presentation/items/ItemParts";
 
 /** No favicons: the detail never loads anything from the sites it names. */
-export function webContent(segment: ToolSegment): ItemContent {
+export function webContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const input = segment.presentation?.summary || null;
   const result = segment.presentation?.resultPreview || null;
-  const callId = segment.presentation?.callId ?? null;
+  const call = segmentCall(segment);
   // The design draws a fetch without an input field; its URL keeps one, unheaded.
   const search = segment.action === "web-search";
   return {
@@ -27,7 +29,8 @@ export function webContent(segment: ToolSegment): ItemContent {
             showHeading={search}
             shortContent={input}
             source="arguments"
-            callId={callId}
+            sessionId={context.sessionId}
+            call={call}
           />
         ) : null}
         {result && isDefault(state) ? <BodyText>{result}</BodyText> : null}
@@ -36,20 +39,32 @@ export function webContent(segment: ToolSegment): ItemContent {
   };
 }
 
-export function fileSearchContent(segment: ToolSegment): ItemContent {
+export function fileSearchContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const pattern = segment.presentation?.summary || null;
   const matches = segment.presentation?.resultPreview || null;
-  const callId = segment.presentation?.callId ?? null;
+  const call = segmentCall(segment);
   return {
     title: actionTypeLabel(segment.action),
     copyText: pattern,
     body: (state) => (
       <>
         {pattern && showsInput(state) ? (
-          <ItemCodeField title="Input" shortContent={pattern} source="arguments" callId={callId} />
+          <ItemCodeField
+            title="Input"
+            shortContent={pattern}
+            source="arguments"
+            sessionId={context.sessionId}
+            call={call}
+          />
         ) : null}
         {matches && isDefault(state) ? (
-          <ItemCodeField title="Output" shortContent={matches} source="output" callId={callId} />
+          <ItemCodeField
+            title="Output"
+            shortContent={matches}
+            source="output"
+            sessionId={context.sessionId}
+            call={call}
+          />
         ) : null}
       </>
     ),

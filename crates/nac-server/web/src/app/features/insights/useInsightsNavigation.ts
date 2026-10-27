@@ -27,6 +27,8 @@ export interface InsightsNavigation {
   /** Subagents with that row open; the newest row stands in until the list has it. */
   openSubagent(rowKey: DelegatedRowKey): void;
   openWorkset(worksetId: string): void;
+  /** Files on the working tree's tree listing, with this workspace-relative file open. */
+  openFile(path: string): void;
 }
 
 /** What the session page lends the hook: its session, its panels and how it brings one up. */
@@ -64,6 +66,9 @@ export function useInsightsNavigation(): InsightsNavigation {
     selectThread,
     selectSubagent,
     selectWorkset,
+    selectRevision,
+    selectFileListing,
+    selectFile,
   } = useNativeRuntime().stores.sessionLayoutStore;
 
   return useMemo(() => {
@@ -97,6 +102,12 @@ export function useInsightsNavigation(): InsightsNavigation {
         }),
       openSubagent: (rowKey) => open("delegated", () => selectSubagent(sessionId, rowKey)),
       openWorkset: (worksetId) => open("worksets", () => selectWorkset(worksetId)),
+      openFile: (path) =>
+        open("files", () => {
+          selectRevision(null);
+          selectFileListing("tree");
+          selectFile(path);
+        }),
     };
   }, [
     sessionId,
@@ -109,6 +120,9 @@ export function useInsightsNavigation(): InsightsNavigation {
     selectThread,
     selectSubagent,
     selectWorkset,
+    selectRevision,
+    selectFileListing,
+    selectFile,
   ]);
 }
 

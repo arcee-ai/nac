@@ -34,6 +34,7 @@ export const NAC_API_SURFACE = {
   "POST /sessions/{session_id}/user-terminals/{terminal_id}/resize": "api.resizeUserTerminal",
   "GET /sessions/{session_id}/messages": "api.getMessages",
   "GET /sessions/{session_id}/threads/{thread_name}/events": "api.getThreadEvents",
+  "GET /sessions/{session_id}/tool-calls/{call_id}": "api.getToolCallContent",
   "GET /auth": "api.listManagedAuth",
   "DELETE /auth/{provider}": "api.managedLogout",
   "POST /auth/{provider}/login": "api.startManagedLogin",

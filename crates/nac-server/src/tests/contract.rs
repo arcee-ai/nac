@@ -193,6 +193,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ),
     ("GET", "/sessions/{session_id}/permissions"),
     ("GET", "/sessions/{session_id}/threads/{thread_name}/events"),
+    ("GET", "/sessions/{session_id}/tool-calls/{call_id}"),
     ("GET", "/sessions/{session_id}/workspace/branches"),
     ("GET", "/sessions/{session_id}/workspace/diff"),
     ("GET", "/sessions/{session_id}/workspace/file"),

@@ -783,6 +783,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::sessions::reorder_handler))
         .routes(routes!(delivery::sessions::update_presentation_handler))
         .routes(routes!(delivery::session_state::session_messages))
+        .routes(routes!(delivery::session_state::session_tool_call))
         .routes(routes!(
             delivery::session_state::list_direct_inbox,
             delivery::session_state::create_direct_inbox_item

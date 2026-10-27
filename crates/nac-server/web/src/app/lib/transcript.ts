@@ -716,7 +716,7 @@ export function buildTranscript(
         if (direct) {
           blocks.push({
             kind: "tool-detail",
-            key: `tool-${call.id}`,
+            key: `tool-${absoluteIndex}-${call.id}`,
             presentation: presentToolCall({
               call,
               events: toolEvents.get(call.id),

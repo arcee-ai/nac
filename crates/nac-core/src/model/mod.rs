@@ -83,7 +83,8 @@ pub use providers::{
     provider_default_base_url, provider_uses_api_key, ProviderModel,
 };
 pub(crate) use redact::{
-    redact_credentials, redact_credentials_with_extra_headers, redact_json_body_with_extra_headers,
+    is_sensitive_json_key, redact_credentials, redact_credentials_with_extra_headers,
+    redact_json_body_with_extra_headers, REDACTED,
 };
 
 /// Resolve the API key a backend would use at run time.

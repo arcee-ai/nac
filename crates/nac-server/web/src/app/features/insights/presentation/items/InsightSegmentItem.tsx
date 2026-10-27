@@ -26,6 +26,7 @@ import {
   webContent,
 } from "@/app/features/insights/presentation/items/SearchItems";
 import { sessionContent } from "@/app/features/insights/presentation/items/SessionItems";
+import { useErrorLine } from "@/app/features/insights/presentation/items/useErrorLine";
 import {
   deleteThreadContent,
   worksetContent,
@@ -38,24 +39,24 @@ function toolContent(segment: ToolSegment, context: ItemContext): ItemContent {
     case "read-file":
     case "write-file":
     case "edit-file":
-      return fileContent(segment);
+      return fileContent(segment, context);
     case "web-search":
     case "web-fetch":
-      return webContent(segment);
+      return webContent(segment, context);
     case "glob":
     case "grep":
-      return fileSearchContent(segment);
+      return fileSearchContent(segment, context);
     case "run-command":
-      return runCommandContent(segment);
+      return runCommandContent(segment, context);
     case "write-command":
-      return writeCommandContent(segment);
+      return writeCommandContent(segment, context);
     case "read-command-output":
-      return readOutputContent(segment);
+      return readOutputContent(segment, context);
     case "create-goal":
     case "update-goal":
       return goalChangeContent(segment);
     case "get-goal":
-      return getGoalContent(segment);
+      return getGoalContent(segment, context);
     case "session-status":
     case "session-steer":
     case "session-read":
@@ -65,7 +66,7 @@ function toolContent(segment: ToolSegment, context: ItemContext): ItemContent {
     case "delete-thread":
       return deleteThreadContent(segment);
     default:
-      return otherContent(segment);
+      return otherContent(segment, context);
   }
 }
 
@@ -81,13 +82,6 @@ function loadingTitle(segment: InsightSegment, status: ActionStatus): string {
   return inProgressLabel(segment).replace(TRAILING_ELLIPSIS, "");
 }
 
-function errorMessage(segment: InsightSegment): string | null {
-  if (segment.kind !== "tool" || !segment.presentation) return null;
-  const { status, statusLabel, resultPreview } = segment.presentation;
-  if (status === "error") return resultPreview || statusLabel;
-  return resultPreview ? `${statusLabel}: ${resultPreview}` : statusLabel;
-}
-
 export function InsightSegmentItem({
   segment,
   active,
@@ -100,6 +94,7 @@ export function InsightSegmentItem({
   const status = segmentStatus(segment);
   const state = itemState(status);
   const content = segmentContent(segment, context);
+  const error = useErrorLine(segment, context.sessionId, state === InsightItemState.Error);
   return (
     <InsightItem
       icon={detailIcon(segmentAction(segment))}
@@ -107,7 +102,8 @@ export function InsightSegmentItem({
       state={state}
       active={active}
       copyText={content.copyText}
-      errorMessage={state === InsightItemState.Error ? errorMessage(segment) : null}
+      errorMessage={error.message}
+      errorAction={error.action}
     >
       {content.body?.(state)}
     </InsightItem>

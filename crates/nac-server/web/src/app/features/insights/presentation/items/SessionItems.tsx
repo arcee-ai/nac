@@ -6,6 +6,7 @@ import {
   withDuration,
   type ItemContent,
   type ItemContext,
+  segmentCall,
   type ToolSegment,
 } from "@/app/features/insights/presentation/items/itemContent";
 import {
@@ -20,7 +21,7 @@ import { formatSeconds } from "@/app/lib/format";
 export function sessionContent(segment: ToolSegment, context: ItemContext): ItemContent {
   const link = context.resolveSession(sessionTarget(segment));
   const result = segment.presentation?.resultPreview || null;
-  const callId = segment.presentation?.callId ?? null;
+  const call = segmentCall(segment);
   const sessionLink = <SessionLinkButton link={link} context={context} />;
 
   switch (segment.action) {
@@ -36,7 +37,8 @@ export function sessionContent(segment: ToolSegment, context: ItemContext): Item
                 title="Results"
                 shortContent={result}
                 source="output"
-                callId={callId}
+                sessionId={context.sessionId}
+                call={call}
               />
             ) : null}
             {sessionLink}

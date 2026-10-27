@@ -1,0 +1,331 @@
+use super::*;
+use crate::model::ModelClient;
+use crate::session_service::tests::{
+    seed_log_tail, test_active_service, test_direct_active_service,
+};
+use crate::types::{FunctionCall, ToolCall};
+
+const EXACT_SECRET: &str = "managed-exact-canary-value";
+
+struct ExactSecret;
+
+impl nac_contracts::CommandEnvironmentProvider for ExactSecret {
+    fn snapshot(&self) -> nac_contracts::CommandEnvironmentFuture<'_> {
+        Box::pin(async { self.redaction_snapshot() })
+    }
+    fn redaction_snapshot(&self) -> Result<nac_contracts::CommandEnvironmentSnapshot> {
+        Ok(nac_contracts::CommandEnvironmentSnapshot::from_parts(
+            BTreeMap::new(),
+            vec![
+                EXACT_SECRET.into(),
+                "123456789012345678901234567890".into(),
+                "1.234567890123456789e+99".into(),
+            ],
+        ))
+    }
+    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
+        Default::default()
+    }
+}
+
+fn assistant(calls: &[(&str, &str)]) -> Message {
+    Message::Assistant {
+        content: None,
+        reasoning_text: None,
+        reasoning_details: None,
+        tool_calls: Some(
+            calls
+                .iter()
+                .map(|(id, arguments)| ToolCall {
+                    id: (*id).into(),
+                    call_type: "function".into(),
+                    function: FunctionCall {
+                        name: "fetch".into(),
+                        arguments: (*arguments).into(),
+                    },
+                })
+                .collect(),
+        ),
+        duration_ms: None,
+        model_origin: None,
+        reasoning_field: None,
+    }
+}
+
+fn result(call_id: &str, text: impl Into<String>) -> Message {
+    Message::Tool {
+        tool_call_id: call_id.into(),
+        content: ToolContent::text(text),
+    }
+}
+
+#[tokio::test]
+async fn known_call_returns_full_redacted_arguments_and_output() {
+    let (mut parts, store_path) =
+        test_direct_active_service("tool_call_content", "session", ModelClient::new_for_test());
+    parts
+        .service
+        .shell_runtime
+        .as_mut()
+        .unwrap()
+        .command_environment = Some(Arc::new(ExactSecret));
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[
+                (
+                    "call-fetch",
+                    r#"{"header":"Authorization: Bearer sk-live-canary-123","url":"https://api.example.test/v1"}"#,
+                ),
+                ("call-pending", r#"{"url":"https://api.example.test/slow"}"#),
+            ]),
+            result(
+                "call-fetch",
+                format!(
+                    "GET /v1 x-api-key: sk-live-output-456\n\
+                     cloning https://deploy:hunter2@git.example.test/repo.git\n\
+                     using {EXACT_SECRET}\ndone\n"
+                ),
+            ),
+        ],
+    )
+    .await;
+
+    let content = parts
+        .service
+        .tool_call_content("call-fetch")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        content,
+        ToolCallContent {
+            call_id: "call-fetch".into(),
+            arguments:
+                r#"{"header":"Authorization: [REDACTED]","url":"https://api.example.test/v1"}"#
+                    .into(),
+            arguments_truncated: false,
+            output: Some(
+                "GET /v1 x-api-key: [REDACTED]\n\
+                 cloning https://[REDACTED]@git.example.test/repo.git\n\
+                 using [REDACTED]\ndone\n"
+                    .into()
+            ),
+            output_truncated: false,
+        }
+    );
+    let pending = parts
+        .service
+        .tool_call_content("call-pending")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        pending.arguments,
+        r#"{"url":"https://api.example.test/slow"}"#
+    );
+    assert_eq!(pending.output, None);
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn oversized_fields_are_redacted_before_char_boundary_bound() {
+    let (parts, store_path) = test_active_service("tool_call_content_bound", "session");
+    // The bound falls three bytes into the token; bounding first would leak "AbC".
+    let arguments = format!(
+        "{} Bearer AbCdEf0123456789",
+        "a".repeat(MAX_TOOL_CALL_CONTENT_BYTES - 11)
+    );
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[("call-large", &arguments)]),
+            result("call-large", "€".repeat(MAX_TOOL_CALL_CONTENT_BYTES)),
+        ],
+    )
+    .await;
+
+    let content = parts
+        .service
+        .tool_call_content("call-large")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(content.arguments_truncated);
+    assert_eq!(content.arguments.len(), MAX_TOOL_CALL_CONTENT_BYTES);
+    assert!(content.arguments.ends_with(" Bearer [RE"));
+    assert!(content.output_truncated);
+    let output = content.output.unwrap();
+    assert_eq!(output.len(), MAX_TOOL_CALL_CONTENT_BYTES / 3 * 3);
+    assert!(output.chars().all(|character| character == '€'));
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn unknown_call_id_yields_none() {
+    let (parts, store_path) = test_active_service("tool_call_content_unknown", "session");
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[("call-known", "{}")]),
+            result("call-known", "ok"),
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        parts
+            .service
+            .tool_call_content("call-missing")
+            .await
+            .unwrap(),
+        None
+    );
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn members_under_credential_keys_are_masked_at_any_depth() {
+    let (parts, store_path) = test_active_service("tool_call_content_keys", "session");
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[(
+                "call-login",
+                r#"{"username":"ada","password":"hunter2","options":{"api_key":"k-123","retries":3,"headers":[{"Token":"t-1"},{"x-api-key":12345678901234567}]}}"#,
+            )]),
+            result("call-login", r#"{"secret":{"value":"s-1"},"status":"ok"}"#),
+        ],
+    )
+    .await;
+
+    let content = parts
+        .service
+        .tool_call_content("call-login")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        content.arguments,
+        r#"{"username":"ada","password":"[REDACTED]","options":{"api_key":"[REDACTED]","retries":3,"headers":[{"Token":"[REDACTED]"},{"x-api-key":"[REDACTED]"}]}}"#
+    );
+    assert_eq!(
+        content.output.as_deref(),
+        Some(r#"{"secret":"[REDACTED]","status":"ok"}"#)
+    );
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn a_call_id_held_twice_names_no_call() {
+    let (parts, store_path) = test_active_service("tool_call_content_reused", "session");
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[("call_0", r#"{"path":"a.txt"}"#)]),
+            result("call_0", "first"),
+            assistant(&[("call_0", r#"{"path":"b.txt"}"#), ("call_1", "{}")]),
+            result("call_0", "second"),
+            result("call_1", "ok"),
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        parts.service.tool_call_content("call_0").await.unwrap(),
+        None
+    );
+    let unique = parts
+        .service
+        .tool_call_content("call_1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(unique.output.as_deref(), Some("ok"));
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn a_diff_keeps_its_rows_when_a_row_ends_in_a_credential_cue() {
+    let (parts, store_path) = test_active_service("tool_call_content_rows", "session");
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[("call-write", r#"{"path":".env"}"#)]),
+            result(
+                "call-write",
+                r#"{"path":".env","diff":"@@ -0,0 +1,3 @@\n+APIKEY=\n+PORT=3000\n+x-api-key: sk-live-diff-789\n"}"#,
+            ),
+        ],
+    )
+    .await;
+
+    let content = parts
+        .service
+        .tool_call_content("call-write")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        content.output.as_deref(),
+        Some(
+            r#"{"path":".env","diff":"@@ -0,0 +1,3 @@\n+APIKEY=\n+PORT=3000\n+x-api-key: [REDACTED]\n"}"#
+        )
+    );
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn numeric_secrets_are_redacted_as_written_without_rounding_other_numbers() {
+    let (mut parts, store_path) = test_direct_active_service(
+        "tool_call_content_numbers",
+        "session",
+        ModelClient::new_for_test(),
+    );
+    parts
+        .service
+        .shell_runtime
+        .as_mut()
+        .unwrap()
+        .command_environment = Some(Arc::new(ExactSecret));
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[("call-numbers", r#"{"values":[123456789012345678901234567890,1.234567890123456789e+99],"count":18446744073709551616,"rate":1e5}"#)]),
+            result("call-numbers", r#"{"secret":123456789012345678901234567890,"count":18446744073709551616,"rate":1e5}"#),
+        ],
+    ).await;
+    let content = parts
+        .service
+        .tool_call_content("call-numbers")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        content.arguments,
+        r#"{"values":["[REDACTED]","[REDACTED]"],"count":18446744073709551616,"rate":1e5}"#
+    );
+    assert_eq!(
+        content.output.as_deref(),
+        Some(r#"{"secret":"[REDACTED]","count":18446744073709551616,"rate":1e5}"#)
+    );
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[test]
+fn raw_document_keeps_duplicate_members_and_retains_the_nesting_bound() {
+    let text = r#"{"count":1e5,"count":18446744073709551616,"password":"private"}"#;
+    assert_eq!(
+        redact_document(text, &str::to_owned, &str::to_owned),
+        r#"{"count":1e5,"count":18446744073709551616,"password":"[REDACTED]"}"#,
+    );
+    let too_deep = format!("{}0{}", "[".repeat(129), "]".repeat(129));
+    assert!(serde_json::from_str::<Document>(&too_deep).is_err());
+}

@@ -63,6 +63,8 @@ pub use execution_history::{
     recent_command_history, ExecutionHistory, ExecutionHistoryEntry, ExecutionHistoryOutput,
     ExecutionOutputAvailability, RECENT_EXECUTION_LIMIT,
 };
+mod tool_call_content;
+pub use tool_call_content::ToolCallContent;
 mod transcript_projection;
 mod user_terminals;
 pub use crate::terminal::{

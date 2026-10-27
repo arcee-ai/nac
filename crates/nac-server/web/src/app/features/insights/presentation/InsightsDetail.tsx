@@ -27,6 +27,11 @@ function segmentElement(root: HTMLElement, key: string): HTMLElement | null {
   );
 }
 
+/** Where an element starts in the column's content, wherever the column is scrolled. */
+function offsetIn(root: HTMLElement, element: HTMLElement): number {
+  return root.scrollTop + element.getBoundingClientRect().top - root.getBoundingClientRect().top;
+}
+
 /** Key it by group: whether the reader sits at the bottom is remembered per group. */
 export function InsightsDetail({
   group,
@@ -40,7 +45,10 @@ export function InsightsDetail({
   context: ItemContext;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const stuckRef = useRef(true);
+  /** The picked segment and where it starts, held there until the reader takes over. */
+  const pinRef = useRef<{ key: string; top: number } | null>(null);
   const focusedNonce = useRef<number | null>(null);
   const glide = useRef<AbortController | null>(null);
   const running = group.status === "running";
@@ -53,6 +61,27 @@ export function InsightsDetail({
     if (root && running && stuckRef.current) scrollToBottomInstantly(root);
   }, [followSeed, running]);
 
+  // Items grow after they render, e.g. a write once its diff loads. Scroll
+  // anchoring keeps whatever sits at the top of the column, which is not the
+  // picked segment while the column cannot scroll down to it.
+  useEffect(() => {
+    const root = rootRef.current;
+    const content = contentRef.current;
+    if (!root || !content) return;
+    const observer = new ResizeObserver(() => {
+      const pin = pinRef.current;
+      const target = pin ? segmentElement(root, pin.key) : null;
+      if (!pin || !target) return;
+      const top = offsetIn(root, target);
+      if (Math.abs(top - pin.top) < 1) return;
+      pin.top = top;
+      glide.current?.abort();
+      root.scrollTop = top;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
+
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || focusedNonce.current === focusNonce) return;
@@ -64,11 +93,8 @@ export function InsightsDetail({
       return;
     }
     stuckRef.current = !target && running;
-    const top = target
-      ? root.scrollTop + target.getBoundingClientRect().top - root.getBoundingClientRect().top
-      : running
-        ? root.scrollHeight
-        : 0;
+    const top = target ? offsetIn(root, target) : running ? root.scrollHeight : 0;
+    pinRef.current = target && segmentKey ? { key: segmentKey, top } : null;
     glide.current?.abort();
     if (mounting) {
       root.scrollTop = top;
@@ -79,6 +105,9 @@ export function InsightsDetail({
     void smoothScrollTo(root, top, undefined, controller.signal);
   }, [focusNonce, segmentKey, running]);
 
+  const release = () => {
+    pinRef.current = null;
+  };
   return (
     <div
       ref={rootRef}
@@ -87,9 +116,12 @@ export function InsightsDetail({
         const root = rootRef.current;
         if (root) stuckRef.current = distanceFromBottom(root) <= STICK_TOLERANCE_PX;
       }}
+      onWheel={release}
+      onPointerDown={release}
+      onKeyDown={release}
     >
       {/* The phone's tab bar floats over the bottom of the column. */}
-      <div className="flex flex-col pb-[128px] md:pb-0">
+      <div ref={contentRef} className="flex flex-col pb-[128px] md:pb-0">
         {group.segments.map((segment) => (
           <div key={segment.key} data-segment-key={segment.key}>
             <InsightSegmentItem

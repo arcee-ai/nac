@@ -7327,6 +7327,79 @@
         }
       }
     },
+    "/sessions/{session_id}/tool-calls/{call_id}": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_tool_calls_call_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCallContentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or rejected path/query/body extraction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or tool call not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/user-commands": {
       "post": {
         "tags": [
@@ -18245,6 +18318,38 @@
           }
         }
       },
+      "ToolCallContentResponse": {
+        "type": "object",
+        "description": "Full content of one main-session tool call. Each field is redacted before\nit is bounded; a `*_truncated` flag marks a field that was cut.",
+        "required": [
+          "call_id",
+          "arguments",
+          "arguments_truncated",
+          "output",
+          "output_truncated"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "string"
+          },
+          "arguments_truncated": {
+            "type": "boolean"
+          },
+          "call_id": {
+            "type": "string"
+          },
+          "output": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null while the call has no recorded result."
+          },
+          "output_truncated": {
+            "type": "boolean"
+          }
+        }
+      },
       "ToolCompletionStatus": {
         "type": "string",
         "enum": [
@@ -19494,6 +19599,13 @@
               "string",
               "null"
             ]
+          },
+          "file_path_prefix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Session-directory prefix for repository-relative Files paths. Empty at\nthe repository root; unavailable when the Git location is unknown."
           },
           "host_root": {
             "type": [

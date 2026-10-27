@@ -755,6 +755,7 @@ function je(e) {
 			let a = i.toString();
 			return t("GET", `${O(e)}/threads/${encodeURIComponent(n)}/events${a ? `?${a}` : ""}`, { signal: r.signal });
 		},
+		getToolCallContent: (e, n, r) => t("GET", `${O(e)}/tool-calls/${encodeURIComponent(n)}`, { signal: r }),
 		getWorkspaceDiff: (e, n, { stage: r = "all", context: i = 3, revision: a, signal: o } = {}) => {
 			let s = new URLSearchParams({
 				path: n,
@@ -7002,6 +7003,13 @@ var su = /* @__PURE__ */ function(e) {
 		e,
 		"thread-events",
 		t
+	],
+	toolCallContent: (e, t, n) => [
+		"session",
+		e,
+		"tool-call",
+		t,
+		n
 	],
 	sessionConfig: (e) => [
 		"session",
@@ -14419,15 +14427,60 @@ function YI() {
 function XI(e) {
 	return e instanceof Error ? e.message : String(e);
 }
+// src/app/lib/workspaceLink.ts
+var ZI = /^(https?|ircs?|mailto|xmpp|file)$/i, QI = /^[a-zA-Z]:[\\/]/, $I = /^(https?|mailto|ircs?|xmpp):/i;
+function eL(e) {
+	let t = String(e ?? "").trim();
+	if (!t) return "";
+	if (QI.test(t)) return t;
+	let n = t.indexOf(":");
+	return n === -1 || ZI.test(t.slice(0, n)) ? t : "";
+}
+function tL(e) {
+	return e.replace(/\\/g, "/");
+}
+function nL(e, t) {
+	if (!t) return null;
+	let n = tL(t).replace(/\/+$/, "");
+	return n ? e === n ? "" : e.startsWith(`${n}/`) ? e.slice(n.length + 1) : null : null;
+}
+function rL(e, t = []) {
+	let n = (e ?? "").trim();
+	if (!n || n.startsWith("#")) return { kind: "blocked" };
+	if ($I.test(n)) return {
+		kind: "external",
+		href: n
+	};
+	if (/^[a-z][a-z0-9+.-]*:/i.test(n) && !/^file:/i.test(n)) return { kind: "blocked" };
+	let r = n;
+	if (/^file:/i.test(r)) try {
+		let e = new URL(r);
+		r = decodeURIComponent(e.pathname), /^\/[a-zA-Z]:\//.test(r) && (r = r.slice(1));
+	} catch {
+		r = r.replace(/^file:\/\//i, "").replace(/^localhost/i, "");
+	}
+	r = tL(r);
+	for (let e of t) {
+		let t = nL(r, e);
+		if (t != null) {
+			r = t;
+			break;
+		}
+	}
+	return r.startsWith("/") || QI.test(r) || (r = r.replace(/^\.\//, ""), !r || r === ".") || r.split("/").includes("..") || r.includes("://") ? { kind: "blocked" } : {
+		kind: "workspace",
+		path: r
+	};
+}
 // src/app/lib/PerfProfiler.tsx
-var ZI = (e, t, n) => {
+var iL = (e, t, n) => {
 	`${e}`;
 };
-function QI({ id: e, children: n }) {
+function aL({ id: e, children: n }) {
 	return Le() ? /* @__PURE__ */ x(t, {
 		id: e,
-		onRender: ZI,
+		onRender: iL,
 		children: n
 	}) : /* @__PURE__ */ x(b, { children: n });
 }
-export { gF as $, Vj as $n, k as $r, UN as $t, JF as A, jt as Ai, $M as An, Kc as Ar, NP as At, IF as B, Pe as Bi, sN as Bn, vc as Br, XN as Bt, EI as C, Bt as Ci, TN as Cn, sl as Cr, XP as Ct, QF as D, un as Di, uN as Dn, Hc as Dr, BP as Dt, tI as E, Zt as Ei, _N as En, Zc as Er, qP as Et, VF as F, nt as Fi, YM as Fn, Nc as Fr, oP as Ft, kF as G, Se as Gi, KM as Gn, N as Gr, qN as Gt, MF as H, Ee as Hi, tN as Hn, _c as Hr, JN as Ht, GF as I, Re as Ii, aN as In, Ic as Ir, rP as It, wF as J, XM as Jn, To as Jr, nP as Jt, jF as K, w as Ki, iN as Kn, ko as Kr, YN as Kt, HF as L, ze as Li, UM as Ln, Pc as Lr, eP as Lt, zF as M, At as Mi, eN as Mn, Rc as Mr, hP as Mt, UF as N, tt as Ni, VM as Nn, zc as Nr, gP as Nt, $F as O, nn as Oi, dN as On, Xc as Or, kP as Ot, WF as P, at as Pi, HM as Pn, Bc as Pr, uP as Pt, DF as Q, Bj as Qn, Co as Qr, WN as Qt, LF as R, Be as Ri, nN as Rn, jc as Rr, QN as Rt, PI as S, Jt as Si, mN as Sn, ll as Sr, GP as St, YF as T, qt as Ti, zN as Tn, tl as Tr, KP as Tt, FF as U, he as Ui, WM as Un, hc as Ur, ZN as Ut, RF as V, De as Vi, cN as Vn, gc as Vr, iP as Vt, PF as W, ge as Wi, GM as Wn, dc as Wr, sP as Wt, TF as X, FM as Xn, Eo as Xr, $N as Xt, EF as Y, BM as Yn, Oo as Yr, tP as Yt, OF as Z, zj as Zn, Do as Zr, lP as Zt, NI as _, Vt as _i, LN as _n, _l as _r, iF as _t, LI as a, vi as ai, RN as an, OC as ar, rF as at, MI as b, Ht as bi, pN as bn, ul as br, lF as bt, RI as c, yi as ci, BN as cn, P as cr, vF as ct, BI as d, ci as di, DN as dn, ru as dr, eF as dt, yo as ei, HN as en, Uj as er, _F as et, CI as f, _r as fi, EN as fn, nu as fr, ZP as ft, wI as g, vr as gi, jN as gn, vl as gr, pF as gt, DI as h, mr as hi, ON as hn, wl as hr, hF as ht, YI as i, ui as ii, SN as in, DC as ir, bF as it, nI as j, on as ji, JM as jn, Jc as jr, TP as jt, XF as k, Kt as ki, qM as kn, Yc as kr, AP as kt, VI as l, di as li, vN as ln, ou as lr, aF as lt, jI as m, hr as mi, MN as mn, Zl as mr, mF as mt, JI as n, So as ni, PN as nn, Rj as nr, cF as nt, FI as o, _i as oi, gN as on, cm as or, dF as ot, AI as p, gr as pi, xN as pn, Jl as pr, $P as pt, AF as q, ne as qi, ZM as qn, Ao as qr, aP as qt, XI as r, go as ri, fN as rn, EC as rr, xF as rt, II as s, hi as si, wN as sn, wf as sr, yF as st, QI as t, bo as ti, VN as tn, Lj as tr, oF as tt, zI as u, pi as ui, bN as un, iu as ur, nF as ut, OI as v, Xt as vi, IN as vn, gl as vr, uF as vt, eI as w, an as wi, CN as wn, rl as wr, HP as wt, kI as x, Qt as xi, hN as xn, cl as xr, SF as xt, TI as y, Yt as yi, FN as yn, pl as yr, fF as yt, NF as z, Fe as zi, oN as zn, yc as zr, cP as zt };
+export { OF as $, zj as $n, Do as $r, lP as $t, $F as A, nn as Ai, dN as An, Xc as Ar, kP as At, LF as B, Be as Bi, nN as Bn, jc as Br, QN as Bt, kI as C, Qt as Ci, hN as Cn, cl as Cr, SF as Ct, YF as D, qt as Di, zN as Dn, tl as Dr, KP as Dt, eI as E, an as Ei, CN as En, rl as Er, HP as Et, UF as F, tt as Fi, VM as Fn, zc as Fr, gP as Ft, FF as G, he as Gi, WM as Gn, hc as Gr, ZN as Gt, IF as H, Pe as Hi, sN as Hn, vc as Hr, XN as Ht, WF as I, at as Ii, HM as In, Bc as Ir, uP as It, jF as J, w as Ji, iN as Jn, ko as Jr, YN as Jt, PF as K, ge as Ki, GM as Kn, dc as Kr, sP as Kt, VF as L, nt as Li, YM as Ln, Nc as Lr, oP as Lt, JF as M, jt as Mi, $M as Mn, Kc as Mr, NP as Mt, nI as N, on as Ni, JM as Nn, Jc as Nr, TP as Nt, tI as O, Zt as Oi, _N as On, Zc as Or, qP as Ot, zF as P, At as Pi, eN as Pn, Rc as Pr, hP as Pt, TF as Q, FM as Qn, Eo as Qr, $N as Qt, GF as R, Re as Ri, aN as Rn, Ic as Rr, rP as Rt, MI as S, Ht as Si, pN as Sn, ul as Sr, lF as St, EI as T, Bt as Ti, TN as Tn, sl as Tr, XP as Tt, RF as U, De as Ui, cN as Un, gc as Ur, iP as Ut, NF as V, Fe as Vi, oN as Vn, yc as Vr, cP as Vt, MF as W, Ee as Wi, tN as Wn, _c as Wr, JN as Wt, wF as X, XM as Xn, To as Xr, nP as Xt, AF as Y, ne as Yi, ZM as Yn, Ao as Yr, aP as Yt, EF as Z, BM as Zn, Oo as Zr, tP as Zt, DI as _, mr as _i, ON as _n, wl as _r, hF as _t, XI as a, go as ai, fN as an, EC as ar, xF as at, OI as b, Xt as bi, IN as bn, gl as br, uF as bt, FI as c, _i as ci, gN as cn, cm as cr, dF as ct, VI as d, di, vN as dn, ou as dr, aF as dt, Co as ei, WN as en, Bj as er, DF as et, zI as f, pi as fi, bN as fn, iu as fr, nF as ft, jI as g, hr as gi, MN as gn, Zl as gr, mF as gt, AI as h, gr as hi, xN as hn, Jl as hr, $P as ht, JI as i, So as ii, PN as in, Rj as ir, cF as it, XF as j, Kt as ji, qM as jn, Yc as jr, AP as jt, QF as k, un as ki, uN as kn, Hc as kr, BP as kt, II as l, hi as li, wN as ln, wf as lr, yF as lt, CI as m, _r as mi, EN as mn, nu as mr, ZP as mt, rL as n, yo as ni, HN as nn, Uj as nr, _F as nt, YI as o, ui as oi, SN as on, DC as or, bF as ot, BI as p, ci as pi, DN as pn, ru as pr, eF as pt, kF as q, Se as qi, KM as qn, N as qr, qN as qt, eL as r, bo as ri, VN as rn, Lj as rr, oF as rt, LI as s, vi as si, RN as sn, OC as sr, rF as st, aL as t, k as ti, UN as tn, Vj as tr, gF as tt, RI as u, yi as ui, BN as un, P as ur, vF as ut, wI as v, vr as vi, jN as vn, vl as vr, pF as vt, PI as w, Jt as wi, mN as wn, ll as wr, GP as wt, TI as x, Yt as xi, FN as xn, pl as xr, fF as xt, NI as y, Vt as yi, LN as yn, _l as yr, iF as yt, HF as z, ze as zi, UM as zn, Pc as zr, eP as zt };
