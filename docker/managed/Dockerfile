@@ -86,6 +86,8 @@ ENV LANG=C.UTF-8 \
 
 COPY docker/managed/git-lfs/go.mod docker/managed/git-lfs/go.sum /tmp/nac-lfs-dependencies/
 COPY --from=runtime-packages /out/ /usr/share/nac/runtime-package-build/
+COPY docker/managed/packages/brotli-supplier.lock.json /usr/share/nac/
+COPY docker/managed/packages/npm-bundle.lock.json docker/managed/packages/correct-npm-bundle.py docker/managed/packages/npm-bundle-probe.cjs /usr/share/nac/npm-runtime-build/
 
 RUN test "$(apk --print-arch)" = x86_64 \
     && apk upgrade --no-cache \
@@ -97,6 +99,7 @@ RUN test "$(apk --print-arch)" = x86_64 \
         openssh-client pkgconf procps python-3.13=3.13.16_git20261016-r1 \
         py3-pip=26.2.2-r0 ripgrep rsync gnutar tini unzip xz zip shadow perl util-linux libxml2 py3-setuptools \
         zlib=1.3.2.1_rc20260921-r0 \
+        libbrotlicommon1=1.2.1-r2 libbrotlidec1=1.2.1-r2 libbrotlienc1=1.2.1-r2 \
     && cd /usr/share/nac/runtime-package-build \
     && sha256sum -c packages.sha256 \
     && python3 check-supplier-packages.py sources.lock.json > supplier-predecessors.json \
@@ -114,6 +117,8 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && mkdir -p /usr/local/lib/node_modules/npm \
     && tar -xzf /tmp/npm.tgz -C /usr/local/lib/node_modules/npm --strip-components=1 \
     && rm /tmp/npm.tgz \
+    && python3 /usr/share/nac/npm-runtime-build/correct-npm-bundle.py \
+        /usr/share/nac/npm-runtime-build /usr/local/lib/node_modules/npm \
     && corepack enable \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/gh.tar.gz \
         "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
