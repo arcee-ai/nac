@@ -284,7 +284,7 @@ export const ModelMessage = memo(function ModelMessage({
                   aria-label="Regenerate from original prompt"
                   disabled={actionsDisabled}
                   onClick={() => onRefresh(userMessageIndex)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
+                  className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
                 >
                   <Icon iconName={IconName.Refresh} size={16} />
                 </Button>
@@ -300,7 +300,7 @@ export const ModelMessage = memo(function ModelMessage({
                   aria-label="Revert to this snapshot"
                   disabled={actionsDisabled}
                   onClick={() => onRevert(userMessageIndex, userText)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
+                  className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
                 >
                   <Icon iconName={IconName.TurnLeft} size={16} />
                 </Button>
@@ -317,7 +317,7 @@ export const ModelMessage = memo(function ModelMessage({
                     content={ButtonContent.Icon}
                     aria-label="Revert to this snapshot"
                     disabled
-                    className="md:!h-4 md:!min-h-4 md:!p-0"
+                    className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
                   >
                     <Icon iconName={IconName.TurnLeft} size={16} />
                   </Button>
@@ -334,7 +334,7 @@ export const ModelMessage = memo(function ModelMessage({
                   aria-label="Create fork"
                   disabled={actionsDisabled}
                   onClick={() => onFork(forkIndex)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
+                  className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
                 >
                   <Icon iconName={IconName.Scheme} size={16} />
                 </Button>
@@ -347,7 +347,7 @@ export const ModelMessage = memo(function ModelMessage({
               variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
               title="Copy message"
               position={TooltipPosition.BottomRight}
-              className="md:!h-4 md:!min-h-4 md:!p-0"
+              className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
             />
           </div>
         ) : null}

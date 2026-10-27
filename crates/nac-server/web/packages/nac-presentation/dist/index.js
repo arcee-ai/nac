@@ -19413,7 +19413,7 @@ var Bb = si(function({ turn: e, model: t, active: n, activity: r, isLast: i = !1
 								"aria-label": "Regenerate from original prompt",
 								disabled: _,
 								onClick: () => d(l),
-								className: "md:!h-4 md:!min-h-4 md:!p-0",
+								className: "md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0",
 								children: /* @__PURE__ */ Y(B, {
 									iconName: V.Refresh,
 									size: 16
@@ -19430,7 +19430,7 @@ var Bb = si(function({ turn: e, model: t, active: n, activity: r, isLast: i = !1
 								"aria-label": "Revert to this snapshot",
 								disabled: _,
 								onClick: () => f(l, u),
-								className: "md:!h-4 md:!min-h-4 md:!p-0",
+								className: "md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0",
 								children: /* @__PURE__ */ Y(B, {
 									iconName: V.TurnLeft,
 									size: 16
@@ -19447,7 +19447,7 @@ var Bb = si(function({ turn: e, model: t, active: n, activity: r, isLast: i = !1
 									content: L.Icon,
 									"aria-label": "Revert to this snapshot",
 									disabled: !0,
-									className: "md:!h-4 md:!min-h-4 md:!p-0",
+									className: "md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0",
 									children: /* @__PURE__ */ Y(B, {
 										iconName: V.TurnLeft,
 										size: 16
@@ -19465,7 +19465,7 @@ var Bb = si(function({ turn: e, model: t, active: n, activity: r, isLast: i = !1
 								"aria-label": "Create fork",
 								disabled: _,
 								onClick: () => p(C),
-								className: "md:!h-4 md:!min-h-4 md:!p-0",
+								className: "md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0",
 								children: /* @__PURE__ */ Y(B, {
 									iconName: V.Scheme,
 									size: 16
@@ -19478,7 +19478,7 @@ var Bb = si(function({ turn: e, model: t, active: n, activity: r, isLast: i = !1
 							variant: E ? H.Ghost : H.Tertiary,
 							title: "Copy message",
 							position: R.BottomRight,
-							className: "md:!h-4 md:!min-h-4 md:!p-0"
+							className: "md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
 						})
 					]
 				})
@@ -19530,7 +19530,7 @@ var Bb = si(function({ turn: e, model: t, active: n, activity: r, isLast: i = !1
 							"aria-label": "Regenerate from original prompt",
 							disabled: l,
 							onClick: () => s(o),
-							className: "md:!h-4 md:!min-h-4 md:!p-0",
+							className: "md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0",
 							children: /* @__PURE__ */ Y(B, {
 								iconName: V.Refresh,
 								size: 16
@@ -19547,7 +19547,7 @@ var Bb = si(function({ turn: e, model: t, active: n, activity: r, isLast: i = !1
 							"aria-label": "Revert to this snapshot",
 							disabled: l,
 							onClick: () => c(o, e),
-							className: "md:!h-4 md:!min-h-4 md:!p-0",
+							className: "md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0",
 							children: /* @__PURE__ */ Y(B, {
 								iconName: V.TurnLeft,
 								size: 16
@@ -19564,7 +19564,7 @@ var Bb = si(function({ turn: e, model: t, active: n, activity: r, isLast: i = !1
 								content: L.Icon,
 								"aria-label": "Revert to this snapshot",
 								disabled: !0,
-								className: "md:!h-4 md:!min-h-4 md:!p-0",
+								className: "md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0",
 								children: /* @__PURE__ */ Y(B, {
 									iconName: V.TurnLeft,
 									size: 16
@@ -19578,7 +19578,7 @@ var Bb = si(function({ turn: e, model: t, active: n, activity: r, isLast: i = !1
 						variant: p ? H.Ghost : H.Tertiary,
 						title: t ? "Copy canonical message" : "Copy message",
 						position: R.BottomLeft,
-						className: "md:!h-4 md:!min-h-4 md:!p-0"
+						className: "md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
 					})
 				]
 			})

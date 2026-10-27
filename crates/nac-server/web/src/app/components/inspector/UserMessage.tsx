@@ -135,7 +135,7 @@ export const UserMessage = memo(function UserMessage({
                 aria-label="Regenerate from original prompt"
                 disabled={actionsDisabled}
                 onClick={() => onRefresh(messageIndex)}
-                className="md:!h-4 md:!min-h-4 md:!p-0"
+                className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
               >
                 <Icon iconName={IconName.Refresh} size={16} />
               </Button>
@@ -151,7 +151,7 @@ export const UserMessage = memo(function UserMessage({
                 aria-label="Revert to this snapshot"
                 disabled={actionsDisabled}
                 onClick={() => onRevert(messageIndex, text)}
-                className="md:!h-4 md:!min-h-4 md:!p-0"
+                className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
               >
                 <Icon iconName={IconName.TurnLeft} size={16} />
               </Button>
@@ -168,7 +168,7 @@ export const UserMessage = memo(function UserMessage({
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
                   disabled
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
+                  className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
                 >
                   <Icon iconName={IconName.TurnLeft} size={16} />
                 </Button>
@@ -182,7 +182,7 @@ export const UserMessage = memo(function UserMessage({
             variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
             title={terminalSelection ? "Copy canonical message" : "Copy message"}
             position={TooltipPosition.BottomLeft}
-            className="md:!h-4 md:!min-h-4 md:!p-0"
+            className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
           />
         </div>
       ) : null}

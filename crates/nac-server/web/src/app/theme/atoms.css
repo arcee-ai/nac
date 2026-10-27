@@ -1,7 +1,7 @@
 /* Atom styles ported from ArceeFM (button/index.css, input/index.css) with
    @apply resolved to concrete values. Colours use design tokens directly.
    The size matrix is generalized to size+content (variant-agnostic) since the
-   values are identical across variants, except tertiary, which has no box. */
+   values are identical across variants, except tertiary, which has no visual box. */
 
 /* ============================ ICON ============================ */
 .icon {
@@ -121,6 +121,14 @@
   height: auto;
   padding: 0;
   border-radius: 8px;
+}
+/* Boxless icon controls still keep a 24px pointer target. Deliberately compact
+   transcript actions can override both minimums at their desktop breakpoint. */
+.btn.btn-icon.btn-tertiary,
+.btn.btn-icon.btn-tertiary-destructive,
+.btn.btn-icon.btn-tertiary-accent {
+  min-width: 24px;
+  min-height: 24px;
 }
 
 /* ---- colour variants ---- */

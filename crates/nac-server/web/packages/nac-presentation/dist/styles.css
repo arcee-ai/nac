@@ -4153,6 +4153,10 @@
       max-width: 100%;
     }
 
+    [data-nac-runtime]:is(.md\:\!min-w-4), [data-nac-runtime] .md\:\!min-w-4 {
+      min-width: calc(var(--spacing) * 4) !important;
+    }
+
     [data-nac-runtime]:is(.md\:flex-1), [data-nac-runtime] .md\:flex-1 {
       flex: 1;
     }
@@ -5588,6 +5592,11 @@
   border-radius: 8px;
   height: auto;
   padding: 0;
+}
+
+[data-nac-runtime]:is(.btn.btn-icon.btn-tertiary), [data-nac-runtime] .btn.btn-icon.btn-tertiary, [data-nac-runtime]:is(.btn.btn-icon.btn-tertiary-destructive), [data-nac-runtime] .btn.btn-icon.btn-tertiary-destructive, [data-nac-runtime]:is(.btn.btn-icon.btn-tertiary-accent), [data-nac-runtime] .btn.btn-icon.btn-tertiary-accent {
+  min-width: 24px;
+  min-height: 24px;
 }
 
 [data-nac-runtime]:is(.btn-primary), [data-nac-runtime] .btn-primary {
