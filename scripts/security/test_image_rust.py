@@ -55,6 +55,16 @@ class RustInventoryTests(unittest.TestCase):
                 self.pins["manifest_sha256"]], env=env))
         self.assertEqual(outputs[0], outputs[1])
 
+    def test_hardlinked_proxies_with_pinned_bytes_remain_supported(self):
+        for name, proxy in self.raw["proxies"].items():
+            proxy["resolved"] = "/usr/local/cargo/bin/" + name
+        self.assertEqual(rust.rust_inventory(self.raw, self.pins, self.root)["distribution"], "1.98.0")
+
+    def test_proxy_resolving_to_another_component_path_fails(self):
+        self.raw["proxies"]["rustc"]["resolved"] = "/usr/local/cargo/bin/cargo"
+        with self.assertRaisesRegex(ValueError, "Rust proxy/rustup hash or path mismatch"):
+            rust.rust_inventory(self.raw, self.pins, self.root)
+
     def test_missing_components_wrong_target_and_unexpected_toolchain_fail(self):
         for field, value in (("targets", "aarch64-unknown-linux-gnu"), ("components", "rustc"),
                              ("components", self.raw["components"].replace("clippy-", "clippy-preview-")),
@@ -66,12 +76,16 @@ class RustInventoryTests(unittest.TestCase):
                 rust.rust_inventory(self.raw, pins, self.root)
 
     def test_proxy_path_hash_and_actual_payload_changes_fail(self):
-        for name in self.raw["proxies"]:
-            for field, value in (("sha256", "d" * 64), ("resolved", "/tmp/rustup"), ("path", "/tmp/proxy")):
-                broken = copy.deepcopy(self.raw)
-                broken["proxies"][name][field] = value
-                with self.subTest(name=name, field=field), self.assertRaises(ValueError):
-                    rust.rust_inventory(broken, self.pins, self.root)
+        for hardlinks in (False, True):
+            for name in self.raw["proxies"]:
+                for field, value in (("sha256", "d" * 64), ("resolved", "/tmp/rustup"), ("path", "/tmp/proxy")):
+                    broken = copy.deepcopy(self.raw)
+                    if hardlinks:
+                        for proxy in broken["proxies"].values():
+                            proxy["resolved"] = proxy["path"]
+                    broken["proxies"][name][field] = value
+                    with self.subTest(hardlinks=hardlinks, name=name, field=field), self.assertRaises(ValueError):
+                        rust.rust_inventory(broken, self.pins, self.root)
         for field in ("payload", "which", "versions"):
             broken = copy.deepcopy(self.raw)
             key = next(iter(broken[field]))
@@ -82,6 +96,23 @@ class RustInventoryTests(unittest.TestCase):
         broken["payload"]["bin/unexpected"] = {"sha256": "e" * 64}
         with self.assertRaisesRegex(ValueError, "unexpected Rust payload"):
             rust.rust_inventory(broken, self.pins, self.root)
+
+    def test_missing_or_uncertain_proxy_binding_fails(self):
+        for hardlinks in (False, True):
+            for field in ("path", "resolved", "sha256", "uncertain", "extra"):
+                broken = copy.deepcopy(self.raw)
+                if hardlinks:
+                    for proxy in broken["proxies"].values():
+                        proxy["resolved"] = proxy["path"]
+                proxy = broken["proxies"]["rustc"]
+                if field == "uncertain":
+                    proxy["resolved"] = None
+                elif field == "extra":
+                    proxy["unverified_target"] = "/tmp/rustup"
+                else:
+                    del proxy[field]
+                with self.subTest(hardlinks=hardlinks, field=field), self.assertRaises(ValueError):
+                    rust.rust_inventory(broken, self.pins, self.root)
 
     def test_immutable_manifest_or_payload_metadata_tamper_fails(self):
         for file in ("rust-distribution.toml", "rust-payload.json"):
