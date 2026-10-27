@@ -18177,6 +18177,8 @@ var qv = {
 	create_goal: "Create goal",
 	get_goal: "Read goal",
 	update_goal: "Update goal",
+	find_tasks: "Find tasks",
+	read_task: "Read task",
 	subagent: "Start coding agent",
 	subagent_status: "Check coding agent",
 	subagent_cancel: "Cancel coding agent",

@@ -149,7 +149,7 @@ impl SessionService {
                 None,
                 cancel_usage.clone(),
                 DurableRunTerminal::Cancelled,
-                None,
+                RunTerminalEvidence::None,
             )
             .await
         {

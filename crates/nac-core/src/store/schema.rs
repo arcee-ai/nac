@@ -52,6 +52,7 @@ mod future_schema_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 38 retains bounded run and replaced/cleared goal outcomes for task reads.
 // 37 binds queued foreground intent to crash-safe exact-input waiting authority.
 // 36 retains requested child execution mode with queued input across recovery.
 // 35 retains terminal results for each delegated generation independently of
@@ -84,7 +85,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 37;
+const STORE_SCHEMA_VERSION: i64 = 38;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -777,7 +778,7 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36
+        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
         | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
@@ -980,6 +981,8 @@ fn open_connection_with_hooks(
         "INTEGER NOT NULL DEFAULT 0",
     )?;
     super::shell_commands::create_shell_commands_table(&transaction)?;
+    ensure_column(&transaction, "session_goals", "last_run_id", "TEXT")?;
+    super::task_evidence::create_task_evidence_tables(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;

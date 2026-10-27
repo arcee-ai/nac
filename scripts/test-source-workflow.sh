@@ -43,6 +43,43 @@ for unsafe in '' nac-web .hidden '../escape' 'nested/name' 'white space'; do
   fi
 done
 
+# Build scripts must resolve the current checkout when Cargo reuses their
+# executables from a moved target cache. Compile once, remove the original
+# checkout, then run those same executables with Cargo's new runtime paths.
+original_checkout="$TMP/original checkout"
+relocated_checkout="$TMP/relocated checkout"
+for crate in nac-contracts nac-server; do
+  mkdir -p "$original_checkout/crates/$crate"
+  CARGO_MANIFEST_DIR="$original_checkout/crates/$crate" \
+    "${RUSTC:-rustc}" --edition=2021 "$ROOT/crates/$crate/build.rs" -o "$TMP/$crate-build"
+done
+mv "$original_checkout" "$relocated_checkout"
+for version in 1.2.3 1.2.4; do
+  printf '%s\n' "$version" >"$relocated_checkout/version.txt"
+  for crate in nac-contracts nac-server; do
+    manifest_dir="$relocated_checkout/crates/$crate"
+    build_output="$(cd "$manifest_dir" && \
+      CARGO_MANIFEST_DIR="$manifest_dir" NAC_BUILD_TRACK=dev \
+        "$TMP/$crate-build")"
+    [[ "$build_output" == *"cargo:rustc-env=NAC_PRODUCT_VERSION=$version"* ]] || \
+      fail "$crate did not read version $version from the relocated checkout"
+    [[ "$build_output" == *"cargo:rerun-if-changed=$manifest_dir/../../version.txt"* ]] || \
+      fail "$crate did not watch the relocated version file"
+  done
+done
+printf '%s\n' '1.2.4-beta' >"$relocated_checkout/version.txt"
+for crate in nac-contracts nac-server; do
+  manifest_dir="$relocated_checkout/crates/$crate"
+  if (cd "$manifest_dir" && \
+      CARGO_MANIFEST_DIR="$manifest_dir" NAC_BUILD_TRACK=dev \
+        "$TMP/$crate-build") >"$TMP/$crate-invalid-version.log" 2>&1; then
+    fail "$crate accepted a prerelease as a stable version"
+  fi
+  grep -F 'version.txt must contain one stable semantic version' \
+    "$TMP/$crate-invalid-version.log" >/dev/null || \
+    fail "$crate failed without validating the relocated version"
+done
+
 fake_bin="$TMP/fake-bin"
 mkdir -p "$fake_bin"
 cat >"$fake_bin/cargo" <<'EOF'

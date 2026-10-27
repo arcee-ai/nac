@@ -227,6 +227,8 @@ pub struct PermissionBroker {
     event_bus: StdMutex<Option<crate::events::SessionEventBus>>,
     state: StdMutex<PermissionBrokerState>,
     approval_observer: tokio::sync::Mutex<PermissionApprovalObserver>,
+    /// The session's saved project; membership is immutable once set.
+    caller_project: std::sync::OnceLock<String>,
 }
 
 /// Project one validated backend path into the action being performed plus an

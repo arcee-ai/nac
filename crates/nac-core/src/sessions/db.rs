@@ -276,13 +276,17 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
                 goal.failure.as_ref(),
             )?;
         }
-        crate::store::clear_active_run(
+        let disposition = update
+            .finished_run_disposition
+            .ok_or_else(|| anyhow!("finished run is missing its validated disposition"))?;
+        crate::store::clear_active_run(&tx, &update.session_id, run_id, disposition)?;
+        crate::store::record_run_outcome_with_connection(
             &tx,
             &update.session_id,
             run_id,
-            update
-                .finished_run_disposition
-                .ok_or_else(|| anyhow!("finished run is missing its validated disposition"))?,
+            disposition.into(),
+            update.finished_run_result.as_deref(),
+            None,
         )?;
     } else if let Some(run_id) = update.failed_run_id.as_deref() {
         if let Some(goal) = update.goal_settlement.as_ref() {
@@ -303,6 +307,14 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
             &tx,
             &update.session_id,
             run_id,
+            durable_failure.as_ref(),
+        )?;
+        crate::store::record_run_outcome_with_connection(
+            &tx,
+            &update.session_id,
+            run_id,
+            crate::store::RunOutcomeDisposition::Failed,
+            None,
             durable_failure.as_ref(),
         )?;
     }

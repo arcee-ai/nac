@@ -139,6 +139,14 @@ pub(crate) fn key_arg_preview(
             .map(|value| truncate_string(&value, 120))
             .unwrap_or_default(),
         "get_goal" => "current goal".to_string(),
+        "find_tasks" => get_str("session_id")
+            .or_else(|| get_str("reference"))
+            .or_else(|| get_str("text"))
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_else(|| "recent tasks".to_string()),
+        "read_task" => get_str("session_id")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
         "update_goal" => get_str("status")
             .map(|value| truncate_string(&value, 120))
             .unwrap_or_default(),

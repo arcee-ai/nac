@@ -91,7 +91,16 @@ impl PermissionBroker {
             event_bus: StdMutex::new(None),
             state: StdMutex::new(PermissionBrokerState::default()),
             approval_observer: tokio::sync::Mutex::new(PermissionApprovalObserver::default()),
+            caller_project: std::sync::OnceLock::new(),
         }
+    }
+
+    pub(crate) fn remember_caller_project(&self, project_id: &str) {
+        let _ = self.caller_project.set(project_id.to_owned());
+    }
+
+    pub(crate) fn caller_project(&self) -> Option<&str> {
+        self.caller_project.get().map(String::as_str)
     }
 
     pub(crate) fn attach_event_bus(&self, bus: crate::events::SessionEventBus) {
@@ -315,6 +324,48 @@ impl PermissionBroker {
         .await
     }
 
+    async fn remembered_allows(
+        &self,
+        owner: Option<&Arc<crate::store::StoreCoordinator>>,
+    ) -> anyhow::Result<Vec<PermissionRule>> {
+        let grants = match owner {
+            Some(owner) => {
+                owner
+                    .list_effective_permission_grants(
+                        self.session_id.clone(),
+                        self.backend.to_owned(),
+                        self.session_config_version,
+                    )
+                    .await
+            }
+            None => crate::store::list_effective_permission_grants(
+                &self.store_path,
+                &self.session_id,
+                self.backend,
+                self.session_config_version,
+            ),
+        }?;
+        Ok(grants
+            .into_iter()
+            .map(|grant| PermissionRule::new(grant.action, grant.resource, PermissionEffect::Allow))
+            .collect())
+    }
+
+    /// Non-prompting policy snapshot for passive reads; `None` when grants are unreadable.
+    pub(crate) async fn passive_read_filter(&self) -> Option<PassiveReadFilter> {
+        let owner = crate::store::coordinator::owner_for(&self.store_path).ok()?;
+        let remembered = self.remembered_allows(owner.as_ref()).await.ok()?;
+        let auto_approve = matches!(
+            self.load_approval_state().await,
+            Ok((PermissionApprovalMode::AutoApprove, _, _))
+        );
+        Some(PassiveReadFilter {
+            policy: self.policy.clone(),
+            remembered,
+            auto_approve,
+        })
+    }
+
     async fn authorize_invocation(
         self: &Arc<Self>,
         tool: &str,
@@ -336,34 +387,12 @@ impl PermissionBroker {
                 ))
             }
         };
-        let grants = match &owner {
-            Some(owner) => {
-                owner
-                    .list_effective_permission_grants(
-                        self.session_id.clone(),
-                        self.backend.to_owned(),
-                        self.session_config_version,
-                    )
-                    .await
-            }
-            None => crate::store::list_effective_permission_grants(
-                &self.store_path,
-                &self.session_id,
-                self.backend,
-                self.session_config_version,
-            ),
-        };
-        let remembered = match grants {
-            Ok(grants) => grants
-                .into_iter()
-                .map(|grant| {
-                    PermissionRule::new(grant.action, grant.resource, PermissionEffect::Allow)
-                })
-                .collect::<Vec<_>>(),
+        let remembered = match self.remembered_allows(owner.as_ref()).await {
+            Ok(remembered) => remembered,
             Err(error) => {
                 return AuthorizationOutcome::Denied(format!(
                     "permission grants could not be read: {error}"
-                ));
+                ))
             }
         };
         let decision = self.policy.evaluate(resources, &remembered);
@@ -771,4 +800,22 @@ fn epoch_millis_now() -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+/// Allows only what policy and grants allow, or Ask under auto-approve.
+#[derive(Clone)]
+pub(crate) struct PassiveReadFilter {
+    policy: PermissionPolicy,
+    remembered: Vec<PermissionRule>,
+    auto_approve: bool,
+}
+
+impl PassiveReadFilter {
+    pub(crate) fn allows(&self, resources: &[PermissionResource]) -> bool {
+        match self.policy.evaluate(resources, &self.remembered).effect {
+            PermissionEffect::Allow => true,
+            PermissionEffect::Deny => false,
+            PermissionEffect::Ask => self.auto_approve,
+        }
+    }
 }
