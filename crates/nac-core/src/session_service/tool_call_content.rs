@@ -64,11 +64,12 @@ impl SessionService {
 /// escaped quote, or run past `\n` escapes into the lines after it. Within a
 /// decoded string the patterns run one line at a time, so they cannot take a
 /// line break either and merge the rows of a diff; the exact secrets are still
-/// matched across the whole string. Encoding again respells numbers (1e5 as
-/// 100000.0, and past 64 bits as a float), so a document with nothing to redact
-/// comes back as written; otherwise its members keep their order and the
-/// document its compact or pretty layout. A member under a credential key, such
-/// as `password` or `token`, is masked whole at any depth, whatever it holds.
+/// matched across the whole string. Numbers retain their original tokens, so
+/// exact secrets match even beyond numeric precision limits. A document with
+/// nothing to redact comes back as written; otherwise its members keep their
+/// order and the document its compact or pretty layout. A member under a
+/// credential key, such as `password` or `token`, is masked whole at any depth,
+/// whatever it holds.
 /// Any other text is redacted as it stands.
 fn redact_document(
     text: &str,
@@ -121,7 +122,7 @@ impl Redaction<'_> {
 enum Document {
     Null,
     Bool(bool),
-    Number(serde_json::Number),
+    Number(Box<serde_json::value::RawValue>),
     String(String),
     Array(Vec<Document>),
     Object(Vec<(String, Document)>),
@@ -132,8 +133,8 @@ impl Document {
         match self {
             Self::String(text) => Self::String(redaction.text(&text)),
             Self::Number(number) => {
-                let text = number.to_string();
-                if redaction.text(&text) == text {
+                let text = number.get();
+                if redaction.text(text) == text {
                     Self::Number(number)
                 } else {
                     redaction.masked()
@@ -179,61 +180,56 @@ fn redact_member(key: &str, text: &str, redaction: &Redaction<'_>) -> String {
 
 impl<'de> serde::Deserialize<'de> for Document {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(DocumentVisitor)
+        // RawValue is already enabled for this crate. Decode only containers
+        // and strings: converting a number through f64 would lose its written
+        // spelling before exact-secret redaction could inspect it.
+        let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
+        Self::from_raw(raw, 0).map_err(serde::de::Error::custom)
     }
 }
 
-struct DocumentVisitor;
+impl Document {
+    fn from_raw(raw: Box<serde_json::value::RawValue>, depth: usize) -> serde_json::Result<Self> {
+        // Each RawValue starts a new parser, so retain serde_json's ordinary
+        // nesting bound rather than allowing unbounded recursive documents.
+        if depth >= 128 {
+            return Err(serde::de::Error::custom("JSON nesting limit exceeded"));
+        }
+        let mut parser = serde_json::Deserializer::from_str(raw.get());
+        match raw.get().as_bytes().first() {
+            Some(b'{') => serde::Deserializer::deserialize_map(&mut parser, DocumentVisitor(depth)),
+            Some(b'[') => serde::Deserializer::deserialize_seq(&mut parser, DocumentVisitor(depth)),
+            Some(b'"') => serde_json::from_str(raw.get()).map(Document::String),
+            Some(b'n') => Ok(Document::Null),
+            Some(b't') => Ok(Document::Bool(true)),
+            Some(b'f') => Ok(Document::Bool(false)),
+            _ => Ok(Document::Number(raw)),
+        }
+    }
+}
+
+struct DocumentVisitor(usize);
 
 impl<'de> serde::de::Visitor<'de> for DocumentVisitor {
     type Value = Document;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("a JSON value")
-    }
-
-    fn visit_unit<E>(self) -> Result<Document, E> {
-        Ok(Document::Null)
-    }
-
-    fn visit_bool<E>(self, value: bool) -> Result<Document, E> {
-        Ok(Document::Bool(value))
-    }
-
-    fn visit_i64<E>(self, value: i64) -> Result<Document, E> {
-        Ok(Document::Number(value.into()))
-    }
-
-    fn visit_u64<E>(self, value: u64) -> Result<Document, E> {
-        Ok(Document::Number(value.into()))
-    }
-
-    fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Document, E> {
-        serde_json::Number::from_f64(value)
-            .map(Document::Number)
-            .ok_or_else(|| E::custom("a JSON number is finite"))
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Document, E> {
-        Ok(Document::String(value.to_owned()))
-    }
-
-    fn visit_string<E>(self, value: String) -> Result<Document, E> {
-        Ok(Document::String(value))
+        formatter.write_str("a JSON object or array")
     }
 
     fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Document, A::Error> {
         let mut items = Vec::new();
-        while let Some(item) = seq.next_element()? {
-            items.push(item);
+        while let Some(raw) = seq.next_element()? {
+            items.push(Document::from_raw(raw, self.0 + 1).map_err(serde::de::Error::custom)?);
         }
         Ok(Document::Array(items))
     }
 
     fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Document, A::Error> {
         let mut members = Vec::new();
-        while let Some(member) = map.next_entry()? {
-            members.push(member);
+        while let Some((key, raw)) = map.next_entry()? {
+            let value = Document::from_raw(raw, self.0 + 1).map_err(serde::de::Error::custom)?;
+            members.push((key, value));
         }
         Ok(Document::Object(members))
     }

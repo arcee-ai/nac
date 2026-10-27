@@ -26,13 +26,21 @@ export interface ToolCallRef {
 export function useToolCallContent(sessionId: string, call: ToolCallRef | null, enabled = true) {
   const { api } = useNativeRuntime();
 
-  return useQuery({
+  const query = useQuery({
     queryKey: queryKeys.toolCallContent(sessionId, call?.id ?? "", call?.blockKey ?? ""),
     queryFn: ({ signal }) => api.getToolCallContent(sessionId, call!.id, signal),
     enabled: enabled && call != null,
     staleTime: (query) => (query.state.data?.output === null ? 0 : Infinity),
     refetchInterval: (query) =>
       query.state.status !== "error" && query.state.data?.output === null ? RESULT_POLL_MS : false,
+    // Returning to an errored item must leave its explicit Retry in charge.
+    retryOnMount: false,
+    refetchOnMount: (query) => query.state.status !== "error",
+    refetchOnReconnect: (query) => query.state.status !== "error",
+    refetchOnWindowFocus: false,
     retry: false,
   });
+  // Revalidation can reject an ID that has become ambiguous. The earlier
+  // cached answer must not remain visible after that rejection.
+  return { ...query, data: query.isError ? undefined : query.data };
 }

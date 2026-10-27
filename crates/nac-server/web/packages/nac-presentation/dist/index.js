@@ -21922,15 +21922,22 @@ function gw(e) {
 // src/app/services/queries/toolCalls.ts
 var _w = 2e3;
 function vw(e, t, n = !0) {
-	let { api: r } = B();
-	return bi({
+	let { api: r } = B(), i = bi({
 		queryKey: Pr.toolCallContent(e, t?.id ?? "", t?.blockKey ?? ""),
 		queryFn: ({ signal: n }) => r.getToolCallContent(e, t.id, n),
 		enabled: n && t != null,
 		staleTime: (e) => e.state.data?.output === null ? 0 : Infinity,
 		refetchInterval: (e) => e.state.status !== "error" && e.state.data?.output === null && _w,
+		retryOnMount: !1,
+		refetchOnMount: (e) => e.state.status !== "error",
+		refetchOnReconnect: (e) => e.state.status !== "error",
+		refetchOnWindowFocus: !1,
 		retry: !1
 	});
+	return {
+		...i,
+		data: i.isError ? void 0 : i.data
+	};
 }
 // src/app/features/insights/presentation/items/useFullContent.ts
 function yw(e, t, n) {

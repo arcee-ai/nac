@@ -16,7 +16,11 @@ impl nac_contracts::CommandEnvironmentProvider for ExactSecret {
     fn redaction_snapshot(&self) -> Result<nac_contracts::CommandEnvironmentSnapshot> {
         Ok(nac_contracts::CommandEnvironmentSnapshot::from_parts(
             BTreeMap::new(),
-            vec![EXACT_SECRET.into()],
+            vec![
+                EXACT_SECRET.into(),
+                "123456789012345678901234567890".into(),
+                "1.234567890123456789e+99".into(),
+            ],
         ))
     }
     fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
@@ -275,4 +279,53 @@ async fn a_diff_keeps_its_rows_when_a_row_ends_in_a_credential_cue() {
     );
     drop(parts);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn numeric_secrets_are_redacted_as_written_without_rounding_other_numbers() {
+    let (mut parts, store_path) = test_direct_active_service(
+        "tool_call_content_numbers",
+        "session",
+        ModelClient::new_for_test(),
+    );
+    parts
+        .service
+        .shell_runtime
+        .as_mut()
+        .unwrap()
+        .command_environment = Some(Arc::new(ExactSecret));
+    seed_log_tail(
+        &parts,
+        vec![
+            assistant(&[("call-numbers", r#"{"values":[123456789012345678901234567890,1.234567890123456789e+99],"count":18446744073709551616,"rate":1e5}"#)]),
+            result("call-numbers", r#"{"secret":123456789012345678901234567890,"count":18446744073709551616,"rate":1e5}"#),
+        ],
+    ).await;
+    let content = parts
+        .service
+        .tool_call_content("call-numbers")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        content.arguments,
+        r#"{"values":["[REDACTED]","[REDACTED]"],"count":18446744073709551616,"rate":1e5}"#
+    );
+    assert_eq!(
+        content.output.as_deref(),
+        Some(r#"{"secret":"[REDACTED]","count":18446744073709551616,"rate":1e5}"#)
+    );
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[test]
+fn raw_document_keeps_duplicate_members_and_retains_the_nesting_bound() {
+    let text = r#"{"count":1e5,"count":18446744073709551616,"password":"private"}"#;
+    assert_eq!(
+        redact_document(text, &str::to_owned, &str::to_owned),
+        r#"{"count":1e5,"count":18446744073709551616,"password":"[REDACTED]"}"#,
+    );
+    let too_deep = format!("{}0{}", "[".repeat(129), "]".repeat(129));
+    assert!(serde_json::from_str::<Document>(&too_deep).is_err());
 }
