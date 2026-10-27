@@ -3,8 +3,11 @@
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import sys
+import shutil
+import stat
 import tarfile
 import tempfile
 import unittest
@@ -41,6 +44,23 @@ class NpmBundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             BUNDLE.unpack(archive("package/LICENSE"), Path(d))
             self.assertTrue((Path(d) / "LICENSE").is_file())
+
+    def test_copied_public_bundle_remains_readable_by_runtime_user(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "private-stage"
+            root.mkdir(mode=0o700)
+            old_umask = os.umask(0o077)
+            try:
+                BUNDLE.unpack(archive("package/lib/nested/module.js"), root)
+                destination = Path(d) / "installed"
+                shutil.copytree(root, destination)
+            finally:
+                os.umask(old_umask)
+            for path in [destination, *destination.rglob("*")]:
+                mode = stat.S_IMODE(path.stat().st_mode)
+                self.assertEqual(mode & 0o444, 0o444, str(path))
+                if path.is_dir():
+                    self.assertEqual(mode & 0o111, 0o111, str(path))
 
     def test_parent_archive_and_same_major_patch_graph_binding(self):
         lock = json.loads((ROOT / "npm-bundle.lock.json").read_text())
