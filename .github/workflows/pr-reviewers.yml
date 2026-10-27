@@ -17,10 +17,14 @@ jobs:
       - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
+            // Generated from pr-ruleset.mjs; run make generate-codeowners.
             const owners = [
-              { login: 'allisoneer', id: 20910163 },
-              { login: 'Cecocho', id: 105443339 },
-              { login: 'ericlau98', id: 17348362 },
+              { login: "allisoneer", id: 20910163 },
+              { login: "Cecocho", id: 105443339 },
+              { login: "ericlau98", id: 17348362 },
+              { login: "samantha662", id: 250395928 },
+              { login: "gerred", id: 365659 },
+              { login: "tmcarcee", id: 338224923 },
             ];
             const pr = context.payload.pull_request;
             const reviewers = [];

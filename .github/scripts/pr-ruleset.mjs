@@ -9,10 +9,13 @@ export const owners = [
   { login: "allisoneer", id: 20910163 },
   { login: "Cecocho", id: 105443339 },
   { login: "ericlau98", id: 17348362 },
+  { login: "samantha662", id: 250395928 },
+  { login: "gerred", id: 365659 },
+  { login: "tmcarcee", id: 338224923 },
 ];
 export const context = "Required PR checks";
 export const actionsApp = 15368;
-export const codeowners = "* @allisoneer @Cecocho @ericlau98\n";
+export const codeowners = `* ${owners.map(({ login }) => `@${login}`).join(" ")}\n`;
 
 export function proposal() {
   return {

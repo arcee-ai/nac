@@ -138,6 +138,9 @@ container infrastructure as an explicit coverage gap, not a passing result.
 
 ## Generated files and single writers
 
+- The verified owner roster in `.github/scripts/pr-ruleset.mjs` drives
+  `.github/CODEOWNERS` and the embedded reviewer roster in `pr-reviewers.yml`.
+  Run `make generate-codeowners` after roster changes; CI rejects stale output.
 - Rust routes and `utoipa` schemas are the API source of truth.
   `make generate-api-contract` is the sole writer for
   `crates/nac-server/web/openapi.json` and
