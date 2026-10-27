@@ -22,17 +22,21 @@ import { useProjects, useVisibleSessions } from "@/app/services/queries";
 
 /**
  * The phone menu's search screen: one field over a flat list of the chats or
- * the projects it matches. Picking a row navigates, which closes the menu too.
+ * the projects it matches. Picking a row closes this screen and the menu, then
+ * navigates; the row on screen changes no route, which alone would close them.
  */
 export function MobileSearchModal({
   open,
   onClose,
+  onNavigate,
   kind,
   activeSessionId,
   activeProjectId,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Closes the menu under this screen once a row is picked. */
+  onNavigate: () => void;
   kind: "chats" | "projects";
   activeSessionId: string | null;
   activeProjectId: string | null;
@@ -41,6 +45,10 @@ export function MobileSearchModal({
   const close = () => {
     setQuery("");
     onClose();
+  };
+  const picked = () => {
+    close();
+    onNavigate();
   };
   const needle = query.trim().toLowerCase();
   const chats = kind === "chats";
@@ -65,9 +73,9 @@ export function MobileSearchModal({
       </div>
       <div className="flex flex-col gap-2 px-2 py-8 [&>*]:shrink-0">
         {chats ? (
-          <ChatResults needle={needle} activeSessionId={activeSessionId} />
+          <ChatResults needle={needle} activeSessionId={activeSessionId} onPicked={picked} />
         ) : (
-          <ProjectResults needle={needle} activeProjectId={activeProjectId} />
+          <ProjectResults needle={needle} activeProjectId={activeProjectId} onPicked={picked} />
         )}
       </div>
     </Modal>
@@ -77,9 +85,11 @@ export function MobileSearchModal({
 function ChatResults({
   needle,
   activeSessionId,
+  onPicked,
 }: {
   needle: string;
   activeSessionId: string | null;
+  onPicked: () => void;
 }) {
   const navigate = useNavigate();
   const policy = useUiPolicy();
@@ -114,7 +124,10 @@ function ChatResults({
         running={isActiveRun(entry.active_run)}
         forkedFromTitle={entry.summary.forked_from?.title}
         isMobile
-        onClick={() => navigate(routes.session(entry.summary.session_id))}
+        onClick={() => {
+          onPicked();
+          navigate(routes.session(entry.summary.session_id));
+        }}
         actions={
           <ChatSessionActions
             title={title}
@@ -133,9 +146,11 @@ function ChatResults({
 function ProjectResults({
   needle,
   activeProjectId,
+  onPicked,
 }: {
   needle: string;
   activeProjectId: string | null;
+  onPicked: () => void;
 }) {
   const navigate = useNavigate();
   const { data: projectList } = useProjects();
@@ -159,7 +174,10 @@ function ProjectResults({
       running={entry.running > 0}
       isMobile
       actions={<ProjectRowActions project={entry.project} />}
-      onClick={() => navigate(routes.project(entry.project.project_id))}
+      onClick={() => {
+        onPicked();
+        navigate(routes.project(entry.project.project_id));
+      }}
     />
   ));
 }

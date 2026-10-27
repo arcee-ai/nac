@@ -2,8 +2,8 @@ interface ChatSessionActionsProps {
     title: string;
     pinned?: boolean;
     /**
-     * Medium buttons with 20px glyphs for the mobile row. Desktop stays small:
-     * its 24px target is the WCAG 2.5.8 minimum.
+     * Bare 20px glyphs for the mobile row. Desktop stays small: its 24px target
+     * is the WCAG 2.5.8 minimum.
      */
     isMobile?: boolean;
     onPin?: () => void;

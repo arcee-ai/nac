@@ -6,6 +6,11 @@ export declare enum ActionListButtonStatus {
     Running = "running",
     Failed = "failed"
 }
+/** The design's RWD: Small is the desktop row, Large the phone's touch row. */
+export declare enum ActionListButtonSize {
+    Small = "small",
+    Large = "large"
+}
 interface ActionListButtonProps {
     /**
      * Type icon, shown while Ready. The other statuses bring their own glyph,
@@ -13,9 +18,10 @@ interface ActionListButtonProps {
      */
     icon: IconName;
     label: string;
-    /** Rendered uppercase. Running and Failed rows drop it. */
+    /** Rendered uppercase, in every status; the caller leaves it out where a row has none. */
     meta?: string;
     status?: ActionListButtonStatus;
+    size?: ActionListButtonSize;
     /** Leave unset on rows that navigate away instead of selecting themselves. */
     selected?: boolean;
     /** Only for group rows, which expand and collapse their children. */
@@ -27,8 +33,9 @@ interface ActionListButtonProps {
 /**
  * One row of the Insights list: a thread, a session, a tool call or a group of
  * them. The caller maps the action type to icon, label and meta; the row only
- * knows its status. It is a small `TabButton`, so hover, press, focus and the
- * selected highlight are the tab button's own. `.btn-small.btn-icon` sets its
+ * knows its status. It is a `TabButton`, so hover, press, focus and the
+ * selected highlight are the tab button's own. The phone's Large row is the
+ * large tab button as it stands; `.btn-small.btn-icon` sets the small one's
  * height and padding in unlayered CSS, which the 28px row overrides with `!`.
  */
 declare const ActionListButton: React.FC<ActionListButtonProps>;

@@ -42,6 +42,7 @@ export function SidebarProjectList({
   activeSessionId,
   activeProjectId,
   mobile = false,
+  onNavigate,
 }: {
   projects: ProjectRecord[];
   sessions: ManagedSessionSummary[];
@@ -50,8 +51,14 @@ export function SidebarProjectList({
   activeProjectId: string | null;
   /** The phone menu's tree: 48px rows, project controls, rules between projects. */
   mobile?: boolean;
+  /** Runs as a row opens its chat, also the chat on screen, whose route does not change. */
+  onNavigate?: () => void;
 }) {
   const navigate = useNavigate();
+  const openSession = (sessionId: string) => {
+    onNavigate?.();
+    navigate(routes.session(sessionId));
+  };
   const sessionTitle = useSessionTitle();
   const now = useNow(RECENCY_TICK_MS);
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
@@ -156,7 +163,7 @@ export function SidebarProjectList({
                   }
                   now={now}
                   mobile={mobile}
-                  onOpen={(sessionId) => navigate(routes.session(sessionId))}
+                  onOpen={openSession}
                 />
               </DropdownContent>
             </section>
@@ -176,7 +183,7 @@ export function SidebarProjectList({
                 active={entry.summary.session_id === activeSessionId}
                 running={isActiveRun(entry.active_run)}
                 isMobile={mobile}
-                onClick={() => navigate(routes.session(entry.summary.session_id))}
+                onClick={() => openSession(entry.summary.session_id)}
               />
             ))}
           </section>

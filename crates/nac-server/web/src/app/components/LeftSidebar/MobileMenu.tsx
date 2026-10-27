@@ -137,12 +137,14 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
             activeSessionId={commands.sessionId}
             activeProjectId={commands.projectId}
             mobile
+            onNavigate={onClose}
           />
         )}
       </Modal>
       <MobileSearchModal
         open={searching}
         onClose={() => setSearching(false)}
+        onNavigate={onClose}
         kind={projectsPage ? "projects" : "chats"}
         activeSessionId={commands.sessionId}
         activeProjectId={commands.projectId}

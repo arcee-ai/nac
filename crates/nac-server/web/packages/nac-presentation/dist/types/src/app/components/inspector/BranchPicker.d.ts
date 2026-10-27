@@ -11,8 +11,8 @@ export declare function BranchPicker({ sessionId, branch, placement, tertiary, l
     /** Footer chips open upward. A header chip opens downward. */
     placement?: PopoverPlacement;
     /**
-     * The desktop session header draws a borderless tertiary button. The phone
-     * dialog title keeps the padded chip, the bigger target for a finger.
+     * The desktop session header draws a borderless tertiary button. A phone's
+     * Files list keeps the padded chip, the bigger target for a finger.
      */
     tertiary?: boolean;
     /** Classes for the tertiary button's branch name; its accessible name stays. */
