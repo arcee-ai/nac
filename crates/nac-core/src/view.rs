@@ -1075,6 +1075,31 @@ mod tests {
     }
 
     #[test]
+    fn parse_status_porcelain_preserves_every_unmerged_status() {
+        for xy in ["DD", "AU", "UD", "UA", "DU", "AA", "UU"] {
+            let raw = format!("{xy} conflict.txt\n");
+            let (_, files) = parse_status_porcelain(&raw);
+            assert_eq!(files["conflict.txt"].status, "U", "status {xy}");
+        }
+    }
+
+    #[test]
+    fn parse_status_porcelain_preserves_copy_and_type_changes() {
+        for xy in ["C ", " C", "T ", " T", "MT", "TM"] {
+            let raw = format!("{xy} changed.txt\n");
+            let (_, files) = parse_status_porcelain(&raw);
+            let expected = if xy.contains('C') { "C" } else { "T" };
+            assert_eq!(files["changed.txt"].status, expected, "status {xy}");
+        }
+        // Captured porcelain v1 paths: copy/rename arrows identify the target.
+        let (_, copied) = parse_status_porcelain("C  original.txt -> copied.txt\n");
+        assert_eq!(copied["copied.txt"].status, "C");
+        assert!(!copied.contains_key("original.txt"));
+        let (_, typed) = parse_status_porcelain(" T symlink.txt\n");
+        assert_eq!(typed["symlink.txt"].status, "T");
+    }
+
+    #[test]
     fn parse_status_porcelain_tracks_untracked_and_staged() {
         let raw = "M  crates/nac-core/src/view.rs\nA  README.md\n?? notes.txt\n";
         let (counts, files) = parse_status_porcelain(raw);
