@@ -39,6 +39,7 @@ EOF
             -o UserKnownHostsFile=/dev/null -o ConnectTimeout=2 -i "$key" -p 4712 root@127.0.0.1 true; then
             ready=1; break
         fi
+        printf 'waiting for isolated sshd (attempt %s/5)\n' "$attempt"
         sleep 1
     done
     if [ "$ready" != 1 ]; then cat /work/libssh2/consumer-sshd.log; exit 1; fi
