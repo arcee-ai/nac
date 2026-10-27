@@ -4,15 +4,20 @@
 NAC's **observed** ruleset 25983949. Live activation requires separate human
 authorization. No settings are changed by the tooling or this PR.
 
-The October 27 [before snapshot](evidence/2026-10-27-required-check-before.json)
+The October 27 [before snapshot](evidence/2026-10-27-required-check-before-six-owners.json)
 shows active `main` on `~DEFAULT_BRANCH` (currently `dev`), no bypass actors,
 one approval, CODEOWNERS, last-push approval, resolved threads, and extra approval
 for unattributed changes. Stale-review dismissal is currently false. Existing
 merge methods, deletion/force-push protections, and inherited enterprise rules
-remain unchanged. [The intended plan](evidence/2026-10-27-required-check-plan.json)
+remain unchanged. [The intended plan](evidence/2026-10-27-required-check-plan-six-owners.json)
 appends exactly one required-status-check rule: `Required PR checks`, GitHub
 Actions integration **15368**, strict current-base checks, enforced on creation.
 It updates that existing ruleset; it does not introduce a second review policy.
+
+The original [three-owner snapshot](evidence/2026-10-27-required-check-before.json)
+and [plan](evidence/2026-10-27-required-check-plan.json) remain historical receipts
+from before the approved owner expansion; they cannot qualify the current
+six-owner baseline. No reviewer membership is changed by this planner update.
 
 ALL-450's earlier bypass/review proposal is historical and must not be applied
 to current settings. ALL-450 remains a completed foundation milestone; ALL-506
@@ -58,9 +63,7 @@ write access on October 30, 2026.
 Scott (`ScottZembsch`, immutable account ID `109129358`) was also verified with
 repository write access on October 30, 2026.
 
-
 Run from the intended repository with authenticated read access:
-
 
 ```sh
 node .github/scripts/pr-ruleset.mjs snapshot arcee-ai/nac /tmp/nac-before.json
@@ -102,7 +105,7 @@ or success, and durable evidence URLs. Do not grant any bypass to run the matrix
 | Failed/pending/cancelled/missing/unexpected skip | Actual state at attempted ordinary merge rejects it; pending attempt time precedes completion |
 | Stale check/base; wrong App | Old-head/base success and same-name foreign-App success cannot authorize merge |
 | ALL-505 strict baseline | Fresh complete combined native amd64 image scan and unchanged-image rescan, fresh DB, zero unresolved/unapproved blockers; link full reports, not advisory historical green |
-| Each designated non-author approval | Eligible approval works when all other protections pass |
+| Each of the six designated non-author approvals | Eligible approval works when all other protections pass |
 | Self/outside-only/last-pusher approval | Cannot satisfy the preserved CODEOWNERS and last-push approval requirements |
 | Unattributed changes and threads | Required extra approval remains effective; unresolved conversation blocks |
 | Requests/bot PRs | Author excluded; eligible owner requests preserved |

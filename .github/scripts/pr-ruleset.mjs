@@ -199,7 +199,7 @@ export const qualificationCases = [
   "image-failure-blocked", "image-unknown-blocked", "strict-image-baseline-qualified",
   "failed-blocked", "pending-blocked", "cancelled-blocked", "missing-blocked",
   "stale-check-blocked", "wrong-app-blocked", "unexpected-skip-blocked",
-  "allison-approval", "aleksiej-approval", "eric-approval", "self-approval-blocked",
+  ...owners.map(({ login }) => `${login}-approval`), "self-approval-blocked",
   "outside-only-blocked", "author-excluded-requests", "bot-owner-requests",
   "last-push-self-approval-blocked", "unattributed-extra-approval-required",
   "unresolved-conversation-blocked", "two-layer-stack-base-codeowners",

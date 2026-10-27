@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "template-not-qualification",
   "fixture_repository": "",
-  "baseline_sha256": "17838925ff2377b2ac33dc639b559f258db07204932be10ea2a21d6b21dbd61f",
+  "baseline_sha256": "e84d2f6772461b313265d745fba056fc9baf42caaba790fa7a30ff9cf8ee0015",
   "payload_sha256": "dbdf31959bf6cead69d0d44e66c4100e8d49486faffda100207aa72dcbd660fa",
   "completed_at": null,
   "cases": [
@@ -133,21 +133,42 @@
       "evidence_url": null
     },
     {
-      "name": "allison-approval",
+      "name": "allisoneer-approval",
       "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
       "evidence_url": null
     },
     {
-      "name": "aleksiej-approval",
+      "name": "Cecocho-approval",
       "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
       "evidence_url": null
     },
     {
-      "name": "eric-approval",
+      "name": "ericlau98-approval",
+      "result": "unperformed",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null
+    },
+    {
+      "name": "samantha662-approval",
+      "result": "unperformed",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null
+    },
+    {
+      "name": "gerred-approval",
+      "result": "unperformed",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null
+    },
+    {
+      "name": "tmcarcee-approval",
       "result": "unperformed",
       "actor_id": null,
       "head_sha": null,

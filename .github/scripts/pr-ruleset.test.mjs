@@ -9,7 +9,7 @@ import {
 
 // An observed server response, not a reconstruction of the old ALL-450 proposal.
 const observed = JSON.parse(fs.readFileSync(new URL(
-  "../../docs/ci/evidence/2026-10-27-required-check-before.json", import.meta.url), "utf8"));
+  "../../docs/ci/evidence/2026-10-27-required-check-before-six-owners.json", import.meta.url), "utf8"));
 const now = Date.parse(observed.captured_at);
 const snapshot = () => {
   const result = structuredClone(observed);
@@ -162,6 +162,8 @@ test("model tests, stale/foreign/incomplete receipts and old override payload ca
     "wrong-app-blocked", "two-layer-stack-base-codeowners", "strict-image-baseline-qualified"])
     assert.ok(qualificationCases.includes(name));
   assert.ok(!qualificationCases.some((name) => name.includes("own-failed-pr-override")));
+  assert.deepEqual(qualificationCases.filter((name) => name.endsWith("-approval")),
+    observed.owners.map(({ login }) => `${login}-approval`));
 });
 
 test("current handoff template matches the plan/matrix but cannot certify unperformed platform work", () => {
@@ -175,4 +177,18 @@ test("current handoff template matches the plan/matrix but cannot certify unperf
   const guide = fs.readFileSync(new URL("../../docs/ci/required-pr-checks.md", import.meta.url), "utf8");
   assert.match(guide, /does \*\*not\*\* inherit its required checks or review rules/);
   assert.match(guide, /retarget the upper PR to `dev`/);
+});
+
+test("six-owner baseline cannot reuse historical three-owner evidence or lose a new owner's access", () => {
+  const historical = JSON.parse(fs.readFileSync(new URL(
+    "../../docs/ci/evidence/2026-10-27-required-check-before.json", import.meta.url), "utf8"));
+  assert.throws(() => dryRunPlan(historical), /lacks verified write access/);
+  for (const mutate of [
+    (s) => { s.owners.pop(); },
+    (s) => { s.owners.at(-1).permission = "read"; },
+    (s) => { s.owners.at(-1).id = 1; },
+  ]) {
+    const current = snapshot(); mutate(current);
+    assert.throws(() => validateSnapshot(current), /lacks verified write access/);
+  }
 });
