@@ -740,13 +740,13 @@ fn recover_pending_transaction_locked(path: &Path) -> ConfigurationResult<()> {
 /// exposed, so NAC startup, registry loading, and dashboard reads never retain
 /// an unvalidated exchange candidate.
 pub fn read_mcp_configuration_consistently(path: &Path) -> ConfigurationResult<String> {
-    read_mcp_configuration_with(path, || ()).map(|(raw, ())| raw)
+    read_mcp_configuration_with(path, |_| ()).map(|(raw, ())| raw)
 }
 
 /// Also runs `alongside` under the lease, so state that writers update with the config matches it.
 pub(crate) fn read_mcp_configuration_with<T>(
     path: &Path,
-    alongside: impl FnOnce() -> T,
+    alongside: impl FnOnce(&str) -> T,
 ) -> ConfigurationResult<(String, T)> {
     let _lease = acquire_mcp_configuration_write_lease(path)?;
     let raw = match read_document_image(path)? {
@@ -758,7 +758,8 @@ pub(crate) fn read_mcp_configuration_with<T>(
         })?,
         None => String::new(),
     };
-    Ok((raw, alongside()))
+    let related = alongside(&raw);
+    Ok((raw, related))
 }
 
 /// Reads only the global `[mcp]` defaults without requiring every server entry
@@ -1304,6 +1305,17 @@ pub fn update_mcp_server_configuration_at_revision(
     configuration: McpServerConfigurationRecord,
     expected_revision: DocumentRevision,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
+    update_mcp_server_configuration_with(path, name, configuration, expected_revision, |_| Ok(()))
+}
+
+/// Validates a complete patch before preparing related durable state and publishing the config.
+pub(crate) fn update_mcp_server_configuration_with(
+    path: &Path,
+    name: &str,
+    configuration: McpServerConfigurationRecord,
+    expected_revision: DocumentRevision,
+    before_publish: impl FnOnce(&str) -> ConfigurationResult<()>,
+) -> ConfigurationResult<McpServerConfigurationRecord> {
     let record = validated_record(configuration)?;
     let (mut document, revision) = read_document_snapshot(path)?;
     if revision != expected_revision {
@@ -1322,6 +1334,7 @@ pub fn update_mcp_server_configuration_at_revision(
         servers.remove(name);
     }
     servers[record.name.as_str()] = Item::Table(table_of(&record));
+    before_publish(&record.name)?;
     write_document(path, &document, expected_revision)?;
     Ok(record)
 }

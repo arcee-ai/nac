@@ -915,22 +915,13 @@ pub async fn update_server_handler(
         },
     };
 
-    let record = mcp::update_mcp_server_configuration_at_revision(
+    let record = manager.mcp_runtime().update_configuration_at_revision(
         &path,
         &server_name,
         configuration,
         revision,
     )?;
     if server_name != record.name {
-        manager
-            .mcp_runtime()
-            .rename_connection(&server_name, &record.name)
-            .map_err(|error| {
-                ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("MCP disconnect state could not be renamed: {error:#}"),
-                )
-            })?;
         remove_oauth_flow(&oauth_flow_key(&manager, &server_name)).await;
         remove_oauth_flow(&oauth_flow_key(&manager, &record.name)).await;
         let redirect_uri = oauth_redirect_uri(&manager, &record.name)?;
@@ -947,6 +938,8 @@ pub async fn update_server_handler(
             )
         })?;
     }
+    // Runtime operations take their own mutex before reading config; do not invert that order.
+    drop(_cross_process);
     manager.mcp_runtime().forget(&server_name).await;
     Ok(Json(view(record)))
 }
@@ -985,6 +978,7 @@ pub async fn delete_server_handler(
                 format!("MCP disconnect state could not be updated: {error:#}"),
             )
         })?;
+    drop(_cross_process);
     manager.mcp_runtime().forget(&server_name).await;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -194,20 +194,21 @@ fn file_servers_for_policy(
         return (McpDefaults::default(), BTreeMap::new(), None, snapshot());
     }
     // The connection snapshot shares the config lease, so it matches the servers read here.
-    let (raw, snapshot) = match super::file_config::read_mcp_configuration_with(&path, snapshot) {
-        Ok(read) => read,
-        Err(error) => {
-            eprintln!(
-                "MCP config at '{}' could not be read; its servers will be skipped: {:#}",
-                path.display(),
-                error
-            );
-            return skipped(
-                path.display().to_string(),
-                format!("could not read config: {error:#}"),
-            );
-        }
-    };
+    let (raw, snapshot) =
+        match super::file_config::read_mcp_configuration_with(&path, |_| snapshot()) {
+            Ok(read) => read,
+            Err(error) => {
+                eprintln!(
+                    "MCP config at '{}' could not be read; its servers will be skipped: {:#}",
+                    path.display(),
+                    error
+                );
+                return skipped(
+                    path.display().to_string(),
+                    format!("could not read config: {error:#}"),
+                );
+            }
+        };
     match mcp_config_for_policy(&raw, transport_policy) {
         Ok(config) => (config.mcp, config.mcp_servers, None, snapshot),
         Err(error) => {

@@ -138,6 +138,7 @@ impl ConnectionSnapshot {
 
 /// What an edit does when the record cannot be read; an unreadable record already blocks every session.
 enum Unreadable<'a> {
+    Fail,
     Skip,
     Rebuild(&'a mut dyn FnMut() -> ConnectionRecord),
 }
@@ -175,6 +176,7 @@ impl ConnectionState {
                 .map(|record| record.unwrap_or_else(ConnectionRecord::new));
             let mut record = match (read, unreadable) {
                 (Ok(record), _) => record,
+                (Err(error), Unreadable::Fail) => return Err(error),
                 (Err(_), Unreadable::Skip) => return Ok(T::default()),
                 (Err(_), Unreadable::Rebuild(rebuild)) => rebuild(),
             };
@@ -240,6 +242,23 @@ impl ConnectionState {
             }
             let identity = record.mint(true);
             record.bind(server_name, identity);
+        })
+    }
+
+    /// Write-ahead binding: either config name keeps the same state if publication is interrupted.
+    pub(super) fn prepare_rename(&self, from: &str, to: &str) -> Result<()> {
+        self.with_record(Unreadable::Fail, |record| {
+            let identity = record.identity(from, true);
+            record.bind(to, identity);
+        })
+    }
+
+    /// Removes the old alias only after configuration publication succeeded.
+    pub(super) fn finish_rename(&self, from: &str, to: &str) -> Result<()> {
+        self.with_record(Unreadable::Fail, |record| {
+            if record.names.get(from) == record.names.get(to) {
+                record.release(from);
+            }
         })
     }
 

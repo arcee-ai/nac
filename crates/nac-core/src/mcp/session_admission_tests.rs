@@ -575,3 +575,147 @@ async fn disconnect_reaches_sessions_in_other_processes_and_survives_restart() {
         "{result}"
     );
 }
+
+#[tokio::test]
+async fn disconnect_holds_the_config_lease_until_admission_is_changed() {
+    use fs2::FileExt;
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let server = RecordingMcpServer::start();
+    let home = TestHome::new("nac-mcp-disconnect-lease", "recorded", &server.url);
+    let cwd = std::env::current_dir().unwrap();
+    let registry = load(&cwd).await.registry.unwrap();
+    let capture = registry.capture_tool("mcp__recorded__echo").unwrap();
+    let config = home.path.join("config.toml");
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    let (arrived, arrival) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let disconnect = std::thread::spawn(move || {
+        lifecycle::CONNECTION_CHANGE_HOOK.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                arrived.send(()).unwrap();
+                released.recv_timeout(Duration::from_secs(10)).unwrap();
+            }));
+        });
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(runtime.disconnect("recorded"))
+    });
+    arrival.recv_timeout(Duration::from_secs(10)).unwrap();
+    let writer = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(config.with_extension("toml.lock"))
+        .unwrap();
+    let writer_blocked = writer.try_lock_exclusive().is_err();
+    if !writer_blocked {
+        FileExt::unlock(&writer).unwrap();
+    }
+    release.send(()).unwrap();
+    assert!(disconnect.join().unwrap().unwrap().sessions_blocked);
+    assert!(
+        writer_blocked,
+        "rename must not enter between config selection and admission mutation"
+    );
+    let _lease = acquire_mcp_configuration_write_lease(&config).unwrap();
+    rename_config(&config, "recorded", "renamed");
+    McpRuntimeManager::new(home.path.clone())
+        .rename_connection("recorded", "renamed")
+        .unwrap();
+    drop(_lease);
+    assert!(capture.call(json!({}), false).await.is_error);
+    assert!(server.authorizations("tools/call").is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failed_rename_preparation_does_not_publish_the_config() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let server = RecordingMcpServer::start();
+    let home = TestHome::new("nac-mcp-rename-prepare-failure", "recorded", &server.url);
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    runtime.disconnect("recorded").await.unwrap();
+    let config = home.path.join("config.toml");
+    let _lease = acquire_mcp_configuration_write_lease(&config).unwrap();
+    let (mut record, revision) =
+        load_mcp_server_configuration_snapshot(&config, "recorded").unwrap();
+    record.name = "renamed".into();
+    let lock = home.path.join("mcp_disconnected.json.lock");
+    fs::set_permissions(&lock, fs::Permissions::from_mode(0o000)).unwrap();
+    let failed = runtime.update_configuration_at_revision(&config, "recorded", record, revision);
+    fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(failed.is_err());
+    drop(_lease);
+    assert!(load_mcp_server_configuration(&config, "recorded").is_ok());
+    assert!(load_mcp_server_configuration(&config, "renamed").is_err());
+    assert!(blocked(&runtime.statuses().await.unwrap(), "recorded"));
+}
+
+#[tokio::test]
+async fn an_interrupted_config_rename_keeps_both_names_on_the_same_disconnect_state() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let server = RecordingMcpServer::start();
+    let home = TestHome::new("nac-mcp-rename-interrupted", "recorded", &server.url);
+    let cwd = std::env::current_dir().unwrap();
+    let registry = load(&cwd).await.registry.unwrap();
+    let capture = registry.capture_tool("mcp__recorded__echo").unwrap();
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    runtime.disconnect("recorded").await.unwrap();
+    let state = admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
+    let config = home.path.join("config.toml");
+    // A crash before config publication leaves the original name protected.
+    state.prepare_rename("recorded", "renamed").unwrap();
+    assert!(load(&cwd).await.registry.is_none());
+    assert!(capture.call(json!({}), false).await.is_error);
+    // A crash after publication but before alias cleanup protects the new name too.
+    let _lease = acquire_mcp_configuration_write_lease(&config).unwrap();
+    rename_config(&config, "recorded", "renamed");
+    drop(_lease);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let lock = home.path.join("mcp_disconnected.json.lock");
+        fs::set_permissions(&lock, fs::Permissions::from_mode(0o000)).unwrap();
+        let cleanup = state.finish_rename("recorded", "renamed");
+        fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(cleanup.is_err());
+    }
+    let restarted = McpRuntimeManager::new(home.path.clone());
+    assert!(blocked(&restarted.statuses().await.unwrap(), "renamed"));
+    assert!(load(&cwd).await.registry.is_none());
+    assert!(capture.call(json!({}), false).await.is_error);
+    restarted.connect("renamed").await.unwrap();
+    assert!(!capture.call(json!({}), false).await.is_error);
+    restarted.disconnect("renamed").await.unwrap();
+    // Creating a server under the stale source alias must not re-admit old captures.
+    let mut added = load_mcp_server_configuration(&config, "renamed").unwrap();
+    added.name = "recorded".into();
+    insert_mcp_server_configuration(&config, added).unwrap();
+    restarted.claim_connection("recorded").unwrap();
+    restarted.connect("recorded").await.unwrap();
+    assert!(capture.call(json!({}), false).await.is_error);
+    restarted.forget("recorded").await;
+    restarted.forget("renamed").await;
+}
+
+#[tokio::test]
+async fn a_rejected_rename_does_not_prepare_connection_aliases() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let home = TestHome::with_server("nac-mcp-rejected-alias", "recorded", "http://127.0.0.1:9/mcp",
+        "[mcp_servers.other]\ntransport = \"streamable_http\"\nurl = \"http://127.0.0.1:9/other\"\n");
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    runtime.disconnect("recorded").await.unwrap();
+    let config = home.path.join("config.toml");
+    let state = home.path.join("mcp_disconnected.json");
+    let before = fs::read(&state).unwrap();
+    let _lease = acquire_mcp_configuration_write_lease(&config).unwrap();
+    let (mut record, revision) =
+        load_mcp_server_configuration_snapshot(&config, "recorded").unwrap();
+    record.name = "other".into();
+    assert!(runtime
+        .update_configuration_at_revision(&config, "recorded", record, revision)
+        .is_err());
+    assert_eq!(fs::read(&state).unwrap(), before);
+}

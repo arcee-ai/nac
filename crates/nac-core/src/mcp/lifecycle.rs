@@ -1,5 +1,10 @@
 use super::*;
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static CONNECTION_CHANGE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
@@ -87,13 +92,7 @@ impl McpRuntimeManager {
     }
 
     async fn connect_inner(&self, name: &str) -> Result<McpRuntimeStatus> {
-        let (defaults, servers) = self.configured_servers()?;
-        let config = servers
-            .get(name)
-            .cloned()
-            .with_context(|| format!("MCP server '{name}' was not found"))?;
-        self.connection_state()?
-            .set_disconnected(name, false, servers.keys())?;
+        let (defaults, config) = self.change_connection(name, false)?;
         if !config.enabled {
             let status = McpRuntimeStatus {
                 state: McpRuntimeState::Disabled,
@@ -175,13 +174,7 @@ impl McpRuntimeManager {
 
     pub async fn disconnect(&self, name: &str) -> Result<McpRuntimeStatus> {
         let _operation = self.operation.lock().await;
-        let (_defaults, servers) = self.configured_servers()?;
-        let config = servers
-            .get(name)
-            .cloned()
-            .with_context(|| format!("MCP server '{name}' was not found"))?;
-        self.connection_state()?
-            .set_disconnected(name, true, servers.keys())?;
+        let (_, config) = self.change_connection(name, true)?;
         let mut status = if config.enabled {
             disconnected_status(name, &config)
         } else {
@@ -193,6 +186,35 @@ impl McpRuntimeManager {
         status.sessions_blocked = true;
         self.set_entry(status.clone(), None).await;
         Ok(status)
+    }
+
+    /// Publishes a validated patch while keeping both rename names bound until commit.
+    /// The caller holds the configuration write lease used to derive `revision`.
+    pub fn update_configuration_at_revision(
+        &self,
+        path: &Path,
+        name: &str,
+        configuration: McpServerConfigurationRecord,
+        revision: super::file_config::DocumentRevision,
+    ) -> std::result::Result<McpServerConfigurationRecord, McpServerConfigurationStoreError> {
+        use McpServerConfigurationStoreError::Store;
+        let state = self.connection_state().map_err(Store)?;
+        let record = super::file_config::update_mcp_server_configuration_with(
+            path,
+            name,
+            configuration,
+            revision,
+            |target| {
+                if name != target {
+                    state.prepare_rename(name, target).map_err(Store)?;
+                }
+                Ok(())
+            },
+        )?;
+        if name != record.name {
+            state.finish_rename(name, &record.name).map_err(Store)?;
+        }
+        Ok(record)
     }
 
     /// After a committed create, gives the server an identity of its own; runs under the config write lease.
@@ -275,6 +297,38 @@ impl McpRuntimeManager {
 
     fn connection_state(&self) -> Result<super::admission::ConnectionState> {
         super::admission::ConnectionState::for_home(&PathContext::new(&self.cwd))
+    }
+
+    /// The config revision and its admission edit share a lease; no await occurs inside it.
+    fn change_connection(
+        &self,
+        name: &str,
+        disconnected: bool,
+    ) -> Result<(McpDefaults, McpServerConfig)> {
+        let paths = PathContext::new(&self.cwd);
+        let path = default_config_path(&paths)
+            .with_context(|| format!("MCP server '{name}' was not found"))?;
+        let (_, changed) =
+            super::file_config::read_mcp_configuration_with(&path, |raw| -> Result<_> {
+                let config = mcp_config_for_policy(raw, McpTransportPolicy::All)?;
+                let server = config
+                    .mcp_servers
+                    .get(name)
+                    .cloned()
+                    .with_context(|| format!("MCP server '{name}' was not found"))?;
+                #[cfg(test)]
+                if let Some(callback) = CONNECTION_CHANGE_HOOK.with(|slot| slot.borrow_mut().take())
+                {
+                    callback();
+                }
+                self.connection_state()?.set_disconnected(
+                    name,
+                    disconnected,
+                    config.mcp_servers.keys(),
+                )?;
+                Ok((config.mcp, server))
+            })?;
+        changed
     }
 
     fn configured_servers(&self) -> Result<(McpDefaults, BTreeMap<String, McpServerConfig>)> {
