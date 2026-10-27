@@ -11,8 +11,11 @@ const execute = promisify(execFile);
 test.use({ managedNativeWeb: false });
 
 for (const withoutRandomUUID of [false, true]) {
-  test(`Local UI opens and steers two pinned retained tasks after restart${withoutRandomUUID ? " without randomUUID" : ""}`, (fixtures, info) =>
-    retainedJourney(fixtures, info, withoutRandomUUID));
+  test(`Local UI opens and steers two pinned retained tasks after restart${withoutRandomUUID ? " without randomUUID" : ""}`, ({
+    harness,
+    page,
+    request,
+  }, info) => retainedJourney({ harness, page, request }, info, withoutRandomUUID));
 }
 
 async function withTaskIdentityCapability(
