@@ -197,3 +197,165 @@ fn restart_reconciliation_preserves_pin_and_retained_ownership_without_admitting
     );
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+fn retained_migration_rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
+    let mut statement = conn
+        .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+        .unwrap();
+    let columns = statement.column_count();
+    statement
+        .query_map([], |row| {
+            (0..columns).map(|column| row.get(column)).collect()
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+}
+
+#[test]
+fn v38_evidence_and_delegated_input_survive_retained_launch_migration_to_39() {
+    let (path, request, source) = fixture();
+    for session in ["parent", "child", "orchestrator"] {
+        insert_test_session(&path, session);
+    }
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "UPDATE sessions SET behavior = 'direct' WHERE session_id IN ('parent', 'child');",
+    )
+    .unwrap();
+    create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        GENERAL_CHILD_PROFILE,
+        "kept child",
+    )
+    .unwrap();
+    for (run, mode) in [
+        (
+            "first-generation",
+            TraditionalChildExecutionMode::Foreground,
+        ),
+        (
+            "second-generation",
+            TraditionalChildExecutionMode::Background,
+        ),
+    ] {
+        begin_traditional_child_run(&path, "child", run, mode).unwrap();
+        settle_traditional_child_run(
+            &path,
+            "child",
+            run,
+            TraditionalChildTerminal {
+                status: TraditionalChildStatus::Completed,
+                report: Some(format!("kept {run}")),
+                failure: None,
+                change_summary: Some("one retained change".into()),
+                verification_summary: Some("existing checks".into()),
+            },
+        )
+        .unwrap();
+    }
+    conn.execute(
+        "UPDATE sessions SET behavior = 'direct-with-orchestrator' WHERE session_id = 'parent'",
+        [],
+    )
+    .unwrap();
+    create_managed_orchestrator_relationship(&path, "parent", "orchestrator", "kept managed")
+        .unwrap();
+    begin_managed_orchestrator_run(
+        &path,
+        "orchestrator",
+        "managed-generation",
+        ManagedOrchestratorExecutionMode::Foreground,
+    )
+    .unwrap();
+    settle_managed_orchestrator_run(
+        &path,
+        "orchestrator",
+        "managed-generation",
+        ManagedOrchestratorTerminal {
+            status: ManagedOrchestratorStatus::Cancelled,
+            report: None,
+            failure: Some("kept cancellation".into()),
+        },
+    )
+    .unwrap();
+    let waiter = crate::sessions::ChildInputWaitLease::new(&path).unwrap();
+    let input = create_traditional_child_inbox_item(
+        &path,
+        "child",
+        "keep queued foreground intent",
+        Some("second-generation"),
+        TraditionalChildExecutionMode::Foreground,
+        Some(waiter.id()),
+    )
+    .unwrap();
+    // The landed v38 shape contains run/goal evidence, both delegated receipt
+    // topologies and exact queued-input authority, but no retained launch tables.
+    conn.execute_batch(
+        "INSERT INTO session_run_outcomes
+             (id, session_id, run_id, disposition, result_excerpt, result_truncated, finished_at)
+         VALUES (41, 'parent', 'kept-run', 'completed', 'kept result ✓', 1, 'run-finished');
+         INSERT INTO session_goals
+             (session_id, goal_id, objective, status, created_at, updated_at, version, last_run_id)
+         VALUES ('parent', 'current-goal', 'keep current objective', 'paused', 'created', 'updated', 7, 'kept-run');
+         INSERT INTO session_goal_outcomes
+             (id, session_id, goal_id, objective, status, version, tokens_used, time_used_ms,
+              created_at, updated_at, retired_at, retirement, last_run_id)
+         VALUES (52, 'parent', 'replaced-goal', 'keep retired objective', 'complete', 6, 123, 456,
+                 'old-created', 'old-updated', 'retired', 'replaced', 'kept-run');
+         DROP TABLE task_launches;
+         DROP TABLE project_git_sources;
+         PRAGMA user_version = 38;",
+    )
+    .unwrap();
+    let tables = [
+        "sessions",
+        "session_goals",
+        "session_run_outcomes",
+        "session_goal_outcomes",
+        "traditional_children",
+        "managed_orchestrators",
+        "traditional_child_terminal_receipts",
+        "managed_orchestrator_terminal_receipts",
+        "session_inbox",
+        "sqlite_sequence",
+    ];
+    let before = tables.map(|table| retained_migration_rows(&conn, table));
+    drop(conn);
+
+    initialize(&path).unwrap();
+    initialize(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    for (table, expected) in tables.into_iter().zip(before) {
+        assert_eq!(retained_migration_rows(&conn, table), expected, "{table}");
+    }
+    assert_eq!(
+        load_session_inbox_item(&path, "child", input.id).unwrap(),
+        input
+    );
+    assert!(conn
+        .prepare("PRAGMA foreign_key_check")
+        .unwrap()
+        .query([])
+        .unwrap()
+        .next()
+        .unwrap()
+        .is_none());
+    // Exercise the missing-table failure at the original collision, rather than
+    // treating a version-number assertion alone as migration coverage.
+    let launch = reserve_task_launch(&path, request.clone(), source).unwrap();
+    assert_eq!(
+        load_task_launch(&path, &request.request_id).unwrap(),
+        Some(launch)
+    );
+    assert_eq!(
+        conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        39
+    );
+    drop(conn);
+    drop(waiter);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}

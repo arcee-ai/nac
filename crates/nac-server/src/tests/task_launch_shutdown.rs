@@ -603,3 +603,95 @@ async fn manager_cancel_reaches_active_observer_after_late_creator_publication()
 async fn complete_shutdown_settles_active_observer_after_late_creator_publication() {
     active_observer_survives_creator_publication(true).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn passive_discovery_reads_committed_retained_task_without_attachment_or_wake() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retained_passive_discovery");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let setup = test_manager(&root);
+    let request = fixture(&root, &setup).await;
+    drop(setup);
+    let manager = owned_manager(&root).await;
+    let gate = Arc::new(application::session_creation::CreationProjectionGate::default());
+    *manager
+        .inner
+        .session_creation_after_persistence
+        .lock()
+        .unwrap() = Some(gate.clone());
+    let app = router(manager.clone());
+    assert_eq!(
+        post_json(
+            app.clone(),
+            "/task-launches",
+            serde_json::to_value(&request).unwrap()
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
+        .await
+        .unwrap();
+    let record = launch_status(app.clone(), &request.request_id).await;
+    assert_eq!(record.phase, TaskLaunchPhase::Ready);
+    assert!(manager.inner.active_sessions.read().await.is_empty());
+
+    let path = manager.inner.store_path.clone();
+    let project_id = request.project_id.clone();
+    let id = record.session_id.clone();
+    let request_id = request.request_id.clone();
+    let (page, lookup, receipt) = nac_core::store::spawn_blocking_store_caller(move || {
+        let page = nac_core::store::search_direct_tasks(
+            &path,
+            &nac_core::store::TaskSearch {
+                project_id,
+                limit: 10,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let lookup = nac_core::store::load_direct_task(&path, &id).unwrap();
+        let receipt = nac_core::store::load_task_launch(&path, &request_id)
+            .unwrap()
+            .unwrap();
+        (page, lookup, receipt)
+    })
+    .await
+    .unwrap();
+    assert_eq!(page.candidates.len(), 1);
+    assert_eq!(page.candidates[0].session_id, record.session_id);
+    let nac_core::store::TaskLookup::Found(snapshot) = lookup else {
+        panic!("committed retained session must be an independent direct task");
+    };
+    assert_eq!(
+        snapshot.project_id.as_deref(),
+        Some(request.project_id.as_str())
+    );
+    assert_eq!(snapshot.title.as_deref(), Some(request.title.as_str()));
+    assert_eq!(snapshot.behavior, "direct");
+    assert_eq!(snapshot.pending_inbox_items, 1);
+    assert_eq!(snapshot.run_count, 0);
+    assert!(snapshot.current_run.is_none());
+    assert_eq!(receipt, record);
+    assert!(manager.inner.active_sessions.read().await.is_empty());
+    assert!(record.workspace_path.join("nested/file").exists());
+
+    manager.stop_local_run_admission().await;
+    gate.resume.notify_one();
+    manager.quiesce_persistence_callers().await;
+    let path = manager.inner.store_path.clone();
+    let id = record.session_id.clone();
+    let after = nac_core::store::spawn_blocking_store_caller(move || {
+        nac_core::store::load_direct_task(&path, &id)
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(after, nac_core::store::TaskLookup::Found(snapshot));
+    manager.drain_persistence().await.unwrap();
+    drop(app);
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
