@@ -39,12 +39,18 @@ async function closeFileList(page: Page, mobile: boolean) {
 }
 
 async function chooseFile(page: Page, name: string, mobile: boolean) {
-  if (mobile && !(await page.getByRole("button", { name, exact: true }).isVisible())) {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const file = page.getByRole("button", {
+    name: new RegExp(
+      `^${escapedName}(?:\\s*, (?:Modified|Added|Deleted|Renamed|Copied|Type changed|Conflict|Untracked|Ignored))?$`,
+    ),
+  });
+  if (mobile && !(await file.isVisible())) {
     await page.getByRole("button", { name: "Open list", exact: true }).click();
   }
   const allFiles = page.getByRole("button", { name: "Show every file", exact: true });
   if ((await allFiles.getAttribute("aria-pressed")) !== "true") await allFiles.click();
-  await page.getByRole("button", { name, exact: true }).click();
+  await file.click();
   if (mobile) await expect(page.getByRole("dialog", { name: "Files", exact: true })).toHaveCount(0);
 }
 
