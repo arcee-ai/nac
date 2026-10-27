@@ -103,12 +103,12 @@ pub use providers::{
     provider_default_base_url, provider_uses_api_key, ProviderModel,
 };
 pub(crate) use redact::{
-    redact_credentials, redact_credentials_with_extra_headers, redact_json_body_with_extra_headers,
-    REDACTED as REDACTED_MARKER,
+    is_sensitive_json_key, redact_credentials, redact_credentials_with_extra_headers,
+    redact_json_body_with_extra_headers, REDACTED, REDACTED as REDACTED_MARKER,
 };
 
 /// Credential values NAC itself holds or can see: stored API keys, the stored
-/// Arcee login tokens, and secret-named process environment variables. Used
+/// Arcee and Codex login tokens, and secret-named process environment variables. Used
 /// only to remove exact values from text that leaves the process, so an
 /// unreadable store is an error rather than an empty set.
 pub(crate) fn known_credential_values() -> Result<Vec<String>> {
@@ -117,6 +117,7 @@ pub(crate) fn known_credential_values() -> Result<Vec<String>> {
         values.push(auth.access_token);
         values.push(auth.refresh_token);
     }
+    values.extend(chatgpt_codex::stored_credential_values()?);
     values.extend(environment_credential_values(std::env::vars()));
     values.retain(|value| !value.is_empty());
     values.sort();

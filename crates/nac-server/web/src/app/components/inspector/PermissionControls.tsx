@@ -70,6 +70,8 @@ interface PermissionControlsProps {
   /** Child retries use its owning primary; mode remains inherited. */
   retryParentSessionId?: string;
   poll?: boolean;
+  /** The trigger drops its mode label but keeps any pending count; its accessible name stays. */
+  compact?: boolean;
 }
 
 /** Subscription lifetime is independent of dialog visibility and request selection. */
@@ -122,6 +124,7 @@ export function PermissionControls({
   requesterLabel,
   retryParentSessionId,
   poll = true,
+  compact = false,
 }: PermissionControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const queue = usePermissionQueue(sessionId, direct, requesterLabel, {
@@ -269,8 +272,7 @@ export function PermissionControls({
               ? ButtonVariant.GhostHighlightedAccent
               : ButtonVariant.Ghost
           }
-          content={ButtonContent.IconLeft}
-          className="pr-3"
+          content={compact && !requests.length ? ButtonContent.Icon : ButtonContent.IconLeft}
           aria-label={
             inheritedAutoApproval
               ? `${label} — ${autoApprove ? "auto-approve" : currentModeName} inherited; open permissions`
@@ -283,10 +285,14 @@ export function PermissionControls({
           onClick={() => setManuallyOpen(true)}
         >
           <Icon iconName={IconName.Private} size={16} />
-          <span className="label-micro">{currentModeName}</span>
-          {reviewMode && reviewAvailability ? (
-            <span className="label-micro text-basic-tertiary">{reviewAvailability}</span>
-          ) : null}
+          {compact ? null : (
+            <>
+              <span className="label-micro">{currentModeName}</span>
+              {reviewMode && reviewAvailability ? (
+                <span className="label-micro text-basic-tertiary">{reviewAvailability}</span>
+              ) : null}
+            </>
+          )}
           {requests.length ? (
             <span className="label-micro">({requests.length} pending)</span>
           ) : null}

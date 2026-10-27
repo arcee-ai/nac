@@ -14,8 +14,8 @@ use crate::{
     ApiError, ApiErrorBody, CancelInboxItemRequest, ClearGoalRequest, CreateGoalRequest,
     CreateInboxItemRequest, InboxItemResponse, MessagesPageResponse, MessagesQuery,
     PermissionStateResponse, ReplyPermissionRequest, SessionManager, SessionSnapshotQuery,
-    SessionSnapshotResponse, ThreadEventsQuery, UpdateGoalRequest, UpdateInboxItemRequest,
-    UpdatePermissionApprovalModeRequest, DEFAULT_MESSAGE_PAGE_LIMIT,
+    SessionSnapshotResponse, ThreadEventsQuery, ToolCallContentResponse, UpdateGoalRequest,
+    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest, DEFAULT_MESSAGE_PAGE_LIMIT,
     DEFAULT_THREAD_EVENT_PAGE_LIMIT, MAX_MESSAGE_PAGE_LIMIT, MAX_THREAD_EVENT_PAGE_LIMIT,
 };
 
@@ -87,6 +87,25 @@ pub(crate) async fn session_messages(
         )
         .await?;
     Ok(Json(page.into()))
+}
+
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/tool-calls/{call_id}",
+    operation_id = "get_sessions_session_id_tool_calls_call_id",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("call_id" = String, Path)),
+    responses((status = 200, description = "Success", body = ToolCallContentResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Session or tool call not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn session_tool_call(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, call_id)): AxumPath<(String, String)>,
+) -> std::result::Result<Json<ToolCallContentResponse>, ApiError> {
+    let content = manager
+        .tool_call_content(&session_id, &call_id)
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "tool call not found".into()))?;
+    Ok(Json(content.into()))
 }
 
 #[utoipa::path(

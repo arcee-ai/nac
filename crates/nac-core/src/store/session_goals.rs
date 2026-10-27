@@ -228,7 +228,7 @@ fn require_direct_session(connection: &Connection, session_id: &str) -> Result<(
     }
 }
 
-fn load_with_connection(
+pub(super) fn load_with_connection(
     connection: &Connection,
     session_id: &str,
 ) -> Result<Option<SessionGoalRecord>> {
@@ -276,6 +276,11 @@ pub fn create_session_goal(
                 existing.goal_id
             ));
         }
+        super::task_evidence::retain_goal_outcome_with_connection(
+            &transaction,
+            &existing,
+            super::task_evidence::GoalRetirement::Replaced,
+        )?;
         transaction.execute(
             "DELETE FROM session_goals WHERE session_id = ?1",
             params![session_id],
@@ -459,16 +464,24 @@ pub fn clear_session_goal(
     goal_id: &str,
     expected_version: i64,
 ) -> Result<()> {
-    let connection = open_runtime_connection(path)?;
-    require_direct_session(&connection, session_id)?;
-    let changed = connection.execute(
+    let mut connection = open_runtime_connection(path)?;
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    require_direct_session(&transaction, session_id)?;
+    let current = load_with_connection(&transaction, session_id)?
+        .filter(|goal| goal.goal_id == goal_id && goal.version == expected_version)
+        .ok_or_else(|| anyhow!("goal clear conflict or goal is no longer current"))?;
+    super::task_evidence::retain_goal_outcome_with_connection(
+        &transaction,
+        &current,
+        super::task_evidence::GoalRetirement::Cleared,
+    )?;
+    transaction.execute(
         "DELETE FROM session_goals
          WHERE session_id = ?1 AND goal_id = ?2 AND version = ?3",
         params![session_id, goal_id, expected_version],
     )?;
-    if changed != 1 {
-        return Err(anyhow!("goal clear conflict or goal is no longer current"));
-    }
+    transaction.commit()?;
     Ok(())
 }
 command ClearSessionGoalCommand {
@@ -699,7 +712,7 @@ fn settle_goal_terminal_state(
     connection.execute(
         "UPDATE session_goals
          SET status = ?1, tokens_used = ?2, time_used_ms = ?3,
-             accounting_run_id = NULL, accounting_token_baseline = NULL,
+             last_run_id = accounting_run_id, accounting_run_id = NULL, accounting_token_baseline = NULL,
              accounting_started_at_epoch_ms = NULL, continuation_run_id = NULL,
              consecutive_transient_failures = ?4, next_attempt_at_epoch_ms = ?5,
              last_failure_json = ?6, updated_at = ?7, version = version + 1
@@ -790,7 +803,7 @@ pub(crate) fn reconcile_session_goal_terminal_with_connection(
     };
     connection.execute(
         "UPDATE session_goals
-         SET status = ?1, accounting_run_id = NULL,
+         SET status = ?1, last_run_id = accounting_run_id, accounting_run_id = NULL,
              accounting_token_baseline = NULL,
              accounting_started_at_epoch_ms = NULL,
              continuation_run_id = NULL, updated_at = ?2, version = version + 1
@@ -819,7 +832,8 @@ pub fn reconcile_session_goal_run(
     require_direct_session(&connection, session_id)?;
     connection.execute(
         "UPDATE session_goals
-         SET accounting_run_id = NULL, accounting_token_baseline = NULL,
+         SET last_run_id = accounting_run_id, accounting_run_id = NULL,
+             accounting_token_baseline = NULL,
              accounting_started_at_epoch_ms = NULL, continuation_run_id = NULL,
              updated_at = ?1, version = version + 1
          WHERE session_id = ?2 AND accounting_run_id IS NOT NULL",

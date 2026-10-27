@@ -755,7 +755,9 @@ pub async fn create_server_handler(
     let _write = CONFIG_WRITE.lock().await;
     let path = config_path(&manager)?;
     let _cross_process = mcp::acquire_mcp_configuration_write_lease(&path)?;
-    let record = mcp::insert_mcp_server_configuration(&path, configuration)?;
+    let record = manager
+        .mcp_runtime()
+        .insert_configuration(&path, configuration)?;
     Ok((StatusCode::CREATED, Json(view(record))))
 }
 
@@ -906,7 +908,7 @@ pub async fn update_server_handler(
         },
     };
 
-    let record = mcp::update_mcp_server_configuration_at_revision(
+    let record = manager.mcp_runtime().update_configuration_at_revision(
         &path,
         &server_name,
         configuration,
@@ -929,6 +931,8 @@ pub async fn update_server_handler(
             )
         })?;
     }
+    // Runtime operations take their own mutex before reading config; do not invert that order.
+    drop(_cross_process);
     manager.mcp_runtime().forget(&server_name).await;
     Ok(Json(view(record)))
 }
@@ -958,6 +962,16 @@ pub async fn delete_server_handler(
             "MCP OAuth cleanup failed",
         )
     })?;
+    manager
+        .mcp_runtime()
+        .forget_connection(&server_name)
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("MCP disconnect state could not be updated: {error:#}"),
+            )
+        })?;
+    drop(_cross_process);
     manager.mcp_runtime().forget(&server_name).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1761,6 +1775,7 @@ pub async fn logout_oauth_handler(
             "MCP OAuth logout could not complete",
         )
     })?;
+    manager.mcp_runtime().forget(&server_name).await;
     Ok(Json(McpOAuthStatusResponse {
         status: public_oauth_status(status),
         message: None,

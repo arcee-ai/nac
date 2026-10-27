@@ -250,6 +250,8 @@ pub struct PermissionBroker {
     review_deadline: StdMutex<Duration>,
     command_environment: StdMutex<Option<Arc<dyn nac_contracts::CommandEnvironmentProvider>>>,
     review_backend: StdMutex<review::ReviewBackendSource>,
+    /// The session's saved project; membership is immutable once set.
+    caller_project: std::sync::OnceLock<String>,
 }
 
 /// Project one validated backend path into the action being performed plus an

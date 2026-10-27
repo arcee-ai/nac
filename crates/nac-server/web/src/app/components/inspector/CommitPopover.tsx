@@ -94,6 +94,7 @@ export function CommitPopover({
       sticky
       placement={PopoverPlacement.BottomRight}
       size={PopoverSize.Medium}
+      sheetClassName="gap-1 px-4"
       content={
         <>
           <TextArea
@@ -138,11 +139,11 @@ export function CommitPopover({
       }
     >
       {isMobile ? (
-        // Floating over the file list on a phone, so it takes the design's
-        // 40px pill rather than the toolbar's flat 24px button.
+        // A phone's list header draws it as the 40px primary pill beside the
+        // listing pills, not as the toolbar's flat 24px button.
         <StickyButton
           className="shrink-0"
-          variant={ButtonVariant.Secondary}
+          variant={ButtonVariant.Primary}
           disabled={Boolean(reason)}
           aria-expanded={open}
           title={reason ?? "Commit every change in the checkout"}

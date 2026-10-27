@@ -52,6 +52,6 @@ fn terminal_selection_migration_34_rolls_back_before_commit_and_restarts() {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        35
+        STORE_SCHEMA_VERSION
     );
 }

@@ -345,6 +345,9 @@ impl McpServer {
                 return;
             }
             Self::wait_for_refresh_turn(gate).await;
+            if self.admit().is_err() {
+                return;
+            }
             let result = timeout(self.catalog_timeout, peer.list_all_tools()).await;
             if !self.is_current_connection_generation(generation) {
                 return;
@@ -391,6 +394,9 @@ impl McpServer {
                 return;
             }
             Self::wait_for_refresh_turn(gate).await;
+            if self.admit().is_err() {
+                return;
+            }
             let result = timeout(self.catalog_timeout, list_bounded_prompts_peer(peer)).await;
             if !self.is_current_connection_generation(generation) {
                 return;
@@ -437,6 +443,9 @@ impl McpServer {
                 return;
             }
             Self::wait_for_refresh_turn(gate).await;
+            if self.admit().is_err() {
+                return;
+            }
             let result = timeout(self.catalog_timeout, peer.list_all_resources()).await;
             if !self.is_current_connection_generation(generation) {
                 return;

@@ -125,50 +125,17 @@ impl nac_core::traditional_children::TraditionalChildController
                 ));
             }
             let service = manager.attach_session(&child_session_id).await?;
-            let relation = service
-                .reconcile_traditional_child_terminal()
-                .await?
-                .unwrap_or(relation);
-            if relation.status == nac_core::store::TraditionalChildStatus::Running {
-                if service.active_run().is_some() {
-                    service
-                        .enqueue_traditional_child_input(
-                            nac_core::store::InboxDelivery::Steer,
-                            &request.prompt,
-                            request.origin,
-                        )
-                        .await?;
-                } else if request.origin == nac_core::store::InputOrigin::Person {
-                    nac_core::store::create_person_session_inbox_item(
-                        &manager.inner.store_path,
-                        &child_session_id,
-                        nac_core::store::InboxDelivery::Steer,
-                        &request.prompt,
-                        relation.run_id.as_deref(),
-                        None,
-                        &request.prompt,
-                    )?;
-                } else {
-                    nac_core::store::create_session_inbox_item(
-                        &manager.inner.store_path,
-                        &child_session_id,
-                        nac_core::store::InboxDelivery::Steer,
-                        &request.prompt,
-                        relation.run_id.as_deref(),
-                        None,
-                    )?;
-                }
-                return Ok(relation);
-            }
+            // The service reauthorizes each actual mutation. Do not retain a
+            // host admission lease throughout a foreground delivery wait.
+            drop(_host_admission);
             service
-                .try_submit_traditional_child_prompt(
+                .submit_or_steer_traditional_child_with_origin(
+                    &request.parent_session_id,
                     request.prompt,
                     request.execution_mode,
                     request.origin,
                 )
-                .map_err(anyhow::Error::new)?;
-            nac_core::store::load_traditional_child(&manager.inner.store_path, &child_session_id)?
-                .ok_or_else(|| anyhow!("traditional child disappeared after run admission"))
+                .await
         })
     }
 
@@ -188,11 +155,15 @@ impl nac_core::traditional_children::TraditionalChildController
                 .ok_or_else(|| {
                     anyhow!("traditional child session '{child_session_id}' was not found")
                 })?;
+                if let Some(terminal) = nac_core::store::load_traditional_child_terminal_receipt(
+                    &manager.inner.store_path,
+                    child_session_id,
+                    generation,
+                )? {
+                    return Ok(terminal);
+                }
                 if child.generation != generation {
-                    return Err(anyhow!(
-                        "traditional child generation {generation} was superseded by {}",
-                        child.generation
-                    ));
+                    return Err(anyhow!("traditional child generation {generation} has no retained terminal receipt"));
                 }
                 if child.status.is_terminal() {
                     return Ok(child);
@@ -306,6 +277,16 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                         .await?
                 }
             };
+            // Creation is committed. Subsequent guarded steering/admission
+            // reacquires host authority for its own bounded mutation.
+            drop(_host_admission);
+            // Serialize start/continue choices, independently of the lifecycle
+            // gate used by attachment and the terminal monitor.
+            let input_gate =
+                manager.lifecycle_gate(&format!("delegated-input:{orchestrator_session_id}"));
+            let _input = input_gate.lock().await;
+            let service = manager.attach_session(&orchestrator_session_id).await?;
+            service.await_finishing_run().await?;
             let mut relation = manager
                 .delegation()
                 .managed_orchestrator_async(&request.parent_session_id, &orchestrator_session_id)
@@ -317,15 +298,17 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                 ));
             }
             if relation.status == ManagedOrchestratorStatus::Running {
-                let service = manager.attach_session(&orchestrator_session_id).await?;
-                if service.active_run().is_some() {
-                    manager
-                        .queue_managed_orchestrator_steering_async(
-                            &request.parent_session_id,
-                            &orchestrator_session_id,
-                            &request.prompt,
-                        )
-                        .await?;
+                if let Some(steering) = service
+                    .steer_managed_orchestrator_input(&request.parent_session_id, &request.prompt)
+                    .await?
+                {
+                    drop(_input);
+                    if request.execution_mode
+                        == nac_core::store::ManagedOrchestratorExecutionMode::Foreground
+                    {
+                        wait_for_managed_steering(&manager, &orchestrator_session_id, steering.id)
+                            .await?;
+                    }
                     return Ok(relation);
                 }
                 match sessions::SessionOperationLease::try_acquire(
@@ -333,13 +316,32 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                     &orchestrator_session_id,
                 ) {
                     Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                        manager
-                            .queue_managed_orchestrator_steering_async(
-                                &request.parent_session_id,
+                        let path = manager.inner.store_path.clone();
+                        let parent = request.parent_session_id.clone();
+                        let id = orchestrator_session_id.clone();
+                        let prompt = request.prompt.clone();
+                        let host_admission = manager.managed_work_admission_async().await?;
+                        let steering = manager
+                            .inner
+                            ._store_ownership
+                            .call_legacy(move || {
+                                nac_core::store::queue_managed_orchestrator_steering(
+                                    &path, &parent, &id, &prompt,
+                                )
+                            })
+                            .await??;
+                        drop(host_admission);
+                        drop(_input);
+                        if request.execution_mode
+                            == nac_core::store::ManagedOrchestratorExecutionMode::Foreground
+                        {
+                            wait_for_managed_steering(
+                                &manager,
                                 &orchestrator_session_id,
-                                &request.prompt,
+                                steering.id,
                             )
                             .await?;
+                        }
                         return Ok(relation);
                     }
                     Err(error) => return Err(anyhow::Error::new(error)),
@@ -537,4 +539,106 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             Ok(())
         })
     }
+}
+
+/// Foreground steering must establish consumption of this exact input, not
+/// borrow a later relationship's successful result. Background means queued.
+pub(crate) async fn wait_for_managed_steering(
+    manager: &crate::SessionManager,
+    session_id: &str,
+    steering_id: i64,
+) -> anyhow::Result<()> {
+    let receipt = load_managed_steering_receipt(manager, session_id, steering_id).await?;
+    match receipt.status.as_str() {
+        "delivered" => return Ok(()),
+        "expired" => return Err(undelivered_managed_steering()),
+        _ => {}
+    }
+    let path = manager.inner.store_path.clone();
+    let id = session_id.to_owned();
+    let relation = manager
+        .inner
+        ._store_ownership
+        .call_legacy(move || nac_core::store::load_managed_orchestrator(&path, &id))
+        .await??
+        .ok_or_else(|| anyhow!("managed orchestrator was not found"))?;
+    if relation.run_id.as_deref() != Some(receipt.dispatch_id.as_str())
+        || relation.status.is_terminal()
+    {
+        return confirm_managed_steering_delivery(manager, session_id, steering_id).await;
+    }
+
+    // Foreground input waits before the application's ordinary completion
+    // wait. Drive the existing exact-generation recovery owner now, including
+    // peer lease observation, so a crashed peer cannot strand this input wait.
+    // This owned task retains its leases if the HTTP future is dropped.
+    let monitor_manager = manager.clone();
+    let monitor_id = session_id.to_owned();
+    let mut monitor = tokio::spawn(async move {
+        monitor_manager
+            .monitor_managed_orchestrator(&monitor_id, relation.generation)
+            .await
+    });
+    loop {
+        let receipt = load_managed_steering_receipt(manager, session_id, steering_id).await?;
+        match receipt.status.as_str() {
+            "delivered" => return Ok(()),
+            "expired" => return Err(undelivered_managed_steering()),
+            _ => {}
+        }
+        let path = manager.inner.store_path.clone();
+        let id = session_id.to_owned();
+        let current = manager
+            .inner
+            ._store_ownership
+            .call_legacy(move || nac_core::store::load_managed_orchestrator(&path, &id))
+            .await??
+            .ok_or_else(|| anyhow!("managed orchestrator was not found"))?;
+        if current.run_id.as_deref() != Some(receipt.dispatch_id.as_str())
+            || current.status.is_terminal()
+        {
+            return confirm_managed_steering_delivery(manager, session_id, steering_id).await;
+        }
+        tokio::select! {
+            result = &mut monitor => {
+                result.map_err(|error| anyhow!("managed steering recovery task failed: {error}"))??;
+                return confirm_managed_steering_delivery(manager, session_id, steering_id).await;
+            }
+            _ = tokio::time::sleep(Duration::from_millis(25)) => {}
+        }
+    }
+}
+
+async fn load_managed_steering_receipt(
+    manager: &crate::SessionManager,
+    session_id: &str,
+    steering_id: i64,
+) -> anyhow::Result<nac_core::store::ThreadSteeringRecord> {
+    let path = manager.inner.store_path.clone();
+    let id = session_id.to_owned();
+    manager
+        .inner
+        ._store_ownership
+        .call_legacy(move || nac_core::store::load_thread_steering(&path, &id, steering_id))
+        .await??
+        .ok_or_else(|| anyhow!("managed orchestrator steering receipt was not found"))
+}
+
+async fn confirm_managed_steering_delivery(
+    manager: &crate::SessionManager,
+    session_id: &str,
+    steering_id: i64,
+) -> anyhow::Result<()> {
+    // Settlement and delivery can commit between reads. Re-read the exact
+    // input after terminal/identity observation before declaring it unconsumed.
+    let receipt = load_managed_steering_receipt(manager, session_id, steering_id).await?;
+    if receipt.status == "delivered" {
+        Ok(())
+    } else {
+        Err(undelivered_managed_steering())
+    }
+}
+
+fn undelivered_managed_steering() -> anyhow::Error {
+    anyhow!("managed orchestrator finished before this steering message was delivered; review its result and explicitly resend the message if still needed")
 }

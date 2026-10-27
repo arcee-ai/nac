@@ -181,6 +181,11 @@ const config = {
         "btn-secondary-hovered": "var(--color-text-btn-secondary-hovered)",
         "btn-secondary-pressed": "var(--color-text-btn-secondary-pressed)",
         "btn-secondary-disabled": "var(--color-text-btn-secondary-disabled)",
+        "btn-secondary-highlighted": "var(--color-text-btn-secondary-highlighted)",
+        "btn-secondary-hovered-highlighted": "var(--color-text-btn-secondary-hovered-highlighted)",
+        "btn-secondary-pressed-highlighted": "var(--color-text-btn-secondary-pressed-highlighted)",
+        "btn-secondary-disabled-highlighted":
+          "var(--color-text-btn-secondary-disabled-highlighted)",
         "btn-destructive": "var(--color-text-btn-destructive)",
         "btn-destructive-hovered": "var(--color-text-btn-destructive-hovered)",
         "btn-destructive-pressed": "var(--color-text-btn-destructive-pressed)",
@@ -243,6 +248,8 @@ const config = {
         "info-tertiary": "var(--color-border-info-tertiary)",
         "info-muted": "var(--color-border-info-muted)",
 
+        input: "var(--color-border-input)",
+
         "primary-inversed": "var(--color-border-primary-inversed)",
         "secondary-inversed": "var(--color-border-secondary-inversed)",
         "tertiary-inversed": "var(--color-border-tertiary-inversed)",
@@ -274,6 +281,11 @@ const config = {
         "btn-secondary-hovered": "var(--color-fill-btn-secondary-hovered)",
         "btn-secondary-pressed": "var(--color-fill-btn-secondary-pressed)",
         "btn-secondary-disabled": "var(--color-fill-btn-secondary-disabled)",
+        "btn-secondary-highlighted": "var(--color-fill-btn-secondary-highlighted)",
+        "btn-secondary-hovered-highlighted": "var(--color-fill-btn-secondary-hovered-highlighted)",
+        "btn-secondary-pressed-highlighted": "var(--color-fill-btn-secondary-pressed-highlighted)",
+        "btn-secondary-disabled-highlighted":
+          "var(--color-fill-btn-secondary-disabled-highlighted)",
         "btn-destructive": "var(--color-fill-btn-destructive)",
         "btn-destructive-hovered": "var(--color-fill-btn-destructive-hovered)",
         "btn-destructive-pressed": "var(--color-fill-btn-destructive-pressed)",
@@ -331,6 +343,7 @@ const config = {
         "3xl": "var(--shadow-3xl)",
         convex: "var(--shadow-convex)",
         concave: "var(--shadow-concave)",
+        "composer-send": "var(--shadow-composer-send)",
         "left-sidebar-open": "var(--left-sidebar-open)",
       },
       screens: {
@@ -351,6 +364,9 @@ const config = {
           "background-clip": "text",
           "-webkit-text-fill-color": "transparent",
           color: "transparent",
+          "@media (prefers-reduced-motion: reduce)": {
+            animation: "none",
+          },
         },
         ".text-shimmer-basic": {
           "background-image":
@@ -362,6 +378,24 @@ const config = {
           "background-clip": "text",
           "-webkit-text-fill-color": "transparent",
           color: "transparent",
+          "@media (prefers-reduced-motion: reduce)": {
+            animation: "none",
+          },
+        },
+        // Figma "Shimmer Text": primary through the disabled button text and back.
+        ".text-shimmer-primary": {
+          "background-image":
+            "linear-gradient(90deg, var(--color-text-basic-primary), var(--color-text-btn-secondary-disabled), var(--color-text-basic-primary))",
+          "background-size": "200% 100%",
+          "background-position": "200% 0",
+          animation: "shimmer 2s linear infinite",
+          "-webkit-background-clip": "text",
+          "background-clip": "text",
+          "-webkit-text-fill-color": "transparent",
+          color: "transparent",
+          "@media (prefers-reduced-motion: reduce)": {
+            animation: "none",
+          },
         },
       });
     },

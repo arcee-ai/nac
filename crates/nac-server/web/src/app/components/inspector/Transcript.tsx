@@ -1,15 +1,7 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { CommandCard } from "@/app/features/human-shell/CommandCard";
 import { useNavigate } from "react-router-dom";
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
@@ -18,15 +10,16 @@ import {
   ButtonVariant,
   ChatSessionMessage,
   ChatSessionMessageVariant,
-  Icon,
-  IconName,
   ShimmerLoader,
 } from "@/app/atoms";
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
+import { JumpToLatest } from "@/app/components/inspector/transcript/JumpToLatest";
 import { RunFailureRecovery } from "@/app/components/inspector/RunFailureRecovery";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
-import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
+import { useTranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
+import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
+import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -34,18 +27,13 @@ import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
-import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
+import { formatStoreTime } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import { routes, type SessionPanel } from "@/app/lib/routes";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
-import { perfMark, perfRender, perfTime } from "@/app/lib/perfDebug";
-import {
-  buildTranscript,
-  withStreamedOutput,
-  STREAMING_TURN_KEY,
-  type TranscriptTurn,
-} from "@/app/lib/transcript";
+import { perfRender } from "@/app/lib/perfDebug";
+import type { ModelTurn, TranscriptTurn } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
@@ -54,19 +42,18 @@ import {
   useLoadOlderMessages,
   useRegenerateRun,
   useSessionGoal,
-  useSessionPermissions,
   useSubmitRun,
   useUpdateGoal,
   useWorkspaceRevisions,
 } from "@/app/services/queries";
 
-import type { SessionSnapshotResponse } from "@/app/types/api";
+import type { SessionForkLink, SessionSnapshotResponse } from "@/app/types/api";
 
 interface TranscriptProps {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
-  /** Which side-panel tab is currently open. */
-  panel: SessionPanel;
+  /** Which side-panel tab is on screen; null while the side box is hidden. */
+  panel: SessionPanel | null;
   /** Brings the matching side panel forward when the chat points at a row. */
   onFocusPanel: (panel: SessionPanel) => void;
   /**
@@ -77,7 +64,11 @@ interface TranscriptProps {
   errorNotice?: ErrorNotice | null;
 }
 
-export function TranscriptRecoveryNotice({ warning }: { warning?: string | null }) {
+export const TranscriptRecoveryNotice = memo(function TranscriptRecoveryNotice({
+  warning,
+}: {
+  warning?: string | null;
+}) {
   if (!warning) return null;
   return (
     <ChatSessionMessage
@@ -88,7 +79,7 @@ export function TranscriptRecoveryNotice({ warning }: { warning?: string | null 
       {warning}
     </ChatSessionMessage>
   );
-}
+});
 
 /**
  * Index of the user turn a resend addresses: the newest prompt, answered or
@@ -98,21 +89,14 @@ export function TranscriptRecoveryNotice({ warning }: { warning?: string | null 
  */
 function resendTargetIndex(turns: TranscriptTurn[]): number | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
-    if (turns[index]?.kind === "delegated-completion") return null;
-    if (turns[index]?.kind === "user") return index;
+    const turn = turns[index];
+    if (turn?.kind === "delegated-completion") return null;
+    if (turn?.kind === "user" && !turn.pending) return index;
   }
   return null;
 }
 
-/** Text of the newest user bubble, or null when the chat opens with the model. */
-function lastUserText(turns: TranscriptTurn[]): string | null {
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index];
-    if (turn.kind === "delegated-completion") return null;
-    if (turn.kind === "user") return turn.text;
-  }
-  return null;
-}
+const NO_BLOCKS: ModelTurn["blocks"] = [];
 
 /**
  * Read-only transcript from the canonical snapshot plus a live typing indicator
@@ -126,47 +110,33 @@ export function Transcript({
   errorNotice = null,
 }: TranscriptProps) {
   const {
-    useStreamText,
-    useStreamReasoning,
     useModelRetryAttempt,
-    useRunning,
     useRunFailure,
     useRunError,
-    useOptimisticUserPrompt,
-    useLiveThreads,
     useCancelArmed,
-    usePrimaryToolEvents,
-    useFinishedToolCalls,
     useActivity,
     setOptimisticUserPrompt,
     pushLocalEvent,
   } = useNativeRuntime().stores.runtimeStore;
 
   const {
-    useSelectedWorkset,
     useSelectedThreadEpisode,
+    useSelectedInsight,
     useSelectedRevision,
     useSelectedFile,
-    selectWorkset,
-    selectThread,
     selectRevision,
     selectFile,
   } = useNativeRuntime().stores.sessionLayoutStore;
 
-  const running = useRunning(sessionId);
   const stopping = useCancelArmed(sessionId);
   const activity = useActivity();
   const error = useRunError();
   const liveFailure = useRunFailure();
   const modelRetryAttempt = useModelRetryAttempt();
-  const liveThreads = useLiveThreads();
-  const finishedToolCalls = useFinishedToolCalls();
-  const primaryToolEvents = usePrimaryToolEvents();
-  const streamText = useStreamText();
-  const streamReasoning = useStreamReasoning();
-  const optimisticPrompt = useOptimisticUserPrompt();
-  const selectedThreadEpisode = useSelectedThreadEpisode();
-  const selectedWorkset = useSelectedWorkset();
+  const selectedInsight = useSelectedInsight();
+  const threadEpisode = useSelectedThreadEpisode();
+  const selectedThreadEpisode = selectedInsight?.kind === "thread" ? threadEpisode : null;
+  const selectedGroupId = selectedInsight?.kind === "group" ? selectedInsight.groupId : null;
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const toast = useToast();
@@ -186,18 +156,10 @@ export function Transcript({
   const direct =
     snapshot?.metadata.behavior === "direct" ||
     snapshot?.metadata.behavior === "direct-with-orchestrator";
-  const goalQuery = useSessionGoal(sessionId, direct);
+  // Read on every render: a query whose fields went unread re-renders on every
+  // fetch, and the goal is polled each second.
+  const goal = useSessionGoal(sessionId, direct).data;
   const updateGoal = useUpdateGoal();
-  const { data: permissions } = useSessionPermissions(sessionId, direct);
-  const pendingPermissionCallIds = useMemo(
-    () =>
-      new Set(
-        (permissions?.requests ?? [])
-          .map((request) => request.call_id)
-          .filter((callId): callId is string => Boolean(callId)),
-      ),
-    [permissions?.requests],
-  );
   const { scrollRef, contentRef, showJumpButton, jumpToLatest, followLatest } = useStickToBottom({
     resetKey: sessionId,
     // Intentionally not keyed on running / active_run / message count: those
@@ -237,36 +199,8 @@ export function Transcript({
 
   perfRender("Transcript");
 
-  // Split so a delta rebuilds only the turn it lands in: the snapshot half is
-  // untouched between refetches, and the stream half hands its earlier turns
-  // straight back, which is what keeps the memoized rows from re-rendering.
-  const snapshotTurns = useMemo(
-    () =>
-      perfTime("buildTranscript", () =>
-        buildTranscript(
-          snapshot,
-          liveThreads,
-          finishedToolCalls,
-          primaryToolEvents,
-          pendingPermissionCallIds,
-        ),
-      ),
-    [snapshot, liveThreads, finishedToolCalls, primaryToolEvents, pendingPermissionCallIds],
-  );
-  // Prefer the live active_run copy; fall back to the optimistic prompt set at
-  // Send so the bubble is already above the model pill before the round-trip.
-  const submitted = running ? snapshot?.active_run?.submitted_user_message : undefined;
-  const pendingText = submitted
-    ? displayPromptFromMessageText(submitted.content)
-    : (optimisticPrompt ?? "");
-  // The optimistic copy is raw typed text; only the stored message can carry
-  // an expansion.
-  const pendingSkills = submitted ? invokedSkillNames(submitted.content) : null;
-  // Compared against the last *user* turn rather than the last turn of any
-  // kind: everything the run produces lands after the prompt it answers, so
-  // once that prompt is in the snapshot the copy is a duplicate no matter how
-  // many model turns have piled up on top of it.
-  const showPending = Boolean(pendingText && lastUserText(snapshotTurns) !== pendingText);
+  const { turns, baseTurns, running, optimisticPrompt, submitted, showPending, replyKey } =
+    useTranscriptModelContext();
   useLayoutEffect(() => {
     hadPending.current = false;
     sendFollowReady.current = false;
@@ -282,31 +216,17 @@ export function Transcript({
     hadPending.current = showPending;
     if (appeared && sendFollowReady.current) followLatest(300);
   }, [showPending, followLatest]);
-  const turns = useMemo(
-    () =>
-      withStreamedOutput(
-        snapshotTurns,
-        { text: streamText, reasoning: streamReasoning },
-        showPending,
-      ),
-    [snapshotTurns, streamText, streamReasoning, showPending],
-  );
-  // A stream that had to open a turn of its own is answering a prompt the
-  // snapshot has not caught up with, so the optimistic bubble moves into the
-  // list with it instead of being rendered under the whole thing.
-  const streamingTurn = showPending && turns[turns.length - 1]?.key === STREAMING_TURN_KEY;
-  perfMark("transcript:turns", {
-    fields: { turns: turns.length, streamChars: streamText.length },
-    throttleMs: 1000,
-  });
 
-  const refreshIndex = useMemo(() => resendTargetIndex(turns), [turns]);
+  // Read off the turns without the stream, which hold the same rows at the same
+  // positions and leave these alone while a reply streams.
+  const refreshIndex = useMemo(() => resendTargetIndex(baseTurns), [baseTurns]);
   const actionsBusy =
     running || stopping || submitRun.isPending || regenerateRun.isPending || forkSession.isPending;
   const [revertTarget, setRevertTarget] = useState<{
     messageIdx: number;
     prompt: string;
   } | null>(null);
+  const closeRevert = useCallback(() => setRevertTarget(null), []);
 
   /**
    * Answer this prompt again instead of asking it twice. The backend drops the
@@ -385,41 +305,52 @@ export function Transcript({
   const readOnly = snapshot?.lineage != null;
   // A revision is captured per finished run, so each model turn carries what
   // its own run changed instead of one running total for the whole checkout.
-  const turnRevisions = useMemo(() => revisionsByTurn(turns, revisions), [turns, revisions]);
+  const turnRevisions = useMemo(
+    () => revisionsByTurn(baseTurns, revisions),
+    [baseTurns, revisions],
+  );
+  const forksAt = useMemo(() => {
+    const byMessage = new Map<number, SessionForkLink[]>();
+    for (const entry of snapshot?.forks ?? []) {
+      byMessage.set(entry.source_message_idx, [
+        ...(byMessage.get(entry.source_message_idx) ?? []),
+        entry,
+      ]);
+    }
+    return byMessage;
+  }, [snapshot?.forks]);
 
   useEffect(() => {
     if (!showPending && optimisticPrompt) {
-      setOptimisticUserPrompt(null);
+      setOptimisticUserPrompt(null, "committed");
     }
   }, [showPending, optimisticPrompt, setOptimisticUserPrompt]);
 
   // Once *this* run has a model message of its own, that message carries the
-  // liveness — its pill spins and its header names the activity. A standalone
-  // row below would be a second pill for the same run. The last snapshot model
-  // turn is the previous reply; treating it as live hid the pending pill and
-  // left `isLast` min-height on the old bubble until the stream opened, so
-  // Send glided twice (user bubble, then the min-height hop).
+  // liveness — its pill spins and its header names the activity. Until then an
+  // empty reply stands in, under the optimistic bubble too, or the pill would
+  // only appear when `running` flips and the layout would jump. It is keyed as
+  // the reply it stands for, so the stream and the commit fill it in place,
+  // and it stands down once that reply is there, even from a run that ended
+  // before the snapshot showed its prompt.
   const lastTurn = turns[turns.length - 1];
-  const liveTurn =
-    running && lastTurn?.kind === "model" && (!showPending || lastTurn.key === STREAMING_TURN_KEY);
-  // Keep the pill under the optimistic bubble too; otherwise it only appears
-  // when `running` flips and the layout jumps.
-  const showModelPending = (running || showPending) && !liveTurn;
+  const showModelPending =
+    (running || showPending) &&
+    lastTurn?.key !== replyKey &&
+    !(running && lastTurn?.kind === "model");
+  const placeholder = useMemo<ModelTurn>(
+    () => ({
+      kind: "model",
+      key: replyKey,
+      blocks: NO_BLOCKS,
+      durationMs: null,
+      messageIndex: null,
+    }),
+    [replyKey],
+  );
+  const rows = showModelPending ? [...turns, placeholder] : turns;
 
-  const focusThread = useCallback(
-    (name: string, episodeKey: string) => {
-      selectThread(name, episodeKey);
-      onFocusPanel("threads");
-    },
-    [onFocusPanel, selectThread],
-  );
-  const focusWorkset = useCallback(
-    (id: string) => {
-      selectWorkset(id);
-      onFocusPanel("worksets");
-    },
-    [onFocusPanel, selectWorkset],
-  );
+  const { openThread } = useInsightsNavigation();
   // Opening a snapshot points the panel at that run's revision rather than at
   // the working tree: the run is what the badge describes, and the tree has
   // usually moved on — or been committed — since.
@@ -461,11 +392,10 @@ export function Transcript({
 
   const runError = error && !running ? error : null;
   const durableFailure = !running
-    ? (liveFailure ?? snapshot?.run_failure ?? goalQuery.data?.last_failure ?? null)
+    ? (liveFailure ?? snapshot?.run_failure ?? goal?.last_failure ?? null)
     : null;
-  const latestUser = [...turns].reverse().find((turn) => turn.kind === "user");
+  const latestUser = [...turns].reverse().find((turn) => turn.kind === "user" && !turn.pending);
   const resumeGoal = () => {
-    const goal = goalQuery.data;
     if (!goal) return;
     void updateGoal
       .mutateAsync({
@@ -506,11 +436,11 @@ export function Transcript({
         role="status"
         aria-label={revealed ? undefined : "Loading conversation"}
         className={cn(
-          "pointer-events-none absolute inset-x-0 top-[96px] px-4 transition-opacity duration-150 ease-in-out md:top-[72px] md:px-0",
+          "pointer-events-none absolute inset-x-0 top-[72px] px-4 transition-opacity duration-150 ease-in-out md:top-[90px] md:px-8",
           revealed ? "opacity-0" : "opacity-100 delay-200",
         )}
       >
-        <div className="mx-auto w-full max-w-[720px]">
+        <div className="mx-auto w-full max-w-[640px]">
           <ShimmerLoader rows={3} rowClassName="h-[48px]" />
         </div>
       </div>
@@ -520,12 +450,12 @@ export function Transcript({
       {showInitialPrompts ? (
         <div
           className={cn(
-            "absolute inset-x-0 top-[96px] flex overflow-auto px-4 md:top-[72px] md:px-0",
+            "absolute inset-x-0 top-[72px] flex overflow-auto px-4 md:top-[90px] md:px-8",
             isMobile ? "bottom-[128px]" : "bottom-[136px]",
             fade,
           )}
         >
-          <div className="m-auto w-full max-w-[720px]">
+          <div className="m-auto w-full max-w-[640px]">
             <InitialPrompts />
           </div>
         </div>
@@ -537,10 +467,15 @@ export function Transcript({
         <div
           ref={contentRef}
           className={cn(
-            "flex flex-col pt-[96px] md:pt-[72px] [&>*]:shrink-0 px-4 md:px-0",
+            "flex flex-col pt-[72px] md:pt-[90px] [&>*]:shrink-0 px-4 md:px-8",
             // The phone's input is a bare pill rather than a padded card, so
-            // the run-out under the last message shrinks with it.
-            isMobile ? "pb-[180px]" : "pb-[320px] mx-auto max-w-[720px]",
+            // the run-out under the last message shrinks with it. A long
+            // draft, the goal editor or queued messages make the composer
+            // taller, and the run-out still clears it. The 640px column keeps
+            // 32px off the edges of a chat narrower than it.
+            isMobile
+              ? "pb-[max(180px,calc(var(--composer-height,0px)_+_40px))]"
+              : "pb-[max(320px,calc(var(--composer-height,0px)_+_40px))] mx-auto max-w-[704px]",
           )}
         >
           {snapshot?.message_page?.has_older ? (
@@ -571,9 +506,9 @@ export function Transcript({
           ) : null}
 
           <PerfProfiler id="turns">
-            {turns.map((turn, index) => {
+            {rows.map((turn, index) => {
               if (turn.kind === "delegated-completion") {
-                return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
+                return <DelegatedCompletionCard key={turn.key} turn={turn} />;
               }
               if (turn.kind === "user") {
                 const command = (snapshot?.shell_commands ?? []).find(
@@ -596,14 +531,17 @@ export function Transcript({
                     key={turn.key}
                     text={turn.text}
                     sessionId={sessionId}
+                    pending={turn.pending}
                     terminalSelection={
-                      snapshot?.terminal_selection_attributions?.find(
-                        (reference) => reference.message_index === turn.messageIndex,
-                      )?.evidence ?? undefined
+                      (turn.pending
+                        ? submitted?.terminal_selection
+                        : snapshot?.terminal_selection_attributions?.find(
+                            (reference) => reference.message_index === turn.messageIndex,
+                          )?.evidence) ?? undefined
                     }
                     invokedSkills={turn.invokedSkills}
                     timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
-                    messageIndex={turn.messageIndex}
+                    messageIndex={turn.pending ? undefined : turn.messageIndex}
                     actionsDisabled={actionsBusy}
                     readOnly={readOnly}
                     onRefresh={!readOnly && refreshIndex === index ? resend : null}
@@ -617,7 +555,7 @@ export function Transcript({
               let precedingUserIndex: number | null = null;
               let precedingUser: Extract<TranscriptTurn, { kind: "user" }> | null = null;
               for (let prior = index - 1; prior >= 0; prior -= 1) {
-                const candidate = turns[prior];
+                const candidate = rows[prior];
                 if (candidate?.kind === "delegated-completion") break;
                 if (candidate?.kind === "user") {
                   precedingUserIndex = prior;
@@ -626,24 +564,23 @@ export function Transcript({
                 }
               }
 
-              const lastIsThisRun =
-                index === turns.length - 1 && !(showPending && turn.key !== STREAMING_TURN_KEY);
-              const row = (
+              // A prompt sent ahead of the snapshot is drawn under the previous
+              // reply, so only the last row can be this run's.
+              const lastIsThisRun = index === rows.length - 1;
+              return (
                 <ModelMessage
                   key={turn.key}
                   turn={turn}
                   model={model}
-                  active={running && lastIsThisRun}
-                  // Pending model chrome below the optimistic bubble is the
-                  // visual last row; leaving min-height on the previous reply
-                  // made Send shrink-then-grow a frame later.
-                  isLast={lastIsThisRun && !showModelPending}
+                  active={(running || turn === placeholder) && lastIsThisRun}
+                  isLast={lastIsThisRun}
                   activity={running && lastIsThisRun ? activity : undefined}
-                  selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
-                  selectedWorkset={panel === "worksets" ? selectedWorkset : null}
-                  onSelectThread={focusThread}
-                  onSelectWorkset={focusWorkset}
-                  userMessageIndex={precedingUser?.messageIndex}
+                  selectedThreadEpisode={panel === "insights" ? selectedThreadEpisode : null}
+                  selectedGroupId={panel === "insights" ? selectedGroupId : null}
+                  onSelectThread={openThread}
+                  userMessageIndex={
+                    precedingUser?.pending ? undefined : precedingUser?.messageIndex
+                  }
                   userText={precedingUser?.text}
                   actionsDisabled={actionsBusy}
                   readOnly={readOnly}
@@ -655,11 +592,9 @@ export function Transcript({
                   onRevert={readOnly ? null : openRevert}
                   onFork={readOnly ? null : createFork}
                   forks={
-                    readOnly
-                      ? []
-                      : (snapshot?.forks ?? []).filter(
-                          (entry) => entry.source_message_idx === turn.messageIndex,
-                        )
+                    readOnly || turn.messageIndex == null
+                      ? undefined
+                      : forksAt.get(turn.messageIndex)
                   }
                   onOpenFork={openFork}
                   onDismissFork={dismissForkMarker}
@@ -671,58 +606,8 @@ export function Transcript({
                   filesPanel={filesPanel}
                 />
               );
-
-              // The prompt a streaming turn answers is not in the snapshot yet,
-              // so its bubble is still the optimistic copy — which belongs
-              // above the answer to it rather than after it.
-              return streamingTurn && turn.key === STREAMING_TURN_KEY ? (
-                <Fragment key={turn.key}>
-                  <UserMessage
-                    text={pendingText}
-                    invokedSkills={pendingSkills}
-                    pending
-                    sessionId={sessionId}
-                    terminalSelection={submitted?.terminal_selection ?? undefined}
-                  />
-                  {row}
-                </Fragment>
-              ) : (
-                row
-              );
             })}
           </PerfProfiler>
-
-          {showPending && !streamingTurn ? (
-            <UserMessage
-              text={pendingText}
-              invokedSkills={pendingSkills}
-              pending
-              sessionId={sessionId}
-              terminalSelection={submitted?.terminal_selection ?? undefined}
-            />
-          ) : null}
-
-          {/* Before the first assistant message or stream delta lands, keep the
-              same chrome as a live ModelMessage — pill + model name — rather
-              than a separate "Run started…" / loader row. */}
-          {showModelPending ? (
-            <ModelMessage
-              turn={{
-                kind: "model",
-                key: "model-pending",
-                blocks: [],
-                durationMs: null,
-                messageIndex: null,
-              }}
-              model={model}
-              active
-              isLast
-              selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
-              selectedWorkset={panel === "worksets" ? selectedWorkset : null}
-              onSelectThread={focusThread}
-              onSelectWorkset={focusWorkset}
-            />
-          ) : null}
 
           {notice ? (
             <ChatSessionMessage
@@ -748,7 +633,7 @@ export function Transcript({
           {durableFailure ? (
             <RunFailureRecovery
               failure={durableFailure}
-              goal={goalQuery.data}
+              goal={goal}
               backend={backend}
               onResumeGoal={resumeGoal}
               onOpenSettings={() => sessionActions.settings(sessionId)}
@@ -772,30 +657,11 @@ export function Transcript({
         </div>
       </div>
 
-      {/* Always mounted so show/hide can animate opacity + translate like
-          ArceeFM's "Last messages" control — unmounting would skip the exit. */}
-      <div
-        className={`absolute z-[2] left-1/2 bottom-0 -translate-x-1/2 rounded-full  transition-all duration-150 ease-out ${
-          showJumpButton
-            ? "translate-y-0 scale-100 opacity-100"
-            : "translate-y-3 scale-75 opacity-0 pointer-events-none"
-        }`}
-      >
-        <Button
-          variant={ButtonVariant.Primary}
-          size={ButtonSize.Small}
-          content={ButtonContent.IconRight}
-          className="!rounded-b-none !shadow-3xl"
-          onClick={jumpToLatest}
-        >
-          Last messages
-          <Icon iconName={IconName.Down} />
-        </Button>
-      </div>
+      <JumpToLatest visible={showJumpButton} onJump={jumpToLatest} />
 
       <RevertModal
         open={revertTarget !== null}
-        onClose={() => setRevertTarget(null)}
+        onClose={closeRevert}
         sessionId={sessionId}
         messageIdx={revertTarget?.messageIdx ?? null}
         prompt={revertTarget?.prompt ?? ""}

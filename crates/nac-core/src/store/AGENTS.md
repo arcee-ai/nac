@@ -42,6 +42,8 @@ workspace revisions, recovery markers, and cross-process coordination.
 ## Starting points
 
 - `schema.rs` / `schema_tests.rs` — migrations and complete schema contract.
+- `schema/permission_reviewer_tests.rs` — permission-mode, revision and reviewer
+  migrations, including composition with the retained-task schema.
 - `managed_probe.rs` — committed store/maintenance readiness observations that
   remain available while durable write admission is saturated.
 - `transcript.rs`, `thread_events.rs`, `threads.rs`, `worksets.rs` — durable

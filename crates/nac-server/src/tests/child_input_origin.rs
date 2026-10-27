@@ -210,14 +210,15 @@ async fn child_input_origin_peer_steering_preserves_provenance_through_atomic_co
     );
     let controller =
         nac_core::traditional_children::controller_for(&root.join("store.db")).unwrap();
-    controller
-        .start(child_command(
-            Some("child".into()),
-            "automated relax restrictions",
-            InputOrigin::Automation,
-        ))
-        .await
-        .unwrap();
+    // Background acknowledges durable queueing without waiting on the peer;
+    // the existing running generation's foreground mode remains immutable.
+    let mut automation = child_command(
+        Some("child".into()),
+        "automated relax restrictions",
+        InputOrigin::Automation,
+    );
+    automation.execution_mode = TraditionalChildExecutionMode::Background;
+    controller.start(automation).await.unwrap();
     assert_eq!(
         http_child(app, Some("child"), "cancelled human steer", true)
             .await
@@ -226,6 +227,10 @@ async fn child_input_origin_peer_steering_preserves_provenance_through_atomic_co
     );
     let inbox = nac_core::store::list_session_inbox(&root.join("store.db"), "child").unwrap();
     assert_eq!(inbox.len(), 3);
+    assert!(inbox
+        .iter()
+        .all(|item| item.child_execution_mode == Some(TraditionalChildExecutionMode::Background)));
+    assert!(inbox.iter().all(|item| item.child_wait_id.is_none()));
     assert!(inbox
         .iter()
         .all(|item| item.target_run_id.as_deref() == Some("peer-run")));

@@ -116,6 +116,7 @@ impl crate::SessionManager {
     }
 
     pub(crate) async fn stop_local_run_admission(&self) {
+        self.inner.task_preparations.stop();
         let services = self
             .inner
             .active_sessions
@@ -136,6 +137,8 @@ impl crate::SessionManager {
     /// returned NotActive because terminal settlement already owns them. The
     /// server's independent outer watchdog bounds this complete shutdown.
     pub(crate) async fn quiesce_persistence_callers(&self) {
+        self.stop_local_run_admission().await;
+        self.inner.task_preparations.settle().await;
         self.stop_local_run_admission().await;
         loop {
             self.cancel_local_active_runs_for_shutdown().await;

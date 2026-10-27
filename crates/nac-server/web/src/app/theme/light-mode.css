@@ -151,6 +151,9 @@
   --color-border-info-tertiary: var(--blue-trans-100);
   --color-border-info-muted: var(--blue-trans-50);
 
+  /* Border / Input */
+  --color-border-input: var(--dark-trans-50);
+
   /* Border / Inversed */
   --color-border-primary-inversed: var(--white);
   --color-border-secondary-inversed: var(--white-trans-500);
@@ -184,10 +187,13 @@
   --color-fill-btn-accent-muted: var(--brand-trans-400);
 
   --color-fill-btn-secondary: var(--gray-700);
-  --color-fill-btn-secondary-highlighted: var(--gray-900);
   --color-fill-btn-secondary-hovered: var(--gray-900);
   --color-fill-btn-secondary-pressed: var(--gray-900);
   --color-fill-btn-secondary-disabled: var(--dark-trans-300);
+  --color-fill-btn-secondary-highlighted: var(--gray-900);
+  --color-fill-btn-secondary-hovered-highlighted: var(--gray-900);
+  --color-fill-btn-secondary-pressed-highlighted: var(--gray-900);
+  --color-fill-btn-secondary-disabled-highlighted: var(--dark-trans-300);
 
   /* Destructive icons match the label ramp under Text / Buttons. */
   --color-fill-btn-destructive: var(--red-600);
@@ -249,6 +255,10 @@
   --color-text-btn-secondary-hovered: var(--black);
   --color-text-btn-secondary-pressed: var(--black);
   --color-text-btn-secondary-disabled: var(--dark-trans-300);
+  --color-text-btn-secondary-highlighted: var(--black);
+  --color-text-btn-secondary-hovered-highlighted: var(--black);
+  --color-text-btn-secondary-pressed-highlighted: var(--black);
+  --color-text-btn-secondary-disabled-highlighted: var(--dark-trans-300);
 
   /* One step darker than the Telos ramp, whose resting red stays below 4.5:1 on
      the red-tinted secondary fill. */
@@ -310,6 +320,7 @@
     0 1px 0 0 rgba(48, 54, 54, 0.04), 0 2px 12px 0 rgba(48, 54, 54, 0.04),
     0 1px 8px 0 rgba(48, 54, 54, 0.1), 0 10px 36px 0 rgba(48, 54, 54, 0.24),
     0 0 0 1px rgba(48, 54, 54, 0.04);
+  --shadow-composer-send: var(--shadow-xl);
   --shadow-convex: 0 -1px 0 0 rgba(48, 54, 54, 0.06) inset, 0 0 0 1px rgba(48, 54, 54, 0.1) inset;
   --shadow-concave: 0 1px 0 0 rgba(48, 54, 54, 0.06) inset, 0 0 0 1px rgba(48, 54, 54, 0.1) inset;
   --shadow-range-knob: 0 1px 2px 0 rgba(18, 36, 52, 0.2), 0 0 1px 1px rgba(0, 0, 0, 0.1);

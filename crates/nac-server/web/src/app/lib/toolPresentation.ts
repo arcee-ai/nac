@@ -1,3 +1,5 @@
+import { isJsonObject, type JsonObject, type JsonValue } from "@/app/lib/json";
+import { isNumber, isString } from "@/app/lib/primitive";
 import type { AgentEvent, Message, SessionSnapshotResponse, ToolCall } from "@/app/types/api";
 
 export type ToolPresentationStatus =
@@ -22,6 +24,17 @@ export interface ToolPresentation {
   resultPreview: string | null;
   status: ToolPresentationStatus;
   statusLabel: string;
+  /**
+   * Execution time from the call's finish event. Absent when the call never
+   * ran, or when no finish event reports one.
+   */
+  durationMs?: number;
+  /**
+   * Session a `subagent` or `orchestrator_launch` call started or continued.
+   * An identity hint for delegated-session links that is never displayed:
+   * consumers must resolve it against the delegation queries before trusting it.
+   */
+  spawnedSessionId?: string;
 }
 
 type ToolStarted = Extract<AgentEvent, { type: "tool_call_started" }>;
@@ -96,6 +109,8 @@ const TOOL_LABELS: Record<string, string> = {
   create_goal: "Create goal",
   get_goal: "Read goal",
   update_goal: "Update goal",
+  find_tasks: "Find tasks",
+  read_task: "Read task",
   subagent: "Start coding agent",
   subagent_status: "Check coding agent",
   subagent_cancel: "Cancel coding agent",
@@ -122,6 +137,12 @@ const CANCELLED_MARKER = "[tool call cancelled by user]";
 const INTERRUPTED_MARKER = "Tool execution was interrupted; no result was recorded.";
 const NAME_LIMIT = 160;
 const PREVIEW_LIMIT = 180;
+/** Launch tools name their session with the same field in arguments and results. */
+const SPAWNED_SESSION_FIELDS = new Map([
+  ["subagent", "child_session_id"],
+  ["orchestrator_launch", "orchestrator_session_id"],
+]);
+const SESSION_ID = /^[^\s\p{Cc}]+$/u;
 
 function bounded(value: string | null | undefined, limit: number): string {
   const safe = [...(value ?? "")]
@@ -149,6 +170,33 @@ function toolLabel(name: string): string {
     return `MCP · ${humanize(leaf)}`;
   }
   return humanize(name || "tool call");
+}
+
+function parseObject(text: string | null | undefined): JsonObject | null {
+  if (!text) return null;
+  try {
+    // SAFETY: JSON.parse only ever yields JSON values.
+    const parsed = JSON.parse(text) as JsonValue;
+    return isJsonObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function sessionId(value: JsonValue | undefined): string | null {
+  if (!isString(value) || !SESSION_ID.test(value) || [...value].length > NAME_LIMIT) return null;
+  return value;
+}
+
+function spawnedSession(name: string, call: ToolCall, resultText: string | null): string | null {
+  const field = SPAWNED_SESSION_FIELDS.get(name);
+  if (!field) return null;
+  const continued = sessionId(parseObject(call.function?.arguments)?.[field]);
+  if (continued) return continued;
+  // Both the foreground record and the background acknowledgement carry these.
+  const result = parseObject(resultText);
+  if (!result || !isNumber(result.generation) || !isString(result.status)) return null;
+  return sessionId(result[field]);
 }
 
 function statusFromFinished(event: ToolFinished): ToolPresentationStatus {
@@ -194,7 +242,7 @@ export function presentToolCall({
   call: ToolCall;
   events?: ToolEventPair;
   hasResult: boolean;
-  /** Used only for fixed cancellation/interruption markers, never displayed. */
+  /** Read only for fixed cancellation/interruption markers and launch records; never displayed. */
   resultText: string | null;
   resultHasImage: boolean;
   active: boolean;
@@ -220,7 +268,7 @@ export function presentToolCall({
   if (!resultPreview && status === "cancelled") resultPreview = "No result was retained.";
   if (!resultPreview && status === "interrupted") resultPreview = "No result was recorded.";
 
-  return {
+  const presentation: ToolPresentation = {
     callId: call.id,
     name,
     label: toolLabel(name),
@@ -229,4 +277,11 @@ export function presentToolCall({
     status,
     statusLabel: STATUS_LABELS[status],
   };
+  const durationMs = events?.finished?.execution_duration_ms;
+  if (durationMs != null && Number.isFinite(durationMs) && durationMs >= 0) {
+    presentation.durationMs = durationMs;
+  }
+  const spawnedSessionId = spawnedSession(name, call, resultText);
+  if (spawnedSessionId) presentation.spawnedSessionId = spawnedSessionId;
+  return presentation;
 }

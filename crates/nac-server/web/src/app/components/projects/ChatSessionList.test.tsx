@@ -44,7 +44,7 @@ function session(
 afterEach(cleanup);
 
 describe("chat session behavior identity", () => {
-  it("shows compact behavior badges with full accessible names in chat lists", () => {
+  it("shows behavior icons with full accessible names in chat lists", () => {
     const onOpen = vi.fn();
     render(
       <UiPolicyContext.Provider value={ORCHESTRATION_UI_POLICY}>
@@ -67,9 +67,10 @@ describe("chat session behavior identity", () => {
       name: "Coordinate the migration, Direct + NAC orchestration",
     });
     expect(hybrid).toBeTruthy();
-    expect(screen.getByText("Orchestrator")).toBeTruthy();
-    expect(screen.getByText("Direct")).toBeTruthy();
-    expect(screen.getByText("Direct + NAC")).toBeTruthy();
+    expect(screen.queryByText("Orchestrator")).toBeNull();
+    expect(screen.queryByText("Direct")).toBeNull();
+    expect(screen.queryByText("Direct + NAC")).toBeNull();
+    expect(hybrid.querySelector('[data-session-behavior-icon="planeAdd"]')).toBeTruthy();
 
     fireEvent.click(hybrid);
     expect(onOpen).toHaveBeenCalledWith(

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
-import { createDirectSession, expect, test } from "./harness";
+import { createDirectSession, expect, showSidePanel, test } from "./harness";
 
 // The native Exa fixture enables the real managed harness. This episode qualifies
 // registered APP redaction only; native Exa output remains a separate required repair.
@@ -22,9 +22,13 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
   await fs.writeFile(
     path.join(workspace, "secret_screen.py"),
     [
-      "import os,sys,termios,tty,time,select,json,signal",
+      "import os,sys,termios,tty,time,select,json,signal,tempfile",
       "value=os.environ['APP_SCREEN_SECRET'].encode(); saved=termios.tcgetattr(0)",
-      "def geometry(*args): open('screen_geometry.json','w').write(json.dumps(list(os.get_terminal_size(0))))",
+      // Readers poll concurrently with SIGWINCH; publish only complete snapshots.
+      "def write_json(name,value):",
+      " with tempfile.NamedTemporaryFile('w',dir='.',delete=False) as output: json.dump(value,output)",
+      " os.replace(output.name,name)",
+      "def geometry(*args): write_json('screen_geometry.json',list(os.get_terminal_size(0)))",
       "signal.signal(signal.SIGWINCH,geometry)",
       "try:",
       " tty.setraw(0); os.write(1,b'\\x1b[?1049h\\x1b[2J\\x1b[HLEFT|'+value[:12])",
@@ -33,7 +37,7 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
       " os.write(1,value[12:]+b'|RIGHT\\x1b[6n'); data=b''; end=time.monotonic()+8",
       " while not os.path.isfile('screen_measure_done') and time.monotonic()<end:",
       "  if select.select([0],[],[],0.05)[0]: data+=os.read(0,256)",
-      " open('screen_cursor.json','w').write(json.dumps(list(data))); os.write(1,b'\\r\\nAPP-SCREEN-DONE'); geometry()",
+      " write_json('screen_cursor.json',list(data)); os.write(1,b'\\r\\nAPP-SCREEN-DONE'); geometry()",
       " end=time.monotonic()+8",
       " while time.monotonic()<end:",
       "  if select.select([0],[],[],0.05)[0] and b'q' in os.read(0,256): break",
@@ -45,8 +49,7 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
   await page.goto(harness.baseUrl + "/#/session/" + session + "/terminal");
-  const show = page.getByRole("button", { name: "Show panel", exact: true });
-  if (await show.isVisible()) await show.click();
+  await showSidePanel(page);
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
   await pane.getByRole("button", { name: "New shell", exact: true }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -106,7 +109,9 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
     observations.maskWidth = "[REDACTED]".length;
     observations.actualCursorColumn = 22;
     const before = await api.getUserTerminal(session, terminal);
-    await page.setViewportSize({ width: 1050, height: 640 });
+    // The side panel keeps its 480px floor at this width and below, so only a
+    // wider window resizes the terminal.
+    await page.setViewportSize({ width: 1600, height: 640 });
     await expect
       .poll(async () => {
         const after = await api.getUserTerminal(session, terminal);
@@ -114,7 +119,9 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
           await fs.readFile(path.join(workspace, "screen_geometry.json"), "utf8"),
         );
         return (
-          after.cols !== before.cols && geometry[0] === after.cols && geometry[1] === after.rows
+          (after.cols !== before.cols || after.rows !== before.rows) &&
+          geometry[0] === after.cols &&
+          geometry[1] === after.rows
         );
       })
       .toBe(true);

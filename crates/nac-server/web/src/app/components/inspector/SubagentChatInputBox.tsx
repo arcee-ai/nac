@@ -1,30 +1,25 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
+import { ButtonVariant, HoverHint, Icon, IconName, Switch, SwitchSize } from "@/app/atoms";
 import {
-  Badge,
-  BadgeColor,
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  Icon,
-  IconName,
-  Switch,
-  Tooltip,
-  TooltipPosition,
-} from "@/app/atoms";
+  ComposerFrame,
+  ComposerIconButton,
+  ComposerPill,
+  ComposerSendButton,
+} from "@/app/components/inspector/composer/ComposerFrame";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
-import type { TraditionalChildStatus } from "@/app/types/api";
+
+const PLACEHOLDER = "Send a message";
 
 const BACKGROUND_HINT =
   "The subagent keeps working after you leave this chat. Steer or stop it from here.";
 
-const STATUS_BADGE: Partial<Record<TraditionalChildStatus, { text: string; color: BadgeColor }>> = {
-  completed: { text: "Completed", color: BadgeColor.Green },
-  cancelled: { text: "Cancelled", color: BadgeColor.Yellow },
-  failed: { text: "Failed", color: BadgeColor.Red },
-  interrupted: { text: "Interrupted", color: BadgeColor.Yellow },
-};
+/** One line of the field on a phone, which is also its collapsed height. */
+const MOBILE_ROW_PX = 40;
+
+/** How far the field grows before it starts scrolling instead. */
+const MAX_HEIGHT_PX = 180;
 
 export interface SubagentChatInputBoxProps {
   value: string;
@@ -35,13 +30,15 @@ export interface SubagentChatInputBoxProps {
   /** Foreground runs keep the switch off and say "Regular run" while they work. */
   background: boolean;
   onBackgroundChange: (background: boolean) => void;
-  status?: TraditionalChildStatus | null;
   busy?: boolean;
+  /** A start is still pending: nothing more is sent until the target is running. */
+  starting?: boolean;
   permission?: ReactNode;
-  /** Put the caret in the field once this composer is shown. */
-  autoFocus?: boolean;
-  /** Changes whenever a new launch should take the caret again. */
-  focusRequest?: number;
+  /**
+   * Over a child transcript it floats on the faded ground, as the main
+   * composer does. A panel already insets and backs it.
+   */
+  floating?: boolean;
 }
 
 /**
@@ -57,89 +54,129 @@ export function SubagentChatInputBox({
   running,
   background,
   onBackgroundChange,
-  status = null,
   busy = false,
+  starting = false,
   permission,
-  autoFocus = false,
-  focusRequest = 0,
+  floating = false,
 }: SubagentChatInputBoxProps) {
+  const isMobile = useIsMobile();
   const field = useRef<HTMLTextAreaElement>(null);
+  const [focused, setFocused] = useState(false);
   const filled = value.trim().length > 0;
-  const placeholder = running ? "Steer a message" : "Send a message";
-  const badge = !running && status ? STATUS_BADGE[status] : undefined;
+  const sendable = filled && (running || !starting);
+  // A phone keeps a message it is not editing to one truncated line.
+  const collapsed = isMobile && !focused && filled;
   const runLabel = running
     ? background
       ? "Running in the background"
       : "Regular run"
     : "Run in the background";
+  // A run's Stop rides at the end of the pill, as the goal flag does in the
+  // main composer.
+  const textInset = isMobile
+    ? running
+      ? "py-2 pr-2 pl-3"
+      : "px-3 py-2"
+    : running
+      ? "py-3 pr-2 pl-4"
+      : "px-4 py-3";
 
   useLayoutEffect(() => {
     const element = field.current;
     if (!element) return;
+    if (collapsed) {
+      element.style.height = `${MOBILE_ROW_PX}px`;
+      return;
+    }
     element.style.height = "auto";
-    element.style.height = `${element.scrollHeight}px`;
-  }, [value]);
-
-  useLayoutEffect(() => {
-    if (!autoFocus) return;
-    const focus = () => field.current?.focus({ preventScroll: true });
-    focus();
-    // The spawn menu unmounts in the same turn and can move focus back to the
-    // parent composer. Retry once the panel is focusable.
-    const frame = requestAnimationFrame(focus);
-    return () => cancelAnimationFrame(frame);
-  }, [autoFocus, focusRequest]);
+    element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT_PX)}px`;
+  }, [collapsed, value]);
 
   return (
-    <form
-      className="flex w-full flex-col gap-4 rounded-[8px] bg-elevation-level-2 p-4 shadow-2xl"
+    <ComposerFrame
+      compact={isMobile}
+      faded={floating}
+      className={floating ? undefined : "p-0"}
       onSubmit={(event) => {
         event.preventDefault();
-        if (running && !filled) onStop();
-        else if (filled) onSubmit();
+        if (busy) return;
+        if (sendable) onSubmit();
       }}
     >
-      <div className="relative flex items-end overflow-hidden rounded-[4px] bg-input py-2 pr-12 pl-2">
-        <textarea
-          ref={field}
-          rows={1}
-          value={value}
-          placeholder={placeholder}
-          aria-label={placeholder}
-          disabled={busy}
-          className="max-h-40 min-h-5 w-full resize-none bg-transparent px-1 text-small text-input outline-none placeholder:text-input-placeholder"
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter" || event.shiftKey) return;
-            event.preventDefault();
-            if (filled && !busy) onSubmit();
-          }}
-        />
-        <Button
+      <div className="flex items-end gap-2">
+        <ComposerPill compact={isMobile} outline={focused ? "focus" : undefined}>
+          <div className="relative min-w-0 flex-1">
+            <textarea
+              ref={field}
+              rows={1}
+              value={value}
+              placeholder={PLACEHOLDER}
+              aria-label={PLACEHOLDER}
+              disabled={busy}
+              className={cn(
+                "block w-full resize-none bg-transparent text-medium text-input outline-none placeholder:text-input-placeholder focus:placeholder:text-transparent",
+                textInset,
+                // The line below stands in for it, because a textarea cannot
+                // ellipsize its own overflow.
+                collapsed && "overflow-hidden opacity-0",
+              )}
+              onChange={(event) => onChange(event.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key !== "Enter" || event.shiftKey) return;
+                if (isMobile && !event.metaKey && !event.ctrlKey) return;
+                event.preventDefault();
+                if (sendable && !busy) onSubmit();
+              }}
+            />
+            {collapsed ? (
+              <div
+                aria-hidden
+                className={cn("pointer-events-none absolute inset-0 flex items-center", textInset)}
+              >
+                <span className="w-full truncate text-medium text-input">{value}</span>
+              </div>
+            ) : null}
+          </div>
+          {running ? (
+            <ComposerIconButton
+              compact={isMobile}
+              type="button"
+              variant={ButtonVariant.Ghost}
+              disabled={busy}
+              onClick={onStop}
+              aria-label="Stop"
+            >
+              <Icon iconName={IconName.Stop} size={24} />
+            </ComposerIconButton>
+          ) : null}
+        </ComposerPill>
+        <ComposerSendButton
+          compact={isMobile}
           type="submit"
-          size={ButtonSize.Medium}
-          variant={ButtonVariant.Primary}
-          content={ButtonContent.Icon}
-          className="absolute right-0 bottom-0"
-          disabled={busy || (!running && !filled)}
-          aria-label={running ? (filled ? "Steer" : "Stop") : "Send"}
+          disabled={busy || !sendable}
+          aria-label={running ? "Steer" : "Send"}
         >
-          <Icon iconName={running && !filled ? IconName.Stop : IconName.ArrowTop} />
-        </Button>
+          <Icon iconName={IconName.ArrowTop} />
+        </ComposerSendButton>
       </div>
-      <div className="flex items-center gap-2.5 h-6">
+      <div className="flex min-h-6 items-center gap-2.5">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {running ? null : (
             <Switch
+              size={isMobile ? SwitchSize.Large : SwitchSize.Medium}
               checked={background}
-              disabled={busy}
+              disabled={busy || starting}
               aria-label="Run in the background"
               onChange={onBackgroundChange}
             />
           )}
           <span
             className={cn(
-              "label-micro truncate",
+              "truncate",
+              isMobile ? "label-small" : "label-micro",
               running && background
                 ? "text-info-primary"
                 : running
@@ -149,19 +186,10 @@ export function SubagentChatInputBox({
           >
             {runLabel}
           </span>
-          <Tooltip
-            title={runLabel}
-            description={BACKGROUND_HINT}
-            position={TooltipPosition.TopCenter}
-          >
-            <span className="inline-flex text-basic-tertiary">
-              <Icon iconName={IconName.Info} size={16} />
-            </span>
-          </Tooltip>
-          {badge ? <Badge text={badge.text} color={badge.color} className="px-1 py-[2px]" /> : null}
+          <HoverHint title={runLabel} description={BACKGROUND_HINT} muted />
         </div>
         {permission}
       </div>
-    </form>
+    </ComposerFrame>
   );
 }

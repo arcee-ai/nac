@@ -481,7 +481,9 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       "import os,time",
       "os.write(1,b'\\x1b[2J\\x1b[HSELECT-WHILE-OUTPUT\\r\\n')",
       "for i in range(240):",
-      " width=max(1,os.get_terminal_size(1).columns-6)",
+      // Rows stay as wide as the half-row panel the 1500ms budget below was set
+      // against; the wider panel would otherwise grow the noise by 1.6x.
+      " width=min(48,max(1,os.get_terminal_size(1).columns-6))",
       " block=b'\\x1b[2;1H'+str(i).encode()+b':'+b'n'*width+b'\\x1b[K'",
       " os.write(1,block*300); time.sleep(0.02)",
     ].join("\n") + "\n",

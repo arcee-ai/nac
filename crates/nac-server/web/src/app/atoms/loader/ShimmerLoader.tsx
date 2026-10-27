@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type React from "react";
 import { cn } from "../../lib/cn";
 
@@ -35,4 +36,4 @@ const ShimmerLoader: React.FC<ShimmerLoaderProps> = ({
   </div>
 );
 
-export default ShimmerLoader;
+export default memo(ShimmerLoader);

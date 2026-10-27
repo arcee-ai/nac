@@ -175,6 +175,46 @@ impl SessionService {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
             return Ok(None);
         };
+        let child = match crate::store::coordinator::owner_for(&self.metadata.store_path)? {
+            Some(owner) => owner.load_traditional_child(session_id.to_owned()).await?,
+            None => crate::store::load_traditional_child(&self.metadata.store_path, session_id)?,
+        };
+        if self.has_active_operation()
+            || child
+                .as_ref()
+                .is_none_or(|child| child.status != crate::store::TraditionalChildStatus::Running)
+        {
+            return Ok(child);
+        }
+        let lease = match sessions::SessionOperationLease::try_acquire(
+            &self.metadata.store_path,
+            session_id,
+        ) {
+            Ok(lease) => lease,
+            Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                return match crate::store::coordinator::owner_for(&self.metadata.store_path)? {
+                    Some(owner) => owner.load_traditional_child(session_id.to_owned()).await,
+                    None => {
+                        crate::store::load_traditional_child(&self.metadata.store_path, session_id)
+                    }
+                };
+            }
+            Err(error) => return Err(error.into()),
+        };
+        self.reconcile_traditional_child_terminal_with_lease(&lease)
+            .await
+    }
+
+    pub(super) async fn reconcile_traditional_child_terminal_with_lease(
+        &self,
+        lease: &sessions::SessionOperationLease,
+    ) -> Result<Option<crate::store::TraditionalChildRecord>> {
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        lease.validate(&self.metadata.store_path, session_id)?;
         let owner = crate::store::coordinator::owner_for(&self.metadata.store_path)?;
         let Some(child) = (if let Some(owner) = &owner {
             owner.load_traditional_child(session_id.to_owned()).await?
@@ -195,25 +235,6 @@ impl SessionService {
             Some(recovery) => recovery,
             None => {
                 if self.active_run().is_some() {
-                    return Ok(Some(child));
-                }
-                let _lease = match sessions::SessionOperationLease::try_acquire(
-                    &self.metadata.store_path,
-                    session_id,
-                ) {
-                    Ok(lease) => lease,
-                    Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                        return Ok(Some(child));
-                    }
-                    Err(error) => return Err(anyhow::Error::new(error)),
-                };
-                if (if let Some(owner) = &owner {
-                    owner.load_run_recovery(session_id.to_owned()).await?
-                } else {
-                    crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
-                })
-                .is_some()
-                {
                     return Ok(Some(child));
                 }
                 let Some(run_id) = child.run_id.as_deref() else {

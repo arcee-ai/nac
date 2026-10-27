@@ -414,7 +414,11 @@ impl AgentEvent {
             exit_code,
             completion_status,
             effective_timeout_ms: metric("timeout_ms"),
-            execution_duration_ms: metric("execution_duration_ms"),
+            execution_duration_ms: if result.execution_duration_excludes_authorization {
+                result.execution_duration_ms
+            } else {
+                metric("execution_duration_ms").or(result.execution_duration_ms)
+            },
             cleanup_duration_ms: metric("cleanup_duration_ms"),
             remote_outcome_uncertain: metadata
                 .as_ref()

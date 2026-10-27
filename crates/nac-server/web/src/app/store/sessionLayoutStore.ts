@@ -2,16 +2,18 @@
 // row the side box points at. Kept outside the URL because both are viewing
 // preferences, not locations.
 
+import type { InsightsFilter } from "@/app/features/insights/model/types";
 import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
+
+/** What the Insights detail shows. A thread reads its name from `selectedThread`. */
+export type InsightSelection =
+  | { kind: "group"; groupId: string; segmentKey: string | null }
+  | { kind: "thread" };
 
 interface SessionLayoutState {
   /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
   collapsed: boolean;
-  /**
-   * Whether the next collapsed change should tween. A launch from the composer
-   * opens a collapsed panel in place, so the chat column does not replay its
-   * layout for half a second.
-   */
+  /** Whether the next collapsed change should tween; restoring a project's stored rail does not. */
   sidePanelAnimate: boolean;
   /**
    * Project the collapsed preference belongs to. Null until the open session's
@@ -27,7 +29,7 @@ interface SessionLayoutState {
    * phone, in place of the detail on a tablet. Wide layouts ignore this.
    */
   panelList: boolean;
-  /** Thread the chat last pointed the Threads panel at. */
+  /** Thread the chat last pointed Insights at; its detail shows this one. */
   selectedThread: string | null;
   /**
    * Which of that thread's chat cards did the pointing, or null when the pick
@@ -35,24 +37,24 @@ interface SessionLayoutState {
    * episode, and only the card clicked belongs highlighted.
    */
   selectedThreadEpisode: string | null;
+  /** Entry the Insights detail shows; null until the panel or the chat picks one. */
+  selectedInsight: InsightSelection | null;
   /**
-   * Whether the Threads detail pane considers the open thread running. The
-   * phone dialog header reads this so its title shimmer matches the panel.
+   * Bumps on every Insights pick, so picking the entry already shown still
+   * scrolls the detail back to it.
    */
-  selectedThreadRunning: boolean;
+  insightFocusNonce: number;
+  /** Insights groups whose child rows are open, by group id. */
+  expandedInsightGroups: ReadonlySet<string>;
+  insightsFilter: InsightsFilter;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
+  /** Open Subagents row per parent, kept so returning from a transcript reopens it. */
+  selectedSubagents: ReadonlyMap<string, string>;
   /** Revision the panels are looking at, or null for the live working tree. */
   selectedRevision: number | null;
   /** File the Files panel is showing. */
   selectedFile: string | null;
-  /**
-   * Subagents tab opened on a blank launch, from the parent composer's spawn
-   * menu or from New Agent / New Orchestrator in the list.
-   */
-  subagentLaunch: "agent" | "orchestrator" | null;
-  /** Bumps every time a blank subagent launch is requested, so the composer can take focus again. */
-  subagentLaunchRequest: number;
   /** Folders flipped away from their default open state, by path. */
   toggledFolders: ReadonlySet<string>;
   /**
@@ -73,14 +75,16 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     panelList: false,
     selectedThread: null,
     selectedThreadEpisode: null,
-    selectedThreadRunning: false,
+    selectedInsight: null,
+    insightFocusNonce: 0,
+    expandedInsightGroups: new Set(),
+    insightsFilter: "all",
     selectedWorkset: null,
+    selectedSubagents: new Map(),
     selectedRevision: null,
     selectedFile: null,
     toggledFolders: new Set(),
     fileListing: "tree",
-    subagentLaunch: null,
-    subagentLaunchRequest: 0,
   });
   const initial_sessionLayoutStore = sessionLayoutStore.getState();
 
@@ -167,6 +171,11 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     setState(expanded ? { expanded, panelList: false } : { expanded });
   }
 
+  /** Bring the side box up as a phone's dialog, on the list of its panel's rows. */
+  function openSidePanelList(): void {
+    setState({ expanded: true, panelList: true });
+  }
+
   /** Slide the side box down to its icon rail, or bring the panel back. */
   function toggleSidePanelCollapsed(): void {
     applyCollapsed(!getState().collapsed);
@@ -209,16 +218,44 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     if (selectedThread) showSidePanelList(false);
   }
 
-  /** Drive the phone dialog title shimmer from the Threads detail pane. */
-  function setSelectedThreadRunning(selectedThreadRunning: boolean): void {
-    if (getState().selectedThreadRunning !== selectedThreadRunning) {
-      setState({ selectedThreadRunning });
-    }
+  /**
+   * Point the Insights detail at an entry. Leaves the narrow list alone: a
+   * group row both opens its children there and selects itself.
+   */
+  function selectInsight(selectedInsight: InsightSelection | null): void {
+    setState((state) =>
+      selectedInsight == null
+        ? { selectedInsight }
+        : { selectedInsight, insightFocusNonce: state.insightFocusNonce + 1 },
+    );
+  }
+
+  /** Open or close one Insights group's child rows; flips it when `expanded` is omitted. */
+  function toggleInsightGroup(groupId: string, expanded?: boolean): void {
+    setState((state) => {
+      const open = state.expandedInsightGroups.has(groupId);
+      if (expanded === open) return null;
+      const next = new Set(state.expandedInsightGroups);
+      if (open) next.delete(groupId);
+      else next.add(groupId);
+      return { expandedInsightGroups: next };
+    });
+  }
+
+  function selectInsightsFilter(insightsFilter: InsightsFilter): void {
+    if (getState().insightsFilter !== insightsFilter) setState({ insightsFilter });
   }
 
   function selectWorkset(selectedWorkset: string | null): void {
     setState({ selectedWorkset });
     if (selectedWorkset) showSidePanelList(false);
+  }
+
+  function selectSubagent(parentSessionId: string, key: string): void {
+    if (getState().selectedSubagents.get(parentSessionId) === key) return;
+    setState((state) => ({
+      selectedSubagents: new Map(state.selectedSubagents).set(parentSessionId, key),
+    }));
   }
 
   /** Point the panels at a captured revision, or back at the working tree. */
@@ -244,37 +281,17 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     setState({ fileListing });
   }
 
-  /** Open the Subagents tab on a blank agent or orchestrator launch. */
-  function openSubagentLaunch(subagentLaunch: "agent" | "orchestrator"): void {
-    setState((state) => ({
-      subagentLaunch,
-      panelList: false,
-      subagentLaunchRequest: state.subagentLaunchRequest + 1,
-      collapsed: false,
-      // The chat is laid out against the column width. Tweening that from the
-      // rail to half the screen reflows the whole transcript, which reads as the
-      // session resetting. The panel is already full size off to the side, so it
-      // can appear without that tween.
-      sidePanelAnimate: state.collapsed ? false : state.sidePanelAnimate,
-    }));
-    rememberCollapsed(false);
-  }
-
   function setSidePanelAnimate(sidePanelAnimate: boolean): void {
     if (getState().sidePanelAnimate !== sidePanelAnimate) setState({ sidePanelAnimate });
   }
 
-  function clearSubagentLaunch(): void {
-    if (getState().subagentLaunch != null) setState({ subagentLaunch: null });
-  }
-
   /**
    * Wipe the session-scoped pointers that belong to the inspector we just left.
-   * Threads, worksets, revisions, files and folders belong to one session, so
-   * carrying them into another would point the panels at something that is not
-   * theirs. A leftover selectedThread in particular was injected into the next
-   * session's thread list as a ghost row that vanished the moment you clicked a
-   * real one.
+   * Threads, Insights entries, worksets, revisions, files and folders belong
+   * to one session, so carrying them into another would point the panels at
+   * something that is not theirs. A leftover selectedThread in particular was
+   * injected into the next session's thread list as a ghost row that vanished
+   * the moment you clicked a real one.
    */
   function resetSessionSelection(): void {
     if (import.meta.env.DEV) {
@@ -287,13 +304,15 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     setState({
       selectedThread: null,
       selectedThreadEpisode: null,
+      selectedInsight: null,
+      insightFocusNonce: 0,
+      expandedInsightGroups: new Set(),
+      insightsFilter: "all",
       selectedWorkset: null,
       selectedRevision: null,
       selectedFile: null,
       toggledFolders: new Set(),
       panelList: false,
-      selectedThreadRunning: false,
-      subagentLaunch: null,
     });
   }
 
@@ -307,14 +326,17 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   const useSidePanelList = () => useStore((s) => s.panelList);
   const useSelectedThread = () => useStore((s) => s.selectedThread);
   const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
-  const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
+  const useSelectedInsight = () => useStore((s) => s.selectedInsight);
+  const useInsightFocusNonce = () => useStore((s) => s.insightFocusNonce);
+  const useExpandedInsightGroups = () => useStore((s) => s.expandedInsightGroups);
+  const useInsightsFilter = () => useStore((s) => s.insightsFilter);
   const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
+  const useSelectedSubagent = (parentSessionId: string) =>
+    useStore((s) => s.selectedSubagents.get(parentSessionId) ?? null);
   const useSelectedRevision = () => useStore((s) => s.selectedRevision);
   const useSelectedFile = () => useStore((s) => s.selectedFile);
   const useToggledFolders = () => useStore((s) => s.toggledFolders);
   const useFileListing = () => useStore((s) => s.fileListing);
-  const useSubagentLaunch = () => useStore((s) => s.subagentLaunch);
-  const useSubagentLaunchRequest = () => useStore((s) => s.subagentLaunchRequest);
   return {
     release: () => {
       sessionLayoutStore.setState(initial_sessionLayoutStore);
@@ -323,20 +345,22 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     bindSidePanelProject,
     unbindSidePanelProject,
     toggleSidePanelExpanded,
+    openSidePanelList,
     toggleSidePanelCollapsed,
     showSidePanelList,
     toggleSidePanelList,
     revealSidePanel,
     selectThread,
-    setSelectedThreadRunning,
+    selectInsight,
+    toggleInsightGroup,
+    selectInsightsFilter,
     selectWorkset,
+    selectSubagent,
     selectRevision,
     selectFile,
     toggleFolder,
     selectFileListing,
-    openSubagentLaunch,
     setSidePanelAnimate,
-    clearSubagentLaunch,
     resetSessionSelection,
     useSidePanelCollapsed,
     useSidePanelAnimate,
@@ -344,14 +368,16 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     useSidePanelList,
     useSelectedThread,
     useSelectedThreadEpisode,
-    useSelectedThreadRunning,
+    useSelectedInsight,
+    useInsightFocusNonce,
+    useExpandedInsightGroups,
+    useInsightsFilter,
     useSelectedWorkset,
+    useSelectedSubagent,
     useSelectedRevision,
     useSelectedFile,
     useToggledFolders,
     useFileListing,
-    useSubagentLaunch,
-    useSubagentLaunchRequest,
   };
 }
 
@@ -361,20 +387,22 @@ export const {
   bindSidePanelProject,
   unbindSidePanelProject,
   toggleSidePanelExpanded,
+  openSidePanelList,
   toggleSidePanelCollapsed,
   showSidePanelList,
   toggleSidePanelList,
   revealSidePanel,
   selectThread,
-  setSelectedThreadRunning,
+  selectInsight,
+  toggleInsightGroup,
+  selectInsightsFilter,
   selectWorkset,
+  selectSubagent,
   selectRevision,
   selectFile,
   toggleFolder,
   selectFileListing,
-  openSubagentLaunch,
   setSidePanelAnimate,
-  clearSubagentLaunch,
   resetSessionSelection,
   useSidePanelCollapsed,
   useSidePanelAnimate,
@@ -382,12 +410,14 @@ export const {
   useSidePanelList,
   useSelectedThread,
   useSelectedThreadEpisode,
-  useSelectedThreadRunning,
+  useSelectedInsight,
+  useInsightFocusNonce,
+  useExpandedInsightGroups,
+  useInsightsFilter,
   useSelectedWorkset,
+  useSelectedSubagent,
   useSelectedRevision,
   useSelectedFile,
   useToggledFolders,
   useFileListing,
-  useSubagentLaunch,
-  useSubagentLaunchRequest,
 } = createSessionLayoutStore(standalonePreferenceStorage);

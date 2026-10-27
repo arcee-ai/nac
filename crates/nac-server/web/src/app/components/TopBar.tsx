@@ -2,27 +2,18 @@ import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  Icon,
-  IconName,
-  Logo,
-} from "@/app/atoms";
+import { Logo } from "@/app/atoms";
 import { Breadcrumbs } from "@/app/components/Breadcrumbs";
 import { HeaderMenu } from "@/app/components/HeaderMenu";
 import { McpServersButton } from "@/app/components/McpServersButton";
-import { SessionHeaderActions } from "@/app/components/SessionHeaderActions";
+import { MobileHeader } from "@/app/components/MobileHeader";
 import { ConfigurationsModal } from "@/app/components/modals/ConfigurationsModal";
 import { McpServersModal } from "@/app/components/modals/MCPServersModal/McpServersModal";
 import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
-import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
+import { routes, sessionIdFromPath } from "@/app/lib/routes";
 
-import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 
 // Figma "HeaderSurface": the same ground-to-transparent gradient stacked twice,
@@ -32,22 +23,24 @@ const GROUND_FADE =
 const SURFACE_STYLE = { backgroundImage: `${GROUND_FADE}, ${GROUND_FADE}` };
 
 export function TopBar() {
+  const isMobile = useIsMobile();
+  if (isMobile) return <MobileHeader />;
+  return <WideTopBar />;
+}
+
+function WideTopBar() {
   const { useSidebarOffset } = useNativeRuntime().stores.sidebarLayoutStore;
 
   const [configuring, setConfiguring] = useState(false);
   const [sshConfigs, setSshConfigs] = useState(false);
   const [mcpServers, setMcpServers] = useState(false);
-  const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   const { pathname } = useLocation();
-  const actions = useProjectActions();
   const managed = useManagedHost();
   const sidebarOffset = useSidebarOffset();
-  const inTrail = sessionIdFromPath(pathname) !== null || projectIdFromPath(pathname) !== null;
-  // A wide session or the project list already has the sidebar for navigation,
-  // so the bar would only sit on top of that chrome. A phone still needs it:
-  // there is no rail, and this is where the side box is opened.
-  if (!isMobile && (sessionIdFromPath(pathname) !== null || pathname === routes.list())) {
+  // A session or the project list already has the sidebar for navigation, so
+  // the bar would only sit on top of that chrome.
+  if (sessionIdFromPath(pathname) !== null || pathname === routes.list()) {
     return null;
   }
 
@@ -56,53 +49,24 @@ export function TopBar() {
       <header
         className={cn(
           "fixed top-0 right-0 z-10 flex items-center justify-between py-2 shrink-0",
-          "transition-[left] duration-500 ease-in-out",
-          isMobile ? "h-16 px-3 gap-4" : isTablet ? "h-[52px] px-3" : "h-[52px] px-4",
+          "transition-[left] duration-300 ease-out",
+          isTablet ? "h-[52px] px-3" : "h-[52px] px-4",
         )}
         style={{ left: sidebarOffset }}
       >
         <div
-          className={cn(
-            "absolute inset-x-0 top-0 pointer-events-none",
-            // On a phone the fade also has to cover the search bar sitting
-            // directly under the bar.
-            isMobile ? "-bottom-[76px]" : "-bottom-[8px]",
-          )}
+          className="absolute inset-x-0 top-0 -bottom-[8px] pointer-events-none"
           style={SURFACE_STYLE}
         />
-        <div
-          className={cn(
-            "relative flex items-center",
-            isMobile ? "flex-1 min-w-0 gap-4" : isTablet ? "shrink-0 gap-4" : "shrink-0 gap-8",
-          )}
-        >
+        <div className={cn("relative flex items-center shrink-0", isTablet ? "gap-4" : "gap-8")}>
           {sidebarOffset > 0 ? null : (
             <Link to={routes.list()} className="shrink-0" aria-label="All projects">
-              <Logo
-                height={isMobile ? 36 : isTablet ? 36 : 36}
-                markOnly={isMobile || isTablet}
-                className="text-basic-primary"
-              />
+              <Logo height={36} markOnly={isTablet} className="text-basic-primary" />
             </Link>
           )}
           <Breadcrumbs />
         </div>
         <div className="relative flex items-center shrink-0 gap-2">
-          {/* On the list a phone has no filter rail to create from, so the
-              primary action rides in the bar. */}
-          {isMobile && !inTrail ? (
-            <Button
-              variant={ButtonVariant.Primary}
-              size={ButtonSize.Medium}
-              content={ButtonContent.Icon}
-              className="btn-round"
-              aria-label={managed.isManaged ? "Add repository" : "New project"}
-              onClick={managed.isManaged ? managed.addRepository : actions.create}
-            >
-              <Icon iconName={IconName.Add} />
-            </Button>
-          ) : null}
-          <SessionHeaderActions />
           <McpServersButton onOpen={() => setMcpServers(true)} />
           <HeaderMenu
             onConfigurations={() => setConfiguring(true)}

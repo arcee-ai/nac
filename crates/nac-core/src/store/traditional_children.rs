@@ -2,6 +2,12 @@ use super::*;
 
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
+mod terminal_receipts;
+pub(super) use terminal_receipts::seed_terminal_receipts;
+pub use terminal_receipts::{
+    load_traditional_child_terminal_receipt, load_traditional_child_terminal_receipt_for_run,
+};
+
 pub const GENERAL_CHILD_PROFILE: &str = "general";
 pub const MAX_RUNNING_TRADITIONAL_CHILDREN: u64 = 4;
 const MAX_OUTCOME_CHARS: usize = 64 * 1024;
@@ -674,6 +680,7 @@ pub fn settle_traditional_child_run(
         settled = load_child_with_connection(&transaction, child_session_id)?
             .ok_or_else(|| anyhow!("traditional child disappeared after completion delivery"))?;
     }
+    terminal_receipts::insert_terminal_receipt(&transaction, &settled)?;
     transaction.commit()?;
     Ok(TraditionalChildSettlement {
         child: settled,

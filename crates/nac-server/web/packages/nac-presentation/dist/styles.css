@@ -20,15 +20,6 @@
       --nac-presentation-tw-divide-x-reverse: 0;
       --nac-presentation-tw-border-style: solid;
       --nac-presentation-tw-divide-y-reverse: 0;
-      --nac-presentation-tw-gradient-position: initial;
-      --nac-presentation-tw-gradient-from: #0000;
-      --nac-presentation-tw-gradient-via: #0000;
-      --nac-presentation-tw-gradient-to: #0000;
-      --nac-presentation-tw-gradient-stops: initial;
-      --nac-presentation-tw-gradient-via-stops: initial;
-      --nac-presentation-tw-gradient-from-position: 0%;
-      --nac-presentation-tw-gradient-via-position: 50%;
-      --nac-presentation-tw-gradient-to-position: 100%;
       --nac-presentation-tw-leading: initial;
       --nac-presentation-tw-font-weight: initial;
       --nac-presentation-tw-tracking: initial;
@@ -76,6 +67,7 @@
       --nac-presentation-tw-backdrop-sepia: initial;
       --nac-presentation-tw-duration: initial;
       --nac-presentation-tw-ease: initial;
+      --nac-presentation-tw-content: "";
     }
   }
 
@@ -98,6 +90,7 @@
     --font-weight-medium: 500;
     --font-weight-semibold: 600;
     --font-weight-bold: 700;
+    --tracking-normal: 0em;
     --tracking-wide: .025em;
     --radius-sm: .25rem;
     --radius-md: .375rem;
@@ -582,20 +575,12 @@
     top: calc(var(--spacing) * 4);
   }
 
-[data-nac-runtime]:is(.top-16), [data-nac-runtime] .top-16 {
-    top: calc(var(--spacing) * 16);
-  }
-
 [data-nac-runtime]:is(.top-\[-8px\]), [data-nac-runtime] .top-\[-8px\] {
     top: -8px;
   }
 
-[data-nac-runtime]:is(.top-\[96px\]), [data-nac-runtime] .top-\[96px\] {
-    top: 96px;
-  }
-
-[data-nac-runtime]:is(.top-full), [data-nac-runtime] .top-full {
-    top: 100%;
+[data-nac-runtime]:is(.top-\[72px\]), [data-nac-runtime] .top-\[72px\] {
+    top: 72px;
   }
 
 [data-nac-runtime]:is(.-right-1), [data-nac-runtime] .-right-1 {
@@ -626,20 +611,16 @@
     right: calc(var(--spacing) * 4);
   }
 
-[data-nac-runtime]:is(.right-\[48px\]), [data-nac-runtime] .right-\[48px\] {
-    right: 48px;
-  }
-
 [data-nac-runtime]:is(.right-\[calc\(100\%\+8px\)\]), [data-nac-runtime] .right-\[calc\(100\%\+8px\)\] {
     right: calc(100% + 8px);
   }
 
-[data-nac-runtime]:is(.-bottom-\[8px\]), [data-nac-runtime] .-bottom-\[8px\] {
-    bottom: -8px;
+[data-nac-runtime]:is(.-bottom-1), [data-nac-runtime] .-bottom-1 {
+    bottom: calc(var(--spacing) * -1);
   }
 
-[data-nac-runtime]:is(.-bottom-\[76px\]), [data-nac-runtime] .-bottom-\[76px\] {
-    bottom: -76px;
+[data-nac-runtime]:is(.-bottom-\[8px\]), [data-nac-runtime] .-bottom-\[8px\] {
+    bottom: -8px;
   }
 
 [data-nac-runtime]:is(.bottom-0), [data-nac-runtime] .bottom-0 {
@@ -660,6 +641,14 @@
 
 [data-nac-runtime]:is(.bottom-\[136px\]), [data-nac-runtime] .bottom-\[136px\] {
     bottom: 136px;
+  }
+
+[data-nac-runtime]:is(.-left-1), [data-nac-runtime] .-left-1 {
+    left: calc(var(--spacing) * -1);
+  }
+
+[data-nac-runtime]:is(.-left-1\.5), [data-nac-runtime] .-left-1\.5 {
+    left: calc(var(--spacing) * -1.5);
   }
 
 [data-nac-runtime]:is(.left-0), [data-nac-runtime] .left-0 {
@@ -690,8 +679,8 @@
     left: calc(var(--spacing) * 3);
   }
 
-[data-nac-runtime]:is(.left-\[-320px\]), [data-nac-runtime] .left-\[-320px\] {
-    left: -320px;
+[data-nac-runtime]:is(.left-\[-280px\]), [data-nac-runtime] .left-\[-280px\] {
+    left: -280px;
   }
 
 [data-nac-runtime]:is(.left-\[3px\]), [data-nac-runtime] .left-\[3px\] {
@@ -750,6 +739,10 @@
     z-index: 1100;
   }
 
+[data-nac-runtime]:is(.col-span-3), [data-nac-runtime] .col-span-3 {
+    grid-column: span 3 / span 3;
+  }
+
 [data-nac-runtime]:is(.container), [data-nac-runtime] .container {
     width: 100%;
   }
@@ -794,12 +787,16 @@
     margin: 0 !important;
   }
 
+[data-nac-runtime]:is(.m-2), [data-nac-runtime] .m-2 {
+    margin: calc(var(--spacing) * 2);
+  }
+
 [data-nac-runtime]:is(.m-auto), [data-nac-runtime] .m-auto {
     margin: auto;
   }
 
-[data-nac-runtime]:is(.-mx-2), [data-nac-runtime] .-mx-2 {
-    margin-inline: calc(var(--spacing) * -2);
+[data-nac-runtime]:is(.-mx-1), [data-nac-runtime] .-mx-1 {
+    margin-inline: calc(var(--spacing) * -1);
   }
 
 [data-nac-runtime]:is(.mx-4), [data-nac-runtime] .mx-4 {
@@ -826,20 +823,12 @@
     margin-block: calc(var(--spacing) * 3);
   }
 
-[data-nac-runtime]:is(.my-5), [data-nac-runtime] .my-5 {
-    margin-block: calc(var(--spacing) * 5);
-  }
-
 [data-nac-runtime]:is(.my-6), [data-nac-runtime] .my-6 {
     margin-block: calc(var(--spacing) * 6);
   }
 
-[data-nac-runtime]:is(.my-8), [data-nac-runtime] .my-8 {
-    margin-block: calc(var(--spacing) * 8);
-  }
-
-[data-nac-runtime]:is(.mt-0\.5), [data-nac-runtime] .mt-0\.5 {
-    margin-top: calc(var(--spacing) * .5);
+[data-nac-runtime]:is(.-mt-2), [data-nac-runtime] .-mt-2 {
+    margin-top: calc(var(--spacing) * -2);
   }
 
 [data-nac-runtime]:is(.mt-1), [data-nac-runtime] .mt-1 {
@@ -890,8 +879,8 @@
     margin-bottom: calc(var(--spacing) * 4);
   }
 
-[data-nac-runtime]:is(.ml-\[3px\]), [data-nac-runtime] .ml-\[3px\] {
-    margin-left: 3px;
+[data-nac-runtime]:is(.ml-auto), [data-nac-runtime] .ml-auto {
+    margin-left: auto;
   }
 
 [data-nac-runtime]:is(.line-clamp-2), [data-nac-runtime] .line-clamp-2 {
@@ -1042,6 +1031,36 @@
     height: calc(var(--spacing) * 12);
   }
 
+[data-nac-runtime]:is(.size-\[2px\]), [data-nac-runtime] .size-\[2px\] {
+    width: 2px;
+    height: 2px;
+  }
+
+[data-nac-runtime]:is(.size-\[3px\]), [data-nac-runtime] .size-\[3px\] {
+    width: 3px;
+    height: 3px;
+  }
+
+[data-nac-runtime]:is(.size-\[4px\]), [data-nac-runtime] .size-\[4px\] {
+    width: 4px;
+    height: 4px;
+  }
+
+[data-nac-runtime]:is(.size-\[16px\]), [data-nac-runtime] .size-\[16px\] {
+    width: 16px;
+    height: 16px;
+  }
+
+[data-nac-runtime]:is(.size-\[20px\]), [data-nac-runtime] .size-\[20px\] {
+    width: 20px;
+    height: 20px;
+  }
+
+[data-nac-runtime]:is(.size-\[24px\]), [data-nac-runtime] .size-\[24px\] {
+    width: 24px;
+    height: 24px;
+  }
+
 [data-nac-runtime]:is(.size-fit), [data-nac-runtime] .size-fit {
     width: fit-content;
     height: fit-content;
@@ -1052,8 +1071,16 @@
     height: 100%;
   }
 
-[data-nac-runtime]:is(.\!h-6), [data-nac-runtime] .\!h-6 {
-    height: calc(var(--spacing) * 6) !important;
+[data-nac-runtime]:is(.\!h-5), [data-nac-runtime] .\!h-5 {
+    height: calc(var(--spacing) * 5) !important;
+  }
+
+[data-nac-runtime]:is(.\!h-7), [data-nac-runtime] .\!h-7 {
+    height: calc(var(--spacing) * 7) !important;
+  }
+
+[data-nac-runtime]:is(.\!h-8), [data-nac-runtime] .\!h-8 {
+    height: calc(var(--spacing) * 8) !important;
   }
 
 [data-nac-runtime]:is(.\!h-auto), [data-nac-runtime] .\!h-auto {
@@ -1088,6 +1115,10 @@
     height: calc(var(--spacing) * 6);
   }
 
+[data-nac-runtime]:is(.h-7), [data-nac-runtime] .h-7 {
+    height: calc(var(--spacing) * 7);
+  }
+
 [data-nac-runtime]:is(.h-8), [data-nac-runtime] .h-8 {
     height: calc(var(--spacing) * 8);
   }
@@ -1098,6 +1129,10 @@
 
 [data-nac-runtime]:is(.h-10), [data-nac-runtime] .h-10 {
     height: calc(var(--spacing) * 10);
+  }
+
+[data-nac-runtime]:is(.h-11), [data-nac-runtime] .h-11 {
+    height: calc(var(--spacing) * 11);
   }
 
 [data-nac-runtime]:is(.h-12), [data-nac-runtime] .h-12 {
@@ -1130,10 +1165,6 @@
 
 [data-nac-runtime]:is(.h-\[70dvh\]), [data-nac-runtime] .h-\[70dvh\] {
     height: 70dvh;
-  }
-
-[data-nac-runtime]:is(.h-\[84px\]), [data-nac-runtime] .h-\[84px\] {
-    height: 84px;
   }
 
 [data-nac-runtime]:is(.h-\[86px\]), [data-nac-runtime] .h-\[86px\] {
@@ -1216,8 +1247,16 @@
     height: 1px;
   }
 
+[data-nac-runtime]:is(.max-h-32), [data-nac-runtime] .max-h-32 {
+    max-height: calc(var(--spacing) * 32);
+  }
+
 [data-nac-runtime]:is(.max-h-40), [data-nac-runtime] .max-h-40 {
     max-height: calc(var(--spacing) * 40);
+  }
+
+[data-nac-runtime]:is(.max-h-48), [data-nac-runtime] .max-h-48 {
+    max-height: calc(var(--spacing) * 48);
   }
 
 [data-nac-runtime]:is(.max-h-56), [data-nac-runtime] .max-h-56 {
@@ -1292,16 +1331,16 @@
     max-height: none;
   }
 
-[data-nac-runtime]:is(.\!min-h-0), [data-nac-runtime] .\!min-h-0 {
-    min-height: 0 !important;
-  }
-
 [data-nac-runtime]:is(.min-h-0), [data-nac-runtime] .min-h-0 {
     min-height: 0;
   }
 
-[data-nac-runtime]:is(.min-h-5), [data-nac-runtime] .min-h-5 {
-    min-height: calc(var(--spacing) * 5);
+[data-nac-runtime]:is(.min-h-4), [data-nac-runtime] .min-h-4 {
+    min-height: calc(var(--spacing) * 4);
+  }
+
+[data-nac-runtime]:is(.min-h-6), [data-nac-runtime] .min-h-6 {
+    min-height: calc(var(--spacing) * 6);
   }
 
 [data-nac-runtime]:is(.min-h-9), [data-nac-runtime] .min-h-9 {
@@ -1310,6 +1349,10 @@
 
 [data-nac-runtime]:is(.min-h-10), [data-nac-runtime] .min-h-10 {
     min-height: calc(var(--spacing) * 10);
+  }
+
+[data-nac-runtime]:is(.min-h-12), [data-nac-runtime] .min-h-12 {
+    min-height: calc(var(--spacing) * 12);
   }
 
 [data-nac-runtime]:is(.min-h-14), [data-nac-runtime] .min-h-14 {
@@ -1326,10 +1369,6 @@
 
 [data-nac-runtime]:is(.min-h-\[20px\]), [data-nac-runtime] .min-h-\[20px\] {
     min-height: 20px;
-  }
-
-[data-nac-runtime]:is(.min-h-\[48px\]), [data-nac-runtime] .min-h-\[48px\] {
-    min-height: 48px;
   }
 
 [data-nac-runtime]:is(.min-h-\[64px\]), [data-nac-runtime] .min-h-\[64px\] {
@@ -1372,14 +1411,6 @@
     min-height: calc(70vh - 316px);
   }
 
-[data-nac-runtime]:is(.min-h-full), [data-nac-runtime] .min-h-full {
-    min-height: 100%;
-  }
-
-[data-nac-runtime]:is(.\!w-6), [data-nac-runtime] .\!w-6 {
-    width: calc(var(--spacing) * 6) !important;
-  }
-
 [data-nac-runtime]:is(.\!w-auto), [data-nac-runtime] .\!w-auto {
     width: auto !important;
   }
@@ -1390,10 +1421,6 @@
 
 [data-nac-runtime]:is(.w-1\.5), [data-nac-runtime] .w-1\.5 {
     width: calc(var(--spacing) * 1.5);
-  }
-
-[data-nac-runtime]:is(.w-1\/2), [data-nac-runtime] .w-1\/2 {
-    width: 50%;
   }
 
 [data-nac-runtime]:is(.w-2), [data-nac-runtime] .w-2 {
@@ -1428,24 +1455,12 @@
     width: calc(var(--spacing) * 12);
   }
 
-[data-nac-runtime]:is(.w-14), [data-nac-runtime] .w-14 {
-    width: calc(var(--spacing) * 14);
-  }
-
 [data-nac-runtime]:is(.w-16), [data-nac-runtime] .w-16 {
     width: calc(var(--spacing) * 16);
   }
 
 [data-nac-runtime]:is(.w-32), [data-nac-runtime] .w-32 {
     width: calc(var(--spacing) * 32);
-  }
-
-[data-nac-runtime]:is(.w-52), [data-nac-runtime] .w-52 {
-    width: calc(var(--spacing) * 52);
-  }
-
-[data-nac-runtime]:is(.w-\[40px\]), [data-nac-runtime] .w-\[40px\] {
-    width: 40px;
   }
 
 [data-nac-runtime]:is(.w-\[52px\]), [data-nac-runtime] .w-\[52px\] {
@@ -1456,8 +1471,8 @@
     width: 60px;
   }
 
-[data-nac-runtime]:is(.w-\[172px\]), [data-nac-runtime] .w-\[172px\] {
-    width: 172px;
+[data-nac-runtime]:is(.w-\[180px\]), [data-nac-runtime] .w-\[180px\] {
+    width: 180px;
   }
 
 [data-nac-runtime]:is(.w-\[181px\]), [data-nac-runtime] .w-\[181px\] {
@@ -1468,12 +1483,12 @@
     width: 200px;
   }
 
-[data-nac-runtime]:is(.w-\[220px\]), [data-nac-runtime] .w-\[220px\] {
-    width: 220px;
-  }
-
 [data-nac-runtime]:is(.w-\[240px\]), [data-nac-runtime] .w-\[240px\] {
     width: 240px;
+  }
+
+[data-nac-runtime]:is(.w-\[268px\]), [data-nac-runtime] .w-\[268px\] {
+    width: 268px;
   }
 
 [data-nac-runtime]:is(.w-\[280px\]), [data-nac-runtime] .w-\[280px\] {
@@ -1486,6 +1501,10 @@
 
 [data-nac-runtime]:is(.w-\[360px\]), [data-nac-runtime] .w-\[360px\] {
     width: 360px;
+  }
+
+[data-nac-runtime]:is(.w-\[380px\]), [data-nac-runtime] .w-\[380px\] {
+    width: 380px;
   }
 
 [data-nac-runtime]:is(.w-\[398px\]), [data-nac-runtime] .w-\[398px\] {
@@ -1504,8 +1523,16 @@
     width: 430px;
   }
 
+[data-nac-runtime]:is(.w-\[480px\]), [data-nac-runtime] .w-\[480px\] {
+    width: 480px;
+  }
+
 [data-nac-runtime]:is(.w-\[520px\]), [data-nac-runtime] .w-\[520px\] {
     width: 520px;
+  }
+
+[data-nac-runtime]:is(.w-\[542px\]), [data-nac-runtime] .w-\[542px\] {
+    width: 542px;
   }
 
 [data-nac-runtime]:is(.w-\[min\(400px\,calc\(100vw-16px\)\)\]),[data-nac-runtime] .w-\[min\(400px\,calc\(100vw-16px\)\)\] {
@@ -1514,6 +1541,10 @@
 
 [data-nac-runtime]:is(.w-\[min\(420px\,calc\(100vw-32px\)\)\]),[data-nac-runtime] .w-\[min\(420px\,calc\(100vw-32px\)\)\] {
     width: min(420px, 100vw - 32px);
+  }
+
+[data-nac-runtime]:is(.w-\[min\(clamp\(480px\,calc\(100\%\*4\/9\)\,800px\)\,max\(50\%\,100\%_-_200px\)\)\]),[data-nac-runtime] .w-\[min\(clamp\(480px\,calc\(100\%\*4\/9\)\,800px\)\,max\(50\%\,100\%_-_200px\)\)\] {
+    width: min(clamp(480px, 44.4444%, 800px), max(50%, 100% - 200px));
   }
 
 [data-nac-runtime]:is(.w-auto), [data-nac-runtime] .w-auto {
@@ -1540,16 +1571,16 @@
     max-width: calc(var(--spacing) * 6);
   }
 
+[data-nac-runtime]:is(.max-w-16), [data-nac-runtime] .max-w-16 {
+    max-width: calc(var(--spacing) * 16);
+  }
+
 [data-nac-runtime]:is(.max-w-\[20px\]), [data-nac-runtime] .max-w-\[20px\] {
     max-width: 20px;
   }
 
 [data-nac-runtime]:is(.max-w-\[64px\]), [data-nac-runtime] .max-w-\[64px\] {
     max-width: 64px;
-  }
-
-[data-nac-runtime]:is(.max-w-\[72px\]), [data-nac-runtime] .max-w-\[72px\] {
-    max-width: 72px;
   }
 
 [data-nac-runtime]:is(.max-w-\[76px\]), [data-nac-runtime] .max-w-\[76px\] {
@@ -1616,8 +1647,12 @@
     max-width: 604px;
   }
 
-[data-nac-runtime]:is(.max-w-\[720px\]), [data-nac-runtime] .max-w-\[720px\] {
-    max-width: 720px;
+[data-nac-runtime]:is(.max-w-\[640px\]), [data-nac-runtime] .max-w-\[640px\] {
+    max-width: 640px;
+  }
+
+[data-nac-runtime]:is(.max-w-\[704px\]), [data-nac-runtime] .max-w-\[704px\] {
+    max-width: 704px;
   }
 
 [data-nac-runtime]:is(.max-w-\[760px\]), [data-nac-runtime] .max-w-\[760px\] {
@@ -1642,6 +1677,10 @@
 
 [data-nac-runtime]:is(.max-w-\[calc\(100vw-32px\)\]), [data-nac-runtime] .max-w-\[calc\(100vw-32px\)\] {
     max-width: calc(100vw - 32px);
+  }
+
+[data-nac-runtime]:is(.max-w-fit), [data-nac-runtime] .max-w-fit {
+    max-width: fit-content;
   }
 
 [data-nac-runtime]:is(.max-w-full), [data-nac-runtime] .max-w-full {
@@ -1684,6 +1723,10 @@
     min-width: 220px;
   }
 
+[data-nac-runtime]:is(.min-w-fit), [data-nac-runtime] .min-w-fit {
+    min-width: fit-content;
+  }
+
 [data-nac-runtime]:is(.min-w-full), [data-nac-runtime] .min-w-full {
     min-width: 100%;
   }
@@ -1714,6 +1757,14 @@
 
 [data-nac-runtime]:is(.flex-grow), [data-nac-runtime] .flex-grow, [data-nac-runtime]:is(.grow), [data-nac-runtime] .grow {
     flex-grow: 1;
+  }
+
+[data-nac-runtime]:is(.basis-48), [data-nac-runtime] .basis-48 {
+    flex-basis: calc(var(--spacing) * 48);
+  }
+
+[data-nac-runtime]:is(.basis-\[160px\]), [data-nac-runtime] .basis-\[160px\] {
+    flex-basis: 160px;
   }
 
 [data-nac-runtime]:is(.border-collapse), [data-nac-runtime] .border-collapse {
@@ -1808,10 +1859,6 @@
     rotate: 0deg;
   }
 
-[data-nac-runtime]:is(.rotate-45), [data-nac-runtime] .rotate-45 {
-    rotate: 45deg;
-  }
-
 [data-nac-runtime]:is(.rotate-90), [data-nac-runtime] .rotate-90 {
     rotate: 90deg;
   }
@@ -1835,6 +1882,12 @@
     animation: 2s linear infinite nac-presentation-shimmer;
   }
 
+@media (prefers-reduced-motion: reduce) {
+    [data-nac-runtime]:is(.text-shimmer-accent), [data-nac-runtime] .text-shimmer-accent {
+      animation: none;
+    }
+  }
+
 [data-nac-runtime]:is(.text-shimmer-basic), [data-nac-runtime] .text-shimmer-basic {
     background-image: linear-gradient(90deg, var(--color-text-basic-secondary), var(--color-text-basic-muted), var(--color-text-basic-secondary));
     -webkit-text-fill-color: transparent;
@@ -1844,6 +1897,29 @@
     -webkit-background-clip: text;
     background-clip: text;
     animation: 2s linear infinite nac-presentation-shimmer;
+  }
+
+@media (prefers-reduced-motion: reduce) {
+    [data-nac-runtime]:is(.text-shimmer-basic), [data-nac-runtime] .text-shimmer-basic {
+      animation: none;
+    }
+  }
+
+[data-nac-runtime]:is(.text-shimmer-primary), [data-nac-runtime] .text-shimmer-primary {
+    background-image: linear-gradient(90deg, var(--color-text-basic-primary), var(--color-text-btn-secondary-disabled), var(--color-text-basic-primary));
+    -webkit-text-fill-color: transparent;
+    color: #0000;
+    background-position: 200% 0;
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation: 2s linear infinite nac-presentation-shimmer;
+  }
+
+@media (prefers-reduced-motion: reduce) {
+    [data-nac-runtime]:is(.text-shimmer-primary), [data-nac-runtime] .text-shimmer-primary {
+      animation: none;
+    }
   }
 
 [data-nac-runtime]:is(.animate-progress), [data-nac-runtime] .animate-progress {
@@ -1919,20 +1995,84 @@
     grid-template-columns: repeat(1, minmax(0, 1fr));
   }
 
-[data-nac-runtime]:is(.grid-cols-2), [data-nac-runtime] .grid-cols-2 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+[data-nac-runtime]:is(.grid-cols-3), [data-nac-runtime] .grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+[data-nac-runtime]:is(.grid-cols-4), [data-nac-runtime] .grid-cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
 [data-nac-runtime]:is(.grid-cols-7), [data-nac-runtime] .grid-cols-7 {
     grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
+[data-nac-runtime]:is(.grid-cols-\[1fr_auto\]), [data-nac-runtime] .grid-cols-\[1fr_auto\] {
+    grid-template-columns: 1fr auto;
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[64px_repeat\(3\,auto\)\]),[data-nac-runtime] .grid-cols-\[64px_repeat\(3\,auto\)\] {
+    grid-template-columns: 64px repeat(3, auto);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[120px_repeat\(4\,200px\)\]),[data-nac-runtime] .grid-cols-\[120px_repeat\(4\,200px\)\] {
+    grid-template-columns: 120px repeat(4, 200px);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[120px_repeat\(4\,240px\)\]),[data-nac-runtime] .grid-cols-\[120px_repeat\(4\,240px\)\] {
+    grid-template-columns: 120px repeat(4, 240px);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[136px_repeat\(4\,minmax\(0\,1fr\)\)\]),[data-nac-runtime] .grid-cols-\[136px_repeat\(4\,minmax\(0\,1fr\)\)\] {
+    grid-template-columns: 136px repeat(4, minmax(0, 1fr));
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[160px_repeat\(2\,auto\)\]),[data-nac-runtime] .grid-cols-\[160px_repeat\(2\,auto\)\] {
+    grid-template-columns: 160px repeat(2, auto);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[160px_repeat\(4\,72px\)\]),[data-nac-runtime] .grid-cols-\[160px_repeat\(4\,72px\)\] {
+    grid-template-columns: 160px repeat(4, 72px);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[160px_repeat\(4\,200px\)\]),[data-nac-runtime] .grid-cols-\[160px_repeat\(4\,200px\)\] {
+    grid-template-columns: 160px repeat(4, 200px);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[160px_repeat\(5\,max-content\)\]),[data-nac-runtime] .grid-cols-\[160px_repeat\(5\,max-content\)\] {
+    grid-template-columns: 160px repeat(5, max-content);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[200px_repeat\(2\,320px\)\]),[data-nac-runtime] .grid-cols-\[200px_repeat\(2\,320px\)\] {
+    grid-template-columns: 200px repeat(2, 320px);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[200px_repeat\(4\,max-content\)\]),[data-nac-runtime] .grid-cols-\[200px_repeat\(4\,max-content\)\] {
+    grid-template-columns: 200px repeat(4, max-content);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[200px_repeat\(12\,32px\)\]),[data-nac-runtime] .grid-cols-\[200px_repeat\(12\,32px\)\] {
+    grid-template-columns: 200px repeat(12, 32px);
+  }
+
 [data-nac-runtime]:is(.grid-cols-\[auto\,minmax\(0\,1fr\)\]),[data-nac-runtime] .grid-cols-\[auto\,minmax\(0\,1fr\)\] {
     grid-template-columns: auto,minmax(0,1fr);
   }
 
+[data-nac-runtime]:is(.grid-cols-\[auto_repeat\(3\,auto\)\]),[data-nac-runtime] .grid-cols-\[auto_repeat\(3\,auto\)\] {
+    grid-template-columns: auto repeat(3, auto);
+  }
+
+[data-nac-runtime]:is(.grid-cols-\[auto_repeat\(5\,160px\)\]),[data-nac-runtime] .grid-cols-\[auto_repeat\(5\,160px\)\] {
+    grid-template-columns: auto repeat(5, 160px);
+  }
+
 [data-nac-runtime]:is(.grid-cols-\[repeat\(auto-fill\,minmax\(min\(360px\,100\%\)\,1fr\)\)\]),[data-nac-runtime] .grid-cols-\[repeat\(auto-fill\,minmax\(min\(360px\,100\%\)\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
+  }
+
+[data-nac-runtime]:is(.grid-rows-4), [data-nac-runtime] .grid-rows-4 {
+    grid-template-rows: repeat(4, minmax(0, 1fr));
   }
 
 [data-nac-runtime]:is(.flex-col), [data-nac-runtime] .flex-col {
@@ -1981,6 +2121,14 @@
 
 [data-nac-runtime]:is(.justify-start), [data-nac-runtime] .justify-start {
     justify-content: flex-start;
+  }
+
+[data-nac-runtime]:is(.justify-items-start), [data-nac-runtime] .justify-items-start {
+    justify-items: start;
+  }
+
+[data-nac-runtime]:is(.\!gap-1), [data-nac-runtime] .\!gap-1 {
+    gap: var(--spacing) !important;
   }
 
 [data-nac-runtime]:is(.\!gap-1\.5), [data-nac-runtime] .\!gap-1\.5 {
@@ -2051,8 +2199,16 @@
     --nac-presentation-tw-space-y-reverse: 1;
   }
 
+[data-nac-runtime]:is(.gap-x-1), [data-nac-runtime] .gap-x-1 {
+    column-gap: var(--spacing);
+  }
+
 [data-nac-runtime]:is(.gap-x-2), [data-nac-runtime] .gap-x-2 {
     column-gap: calc(var(--spacing) * 2);
+  }
+
+[data-nac-runtime]:is(.gap-x-2\.5), [data-nac-runtime] .gap-x-2\.5 {
+    column-gap: calc(var(--spacing) * 2.5);
   }
 
 [data-nac-runtime]:is(.gap-x-3), [data-nac-runtime] .gap-x-3 {
@@ -2061,6 +2217,14 @@
 
 [data-nac-runtime]:is(.gap-x-4), [data-nac-runtime] .gap-x-4 {
     column-gap: calc(var(--spacing) * 4);
+  }
+
+[data-nac-runtime]:is(.gap-x-6), [data-nac-runtime] .gap-x-6 {
+    column-gap: calc(var(--spacing) * 6);
+  }
+
+[data-nac-runtime]:is(.gap-x-10), [data-nac-runtime] .gap-x-10 {
+    column-gap: calc(var(--spacing) * 10);
   }
 
 [data-nac-runtime]:is(:where(.space-x-reverse > :not(:last-child))), [data-nac-runtime] :where(.space-x-reverse > :not(:last-child)) {
@@ -2073,6 +2237,10 @@
 
 [data-nac-runtime]:is(.gap-y-2), [data-nac-runtime] .gap-y-2 {
     row-gap: calc(var(--spacing) * 2);
+  }
+
+[data-nac-runtime]:is(.gap-y-3), [data-nac-runtime] .gap-y-3 {
+    row-gap: calc(var(--spacing) * 3);
   }
 
 [data-nac-runtime]:is(:where(.divide-x > :not(:last-child))), [data-nac-runtime] :where(.divide-x > :not(:last-child)) {
@@ -2112,6 +2280,10 @@
     overflow: auto;
   }
 
+[data-nac-runtime]:is(.overflow-clip), [data-nac-runtime] .overflow-clip {
+    overflow: clip;
+  }
+
 [data-nac-runtime]:is(.overflow-hidden), [data-nac-runtime] .overflow-hidden {
     overflow: hidden;
   }
@@ -2124,6 +2296,10 @@
     overflow-x: auto;
   }
 
+[data-nac-runtime]:is(.overflow-x-clip), [data-nac-runtime] .overflow-x-clip {
+    overflow-x: clip;
+  }
+
 [data-nac-runtime]:is(.overflow-y-auto), [data-nac-runtime] .overflow-y-auto {
     overflow-y: auto;
   }
@@ -2132,12 +2308,20 @@
     overflow-y: clip;
   }
 
+[data-nac-runtime]:is(.overflow-y-hidden), [data-nac-runtime] .overflow-y-hidden {
+    overflow-y: hidden;
+  }
+
 [data-nac-runtime]:is(.overscroll-x-contain), [data-nac-runtime] .overscroll-x-contain {
     overscroll-behavior-x: contain;
   }
 
 [data-nac-runtime]:is(.\!rounded), [data-nac-runtime] .\!rounded {
     border-radius: .25rem !important;
+  }
+
+[data-nac-runtime]:is(.\!rounded-\[8px\]), [data-nac-runtime] .\!rounded-\[8px\] {
+    border-radius: 8px !important;
   }
 
 [data-nac-runtime]:is(.\!rounded-full), [data-nac-runtime] .\!rounded-full {
@@ -2150,6 +2334,10 @@
 
 [data-nac-runtime]:is(.rounded-2xl), [data-nac-runtime] .rounded-2xl {
     border-radius: var(--radius-2xl);
+  }
+
+[data-nac-runtime]:is(.rounded-\[1px\]), [data-nac-runtime] .rounded-\[1px\] {
+    border-radius: 1px;
   }
 
 [data-nac-runtime]:is(.rounded-\[2px\]), [data-nac-runtime] .rounded-\[2px\] {
@@ -2176,12 +2364,16 @@
     border-radius: 12px;
   }
 
-[data-nac-runtime]:is(.rounded-\[18px\]), [data-nac-runtime] .rounded-\[18px\] {
-    border-radius: 18px;
-  }
-
 [data-nac-runtime]:is(.rounded-\[20px\]), [data-nac-runtime] .rounded-\[20px\] {
     border-radius: 20px;
+  }
+
+[data-nac-runtime]:is(.rounded-\[24px\]), [data-nac-runtime] .rounded-\[24px\] {
+    border-radius: 24px;
+  }
+
+[data-nac-runtime]:is(.rounded-\[inherit\]), [data-nac-runtime] .rounded-\[inherit\] {
+    border-radius: inherit;
   }
 
 [data-nac-runtime]:is(.rounded-full), [data-nac-runtime] .rounded-full {
@@ -2480,6 +2672,10 @@
     border-bottom-color: var(--color-border-tertiary);
   }
 
+[data-nac-runtime]:is(.bg-\[var\(--color-fill-basic-primary\)\]), [data-nac-runtime] .bg-\[var\(--color-fill-basic-primary\)\] {
+    background-color: var(--color-fill-basic-primary);
+  }
+
 [data-nac-runtime]:is(.bg-accent-inverse), [data-nac-runtime] .bg-accent-inverse {
     background-color: var(--color-bg-accent-inverse);
   }
@@ -2508,16 +2704,8 @@
     background-color: var(--color-bg-btn-primary);
   }
 
-[data-nac-runtime]:is(.bg-btn-primary-disabled), [data-nac-runtime] .bg-btn-primary-disabled {
-    background-color: var(--color-bg-btn-primary-disabled);
-  }
-
 [data-nac-runtime]:is(.bg-btn-secondary), [data-nac-runtime] .bg-btn-secondary {
     background-color: var(--color-bg-btn-secondary);
-  }
-
-[data-nac-runtime]:is(.bg-btn-secondary-accent), [data-nac-runtime] .bg-btn-secondary-accent {
-    background-color: var(--color-bg-btn-secondary-accent);
   }
 
 [data-nac-runtime]:is(.bg-btn-secondary-disabled), [data-nac-runtime] .bg-btn-secondary-disabled {
@@ -2690,19 +2878,9 @@
     background-color: #0000;
   }
 
-[data-nac-runtime]:is(.bg-gradient-to-b), [data-nac-runtime] .bg-gradient-to-b {
-    --nac-presentation-tw-gradient-position: to bottom in oklab;
-    background-image: linear-gradient(var(--nac-presentation-tw-gradient-stops));
-  }
-
-[data-nac-runtime]:is(.from-\[var\(--color-fill-basic-muted\)\]), [data-nac-runtime] .from-\[var\(--color-fill-basic-muted\)\] {
-    --nac-presentation-tw-gradient-from: var(--color-fill-basic-muted);
-    --nac-presentation-tw-gradient-stops: var(--nac-presentation-tw-gradient-via-stops, var(--nac-presentation-tw-gradient-position), var(--nac-presentation-tw-gradient-from) var(--nac-presentation-tw-gradient-from-position), var(--nac-presentation-tw-gradient-to) var(--nac-presentation-tw-gradient-to-position));
-  }
-
-[data-nac-runtime]:is(.to-transparent), [data-nac-runtime] .to-transparent {
-    --nac-presentation-tw-gradient-to: transparent;
-    --nac-presentation-tw-gradient-stops: var(--nac-presentation-tw-gradient-via-stops, var(--nac-presentation-tw-gradient-position), var(--nac-presentation-tw-gradient-from) var(--nac-presentation-tw-gradient-from-position), var(--nac-presentation-tw-gradient-to) var(--nac-presentation-tw-gradient-to-position));
+[data-nac-runtime]:is(.\[mask-image\:linear-gradient\(to_right\,black_calc\(100\%-40px\)\,transparent\)\]),[data-nac-runtime] .\[mask-image\:linear-gradient\(to_right\,black_calc\(100\%-40px\)\,transparent\)\] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), #0000);
+    mask-image: linear-gradient(to right, #000 calc(100% - 40px), #0000);
   }
 
 [data-nac-runtime]:is(.bg-\[length\:200\%_100\%\]), [data-nac-runtime] .bg-\[length\:200\%_100\%\] {
@@ -2755,12 +2933,20 @@
     padding: 0 !important;
   }
 
+[data-nac-runtime]:is(.\!p-1), [data-nac-runtime] .\!p-1 {
+    padding: var(--spacing) !important;
+  }
+
 [data-nac-runtime]:is(.p-0), [data-nac-runtime] .p-0 {
     padding: 0;
   }
 
 [data-nac-runtime]:is(.p-1), [data-nac-runtime] .p-1 {
     padding: var(--spacing);
+  }
+
+[data-nac-runtime]:is(.p-1\.5), [data-nac-runtime] .p-1\.5 {
+    padding: calc(var(--spacing) * 1.5);
   }
 
 [data-nac-runtime]:is(.p-2), [data-nac-runtime] .p-2 {
@@ -2775,6 +2961,10 @@
     padding: calc(var(--spacing) * 4);
   }
 
+[data-nac-runtime]:is(.p-5), [data-nac-runtime] .p-5 {
+    padding: calc(var(--spacing) * 5);
+  }
+
 [data-nac-runtime]:is(.p-6), [data-nac-runtime] .p-6 {
     padding: calc(var(--spacing) * 6);
   }
@@ -2783,8 +2973,8 @@
     padding: calc(var(--spacing) * 8);
   }
 
-[data-nac-runtime]:is(.p-\[2px\]), [data-nac-runtime] .p-\[2px\] {
-    padding: 2px;
+[data-nac-runtime]:is(.p-px), [data-nac-runtime] .p-px {
+    padding: 1px;
   }
 
 [data-nac-runtime]:is(.\!px-1), [data-nac-runtime] .\!px-1 {
@@ -2795,16 +2985,16 @@
     padding-inline: calc(var(--spacing) * 2) !important;
   }
 
-[data-nac-runtime]:is(.px-0), [data-nac-runtime] .px-0 {
-    padding-inline: 0;
-  }
-
 [data-nac-runtime]:is(.px-0\.5), [data-nac-runtime] .px-0\.5 {
     padding-inline: calc(var(--spacing) * .5);
   }
 
 [data-nac-runtime]:is(.px-1), [data-nac-runtime] .px-1 {
     padding-inline: var(--spacing);
+  }
+
+[data-nac-runtime]:is(.px-1\.5), [data-nac-runtime] .px-1\.5 {
+    padding-inline: calc(var(--spacing) * 1.5);
   }
 
 [data-nac-runtime]:is(.px-2), [data-nac-runtime] .px-2 {
@@ -2817,10 +3007,6 @@
 
 [data-nac-runtime]:is(.px-4), [data-nac-runtime] .px-4 {
     padding-inline: calc(var(--spacing) * 4);
-  }
-
-[data-nac-runtime]:is(.px-5), [data-nac-runtime] .px-5 {
-    padding-inline: calc(var(--spacing) * 5);
   }
 
 [data-nac-runtime]:is(.px-6), [data-nac-runtime] .px-6 {
@@ -2871,8 +3057,12 @@
     padding-block: calc(var(--spacing) * 16);
   }
 
-[data-nac-runtime]:is(.py-\[2px\]), [data-nac-runtime] .py-\[2px\] {
-    padding-block: 2px;
+[data-nac-runtime]:is(.py-18), [data-nac-runtime] .py-18 {
+    padding-block: calc(var(--spacing) * 18);
+  }
+
+[data-nac-runtime]:is(.py-\[3px\]), [data-nac-runtime] .py-\[3px\] {
+    padding-block: 3px;
   }
 
 [data-nac-runtime]:is(.pt-0), [data-nac-runtime] .pt-0 {
@@ -2895,10 +3085,6 @@
     padding-top: calc(var(--spacing) * 2);
   }
 
-[data-nac-runtime]:is(.pt-3), [data-nac-runtime] .pt-3 {
-    padding-top: calc(var(--spacing) * 3);
-  }
-
 [data-nac-runtime]:is(.pt-4), [data-nac-runtime] .pt-4 {
     padding-top: calc(var(--spacing) * 4);
   }
@@ -2911,28 +3097,24 @@
     padding-top: calc(var(--spacing) * 6);
   }
 
-[data-nac-runtime]:is(.pt-8), [data-nac-runtime] .pt-8 {
-    padding-top: calc(var(--spacing) * 8);
-  }
-
 [data-nac-runtime]:is(.pt-14), [data-nac-runtime] .pt-14 {
     padding-top: calc(var(--spacing) * 14);
   }
 
-[data-nac-runtime]:is(.pt-36), [data-nac-runtime] .pt-36 {
-    padding-top: calc(var(--spacing) * 36);
+[data-nac-runtime]:is(.pt-16), [data-nac-runtime] .pt-16 {
+    padding-top: calc(var(--spacing) * 16);
+  }
+
+[data-nac-runtime]:is(.pt-18), [data-nac-runtime] .pt-18 {
+    padding-top: calc(var(--spacing) * 18);
+  }
+
+[data-nac-runtime]:is(.pt-20), [data-nac-runtime] .pt-20 {
+    padding-top: calc(var(--spacing) * 20);
   }
 
 [data-nac-runtime]:is(.pt-\[72px\]), [data-nac-runtime] .pt-\[72px\] {
     padding-top: 72px;
-  }
-
-[data-nac-runtime]:is(.pt-\[96px\]), [data-nac-runtime] .pt-\[96px\] {
-    padding-top: 96px;
-  }
-
-[data-nac-runtime]:is(.\!pr-3), [data-nac-runtime] .\!pr-3 {
-    padding-right: calc(var(--spacing) * 3) !important;
   }
 
 [data-nac-runtime]:is(.pr-1), [data-nac-runtime] .pr-1 {
@@ -2959,6 +3141,10 @@
     padding-right: calc(var(--spacing) * 6);
   }
 
+[data-nac-runtime]:is(.pr-8), [data-nac-runtime] .pr-8 {
+    padding-right: calc(var(--spacing) * 8);
+  }
+
 [data-nac-runtime]:is(.pr-9), [data-nac-runtime] .pr-9 {
     padding-right: calc(var(--spacing) * 9);
   }
@@ -2971,20 +3157,16 @@
     padding-right: calc(var(--spacing) * 12);
   }
 
-[data-nac-runtime]:is(.pr-\[40px\]), [data-nac-runtime] .pr-\[40px\] {
-    padding-right: 40px;
-  }
-
-[data-nac-runtime]:is(.pr-\[48px\]), [data-nac-runtime] .pr-\[48px\] {
-    padding-right: 48px;
-  }
-
-[data-nac-runtime]:is(.pr-\[96px\]), [data-nac-runtime] .pr-\[96px\] {
-    padding-right: 96px;
+[data-nac-runtime]:is(.pr-\[7px\]), [data-nac-runtime] .pr-\[7px\] {
+    padding-right: 7px;
   }
 
 [data-nac-runtime]:is(.pb-1), [data-nac-runtime] .pb-1 {
     padding-bottom: var(--spacing);
+  }
+
+[data-nac-runtime]:is(.pb-1\.5), [data-nac-runtime] .pb-1\.5 {
+    padding-bottom: calc(var(--spacing) * 1.5);
   }
 
 [data-nac-runtime]:is(.pb-2), [data-nac-runtime] .pb-2 {
@@ -3011,32 +3193,32 @@
     padding-bottom: calc(var(--spacing) * 20);
   }
 
-[data-nac-runtime]:is(.pb-\[2px\]), [data-nac-runtime] .pb-\[2px\] {
-    padding-bottom: 2px;
+[data-nac-runtime]:is(.pb-32), [data-nac-runtime] .pb-32 {
+    padding-bottom: calc(var(--spacing) * 32);
   }
 
-[data-nac-runtime]:is(.pb-\[80px\]), [data-nac-runtime] .pb-\[80px\] {
-    padding-bottom: 80px;
+[data-nac-runtime]:is(.pb-\[23px\]), [data-nac-runtime] .pb-\[23px\] {
+    padding-bottom: 23px;
   }
 
 [data-nac-runtime]:is(.pb-\[88px\]), [data-nac-runtime] .pb-\[88px\] {
     padding-bottom: 88px;
   }
 
-[data-nac-runtime]:is(.pb-\[96px\]), [data-nac-runtime] .pb-\[96px\] {
-    padding-bottom: 96px;
-  }
-
 [data-nac-runtime]:is(.pb-\[128px\]), [data-nac-runtime] .pb-\[128px\] {
     padding-bottom: 128px;
   }
 
-[data-nac-runtime]:is(.pb-\[180px\]), [data-nac-runtime] .pb-\[180px\] {
-    padding-bottom: 180px;
+[data-nac-runtime]:is(.pb-\[184px\]), [data-nac-runtime] .pb-\[184px\] {
+    padding-bottom: 184px;
   }
 
-[data-nac-runtime]:is(.pb-\[320px\]), [data-nac-runtime] .pb-\[320px\] {
-    padding-bottom: 320px;
+[data-nac-runtime]:is(.pb-\[max\(180px\,calc\(var\(--composer-height\,0px\)_\+_40px\)\)\]),[data-nac-runtime] .pb-\[max\(180px\,calc\(var\(--composer-height\,0px\)_\+_40px\)\)\] {
+    padding-bottom: max(180px, calc(var(--composer-height, 0px) + 40px));
+  }
+
+[data-nac-runtime]:is(.pb-\[max\(320px\,calc\(var\(--composer-height\,0px\)_\+_40px\)\)\]),[data-nac-runtime] .pb-\[max\(320px\,calc\(var\(--composer-height\,0px\)_\+_40px\)\)\] {
+    padding-bottom: max(320px, calc(var(--composer-height, 0px) + 40px));
   }
 
 [data-nac-runtime]:is(.\!pl-3), [data-nac-runtime] .\!pl-3 {
@@ -3049,6 +3231,10 @@
 
 [data-nac-runtime]:is(.pl-2), [data-nac-runtime] .pl-2 {
     padding-left: calc(var(--spacing) * 2);
+  }
+
+[data-nac-runtime]:is(.pl-2\.5), [data-nac-runtime] .pl-2\.5 {
+    padding-left: calc(var(--spacing) * 2.5);
   }
 
 [data-nac-runtime]:is(.pl-3), [data-nac-runtime] .pl-3 {
@@ -3079,8 +3265,8 @@
     padding-left: calc(var(--spacing) * 12);
   }
 
-[data-nac-runtime]:is(.pl-\[48px\]), [data-nac-runtime] .pl-\[48px\] {
-    padding-left: 48px;
+[data-nac-runtime]:is(.pl-\[7px\]), [data-nac-runtime] .pl-\[7px\] {
+    padding-left: 7px;
   }
 
 [data-nac-runtime]:is(.text-center), [data-nac-runtime] .text-center {
@@ -3123,6 +3309,11 @@
     line-height: var(--nac-presentation-tw-leading, var(--text-xs--line-height));
   }
 
+[data-nac-runtime]:is(.text-xs\/4), [data-nac-runtime] .text-xs\/4 {
+    font-size: var(--text-xs);
+    line-height: calc(var(--spacing) * 4);
+  }
+
 [data-nac-runtime]:is(.\!text-\[10px\]), [data-nac-runtime] .\!text-\[10px\] {
     font-size: 10px !important;
   }
@@ -3139,6 +3330,30 @@
     font-size: 10px;
   }
 
+[data-nac-runtime]:is(.text-\[11px\]), [data-nac-runtime] .text-\[11px\] {
+    font-size: 11px;
+  }
+
+[data-nac-runtime]:is(.\!leading-4), [data-nac-runtime] .\!leading-4 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 4) !important;
+    line-height: calc(var(--spacing) * 4) !important;
+  }
+
+[data-nac-runtime]:is(.\!leading-5), [data-nac-runtime] .\!leading-5 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 5) !important;
+    line-height: calc(var(--spacing) * 5) !important;
+  }
+
+[data-nac-runtime]:is(.\!leading-6), [data-nac-runtime] .\!leading-6 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 6) !important;
+    line-height: calc(var(--spacing) * 6) !important;
+  }
+
+[data-nac-runtime]:is(.\!leading-7), [data-nac-runtime] .\!leading-7 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 7) !important;
+    line-height: calc(var(--spacing) * 7) !important;
+  }
+
 [data-nac-runtime]:is(.\!leading-\[12px\]), [data-nac-runtime] .\!leading-\[12px\] {
     --nac-presentation-tw-leading: 12px !important;
     line-height: 12px !important;
@@ -3147,11 +3362,6 @@
 [data-nac-runtime]:is(.\!leading-\[16px\]), [data-nac-runtime] .\!leading-\[16px\] {
     --nac-presentation-tw-leading: 16px !important;
     line-height: 16px !important;
-  }
-
-[data-nac-runtime]:is(.\!leading-\[20px\]), [data-nac-runtime] .\!leading-\[20px\] {
-    --nac-presentation-tw-leading: 20px !important;
-    line-height: 20px !important;
   }
 
 [data-nac-runtime]:is(.leading-3), [data-nac-runtime] .leading-3 {
@@ -3167,6 +3377,11 @@
 [data-nac-runtime]:is(.leading-\[12px\]), [data-nac-runtime] .leading-\[12px\] {
     --nac-presentation-tw-leading: 12px;
     line-height: 12px;
+  }
+
+[data-nac-runtime]:is(.leading-\[14px\]), [data-nac-runtime] .leading-\[14px\] {
+    --nac-presentation-tw-leading: 14px;
+    line-height: 14px;
   }
 
 [data-nac-runtime]:is(.font-bold), [data-nac-runtime] .font-bold {
@@ -3191,6 +3406,16 @@
 
 [data-nac-runtime]:is(.\[font-weight\:inherit\]), [data-nac-runtime] .\[font-weight\:inherit\] {
     font-weight: inherit;
+  }
+
+[data-nac-runtime]:is(.\!tracking-normal), [data-nac-runtime] .\!tracking-normal {
+    --nac-presentation-tw-tracking: var(--tracking-normal) !important;
+    letter-spacing: var(--tracking-normal) !important;
+  }
+
+[data-nac-runtime]:is(.tracking-\[-0\.05em\]), [data-nac-runtime] .tracking-\[-0\.05em\] {
+    --nac-presentation-tw-tracking: -.05em;
+    letter-spacing: -.05em;
   }
 
 [data-nac-runtime]:is(.tracking-\[0\.2em\]), [data-nac-runtime] .tracking-\[0\.2em\] {
@@ -3279,6 +3504,14 @@
     color: var(--color-text-btn-secondary);
   }
 
+[data-nac-runtime]:is(.text-btn-secondary-disabled), [data-nac-runtime] .text-btn-secondary-disabled {
+    color: var(--color-text-btn-secondary-disabled);
+  }
+
+[data-nac-runtime]:is(.text-btn-secondary-highlighted), [data-nac-runtime] .text-btn-secondary-highlighted {
+    color: var(--color-text-btn-secondary-highlighted);
+  }
+
 [data-nac-runtime]:is(.text-btn-secondary-pressed), [data-nac-runtime] .text-btn-secondary-pressed {
     color: var(--color-text-btn-secondary-pressed);
   }
@@ -3287,8 +3520,16 @@
     color: var(--color-text-danger-primary);
   }
 
+[data-nac-runtime]:is(.text-danger-secondary), [data-nac-runtime] .text-danger-secondary {
+    color: var(--color-text-danger-secondary);
+  }
+
 [data-nac-runtime]:is(.text-error-primary), [data-nac-runtime] .text-error-primary {
     color: var(--color-text-error-primary);
+  }
+
+[data-nac-runtime]:is(.text-error-secondary), [data-nac-runtime] .text-error-secondary {
+    color: var(--color-text-error-secondary);
   }
 
 [data-nac-runtime]:is(.text-info-primary), [data-nac-runtime] .text-info-primary {
@@ -3429,6 +3670,10 @@
     opacity: .1;
   }
 
+[data-nac-runtime]:is(.opacity-25), [data-nac-runtime] .opacity-25 {
+    opacity: .25;
+  }
+
 [data-nac-runtime]:is(.opacity-40), [data-nac-runtime] .opacity-40 {
     opacity: .4;
   }
@@ -3462,6 +3707,11 @@
     box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow) !important;
   }
 
+[data-nac-runtime]:is(.\!shadow-composer-send), [data-nac-runtime] .\!shadow-composer-send {
+    --nac-presentation-tw-shadow: var(--shadow-composer-send) !important;
+    box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow) !important;
+  }
+
 [data-nac-runtime]:is(.shadow), [data-nac-runtime] .shadow {
     --nac-presentation-tw-shadow: 0 1px 3px 0 var(--nac-presentation-tw-shadow-color, #0000001a), 0 1px 2px -1px var(--nac-presentation-tw-shadow-color, #0000001a);
     box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
@@ -3484,6 +3734,11 @@
 
 [data-nac-runtime]:is(.shadow-lg), [data-nac-runtime] .shadow-lg {
     --nac-presentation-tw-shadow: var(--shadow-lg);
+    box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
+  }
+
+[data-nac-runtime]:is(.shadow-md), [data-nac-runtime] .shadow-md {
+    --nac-presentation-tw-shadow: var(--shadow-md);
     box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
   }
 
@@ -3510,6 +3765,14 @@
 [data-nac-runtime]:is(.outline), [data-nac-runtime] .outline {
     outline-style: var(--nac-presentation-tw-outline-style);
     outline-width: 1px;
+  }
+
+[data-nac-runtime]:is(.-outline-offset-2), [data-nac-runtime] .-outline-offset-2 {
+    outline-offset: calc(2px * -1);
+  }
+
+[data-nac-runtime]:is(.outline-\[var\(--color-border-focus-outline\)\]), [data-nac-runtime] .outline-\[var\(--color-border-focus-outline\)\] {
+    outline-color: var(--color-border-focus-outline);
   }
 
 [data-nac-runtime]:is(.blur), [data-nac-runtime] .blur {
@@ -3680,25 +3943,20 @@
     --nac-presentation-tw-ring-inset: inset;
   }
 
-[data-nac-runtime]:is(.group-focus-within\/model-msg\:pointer-events-auto:is(:where(.group\/model-msg):focus-within *)), [data-nac-runtime] .group-focus-within\/model-msg\:pointer-events-auto:is(:where(.group\/model-msg):focus-within *) {
-    pointer-events: auto;
-  }
-
-[data-nac-runtime]:is(.group-focus-within\/model-msg\:opacity-100:is(:where(.group\/model-msg):focus-within *)), [data-nac-runtime] .group-focus-within\/model-msg\:opacity-100:is(:where(.group\/model-msg):focus-within *) {
-    opacity: 1;
-  }
-
-[data-nac-runtime]:is(.group-focus-within\/user-msg\:pointer-events-auto:is(:where(.group\/user-msg):focus-within *)), [data-nac-runtime] .group-focus-within\/user-msg\:pointer-events-auto:is(:where(.group\/user-msg):focus-within *) {
-    pointer-events: auto;
-  }
-
-[data-nac-runtime]:is(.group-focus-within\/user-msg\:opacity-100:is(:where(.group\/user-msg):focus-within *)), [data-nac-runtime] .group-focus-within\/user-msg\:opacity-100:is(:where(.group\/user-msg):focus-within *) {
-    opacity: 1;
-  }
-
 @media (hover: hover) {
     [data-nac-runtime]:is(.group-hover\:pointer-events-auto:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:pointer-events-auto:is(:where(.group):hover *) {
       pointer-events: auto;
+    }
+
+    [data-nac-runtime]:is(.group-hover\:not-sr-only:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:not-sr-only:is(:where(.group):hover *) {
+      clip-path: none;
+      white-space: normal;
+      width: auto;
+      height: auto;
+      margin: 0;
+      padding: 0;
+      position: static;
+      overflow: visible;
     }
 
     [data-nac-runtime]:is(.group-hover\:flex:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:flex:is(:where(.group):hover *) {
@@ -3709,12 +3967,20 @@
       display: none;
     }
 
+    [data-nac-runtime]:is(.group-hover\:animate-none:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:animate-none:is(:where(.group):hover *) {
+      animation: none;
+    }
+
     [data-nac-runtime]:is(.group-hover\:bg-btn-ghost-hovered:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:bg-btn-ghost-hovered:is(:where(.group):hover *) {
       background-color: var(--color-bg-btn-ghost-hovered);
     }
 
     [data-nac-runtime]:is(.group-hover\:bg-btn-secondary-hovered:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:bg-btn-secondary-hovered:is(:where(.group):hover *) {
       background-color: var(--color-bg-btn-secondary-hovered);
+    }
+
+    [data-nac-runtime]:is(.group-hover\:bg-none:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:bg-none:is(:where(.group):hover *) {
+      background-image: none;
     }
 
     [data-nac-runtime]:is(.group-hover\:pr-8:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:pr-8:is(:where(.group):hover *) {
@@ -3725,29 +3991,29 @@
       color: var(--color-text-btn-secondary-hovered);
     }
 
+    [data-nac-runtime]:is(.group-hover\:text-inherit:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:text-inherit:is(:where(.group):hover *) {
+      color: inherit;
+    }
+
     [data-nac-runtime]:is(.group-hover\:opacity-100:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:opacity-100:is(:where(.group):hover *) {
       opacity: 1;
     }
 
-    [data-nac-runtime]:is(.group-hover\/model-msg\:pointer-events-auto:is(:where(.group\/model-msg):hover *)), [data-nac-runtime] .group-hover\/model-msg\:pointer-events-auto:is(:where(.group\/model-msg):hover *) {
-      pointer-events: auto;
+    [data-nac-runtime]:is(.group-hover\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):hover *) {
+      -webkit-text-fill-color: currentColor;
     }
+  }
 
-    [data-nac-runtime]:is(.group-hover\/model-msg\:opacity-100:is(:where(.group\/model-msg):hover *)), [data-nac-runtime] .group-hover\/model-msg\:opacity-100:is(:where(.group\/model-msg):hover *) {
-      opacity: 1;
-    }
-
-    [data-nac-runtime]:is(.group-hover\/user-msg\:pointer-events-auto:is(:where(.group\/user-msg):hover *)), [data-nac-runtime] .group-hover\/user-msg\:pointer-events-auto:is(:where(.group\/user-msg):hover *) {
-      pointer-events: auto;
-    }
-
-    [data-nac-runtime]:is(.group-hover\/user-msg\:opacity-100:is(:where(.group\/user-msg):hover *)), [data-nac-runtime] .group-hover\/user-msg\:opacity-100:is(:where(.group\/user-msg):hover *) {
-      opacity: 1;
-    }
+[data-nac-runtime]:is(.group-focus-visible\:block:is(:where(.group):focus-visible *)), [data-nac-runtime] .group-focus-visible\:block:is(:where(.group):focus-visible *) {
+    display: block;
   }
 
 [data-nac-runtime]:is(.group-focus-visible\:opacity-100:is(:where(.group):focus-visible *)), [data-nac-runtime] .group-focus-visible\:opacity-100:is(:where(.group):focus-visible *) {
     opacity: 1;
+  }
+
+[data-nac-runtime]:is(.group-active\:animate-none:is(:where(.group):active *)), [data-nac-runtime] .group-active\:animate-none:is(:where(.group):active *) {
+    animation: none;
   }
 
 [data-nac-runtime]:is(.group-active\:bg-btn-ghost-pressed:is(:where(.group):active *)), [data-nac-runtime] .group-active\:bg-btn-ghost-pressed:is(:where(.group):active *) {
@@ -3758,8 +4024,55 @@
     background-color: var(--color-bg-btn-secondary-pressed);
   }
 
+[data-nac-runtime]:is(.group-active\:bg-none:is(:where(.group):active *)), [data-nac-runtime] .group-active\:bg-none:is(:where(.group):active *) {
+    background-image: none;
+  }
+
+[data-nac-runtime]:is(.group-active\:text-inherit:is(:where(.group):active *)), [data-nac-runtime] .group-active\:text-inherit:is(:where(.group):active *) {
+    color: inherit;
+  }
+
+[data-nac-runtime]:is(.group-active\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):active *)), [data-nac-runtime] .group-active\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):active *) {
+    -webkit-text-fill-color: currentColor;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:animate-none:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:animate-none:is(:where(.group):disabled *) {
+    animation: none;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:bg-none:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:bg-none:is(:where(.group):disabled *) {
+    background-image: none;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:text-inherit:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:text-inherit:is(:where(.group):disabled *) {
+    color: inherit;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:opacity-50:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:opacity-50:is(:where(.group):disabled *) {
+    opacity: .5;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):disabled *) {
+    -webkit-text-fill-color: currentColor;
+  }
+
+[data-nac-runtime]:is(.group-disabled\/file-button\:opacity-50:is(:where(.group\/file-button):disabled *)), [data-nac-runtime] .group-disabled\/file-button\:opacity-50:is(:where(.group\/file-button):disabled *), [data-nac-runtime]:is(.group-disabled\/file-list-tab-button\:opacity-50:is(:where(.group\/file-list-tab-button):disabled *)), [data-nac-runtime] .group-disabled\/file-list-tab-button\:opacity-50:is(:where(.group\/file-list-tab-button):disabled *) {
+    opacity: .5;
+  }
+
 [data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:pointer-events-auto:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:pointer-events-auto:is(:where(.group):has(:focus-visible) *) {
     pointer-events: auto;
+  }
+
+[data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:not-sr-only:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:not-sr-only:is(:where(.group):has(:focus-visible) *) {
+    clip-path: none;
+    white-space: normal;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    position: static;
+    overflow: visible;
   }
 
 [data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:flex:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:flex:is(:where(.group):has(:focus-visible) *) {
@@ -3774,7 +4087,15 @@
     padding-right: calc(var(--spacing) * 8);
   }
 
-[data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:opacity-100:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:opacity-100:is(:where(.group):has(:focus-visible) *), [data-nac-runtime]:is(.peer-focus-visible\:opacity-100:is(:where(.peer):focus-visible ~ *)), [data-nac-runtime] .peer-focus-visible\:opacity-100:is(:where(.peer):focus-visible ~ *) {
+[data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:opacity-100:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:opacity-100:is(:where(.group):has(:focus-visible) *) {
+    opacity: 1;
+  }
+
+[data-nac-runtime]:is(.group-has-\[\>button\:disabled\]\:hidden:is(:where(.group):has( > button:disabled) *)), [data-nac-runtime] .group-has-\[\>button\:disabled\]\:hidden:is(:where(.group):has( > button:disabled) *) {
+    display: none;
+  }
+
+[data-nac-runtime]:is(.peer-focus-visible\:opacity-100:is(:where(.peer):focus-visible ~ *)), [data-nac-runtime] .peer-focus-visible\:opacity-100:is(:where(.peer):focus-visible ~ *) {
     opacity: 1;
   }
 
@@ -3784,6 +4105,31 @@
 
 [data-nac-runtime] .placeholder\:text-input-placeholder::placeholder {
     color: var(--color-text-input-placeholder);
+  }
+
+[data-nac-runtime]:is(.after\:absolute:after), [data-nac-runtime] .after\:absolute:after {
+    content: var(--nac-presentation-tw-content);
+    position: absolute;
+  }
+
+[data-nac-runtime]:is(.after\:-inset-1\.5:after), [data-nac-runtime] .after\:-inset-1\.5:after {
+    content: var(--nac-presentation-tw-content);
+    inset: calc(var(--spacing) * -1.5);
+  }
+
+[data-nac-runtime]:is(.empty\:hidden:empty), [data-nac-runtime] .empty\:hidden:empty {
+    display: none;
+  }
+
+[data-nac-runtime]:is(.focus-within\:not-sr-only:focus-within), [data-nac-runtime] .focus-within\:not-sr-only:focus-within {
+    clip-path: none;
+    white-space: normal;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    position: static;
+    overflow: visible;
   }
 
 @media (hover: hover) {
@@ -3811,13 +4157,25 @@
       background-color: var(--color-bg-elevation-sublevel-variant-A);
     }
 
-    [data-nac-runtime]:is(.hover\:text-basic-primary:hover), [data-nac-runtime] .hover\:text-basic-primary:hover {
-      color: var(--color-text-basic-primary);
+    [data-nac-runtime]:is(.hover\:text-accent-secondary:hover), [data-nac-runtime] .hover\:text-accent-secondary:hover {
+      color: var(--color-text-accent-secondary);
+    }
+
+    [data-nac-runtime]:is(.hover\:text-basic-secondary:hover), [data-nac-runtime] .hover\:text-basic-secondary:hover {
+      color: var(--color-text-basic-secondary);
+    }
+
+    [data-nac-runtime]:is(.hover\:text-btn-secondary-hovered:hover), [data-nac-runtime] .hover\:text-btn-secondary-hovered:hover {
+      color: var(--color-text-btn-secondary-hovered);
     }
 
     [data-nac-runtime]:is(.hover\:underline:hover), [data-nac-runtime] .hover\:underline:hover {
       text-decoration-line: underline;
     }
+  }
+
+[data-nac-runtime] .focus\:placeholder\:text-transparent:focus::placeholder {
+    color: #0000;
   }
 
 [data-nac-runtime]:is(.focus-visible\:outline:focus-visible), [data-nac-runtime] .focus-visible\:outline:focus-visible {
@@ -3846,6 +4204,11 @@
     outline-color: var(--color-border-focus-outline);
   }
 
+[data-nac-runtime]:is(.focus-visible\:outline-none:focus-visible), [data-nac-runtime] .focus-visible\:outline-none:focus-visible {
+    --nac-presentation-tw-outline-style: none;
+    outline-style: none;
+  }
+
 [data-nac-runtime]:is(.active\:cursor-grabbing:active), [data-nac-runtime] .active\:cursor-grabbing:active {
     cursor: grabbing;
   }
@@ -3854,8 +4217,135 @@
     background-color: var(--color-bg-btn-ghost-accent-highlighted-pressed);
   }
 
+[data-nac-runtime]:is(.active\:bg-btn-ghost-pressed:active), [data-nac-runtime] .active\:bg-btn-ghost-pressed:active {
+    background-color: var(--color-bg-btn-ghost-pressed);
+  }
+
+[data-nac-runtime]:is(.active\:text-accent-tertiary:active), [data-nac-runtime] .active\:text-accent-tertiary:active {
+    color: var(--color-text-accent-tertiary);
+  }
+
+[data-nac-runtime]:is(.active\:text-basic-primary:active), [data-nac-runtime] .active\:text-basic-primary:active {
+    color: var(--color-text-basic-primary);
+  }
+
+[data-nac-runtime]:is(.active\:text-btn-secondary-pressed:active), [data-nac-runtime] .active\:text-btn-secondary-pressed:active {
+    color: var(--color-text-btn-secondary-pressed);
+  }
+
+@media (hover: hover) {
+    [data-nac-runtime]:is(.enabled\:hover\:bg-btn-ghost-highlighted-hovered:enabled:hover), [data-nac-runtime] .enabled\:hover\:bg-btn-ghost-highlighted-hovered:enabled:hover {
+      background-color: var(--color-bg-btn-ghost-highlighted-hovered);
+    }
+
+    [data-nac-runtime]:is(.enabled\:hover\:bg-btn-ghost-hovered:enabled:hover), [data-nac-runtime] .enabled\:hover\:bg-btn-ghost-hovered:enabled:hover {
+      background-color: var(--color-bg-btn-ghost-hovered);
+    }
+
+    [data-nac-runtime]:is(.enabled\:hover\:text-btn-secondary-hovered:enabled:hover), [data-nac-runtime] .enabled\:hover\:text-btn-secondary-hovered:enabled:hover {
+      color: var(--color-text-btn-secondary-hovered);
+    }
+
+    [data-nac-runtime]:is(.enabled\:hover\:text-btn-secondary-hovered-highlighted:enabled:hover), [data-nac-runtime] .enabled\:hover\:text-btn-secondary-hovered-highlighted:enabled:hover {
+      color: var(--color-text-btn-secondary-hovered-highlighted);
+    }
+  }
+
+[data-nac-runtime]:is(.enabled\:active\:bg-btn-ghost-highlighted-pressed:enabled:active), [data-nac-runtime] .enabled\:active\:bg-btn-ghost-highlighted-pressed:enabled:active {
+    background-color: var(--color-bg-btn-ghost-highlighted-pressed);
+  }
+
+[data-nac-runtime]:is(.enabled\:active\:bg-btn-ghost-pressed:enabled:active), [data-nac-runtime] .enabled\:active\:bg-btn-ghost-pressed:enabled:active {
+    background-color: var(--color-bg-btn-ghost-pressed);
+  }
+
+[data-nac-runtime]:is(.enabled\:active\:text-btn-secondary-pressed:enabled:active), [data-nac-runtime] .enabled\:active\:text-btn-secondary-pressed:enabled:active {
+    color: var(--color-text-btn-secondary-pressed);
+  }
+
+[data-nac-runtime]:is(.enabled\:active\:text-btn-secondary-pressed-highlighted:enabled:active), [data-nac-runtime] .enabled\:active\:text-btn-secondary-pressed-highlighted:enabled:active {
+    color: var(--color-text-btn-secondary-pressed-highlighted);
+  }
+
 [data-nac-runtime]:is(.disabled\:cursor-not-allowed:disabled), [data-nac-runtime] .disabled\:cursor-not-allowed:disabled {
     cursor: not-allowed;
+  }
+
+[data-nac-runtime]:is(.disabled\:bg-btn-ghost-disabled:disabled), [data-nac-runtime] .disabled\:bg-btn-ghost-disabled:disabled {
+    background-color: var(--color-bg-btn-ghost-disabled);
+  }
+
+[data-nac-runtime]:is(.disabled\:bg-btn-ghost-highlighted-disabled:disabled), [data-nac-runtime] .disabled\:bg-btn-ghost-highlighted-disabled:disabled {
+    background-color: var(--color-bg-btn-ghost-highlighted-disabled);
+  }
+
+[data-nac-runtime]:is(.disabled\:text-accent-muted:disabled), [data-nac-runtime] .disabled\:text-accent-muted:disabled {
+    color: var(--color-text-accent-muted);
+  }
+
+[data-nac-runtime]:is(.disabled\:text-basic-muted:disabled), [data-nac-runtime] .disabled\:text-basic-muted:disabled {
+    color: var(--color-text-basic-muted);
+  }
+
+[data-nac-runtime]:is(.disabled\:text-btn-secondary-disabled:disabled), [data-nac-runtime] .disabled\:text-btn-secondary-disabled:disabled {
+    color: var(--color-text-btn-secondary-disabled);
+  }
+
+[data-nac-runtime]:is(.disabled\:text-btn-secondary-disabled-highlighted:disabled), [data-nac-runtime] .disabled\:text-btn-secondary-disabled-highlighted:disabled {
+    color: var(--color-text-btn-secondary-disabled-highlighted);
+  }
+
+[data-nac-runtime]:is(.has-\[\>button\:active\]\:bg-btn-ghost-highlighted-pressed:has( > button:active)), [data-nac-runtime] .has-\[\>button\:active\]\:bg-btn-ghost-highlighted-pressed:has( > button:active) {
+    background-color: var(--color-bg-btn-ghost-highlighted-pressed);
+  }
+
+[data-nac-runtime]:is(.has-\[\>button\:active\]\:bg-btn-ghost-pressed:has( > button:active)), [data-nac-runtime] .has-\[\>button\:active\]\:bg-btn-ghost-pressed:has( > button:active) {
+    background-color: var(--color-bg-btn-ghost-pressed);
+  }
+
+[data-nac-runtime]:is(.has-\[\>button\:disabled\]\:bg-btn-ghost-disabled:has( > button:disabled)), [data-nac-runtime] .has-\[\>button\:disabled\]\:bg-btn-ghost-disabled:has( > button:disabled) {
+    background-color: var(--color-bg-btn-ghost-disabled);
+  }
+
+[data-nac-runtime]:is(.has-\[\>button\:disabled\]\:bg-btn-ghost-highlighted-disabled:has( > button:disabled)), [data-nac-runtime] .has-\[\>button\:disabled\]\:bg-btn-ghost-highlighted-disabled:has( > button:disabled) {
+    background-color: var(--color-bg-btn-ghost-highlighted-disabled);
+  }
+
+[data-nac-runtime]:is(.has-\[\>button\:focus-visible\]\:outline-2:has( > button:focus-visible)), [data-nac-runtime] .has-\[\>button\:focus-visible\]\:outline-2:has( > button:focus-visible) {
+    outline-style: var(--nac-presentation-tw-outline-style);
+    outline-width: 2px;
+  }
+
+@media (prefers-reduced-motion: reduce) {
+    [data-nac-runtime]:is(.motion-reduce\:animate-none), [data-nac-runtime] .motion-reduce\:animate-none {
+      animation: none;
+    }
+
+    [data-nac-runtime]:is(.motion-reduce\:bg-none), [data-nac-runtime] .motion-reduce\:bg-none {
+      background-image: none;
+    }
+
+    [data-nac-runtime]:is(.motion-reduce\:text-inherit), [data-nac-runtime] .motion-reduce\:text-inherit {
+      color: inherit;
+    }
+
+    [data-nac-runtime]:is(.motion-reduce\:transition-none), [data-nac-runtime] .motion-reduce\:transition-none {
+      transition-property: none;
+    }
+
+    [data-nac-runtime]:is(.motion-reduce\:\[-webkit-text-fill-color\:currentColor\]), [data-nac-runtime] .motion-reduce\:\[-webkit-text-fill-color\:currentColor\] {
+      -webkit-text-fill-color: currentColor;
+    }
+  }
+
+@media not all and (min-width: 48rem) {
+    [data-nac-runtime]:is(.max-md\:scroll-pt-14), [data-nac-runtime] .max-md\:scroll-pt-14 {
+      scroll-padding-top: calc(var(--spacing) * 14);
+    }
+
+    [data-nac-runtime]:is(.max-md\:py-14), [data-nac-runtime] .max-md\:py-14 {
+      padding-block: calc(var(--spacing) * 14);
+    }
   }
 
 @media (min-width: 40rem) {
@@ -3873,8 +4363,8 @@
   }
 
 @media (min-width: 48rem) {
-    [data-nac-runtime]:is(.md\:top-\[72px\]), [data-nac-runtime] .md\:top-\[72px\] {
-      top: 72px;
+    [data-nac-runtime]:is(.md\:top-\[90px\]), [data-nac-runtime] .md\:top-\[90px\] {
+      top: 90px;
     }
 
     [data-nac-runtime]:is(.md\:col-span-2), [data-nac-runtime] .md\:col-span-2 {
@@ -3947,10 +4437,6 @@
 
     [data-nac-runtime]:is(.md\:max-w-\[220px\]), [data-nac-runtime] .md\:max-w-\[220px\] {
       max-width: 220px;
-    }
-
-    [data-nac-runtime]:is(.md\:max-w-\[calc\(100\%-36px\)\]), [data-nac-runtime] .md\:max-w-\[calc\(100\%-36px\)\] {
-      max-width: calc(100% - 36px);
     }
 
     [data-nac-runtime]:is(.md\:max-w-full), [data-nac-runtime] .md\:max-w-full {
@@ -4074,6 +4560,10 @@
       padding-inline: calc(var(--spacing) * 2);
     }
 
+    [data-nac-runtime]:is(.md\:px-8), [data-nac-runtime] .md\:px-8 {
+      padding-inline: calc(var(--spacing) * 8);
+    }
+
     [data-nac-runtime]:is(.md\:py-1), [data-nac-runtime] .md\:py-1 {
       padding-block: var(--spacing);
     }
@@ -4094,16 +4584,12 @@
       padding-top: calc(var(--spacing) * 6);
     }
 
-    [data-nac-runtime]:is(.md\:pt-\[72px\]), [data-nac-runtime] .md\:pt-\[72px\] {
-      padding-top: 72px;
+    [data-nac-runtime]:is(.md\:pt-\[90px\]), [data-nac-runtime] .md\:pt-\[90px\] {
+      padding-top: 90px;
     }
 
     [data-nac-runtime]:is(.md\:pr-2), [data-nac-runtime] .md\:pr-2 {
       padding-right: calc(var(--spacing) * 2);
-    }
-
-    [data-nac-runtime]:is(.md\:pb-0), [data-nac-runtime] .md\:pb-0 {
-      padding-bottom: 0;
     }
 
     [data-nac-runtime]:is(.md\:pb-2), [data-nac-runtime] .md\:pb-2 {
@@ -4112,6 +4598,10 @@
 
     [data-nac-runtime]:is(.md\:pb-4), [data-nac-runtime] .md\:pb-4 {
       padding-bottom: calc(var(--spacing) * 4);
+    }
+
+    [data-nac-runtime]:is(.md\:pl-2), [data-nac-runtime] .md\:pl-2 {
+      padding-left: calc(var(--spacing) * 2);
     }
 
     [data-nac-runtime]:is(.md\:pl-3), [data-nac-runtime] .md\:pl-3 {
@@ -4139,8 +4629,17 @@
   }
 
 @media (min-width: 80rem) {
-    [data-nac-runtime]:is(.xl\:flex), [data-nac-runtime] .xl\:flex {
-      display: flex;
+    [data-nac-runtime]:is(.xl\:size-5), [data-nac-runtime] .xl\:size-5 {
+      width: calc(var(--spacing) * 5);
+      height: calc(var(--spacing) * 5);
+    }
+
+    [data-nac-runtime]:is(.xl\:h-12), [data-nac-runtime] .xl\:h-12 {
+      height: calc(var(--spacing) * 12);
+    }
+
+    [data-nac-runtime]:is(.xl\:w-\[220px\]), [data-nac-runtime] .xl\:w-\[220px\] {
+      width: 220px;
     }
 
     [data-nac-runtime]:is(.xl\:max-w-\[128px\]), [data-nac-runtime] .xl\:max-w-\[128px\] {
@@ -4149,6 +4648,35 @@
 
     [data-nac-runtime]:is(.xl\:gap-1\.5), [data-nac-runtime] .xl\:gap-1\.5 {
       gap: calc(var(--spacing) * 1.5);
+    }
+
+    [data-nac-runtime]:is(.xl\:gap-2\.5), [data-nac-runtime] .xl\:gap-2\.5 {
+      gap: calc(var(--spacing) * 2.5);
+    }
+
+    [data-nac-runtime]:is(.xl\:p-2), [data-nac-runtime] .xl\:p-2 {
+      padding: calc(var(--spacing) * 2);
+    }
+
+    [data-nac-runtime]:is(.xl\:px-2), [data-nac-runtime] .xl\:px-2 {
+      padding-inline: calc(var(--spacing) * 2);
+    }
+
+    [data-nac-runtime]:is(.xl\:py-3), [data-nac-runtime] .xl\:py-3 {
+      padding-block: calc(var(--spacing) * 3);
+    }
+
+    [data-nac-runtime]:is(.xl\:pb-2), [data-nac-runtime] .xl\:pb-2 {
+      padding-bottom: calc(var(--spacing) * 2);
+    }
+
+    [data-nac-runtime]:is(.xl\:pl-4), [data-nac-runtime] .xl\:pl-4 {
+      padding-left: calc(var(--spacing) * 4);
+    }
+
+    [data-nac-runtime]:is(.xl\:text-sm\/5), [data-nac-runtime] .xl\:text-sm\/5 {
+      font-size: var(--text-sm);
+      line-height: calc(var(--spacing) * 5);
     }
   }
 
@@ -4159,6 +4687,122 @@
 
     [data-nac-runtime]:is(.\@max-\[560px\]\:px-2), [data-nac-runtime] .\@max-\[560px\]\:px-2 {
       padding-inline: calc(var(--spacing) * 2);
+    }
+  }
+
+@container not (min-width: 24rem) {
+    [data-nac-runtime]:is(.\@max-sm\:sr-only), [data-nac-runtime] .\@max-sm\:sr-only {
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border-width: 0;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      position: absolute;
+      overflow: hidden;
+    }
+
+    [data-nac-runtime]:is(.\@max-sm\:hidden), [data-nac-runtime] .\@max-sm\:hidden {
+      display: none;
+    }
+  }
+
+@container (min-width: 24rem) {
+    [data-nac-runtime]:is(.\@sm\:\!hidden), [data-nac-runtime] .\@sm\:\!hidden {
+      display: none !important;
+    }
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-accent-primary path), [data-nac-runtime] .\[\&_path\]\:fill-accent-primary path {
+    fill: var(--color-fill-accent-primary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-basic-tertiary path), [data-nac-runtime] .\[\&_path\]\:fill-basic-tertiary path {
+    fill: var(--color-fill-basic-tertiary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-btn-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-btn-secondary path {
+    fill: var(--color-fill-btn-secondary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-btn-secondary-disabled path), [data-nac-runtime] .\[\&_path\]\:fill-btn-secondary-disabled path {
+    fill: var(--color-fill-btn-secondary-disabled);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-btn-secondary-hovered path), [data-nac-runtime] .\[\&_path\]\:fill-btn-secondary-hovered path {
+    fill: var(--color-fill-btn-secondary-hovered);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-btn-secondary-pressed path), [data-nac-runtime] .\[\&_path\]\:fill-btn-secondary-pressed path {
+    fill: var(--color-fill-btn-secondary-pressed);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-danger-primary path), [data-nac-runtime] .\[\&_path\]\:fill-danger-primary path {
+    fill: var(--color-fill-danger-primary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-danger-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-danger-secondary path {
+    fill: var(--color-fill-danger-secondary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-error-primary path), [data-nac-runtime] .\[\&_path\]\:fill-error-primary path {
+    fill: var(--color-fill-error-primary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-error-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-error-secondary path {
+    fill: var(--color-fill-error-secondary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-info-primary path), [data-nac-runtime] .\[\&_path\]\:fill-info-primary path {
+    fill: var(--color-fill-info-primary);
+  }
+
+[data-nac-runtime]:is(.\[\&_path\]\:fill-info-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-info-secondary path {
+    fill: var(--color-fill-info-secondary);
+  }
+
+@media (hover: hover) {
+    [data-nac-runtime]:is(.group-hover\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group):hover *) path), [data-nac-runtime] .group-hover\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group):hover *) path, [data-nac-runtime]:is(.group-hover\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group\/file-list-tab-button):hover *) path), [data-nac-runtime] .group-hover\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group\/file-list-tab-button):hover *) path {
+      fill: var(--color-fill-btn-secondary-hovered);
+    }
+  }
+
+[data-nac-runtime]:is(.group-active\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group\/file-list-tab-button):active *) path), [data-nac-runtime] .group-active\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group\/file-list-tab-button):active *) path {
+    fill: var(--color-fill-btn-secondary-pressed);
+  }
+
+[data-nac-runtime]:is(.group-disabled\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group\/file-list-tab-button):disabled *) path), [data-nac-runtime] .group-disabled\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group\/file-list-tab-button):disabled *) path {
+    fill: var(--color-fill-btn-secondary-disabled);
+  }
+
+[data-nac-runtime]:is(.group-has-\[\>button\:active\]\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group):has( > button:active) *) path), [data-nac-runtime] .group-has-\[\>button\:active\]\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group):has( > button:active) *) path {
+    fill: var(--color-fill-btn-secondary-pressed);
+  }
+
+[data-nac-runtime]:is(.group-has-\[\>button\:disabled\]\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group):has( > button:disabled) *) path), [data-nac-runtime] .group-has-\[\>button\:disabled\]\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group):has( > button:disabled) *) path {
+    fill: var(--color-fill-btn-secondary-disabled);
+  }
+
+@media (hover: hover) {
+    [data-nac-runtime]:is(.hover\:\[\&_path\]\:fill-btn-secondary-hovered:hover path), [data-nac-runtime] .hover\:\[\&_path\]\:fill-btn-secondary-hovered:hover path {
+      fill: var(--color-fill-btn-secondary-hovered);
+    }
+  }
+
+[data-nac-runtime]:is(.active\:\[\&_path\]\:fill-btn-secondary-pressed:active path), [data-nac-runtime] .active\:\[\&_path\]\:fill-btn-secondary-pressed:active path {
+    fill: var(--color-fill-btn-secondary-pressed);
+  }
+
+[data-nac-runtime]:is(.\[\&_svg\]\:size-4 svg), [data-nac-runtime] .\[\&_svg\]\:size-4 svg {
+    width: calc(var(--spacing) * 4);
+    height: calc(var(--spacing) * 4);
+  }
+
+@media (min-width: 80rem) {
+    [data-nac-runtime]:is(.xl\:\[\&_svg\]\:size-5 svg), [data-nac-runtime] .xl\:\[\&_svg\]\:size-5 svg {
+      width: calc(var(--spacing) * 5);
+      height: calc(var(--spacing) * 5);
     }
   }
 
@@ -4178,6 +4822,14 @@
     min-height: 0;
   }
 
+[data-nac-runtime]:is(.\[\&\>\*\]\:w-full > *), [data-nac-runtime] .\[\&\>\*\]\:w-full > * {
+    width: 100%;
+  }
+
+[data-nac-runtime]:is(.\[\&\>\*\]\:max-w-\[640px\] > *), [data-nac-runtime] .\[\&\>\*\]\:max-w-\[640px\] > * {
+    max-width: 640px;
+  }
+
 [data-nac-runtime]:is(.\[\&\>\*\]\:flex-1 > *), [data-nac-runtime] .\[\&\>\*\]\:flex-1 > * {
     flex: 1;
   }
@@ -4188,6 +4840,14 @@
 
 [data-nac-runtime]:is(.\[\&\>\*\]\:flex-col > *), [data-nac-runtime] .\[\&\>\*\]\:flex-col > * {
     flex-direction: column;
+  }
+
+[data-nac-runtime]:is(.\[\&\>\:first-child\]\:\!mt-0 > :first-child), [data-nac-runtime] .\[\&\>\:first-child\]\:\!mt-0 > :first-child {
+    margin-top: 0 !important;
+  }
+
+[data-nac-runtime]:is(.\[\&\>\:last-child\]\:\!mb-0 > :last-child), [data-nac-runtime] .\[\&\>\:last-child\]\:\!mb-0 > :last-child {
+    margin-bottom: 0 !important;
   }
 
 [data-nac-runtime]:is(.\[\&\>path\]\:\!fill-\[var\(--white\)\] > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-\[var\(--white\)\] > path {
@@ -4202,6 +4862,14 @@
     fill: var(--color-fill-basic-primary) !important;
   }
 
+[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-btn-destructive > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-btn-destructive > path {
+    fill: var(--color-fill-btn-destructive) !important;
+  }
+
+[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-btn-secondary-disabled > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-btn-secondary-disabled > path {
+    fill: var(--color-fill-btn-secondary-disabled) !important;
+  }
+
 [data-nac-runtime]:is(.\[\&\>path\]\:\!fill-error-primary > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-error-primary > path {
     fill: var(--color-fill-error-primary) !important;
   }
@@ -4210,23 +4878,52 @@
     fill: var(--white);
   }
 
+[data-nac-runtime]:is(.\[\&\>path\]\:fill-accent-primary > path), [data-nac-runtime] .\[\&\>path\]\:fill-accent-primary > path {
+    fill: var(--color-fill-accent-primary);
+  }
+
+[data-nac-runtime]:is(.\[\&\>path\]\:fill-basic-primary > path), [data-nac-runtime] .\[\&\>path\]\:fill-basic-primary > path {
+    fill: var(--color-fill-basic-primary);
+  }
+
 [data-nac-runtime]:is(.\[\&\>path\]\:fill-basic-tertiary > path), [data-nac-runtime] .\[\&\>path\]\:fill-basic-tertiary > path {
     fill: var(--color-fill-basic-tertiary);
   }
 
-@media (hover: none) {
-    [data-nac-runtime]:is(.\[\@media\(hover\:none\)\]\:pointer-events-auto), [data-nac-runtime] .\[\@media\(hover\:none\)\]\:pointer-events-auto {
-      pointer-events: auto;
+[data-nac-runtime]:is(.\[\&\>path\]\:fill-error-primary > path), [data-nac-runtime] .\[\&\>path\]\:fill-error-primary > path {
+    fill: var(--color-fill-error-primary);
+  }
+
+@media (hover: hover) {
+    [data-nac-runtime]:is(.group-hover\:\[\&\>path\]\:fill-accent-secondary:is(:where(.group):hover *) > path), [data-nac-runtime] .group-hover\:\[\&\>path\]\:fill-accent-secondary:is(:where(.group):hover *) > path {
+      fill: var(--color-fill-accent-secondary);
     }
 
-    [data-nac-runtime]:is(.\[\@media\(hover\:none\)\]\:opacity-100), [data-nac-runtime] .\[\@media\(hover\:none\)\]\:opacity-100 {
-      opacity: 1;
+    [data-nac-runtime]:is(.group-hover\:\[\&\>path\]\:fill-basic-secondary:is(:where(.group):hover *) > path), [data-nac-runtime] .group-hover\:\[\&\>path\]\:fill-basic-secondary:is(:where(.group):hover *) > path {
+      fill: var(--color-fill-basic-secondary);
     }
   }
 
-[data-nac-runtime].light .\[html\.light_\&\]\:bg-gradient-to-t {
-    --nac-presentation-tw-gradient-position: to top in oklab;
-    background-image: linear-gradient(var(--nac-presentation-tw-gradient-stops));
+[data-nac-runtime]:is(.group-active\:\[\&\>path\]\:fill-accent-tertiary:is(:where(.group):active *) > path), [data-nac-runtime] .group-active\:\[\&\>path\]\:fill-accent-tertiary:is(:where(.group):active *) > path {
+    fill: var(--color-fill-accent-tertiary);
+  }
+
+[data-nac-runtime]:is(.group-active\:\[\&\>path\]\:fill-basic-primary:is(:where(.group):active *) > path), [data-nac-runtime] .group-active\:\[\&\>path\]\:fill-basic-primary:is(:where(.group):active *) > path {
+    fill: var(--color-fill-basic-primary);
+  }
+
+[data-nac-runtime]:is(.group-disabled\:\[\&\>path\]\:fill-accent-muted:is(:where(.group):disabled *) > path), [data-nac-runtime] .group-disabled\:\[\&\>path\]\:fill-accent-muted:is(:where(.group):disabled *) > path {
+    fill: var(--color-fill-accent-muted);
+  }
+
+[data-nac-runtime]:is(.group-disabled\:\[\&\>path\]\:fill-basic-muted:is(:where(.group):disabled *) > path), [data-nac-runtime] .group-disabled\:\[\&\>path\]\:fill-basic-muted:is(:where(.group):disabled *) > path {
+    fill: var(--color-fill-basic-muted);
+  }
+
+@media (hover: none) {
+    [data-nac-runtime]:is(.\[\@media\(hover\:none\)\]\:opacity-100), [data-nac-runtime] .\[\@media\(hover\:none\)\]\:opacity-100 {
+      opacity: 1;
+    }
   }
 
 [data-nac-runtime] {
@@ -4502,6 +5199,7 @@
   --color-border-info-secondary: var(--blue-trans-500);
   --color-border-info-tertiary: var(--blue-trans-100);
   --color-border-info-muted: var(--blue-trans-50);
+  --color-border-input: var(--dark-trans-50);
   --color-border-primary-inversed: var(--white);
   --color-border-secondary-inversed: var(--white-trans-500);
   --color-border-tertiary-inversed: var(--white-trans-100);
@@ -4525,10 +5223,13 @@
   --color-fill-btn-accent-pressed: var(--brand-800);
   --color-fill-btn-accent-muted: var(--brand-trans-400);
   --color-fill-btn-secondary: var(--gray-700);
-  --color-fill-btn-secondary-highlighted: var(--gray-900);
   --color-fill-btn-secondary-hovered: var(--gray-900);
   --color-fill-btn-secondary-pressed: var(--gray-900);
   --color-fill-btn-secondary-disabled: var(--dark-trans-300);
+  --color-fill-btn-secondary-highlighted: var(--gray-900);
+  --color-fill-btn-secondary-hovered-highlighted: var(--gray-900);
+  --color-fill-btn-secondary-pressed-highlighted: var(--gray-900);
+  --color-fill-btn-secondary-disabled-highlighted: var(--dark-trans-300);
   --color-fill-btn-destructive: var(--red-600);
   --color-fill-btn-destructive-hovered: var(--red-700);
   --color-fill-btn-destructive-pressed: var(--red-800);
@@ -4571,6 +5272,10 @@
   --color-text-btn-secondary-hovered: var(--black);
   --color-text-btn-secondary-pressed: var(--black);
   --color-text-btn-secondary-disabled: var(--dark-trans-300);
+  --color-text-btn-secondary-highlighted: var(--black);
+  --color-text-btn-secondary-hovered-highlighted: var(--black);
+  --color-text-btn-secondary-pressed-highlighted: var(--black);
+  --color-text-btn-secondary-disabled-highlighted: var(--dark-trans-300);
   --color-text-btn-destructive: var(--red-600);
   --color-text-btn-destructive-hovered: var(--red-700);
   --color-text-btn-destructive-pressed: var(--red-800);
@@ -4610,6 +5315,7 @@
   --shadow-3xl: 0 1px 0 0 #3036360a, 0 2px 12px 0 #3036360a,
     0 1px 8px 0 #3036361a, 0 10px 36px 0 #3036363d,
     0 0 0 1px #3036360a;
+  --shadow-composer-send: var(--shadow-xl);
   --shadow-convex: 0 -1px 0 0 #3036360f inset, 0 0 0 1px #3036361a inset;
   --shadow-concave: 0 1px 0 0 #3036360f inset, 0 0 0 1px #3036361a inset;
   --shadow-range-knob: 0 1px 2px 0 #12243433, 0 0 1px 1px #0000001a;
@@ -4731,6 +5437,7 @@
   --color-border-info-secondary: var(--blue-trans-500);
   --color-border-info-tertiary: var(--blue-trans-100);
   --color-border-info-muted: var(--blue-trans-50);
+  --color-border-input: var(--white-trans-100);
   --color-border-primary-inversed: var(--black);
   --color-border-secondary-inversed: var(--dark-trans-500);
   --color-border-tertiary-inversed: var(--dark-trans-100);
@@ -4750,14 +5457,17 @@
   --color-fill-btn-primary: var(--gray-900);
   --color-fill-btn-primary-disabled: var(--gray-500);
   --color-fill-btn-accent: var(--brand-300);
-  --color-fill-btn-accent-hovered: var(--brand-200);
-  --color-fill-btn-accent-pressed: var(--brand-100);
+  --color-fill-btn-accent-hovered: var(--brand-400);
+  --color-fill-btn-accent-pressed: var(--brand-450);
   --color-fill-btn-accent-muted: var(--brand-trans-500);
   --color-fill-btn-secondary: var(--gray-200);
-  --color-fill-btn-secondary-highlighted: var(--gray-100);
   --color-fill-btn-secondary-hovered: var(--gray-100);
   --color-fill-btn-secondary-pressed: var(--gray-100);
   --color-fill-btn-secondary-disabled: var(--white-trans-300);
+  --color-fill-btn-secondary-highlighted: var(--gray-100);
+  --color-fill-btn-secondary-hovered-highlighted: var(--gray-100);
+  --color-fill-btn-secondary-pressed-highlighted: var(--gray-100);
+  --color-fill-btn-secondary-disabled-highlighted: var(--white-trans-300);
   --color-fill-btn-destructive: var(--red-300);
   --color-fill-btn-destructive-hovered: var(--red-200);
   --color-fill-btn-destructive-pressed: var(--red-100);
@@ -4793,13 +5503,17 @@
   --color-text-btn-primary: var(--black);
   --color-text-btn-primary-disabled: var(--gray-500);
   --color-text-btn-accent: var(--brand-300);
-  --color-text-btn-accent-hovered: var(--brand-200);
-  --color-text-btn-accent-pressed: var(--brand-100);
+  --color-text-btn-accent-hovered: var(--brand-400);
+  --color-text-btn-accent-pressed: var(--brand-450);
   --color-text-btn-accent-disabled: var(--brand-trans-500);
   --color-text-btn-secondary: var(--gray-150);
   --color-text-btn-secondary-hovered: var(--white);
   --color-text-btn-secondary-pressed: var(--white);
   --color-text-btn-secondary-disabled: var(--white-trans-400);
+  --color-text-btn-secondary-highlighted: var(--white);
+  --color-text-btn-secondary-hovered-highlighted: var(--white);
+  --color-text-btn-secondary-pressed-highlighted: var(--white);
+  --color-text-btn-secondary-disabled-highlighted: var(--white-trans-400);
   --color-text-btn-destructive: var(--red-300);
   --color-text-btn-destructive-hovered: var(--red-200);
   --color-text-btn-destructive-pressed: var(--red-100);
@@ -4838,6 +5552,8 @@
     0 12px 42px 0 #00000073, 0 1px 0 0 #ffffff08 inset;
   --shadow-3xl: 0 0 0 1px #ffffff1f inset, 0 4px 16px 0 #00000080,
     0 14px 46px 0 #00000080, 0 1px 0 0 #ffffff08 inset;
+  --shadow-composer-send: 0 3px 10px 0 #00000073, 0 9px 36px 0 #00000073,
+    0 1px 0 0 #ffffff08 inset;
   --shadow-convex: 0 0 0 1px #ffffff1a inset, 0 1px 0 0 #ffffff08 inset;
   --shadow-concave: 0 0 0 1px #ffffff1a inset, 0 -1px 0 0 #ffffff08 inset;
   --shadow-range-knob: 0 1px 2px 0 #12243433, 0 0 1px 1px #0000001a;
@@ -4885,6 +5601,13 @@
   font-size: .875rem;
   font-weight: 600;
   line-height: 1.25rem;
+}
+
+[data-nac-runtime]:is(.header-2xs), [data-nac-runtime] .header-2xs {
+  font-family: NACPresentationInter;
+  font-size: .6875rem;
+  font-weight: 600;
+  line-height: .875rem;
 }
 
 [data-nac-runtime]:is(.header-2xl), [data-nac-runtime] .header-2xl {
@@ -4948,6 +5671,13 @@
   font-size: .75rem;
   font-weight: 500;
   line-height: 1rem;
+}
+
+[data-nac-runtime]:is(.label-2xs), [data-nac-runtime] .label-2xs {
+  font-family: NACPresentationInter;
+  font-size: .6875rem;
+  font-weight: 500;
+  line-height: .875rem;
 }
 
 [data-nac-runtime]:is(.text-big), [data-nac-runtime] .text-big {
@@ -5182,14 +5912,14 @@
   }
 }
 
-@keyframes nac-presentation-loader-steps {
+@keyframes nac-presentation-loader-spin {
   to {
     transform: rotate(-360deg);
   }
 }
 
 [data-nac-runtime]:is(.loader), [data-nac-runtime] .loader {
-  animation: .9s steps(3, end) infinite nac-presentation-loader-steps;
+  animation: .9s linear infinite nac-presentation-loader-spin;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5244,8 +5974,8 @@
 }
 
 [data-nac-runtime]:is(.btn:focus-visible), [data-nac-runtime] .btn:focus-visible {
-  outline: 2px solid var(--blue-500);
-  outline-offset: -2px;
+  outline: 2px solid var(--color-border-focus-outline);
+  outline-offset: 2px;
 }
 
 [data-nac-runtime]:is(.btn-disabled), [data-nac-runtime] .btn-disabled {
@@ -5253,7 +5983,7 @@
 }
 
 [data-nac-runtime]:is(.btn-small), [data-nac-runtime] .btn-small {
-  gap: .25rem;
+  gap: .375rem;
   font-family: NACPresentationInter;
   font-size: .75rem;
   font-weight: 500;
@@ -5284,18 +6014,18 @@
 [data-nac-runtime]:is(.btn-small.btn-icon-left), [data-nac-runtime] .btn-small.btn-icon-left {
   height: 24px;
   padding-left: 4px;
-  padding-right: 8px;
+  padding-right: 12px;
 }
 
 [data-nac-runtime]:is(.btn-small.btn-icon-right), [data-nac-runtime] .btn-small.btn-icon-right {
   height: 24px;
-  padding-left: 8px;
+  padding-left: 12px;
   padding-right: 4px;
 }
 
 [data-nac-runtime]:is(.btn-small.btn-text), [data-nac-runtime] .btn-small.btn-text {
   height: 24px;
-  padding: 0 8px;
+  padding: 0 12px;
 }
 
 [data-nac-runtime]:is(.btn-medium.btn-icon), [data-nac-runtime] .btn-medium.btn-icon {
@@ -5342,8 +6072,15 @@
   padding: 0 24px;
 }
 
-[data-nac-runtime]:is(.btn-secondary.btn-large.btn-icon), [data-nac-runtime] .btn-secondary.btn-large.btn-icon, [data-nac-runtime]:is(.btn-secondary-highlighted.btn-large.btn-icon), [data-nac-runtime] .btn-secondary-highlighted.btn-large.btn-icon, [data-nac-runtime]:is(.btn-secondary-accent.btn-large.btn-icon), [data-nac-runtime] .btn-secondary-accent.btn-large.btn-icon, [data-nac-runtime]:is(.btn-secondary-accent-highlighted.btn-large.btn-icon), [data-nac-runtime] .btn-secondary-accent-highlighted.btn-large.btn-icon, [data-nac-runtime]:is(.btn-secondary-destructive.btn-large.btn-icon), [data-nac-runtime] .btn-secondary-destructive.btn-large.btn-icon {
-  padding: 0 11px;
+[data-nac-runtime]:is(.btn.btn-tertiary), [data-nac-runtime] .btn.btn-tertiary, [data-nac-runtime]:is(.btn.btn-tertiary-destructive), [data-nac-runtime] .btn.btn-tertiary-destructive, [data-nac-runtime]:is(.btn.btn-tertiary-accent), [data-nac-runtime] .btn.btn-tertiary-accent {
+  border-radius: 8px;
+  height: auto;
+  padding: 0;
+}
+
+[data-nac-runtime]:is(.btn.btn-icon.btn-tertiary), [data-nac-runtime] .btn.btn-icon.btn-tertiary, [data-nac-runtime]:is(.btn.btn-icon.btn-tertiary-destructive), [data-nac-runtime] .btn.btn-icon.btn-tertiary-destructive, [data-nac-runtime]:is(.btn.btn-icon.btn-tertiary-accent), [data-nac-runtime] .btn.btn-icon.btn-tertiary-accent {
+  min-width: 24px;
+  min-height: 24px;
 }
 
 [data-nac-runtime]:is(.btn-primary), [data-nac-runtime] .btn-primary {
@@ -5381,13 +6118,7 @@
   background-color: var(--color-bg-btn-secondary-pressed);
 }
 
-[data-nac-runtime]:is(.btn-secondary.btn-disabled), [data-nac-runtime] .btn-secondary.btn-disabled {
-  box-shadow: none;
-  color: var(--color-text-btn-secondary-disabled);
-  background-color: var(--color-bg-btn-secondary-disabled);
-}
-
-[data-nac-runtime]:is(.btn-secondary.btn-disabled:hover), [data-nac-runtime] .btn-secondary.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary.btn-disabled:active), [data-nac-runtime] .btn-secondary.btn-disabled:active {
+[data-nac-runtime]:is(.btn-secondary.btn-disabled), [data-nac-runtime] .btn-secondary.btn-disabled, [data-nac-runtime]:is(.btn-secondary.btn-disabled:hover), [data-nac-runtime] .btn-secondary.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary.btn-disabled:active), [data-nac-runtime] .btn-secondary.btn-disabled:active {
   color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-secondary-disabled);
 }
@@ -5408,13 +6139,7 @@
   background-color: var(--color-bg-btn-secondary-destructive-pressed);
 }
 
-[data-nac-runtime]:is(.btn-secondary-destructive.btn-disabled), [data-nac-runtime] .btn-secondary-destructive.btn-disabled {
-  box-shadow: none;
-  color: var(--color-text-btn-destructive-disabled);
-  background-color: var(--color-bg-btn-secondary-destructive-disabled);
-}
-
-[data-nac-runtime]:is(.btn-secondary-destructive.btn-disabled:hover), [data-nac-runtime] .btn-secondary-destructive.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary-destructive.btn-disabled:active), [data-nac-runtime] .btn-secondary-destructive.btn-disabled:active {
+[data-nac-runtime]:is(.btn-secondary-destructive.btn-disabled), [data-nac-runtime] .btn-secondary-destructive.btn-disabled, [data-nac-runtime]:is(.btn-secondary-destructive.btn-disabled:hover), [data-nac-runtime] .btn-secondary-destructive.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary-destructive.btn-disabled:active), [data-nac-runtime] .btn-secondary-destructive.btn-disabled:active {
   color: var(--color-text-btn-destructive-disabled);
   background-color: var(--color-bg-btn-secondary-destructive-disabled);
 }
@@ -5435,41 +6160,29 @@
   background-color: var(--color-bg-btn-secondary-accent-pressed);
 }
 
-[data-nac-runtime]:is(.btn-secondary-accent.btn-disabled), [data-nac-runtime] .btn-secondary-accent.btn-disabled {
-  box-shadow: none;
-  color: var(--color-text-btn-accent-disabled);
-  background-color: var(--color-bg-btn-secondary-accent-disabled);
-}
-
-[data-nac-runtime]:is(.btn-secondary-accent.btn-disabled:hover), [data-nac-runtime] .btn-secondary-accent.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary-accent.btn-disabled:active), [data-nac-runtime] .btn-secondary-accent.btn-disabled:active {
+[data-nac-runtime]:is(.btn-secondary-accent.btn-disabled), [data-nac-runtime] .btn-secondary-accent.btn-disabled, [data-nac-runtime]:is(.btn-secondary-accent.btn-disabled:hover), [data-nac-runtime] .btn-secondary-accent.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary-accent.btn-disabled:active), [data-nac-runtime] .btn-secondary-accent.btn-disabled:active {
   color: var(--color-text-btn-accent-disabled);
   background-color: var(--color-bg-btn-secondary-accent-disabled);
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted), [data-nac-runtime] .btn-secondary-highlighted {
-  color: var(--color-text-btn-secondary);
+  color: var(--color-text-btn-secondary-highlighted);
   background-color: var(--color-bg-btn-secondary-highlighted);
   box-shadow: var(--shadow-convex);
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted:hover), [data-nac-runtime] .btn-secondary-highlighted:hover {
-  color: var(--color-text-btn-secondary-hovered);
+  color: var(--color-text-btn-secondary-hovered-highlighted);
   background-color: var(--color-bg-btn-secondary-highlighted-hovered);
 }
 
 [data-nac-runtime]:is(.btn-secondary-highlighted:active), [data-nac-runtime] .btn-secondary-highlighted:active {
-  color: var(--color-text-btn-secondary-pressed);
+  color: var(--color-text-btn-secondary-pressed-highlighted);
   background-color: var(--color-bg-btn-secondary-highlighted-pressed);
 }
 
-[data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled {
-  box-shadow: none;
-  color: var(--color-text-btn-secondary-disabled);
-  background-color: var(--color-bg-btn-secondary-highlighted-disabled);
-}
-
-[data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled:hover), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled:active), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled:active {
-  color: var(--color-text-btn-secondary-disabled);
+[data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled, [data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled:hover), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled:active), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled:active {
+  color: var(--color-text-btn-secondary-disabled-highlighted);
   background-color: var(--color-bg-btn-secondary-highlighted-disabled);
 }
 
@@ -5489,13 +6202,7 @@
   background-color: var(--color-bg-btn-secondary-accent-highlighted-pressed);
 }
 
-[data-nac-runtime]:is(.btn-secondary-accent-highlighted.btn-disabled), [data-nac-runtime] .btn-secondary-accent-highlighted.btn-disabled {
-  box-shadow: none;
-  color: var(--color-text-btn-accent-disabled);
-  background-color: var(--color-bg-btn-secondary-accent-highlighted-disabled);
-}
-
-[data-nac-runtime]:is(.btn-secondary-accent-highlighted.btn-disabled:hover), [data-nac-runtime] .btn-secondary-accent-highlighted.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary-accent-highlighted.btn-disabled:active), [data-nac-runtime] .btn-secondary-accent-highlighted.btn-disabled:active {
+[data-nac-runtime]:is(.btn-secondary-accent-highlighted.btn-disabled), [data-nac-runtime] .btn-secondary-accent-highlighted.btn-disabled, [data-nac-runtime]:is(.btn-secondary-accent-highlighted.btn-disabled:hover), [data-nac-runtime] .btn-secondary-accent-highlighted.btn-disabled:hover, [data-nac-runtime]:is(.btn-secondary-accent-highlighted.btn-disabled:active), [data-nac-runtime] .btn-secondary-accent-highlighted.btn-disabled:active {
   color: var(--color-text-btn-accent-disabled);
   background-color: var(--color-bg-btn-secondary-accent-highlighted-disabled);
 }
@@ -5547,12 +6254,12 @@
 
 [data-nac-runtime]:is(.btn-ghost-accent:hover), [data-nac-runtime] .btn-ghost-accent:hover {
   color: var(--color-text-btn-accent-hovered);
-  background-color: var(--color-bg-btn-ghost-accent-hovered);
+  background-color: var(--color-bg-btn-secondary-accent-hovered);
 }
 
 [data-nac-runtime]:is(.btn-ghost-accent:active), [data-nac-runtime] .btn-ghost-accent:active {
   color: var(--color-text-btn-accent-pressed);
-  background-color: var(--color-bg-btn-ghost-accent-pressed);
+  background-color: var(--color-bg-btn-secondary-accent-pressed);
 }
 
 [data-nac-runtime]:is(.btn-ghost-accent.btn-disabled), [data-nac-runtime] .btn-ghost-accent.btn-disabled, [data-nac-runtime]:is(.btn-ghost-accent.btn-disabled:hover), [data-nac-runtime] .btn-ghost-accent.btn-disabled:hover, [data-nac-runtime]:is(.btn-ghost-accent.btn-disabled:active), [data-nac-runtime] .btn-ghost-accent.btn-disabled:active {
@@ -5561,17 +6268,17 @@
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted), [data-nac-runtime] .btn-ghost-highlighted {
-  color: var(--color-text-btn-secondary);
+  color: var(--color-text-btn-secondary-highlighted);
   background-color: var(--color-bg-btn-ghost-highlighted);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted:hover), [data-nac-runtime] .btn-ghost-highlighted:hover {
-  color: var(--color-text-btn-secondary-hovered);
+  color: var(--color-text-btn-secondary-hovered-highlighted);
   background-color: var(--color-bg-btn-ghost-highlighted-hovered);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted:active), [data-nac-runtime] .btn-ghost-highlighted:active {
-  color: var(--color-text-btn-secondary-pressed);
+  color: var(--color-text-btn-secondary-pressed-highlighted);
   background-color: var(--color-bg-btn-ghost-highlighted-pressed);
 }
 
@@ -5582,22 +6289,22 @@
 
 [data-nac-runtime]:is(.btn-ghost-highlighted-accent), [data-nac-runtime] .btn-ghost-highlighted-accent {
   color: var(--color-text-btn-accent);
-  background-color: var(--color-bg-btn-ghost-accent-highlighted);
+  background-color: var(--color-bg-btn-secondary-accent-highlighted);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted-accent:hover), [data-nac-runtime] .btn-ghost-highlighted-accent:hover {
   color: var(--color-text-btn-accent-hovered);
-  background-color: var(--color-bg-btn-ghost-accent-highlighted-hovered);
+  background-color: var(--color-bg-btn-secondary-accent-highlighted-hovered);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted-accent:active), [data-nac-runtime] .btn-ghost-highlighted-accent:active {
   color: var(--color-text-btn-accent-pressed);
-  background-color: var(--color-bg-btn-ghost-accent-highlighted-pressed);
+  background-color: var(--color-bg-btn-secondary-accent-highlighted-pressed);
 }
 
 [data-nac-runtime]:is(.btn-ghost-highlighted-accent.btn-disabled), [data-nac-runtime] .btn-ghost-highlighted-accent.btn-disabled, [data-nac-runtime]:is(.btn-ghost-highlighted-accent.btn-disabled:hover), [data-nac-runtime] .btn-ghost-highlighted-accent.btn-disabled:hover, [data-nac-runtime]:is(.btn-ghost-highlighted-accent.btn-disabled:active), [data-nac-runtime] .btn-ghost-highlighted-accent.btn-disabled:active {
   color: var(--color-text-btn-accent-disabled);
-  background-color: var(--color-bg-btn-ghost-accent-highlighted-disabled);
+  background-color: var(--color-bg-btn-secondary-accent-highlighted-disabled);
 }
 
 [data-nac-runtime]:is(.btn-tertiary), [data-nac-runtime] .btn-tertiary {
@@ -5701,36 +6408,20 @@
   fill: var(--color-fill-btn-secondary-disabled);
 }
 
-[data-nac-runtime]:is(.btn-secondary-highlighted .icon path), [data-nac-runtime] .btn-secondary-highlighted .icon path {
-  fill: var(--color-fill-btn-secondary);
+[data-nac-runtime]:is(.btn-secondary-highlighted .icon path), [data-nac-runtime] .btn-secondary-highlighted .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted .icon path), [data-nac-runtime] .btn-ghost-highlighted .icon path {
+  fill: var(--color-fill-btn-secondary-highlighted);
 }
 
-[data-nac-runtime]:is(.btn-secondary-highlighted:hover .icon path), [data-nac-runtime] .btn-secondary-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-secondary-hovered);
+[data-nac-runtime]:is(.btn-secondary-highlighted:hover .icon path), [data-nac-runtime] .btn-secondary-highlighted:hover .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted:hover .icon path), [data-nac-runtime] .btn-ghost-highlighted:hover .icon path {
+  fill: var(--color-fill-btn-secondary-hovered-highlighted);
 }
 
-[data-nac-runtime]:is(.btn-secondary-highlighted:active .icon path), [data-nac-runtime] .btn-secondary-highlighted:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed);
+[data-nac-runtime]:is(.btn-secondary-highlighted:active .icon path), [data-nac-runtime] .btn-secondary-highlighted:active .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted:active .icon path), [data-nac-runtime] .btn-ghost-highlighted:active .icon path {
+  fill: var(--color-fill-btn-secondary-pressed-highlighted);
 }
 
-[data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled .icon path), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled);
-}
-
-[data-nac-runtime]:is(.btn-ghost-highlighted .icon path), [data-nac-runtime] .btn-ghost-highlighted .icon path {
-  fill: var(--color-fill-btn-secondary);
-}
-
-[data-nac-runtime]:is(.btn-ghost-highlighted:hover .icon path), [data-nac-runtime] .btn-ghost-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-secondary-hovered);
-}
-
-[data-nac-runtime]:is(.btn-ghost-highlighted:active .icon path), [data-nac-runtime] .btn-ghost-highlighted:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed);
-}
-
-[data-nac-runtime]:is(.btn-ghost-highlighted.btn-disabled .icon path), [data-nac-runtime] .btn-ghost-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled);
+[data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled .icon path), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted.btn-disabled .icon path), [data-nac-runtime] .btn-ghost-highlighted.btn-disabled .icon path {
+  fill: var(--color-fill-btn-secondary-disabled-highlighted);
 }
 
 [data-nac-runtime]:is(.btn-secondary-accent .icon path), [data-nac-runtime] .btn-secondary-accent .icon path, [data-nac-runtime]:is(.btn-secondary-accent-highlighted .icon path), [data-nac-runtime] .btn-secondary-accent-highlighted .icon path, [data-nac-runtime]:is(.btn-ghost-accent .icon path), [data-nac-runtime] .btn-ghost-accent .icon path, [data-nac-runtime]:is(.btn-tertiary-accent .icon path), [data-nac-runtime] .btn-tertiary-accent .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted-accent .icon path), [data-nac-runtime] .btn-ghost-highlighted-accent .icon path {
@@ -5745,6 +6436,10 @@
   fill: var(--color-fill-btn-accent-pressed);
 }
 
+[data-nac-runtime]:is(.btn-secondary-accent.btn-disabled .icon path), [data-nac-runtime] .btn-secondary-accent.btn-disabled .icon path, [data-nac-runtime]:is(.btn-secondary-accent-highlighted.btn-disabled .icon path), [data-nac-runtime] .btn-secondary-accent-highlighted.btn-disabled .icon path, [data-nac-runtime]:is(.btn-ghost-accent.btn-disabled .icon path), [data-nac-runtime] .btn-ghost-accent.btn-disabled .icon path, [data-nac-runtime]:is(.btn-tertiary-accent.btn-disabled .icon path), [data-nac-runtime] .btn-tertiary-accent.btn-disabled .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted-accent.btn-disabled .icon path), [data-nac-runtime] .btn-ghost-highlighted-accent.btn-disabled .icon path {
+  fill: var(--color-fill-btn-accent-muted);
+}
+
 [data-nac-runtime]:is(.btn-secondary-destructive .icon path), [data-nac-runtime] .btn-secondary-destructive .icon path, [data-nac-runtime]:is(.btn-ghost-destructive .icon path), [data-nac-runtime] .btn-ghost-destructive .icon path, [data-nac-runtime]:is(.btn-tertiary-destructive .icon path), [data-nac-runtime] .btn-tertiary-destructive .icon path {
   fill: var(--color-fill-btn-destructive);
 }
@@ -5755,6 +6450,10 @@
 
 [data-nac-runtime]:is(.btn-secondary-destructive:active .icon path), [data-nac-runtime] .btn-secondary-destructive:active .icon path, [data-nac-runtime]:is(.btn-ghost-destructive:active .icon path), [data-nac-runtime] .btn-ghost-destructive:active .icon path, [data-nac-runtime]:is(.btn-tertiary-destructive:active .icon path), [data-nac-runtime] .btn-tertiary-destructive:active .icon path {
   fill: var(--color-fill-btn-destructive-pressed);
+}
+
+[data-nac-runtime]:is(.btn-secondary-destructive.btn-disabled .icon path), [data-nac-runtime] .btn-secondary-destructive.btn-disabled .icon path, [data-nac-runtime]:is(.btn-ghost-destructive.btn-disabled .icon path), [data-nac-runtime] .btn-ghost-destructive.btn-disabled .icon path, [data-nac-runtime]:is(.btn-tertiary-destructive.btn-disabled .icon path), [data-nac-runtime] .btn-tertiary-destructive.btn-disabled .icon path {
+  fill: var(--color-fill-btn-destructive-disabled);
 }
 
 [data-nac-runtime]:is(.input), [data-nac-runtime] .input {
@@ -5830,11 +6529,6 @@
   gap: 4px;
 }
 
-[data-nac-runtime]:is(.btn-sticky:focus-visible), [data-nac-runtime] .btn-sticky:focus-visible {
-  outline: 2px solid var(--color-border-focus-outline);
-  outline-offset: 2px;
-}
-
 [data-nac-runtime]:is(.btn-sticky.btn-large.btn-icon), [data-nac-runtime] .btn-sticky.btn-large.btn-icon {
   height: 40px;
   padding: 8px;
@@ -5892,8 +6586,157 @@
   justify-content: flex-start;
 }
 
+[data-nac-runtime]:is(.tab-btn.btn-small), [data-nac-runtime] .tab-btn.btn-small {
+  gap: 4px;
+  height: 28px;
+}
+
 [data-nac-runtime]:is(.tab-btn.btn-large), [data-nac-runtime] .tab-btn.btn-large {
   gap: 12px;
+}
+
+[data-nac-runtime]:is(.tab-btn-regular), [data-nac-runtime] .tab-btn-regular {
+  color: var(--color-text-btn-secondary);
+  background-color: var(--color-bg-btn-ghost);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular:hover), [data-nac-runtime] .tab-btn-regular:hover {
+  color: var(--color-text-btn-secondary-hovered);
+  background-color: var(--color-bg-btn-secondary-hovered);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular:active), [data-nac-runtime] .tab-btn-regular:active {
+  color: var(--color-text-btn-secondary-pressed);
+  background-color: var(--color-bg-btn-secondary-pressed);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active), [data-nac-runtime] .tab-btn-regular.tab-btn-active {
+  color: var(--color-text-btn-secondary-highlighted);
+  background-color: var(--color-bg-btn-secondary-highlighted);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active:hover), [data-nac-runtime] .tab-btn-regular.tab-btn-active:hover {
+  background-color: var(--color-bg-btn-ghost-highlighted-hovered);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active:active), [data-nac-runtime] .tab-btn-regular.tab-btn-active:active {
+  color: var(--color-text-btn-secondary-pressed-highlighted);
+  background-color: var(--color-bg-btn-ghost-highlighted-pressed);
+}
+
+[data-nac-runtime]:is(.tab-btn-accent), [data-nac-runtime] .tab-btn-accent {
+  color: var(--color-text-btn-accent);
+  background-color: var(--color-bg-btn-ghost-accent);
+}
+
+[data-nac-runtime]:is(.tab-btn-accent:hover), [data-nac-runtime] .tab-btn-accent:hover {
+  background-color: var(--color-bg-btn-ghost-accent-hovered);
+}
+
+[data-nac-runtime]:is(.tab-btn-accent:active), [data-nac-runtime] .tab-btn-accent:active {
+  background-color: var(--color-bg-btn-secondary-accent-pressed);
+}
+
+[data-nac-runtime]:is(.tab-btn-accent.tab-btn-active), [data-nac-runtime] .tab-btn-accent.tab-btn-active {
+  background-color: var(--color-bg-btn-secondary-accent-highlighted);
+}
+
+[data-nac-runtime]:is(.tab-btn-accent.tab-btn-active:hover), [data-nac-runtime] .tab-btn-accent.tab-btn-active:hover {
+  background-color: var(--color-bg-btn-secondary-accent-highlighted-hovered);
+}
+
+[data-nac-runtime]:is(.tab-btn-accent.tab-btn-active:active), [data-nac-runtime] .tab-btn-accent.tab-btn-active:active {
+  background-color: var(--color-bg-btn-secondary-accent-pressed);
+}
+
+[data-nac-runtime]:is(.tab-btn-destructive), [data-nac-runtime] .tab-btn-destructive {
+  color: var(--color-text-btn-destructive);
+  background-color: var(--color-bg-btn-ghost-destructive);
+}
+
+[data-nac-runtime]:is(.tab-btn-destructive:hover), [data-nac-runtime] .tab-btn-destructive:hover {
+  background-color: var(--color-bg-btn-ghost-destructive-hovered);
+}
+
+[data-nac-runtime]:is(.tab-btn-destructive:active), [data-nac-runtime] .tab-btn-destructive:active {
+  background-color: var(--color-bg-btn-ghost-destructive-pressed);
+}
+
+[data-nac-runtime]:is(.tab-btn-destructive.tab-btn-active), [data-nac-runtime] .tab-btn-destructive.tab-btn-active {
+  background-color: var(--color-bg-btn-secondary-destructive);
+}
+
+[data-nac-runtime]:is(.tab-btn-destructive.tab-btn-active:hover), [data-nac-runtime] .tab-btn-destructive.tab-btn-active:hover {
+  background-color: var(--color-bg-btn-secondary-destructive-hovered);
+}
+
+[data-nac-runtime]:is(.tab-btn-destructive.tab-btn-active:active), [data-nac-runtime] .tab-btn-destructive.tab-btn-active:active {
+  background-color: var(--color-bg-btn-secondary-destructive-pressed);
+}
+
+[data-nac-runtime]:is(.tab-btn.btn-disabled), [data-nac-runtime] .tab-btn.btn-disabled, [data-nac-runtime]:is(.tab-btn.btn-disabled:hover), [data-nac-runtime] .tab-btn.btn-disabled:hover, [data-nac-runtime]:is(.tab-btn.btn-disabled:active), [data-nac-runtime] .tab-btn.btn-disabled:active {
+  background-color: var(--color-bg-btn-ghost-disabled);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular.btn-disabled), [data-nac-runtime] .tab-btn-regular.btn-disabled, [data-nac-runtime]:is(.tab-btn-regular.btn-disabled:hover), [data-nac-runtime] .tab-btn-regular.btn-disabled:hover, [data-nac-runtime]:is(.tab-btn-regular.btn-disabled:active), [data-nac-runtime] .tab-btn-regular.btn-disabled:active {
+  color: var(--color-text-btn-secondary-disabled);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active.btn-disabled), [data-nac-runtime] .tab-btn-regular.tab-btn-active.btn-disabled, [data-nac-runtime]:is(.tab-btn-regular.tab-btn-active.btn-disabled:hover), [data-nac-runtime] .tab-btn-regular.tab-btn-active.btn-disabled:hover, [data-nac-runtime]:is(.tab-btn-regular.tab-btn-active.btn-disabled:active), [data-nac-runtime] .tab-btn-regular.tab-btn-active.btn-disabled:active {
+  color: var(--color-text-btn-secondary-disabled-highlighted);
+  background-color: var(--color-bg-btn-ghost-highlighted-disabled);
+}
+
+[data-nac-runtime]:is(.tab-btn-accent.btn-disabled), [data-nac-runtime] .tab-btn-accent.btn-disabled {
+  color: var(--color-text-btn-accent-disabled);
+}
+
+[data-nac-runtime]:is(.tab-btn-destructive.btn-disabled), [data-nac-runtime] .tab-btn-destructive.btn-disabled {
+  color: var(--color-text-btn-destructive-disabled);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular .icon path), [data-nac-runtime] .tab-btn-regular .icon path {
+  fill: var(--color-fill-btn-secondary);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular:hover .icon path), [data-nac-runtime] .tab-btn-regular:hover .icon path {
+  fill: var(--color-fill-btn-secondary-hovered);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular:active .icon path), [data-nac-runtime] .tab-btn-regular:active .icon path {
+  fill: var(--color-fill-btn-secondary-pressed);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active .icon path), [data-nac-runtime] .tab-btn-regular.tab-btn-active .icon path {
+  fill: var(--color-fill-btn-secondary-highlighted);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active:active .icon path), [data-nac-runtime] .tab-btn-regular.tab-btn-active:active .icon path {
+  fill: var(--color-fill-btn-secondary-pressed-highlighted);
+}
+
+[data-nac-runtime]:is(.tab-btn-accent .icon path), [data-nac-runtime] .tab-btn-accent .icon path {
+  fill: var(--color-fill-btn-accent);
+}
+
+[data-nac-runtime]:is(.tab-btn-destructive .icon path), [data-nac-runtime] .tab-btn-destructive .icon path {
+  fill: var(--color-fill-btn-destructive);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular.btn-disabled .icon path), [data-nac-runtime] .tab-btn-regular.btn-disabled .icon path {
+  fill: var(--color-fill-btn-secondary-disabled);
+}
+
+[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active.btn-disabled .icon path), [data-nac-runtime] .tab-btn-regular.tab-btn-active.btn-disabled .icon path {
+  fill: var(--color-fill-btn-secondary-disabled-highlighted);
+}
+
+[data-nac-runtime]:is(.tab-btn-accent.btn-disabled .icon path), [data-nac-runtime] .tab-btn-accent.btn-disabled .icon path {
+  fill: var(--color-fill-btn-accent-muted);
+}
+
+[data-nac-runtime]:is(.tab-btn-destructive.btn-disabled .icon path), [data-nac-runtime] .tab-btn-destructive.btn-disabled .icon path {
+  fill: var(--color-fill-btn-destructive-disabled);
 }
 
 [data-nac-runtime]:is(.horizontal-tab-item), [data-nac-runtime] .horizontal-tab-item {
@@ -5905,29 +6748,12 @@
   box-shadow: inset 0 -2px 0 0 var(--color-border-primary);
 }
 
-[data-nac-runtime]:is(.horizontal-tab-item-active .icon path), [data-nac-runtime] .horizontal-tab-item-active .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted);
-}
-
-[data-nac-runtime]:is(.horizontal-tab-item-active:hover .icon path), [data-nac-runtime] .horizontal-tab-item-active:hover .icon path {
-  fill: var(--color-fill-btn-secondary-hovered);
-}
-
-[data-nac-runtime]:is(.horizontal-tab-item-active:active .icon path), [data-nac-runtime] .horizontal-tab-item-active:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed);
-}
-
-[data-nac-runtime]:is(.horizontal-tab-item-active.btn-disabled .icon path), [data-nac-runtime] .horizontal-tab-item-active.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled);
-}
-
 [data-nac-runtime]:is(.horizontal-tab-item-active.btn-disabled), [data-nac-runtime] .horizontal-tab-item-active.btn-disabled {
   box-shadow: inset 0 -2px 0 0 var(--color-border-tertiary);
 }
 
-[data-nac-runtime]:is(.horizontal-tab-item:focus-visible), [data-nac-runtime] .horizontal-tab-item:focus-visible {
-  outline: 2px solid var(--color-border-focus-outline);
-  outline-offset: 2px;
+[data-nac-runtime]:is(.horizontal-tab-item.btn-small), [data-nac-runtime] .horizontal-tab-item.btn-small {
+  gap: 4px;
 }
 
 [data-nac-runtime]:is(.horizontal-tab-item-icon-left.btn-small), [data-nac-runtime] .horizontal-tab-item-icon-left.btn-small {
@@ -6126,11 +6952,11 @@
 }
 
 @media (max-width: 767.98px) {
-  [data-nac-runtime]:is(.range-input), [data-nac-runtime] .range-input {
+  [data-nac-runtime]:is(.range-input:not(.range-input-small)), [data-nac-runtime] .range-input:not(.range-input-small) {
     height: 20px;
   }
 
-  [data-nac-runtime]:is(.range-knob), [data-nac-runtime] .range-knob {
+  [data-nac-runtime]:is(.range-input:not(.range-input-small) .range-knob), [data-nac-runtime] .range-input:not(.range-input-small) .range-knob {
     width: 20px;
     height: 20px;
   }
@@ -6719,57 +7545,6 @@
   initial-value: 0;
 }
 
-@property --nac-presentation-tw-gradient-position {
-  syntax: "*";
-  inherits: false
-}
-
-@property --nac-presentation-tw-gradient-from {
-  syntax: "<color>";
-  inherits: false;
-  initial-value: #0000;
-}
-
-@property --nac-presentation-tw-gradient-via {
-  syntax: "<color>";
-  inherits: false;
-  initial-value: #0000;
-}
-
-@property --nac-presentation-tw-gradient-to {
-  syntax: "<color>";
-  inherits: false;
-  initial-value: #0000;
-}
-
-@property --nac-presentation-tw-gradient-stops {
-  syntax: "*";
-  inherits: false
-}
-
-@property --nac-presentation-tw-gradient-via-stops {
-  syntax: "*";
-  inherits: false
-}
-
-@property --nac-presentation-tw-gradient-from-position {
-  syntax: "<length-percentage>";
-  inherits: false;
-  initial-value: 0%;
-}
-
-@property --nac-presentation-tw-gradient-via-position {
-  syntax: "<length-percentage>";
-  inherits: false;
-  initial-value: 50%;
-}
-
-@property --nac-presentation-tw-gradient-to-position {
-  syntax: "<length-percentage>";
-  inherits: false;
-  initial-value: 100%;
-}
-
 @property --nac-presentation-tw-leading {
   syntax: "*";
   inherits: false
@@ -7014,6 +7789,12 @@
 @property --nac-presentation-tw-ease {
   syntax: "*";
   inherits: false
+}
+
+@property --nac-presentation-tw-content {
+  syntax: "*";
+  inherits: false;
+  initial-value: "";
 }
 
 @keyframes nac-presentation-spin {

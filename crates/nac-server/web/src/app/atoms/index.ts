@@ -1,3 +1,9 @@
+export {
+  default as ActionListButton,
+  ActionListButtonSize,
+  ActionListButtonStatus,
+  ActionListSegment,
+} from "./action-list-button";
 export { default as Avatar, AvatarSize } from "./avatar";
 export { default as Badge, BadgeColor } from "./badge";
 export { default as BoxSurface } from "./box-surface";
@@ -11,14 +17,31 @@ export { default as ChatSessionOrphanAvatar } from "./chat-session-orphan-avatar
 export { default as ChatSessionTab, ChatSessionTabSkeleton } from "./chat-session-tab";
 export { default as Checkbox } from "./checkbox";
 export { default as CodeBlock, CodeBlockSize } from "./code-block";
+export {
+  default as CodeDisplayer,
+  type CodeDisplayerLine,
+  type CodeDisplayerLineKind,
+} from "./code-displayer";
 export { default as CoverBackground } from "./cover-background";
 export { default as DatePicker, type DateRange } from "./date-picker";
 export { default as DateSelector, type DateString, type DateStringRange } from "./date-selector";
 export { default as DropdownContent } from "./dropdown-content";
 export { default as EditableHeader, EditableHeaderSize } from "./editable-header";
+export { default as FileButton, FileButtonSize } from "./file-button";
+export { default as CodeChangesBadge, CodeChangesBadgeSize } from "./file-button/CodeChangesBadge";
+export {
+  default as FileButtonsList,
+  type FileButtonsListFile,
+} from "./file-button/FileButtonsList";
 export { default as FileIcon, fileIconName } from "./file-icon";
 export { default as FileInput, type FileInputFile } from "./file-input";
+export {
+  default as FileListTabButton,
+  FileListTabButtonSize,
+  FileListTabButtonVariant,
+} from "./file-list-tab-button";
 export { default as ForkSessionItem } from "./fork-session-item";
+export { default as GitStatusLabel, GitStatus, gitStatusOf } from "./git-status-label";
 export { default as Hint } from "./hint";
 export {
   default as HorizontalTabsItem,
@@ -32,6 +55,14 @@ export { default as Input, InputLeading, InputSize, InputTrailing } from "./inpu
 export { default as InputWrapper } from "./input/InputWrapper";
 export { default as StickyInput, StickyInputVariant } from "./input/StickyInput";
 export { default as TextArea, TextAreaSize } from "./input/TextArea";
+export {
+  default as InsightItem,
+  InsightItemCodeDisplayer,
+  InsightItemCodeDisplayerState,
+  InsightItemState,
+  InsightLinkButton,
+  InsightShowFullButton,
+} from "./insight-item";
 export { default as KeyboardShortcut } from "./keyboard-shortcut";
 export { default as Label, type HoverHintConfig, LabelSize } from "./label";
 export { default as Loader, LoaderSize, LoaderVariant } from "./loader";
@@ -41,6 +72,12 @@ export { default as ShimmerLoader } from "./loader/ShimmerLoader";
 export { default as Logo } from "./logo";
 export { default as MessageBox, MessageBoxSize, MessageBoxVariant } from "./message-box";
 export { default as Modal, ModalSize } from "./modal";
+export {
+  default as ModelLoader,
+  type ModelLoaderFrame,
+  ModelLoaderSize,
+  ModelLoaderVariant,
+} from "./model-loader";
 export { default as ModelPill, ModelPillSize } from "./model-pill";
 export { default as NumberInput } from "./number-input";
 export { default as Pagination } from "./pagination";
@@ -51,10 +88,13 @@ export { default as Radio } from "./radio";
 export { default as RangeInput } from "./range-input";
 export { default as Select, type SelectItem } from "./select";
 export { default as SessionAvatar, sessionAvatarColor } from "./session-avatar";
+export { default as SessionBehaviorIcon, SessionBehaviorIconSize } from "./session-behavior-icon";
 export { default as SessionIllustration } from "./session-illustration";
 export { default as Separator } from "./separator";
+export { default as SubagentTranscriptCard, SubagentCardStatus } from "./subagent-transcript-card";
 export { default as Switch, SwitchSize } from "./switch";
 export { default as TabButton, TabButtonSize, TabButtonVariant } from "./tab-button";
 export { default as TagsSelector } from "./tags-selector";
 export { default as Toast, ToastVariant } from "./toast/Toast";
+export { default as ToolsAndReasoningBadge } from "./tools-and-reasoning-badge";
 export { default as Tooltip, TooltipPosition } from "./tooltip";

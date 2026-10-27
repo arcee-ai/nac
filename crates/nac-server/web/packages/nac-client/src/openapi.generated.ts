@@ -714,6 +714,7 @@ export interface components {
       required: boolean;
       server_name?: string | null;
       server_version?: string | null;
+      sessions_blocked: boolean;
       state: components["schemas"]["McpRuntimeState"];
       tool_count: number;
     };
@@ -1540,6 +1541,13 @@ export interface components {
       total_tokens: number;
     };
     ToolCall: { function: components["schemas"]["FunctionCall"]; id: string; type: string };
+    ToolCallContentResponse: {
+      arguments: string;
+      arguments_truncated: boolean;
+      call_id: string;
+      output: string | null;
+      output_truncated: boolean;
+    };
     ToolCompletionStatus: "success" | "error" | "timed_out" | "cancelled";
     ToolContentPartSchema:
       | { text: string; type: "text" }
@@ -1789,6 +1797,7 @@ export interface components {
       branch?: string | null;
       changed_files: components["schemas"]["ChangedFileStat"][];
       error?: string | null;
+      file_path_prefix?: string | null;
       host_root?: string | null;
       repo_label?: string | null;
       total_additions: number;

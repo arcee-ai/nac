@@ -132,6 +132,53 @@ async fn finish_run_persists_snapshot_before_completion_event() {
     ));
     assert!(parts.service.active_run().is_none());
 
+    // A follow-up run settles beside the first outcome instead of replacing it.
+    let follow_up = parts
+        .service
+        .try_begin_run(Some(client.client_id().clone()), "again")
+        .unwrap();
+    assert!(
+        parts
+            .service
+            .finish_run_once(
+                &follow_up.run_id,
+                RunOutcome::Completed("second".to_string(), None)
+            )
+            .await
+    );
+    let outcomes = crate::store::open_runtime_connection(&store_path)
+        .unwrap()
+        .prepare(
+            "SELECT run_id, disposition, result_excerpt FROM session_run_outcomes
+             WHERE session_id = ?1 ORDER BY id",
+        )
+        .unwrap()
+        .query_map([&session_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(
+        outcomes,
+        [
+            (
+                active.run_id.to_string(),
+                "completed".to_string(),
+                Some("done".to_string())
+            ),
+            (
+                follow_up.run_id.to_string(),
+                "completed".to_string(),
+                Some("second".to_string())
+            ),
+        ]
+    );
+
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -1021,4 +1068,39 @@ async fn failed_run_normalizes_the_dangling_tool_turn_for_the_next_run() {
     );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn finishing_handoff_waits_for_exact_release_and_shutdown_wakes_it() {
+    let parts = test_picker_service("finishing_input_handoff");
+    let active = parts
+        .service
+        .try_begin_run(None, "run being settled")
+        .unwrap();
+    parts.service.mark_run_finishing(&active.run_id).unwrap();
+    let mut handoff = Box::pin(parts.service.await_finishing_run());
+    assert_pending(handoff.as_mut());
+    parts.service.clear_finished_run(&SessionRunId::new());
+    assert_pending(handoff.as_mut());
+    parts.service.clear_finished_run(&active.run_id);
+    handoff.await.unwrap();
+    assert!(parts.service.active_run().is_none());
+
+    let active = parts
+        .service
+        .try_begin_run(None, "finishing during shutdown")
+        .unwrap();
+    parts.service.mark_run_finishing(&active.run_id).unwrap();
+    let mut handoff = Box::pin(parts.service.await_finishing_run());
+    assert_pending(handoff.as_mut());
+    parts.service.stop_run_admission().await.unwrap();
+    let error = handoff.await.unwrap_err();
+    assert!(error.to_string().contains("shutting down"));
+    parts.service.clear_finished_run(&active.run_id);
+    let _ = std::fs::remove_dir_all(parts.init.metadata.store_path.parent().unwrap());
+}
+
+fn assert_pending<F: std::future::Future>(future: std::pin::Pin<&mut F>) {
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    assert!(std::future::Future::poll(future, &mut context).is_pending());
 }

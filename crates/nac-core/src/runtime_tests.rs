@@ -44,5 +44,7 @@ fn complete_model_config() -> NacConfig {
 
 #[path = "runtime_tests/construction.rs"]
 mod construction;
+#[path = "runtime_tests/mcp_admission.rs"]
+mod mcp_admission;
 #[path = "runtime_tests/remote.rs"]
 mod remote;

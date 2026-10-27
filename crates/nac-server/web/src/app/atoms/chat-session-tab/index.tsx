@@ -1,10 +1,12 @@
 import type React from "react";
 
 import { cn } from "../../lib/cn";
+import type { SessionBehavior } from "../../types/api";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import ChatSessionLeadingMark from "../chat-session-fork-mark";
 import Icon, { IconName } from "../icon";
 import ShimmerLoader from "../loader/ShimmerLoader";
+import SessionBehaviorIcon, { SessionBehaviorIconSize } from "../session-behavior-icon";
 import Tooltip from "../tooltip";
 
 interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> {
@@ -14,8 +16,10 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
   running?: boolean;
   /** Display title of the chat this session was forked from. */
   forkedFromTitle?: string | null;
-  /** Compact identity shown immediately before the title. */
-  behaviorIcon?: IconName;
+  /** Session type, drawn immediately before the title. */
+  behavior?: SessionBehavior | null;
+  /** Figma `isNacEnable`: whether the behavior glyph is drawn at all. */
+  showBehaviorIcon?: boolean;
   /** Full accessible and hover/focus meaning of the behavior icon. */
   behaviorLabel?: string;
   /** Takes the tab off the strip. The chat itself is untouched. */
@@ -55,7 +59,8 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   active = false,
   running = false,
   forkedFromTitle,
-  behaviorIcon,
+  behavior,
+  showBehaviorIcon = false,
   behaviorLabel,
   onDismiss,
   className = "",
@@ -70,6 +75,11 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
       : active
         ? "text-btn-secondary-pressed"
         : "text-btn-secondary group-hover:text-btn-secondary-hovered";
+  // Not the shimmer: it paints text through a transparent color, which leaves an SVG blank.
+  const glyphClass =
+    active && !forkedFromTitle
+      ? "[&_path]:fill-btn-secondary-pressed"
+      : "[&_path]:fill-btn-secondary group-hover:[&_path]:fill-btn-secondary-hovered";
 
   const tabButton = (
     <button
@@ -91,13 +101,11 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
               : "text-btn-secondary group-hover:text-btn-secondary-hovered"
         }
       />
-      {behaviorIcon ? (
-        <Icon
-          iconName={behaviorIcon}
-          size={16}
-          aria-hidden
-          data-session-behavior-icon={behaviorIcon}
-          className={cn("shrink-0", labelClass)}
+      {showBehaviorIcon ? (
+        <SessionBehaviorIcon
+          behavior={behavior}
+          size={SessionBehaviorIconSize.Small}
+          className={glyphClass}
         />
       ) : null}
       <span

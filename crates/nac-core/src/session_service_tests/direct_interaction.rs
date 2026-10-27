@@ -1336,6 +1336,7 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
         finishing: false,
         task: None,
         prompt_commit,
+        settlement: watch::channel(false).0,
         transcript_baseline: None,
         command_cancellation: crate::tools::ThreadCancellation::default(),
         inbox_item_id: None,
@@ -1754,4 +1755,106 @@ fn from_orchestrator_run_config_exposes_metadata_and_init_snapshot() {
         parts.init.response_timing.response_durations_ms,
         Some(vec![Some(100), Some(200)])
     );
+}
+
+#[tokio::test]
+async fn maintenance_rejects_child_steering_before_inbox_mutation() {
+    let child_id = "maintenance-child";
+    let (mut parts, path) = test_direct_active_service(
+        "maintenance_child_steering",
+        child_id,
+        ModelClient::new_for_test(),
+    );
+    let mut parent = sessions::load_session(&path, child_id).unwrap();
+    parent.session_id = "maintenance-parent".to_owned();
+    sessions::create_session(&path, &parent).unwrap();
+    crate::store::create_traditional_child_relationship(
+        &path,
+        &parent.session_id,
+        child_id,
+        "general",
+        "maintenance fixture",
+    )
+    .unwrap();
+    let active = parts
+        .service
+        .try_begin_run_inner(
+            None,
+            "existing child run",
+            None,
+            false,
+            RunAdmissionKind {
+                child_execution_mode: Some(crate::store::TraditionalChildExecutionMode::Foreground),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    parts.service.mark_run_finishing(&active.run_id).unwrap();
+    crate::store::settle_traditional_child_run(
+        &path,
+        child_id,
+        active.run_id.as_str(),
+        crate::store::TraditionalChildTerminal {
+            status: crate::store::TraditionalChildStatus::Completed,
+            report: Some("finished before maintenance".to_owned()),
+            failure: None,
+            change_summary: None,
+            verification_summary: None,
+        },
+    )
+    .unwrap();
+    parts.service.enable_managed_admission(None);
+    let binding = crate::store::ManagedOperationBinding {
+        managed_host_id: "host".to_owned(),
+        host_incarnation_id: "incarnation".to_owned(),
+        issuer: "https://controller.example.test".to_owned(),
+        audience: "urn:nac:managed-control:host:incarnation".to_owned(),
+        authority_origin: "https://controller.example.test".to_owned(),
+        operation_id: "operation".to_owned(),
+        target: crate::store::ManagedUpgradeTarget {
+            release_id: "release".to_owned(),
+            source_sha: "a".repeat(40),
+            product_version: "version".to_owned(),
+            schema_version: crate::store::schema_version(),
+            minimum_schema_version: 0,
+        },
+        actor: "actor".to_owned(),
+        beneficiary: "beneficiary".to_owned(),
+    };
+    let expires_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + 60;
+    assert!(matches!(
+        crate::store::prepare_managed_upgrade(
+            &path,
+            "child-maintenance-jti",
+            &binding,
+            crate::store::ManagedControlAttemptAction::Prepare,
+            expires_at,
+            Vec::new(),
+        )
+        .unwrap(),
+        crate::store::ManagedPrepareOutcome::SafeToStop { .. }
+    ));
+    let error = parts
+        .service
+        .submit_or_steer_traditional_child(
+            &parent.session_id,
+            "must not enter inbox".to_owned(),
+            crate::store::TraditionalChildExecutionMode::Foreground,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<crate::store::ManagedWorkAdmissionError>(),
+        Some(&crate::store::ManagedWorkAdmissionError::Maintenance),
+        "the bounded input mutation must fail at the maintenance admission gate: {error:#}",
+    );
+    assert!(crate::store::list_session_inbox(&path, child_id)
+        .unwrap()
+        .is_empty());
+    parts.service.clear_finished_run(&active.run_id);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

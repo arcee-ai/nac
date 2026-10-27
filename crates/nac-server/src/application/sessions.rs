@@ -6,7 +6,7 @@ use nac_core::{
     permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
     session_service::{
         FrontendSnapshotLoadOptions, MessagePageRequest, MessagesPageSnapshot,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, ThreadEventPage,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, ThreadEventPage, ToolCallContent,
     },
     sessions,
     store::{
@@ -339,6 +339,18 @@ impl<'a> SessionStateApplication<'a> {
             .attach_session(session_id)
             .await?
             .messages_page(request)
+            .await
+    }
+
+    pub(crate) async fn tool_call_content(
+        &self,
+        session_id: &str,
+        call_id: &str,
+    ) -> Result<Option<ToolCallContent>> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .tool_call_content(call_id)
             .await
     }
 

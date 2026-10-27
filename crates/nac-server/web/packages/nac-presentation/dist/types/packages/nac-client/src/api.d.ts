@@ -490,6 +490,7 @@ export declare function createNacApi(nacClient: NacClient): {
         required: boolean;
         server_name?: string | null;
         server_version?: string | null;
+        sessions_blocked: boolean;
         state: import("./openapi.generated.js").components["schemas"]["McpRuntimeState"];
         tool_count: number;
     }>;
@@ -501,6 +502,7 @@ export declare function createNacApi(nacClient: NacClient): {
         required: boolean;
         server_name?: string | null;
         server_version?: string | null;
+        sessions_blocked: boolean;
         state: import("./openapi.generated.js").components["schemas"]["McpRuntimeState"];
         tool_count: number;
     }>;
@@ -512,6 +514,7 @@ export declare function createNacApi(nacClient: NacClient): {
         required: boolean;
         server_name?: string | null;
         server_version?: string | null;
+        sessions_blocked: boolean;
         state: import("./openapi.generated.js").components["schemas"]["McpRuntimeState"];
         tool_count: number;
     }>;
@@ -1027,6 +1030,13 @@ export declare function createNacApi(nacClient: NacClient): {
         has_older: boolean;
         next_before_id?: number | null;
         thread_event_boundary?: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"] | null;
+    }>;
+    getToolCallContent: (id: string, callId: string, signal?: AbortSignal) => Promise<{
+        arguments: string;
+        arguments_truncated: boolean;
+        call_id: string;
+        output: string | null;
+        output_truncated: boolean;
     }>;
     getWorkspaceDiff: (id: string, path: string, { stage, context, revision, signal }?: WorkspaceDiffOptions) => Promise<{
         error: string | null;

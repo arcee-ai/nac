@@ -91,6 +91,7 @@ export enum IconName {
   Danger = "danger",
   Download = "download",
   Stop = "stop",
+  Pause = "pause",
   // Deliberate aliases: these names reuse an existing glyph.
   /* eslint-disable @typescript-eslint/no-duplicate-enum-values */
   JSON = "code",
@@ -146,6 +147,12 @@ export enum IconName {
   ChatGpt = "chatGpt",
   Orchestrator = "orchestrator",
   Robot = "robot",
+  ReadFile = "readFile",
+  SearchFile = "searchFile",
+  SearchFiles = "searchFiles",
+  WriteCommand = "writeCommand",
+  Clock = "clock",
+  AddChat = "addChat",
 }
 
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {

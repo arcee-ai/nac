@@ -32,8 +32,8 @@ pub use delivery::contracts::{
     ReplayBoundaryEvent, ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest,
     SessionLineageKind, SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse,
     SshBrowseRequest, StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
-    ThreadSteeringRequest, ThreadSteeringResponse, UpdateConfigRequest, UpdateGoalRequest,
-    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
+    ThreadSteeringRequest, ThreadSteeringResponse, ToolCallContentResponse, UpdateConfigRequest,
+    UpdateGoalRequest, UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
 };
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
@@ -130,6 +130,7 @@ use nac_core::{
         ActiveSessionOperationSnapshot, FrontendSnapshotLoadOptions, MessagePageRequest,
         MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
         SessionFrontendSnapshotLoad, SessionRunHandle, SessionService, ThreadEventPage,
+        ToolCallContent,
     },
     sessions,
     store::{
@@ -318,6 +319,7 @@ struct SessionManagerInner {
     managed_clones: Option<nac_managed::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     terminal_observations: application::terminal_observation::TerminalObservationHub,
+    task_preparations: application::task_preparations::TaskPreparations,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
     git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
@@ -332,6 +334,9 @@ struct SessionManagerInner {
     managed_monitor_peer_observed: tokio::sync::Notify,
     #[cfg(test)]
     session_creation_before_projection:
+        StdMutex<Option<Arc<application::session_creation::CreationProjectionGate>>>,
+    #[cfg(test)]
+    session_creation_after_persistence:
         StdMutex<Option<Arc<application::session_creation::CreationProjectionGate>>>,
 }
 
@@ -573,6 +578,7 @@ impl SessionManager {
                 managed_model,
                 managed_clones,
                 active_sessions: RwLock::new(HashMap::new()),
+                task_preparations: application::task_preparations::TaskPreparations::default(),
                 terminal_observations:
                     application::terminal_observation::TerminalObservationHub::default(),
 
@@ -590,8 +596,13 @@ impl SessionManager {
                 managed_monitor_peer_observed: tokio::sync::Notify::new(),
                 #[cfg(test)]
                 session_creation_before_projection: StdMutex::new(None),
+                #[cfg(test)]
+                session_creation_after_persistence: StdMutex::new(None),
             }),
         };
+        if manager.managed_host().is_none() {
+            application::task_launches::reconcile_startup(&store_path)?;
+        }
         if let Err(error) = mcp_api::synchronize_mcp_oauth_redirect_uris(&manager) {
             eprintln!("MCP OAuth redirect synchronization failed: {error}");
         }
@@ -1249,6 +1260,16 @@ impl SessionManager {
     ) -> Result<MessagesPageSnapshot> {
         self.session_state()
             .messages_page(session_id, request)
+            .await
+    }
+
+    pub async fn tool_call_content(
+        &self,
+        session_id: &str,
+        call_id: &str,
+    ) -> Result<Option<ToolCallContent>> {
+        self.session_state()
+            .tool_call_content(session_id, call_id)
             .await
     }
 

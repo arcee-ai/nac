@@ -13,12 +13,12 @@ interface ProjectButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
     running?: boolean;
     /** Session count and similar, held at the row's end. */
     trailing?: React.ReactNode;
-    /** Taller touch target and larger type for the mobile modal. */
+    /** Taller touch target and larger type for the phone menu. */
     isMobile?: boolean;
     actions?: React.ReactNode;
 }
 /**
- * One project as a list row, shared by the project popover and the mobile modal.
+ * One project as a list row, shared by the project popover and the phone menu.
  *
  * The row's end holds the session count until the pointer arrives, and the
  * controls then take that same place. Trading one for the other keeps the count

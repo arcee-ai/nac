@@ -1,4 +1,5 @@
 use super::*;
+use rusqlite::OptionalExtension;
 
 #[tokio::test]
 async fn lost_permission_mode_cas_is_an_http_conflict() {
@@ -1071,24 +1072,6 @@ async fn managed_orchestrator_cancel_propagates_and_delivers_once() {
     assert_eq!(started.status(), StatusCode::CREATED);
     let running: ManagedOrchestratorRecord =
         serde_json::from_slice(&response_body(started).await).unwrap();
-    let continued = nac_core::orchestration_control::controller_for(&root.join("store.db"))
-        .unwrap()
-        .start(
-            nac_core::orchestration_control::ManagedOrchestratorStartRequest {
-                parent_session_id: "delegating".to_string(),
-                orchestrator_session_id: Some(running.orchestrator_session_id.clone()),
-                description: "cancel flow".to_string(),
-                prompt: "additional foreground steering".to_string(),
-                execution_mode: ManagedOrchestratorExecutionMode::Foreground,
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        continued.execution_mode,
-        Some(ManagedOrchestratorExecutionMode::Background),
-        "continuation must not rewrite the admitted generation mode"
-    );
     tokio::task::spawn_blocking(move || {
         assert_eq!(requests.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
     })
@@ -1137,6 +1120,65 @@ async fn managed_orchestrator_cancel_propagates_and_delivers_once() {
         )
         .unwrap();
 
+    // Foreground steering waits for this input's delivery, so start it
+    // concurrently with the deliberate cancellation of the held provider.
+    let controller = nac_core::orchestration_control::controller_for(&store_path).unwrap();
+    let continuation_id = running.orchestrator_session_id.clone();
+    let continued = tokio::spawn(async move {
+        controller
+            .start(
+                nac_core::orchestration_control::ManagedOrchestratorStartRequest {
+                    parent_session_id: "delegating".to_owned(),
+                    orchestrator_session_id: Some(continuation_id),
+                    description: "cancel flow".to_owned(),
+                    prompt: "additional foreground steering".to_owned(),
+                    execution_mode: ManagedOrchestratorExecutionMode::Foreground,
+                },
+            )
+            .await
+    });
+    let steering_id = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let id = connection
+                .query_row(
+                    "SELECT id FROM thread_steering WHERE session_id = ?1 ORDER BY id LIMIT 1",
+                    [&running.orchestrator_session_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .unwrap();
+            if let Some(id) = id {
+                break id;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("foreground steering must persist its exact receipt before cancellation");
+    let steering = nac_core::store::load_thread_steering(
+        &store_path,
+        &running.orchestrator_session_id,
+        steering_id,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(steering.dispatch_id, expected_run_id);
+    assert_eq!(steering.instruction, "additional foreground steering");
+    assert_eq!(steering.status, "queued");
+    assert!(
+        !continued.is_finished(),
+        "foreground steering must not report queued input as delivered"
+    );
+    let current =
+        nac_core::store::load_managed_orchestrator(&store_path, &running.orchestrator_session_id)
+            .unwrap()
+            .unwrap();
+    assert_eq!(
+        current.execution_mode,
+        Some(ManagedOrchestratorExecutionMode::Background),
+        "continuation must not rewrite the admitted generation mode"
+    );
+
     let cancelled = tokio::time::timeout(
         Duration::from_secs(10),
         app.oneshot(
@@ -1157,7 +1199,27 @@ async fn managed_orchestrator_cancel_propagates_and_delivers_once() {
     let cancelled: ManagedOrchestratorRecord =
         serde_json::from_slice(&response_body(cancelled).await).unwrap();
     assert_eq!(cancelled.status, ManagedOrchestratorStatus::Cancelled);
+    assert_eq!(
+        cancelled.execution_mode,
+        Some(ManagedOrchestratorExecutionMode::Background)
+    );
     release.send(()).unwrap();
+    let continuation_error = tokio::time::timeout(Duration::from_secs(5), continued)
+        .await
+        .expect("cancelled foreground steering must settle instead of hanging")
+        .unwrap()
+        .unwrap_err();
+    assert!(continuation_error.to_string().contains("before this steering message was delivered"),
+        "unconsumed steering must not inherit cancellation as successful execution: {continuation_error:#}");
+    let steering = nac_core::store::load_thread_steering(
+        &store_path,
+        &running.orchestrator_session_id,
+        steering_id,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(steering.status, "expired");
+    assert!(steering.delivered_at.is_none());
 
     let inbox = nac_core::store::list_session_inbox(&root.join("store.db"), "delegating").unwrap();
     assert_eq!(inbox.len(), 1);

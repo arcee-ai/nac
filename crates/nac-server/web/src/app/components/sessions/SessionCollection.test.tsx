@@ -120,7 +120,7 @@ describe("global session collection", () => {
     expect(activeRow.getAttribute("aria-current")).toBe("page");
     activeRow.focus();
     expect(document.activeElement).toBe(activeRow);
-    expect(activeRow.className).toContain("focus-visible:outline");
+    expect(activeRow.parentElement?.className).toContain("has-[>button:focus-visible]:outline-2");
   });
 
   it("pins locally, navigates while marking viewed, and reuses rename/delete actions", () => {
@@ -140,7 +140,7 @@ describe("global session collection", () => {
     expect(actions.remove).toHaveBeenCalledWith(sessions[1].summary);
 
     fireEvent.click(screen.getByRole("button", { name: /^two-chat/ }));
-    expect(screen.getByTestId("location").textContent).toBe("/session/two-chat/files");
+    expect(screen.getByTestId("location").textContent).toBe("/session/two-chat/insights");
     expect(sessionNavigationStore.getState().lastViewedAt["two-chat"]).toBe("2026-09-22T12:00:00Z");
   });
 

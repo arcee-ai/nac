@@ -82,7 +82,15 @@ impl SessionService {
                 completed_duration_ms,
                 completed_usage,
                 durable_terminal,
-                run_failure.clone(),
+                match (&outcome, run_failure.clone()) {
+                    (RunOutcome::Completed(response, _), _) => {
+                        RunTerminalEvidence::Response(response.clone())
+                    }
+                    (RunOutcome::Failed(..), Some(failure)) => {
+                        RunTerminalEvidence::Failure(failure)
+                    }
+                    (RunOutcome::Failed(..), None) => RunTerminalEvidence::None,
+                },
             )
             .await
         {
@@ -113,6 +121,8 @@ impl SessionService {
         };
         self.settle_traditional_child_run(run_id, child_status, child_report, child_failure)
             .await;
+        #[cfg(any(test, feature = "test-support"))]
+        self.wait_child_terminal_release_for_test().await;
 
         self.settle_direct_goal_run(run_id, goal_usage, goal_disposition, run_failure.as_ref())
             .await;
@@ -613,7 +623,11 @@ impl SessionService {
                     if &active_run.snapshot.run_id == run_id && active_run.finishing
             )
         }) {
-            *guard = None;
+            if let Some(ActiveSessionOperation::Run(run)) = guard.take() {
+                run.settlement.send_replace(true);
+                // Drop the run's operation lease before publishing the idle slot.
+                drop(run);
+            }
         }
     }
 
@@ -641,8 +655,13 @@ impl SessionService {
         completed_duration_ms: Option<u64>,
         completed_usage: Option<crate::model::TokenUsage>,
         durable_terminal: DurableRunTerminal,
-        failure: Option<crate::run_failure::RunFailure>,
+        evidence: RunTerminalEvidence,
     ) -> Result<()> {
+        let (failure, run_result) = match evidence {
+            RunTerminalEvidence::None => (None, None),
+            RunTerminalEvidence::Response(response) => (None, Some(response)),
+            RunTerminalEvidence::Failure(failure) => (Some(failure), None),
+        };
         let goal_final_billable_tokens = completed_usage
             .as_ref()
             .map_or(0, crate::model::TokenUsage::billable_tokens);
@@ -725,6 +744,7 @@ impl SessionService {
                 failure,
             });
         }
+        update.finished_run_result = run_result;
         let saved_session_id = update.session_id.clone();
         let store_path = self.metadata.store_path.clone();
         crate::store::spawn_blocking_store_caller(move || {

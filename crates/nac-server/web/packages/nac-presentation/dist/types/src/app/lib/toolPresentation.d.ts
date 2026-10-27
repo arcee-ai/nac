@@ -12,6 +12,17 @@ export interface ToolPresentation {
     resultPreview: string | null;
     status: ToolPresentationStatus;
     statusLabel: string;
+    /**
+     * Execution time from the call's finish event. Absent when the call never
+     * ran, or when no finish event reports one.
+     */
+    durationMs?: number;
+    /**
+     * Session a `subagent` or `orchestrator_launch` call started or continued.
+     * An identity hint for delegated-session links that is never displayed:
+     * consumers must resolve it against the delegation queries before trusting it.
+     */
+    spawnedSessionId?: string;
 }
 type ToolStarted = Extract<AgentEvent, {
     type: "tool_call_started";
@@ -40,7 +51,7 @@ export declare function presentToolCall({ call, events, hasResult, resultText, r
     call: ToolCall;
     events?: ToolEventPair;
     hasResult: boolean;
-    /** Used only for fixed cancellation/interruption markers, never displayed. */
+    /** Read only for fixed cancellation/interruption markers and launch records; never displayed. */
     resultText: string | null;
     resultHasImage: boolean;
     active: boolean;

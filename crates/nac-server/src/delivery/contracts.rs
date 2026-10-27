@@ -5,7 +5,9 @@ use nac_core::{
     light_model::LightModelSettings,
     model::{BackendKind, ProviderModel, ReasoningEffort},
     permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
-    session_service::{ActiveRunSnapshot, MessagesPageSnapshot, SessionFrontendSnapshot},
+    session_service::{
+        ActiveRunSnapshot, MessagesPageSnapshot, SessionFrontendSnapshot, ToolCallContent,
+    },
     sessions,
     store::{GoalStatus, InboxDelivery, PermissionGrantRecord, SessionInboxRecord},
     types::Message,
@@ -676,6 +678,19 @@ pub struct MessagesPageResponse {
     pub page: MessagePageMetadata,
 }
 
+/// Full content of one main-session tool call. Each field is redacted before
+/// it is bounded; a `*_truncated` flag marks a field that was cut.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct ToolCallContentResponse {
+    pub call_id: String,
+    pub arguments: String,
+    pub arguments_truncated: bool,
+    /// Null while the call has no recorded result.
+    #[schema(required)]
+    pub output: Option<String>,
+    pub output_truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct MessageCycleMetadata {
     pub marker: String,
@@ -742,6 +757,18 @@ impl From<MessagesPageSnapshot> for MessagesPageResponse {
             messages: page.messages,
             created_at: page.created_at,
             page: page.page.into(),
+        }
+    }
+}
+
+impl From<ToolCallContent> for ToolCallContentResponse {
+    fn from(content: ToolCallContent) -> Self {
+        Self {
+            call_id: content.call_id,
+            arguments: content.arguments,
+            arguments_truncated: content.arguments_truncated,
+            output: content.output,
+            output_truncated: content.output_truncated,
         }
     }
 }

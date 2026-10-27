@@ -294,6 +294,7 @@ impl SessionService {
             call_id: Some(snapshot.operation_id.clone()),
             thread_name: None,
             cancellation: Some(runtime.command_cancellation.clone()),
+            ..Default::default()
         };
         let mut runtime = runtime;
         runtime.terminal_manager = runtime

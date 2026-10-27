@@ -1,6 +1,7 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -14,30 +15,34 @@ import {
   ButtonVariant,
   Icon,
   IconName,
-  Modal,
   ShimmerLoader,
   TabButton,
   TabButtonSize,
 } from "@/app/atoms";
+import { PanelPhoneScreen } from "@/app/components/inspector/PanelPhoneScreen";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import {
   clampPanelListWidth,
+  defaultPanelListWidth,
+  PANEL_LIST_DEFAULT_WIDTH,
   PANEL_LIST_MAX_RATIO,
   PANEL_LIST_MIN_WIDTH,
 } from "@/app/hooks/usePanelListWidth";
 
 /**
- * The shape all three side-box panels share: a narrow list of rows on the left
- * and the detail of whatever is selected on the right.
+ * The shape every side-box panel shares: the detail of whatever is selected,
+ * with a narrow list of rows in a column on its right.
  *
- * Below the desktop width there is no room for both, so the panel opens on the
- * row it has selected and the list is reached from a control of its own: a
- * dialog over the detail on a phone, the panel's own column on a tablet.
+ * Below the desktop width there is no room for both, so the two take turns. A
+ * tablet opens on the selected row and reaches the list from its header; a
+ * phone opens on the list, the way its tab bar does, and a row pushes the
+ * detail over it.
  */
 export function PanelSplit({
   list,
   listToolbar,
+  listClassName,
   listTitle,
   title,
   titleAction,
@@ -47,13 +52,16 @@ export function PanelSplit({
   list: ReactNode;
   /**
    * The list's own controls, staying put while it scrolls: a bar above it on a
-   * pointer, and a pill floating over its last rows on a phone.
+   * desktop, inline after the back button of a tablet's list header, and the
+   * trailing pills of a phone's.
    */
   listToolbar?: ReactNode;
-  /** What the list is of, for the header of the phone's list dialog. */
+  /** Insets of the desktop list column, for a panel drawn with its own. */
+  listClassName?: string;
+  /** What the list is of, titling its screen below the desktop width. */
   listTitle?: string;
   /** Row that is open, named for the narrow header. */
-  title?: string;
+  title?: ReactNode;
   /** Control belonging to the title itself, beside it rather than trailing. */
   titleAction?: ReactNode;
   /** Panel's own controls, trailing the narrow header. */
@@ -75,7 +83,10 @@ export function PanelSplit({
   const releaseDrag = useRef<(() => void) | null>(null);
   useEffect(() => () => releaseDrag.current?.(), []);
 
-  useEffect(() => {
+  // Measured before paint: an unresized list is a share of this width, and a
+  // first frame at the floor would visibly jump. The container only exists in
+  // the desktop split, so a change of layout measures again.
+  useLayoutEffect(() => {
     const element = containerRef.current;
     if (!element) return undefined;
     const measure = () => setContainerWidth(element.clientWidth);
@@ -83,10 +94,16 @@ export function PanelSplit({
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [isMobile, isTablet]);
 
-  const maxWidth = containerWidth > 0 ? containerWidth * PANEL_LIST_MAX_RATIO : storedWidth;
-  const listWidth = clampPanelListWidth(storedWidth, maxWidth);
+  const maxWidth =
+    containerWidth > 0
+      ? containerWidth * PANEL_LIST_MAX_RATIO
+      : (storedWidth ?? PANEL_LIST_DEFAULT_WIDTH);
+  const listWidth = clampPanelListWidth(
+    storedWidth ?? defaultPanelListWidth(containerWidth),
+    maxWidth,
+  );
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -105,7 +122,7 @@ export function PanelSplit({
     const onMove = (moveEvent: PointerEvent) => {
       if (!dragging.current || moveEvent.pointerId !== event.pointerId) return;
       const rect = container.getBoundingClientRect();
-      const next = moveEvent.clientX - rect.left;
+      const next = rect.right - moveEvent.clientX;
       setPanelListWidth(clampPanelListWidth(next, rect.width * PANEL_LIST_MAX_RATIO));
     };
 
@@ -130,34 +147,25 @@ export function PanelSplit({
   };
 
   if (isMobile) {
-    // The phone's outer dialog already shows the selected row; the list is a
-    // second dialog stacked on top of it.
-    return (
-      <>
-        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
-        <Modal
-          open={showList}
-          onClose={() => showSidePanelList(false)}
-          title={listTitle}
-          keepOnNavigate
-          bodyClassName="!p-0 relative flex flex-col overflow-hidden"
-        >
-          <div
-            className={cn(
-              "flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-2 gap-1 [&>*]:shrink-0",
-              // Clearance for the bar floating over the last rows.
-              listToolbar && "pb-[80px]",
-            )}
-          >
+    if (showList) {
+      return (
+        <PanelPhoneScreen title={listTitle} actions={listToolbar} bar>
+          {/* Clear of the header above and of the tab bar over the last rows. */}
+          <div className="flex flex-col flex-1 min-h-0 overflow-auto px-2 pt-16 pb-32 gap-1 [&>*]:shrink-0">
             {list}
           </div>
-          {listToolbar ? (
-            <div className="absolute inset-x-0 bottom-0 z-10 p-4 pointer-events-none [&>*]:pointer-events-auto">
-              {listToolbar}
-            </div>
-          ) : null}
-        </Modal>
-      </>
+        </PanelPhoneScreen>
+      );
+    }
+    return (
+      <PanelPhoneScreen
+        title={title ?? listTitle}
+        titleAction={titleAction}
+        actions={actions}
+        back={{ label: "Open list", onClick: () => showSidePanelList(true) }}
+      >
+        {children}
+      </PanelPhoneScreen>
     );
   }
 
@@ -165,10 +173,10 @@ export function PanelSplit({
     return (
       <div className="flex flex-col flex-1 min-h-0 w-full">
         {/* The list is a screen of its own here, so the row above the detail is
-            what leads back to it. */}
+            what leads to it, and the one above the list leads back. */}
         {!showList ? (
-          <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground">
-            <span className="min-w-0 truncate label-small text-basic-primary">{title}</span>
+          <div className="flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted bg-elevation-ground">
+            <span className="min-w-0 truncate header-sm text-basic-primary">{title}</span>
             {titleAction}
             <span className="flex-1" />
             {actions}
@@ -186,8 +194,24 @@ export function PanelSplit({
         ) : null}
         {showList ? (
           <div className="flex flex-col flex-1 min-h-0 bg-elevation-ground">
-            {listToolbar}
-            <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-1 [&>*]:shrink-0">
+            <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground">
+              <Button
+                className="shrink-0"
+                size={ButtonSize.Medium}
+                variant={ButtonVariant.Ghost}
+                content={ButtonContent.Icon}
+                aria-label="Close list"
+                onClick={() => showSidePanelList(false)}
+              >
+                <Icon iconName={IconName.Left} />
+              </Button>
+              {listToolbar ? (
+                <div className="flex min-w-0 flex-1 items-center">{listToolbar}</div>
+              ) : (
+                <span className="min-w-0 truncate header-sm text-basic-primary">{listTitle}</span>
+              )}
+            </div>
+            <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-2 [&>*]:shrink-0">
               {list}
             </div>
           </div>
@@ -200,14 +224,22 @@ export function PanelSplit({
 
   return (
     <div ref={containerRef} className="flex flex-1 min-h-0 w-full">
+      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
       <div
-        className="relative flex flex-col shrink-0 min-h-0 border-r border-muted bg-elevation-ground"
+        className="relative flex flex-col shrink-0 min-h-0 border-l border-muted bg-elevation-ground"
         style={{ width: listWidth }}
       >
         {listToolbar}
-        <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-4 px-1 [&>*]:shrink-0">
+        <div
+          className={cn(
+            "flex flex-col flex-1 min-h-0 overflow-auto px-1 py-4 [&>*]:shrink-0",
+            listClassName,
+          )}
+        >
           {list}
         </div>
+        {/* The handle sits on the list's leading edge, so dragging or arrowing
+            left widens the list. */}
         <div
           role="separator"
           aria-orientation="vertical"
@@ -216,28 +248,27 @@ export function PanelSplit({
           aria-valuemax={Math.round(maxWidth)}
           aria-valuenow={listWidth}
           tabIndex={0}
-          className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none"
+          className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none"
           onPointerDown={onPointerDown}
           onKeyDown={(event) => {
             const step = event.shiftKey ? 24 : 8;
             if (event.key === "ArrowLeft") {
               event.preventDefault();
-              setPanelListWidth(clampPanelListWidth(listWidth - step, maxWidth));
+              setPanelListWidth(clampPanelListWidth(listWidth + step, maxWidth));
             } else if (event.key === "ArrowRight") {
               event.preventDefault();
-              setPanelListWidth(clampPanelListWidth(listWidth + step, maxWidth));
+              setPanelListWidth(clampPanelListWidth(listWidth - step, maxWidth));
             }
           }}
         />
       </div>
-      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
     </div>
   );
 }
 
 /**
- * Row of the left list, sized to the 24px tree row in the design — and to the
- * 48px touch row on a phone, where a finger has none of a pointer's precision.
+ * Row of the list column, as tall as a file list row — 28px, or the 48px touch
+ * row on a phone, where a finger has none of a pointer's precision.
  */
 export function PanelRow({
   label,
@@ -245,7 +276,6 @@ export function PanelRow({
   disabled = false,
   icon,
   trailing,
-  labelClassName,
   title,
   onClick,
 }: {
@@ -255,8 +285,6 @@ export function PanelRow({
   disabled?: boolean;
   icon?: ReactNode;
   trailing?: ReactNode;
-  /** Overrides the label colour, e.g. to mark a file's git status. */
-  labelClassName?: string;
   title?: string;
   onClick?: () => void;
 }) {
@@ -272,7 +300,7 @@ export function PanelRow({
       onClick={onClick}
     >
       {icon}
-      <span className={cn("flex-1 min-w-0 truncate text-left", labelClassName)}>{label}</span>
+      <span className="flex-1 min-w-0 truncate text-left">{label}</span>
       {trailing}
     </TabButton>
   );
@@ -282,24 +310,25 @@ export function PanelRow({
  * Placeholder for a panel waiting on its first payload: rows the size of the
  * ones on their way, rather than the word "Loading".
  *
- * Laid out as the split it is loading into — a short list beside a taller body
+ * Laid out as the split it is loading into — a taller body beside a short list
  * — so the columns and the divider are already where the rows will land, and
  * arriving data fills the panel instead of rebuilding it.
  */
 export function PanelLoading({ listTitle }: { listTitle?: string }) {
+  const isMobile = useIsMobile();
   return (
     <PanelSplit
       listTitle={listTitle}
       list={
         <div className="px-1">
-          <ShimmerLoader rows={2} rowClassName="h-6" />
+          <ShimmerLoader rows={2} rowClassName="h-7" />
         </div>
       }
     >
       <div
         role="status"
         aria-label={`Loading ${listTitle ?? "panel"}`}
-        className="flex flex-1 flex-col min-h-0 overflow-hidden p-4"
+        className={cn("flex flex-1 flex-col min-h-0 overflow-hidden p-4", isMobile && "pt-18")}
       >
         <ShimmerLoader rows={3} rowClassName="h-6" />
       </div>
@@ -310,18 +339,30 @@ export function PanelLoading({ listTitle }: { listTitle?: string }) {
 /**
  * Placeholder for an empty or not-yet-selected panel. Given a `title` it takes
  * the design's two-line form — what is missing above why it is — in the same
- * monospace as the panel body it stands in for.
+ * monospace as the panel body it stands in for. On a phone it starts below the
+ * screen's floating header, which a panel's body otherwise runs under.
  */
 export function PanelEmpty({ title, children }: { title?: string; children: ReactNode }) {
+  const isMobile = useIsMobile();
   if (title === undefined) {
     return (
-      <div className="flex flex-1 flex-col min-h-0 overflow-auto p-6 label-small text-basic-muted [&>*]:shrink-0">
+      <div
+        className={cn(
+          "flex flex-1 flex-col min-h-0 overflow-auto p-6 label-small text-basic-muted [&>*]:shrink-0",
+          isMobile && "pt-20",
+        )}
+      >
         {children}
       </div>
     );
   }
   return (
-    <div className="flex flex-1 flex-col min-h-0 overflow-auto p-4 code code-small [&>*]:shrink-0">
+    <div
+      className={cn(
+        "flex flex-1 flex-col min-h-0 overflow-auto p-4 code code-small [&>*]:shrink-0",
+        isMobile && "pt-18",
+      )}
+    >
       <p className="text-basic-tertiary">{title}</p>
       <p className="text-basic-muted">{children}</p>
     </div>

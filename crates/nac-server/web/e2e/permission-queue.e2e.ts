@@ -294,7 +294,10 @@ test("last-client disconnect dismisses queued access without executing it", asyn
   await expect(page.getByRole("dialog", { name: "Permission required", exact: true })).toHaveCount(
     0,
   );
-  await expect(page.locator('[data-tool-call-id="disconnected-write"]')).toContainText("Failed");
+  await page.getByRole("button", { name: "Create File", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Create File, failed", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByText(/interactive session client disconnected while approval was pending/).first(),
   ).toBeVisible();

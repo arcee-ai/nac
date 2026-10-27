@@ -229,6 +229,7 @@ export function createNacApi(nacClient) {
             const query = params.toString();
             return request("GET", `${sessionPath(id)}/threads/${encodeURIComponent(threadName)}/events${query ? `?${query}` : ""}`, { signal: options.signal });
         },
+        getToolCallContent: (id, callId, signal) => request("GET", `${sessionPath(id)}/tool-calls/${encodeURIComponent(callId)}`, { signal }),
         getWorkspaceDiff: (id, path, { stage = "all", context = 3, revision, signal } = {}) => {
             const params = new URLSearchParams({
                 path,

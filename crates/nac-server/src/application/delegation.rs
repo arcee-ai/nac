@@ -286,10 +286,25 @@ impl SessionManager {
                         "managed orchestrator session '{orchestrator_session_id}' was not found"
                     )
                 })?;
+            let path = self.inner.store_path.clone();
+            let session_id = orchestrator_session_id.to_owned();
+            if let Some(terminal) = self
+                .inner
+                ._store_ownership
+                .call_legacy(move || {
+                    nac_core::store::load_managed_orchestrator_terminal_receipt(
+                        &path,
+                        &session_id,
+                        generation,
+                    )
+                })
+                .await??
+            {
+                return Ok(terminal);
+            }
             if record.generation != generation {
                 return Err(anyhow!(
-                    "managed orchestrator generation {generation} was superseded by {}",
-                    record.generation
+                    "managed orchestrator generation {generation} has no retained terminal receipt"
                 ));
             }
             if record.status.is_terminal() {
@@ -513,6 +528,9 @@ impl SessionManager {
                 };
                 parent.start_next_direct_inbox_item().await?;
             }
+            // Release operation ownership while the lifecycle gate still
+            // excludes a continuation observing this terminal relationship.
+            drop(operation_lease);
             return Ok(settlement.orchestrator);
         }
     }

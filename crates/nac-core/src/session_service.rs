@@ -36,6 +36,9 @@ mod admission;
 mod attachment;
 mod cancellation;
 mod creation;
+mod delegated_input;
+#[cfg(any(test, feature = "test-support"))]
+mod delegated_input_test_support;
 mod direct_interaction;
 mod frontend_projection;
 mod manual_compaction;
@@ -60,6 +63,8 @@ pub use execution_history::{
     recent_command_history, ExecutionHistory, ExecutionHistoryEntry, ExecutionHistoryOutput,
     ExecutionOutputAvailability, RECENT_EXECUTION_LIMIT,
 };
+mod tool_call_content;
+pub use tool_call_content::ToolCallContent;
 mod transcript_projection;
 mod user_terminals;
 pub use crate::terminal::{
@@ -719,6 +724,7 @@ struct ActiveRunState {
     finishing: bool,
     task: Option<JoinHandle<()>>,
     prompt_commit: watch::Sender<RunPromptCommitStatus>,
+    settlement: watch::Sender<bool>,
     /// Visible-response count of the store transcript at run start,
     /// captured by the run task before its first append (step 4,
     /// never-fold): the diff base for the run-end token/timing bookkeeping.
@@ -791,6 +797,13 @@ enum DurableRunTerminal {
     Completed,
     Cancelled,
     Failed,
+}
+
+/// Final response or redacted failure a terminal run leaves behind.
+enum RunTerminalEvidence {
+    None,
+    Response(String),
+    Failure(crate::run_failure::RunFailure),
 }
 
 enum OperationAdmissionPreparationError {

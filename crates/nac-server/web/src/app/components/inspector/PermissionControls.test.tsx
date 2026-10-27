@@ -62,7 +62,7 @@ function pendingState(): PermissionStateResponse {
   };
 }
 
-function mount(state: PermissionStateResponse, requesterLabel?: string) {
+function mount(state: PermissionStateResponse, requesterLabel?: string, compact = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -75,6 +75,7 @@ function mount(state: PermissionStateResponse, requesterLabel?: string) {
             sessionId={SESSION_ID}
             behavior="direct"
             requesterLabel={requesterLabel}
+            compact={compact}
           />
         </ToastProvider>
       </MemoryRouter>
@@ -109,6 +110,27 @@ afterEach(() => {
 });
 
 describe("direct permission controls", () => {
+  it.each([
+    ["manual", "Manual", "Permissions"],
+    ["auto_approve", "Approve all", "Auto-approve on — open permissions"],
+    ["review", "Approve for me", "Approve for me enabled — open permissions"],
+  ] as const)("keeps all three modes accessible from a compact %s trigger", (mode, name, label) => {
+    const state = { ...pendingState(), approval_mode: mode, requests: [] };
+    mount(state, undefined, true);
+    const trigger = screen.getByRole("button", { name: label });
+    expect(trigger.textContent).not.toContain(name);
+    fireEvent.click(trigger);
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    expect((screen.getByRole("radio", { name }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("retains a pending count in the compact permission trigger", () => {
+    mount(pendingState(), undefined, true);
+    expect(screen.getByRole("button", { name: "Permissions (1)" }).textContent).toContain(
+      "(1 pending)",
+    );
+  });
+
   it("keeps a large remembered-grant list in the bounded scrolling modal body", () => {
     const state = pendingState();
     state.grants = Array.from({ length: 20 }, (_, index) => ({

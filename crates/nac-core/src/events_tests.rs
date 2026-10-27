@@ -129,6 +129,44 @@ fn kernel_deadline_shape_populates_typed_telemetry() {
 }
 
 #[test]
+fn finished_duration_prefers_the_deadline_envelope_over_the_measured_field() {
+    let mut timed_out = crate::tools::ToolResult::text(
+        serde_json::json!({
+            "error": "Tool 'remote_tool' timed_out after 8 ms (limit 5 ms; cleanup 3 ms). The remote outcome is uncertain.",
+            "_nac": {
+                "status": "timed_out",
+                "timeout_ms": 5,
+                "execution_duration_ms": 8,
+                "cleanup_duration_ms": 3,
+                "remote_outcome_uncertain": true
+            }
+        })
+        .to_string(),
+        true,
+    );
+    timed_out.execution_duration_ms = Some(11);
+    let mut completed = crate::tools::ToolResult::text("done", false);
+    completed.execution_duration_ms = Some(42);
+
+    let durations = [timed_out, completed].map(|result| {
+        let AgentEvent::ToolCallFinished {
+            execution_duration_ms,
+            ..
+        } = AgentEvent::tool_call_finished(
+            None,
+            "call-1".to_string(),
+            "remote_tool".to_string(),
+            &result,
+        )
+        else {
+            panic!("expected tool completion event");
+        };
+        execution_duration_ms
+    });
+    assert_eq!(durations, [Some(8), Some(42)]);
+}
+
+#[test]
 fn durable_cancelled_records_have_typed_cancelled_completion() {
     for name in [
         "subagent",
@@ -1430,4 +1468,32 @@ fn rejected_publication_remains_an_explicit_replay_gap() {
             missing_to_sequence_id: first.sequence_id + 1,
         })
     );
+}
+
+#[test]
+fn authorization_adjusted_duration_overrides_only_the_finished_event_metric() {
+    let body = serde_json::json!({
+        "error": "Tool 'remote_tool' timed_out after 120 ms (limit 100 ms; cleanup 3 ms).",
+        "_nac": { "status":"timed_out", "timeout_ms":100, "execution_duration_ms":120, "cleanup_duration_ms":3, "remote_outcome_uncertain":false }
+    }).to_string();
+    for measured in [Some(4), None] {
+        let mut result = crate::tools::ToolResult::text(body.clone(), true);
+        result.execution_duration_ms = measured;
+        result.execution_duration_excludes_authorization = true;
+        let AgentEvent::ToolCallFinished {
+            execution_duration_ms,
+            completion_status,
+            effective_timeout_ms,
+            cleanup_duration_ms,
+            ..
+        } = AgentEvent::tool_call_finished(None, "call".into(), "remote_tool".into(), &result)
+        else {
+            panic!("expected finished event");
+        };
+        assert_eq!(execution_duration_ms, measured);
+        assert_eq!(completion_status, Some(ToolCompletionStatus::TimedOut));
+        assert_eq!(effective_timeout_ms, Some(100));
+        assert_eq!(cleanup_duration_ms, Some(3));
+        assert_eq!(result.content.as_text(), Some(body.as_str()));
+    }
 }

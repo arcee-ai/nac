@@ -1,8 +1,14 @@
-import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
+import { IconName } from "@/app/atoms";
+import { RowActionButton } from "@/app/components/projects/RowActionButton";
 
 interface ChatSessionActionsProps {
   title: string;
   pinned?: boolean;
+  /**
+   * Bare 20px glyphs for the mobile row. Desktop stays small: its 24px target
+   * is the WCAG 2.5.8 minimum.
+   */
+  isMobile?: boolean;
   onPin?: () => void;
   onRename?: () => void;
   onDelete?: () => void;
@@ -12,6 +18,7 @@ interface ChatSessionActionsProps {
 export function ChatSessionActions({
   title,
   pinned = false,
+  isMobile = false,
   onPin,
   onRename,
   onDelete,
@@ -19,40 +26,32 @@ export function ChatSessionActions({
   return (
     <>
       {onPin ? (
-        <Button
-          variant={ButtonVariant.Ghost}
-          size={ButtonSize.Small}
-          content={ButtonContent.Icon}
+        <RowActionButton
+          icon={pinned ? IconName.Unpin : IconName.Pin}
           title={pinned ? "Unpin chat" : "Pin chat"}
-          aria-label={`${pinned ? "Unpin" : "Pin"} ${title}`}
+          label={`${pinned ? "Unpin" : "Pin"} ${title}`}
+          isMobile={isMobile}
           onClick={onPin}
-        >
-          <Icon iconName={pinned ? IconName.Unpin : IconName.Pin} />
-        </Button>
+        />
       ) : null}
       {onRename ? (
-        <Button
-          variant={ButtonVariant.Ghost}
-          size={ButtonSize.Small}
-          content={ButtonContent.Icon}
+        <RowActionButton
+          icon={IconName.Edit}
           title="Rename chat"
-          aria-label={`Rename ${title}`}
+          label={`Rename ${title}`}
+          isMobile={isMobile}
           onClick={onRename}
-        >
-          <Icon iconName={IconName.Edit} />
-        </Button>
+        />
       ) : null}
       {onDelete ? (
-        <Button
-          variant={ButtonVariant.GhostDestructive}
-          size={ButtonSize.Small}
-          content={ButtonContent.Icon}
+        <RowActionButton
+          icon={IconName.Trash}
           title="Delete chat"
-          aria-label={`Delete ${title}`}
+          label={`Delete ${title}`}
+          isMobile={isMobile}
+          destructive
           onClick={onDelete}
-        >
-          <Icon iconName={IconName.Trash} />
-        </Button>
+        />
       ) : null}
     </>
   );

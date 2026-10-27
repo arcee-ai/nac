@@ -479,3 +479,7 @@ export type TerminalSelectionDelivery = ApiSchema<"TerminalSelectionDelivery">;
 export type ShellCommandRequest = ApiSchema<"ShellCommandRequest">;
 export type ShellCommandSnapshot = ApiSchema<"ShellCommandSnapshot">;
 export type ShellOutputPage = ApiSchema<"ShellOutputPage">;
+
+export type TaskLaunchRequest = ApiSchema<"TaskLaunchRequest">;
+export type TaskLaunchRecord = ApiSchema<"TaskLaunchRecord">;
+export type TaskLaunchSourceInfo = ApiSchema<"TaskLaunchSourceInfo">;

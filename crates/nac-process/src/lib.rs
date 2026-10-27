@@ -223,6 +223,33 @@ impl ProcessTreeGuard {
         self.disarm();
     }
 
+    /// Complete a reaped command while retaining any unproven descendant
+    /// cleanup obligation. The reserved group leader prevents group-ID reuse
+    /// through the final signal; retries retain only the tagged/census owners.
+    pub async fn finish_checked(&mut self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            if self.root_pid.is_some() || (self.pgid.is_some() && self.group_leader.is_none()) {
+                return Err(std::io::Error::other(
+                    "checked finish requires a reaped supervised command",
+                ));
+            }
+            if let Some(pgid) = self.pgid.take() {
+                // SAFETY: the unreaped reserved group leader still owns pgid.
+                unsafe {
+                    libc::killpg(pgid, libc::SIGKILL);
+                }
+            }
+            if let Some(leader) = self.group_leader.as_mut() {
+                leader.wait().await?;
+            }
+            self.group_leader = None;
+            self.finish_tagged_cleanup().await?;
+        }
+        self.disarm();
+        Ok(())
+    }
+
     pub async fn terminate(&mut self, child: &mut Child) -> std::io::Result<()> {
         #[cfg(target_os = "linux")]
         let mut cleanup_result = Ok(());
@@ -1511,6 +1538,13 @@ mod tests {
             .stderr(Stdio::null());
         command.process_group(0);
         let mut descendant = command.spawn().unwrap();
+        if let Some(gate) = std::env::var_os("NAC_PROCESS_TREE_EXIT_GATE") {
+            std::fs::write(root.join("descendant-pid"), descendant.id().to_string()).unwrap();
+            while !std::path::Path::new(&gate).exists() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            return;
+        }
         let _ = descendant.wait();
     }
 
@@ -1549,5 +1583,55 @@ mod tests {
             "isolated descendant survived process-tree cancellation"
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+    #[tokio::test]
+    async fn checked_finish_reaches_observed_escape_after_reaped_leader() {
+        let root =
+            std::env::temp_dir().join(format!("nac_process_finish_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let gate = root.join("exit-gate");
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "tests::isolated_descendant_helper",
+                "--nocapture",
+            ])
+            .env("NAC_PROCESS_TREE_TEST_ROOT", &root)
+            .env("NAC_PROCESS_TREE_EXIT_GATE", &gate)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let (mut child, mut owner) = ProcessTreeGuard::spawn_supervised(&mut command).unwrap();
+        assert!(
+            owner.finish_checked().await.is_err(),
+            "a live leader cannot be marked settled"
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let pid = std::fs::read_to_string(root.join("descendant-pid"))
+                    .ok()
+                    .and_then(|s| s.parse::<libc::pid_t>().ok());
+                if root.join("descendant-ready").exists()
+                    && pid.is_some_and(|pid| owner.live_tagged_pids().contains(&pid))
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        std::fs::write(gate, "exit root after capturing descendant").unwrap();
+        child.wait().await.unwrap();
+        owner.mark_leader_reaped();
+        owner.finish_checked().await.unwrap();
+        sleep(Duration::from_millis(1100)).await;
+        assert!(
+            !root.join("late-write").exists(),
+            "escaped descendant survived checked completion"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -449,6 +449,8 @@ fn exec_command_result_preview_uses_structured_previews() {
         .to_string())
         .into(),
         is_error: false,
+        execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     };
 
     assert_eq!(preview_tool_result("exec_command", &result), "line two...");
@@ -503,6 +505,38 @@ fn key_argument_preview_is_family_aware_and_fail_closed() {
 }
 
 #[test]
+fn file_path_preview_keeps_the_end_of_long_paths() {
+    let preview_of = |name: &str, key: &str, value: &str| {
+        let args = serde_json::json!({ key: value }).to_string();
+        key_arg_preview(name, Some(&args), &args)
+    };
+
+    let long = format!(
+        "{}crates/nac-core/src/agent/preview.rs",
+        "workspace/".repeat(15)
+    );
+    let preview = preview_of("read", "path", &long);
+    assert_eq!(preview.chars().count(), 120, "{preview}");
+    assert!(preview.starts_with('…'), "{preview}");
+    assert!(preview.ends_with("/agent/preview.rs"), "{preview}");
+
+    let multibyte = format!("{}/notes.md", "é".repeat(200));
+    let preview = preview_of("read", "path", &multibyte);
+    assert_eq!(preview.chars().count(), 120, "{preview}");
+    assert!(preview.ends_with("é/notes.md"), "{preview}");
+
+    let exact = format!("{}.rs", "a".repeat(117));
+    assert_eq!(exact.chars().count(), 120);
+    assert_eq!(preview_of("read", "path", &exact), exact);
+
+    let pattern = format!("needle{}", "x".repeat(200));
+    assert_eq!(
+        preview_of("grep", "pattern", &pattern),
+        format!("needle{}…", "x".repeat(114))
+    );
+}
+
+#[test]
 fn exec_command_result_preview_includes_nonzero_exit() {
     let result = ToolResult {
         content: (serde_json::json!({
@@ -516,6 +550,8 @@ fn exec_command_result_preview_includes_nonzero_exit() {
         .to_string())
         .into(),
         is_error: false,
+        execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     };
 
     assert_eq!(
@@ -536,6 +572,8 @@ fn exec_command_finished_event_carries_structured_outcome() {
         .to_string())
         .into(),
         is_error: false,
+        execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     };
     let event = AgentEvent::tool_call_finished(
         Some("worker".to_string()),
@@ -607,6 +645,8 @@ fn finished_pty_result_preview_keeps_terminal_output() {
         .to_string())
         .into(),
         is_error: false,
+        execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     };
 
     assert_eq!(preview_tool_result("exec_command", &result), "line two");
@@ -630,6 +670,8 @@ fn exec_command_finished_events_distinguish_terminal_statuses() {
             .to_string())
             .into(),
             is_error: serialized == "spawn_error",
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         };
         let event = AgentEvent::tool_call_finished(
             Some("worker".to_string()),
@@ -980,6 +1022,8 @@ async fn image_limit_error_is_the_only_finished_event_for_the_result() {
             ToolResult {
                 content: image_content,
                 is_error: false,
+                execution_duration_ms: Some(42),
+                execution_duration_excludes_authorization: true,
             },
         )],
         &EventSink::channel(events_tx),
@@ -995,6 +1039,7 @@ async fn image_limit_error_is_the_only_finished_event_for_the_result() {
         AgentEvent::ToolCallFinished {
             call_id,
             is_error: true,
+            execution_duration_ms: Some(42),
             ..
         } if call_id == "call-image"
     ));
@@ -1103,6 +1148,8 @@ fn json_tool_error(id: &str, name: &str, body: serde_json::Value) -> (String, St
         ToolResult {
             content: (body.to_string()).into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
     )
 }
