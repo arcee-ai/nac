@@ -77,6 +77,16 @@ export function sessionBehaviorIcon(
   }
 }
 
+/** What `sessionBehaviorIcon` draws, for the accessible name beside the glyph. */
+export function sessionBehaviorName(
+  behavior: SessionBehavior | null | undefined,
+  lineage?: SessionLineage["kind"] | null,
+): string {
+  if (lineage === "managed-orchestrator") return "NAC orchestrator";
+  if (lineage === "traditional-child") return "Coding agent";
+  return sessionBehaviorPresentation(behavior).label;
+}
+
 export interface SessionPanelPolicy {
   widePanels: readonly SessionPanel[];
   mobilePanels: readonly SessionPanel[];

@@ -41,6 +41,13 @@
   line-height: 1.25rem;
   font-weight: 600;
 }
+/* Figma "Header/Header-2xs": semibold 11/14, the size of a git status letter. */
+.header-2xs {
+  font-family: Inter;
+  font-size: 0.6875rem;
+  line-height: 0.875rem;
+  font-weight: 600;
+}
 /* Figma "Header/Header-2xl": semibold 24/32, unlike .subtitle which is medium. */
 .header-2xl {
   font-family: Inter;
