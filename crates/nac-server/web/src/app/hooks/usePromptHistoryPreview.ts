@@ -17,8 +17,6 @@ export interface PromptHistoryPreview {
   active: boolean;
   /** That prompt, shortened for the placeholder. Empty while inactive. */
   previewText: string;
-  /** There is at least one earlier prompt to walk back to. */
-  hasHistory: boolean;
   /** True when the key belonged to the preview and needs no further handling. */
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   /** Called with what the field now holds, before the state that holds it. */
@@ -139,11 +137,10 @@ export function usePromptHistoryPreview({
     () => ({
       active,
       previewText: active ? previewLine(current) : "",
-      hasHistory: enabled && prompts.length > 0,
       onKeyDown,
       onValueChange,
       reset,
     }),
-    [active, current, enabled, onKeyDown, onValueChange, prompts.length, reset],
+    [active, current, onKeyDown, onValueChange, reset],
   );
 }

@@ -30,8 +30,8 @@ interface SelectProps {
      */
     sticky?: boolean;
     className?: string;
-    /** Glyph after the label. Forms keep the disclosure chevron. */
-    trailingIcon?: IconName;
+    /** Glyph after the label, or `null` for a trigger of text alone. Forms keep the disclosure chevron. */
+    trailingIcon?: IconName | null;
     /**
      * Applied to the trigger button. The wrapper stretching is not enough on its
      * own — the button hugs its label — so a select that has to fill a form

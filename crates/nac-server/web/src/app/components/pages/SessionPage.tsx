@@ -3,7 +3,7 @@ import { InsightsNavigationProvider } from "@/app/features/insights/InsightsNavi
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { sessionAvailable } from "@/app/features/ui-policy/policy";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -210,6 +210,19 @@ export default function SessionPage() {
     return () => cancelAnimationFrame(frame);
   }, [animateSidePanel, setSidePanelAnimate]);
 
+  // The composer floats over the transcript, whose run-out under the last
+  // message has to clear it however tall it grows.
+  const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null);
+  const [composerLayer, setComposerLayer] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!chatColumn || !composerLayer || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      chatColumn.style.setProperty("--composer-height", `${composerLayer.offsetHeight}px`);
+    });
+    observer.observe(composerLayer);
+    return () => observer.disconnect();
+  }, [chatColumn, composerLayer]);
+
   if (behaviorKnown && !available)
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
@@ -286,7 +299,7 @@ export default function SessionPage() {
     <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground">
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
         <div className="flex flex-col items-center flex-1 min-w-0 h-full">
-          <div className="flex flex-col flex-1 min-h-0 w-full relative">
+          <div ref={setChatColumn} className="flex flex-col flex-1 min-h-0 w-full relative">
             {isMobile && (entry?.lineage ?? snapshot?.lineage) ? (
               <div className="pointer-events-none absolute inset-x-0 top-16 z-20 flex items-center px-3 pt-2">
                 <Button
@@ -313,14 +326,7 @@ export default function SessionPage() {
               errorNotice={errorNotice}
             />
 
-            <div
-              className={cn(
-                "absolute bottom-0 left-0 right-0",
-                // The phone composer paints its own ground fade and owns its
-                // padding, so it has to reach past the column's inset.
-                isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[640px]",
-              )}
-            >
+            <div ref={setComposerLayer} className="pointer-events-none absolute inset-x-0 bottom-0">
               <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
             </div>
           </div>

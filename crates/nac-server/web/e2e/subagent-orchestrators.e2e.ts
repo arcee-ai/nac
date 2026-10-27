@@ -76,7 +76,8 @@ for (const [name, viewport, mobile] of [
     await composer.getByRole("textbox", { name: "Send a message" }).fill("E2E_MANAGED_CONTINUE");
     await composer.getByRole("button", { name: "Send", exact: true }).click();
     await continuation.accepted;
-    await expect(composer.getByRole("textbox", { name: "Steer a message" })).toBeEnabled();
+    await expect(composer.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+    await expect(composer.getByRole("textbox", { name: "Send a message" })).toBeEnabled();
 
     // The transcript and panel share draft ownership, without replaying the pending continuation.
     await page.getByRole("button", { name: "Open", exact: true }).click();
@@ -84,7 +85,7 @@ for (const [name, viewport, mobile] of [
     if (mobile) {
       await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
     }
-    await expect(page.getByRole("textbox", { name: "Steer a message" })).toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "Send a message" })).toHaveValue("");
     await page.getByRole("button", { name: "Parent chat" }).click();
     await showSubagents(page, mobile);
     const screenshot = testInfo.outputPath("subagent-running.png");
@@ -93,7 +94,7 @@ for (const [name, viewport, mobile] of [
       path: screenshot,
       contentType: "image/png",
     });
-    await composer.getByRole("textbox", { name: "Steer a message" }).fill("E2E_MANAGED_STEER");
+    await composer.getByRole("textbox", { name: "Send a message" }).fill("E2E_MANAGED_STEER");
     const steerButton = composer.getByRole("button", { name: "Steer", exact: true });
     await steerButton.focus();
     await page.keyboard.press("Enter");
@@ -102,7 +103,7 @@ for (const [name, viewport, mobile] of [
     await expect(composer.getByRole("button", { name: "Stop", exact: true })).toBeEnabled();
     continuation.release();
     await continued.accepted;
-    await expect(composer.getByRole("textbox", { name: "Steer a message" })).toHaveValue("");
+    await expect(composer.getByRole("textbox", { name: "Send a message" })).toHaveValue("");
     continued.release();
     await expect.poll(() => starts.length).toBe(2);
     expect(starts).toEqual([

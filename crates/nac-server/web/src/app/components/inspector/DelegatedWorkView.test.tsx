@@ -119,7 +119,7 @@ function mount(
   });
 }
 
-function draftBox(name: "Steer a message" | "Send a message") {
+function draftBox(name: "Send a message") {
   return screen.getByRole("textbox", { name }) as HTMLTextAreaElement;
 }
 
@@ -187,7 +187,7 @@ describe("delegated work", () => {
   it("routes topology-specific steering, continuation, and cancellation to the parent", async () => {
     mount("direct-with-orchestrator");
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Steer a message" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Send a message" }), {
       target: { value: "Check the remembered grant." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
@@ -235,8 +235,7 @@ describe("delegated work", () => {
       ]);
     });
 
-    await waitFor(() => expect(screen.getByText("Completed")).toBeTruthy());
-    expect(screen.getByText("The permissions audit passed.")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("The permissions audit passed.")).toBeTruthy());
     expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
@@ -349,13 +348,12 @@ describe("selection and drafts", () => {
 
     act(() => client.remount());
 
-    expect(screen.getByText("Completed")).toBeTruthy();
     expect(draftBox("Send a message").value).toBe("Next audit pass");
   });
 
   it("keeps the draft when the selected subagent finishes and the composer remounts", async () => {
     const client = mount("direct");
-    fireEvent.change(draftBox("Steer a message"), {
+    fireEvent.change(draftBox("Send a message"), {
       target: { value: "Also check grants" },
     });
 
@@ -374,21 +372,21 @@ describe("selection and drafts", () => {
     const reply = deferred<TraditionalChildRecord>();
     startChild.mockReturnValueOnce(reply.promise);
     const client = mount("direct");
-    fireEvent.change(draftBox("Steer a message"), {
+    fireEvent.change(draftBox("Send a message"), {
       target: { value: "Check the grant" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
-    expect(draftBox("Steer a message").value).toBe("");
+    expect(draftBox("Send a message").value).toBe("");
 
     act(() => client.remount());
 
     // The field is free for the next message while the first is still pending.
-    expect(draftBox("Steer a message").value).toBe("");
-    expect(draftBox("Steer a message").disabled).toBe(false);
-    fireEvent.keyDown(draftBox("Steer a message"), { key: "Enter" });
+    expect(draftBox("Send a message").value).toBe("");
+    expect(draftBox("Send a message").disabled).toBe(false);
+    fireEvent.keyDown(draftBox("Send a message"), { key: "Enter" });
     expect(startChild).toHaveBeenCalledOnce();
-    fireEvent.change(draftBox("Steer a message"), {
+    fireEvent.change(draftBox("Send a message"), {
       target: { value: "Also check the cache" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
@@ -400,7 +398,7 @@ describe("selection and drafts", () => {
 
     await act(async () => reply.resolve(child));
     expect(startChild).toHaveBeenCalledTimes(2);
-    expect(draftBox("Steer a message").value).toBe("");
+    expect(draftBox("Send a message").value).toBe("");
   });
 
   it.each([0, 1, 2])(
@@ -409,7 +407,7 @@ describe("selection and drafts", () => {
       const reply = deferred<TraditionalChildRecord>();
       startChild.mockReturnValue(reply.promise);
       mount("direct");
-      fireEvent.change(draftBox("Steer a message"), {
+      fireEvent.change(draftBox("Send a message"), {
         target: { value: "Check the grant" },
       });
       const button = screen.getByRole("button", { name: "Steer" });
@@ -462,7 +460,8 @@ describe("selection and drafts", () => {
       ]);
     });
     // A fresh composer for the newer run keeps the next message and lets it steer.
-    const box = await waitFor(() => draftBox("Steer a message"));
+    await screen.findByRole("button", { name: "Stop" });
+    const box = draftBox("Send a message");
     expect(box.value).toBe("And the cache");
     expect(box.disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
@@ -501,11 +500,11 @@ describe("selection and drafts", () => {
         { ...orchestrator, status: "running", generation: 2, version: 3 },
       ]);
     });
-    await waitFor(() => draftBox("Steer a message"));
+    await screen.findByRole("button", { name: "Stop" });
     fireEvent.click(screen.getByRole("button", { name: "Review permissions" }));
     fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-    expect(draftBox("Steer a message").value).toBe("Check the pins");
-    expect(draftBox("Steer a message").disabled).toBe(false);
+    expect(draftBox("Send a message").value).toBe("Check the pins");
+    expect(draftBox("Send a message").disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() => expect(startOrchestrator).toHaveBeenCalledTimes(2));
     expect(startOrchestrator.mock.calls.map(([, payload]) => payload.prompt)).toEqual([
@@ -527,7 +526,7 @@ describe("selection and drafts", () => {
     startChild.mockReturnValueOnce(reply.promise);
     const client = mount("direct");
     client.setQueryData(queryKeys.traditionalChildren("parent"), [child, second]);
-    fireEvent.change(draftBox("Steer a message"), {
+    fireEvent.change(draftBox("Send a message"), {
       target: { value: "Check the grant" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
@@ -546,7 +545,7 @@ describe("selection and drafts", () => {
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Review permissions" }));
-    expect(draftBox("Steer a message").value).toBe("");
+    expect(draftBox("Send a message").value).toBe("");
     await act(async () => reply.resolve(child));
     expect(startChild).toHaveBeenCalledTimes(2);
   });
@@ -555,7 +554,7 @@ describe("selection and drafts", () => {
     const reply = deferred<TraditionalChildRecord>();
     startChild.mockReturnValueOnce(reply.promise);
     const client = mount("direct");
-    fireEvent.change(draftBox("Steer a message"), {
+    fireEvent.change(draftBox("Send a message"), {
       target: { value: "Check the grant" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
@@ -564,14 +563,14 @@ describe("selection and drafts", () => {
 
     await act(async () => reply.reject(new Error("busy")));
 
-    expect(draftBox("Steer a message").value).toBe("");
+    expect(draftBox("Send a message").value).toBe("");
     expect(screen.getByText(/Message delivery is unconfirmed/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Restore to composer" }));
-    expect(draftBox("Steer a message").value).toBe("Check the grant");
+    expect(draftBox("Send a message").value).toBe("Check the grant");
     expect(startChild).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() => expect(startChild).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(draftBox("Steer a message").value).toBe(""));
+    await waitFor(() => expect(draftBox("Send a message").value).toBe(""));
   });
 
   it("keeps a message written while a send is pending, whichever way the send ends", async () => {
@@ -579,23 +578,23 @@ describe("selection and drafts", () => {
     const rejected = deferred<TraditionalChildRecord>();
     startChild.mockReturnValueOnce(accepted.promise).mockReturnValueOnce(rejected.promise);
     mount("direct");
-    fireEvent.change(draftBox("Steer a message"), {
+    fireEvent.change(draftBox("Send a message"), {
       target: { value: "First" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
-    fireEvent.change(draftBox("Steer a message"), {
+    fireEvent.change(draftBox("Send a message"), {
       target: { value: "Second" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() => expect(startChild).toHaveBeenCalledTimes(2));
-    fireEvent.change(draftBox("Steer a message"), {
+    fireEvent.change(draftBox("Send a message"), {
       target: { value: "Unsent" },
     });
 
     await act(async () => accepted.resolve(child));
-    expect(draftBox("Steer a message").value).toBe("Unsent");
+    expect(draftBox("Send a message").value).toBe("Unsent");
     await act(async () => rejected.reject(new Error("busy")));
-    expect(draftBox("Steer a message").value).toBe("Unsent");
+    expect(draftBox("Send a message").value).toBe("Unsent");
     expect(screen.getByText("Second")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Restore to composer" })).toHaveProperty(
       "disabled",
@@ -611,7 +610,7 @@ describe("selection and drafts", () => {
       if (mode === "child") {
         const reply = deferred<TraditionalChildRecord>();
         startChild.mockReturnValueOnce(reply.promise);
-        fireEvent.change(draftBox("Steer a message"), { target: { value: "Steer" } });
+        fireEvent.change(draftBox("Send a message"), { target: { value: "Steer" } });
         fireEvent.click(screen.getByRole("button", { name: "Steer" }));
         await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
         const newer = { ...child, generation: 3, version: 8 };
@@ -631,7 +630,7 @@ describe("selection and drafts", () => {
         expect(client.getQueryData(queryKeys.managedOrchestrators("parent"))).toEqual([newer]);
       }
       await waitFor(() => {
-        expect(draftBox("Steer a message")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
         expect(screen.queryByText("Sending message…")).toBeNull();
       });
     },
@@ -725,8 +724,8 @@ describe("selection and drafts", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Audit the cache" })).toBeNull(),
     );
-    expect(draftBox("Steer a message").value).toBe("");
-    fireEvent.change(draftBox("Steer a message"), {
+    expect(draftBox("Send a message").value).toBe("");
+    fireEvent.change(draftBox("Send a message"), {
       target: { value: "For child one" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));
@@ -752,7 +751,7 @@ describe("selection and drafts", () => {
     act(() => client.show("parent", false));
 
     expect(screen.queryByRole("button", { name: "Run the compatibility audit" })).toBeNull();
-    expect(draftBox("Steer a message").value).toBe("");
+    expect(draftBox("Send a message").value).toBe("");
     expect(startChild).not.toHaveBeenCalled();
     expect(startOrchestrator).not.toHaveBeenCalled();
 
@@ -785,7 +784,7 @@ describe("selection and drafts", () => {
         name: "Run the compatibility audit",
       }),
     );
-    fireEvent.change(draftBox("Steer a message"), {
+    fireEvent.change(draftBox("Send a message"), {
       target: { value: "Narrow the audit" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Steer" }));

@@ -91,6 +91,7 @@ export enum IconName {
   Danger = "danger",
   Download = "download",
   Stop = "stop",
+  Pause = "pause",
   // Deliberate aliases: these names reuse an existing glyph.
   /* eslint-disable @typescript-eslint/no-duplicate-enum-values */
   JSON = "code",

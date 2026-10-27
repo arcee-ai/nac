@@ -189,13 +189,14 @@ for (const [name, viewport, mobile] of [
       await panel.getByRole("button", { name: "Close", exact: true }).click();
       await expect(panel).toHaveCount(0);
     }
-    const childDraft = page.getByRole("textbox", { name: "Steer a message" });
+    await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+    const childDraft = page.getByRole("textbox", { name: "Send a message" });
     await expect(childDraft).toHaveValue("");
     await expect(childDraft).toBeEnabled();
     await page.getByRole("button", { name: "Parent chat" }).click();
     await showSubagents(page, mobile);
     // A running composer has no background switch; its Steer field is the only one on the page.
-    const steer = page.getByRole("textbox", { name: "Steer a message" });
+    const steer = page.getByRole("textbox", { name: "Send a message" });
     await expect(steer).toHaveValue("");
     await expect(steer).toBeEnabled();
     await steer.fill("E2E_PANEL_STEER check the cache too");

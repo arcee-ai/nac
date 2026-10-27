@@ -94,6 +94,7 @@ export function SubagentComposer({
   permissionBehavior,
   requesterLabel,
   showPermissions = true,
+  floating = false,
 }: {
   parentSessionId: string;
   target: SubagentTarget;
@@ -105,6 +106,7 @@ export function SubagentComposer({
    * dialogs. The panel composer must not open a second copy of the same ask.
    */
   showPermissions?: boolean;
+  floating?: boolean;
 }) {
   const toast = useToast();
   const startChild = useStartTraditionalChild();
@@ -203,9 +205,9 @@ export function SubagentComposer({
         running={running}
         background={running ? target.background : background}
         onBackgroundChange={setBackground}
-        status={target.status}
         busy={busy}
         starting={starting}
+        floating={floating}
         permission={
           showPermissions ? (
             <PermissionControls
@@ -221,7 +223,7 @@ export function SubagentComposer({
         <div
           role="region"
           aria-label="Subagent message delivery"
-          className="flex max-h-48 flex-col gap-2 overflow-y-auto"
+          className="pointer-events-auto flex max-h-48 flex-col gap-2 overflow-y-auto"
         >
           {recoveries.map((recovery) => (
             <RecoveryMessage
@@ -273,6 +275,7 @@ export function SubagentSessionComposer({
       permissionSessionId={sessionId}
       permissionBehavior={orchestrator ? "orchestrator" : (behavior ?? "direct")}
       requesterLabel={orchestrator ? undefined : `child agent “${target.description}”`}
+      floating
     />
   );
 }

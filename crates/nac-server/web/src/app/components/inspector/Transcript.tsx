@@ -469,8 +469,12 @@ export function Transcript({
           className={cn(
             "flex flex-col pt-[96px] md:pt-[90px] [&>*]:shrink-0 px-4 md:px-0",
             // The phone's input is a bare pill rather than a padded card, so
-            // the run-out under the last message shrinks with it.
-            isMobile ? "pb-[180px]" : "pb-[320px] mx-auto max-w-[640px]",
+            // the run-out under the last message shrinks with it. A long
+            // draft, the goal editor or queued messages make the composer
+            // taller, and the run-out still clears it.
+            isMobile
+              ? "pb-[max(180px,calc(var(--composer-height,0px)_+_40px))]"
+              : "pb-[max(320px,calc(var(--composer-height,0px)_+_40px))] mx-auto max-w-[640px]",
           )}
         >
           {snapshot?.message_page?.has_older ? (
