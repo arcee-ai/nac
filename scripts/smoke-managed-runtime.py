@@ -33,6 +33,38 @@ assert runtime_provenance["packages"] and runtime_provenance["notice_files"]
 locale.setlocale(locale.LC_ALL, "")
 assert locale.getpreferredencoding(False).lower().replace("-", "") == "utf8"
 assert run("node", "-p", "JSON.stringify({value: 6 * 7, bytes: Buffer.byteLength('é')})") == '{"value":42,"bytes":2}'
+# The actual supplier libraries must agree on the fixed upstream ABI/version.
+decoder = ctypes.CDLL("libbrotlidec.so.1")
+encoder = ctypes.CDLL("libbrotlienc.so.1")
+assert decoder.BrotliDecoderVersion() == encoder.BrotliEncoderVersion() == (1 << 24 | 2 << 12 | 1)
+decoder.BrotliDecoderErrorString.restype = ctypes.c_char_p
+assert decoder.BrotliDecoderErrorString(-17) == b"_ERROR_FORMAT_BLOCK_SWITCH"
+supplier = json.loads(Path("/usr/share/nac/brotli-supplier.lock.json").read_text())
+actual_packages = {package["name"]: package for package in runtime_provenance["packages"]}
+for name, expected in supplier["packages"].items():
+    actual = actual_packages[name]
+    assert actual["version"] == expected["version"]
+    assert actual["archive"]["sha256"] == expected["archive_sha256"]
+    for filename, signature in expected["installed_payload"].items():
+        path = Path(filename)
+        if "symlink" in signature:
+            assert path.is_symlink() and str(path.readlink()) == signature["symlink"]
+        else:
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == signature["sha256"]
+source = b"managed Brotli roundtrip " * 32
+encoded, decoded = ctypes.create_string_buffer(4096), ctypes.create_string_buffer(len(source))
+encoded_size, decoded_size = ctypes.c_size_t(len(encoded)), ctypes.c_size_t(len(decoded))
+assert encoder.BrotliEncoderCompress(5, 22, 0, len(source), source, ctypes.byref(encoded_size), encoded) == 1
+assert decoder.BrotliDecoderDecompress(encoded_size, encoded, ctypes.byref(decoded_size), decoded) == 1
+assert decoded.raw[:decoded_size.value] == source
+npm_recipe = Path("/usr/share/nac/npm-runtime-build")
+npm_provenance = json.loads((npm_recipe / "npm-bundle-provenance.json").read_text())
+for payload in npm_provenance["installed_payload"].values():
+    for filename, expected in payload.items():
+        assert hashlib.sha256((Path("/usr/local/lib/node_modules/npm") / filename).read_bytes()).hexdigest() == expected
+for mode in ["early-close", "compatible"]:
+    subprocess.run(["node", str(npm_recipe / "npm-bundle-probe.cjs"),
+                    "/usr/local/lib/node_modules/npm/node_modules/undici", mode], check=True, timeout=20)
 with tempfile.TemporaryDirectory(prefix="nac-runtime-", dir="/repositories") as directory:
     root = Path(directory)
     for compiler, suffix, source in [
@@ -52,6 +84,9 @@ with tempfile.TemporaryDirectory(prefix="nac-runtime-", dir="/repositories") as 
     data = root / "data.txt"
     data.write_text("runtime-transfer-ok\n")
     assert run("curl", "--fail", "--silent", data.as_uri()) == "runtime-transfer-ok"
+    (root / "package.json").write_text('{"name":"nac-offline-smoke","version":"1.0.0"}')
+    subprocess.run(["npm", "pack", "--offline", "--ignore-scripts", "--pack-destination", str(root), str(root)],
+                   check=True, timeout=30, capture_output=True)
 
 # Load each installed SASL mechanism with its actual dependencies, without
 # performing authentication, protocol fuzzing or malformed-message validation.
