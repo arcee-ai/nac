@@ -18,7 +18,7 @@ def run(*args):
 
 assert (os.getuid(), os.getgid()) == (10001, 10001)
 owned = list(Path("/usr/share/nac/package-provenance").glob("*.json"))
-assert len(owned) == 5, "owned package provenance incomplete"
+assert len(owned) == 6, "owned package provenance incomplete"
 for record in owned:
     package = json.loads(record.read_text())
     assert package["supplier"] == "NAC" and package["schema_version"] == 1
@@ -30,6 +30,12 @@ for record in owned:
             assert hashlib.sha256(path.read_bytes()).hexdigest() == evidence["sha256"], filename
 runtime_provenance = json.loads(Path("/usr/share/nac/runtime-provenance.json").read_text())
 assert runtime_provenance["packages"] and runtime_provenance["notice_files"]
+libssh2 = ctypes.CDLL("libssh2.so.1")
+libssh2.libssh2_version.restype = ctypes.c_char_p
+assert libssh2.libssh2_version(0) == b"1.11.1"
+ssh_dynamic = run("readelf", "-d", "/usr/lib/libssh2.so.1")
+assert "libcrypto.so.4" in ssh_dynamic and "libcrypto.so.3" not in ssh_dynamic
+assert "libssh2.so.1 => /usr/lib/libssh2.so.1" in run("ldd", "/usr/lib/libcurl.so.4")
 locale.setlocale(locale.LC_ALL, "")
 assert locale.getpreferredencoding(False).lower().replace("-", "") == "utf8"
 assert run("node", "-p", "JSON.stringify({value: 6 * 7, bytes: Buffer.byteLength('é')})") == '{"value":42,"bytes":2}'

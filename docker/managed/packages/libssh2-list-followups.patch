@@ -1,0 +1,19 @@
+--- a/src/publickey.c
++++ b/src/publickey.c
+@@ -975 +975,2 @@
+-                memset(&list[keys], 0, sizeof(list[keys]));
++                memset(&list[keys], 0,
++                       (max_keys - keys + 1) * sizeof(list[keys]));
+@@ -1203,0 +1205 @@
++            pkey->listFetch_data = NULL;
+@@ -1205,3 +1206,0 @@
+-
+-            list[keys].packet = NULL;   /* Terminate the list */
+-            pkey->listFetch_data = NULL;
+@@ -1246 +1245 @@
+-    while(p->packet) {
++    while(p->attrs || p->packet) {
+@@ -1250 +1249,2 @@
+-        LIBSSH2_FREE(session, p->packet);
++        if(p->packet)
++            LIBSSH2_FREE(session, p->packet);
