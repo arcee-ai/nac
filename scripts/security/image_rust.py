@@ -172,7 +172,9 @@ def rust_inventory(raw, pins, output):
     require(raw.get("toolchains") == [toolchain] and raw.get("active") == toolchain + " (default)",
             "unexpected active Rust toolchain")
     require(raw.get("targets") == TARGET, "wrong/unexpected Rust target")
-    components = {n + "-" + TARGET for n in COMPONENTS}
+    # rustup's public list uses renamed short names; archive/bookkeeping names keep -preview.
+    public_names = {"clippy-preview": "clippy", "rustfmt-preview": "rustfmt"}
+    components = {public_names.get(n, n) + "-" + TARGET for n in COMPONENTS}
     require(set(raw.get("components", "").splitlines()) == components, "missing/unexpected installed Rust component")
     proxies, which, versions = raw.get("proxies", {}), raw.get("which", {}), raw.get("versions", {})
     require(set(proxies) == {*BINARIES, "rustup"} and set(which) == set(BINARIES), "missing Rust proxy evidence")

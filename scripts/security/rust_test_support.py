@@ -1,7 +1,7 @@
 """Synthetic Rust distribution evidence for scanner contract tests (no network)."""
 import json
 from image_inventory import write_json
-from image_rust import BINARIES, COMPONENTS, TARGET, digest, manifest_identities
+from image_rust import BINARIES, TARGET, digest, manifest_identities
 
 
 def rust_fixture(output):
@@ -34,7 +34,9 @@ def rust_fixture(output):
            "proxies": {n: {"path": "/usr/local/cargo/bin/" + n,
                            "resolved": "/usr/local/cargo/bin/" + n, "sha256": pins["RUSTUP_SHA256"]}
                        for n in (*BINARIES, "rustup")}, "versions": versions,
-           "components": "\n".join(n + "-" + TARGET for n in sorted(COMPONENTS)), "payload": payload}
+           "components": "cargo-x86_64-unknown-linux-gnu\nclippy-x86_64-unknown-linux-gnu\n"
+                         "rust-std-x86_64-unknown-linux-gnu\nrustc-x86_64-unknown-linux-gnu\n"
+                         "rustfmt-x86_64-unknown-linux-gnu", "payload": payload}
     return pins, raw
 
 
