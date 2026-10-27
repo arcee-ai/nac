@@ -91,9 +91,17 @@ test("reviews eligible requests, returns blocked actions and reviews an authoriz
   await harness.provider.waitForRequestCount(3);
   await waitForRunIdle(request, harness, sessionId);
 
-  await expect(page.locator('[data-tool-call-id="review-allowed"]')).toContainText("Succeeded");
-  const blockedCall = page.locator('[data-tool-call-id="review-blocked"]');
-  await expect(blockedCall).toContainText("Failed");
+  // Settled tool details live in Insights; the transcript retains their activity badge.
+  await page.getByRole("button", { name: /^Total activity: \d+\.\ds$/ }).click();
+  const reads = page.getByRole("group", { name: "File Read", exact: true });
+  await expect(reads.filter({ hasText: "allowed.txt" })).toBeVisible();
+  const blockedCall = reads.filter({ hasText: "code=review_rejected" });
+  await expect(blockedCall).toContainText("operation_executed=false");
+  const explained = harness.provider.requests.find(
+    (entry) => entry.matchedStep === "review-explained",
+  );
+  expect(JSON.stringify(explained?.body)).toContain("routine contents");
+  expect(JSON.stringify(explained?.body)).not.toContain("blocked contents");
   await expect(page.getByText("Permission required")).toHaveCount(0);
 
   const state = await (
@@ -137,7 +145,12 @@ test("reviews eligible requests, returns blocked actions and reviews an authoriz
 
   await harness.provider.waitForRequestCount(5);
   await waitForRunIdle(request, harness, sessionId);
-  await expect(page.locator('[data-tool-call-id="review-retry"]')).toContainText("Succeeded");
+  await page.getByRole("button", { name: /^Total activity: \d+\.\ds, 1$/ }).click();
+  await expect(reads.filter({ hasText: "blocked.txt" })).toBeVisible();
+  const completed = harness.provider.requests.find(
+    (entry) => entry.matchedStep === "review-retry-complete",
+  );
+  expect(JSON.stringify(completed?.body)).toContain("blocked contents");
   await expect(page.getByText("authorized retry complete")).toBeVisible();
 
   const after = await (

@@ -2,6 +2,60 @@ use super::*;
 use crate::sandbox::DEFAULT_SANDBOX_WORKDIR;
 use std::path::PathBuf;
 
+// Both creation-cancellation fixtures hold TEST_ENV_LOCK. Restore every injected
+// value and release a waiting fake process even when readiness/assertions panic.
+#[cfg(unix)]
+struct CreationFixtureEnvironment {
+    release: PathBuf,
+    originals: Vec<(&'static str, Option<std::ffi::OsString>)>,
+}
+
+#[cfg(unix)]
+impl CreationFixtureEnvironment {
+    fn new(release: &Path, names: &[&'static str]) -> Self {
+        Self {
+            release: release.to_path_buf(),
+            originals: names
+                .iter()
+                .map(|&name| (name, std::env::var_os(name)))
+                .collect(),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for CreationFixtureEnvironment {
+    fn drop(&mut self) {
+        let _ = std::fs::write(&self.release, b"");
+        for (name, value) in self.originals.drain(..) {
+            unsafe {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn wait_for_creation_start(started: &Path, launch: &mut tokio::task::JoinHandle<Result<()>>) {
+    let ready = tokio::time::timeout(Duration::from_secs(10), async {
+        while !started.exists() {
+            tokio::select! {
+                result = &mut *launch => panic!("creation exited before fake podman started: {result:?}"),
+                _ = tokio::time::sleep(Duration::from_millis(5)) => {}
+            }
+        }
+    })
+    .await;
+    if ready.is_err() {
+        launch.abort();
+        let _ = launch.await;
+        panic!("fake podman run did not start within the readiness deadline");
+    }
+}
+
 fn sample_session() -> PodmanSession {
     PodmanSession::new(
         SandboxSpec {
@@ -533,20 +587,6 @@ async fn explicit_lifecycle_cleanup_removes_an_observer_container() {
 async fn cancelled_creation_waits_for_run_before_removing_the_container() {
     use std::os::unix::fs::PermissionsExt;
 
-    struct RestoreEnvironment(Vec<(&'static str, Option<std::ffi::OsString>)>);
-    impl Drop for RestoreEnvironment {
-        fn drop(&mut self) {
-            for (name, value) in self.0.drain(..) {
-                unsafe {
-                    match value {
-                        Some(value) => std::env::set_var(name, value),
-                        None => std::env::remove_var(name),
-                    }
-                }
-            }
-        }
-    }
-
     let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
         "nac-podman-cancelled-create-{}",
@@ -598,20 +638,19 @@ exit 0
     )
     .unwrap();
     std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let _environment = RestoreEnvironment(
-        [
-            "PATH",
+    let _environment = CreationFixtureEnvironment::new(
+        &release,
+        &[
+            "NAC_TEST_PODMAN_PROGRAM",
             "NAC_TEST_CREATE_STARTED",
             "NAC_TEST_CREATE_RELEASE",
             "NAC_TEST_CONTAINER",
             "NAC_TEST_REMOVE_STARTED",
             "NAC_TEST_OWNERSHIP_TOKEN",
-        ]
-        .map(|name| (name, std::env::var_os(name)))
-        .into(),
+        ],
     );
     unsafe {
-        std::env::set_var("PATH", &root);
+        std::env::set_var("NAC_TEST_PODMAN_PROGRAM", &podman);
         std::env::set_var("NAC_TEST_CREATE_STARTED", &started);
         std::env::set_var("NAC_TEST_CREATE_RELEASE", &release);
         std::env::set_var("NAC_TEST_CONTAINER", &container);
@@ -629,14 +668,7 @@ exit 0
         let session = std::sync::Arc::clone(&session);
         async move { session.create_container().await }
     });
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while !started.exists() {
-            tokio::select! {
-                result = &mut launch => panic!("creation exited before fake podman started: {result:?}"),
-                _ = tokio::time::sleep(Duration::from_millis(5)) => {}
-            }
-        }
-    }).await.expect("fake podman run did not start within the readiness deadline");
+    wait_for_creation_start(&started, &mut launch).await;
     launch.abort();
     let _ = launch.await;
     tokio::time::sleep(Duration::from_millis(30)).await;
@@ -990,9 +1022,18 @@ exit 0
     )
     .unwrap();
     std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let original_path = std::env::var_os("PATH");
+    let _environment = CreationFixtureEnvironment::new(
+        &release,
+        &[
+            "NAC_TEST_PODMAN_PROGRAM",
+            "NAC_TEST_CREATE_STARTED",
+            "NAC_TEST_CREATE_RELEASE",
+            "NAC_TEST_PEER_CONTAINER",
+            "NAC_TEST_REMOVE_STARTED",
+        ],
+    );
     unsafe {
-        std::env::set_var("PATH", &root);
+        std::env::set_var("NAC_TEST_PODMAN_PROGRAM", &podman);
         std::env::set_var("NAC_TEST_CREATE_STARTED", &started);
         std::env::set_var("NAC_TEST_CREATE_RELEASE", &release);
         std::env::set_var("NAC_TEST_PEER_CONTAINER", &peer_container);
@@ -1005,17 +1046,11 @@ exit 0
         false,
         "cancelled-peer-create".to_string(),
     ));
-    let launch = tokio::spawn({
+    let mut launch = tokio::spawn({
         let session = std::sync::Arc::clone(&session);
         async move { session.create_container().await }
     });
-    for _ in 0..200 {
-        if started.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    assert!(started.exists(), "fake Podman run did not start");
+    wait_for_creation_start(&started, &mut launch).await;
     launch.abort();
     let _ = launch.await;
 
@@ -1028,16 +1063,6 @@ exit 0
     );
     assert!(peer_container.exists(), "peer container was removed");
 
-    unsafe {
-        match original_path {
-            Some(path) => std::env::set_var("PATH", path),
-            None => std::env::remove_var("PATH"),
-        }
-        std::env::remove_var("NAC_TEST_CREATE_STARTED");
-        std::env::remove_var("NAC_TEST_CREATE_RELEASE");
-        std::env::remove_var("NAC_TEST_PEER_CONTAINER");
-        std::env::remove_var("NAC_TEST_REMOVE_STARTED");
-    }
     drop(session);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1535,6 +1560,7 @@ fn total_portable_identity_inspection_failure_retains_retry_authority() {
 fn successful_wrapper_completion_kills_background_group_members() {
     use std::os::unix::process::ExitStatusExt;
 
+    let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
     let root =
         std::env::temp_dir().join(format!("nac-wrapper-descendant-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
