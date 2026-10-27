@@ -7,12 +7,34 @@ const CUT_MARK = "…";
 
 type FileTarget = { kind: "workspace"; path: string } | { kind: "unmapped"; reason: string };
 
+/** Git prefixes are filesystem paths: URL/Markdown normalization would change identity. */
+function repositoryPrefix(prefix: string): string | null {
+  if (prefix === "") return "";
+  if (
+    prefix.startsWith("/") ||
+    prefix.includes("\\") ||
+    /[\p{Cc}]/u.test(prefix) ||
+    /^[a-z][a-z0-9+.-]*:/iu.test(prefix)
+  )
+    return null;
+  const components = prefix.split("/");
+  if (components.at(-1) === "") components.pop();
+  if (components.some((part) => part === "" || part === "." || part === "..")) return null;
+  return prefix.endsWith("/") ? prefix : `${prefix}/`;
+}
+
 /** Map a tool's session-relative path onto Files' repository-relative paths. */
 function fileTarget(path: string, context: ItemContext): FileTarget {
   if (path.startsWith(CUT_MARK)) {
     return {
       kind: "unmapped",
       reason: "Only the end of this path is known, so Files cannot open it.",
+    };
+  }
+  if (path !== path.trim()) {
+    return {
+      kind: "unmapped",
+      reason: "This path cannot be mapped exactly, so Files cannot open it.",
     };
   }
   const prefix = context.filePathPrefix;
@@ -22,15 +44,10 @@ function fileTarget(path: string, context: ItemContext): FileTarget {
       reason: "The file's repository location is unknown, so Files cannot open it.",
     };
   }
-  // An empty prefix explicitly means the session is at the repository root.
-  // Validate nonempty prefixes just like relative paths, without cwd aliases.
-  const base = prefix === "" ? "" : classifyMarkdownHref(prefix, []);
+  const base = repositoryPrefix(prefix);
   const link = classifyMarkdownHref(path, context.workspaceRoots);
-  return (base === "" || base.kind === "workspace") && link.kind === "workspace"
-    ? {
-        kind: "workspace",
-        path: `${base === "" ? "" : `${base.path.replace(/\/+$/u, "")}/`}${link.path}`,
-      }
+  return base != null && link.kind === "workspace"
+    ? { kind: "workspace", path: `${base}${link.path}` }
     : { kind: "unmapped", reason: "This file is outside the workspace, so Files cannot open it." };
 }
 

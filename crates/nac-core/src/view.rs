@@ -999,6 +999,35 @@ mod tests {
     }
 
     #[test]
+    fn workspace_file_prefix_preserves_leading_space_directory_identity() {
+        let repo = TestRepo::new("view-file-prefix-space");
+        let cwd = repo.root.join(" app");
+        std::fs::create_dir_all(cwd.join("src")).unwrap();
+        std::fs::create_dir_all(repo.root.join("app/src")).unwrap();
+        std::fs::write(cwd.join("src/lib.rs"), "space directory").unwrap();
+        std::fs::write(repo.root.join("app/src/lib.rs"), "trimmed decoy").unwrap();
+
+        let target = GitTarget::local(cwd.clone());
+        let snapshot = workspace_snapshot("/repo/ app", Some(&target));
+        assert_eq!(snapshot.host_root, Some(cwd));
+        assert_eq!(snapshot.file_path_prefix.as_deref(), Some(" app/"));
+        assert_eq!(
+            read_file(&target, " app/src/lib.rs")
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("space directory")
+        );
+        assert_eq!(
+            read_file(&target, "app/src/lib.rs")
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("trimmed decoy")
+        );
+    }
+
+    #[test]
     fn workspace_file_prefix_is_unknown_outside_git() {
         let repo = TestRepo::new("view-file-prefix-unknown");
         let directory = repo.base.join("outside-git");

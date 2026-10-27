@@ -47,10 +47,20 @@ it.each(["src/lib.rs", "/repo/src/lib.rs"])("maps a repository-root session path
   expect(openFile).toHaveBeenCalledExactlyOnceWith("src/lib.rs");
 });
 
-it.each(["crates/foo", "./crates/foo/", "crates/foo//"])("normalizes prefix %s once", (prefix) => {
+it.each(["crates/foo", "crates/foo/"])("joins valid prefix %s once", (prefix) => {
   const { openFile, button } = renderFile("src/lib.rs", prefix);
   fireEvent.click(button);
   expect(openFile).toHaveBeenCalledExactlyOnceWith("crates/foo/src/lib.rs");
+});
+
+it.each([" app/", "app /", "#app/", "%61pp/"])("preserves filesystem prefix %s", (prefix) => {
+  const cwd = `/repo/${prefix.slice(0, -1)}`;
+  for (const path of ["src/lib.rs", `${cwd}/src/lib.rs`]) {
+    const { openFile, button } = renderFile(path, prefix, [cwd]);
+    fireEvent.click(button);
+    expect(openFile).toHaveBeenCalledExactlyOnceWith(`${prefix}src/lib.rs`);
+    cleanup();
+  }
 });
 
 it("does not mistake a relative name resembling the prefix for a repository path", () => {
@@ -72,17 +82,29 @@ it.each([null, undefined])("disables paths when the repository prefix is %s", (p
   expect(openFile).not.toHaveBeenCalled();
 });
 
-it.each(["../", "foo/../../", "/repo/", "https://host/repo/", "file:///repo/", "."])(
-  "rejects an unsafe repository prefix %s",
-  (prefix) => {
-    const { button, openFile } = renderFile("src/lib.rs", prefix);
-    expect(button.disabled).toBe(true);
-    fireEvent.click(button);
-    expect(openFile).not.toHaveBeenCalled();
-  },
-);
+it.each([
+  "../",
+  "foo/../../",
+  "/repo/",
+  "https://host/repo/",
+  "file:///repo/",
+  ".",
+  "./crates/foo/",
+  "crates/foo//",
+  "app\\child/",
+  "C:/repo/",
+  "app/./child/",
+  "app/\u0000/",
+])("rejects an unsafe repository prefix %s", (prefix) => {
+  const { button, openFile } = renderFile("src/lib.rs", prefix);
+  expect(button.disabled).toBe(true);
+  fireEvent.click(button);
+  expect(openFile).not.toHaveBeenCalled();
+});
 
 it.each([
+  " src/lib.rs",
+  "src/lib.rs ",
   "../src/lib.rs",
   "/repo/crates/foo/../other/lib.rs",
   "/repo/crates/foobar/src/lib.rs",
