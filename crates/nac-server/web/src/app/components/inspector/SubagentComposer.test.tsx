@@ -8,6 +8,14 @@ import { createNacClient } from "@/app/services/nacClient";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { SubagentComposer } from "./SubagentComposer";
 
+const permissionControl = vi.hoisted(() => vi.fn());
+vi.mock("./PermissionControls", () => ({
+  PermissionControls: (props: unknown) => {
+    permissionControl(props);
+    return null;
+  },
+}));
+
 const scope: NativeRuntimeScope = {
   owner: "owner",
   profile: "profile",
@@ -20,6 +28,7 @@ const scope: NativeRuntimeScope = {
 const runtimes: ReturnType<typeof createNativeRuntime>[] = [];
 afterEach(() => {
   cleanup();
+  permissionControl.mockClear();
   for (const runtime of runtimes.splice(0)) runtime.close();
 });
 
@@ -41,6 +50,8 @@ function mount(
   fetch: typeof globalThis.fetch,
   draftStorage = storage(),
   binding = scope,
+  showPermissions = false,
+  status: "running" | "completed" = "running",
 ) {
   window.matchMedia = (query: string) =>
     ({
@@ -67,12 +78,12 @@ function mount(
             parentSessionId="parent"
             permissionSessionId="target"
             permissionBehavior="direct"
-            showPermissions={false}
+            showPermissions={showPermissions}
             target={{
               mode,
               id: "target",
               description: "Review permissions",
-              status: "running",
+              status,
               background: false,
             }}
           />
@@ -124,3 +135,20 @@ it("does not treat an HTTP foreground failure as proof that the message was neve
   expect(screen.queryByLabelText("Subagent message delivery")).toBeNull();
   expect(fetch).toHaveBeenCalledOnce();
 });
+
+it.each(["running", "completed"] as const)(
+  "keeps owning-parent retry routing for a %s child's permission control",
+  (status) => {
+    const fetch = vi.fn(() => new Promise<Response>(() => {}));
+    mount("child", fetch, storage(), scope, true, status);
+    expect(permissionControl).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sessionId: "target",
+        autoApprovalAvailable: false,
+        retryParentSessionId: "parent",
+        poll: status === "running",
+      }),
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);

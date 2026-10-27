@@ -575,6 +575,16 @@ pub enum SessionEvent {
     PermissionApprovalModeChanged {
         mode: crate::permissions::PermissionApprovalMode,
     },
+    /// An eligible Ask request was sent to the automatic reviewer. Carries
+    /// only the redacted projection the reviewer sees.
+    PermissionReviewStarted {
+        review: Box<crate::permissions::PermissionReview>,
+    },
+    /// The automatic reviewer finished. Rejected and uncertain reviews are
+    /// returned to the model unexecuted; the user may authorize one retry.
+    PermissionReviewed {
+        review: Box<crate::permissions::PermissionReview>,
+    },
     SnapshotSaved {
         session_id: String,
     },

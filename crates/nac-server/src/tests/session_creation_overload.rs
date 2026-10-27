@@ -32,8 +32,46 @@ async fn pause_creation(
     (gate, creation)
 }
 
+struct ReleaseCallers(Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>);
+
+impl Drop for ReleaseCallers {
+    fn drop(&mut self) {
+        let (lock, condition) = &*self.0;
+        *lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        condition.notify_all();
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn rejected_creation_projection_does_not_leave_a_durable_session() {
+    // Saturation owns the entire process-wide caller budget. Other parallel
+    // tests must not borrow its slots or receive its deliberate rejections.
+    const CHILD: &str = "NAC_TEST_CREATION_PROJECTION_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::session_creation_overload::rejected_creation_projection_does_not_leave_a_durable_session",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "saturation child failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("caller saturation completed"),
+            "saturation child did not execute: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        return;
+    }
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("creation_projection_overload");
     let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("test-only-key"));
@@ -64,6 +102,9 @@ async fn rejected_creation_projection_does_not_leave_a_durable_session() {
     // Occupy the real bounded caller adapter only after runtime construction.
     // The response read must then either succeed or reject without a session row.
     let release = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    // Always release blocking threads before Tokio runtime teardown, including
+    // when an assertion fails while the caller budget is saturated.
+    let release_guard = ReleaseCallers(Arc::clone(&release));
     let (entered, observed) = std::sync::mpsc::channel();
     let mut callers = Vec::new();
     for _ in 0..128 {
@@ -86,9 +127,7 @@ async fn rejected_creation_projection_does_not_leave_a_durable_session() {
         .unwrap();
     let status = response.status();
     let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    let (lock, condition) = &*release;
-    *lock.lock().unwrap() = true;
-    condition.notify_all();
+    drop(release_guard);
     for caller in callers {
         caller.await.unwrap();
     }
@@ -113,6 +152,7 @@ async fn rejected_creation_projection_does_not_leave_a_durable_session() {
         stored, acknowledged,
         "rejected creation left a durable orphan: status={status}"
     );
+    println!("caller saturation completed");
     std::fs::remove_dir_all(root).unwrap();
 }
 

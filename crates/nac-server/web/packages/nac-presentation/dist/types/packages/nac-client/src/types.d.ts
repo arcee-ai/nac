@@ -61,6 +61,7 @@ export type OrchestratorSteeringResponse = ApiSchema<"OrchestratorSteeringRespon
 export type PermissionApprovalMode = ApiSchema<"PermissionApprovalMode">;
 export type PermissionReply = ApiSchema<"PermissionReply">;
 export type PermissionStateResponse = ApiSchema<"PermissionStateResponse">;
+export type PermissionReview = ApiSchema<"PermissionReview">;
 export type SessionGoalRecord = ApiSchema<"SessionGoalRecord">;
 export type StartTraditionalChildRequest = ApiSchema<"StartTraditionalChildRequest">;
 export type StartManagedOrchestratorRequest = ApiSchema<"StartManagedOrchestratorRequest">;

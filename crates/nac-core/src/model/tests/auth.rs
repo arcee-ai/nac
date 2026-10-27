@@ -92,6 +92,75 @@ fn stored_codex_auth() -> String {
     .to_string()
 }
 
+#[test]
+fn stored_codex_tokens_exclude_invocations_and_person_intent_from_review() {
+    use crate::permissions::{review_request, ExactSecrets, PermissionBackend};
+    use crate::tools::kernel::PermissionResource;
+
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    // Opaque canaries have no recognizable credential prefix or field label.
+    let access = "cobaltwindflower";
+    let refresh = "ambermeadowstone";
+    let auth = json!({
+        "type": "chatgpt-codex", "access": access, "refresh": refresh,
+        "expires_at_ms": 1, "account_id": "synthetic-account"
+    })
+    .to_string();
+    let _env = IsolatedModelEnv::new("codex-review-secrets", Some(&auth), None, None);
+    let secrets = ExactSecrets::current(None).unwrap();
+    for value in [access, refresh] {
+        assert!(review_request(
+            "exec_command",
+            &[PermissionResource::new("execute", "command:[ls]")],
+            PermissionBackend::Local,
+            &[format!("Find occurrences of {value}")],
+            false,
+            &secrets,
+        )
+        .is_err());
+        assert!(review_request(
+            "exec_command",
+            &[PermissionResource::new(
+                "execute",
+                format!("command:[printf][{value}]")
+            )],
+            PermissionBackend::Local,
+            &["Inspect the workspace".to_owned()],
+            false,
+            &secrets,
+        )
+        .is_err());
+    }
+    assert!(review_request(
+        "exec_command",
+        &[PermissionResource::new("execute", "command:[ls]")],
+        PermissionBackend::Local,
+        &["Inspect the workspace".to_owned()],
+        false,
+        &secrets,
+    )
+    .is_ok());
+
+    write_test_credential(&_env.home.join("auth.json"), "{malformed");
+    assert!(
+        ExactSecrets::current(None).is_err(),
+        "unreadable secrets fail closed"
+    );
+}
+
+#[test]
+fn missing_or_foreign_codex_storage_does_not_block_review_redaction() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let foreign = stored_arcee_auth("synthetic-foreign-access", "https://api.arcee.ai");
+    for contents in [None, Some(foreign.as_str())] {
+        let _env = IsolatedModelEnv::new("optional-codex-review", contents, None, None);
+        assert!(chatgpt_codex::stored_credential_values()
+            .unwrap()
+            .is_empty());
+        assert!(crate::permissions::ExactSecrets::current(None).is_ok());
+    }
+}
+
 fn directory_names(path: &std::path::Path) -> Vec<String> {
     let mut names = std::fs::read_dir(path)
         .unwrap()

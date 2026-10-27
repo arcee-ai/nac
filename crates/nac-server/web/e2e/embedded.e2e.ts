@@ -28,6 +28,22 @@ async function newChatChord(page: Page): Promise<string> {
   return isMac ? "Meta+Shift+O" : "Control+Shift+O";
 }
 
+/** Separate child/run requests must not overtake a permission-mode transition. */
+async function selectApprovalMode(page: Page, sessionId: string, mode: "manual" | "auto_approve") {
+  const group = page.getByRole("radiogroup", { name: "Approval mode" });
+  await expect(group.getByRole("radio")).toHaveCount(3);
+  const name = mode === "manual" ? "Manual" : "Approve all";
+  const response = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/sessions/${sessionId}/permissions/mode`) &&
+      response.request().method() === "PUT" &&
+      response.request().postDataJSON()?.mode === mode,
+  );
+  await group.getByText(name, { exact: true }).click();
+  expect((await response).status()).toBe(204);
+  await expect(group.getByRole("radio", { name, exact: true })).toBeChecked();
+}
+
 test("serves the production-embedded application and hashed assets", async ({
   harness,
   page,
@@ -506,7 +522,7 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   await harness.provider.waitForRequestCount(1);
   await expect(page.getByRole("button", { name: "Awaiting approval…", exact: true })).toBeVisible();
 
-  await page.getByRole("switch", { name: "Approve all automatically" }).click();
+  await selectApprovalMode(page, sessionId, "auto_approve");
   await expect(
     page.getByRole("button", { name: "Auto-approve on — open permissions" }),
   ).toBeVisible();
@@ -526,11 +542,8 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   );
   await expect(page.getByRole("group", { name: "File Read", exact: true })).toHaveCount(2);
   await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
-  const toggle = page.getByRole("switch", {
-    name: "Approve all automatically",
-  });
-  await expect(toggle).toHaveAttribute("aria-checked", "true");
-  await toggle.click();
+  await expect(page.getByRole("radio", { name: "Approve all", exact: true })).toBeChecked();
+  await selectApprovalMode(page, sessionId, "manual");
   await expect(page.getByRole("button", { name: "Permissions" })).toBeVisible();
   await page.keyboard.press("Escape");
 
@@ -622,13 +635,10 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await page.getByRole("button", { name: "Permissions" }).click();
   const permissions = page.getByRole("dialog");
   await expect(permissions).toContainText(
-    "This setting governs this session and all existing or future owned child agents",
+    "The mode governs this session and all existing or future owned child agents",
   );
   await expect(permissions).toContainText("Separately managed orchestrators are not included");
-  const automaticMode = permissions.getByRole("switch", { name: "Approve all automatically" });
-  await automaticMode.click();
-  // The child start below is a separate request; it must not overtake the mode change.
-  await expect(automaticMode).toBeChecked();
+  await selectApprovalMode(page, sessionId, "auto_approve");
   await page.keyboard.press("Escape");
 
   const automaticStart = startForegroundChild(
@@ -646,9 +656,7 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await expect(page.getByText("Permission required")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
-  const manualMode = page.getByRole("switch", { name: "Approve all automatically" });
-  await manualMode.click();
-  await expect(manualMode).not.toBeChecked();
+  await selectApprovalMode(page, sessionId, "manual");
   await page.keyboard.press("Escape");
 
   const manualStart = startForegroundChild(

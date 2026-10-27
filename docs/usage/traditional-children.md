@@ -12,10 +12,20 @@ permission connection open and presents that request beside the child controls.
 The child page exposes the same approval control beside its existing-session
 composer. A child waits briefly for the parent UI to establish this connection;
 without one, the request fails closed and the operation is not executed.
-The parent's **Approve all automatically** mode governs the parent and all of
-its traditional children. It answers only requests that reach each child's
-broker after configured and hard denials; remembered grants remain child-local.
+The parent's approval mode — **Manual** by default, **Approve all**, or
+**Approve for me** — governs the parent and all of its traditional children.
+Approval answers only requests that reach each child's broker after configured
+and hard denials; remembered grants remain child-local.
 Managed orchestrators are a separate topology and do not inherit the mode.
+
+In **Approve for me** mode, the child's permissions dialog retains blocked
+reviews even after the child finishes. **Authorize retry** routes through the
+owning parent and authorizes one matching child action to be reviewed again;
+it does not change the inherited mode or create a remembered grant. A running
+child receives a steer for its current generation. A terminal child starts a
+new background generation, whose completion is delivered to the parent through
+the usual durable completion inbox. Recent reviews and retry authorizations
+exist only in the current server process; a restart does not recreate them.
 
 The parent agent starts children with its subagent tool; ask it to delegate
 work. The web UI has no manual launch. Children appear in the parent's Subagents

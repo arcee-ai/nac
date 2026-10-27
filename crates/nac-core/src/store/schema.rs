@@ -50,8 +50,13 @@ mod connection_capacity_tests;
 #[path = "schema/future_schema_tests.rs"]
 mod future_schema_tests;
 
+#[cfg(test)]
+#[path = "schema/permission_reviewer_tests.rs"]
+mod permission_reviewer_tests;
+
 use wal_preflight::read_schema_version_header;
 
+// 40 composes automatic permission review with the retained-task/child-input schema.
 // 39 adds retained task launch receipts and saved Git source bindings.
 // 38 retains bounded run and replaced/cleared goal outcomes for task reads.
 // 37 binds queued foreground intent to crash-safe exact-input waiting authority.
@@ -86,7 +91,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 39;
+const STORE_SCHEMA_VERSION: i64 = 40;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -780,7 +785,7 @@ fn open_connection_with_hooks(
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
         | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-        | 38 | STORE_SCHEMA_VERSION => {}
+        | 38 | 39 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -865,6 +870,19 @@ fn open_connection_with_hooks(
         "permission_approval_revision",
         "INTEGER NOT NULL DEFAULT 0 CHECK (permission_approval_revision >= 0)",
     )?;
+    // The automatic reviewer pairs only with the manual answer policy, which
+    // is how the review mode is stored without rebuilding `sessions` to widen
+    // the mode CHECK. Existing rows keep their mode with the human reviewer.
+    ensure_column(
+        &transaction,
+        "sessions",
+        "permission_reviewer",
+        "TEXT NOT NULL DEFAULT 'user' CHECK (permission_reviewer IN ('user', 'auto_review') AND (permission_reviewer = 'user' OR permission_approval_mode = 'manual'))",
+    )?;
+    // The messages a person typed to this session tree, as JSON, written
+    // when each reaches the model and cleared when Approve for me is turned
+    // off. Automatic review uses them as intent.
+    ensure_column(&transaction, "sessions", "permission_review_intent", "TEXT")?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
     }
@@ -927,6 +945,11 @@ fn open_connection_with_hooks(
         "TEXT CHECK (child_wait_id IS NULL OR length(child_wait_id) = 36)",
     )?;
     transaction.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS idx_session_inbox_admission ON session_inbox(session_id,admission_id) WHERE admission_id IS NOT NULL")?;
+    // What a person typed on a human-facing route, kept with the item and
+    // recorded as review intent when the item reaches the model. NULL for
+    // input from agents, MCP clients and NAC itself.
+    ensure_column(&transaction, "session_inbox", "review_intent", "TEXT")?;
+    ensure_column(&transaction, "thread_steering", "review_intent", "TEXT")?;
     create_permission_grants_table(&transaction)?;
     create_session_goals_table(&transaction)?;
     ensure_column(

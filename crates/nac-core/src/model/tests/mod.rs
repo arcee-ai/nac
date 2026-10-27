@@ -65,3 +65,58 @@ fn retry_policy_covers_transient_statuses_and_bounds_retry_after() {
     headers.insert(reqwest::header::RETRY_AFTER, "600".parse().unwrap());
     assert_eq!(retry_after_delay(&headers), Some(Duration::from_secs(60)));
 }
+
+#[test]
+fn short_environment_credentials_remain_exact_secrets_and_keep_review_manual() {
+    use crate::permissions::{review_request, ExactSecrets, PermissionBackend};
+    use crate::tools::kernel::PermissionResource;
+    for (name, value) in [
+        ("PGPASSWORD", "hunter2"),
+        ("DB_PASS", "x"),
+        ("API_TOKEN", "ab"),
+        ("PASSWORD", "false"),
+        ("PASSWORD", "1"),
+    ] {
+        let values = environment_credential_values([(name.to_owned(), value.to_owned())])
+            .collect::<Vec<_>>();
+        assert_eq!(values, [value], "{name}");
+        let secrets = ExactSecrets::from_values(values);
+        let intent = [format!("Find where {value} occurs in this project")];
+        assert!(
+            review_request(
+                "exec_command",
+                &[PermissionResource::new("execute", "command:[ls]")],
+                PermissionBackend::Local,
+                &intent,
+                false,
+                &secrets
+            )
+            .is_err(),
+            "{name}"
+        );
+    }
+    let flags = [
+        ("TOKENIZERS_PARALLELISM", "false"),
+        ("KEYTIMEOUT", "1"),
+        ("KDE_FULL_SESSION", "true"),
+        ("DESKTOP_SESSION", "ubuntu"),
+        ("DESKTOP_SESSION", "plasma"),
+        ("SESSION_MANAGER", "local/desktop:@/tmp/.ICE-unix/123"),
+        ("PWD", "/workspace"),
+        ("PGPASSWORD", ""),
+    ];
+    let values = environment_credential_values(
+        flags.map(|(name, value)| (name.to_owned(), value.to_owned())),
+    )
+    .collect::<Vec<_>>();
+    assert!(values.is_empty());
+    assert!(review_request(
+        "exec_command",
+        &[PermissionResource::new("execute", "command:[ls]")],
+        PermissionBackend::Local,
+        &["Inspect 1 file on ubuntu or plasma if the check is false or true".to_owned()],
+        false,
+        &ExactSecrets::from_values(values)
+    )
+    .is_ok());
+}

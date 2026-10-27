@@ -18,6 +18,7 @@ pub(crate) mod orchestrator_compaction;
 mod permission_grants;
 mod projects;
 mod render;
+mod review_intent;
 mod run_recovery;
 mod schema;
 mod session_forks;
@@ -61,6 +62,8 @@ pub use model_configurations::*;
 pub use permission_grants::*;
 pub use projects::*;
 pub use render::*;
+pub use review_intent::InputOrigin;
+pub(crate) use review_intent::{decode_review_intent, record_review_intent, StoredReviewIntent};
 pub(crate) use run_recovery::{
     clear_active_run, load_run_recovery_with_connection, mark_active_run_failed,
     replace_with_active_run, stage_active_run_failure,

@@ -636,6 +636,7 @@ pub(crate) fn load_effective_permission_approval_state(
     let (stored, generation, revision) = conn
         .query_row(
             "SELECT policy.permission_approval_mode,
+                    policy.permission_reviewer,
                     policy.permission_auto_approve_generation,
                     policy.permission_approval_revision
              FROM sessions AS requester
@@ -647,9 +648,9 @@ pub(crate) fn load_effective_permission_approval_state(
             params![requesting_session_id],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
+                    (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
                 ))
             },
         )
@@ -658,6 +659,48 @@ pub(crate) fn load_effective_permission_approval_state(
     decode_permission_approval_state(stored, generation, revision)
 }
 command LoadEffectivePermissionApprovalStateCommand {
+    requesting_session_id: String = requesting_session_id.to_owned(),
+}
+call |command| (&command.requesting_session_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port internal;
+}
+
+coordinated_command! {
+/// Loads the messages a person typed to the session tree that owns the
+/// answer policy for a requester. Traditional children
+/// resolve to their durable root. Only input a person typed on a
+/// human-facing route is recorded, so model, child, orchestrator, MCP and
+/// NAC-generated text never stands in for user intent. `Err` is only a
+/// store failure.
+pub(crate) fn load_permission_review_intent(
+    path: &Path,
+    requesting_session_id: &str,
+) -> Result<super::ReviewIntent> {
+    let conn = crate::store::open_initialized_read_connection(path)?;
+    let intent = conn
+        .query_row(
+            "SELECT policy.permission_review_intent
+             FROM sessions AS requester
+             LEFT JOIN traditional_children AS child
+                ON child.child_session_id = requester.session_id
+             JOIN sessions AS policy
+                ON policy.session_id = COALESCE(child.root_session_id, requester.session_id)
+             WHERE requester.session_id = ?1",
+            params![requesting_session_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .ok_or_else(|| anyhow!("session '{requesting_session_id}' was not found"))?;
+    Ok(match intent.as_deref().map(crate::store::decode_review_intent) {
+        None => super::ReviewIntent::NeverRecorded,
+        Some(crate::store::StoredReviewIntent::Messages(messages)) => {
+            super::ReviewIntent::Accepted(messages)
+        }
+        Some(crate::store::StoredReviewIntent::Overflowed | crate::store::StoredReviewIntent::Invalidated) => super::ReviewIntent::Unavailable,
+    })
+}
+command LoadPermissionReviewIntentCommand {
     requesting_session_id: String = requesting_session_id.to_owned(),
 }
 call |command| (&command.requesting_session_id)
@@ -675,15 +718,15 @@ pub(crate) fn load_permission_approval_state(
     let conn = crate::store::open_initialized_read_connection(path)?;
     let (stored, generation, revision) = conn
         .query_row(
-            "SELECT permission_approval_mode, permission_auto_approve_generation,
-                    permission_approval_revision
+            "SELECT permission_approval_mode, permission_reviewer,
+                    permission_auto_approve_generation, permission_approval_revision
              FROM sessions WHERE session_id = ?1",
             params![session_id],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
+                    (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
                 ))
             },
         )
@@ -699,16 +742,20 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port internal;
 }
 
+/// Review is stored as the manual answer policy plus an automatic reviewer so
+/// the existing mode column and its CHECK stay valid in migrated stores. Any
+/// other combination is rejected rather than guessed.
 fn decode_permission_approval_state(
-    stored: String,
+    (stored, reviewer): (String, String),
     generation: i64,
     revision: i64,
 ) -> Result<(crate::permissions::PermissionApprovalMode, i64, i64)> {
-    let mode = match stored.as_str() {
-        "manual" => crate::permissions::PermissionApprovalMode::Manual,
-        "auto_approve" => crate::permissions::PermissionApprovalMode::AutoApprove,
+    let mode = match (stored.as_str(), reviewer.as_str()) {
+        ("manual", "user") => crate::permissions::PermissionApprovalMode::Manual,
+        ("auto_approve", "user") => crate::permissions::PermissionApprovalMode::AutoApprove,
+        ("manual", "auto_review") => crate::permissions::PermissionApprovalMode::Review,
         _ => Err(anyhow!(
-            "unsupported stored permission approval mode '{stored}'"
+            "unsupported stored permission approval mode '{stored}' with reviewer '{reviewer}'"
         ))?,
     };
     if generation < 0 {
@@ -793,17 +840,28 @@ pub(crate) fn compare_and_update_permission_approval_state(
 ) -> Result<bool> {
     let mut conn = crate::store::open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let stored = match mode {
-        crate::permissions::PermissionApprovalMode::Manual => "manual",
-        crate::permissions::PermissionApprovalMode::AutoApprove => "auto_approve",
+    let (stored, reviewer) = match mode {
+        crate::permissions::PermissionApprovalMode::Manual => ("manual", "user"),
+        crate::permissions::PermissionApprovalMode::AutoApprove => ("auto_approve", "user"),
+        crate::permissions::PermissionApprovalMode::Review => ("manual", "auto_review"),
     };
+    // Only enabling approve-all claims waiters; selecting review leaves
+    // requests that are already waiting with the human.
     let increment = i64::from(mode == crate::permissions::PermissionApprovalMode::AutoApprove);
+    // Entering or leaving Approve for me starts a fresh scope. Manual-period
+    // history must not overflow or supply authority when review is enabled.
+    // Reselecting the same reviewer preserves its existing restrictions.
     let updated = tx.execute(
         "UPDATE sessions
          SET permission_approval_mode = ?1,
-             permission_auto_approve_generation = permission_auto_approve_generation + ?2
-         WHERE session_id = ?3 AND permission_approval_revision = ?4",
-        params![stored, increment, session_id, revision],
+             permission_reviewer = ?2,
+             permission_auto_approve_generation = permission_auto_approve_generation + ?3,
+             permission_review_intent = CASE
+                 WHEN permission_reviewer <> ?2 THEN NULL
+                 ELSE permission_review_intent
+             END
+         WHERE session_id = ?4 AND permission_approval_revision = ?5",
+        params![stored, reviewer, increment, session_id, revision],
     )?;
     if updated == 0 {
         let exists = tx.query_row(

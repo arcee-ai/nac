@@ -41,6 +41,7 @@ async fn owned_direct_inbox_goal_and_approval_transitions_keep_current_thread_co
             crate::store::InboxDelivery::Steer,
             "retain this steering input",
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1160,7 +1161,7 @@ async fn direct_inbox_pending_items_are_versioned_editable_and_cancellable() {
     let service = parts.service;
     let active = service.try_begin_run(None, "active prompt").unwrap();
     let queued = service
-        .enqueue_direct_input(crate::store::InboxDelivery::Queue, "later", None)
+        .enqueue_direct_input(crate::store::InboxDelivery::Queue, "later", None, None)
         .await
         .unwrap();
     assert_eq!(queued.target_run_id, None);
@@ -1237,7 +1238,12 @@ async fn direct_inbox_steer_is_consumed_at_the_next_model_boundary() {
         test_direct_active_service("direct_steer_boundary", session_id, client);
     let service = parts.service;
     service
-        .enqueue_direct_input(crate::store::InboxDelivery::Queue, "initial prompt", None)
+        .enqueue_direct_input(
+            crate::store::InboxDelivery::Queue,
+            "initial prompt",
+            None,
+            None,
+        )
         .await
         .unwrap();
     tokio::task::spawn_blocking(move || {
@@ -1251,6 +1257,7 @@ async fn direct_inbox_steer_is_consumed_at_the_next_model_boundary() {
         .enqueue_direct_input(
             crate::store::InboxDelivery::Steer,
             "change course at the boundary",
+            None,
             None,
         )
         .await
@@ -1290,7 +1297,12 @@ async fn orchestrator_sessions_reject_the_direct_inbox() {
         test_active_service("orchestrator_inbox_rejected", "orchestrator-inbox");
     let error = parts
         .service
-        .enqueue_direct_input(crate::store::InboxDelivery::Queue, "not allowed", None)
+        .enqueue_direct_input(
+            crate::store::InboxDelivery::Queue,
+            "not allowed",
+            None,
+            None,
+        )
         .await
         .unwrap_err();
     assert!(error.to_string().contains("only for direct behaviors"));
@@ -1303,7 +1315,11 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
     let (parts, store_path) = test_active_service("steering", "session-steering");
     let service = parts.service;
     let no_run = service
-        .queue_thread_steering("impl/ui", "make the layout denser")
+        .queue_thread_steering(
+            "impl/ui",
+            "make the layout denser",
+            crate::store::InputOrigin::Automation,
+        )
         .unwrap_err();
     assert!(no_run.to_string().contains("no active run"));
 
@@ -1324,17 +1340,26 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
         transcript_baseline: None,
         command_cancellation: crate::tools::ThreadCancellation::default(),
         inbox_item_id: None,
+        review_intent: None,
         _operation_lease: None,
         _workspace_activity_lease: None,
     }));
     let inactive = service
-        .queue_thread_steering("impl/ui", "make the layout denser")
+        .queue_thread_steering(
+            "impl/ui",
+            "make the layout denser",
+            crate::store::InputOrigin::Automation,
+        )
         .unwrap_err();
     assert!(inactive.to_string().contains("not active"));
 
     service.active_threads.mark("impl/ui", "worker-dispatch");
     let queued = service
-        .queue_thread_steering("impl/ui", "make the layout denser")
+        .queue_thread_steering(
+            "impl/ui",
+            "make the layout denser",
+            crate::store::InputOrigin::Automation,
+        )
         .unwrap();
     assert_eq!(queued.status, "queued");
     assert_eq!(queued.dispatch_id, "worker-dispatch");
@@ -1352,13 +1377,13 @@ async fn orchestrator_steering_requires_an_active_run_and_expires_at_run_end() {
         test_active_service("orchestrator_steering", "session-orchestrator-steering");
     let service = parts.service;
     let no_run = service
-        .queue_orchestrator_steering("change direction")
+        .queue_orchestrator_steering("change direction", crate::store::InputOrigin::Automation)
         .unwrap_err();
     assert!(no_run.to_string().contains("no active run"));
 
     let active = service.try_begin_run(None, "initial direction").unwrap();
     let queued = service
-        .queue_orchestrator_steering("change direction")
+        .queue_orchestrator_steering("change direction", crate::store::InputOrigin::Automation)
         .unwrap();
     assert_eq!(
         queued.thread_name,

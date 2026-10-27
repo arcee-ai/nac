@@ -129,10 +129,11 @@ impl nac_core::traditional_children::TraditionalChildController
             // host admission lease throughout a foreground delivery wait.
             drop(_host_admission);
             service
-                .submit_or_steer_traditional_child(
+                .submit_or_steer_traditional_child_with_origin(
                     &request.parent_session_id,
                     request.prompt,
                     request.execution_mode,
+                    request.origin,
                 )
                 .await
         })

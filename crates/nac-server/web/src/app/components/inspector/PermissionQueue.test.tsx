@@ -28,6 +28,8 @@ const failed = new Set<string>();
 const replies = vi.spyOn(api, "replyPermission");
 const deletes = vi.spyOn(api, "deletePermissionGrant");
 const modes = vi.spyOn(api, "setPermissionApprovalMode");
+const authorizeParent = vi.spyOn(api, "authorizePermissionReviewRetry");
+const authorizeChild = vi.spyOn(api, "authorizeChildPermissionReviewRetry");
 const childrenApi = vi.spyOn(api, "listTraditionalChildren");
 vi.spyOn(api, "getPermissions").mockImplementation(async (id) => {
   if (failed.has(id)) throw new Error("offline");
@@ -68,6 +70,29 @@ function state(id: string, pending = true): PermissionStateResponse {
     ],
   };
 }
+function reviewed(id: string): PermissionStateResponse {
+  return {
+    ...state(id, false),
+    grants: [],
+    approval_mode: "review",
+    reviews: [
+      {
+        id: "same-review-id",
+        session_id: id,
+        tool: `exec-${id}`,
+        backend: "local",
+        resources: [{ action: "execute", resource: `command:[${id}]`, display: `run ${id}` }],
+        user_authorized_retry: false,
+        outcome: "rejected",
+        code: "review_rejected",
+        reviewer: "test",
+        created_at_epoch_ms: 1,
+      },
+    ],
+    authorizable_review_ids: ["same-review-id"],
+  };
+}
+
 function child(id: string, status = "running"): TraditionalChildRecord {
   return {
     child_session_id: id,
@@ -110,6 +135,14 @@ beforeEach(() => {
     states.get(id)!.grants = [];
   });
   modes.mockReset().mockResolvedValue(undefined);
+  authorizeParent.mockReset().mockImplementation(async (id) => {
+    states.get(id)!.authorizable_review_ids = [];
+    return states.get(id)!.reviews![0];
+  });
+  authorizeChild.mockReset().mockImplementation(async (_parent, id) => {
+    states.get(id)!.authorizable_review_ids = [];
+    return states.get(id)!.reviews![0];
+  });
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
     addEventListener() {},
@@ -127,7 +160,9 @@ describe("parent permission queue", () => {
     mount([], false);
     fireEvent.click(screen.getByRole("button", { name: "Permissions" }));
     expect(screen.getAllByRole("status")).toHaveLength(2);
-    expect(screen.getByRole("switch").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("radio", { name: "Approve for me" }).hasAttribute("disabled")).toBe(
+      true,
+    );
     await waitFor(() => expect(screen.queryAllByRole("status")).toHaveLength(0));
     expect(screen.getByText("No pending permission requests.")).toBeTruthy();
     expect(screen.getByText("No remembered permissions.")).toBeTruthy();
@@ -150,7 +185,7 @@ describe("parent permission queue", () => {
     mount(Array.from({ length: count }, (_, i) => child(`child-${i}`)));
     expect(screen.getAllByRole("button", { name: /^Permissions/ })).toHaveLength(1);
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    expect(screen.getAllByRole("switch", { name: "Approve all automatically" })).toHaveLength(1);
+    expect(screen.getAllByRole("radiogroup", { name: "Approval mode" })).toHaveLength(1);
     expect(screen.getByText(`(${count + 1} pending)`)).toBeTruthy();
     await waitFor(() => expect(streams.calls).toHaveBeenCalledTimes(count));
   });
@@ -163,6 +198,9 @@ describe("parent permission queue", () => {
       );
       expect(screen.getByRole("region", { name: "Requested access" }).textContent).toContain(
         "Requested by child agent “second” (second)",
+      );
+      expect(screen.getByRole("dialog").textContent).toContain(
+        "read-second requested by child agent “second” is paused before execution.",
       );
       expect(screen.getByRole("region", { name: "Requested access" }).textContent).toContain(
         "/outside/second",
@@ -228,8 +266,8 @@ describe("parent permission queue", () => {
     fireEvent.click(screen.getByRole("button", { name: "Auto-approve on — open permissions" }));
     expect(screen.getByText("No pending permission requests.")).toBeTruthy();
     expect(screen.getAllByText("Auto-approve inherited from parent.")).toHaveLength(2);
-    expect(screen.getAllByRole("switch")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("switch", { name: "Approve all automatically" }));
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("radio", { name: "Manual" }));
     await waitFor(() => expect(modes).toHaveBeenCalledExactlyOnceWith("parent", "manual"));
   });
   it("fails closed for a selected broker refresh error and retries without losing other scopes", async () => {
@@ -266,8 +304,77 @@ describe("parent permission queue", () => {
     expect(screen.getByRole("region", { name: "Requested access" }).textContent).toContain(
       "(first)",
     );
-    fireEvent.click(screen.getByRole("switch", { name: "Approve all automatically" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Approve all" }));
     await waitFor(() => expect(modes).toHaveBeenCalledExactlyOnceWith("parent", "auto_approve"));
     expect(states.get("first")!.grants[0].session_id).toBe("first");
+  });
+  it.each(["running", "completed", "cancelled", "failed"])(
+    "retains %s child reviews and routes retry through the actual parent despite matching review IDs",
+    async (status) => {
+      for (const id of ["parent", "first", "second"]) states.set(id, reviewed(id));
+      mount([child("first", status), child("second")]);
+      fireEvent.click(screen.getByRole("button", { name: /^Approve for me enabled/ }));
+      const scope = screen.getByRole("region", { name: "Review for child agent “first”" });
+      expect(within(scope).getByText("run first")).toBeTruthy();
+      fireEvent.click(within(scope).getByRole("button", { name: "Authorize retry" }));
+      await waitFor(() =>
+        expect(authorizeChild).toHaveBeenCalledExactlyOnceWith("parent", "first", "same-review-id"),
+      );
+      await waitFor(() =>
+        expect(within(scope).queryByRole("button", { name: "Authorize retry" })).toBeNull(),
+      );
+      expect(authorizeParent).not.toHaveBeenCalled();
+      expect(states.get("parent")!.authorizable_review_ids).toHaveLength(1);
+      expect(states.get("second")!.authorizable_review_ids).toHaveLength(1);
+      expect(screen.getAllByRole("radiogroup")).toHaveLength(1);
+      expect(modes).not.toHaveBeenCalled();
+      if (status !== "running") expect(streams.calls).not.toHaveBeenCalledWith("first");
+    },
+  );
+  it("keeps parent retry primary-only and each broker's authorizable IDs separate", async () => {
+    for (const id of ["parent", "first", "second"]) states.set(id, reviewed(id));
+    states.get("first")!.authorizable_review_ids = [];
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: /^Approve for me enabled/ }));
+    expect(
+      within(screen.getByRole("region", { name: "Review for child agent “first”" })).queryByRole(
+        "button",
+        { name: "Authorize retry" },
+      ),
+    ).toBeNull();
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Review for this session" })).getByRole("button", {
+        name: "Authorize retry",
+      }),
+    );
+    await waitFor(() =>
+      expect(authorizeParent).toHaveBeenCalledExactlyOnceWith("parent", "same-review-id"),
+    );
+    expect(authorizeChild).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("radio", { name: "Manual" }));
+    await waitFor(() => expect(modes).toHaveBeenCalledExactlyOnceWith("parent", "manual"));
+  });
+  it("disables a child's cached retry after refresh failure and retains its scope through recovery", async () => {
+    for (const id of ["parent", "first", "second"]) states.set(id, reviewed(id));
+    failed.add("second");
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: /^Approve for me enabled/ }));
+    const scope = screen.getByRole("region", { name: "Review for child agent “second”" });
+    await waitFor(() =>
+      expect(
+        within(scope).getByRole("button", { name: "Authorize retry" }).hasAttribute("disabled"),
+      ).toBe(true),
+    );
+    failed.delete("second");
+    fireEvent.click(screen.getByRole("button", { name: "Retry child agent “second”" }));
+    await waitFor(() =>
+      expect(
+        within(scope).getByRole("button", { name: "Authorize retry" }).hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    fireEvent.click(within(scope).getByRole("button", { name: "Authorize retry" }));
+    await waitFor(() =>
+      expect(authorizeChild).toHaveBeenCalledExactlyOnceWith("parent", "second", "same-review-id"),
+    );
   });
 });

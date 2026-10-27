@@ -225,7 +225,9 @@ impl SessionService {
     /// that message and everything after it leave the transcript, and the
     /// checkout returns to the revision that was current when it was sent.
     /// Messages that still live in the snapshot blob (forked or legacy
-    /// prefix) are truncated there; later log rows are deleted.
+    /// prefix) are truncated there; later log rows are deleted. The same
+    /// store transaction invalidates retained tree-wide review intent: without
+    /// per-message provenance it cannot safely reconstruct surviving scope.
     ///
     /// Order matters. The checkout is restored first, because a git failure
     /// there is recoverable — nothing has been forgotten yet — whereas a

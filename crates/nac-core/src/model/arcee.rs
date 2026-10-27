@@ -1091,7 +1091,7 @@ pub(super) fn read_stored_auth_for_base_url_at(
     Ok(auth)
 }
 
-fn read_stored_auth_optional() -> Result<Option<StoredArceeAuth>> {
+pub(super) fn read_stored_auth_optional() -> Result<Option<StoredArceeAuth>> {
     let path = arcee_auth_file_path()?;
     read_stored_auth_optional_at(&path)
 }

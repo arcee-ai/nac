@@ -205,6 +205,15 @@ struct TranscriptLogSink {
     store_path: PathBuf,
 }
 
+/// The durable run a prompt starts, and where the prompt came from.
+struct SessionRunPrompt<'a> {
+    run_id: &'a SessionRunId,
+    prompt_commit: watch::Sender<RunPromptCommitStatus>,
+    inbox_item_id: Option<i64>,
+    /// What a person typed, for a prompt from a human-facing route.
+    review_intent: Option<String>,
+}
+
 impl Agent {
     pub fn with_config(client: ModelClient, config: AgentConfig) -> Result<Self> {
         let client = client.with_prompt_cache_key(config.session_id.clone());
@@ -422,6 +431,7 @@ impl Agent {
                 light_client: config.light_client,
                 allowed_tools: Some(allowed_tools),
                 permission_broker: None,
+                permission_reviewer: None,
                 permission_rules: Arc::new(config.permission_rules.clone()),
                 goal_runtime,
                 command_environment: None,
@@ -457,6 +467,9 @@ impl Agent {
         &mut self,
         provider: Option<Arc<dyn nac_contracts::CommandEnvironmentProvider>>,
     ) {
+        if let Some(broker) = &self.tool_runtime.permission_broker {
+            broker.set_command_environment(provider.clone());
+        }
         self.tool_runtime.command_environment = provider;
     }
 
@@ -620,26 +633,31 @@ impl Agent {
         run_id: &SessionRunId,
         prompt_commit: watch::Sender<RunPromptCommitStatus>,
         inbox_item_id: Option<i64>,
+        review_intent: Option<String>,
     ) -> Result<String> {
         if let Some(goals) = &self.tool_runtime.goal_runtime {
             goals.begin_run(run_id.as_str());
         }
-        self.send_inner(prompt, Some((run_id, prompt_commit, inbox_item_id)))
-            .await
+        self.send_inner(
+            prompt,
+            Some(SessionRunPrompt {
+                run_id,
+                prompt_commit,
+                inbox_item_id,
+                review_intent,
+            }),
+        )
+        .await
     }
 
     async fn send_inner(
         &mut self,
         prompt: &str,
-        session_run: Option<(
-            &SessionRunId,
-            watch::Sender<RunPromptCommitStatus>,
-            Option<i64>,
-        )>,
+        session_run: Option<SessionRunPrompt<'_>>,
     ) -> Result<String> {
         let correlation =
             crate::telemetry::Correlation::session(self.tool_runtime.session_id.as_deref())
-                .with_run(session_run.as_ref().map(|(run_id, _, _)| run_id.as_str()));
+                .with_run(session_run.as_ref().map(|run| run.run_id.as_str()));
         let _runtime_activity = match self.mode {
             AgentMode::Orchestrator => Some(crate::telemetry::RuntimeActivityGuard::start(
                 crate::telemetry::RuntimeActivity::Orchestrator,
@@ -666,14 +684,19 @@ impl Agent {
             content: prompt.to_string(),
         };
         let prompt_result = match session_run.as_ref() {
-            Some((run_id, _, inbox_item_id)) => {
-                self.push_and_log_run_prompt(prompt_message, run_id, *inbox_item_id)
-                    .await
+            Some(run) => {
+                self.push_and_log_run_prompt(
+                    prompt_message,
+                    run.run_id,
+                    run.inbox_item_id,
+                    run.review_intent.clone(),
+                )
+                .await
             }
             None => self.push_and_log(prompt_message).await,
         };
-        if let Some((_, prompt_commit, _)) = session_run {
-            prompt_commit.send_replace(if prompt_result.is_ok() {
+        if let Some(run) = session_run {
+            run.prompt_commit.send_replace(if prompt_result.is_ok() {
                 RunPromptCommitStatus::Committed
             } else {
                 RunPromptCommitStatus::Failed
@@ -705,6 +728,9 @@ impl Agent {
         let mut last_failure_detail = String::new();
         let mut repeated_failures = 0usize;
         let mut accumulated_usage = TokenUsage::default();
+        if let Some(broker) = &self.tool_runtime.permission_broker {
+            broker.begin_review_run();
+        }
         loop {
             self.append_pending_guidance_checked().await?;
             let request_tool_defs = self.refresh_model_request_capabilities()?;
@@ -1035,6 +1061,23 @@ impl Agent {
                 self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
+            if let Some(reason) = self
+                .tool_runtime
+                .permission_broker
+                .as_ref()
+                .and_then(|broker| broker.take_review_stop())
+            {
+                // Automatic review limits span variants of a blocked request,
+                // which the identical-failure guard below cannot see.
+                let error = anyhow!("{reason}");
+                self.emit(AgentEvent::ModelError {
+                    thread_name: self.thread_name.clone(),
+                    message: error.to_string(),
+                })
+                .await;
+                self.record_terminal_cleanup_error().await;
+                return Err(error);
+            }
             if repeated_identical_failure {
                 let error = anyhow!(
                     "Stopped after {REPEATED_TOOL_FAILURE_LIMIT} identical tool failures: {failure_detail}"
@@ -1133,6 +1176,18 @@ impl Agent {
             session_config_version,
             self.tool_runtime.permission_rules.as_ref().clone(),
         ));
+        broker.set_reviewer(
+            self.tool_runtime
+                .permission_reviewer
+                .clone()
+                .unwrap_or_else(crate::model::default_permission_reviewer),
+        );
+        broker.set_command_environment(self.tool_runtime.command_environment.clone());
+        broker.set_review_backend(
+            crate::permissions::ReviewBackendSource::from_execution_backend(
+                self.tool_runtime.backend.as_ref(),
+            ),
+        );
         self.tool_runtime.permission_broker = Some(Arc::clone(&broker));
         Some(broker)
     }
@@ -1179,7 +1234,8 @@ impl Agent {
         message: Message,
         run_id: &SessionRunId,
     ) -> Result<()> {
-        self.push_and_log_run_prompt(message, run_id, None).await
+        self.push_and_log_run_prompt(message, run_id, None, None)
+            .await
     }
 
     /// Restore a stored transcript while keeping the current system prompt.

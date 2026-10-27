@@ -224,6 +224,15 @@ pub(super) fn stored_credential_present() -> bool {
     matches!(read_auth_file_optional_for_status(), Ok(Some(_)))
 }
 
+/// Exact stored tokens for outbound-text redaction, including expired values.
+/// Reuse secure status loading so foreign-provider files remain absent while
+/// malformed or unsafe Codex files fail closed. This never refreshes credentials.
+pub(super) fn stored_credential_values() -> Result<Vec<String>> {
+    Ok(read_auth_file_optional_for_status()?
+        .map(|auth| vec![auth.access, auth.refresh])
+        .unwrap_or_default())
+}
+
 pub(super) fn preflight_stored_auth() -> Result<()> {
     let _lock = acquire_auth_lock()?;
     read_auth_file().map(|_| ())

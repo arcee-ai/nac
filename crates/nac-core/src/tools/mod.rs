@@ -516,6 +516,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         light_client: None,
         allowed_tools: None,
         permission_broker: None,
+        permission_reviewer: None,
         permission_rules: Arc::new(Vec::new()),
         goal_runtime: None,
         command_environment: None,

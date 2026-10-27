@@ -259,6 +259,101 @@ async fn foreground_child_input_recovers_peer_exit_before_successor_admission() 
 }
 
 #[tokio::test]
+async fn person_child_input_records_intent_only_on_delivery_with_live_or_lost_foreground_waiter() {
+    for abandon_waiter in [false, true] {
+        let server = successor_server();
+        let (service, path, original) = abandoned_child_with_client(
+            if abandon_waiter {
+                "person_child_lost_waiter"
+            } else {
+                "person_child_live_waiter"
+            },
+            Some("relationship-run"),
+            ModelClient::new_for_test_server(server.base_url.clone()),
+        );
+        sessions::update_permission_approval_mode(
+            &path,
+            "parent",
+            crate::permissions::PermissionApprovalMode::Review,
+        )
+        .unwrap();
+        let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+        let peer = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+        let submitting = service.clone();
+        let waiting = tokio::spawn(async move {
+            submitting
+                .submit_or_steer_traditional_child_with_origin(
+                    "parent",
+                    QUEUED_PROMPT.into(),
+                    TraditionalChildExecutionMode::Foreground,
+                    crate::store::InputOrigin::Person,
+                )
+                .await
+        });
+        let item = queued_input(&owner).await;
+        assert_eq!(
+            item.child_execution_mode,
+            Some(TraditionalChildExecutionMode::Foreground)
+        );
+        assert!(item.child_wait_id.is_some());
+        assert_eq!(
+            sessions::reviewable_intent(path.clone(), "parent".into()).await,
+            sessions::ReviewIntent::NeverRecorded
+        );
+        let successor = if abandon_waiter {
+            waiting.abort();
+            assert!(waiting.await.unwrap_err().is_cancelled());
+            drop(peer);
+            service
+                .start_next_direct_inbox_item()
+                .await
+                .unwrap()
+                .unwrap();
+            service
+                .wait_for_child_input_delivery(item.id)
+                .await
+                .unwrap()
+        } else {
+            drop(peer);
+            tokio::time::timeout(Duration::from_secs(5), waiting)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+        };
+        assert_eq!(
+            successor.execution_mode,
+            Some(if abandon_waiter {
+                TraditionalChildExecutionMode::Background
+            } else {
+                TraditionalChildExecutionMode::Foreground
+            })
+        );
+        assert_successor_delivery(
+            &service,
+            &owner,
+            &original,
+            &item,
+            successor,
+            crate::store::TraditionalChildStatus::Interrupted,
+            server,
+        )
+        .await;
+        let expected = sessions::ReviewIntent::Accepted(vec![QUEUED_PROMPT.into()]);
+        assert_eq!(
+            sessions::reviewable_intent(path.clone(), "parent".into()).await,
+            expected
+        );
+        assert_eq!(
+            sessions::reviewable_intent(path.clone(), "child".into()).await,
+            expected
+        );
+        owner.shutdown().await.unwrap();
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[tokio::test]
 async fn queued_child_input_survives_waiter_exit_and_recovery_crash_windows() {
     // No prompt committed; prompt recovery committed before relationship
     // settlement; cancellation committed before relationship settlement.

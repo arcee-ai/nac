@@ -25,13 +25,31 @@ impl SessionService {
         prompt: String,
         execution_mode: TraditionalChildExecutionMode,
     ) -> Result<TraditionalChildRecord> {
+        self.submit_or_steer_traditional_child_with_origin(
+            parent_session_id,
+            prompt,
+            execution_mode,
+            crate::store::InputOrigin::Automation,
+        )
+        .await
+    }
+
+    /// Trusted human-facing callers retain the person's raw text through
+    /// child admission or the durable inbox's eventual delivery transaction.
+    pub async fn submit_or_steer_traditional_child_with_origin(
+        &self,
+        parent_session_id: &str,
+        prompt: String,
+        execution_mode: TraditionalChildExecutionMode,
+        origin: crate::store::InputOrigin,
+    ) -> Result<TraditionalChildRecord> {
         loop {
             let service = self.clone();
             let parent = parent_session_id.to_owned();
             let input = prompt.clone();
             let transition =
                 crate::store::call_legacy_store(&self.metadata.store_path, move || {
-                    service.admit_child_input(&parent, input, execution_mode)
+                    service.admit_child_input(&parent, input, execution_mode, origin)
                 })
                 .await??;
             match transition {
@@ -145,6 +163,7 @@ impl SessionService {
         parent_session_id: &str,
         prompt: String,
         execution_mode: TraditionalChildExecutionMode,
+        origin: crate::store::InputOrigin,
     ) -> Result<ChildInputTransition> {
         if prompt.trim().is_empty() {
             return Err(anyhow::anyhow!("traditional child prompt is empty"));
@@ -170,6 +189,28 @@ impl SessionService {
             session_id,
         )?
         .ok_or_else(|| anyhow::anyhow!("traditional child was not found"))?;
+        let queue = |target_run_id: Option<&str>, wait_id: Option<&str>| {
+            if origin == crate::store::InputOrigin::Person {
+                crate::store::create_person_traditional_child_inbox_item(
+                    &self.metadata.store_path,
+                    session_id,
+                    &prompt,
+                    target_run_id,
+                    execution_mode,
+                    wait_id,
+                    &prompt,
+                )
+            } else {
+                crate::store::create_traditional_child_inbox_item(
+                    &self.metadata.store_path,
+                    session_id,
+                    &prompt,
+                    target_run_id,
+                    execution_mode,
+                    wait_id,
+                )
+            }
+        };
         match guard.as_ref() {
             Some(ActiveSessionOperation::Run(run)) if run.finishing => {
                 #[cfg(any(test, feature = "test-support"))]
@@ -180,12 +221,8 @@ impl SessionService {
                 let wait_lease = (execution_mode == TraditionalChildExecutionMode::Foreground)
                     .then(|| sessions::ChildInputWaitLease::new(&self.metadata.store_path))
                     .transpose()?;
-                let input = crate::store::create_traditional_child_inbox_item(
-                    &self.metadata.store_path,
-                    session_id,
-                    &prompt,
+                let input = queue(
                     Some(run.snapshot.run_id.as_str()),
-                    execution_mode,
                     wait_lease.as_ref().map(sessions::ChildInputWaitLease::id),
                 )?;
                 return Ok(ChildInputTransition::Queued(child, input.id, wait_lease));
@@ -202,12 +239,8 @@ impl SessionService {
                             == TraditionalChildExecutionMode::Foreground)
                             .then(|| sessions::ChildInputWaitLease::new(&self.metadata.store_path))
                             .transpose()?;
-                        let input = crate::store::create_traditional_child_inbox_item(
-                            &self.metadata.store_path,
-                            session_id,
-                            &prompt,
+                        let input = queue(
                             child.run_id.as_deref(),
-                            execution_mode,
                             wait_lease.as_ref().map(sessions::ChildInputWaitLease::id),
                         )?;
                         return Ok(ChildInputTransition::Queued(child, input.id, wait_lease));
@@ -221,6 +254,7 @@ impl SessionService {
             _ => {}
         }
         let generation = child.generation + 1;
+        let review_intent = (origin == crate::store::InputOrigin::Person).then(|| prompt.clone());
         let submitted = self
             .try_submit_prompt_with_guard(
                 None,
@@ -228,6 +262,7 @@ impl SessionService {
                 None,
                 RunAdmissionKind {
                     child_execution_mode: Some(execution_mode),
+                    review_intent,
                     ..Default::default()
                 },
                 Some(guard),

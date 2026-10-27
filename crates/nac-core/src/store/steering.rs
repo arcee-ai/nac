@@ -70,9 +70,47 @@ pub fn queue_thread_steering(
     instruction: &str,
 ) -> Result<ThreadSteeringRecord> {
     let conn = open_runtime_connection(path)?;
-    queue_thread_steering_with_connection(&conn, session_id, thread_name, dispatch_id, instruction)
+    queue_thread_steering_with_connection(
+        &conn,
+        session_id,
+        thread_name,
+        dispatch_id,
+        instruction,
+        InputOrigin::Automation,
+    )
 }
 command QueueThreadSteeringCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    dispatch_id: String = dispatch_id.to_owned(),
+    instruction: String = instruction.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name, &command.dispatch_id, &command.instruction)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+coordinated_command! {
+/// Queues steering a person typed on a human-facing route. It becomes
+/// review intent when it reaches the model, never before.
+pub fn queue_person_thread_steering(
+    path: &Path,
+    session_id: &str,
+    thread_name: &str,
+    dispatch_id: &str,
+    instruction: &str,
+) -> Result<ThreadSteeringRecord> {
+    let conn = open_runtime_connection(path)?;
+    queue_thread_steering_with_connection(
+        &conn,
+        session_id,
+        thread_name,
+        dispatch_id,
+        instruction,
+        InputOrigin::Person,
+    )
+}
+command QueuePersonThreadSteeringCommand {
     session_id: String = session_id.to_owned(),
     thread_name: String = thread_name.to_owned(),
     dispatch_id: String = dispatch_id.to_owned(),
@@ -89,6 +127,7 @@ pub(super) fn queue_thread_steering_with_connection(
     thread_name: &str,
     dispatch_id: &str,
     instruction: &str,
+    origin: InputOrigin,
 ) -> Result<ThreadSteeringRecord> {
     let instruction = instruction.trim();
     if session_id.trim().is_empty() {
@@ -107,14 +146,15 @@ pub(super) fn queue_thread_steering_with_connection(
     let created_at = now_utc();
     connection.execute(
         "INSERT INTO thread_steering
-         (session_id, thread_name, dispatch_id, instruction, status, created_at)
-         VALUES (?1, ?2, ?3, ?4, 'queued', ?5)",
+         (session_id, thread_name, dispatch_id, instruction, status, created_at, review_intent)
+         VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?6)",
         params![
             session_id,
             thread_name,
             dispatch_id,
             instruction,
-            created_at
+            created_at,
+            (origin == InputOrigin::Person).then_some(instruction)
         ],
     )?;
     Ok(ThreadSteeringRecord {
@@ -236,6 +276,15 @@ pub(super) fn acknowledge_thread_steering_batch_with_connection(
             return Err(anyhow!(
                 "steering {id} is not claimed by dispatch '{dispatch_id}'"
             ));
+        }
+        // A person's steering becomes review intent as it reaches the model.
+        let review_intent: Option<String> = connection.query_row(
+            "SELECT review_intent FROM thread_steering WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if let Some(text) = review_intent {
+            super::record_review_intent(connection, session_id, &text)?;
         }
     }
     Ok(())

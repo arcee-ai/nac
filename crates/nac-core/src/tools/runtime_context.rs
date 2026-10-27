@@ -37,6 +37,9 @@ pub struct ToolRuntime {
     /// service attaches. Workers and the existing orchestrator retain their
     /// established allow-through behavior.
     pub permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
+    /// Automatic reviewer installed on the broker when it is created. `None`
+    /// selects the default Jev reviewer; tests inject fakes here.
+    pub(crate) permission_reviewer: Option<Arc<dyn crate::permissions::PermissionReviewer>>,
     /// Construction-time rules retained so headless imported capabilities can
     /// fail closed on `ask` while still honoring an explicit final allow.
     pub(crate) permission_rules: Arc<Vec<crate::permissions::PermissionRule>>,

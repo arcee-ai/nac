@@ -46,14 +46,14 @@ function acceptSubagentList<T extends { generation: number; version: number }>(
   });
 }
 
-export function useSessionPermissions(sessionId: string, enabled: boolean) {
+export function useSessionPermissions(sessionId: string, enabled: boolean, poll = true) {
   const { api } = useNativeRuntime();
 
   return useQuery<PermissionStateResponse>({
     queryKey: queryKeys.sessionPermissions(sessionId),
     queryFn: ({ signal }) => api.getPermissions(sessionId, signal),
     enabled,
-    refetchInterval: enabled ? 1_000 : false,
+    refetchInterval: enabled && poll ? 1_000 : false,
     staleTime: 0,
     retry: false,
   });
@@ -75,6 +75,39 @@ export function useReplyPermission() {
     }) => api.replyPermission(sessionId, requestId, reply),
     onSuccess: (_data, variables) =>
       client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
+  });
+}
+
+/** Authorizes one retry of a blocked review. The model is asked to retry and
+ * the retry passes policy and a fresh review; nothing is bypassed. */
+export function useAuthorizePermissionReviewRetry() {
+  const { api } = useNativeRuntime();
+
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      reviewId,
+      parentSessionId,
+    }: {
+      sessionId: string;
+      reviewId: string;
+      parentSessionId?: string;
+    }) =>
+      parentSessionId
+        ? api.authorizeChildPermissionReviewRetry(parentSessionId, sessionId, reviewId)
+        : api.authorizePermissionReviewRetry(sessionId, reviewId),
+    onSuccess: (_data, variables) =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
+        ...(variables.parentSessionId
+          ? [
+              client.invalidateQueries({
+                queryKey: queryKeys.traditionalChildren(variables.parentSessionId),
+              }),
+            ]
+          : []),
+      ]),
   });
 }
 

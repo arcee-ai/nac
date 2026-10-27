@@ -154,7 +154,7 @@ pub fn create_session_inbox_item(
     target_run_id: Option<&str>,
     client_id: Option<&str>,
 ) -> Result<SessionInboxRecord> {
-    create_inbox_item(path, session_id, delivery, content, target_run_id, client_id, None)
+    create_inbox_item(path, session_id, delivery, content, target_run_id, client_id, InboxAdmission::default())
 }
 command CreateSessionInboxItemCommand {
     session_id: String = session_id.to_owned(),
@@ -169,6 +169,35 @@ port public;
 }
 
 coordinated_command! {
+/// Creates an inbox item a person typed on a human-facing route.
+/// `review_intent` is their text as typed, before expansion; it becomes
+/// review intent when the item reaches the model, never before.
+pub fn create_person_session_inbox_item(
+    path: &Path,
+    session_id: &str,
+    delivery: InboxDelivery,
+    content: &str,
+    target_run_id: Option<&str>,
+    client_id: Option<&str>,
+    review_intent: &str,
+) -> Result<SessionInboxRecord> {
+    create_inbox_item(path, session_id, delivery, content, target_run_id, client_id,
+        InboxAdmission { review_intent: Some(review_intent), ..InboxAdmission::default() })
+}
+command CreatePersonSessionInboxItemCommand {
+    session_id: String = session_id.to_owned(),
+    delivery: InboxDelivery = delivery,
+    content: String = content.to_owned(),
+    target_run_id: Option<String> = target_run_id.map(str::to_owned),
+    client_id: Option<String> = client_id.map(str::to_owned),
+    review_intent: String = review_intent.to_owned(),
+}
+call |command| (&command.session_id, command.delivery, command.content.as_str(), command.target_run_id.as_deref(), command.client_id.as_deref(), &command.review_intent)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+coordinated_command! {
 /// Persist the requested mode atomically with a parent's queued child input.
 pub fn create_traditional_child_inbox_item(
     path: &Path,
@@ -178,13 +207,8 @@ pub fn create_traditional_child_inbox_item(
     execution_mode: TraditionalChildExecutionMode,
     wait_id: Option<&str>,
 ) -> Result<SessionInboxRecord> {
-    if let Some(id) = wait_id {
-        uuid::Uuid::parse_str(id)?;
-        if execution_mode != TraditionalChildExecutionMode::Foreground {
-            return Err(anyhow!("only foreground child input can own a waiter"));
-        }
-    }
-    create_inbox_item(path, session_id, InboxDelivery::Steer, content, target_run_id, None, Some((execution_mode, wait_id)))
+    create_inbox_item(path, session_id, InboxDelivery::Steer, content, target_run_id, None,
+        InboxAdmission { child: Some((execution_mode, wait_id)), ..InboxAdmission::default() })
 }
 command CreateTraditionalChildInboxItemCommand {
     session_id: String = session_id.to_owned(),
@@ -198,6 +222,40 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
+coordinated_command! {
+/// Record a person's child input, requested mode and waiter in one write.
+/// Intent becomes effective only when the transcript delivers this inbox item.
+pub fn create_person_traditional_child_inbox_item(
+    path: &Path,
+    session_id: &str,
+    content: &str,
+    target_run_id: Option<&str>,
+    execution_mode: TraditionalChildExecutionMode,
+    wait_id: Option<&str>,
+    review_intent: &str,
+) -> Result<SessionInboxRecord> {
+    create_inbox_item(path, session_id, InboxDelivery::Steer, content, target_run_id, None,
+        InboxAdmission { child: Some((execution_mode, wait_id)), review_intent: Some(review_intent) })
+}
+command CreatePersonTraditionalChildInboxItemCommand {
+    session_id: String = session_id.to_owned(),
+    content: String = content.to_owned(),
+    target_run_id: Option<String> = target_run_id.map(str::to_owned),
+    execution_mode: TraditionalChildExecutionMode = execution_mode,
+    wait_id: Option<String> = wait_id.map(str::to_owned),
+    review_intent: String = review_intent.to_owned(),
+}
+call |command| (&command.session_id, &command.content, command.target_run_id.as_deref(), command.execution_mode, command.wait_id.as_deref(), &command.review_intent)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+#[derive(Default)]
+struct InboxAdmission<'a> {
+    child: Option<(TraditionalChildExecutionMode, Option<&'a str>)>,
+    review_intent: Option<&'a str>,
+}
+
 fn create_inbox_item(
     path: &Path,
     session_id: &str,
@@ -205,7 +263,7 @@ fn create_inbox_item(
     content: &str,
     target_run_id: Option<&str>,
     client_id: Option<&str>,
-    child_admission: Option<(TraditionalChildExecutionMode, Option<&str>)>,
+    admission: InboxAdmission<'_>,
 ) -> Result<SessionInboxRecord> {
     let session_id = session_id.trim();
     let content = content.trim();
@@ -218,13 +276,19 @@ fn create_inbox_item(
     if delivery == InboxDelivery::Queue && target_run_id.is_some() {
         return Err(anyhow!("queued inbox input cannot target an active run"));
     }
+    if let Some((mode, Some(id))) = admission.child {
+        uuid::Uuid::parse_str(id)?;
+        if mode != TraditionalChildExecutionMode::Foreground {
+            return Err(anyhow!("only foreground child input can own a waiter"));
+        }
+    }
     let connection = open_runtime_connection(path)?;
     let now = now_utc();
     connection.execute(
         "INSERT INTO session_inbox
          (session_id, delivery, status, content, target_run_id, client_id,
-          created_at, updated_at, child_execution_mode, child_wait_id)
-         VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?6, ?7, ?8)",
+          created_at, updated_at, child_execution_mode, child_wait_id, review_intent)
+         VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9)",
         params![
             session_id,
             delivery.as_str(),
@@ -232,8 +296,9 @@ fn create_inbox_item(
             target_run_id,
             client_id,
             now,
-            child_admission.map(|(mode, _)| mode.as_str()),
-            child_admission.and_then(|(_, wait_id)| wait_id),
+            admission.child.map(|(mode, _)| mode.as_str()),
+            admission.child.and_then(|(_, wait_id)| wait_id),
+            admission.review_intent,
         ],
     )?;
     load_session_inbox_item_with_connection(&connection, session_id, connection.last_insert_rowid())
@@ -441,6 +506,80 @@ mod tests {
                 uuid::Uuid::new_v4()
             ))
             .join("store.db")
+    }
+
+    #[test]
+    fn child_input_persists_mode_waiter_and_raw_person_intent_together() {
+        let path = temp_store_path("child_person_admission");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "child");
+        let raw = "  inspect only; do not publish  ";
+        for mode in [
+            TraditionalChildExecutionMode::Foreground,
+            TraditionalChildExecutionMode::Background,
+        ] {
+            let wait_id = (mode == TraditionalChildExecutionMode::Foreground)
+                .then(|| uuid::Uuid::new_v4().to_string());
+            let item = create_person_traditional_child_inbox_item(
+                &path,
+                "child",
+                raw,
+                Some("run"),
+                mode,
+                wait_id.as_deref(),
+                raw,
+            )
+            .unwrap();
+            assert_eq!(item.content, raw.trim());
+            assert_eq!(item.child_execution_mode, Some(mode));
+            assert_eq!(item.child_wait_id, wait_id);
+            let connection = open_runtime_connection(&path).unwrap();
+            let intent: Option<String> = connection
+                .query_row(
+                    "SELECT review_intent FROM session_inbox WHERE id = ?1",
+                    params![item.id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(intent.as_deref(), Some(raw));
+            assert_eq!(
+                crate::sessions::load_permission_review_intent(&path, "child").unwrap(),
+                crate::sessions::ReviewIntent::NeverRecorded,
+                "enqueue does not deliver the person's intent"
+            );
+        }
+        let before = list_session_inbox(&path, "child").unwrap();
+        assert!(create_person_traditional_child_inbox_item(
+            &path,
+            "child",
+            raw,
+            Some("run"),
+            TraditionalChildExecutionMode::Background,
+            Some(&uuid::Uuid::new_v4().to_string()),
+            raw,
+        )
+        .is_err());
+        assert_eq!(list_session_inbox(&path, "child").unwrap(), before);
+        let automation = create_traditional_child_inbox_item(
+            &path,
+            "child",
+            "automation",
+            Some("run"),
+            TraditionalChildExecutionMode::Background,
+            None,
+        )
+        .unwrap();
+        let connection = open_runtime_connection(&path).unwrap();
+        let intent: Option<String> = connection
+            .query_row(
+                "SELECT review_intent FROM session_inbox WHERE id = ?1",
+                params![automation.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(intent.is_none());
+        drop(connection);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

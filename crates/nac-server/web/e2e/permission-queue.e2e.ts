@@ -236,9 +236,10 @@ for (const mobile of [false, true]) {
       expect((await state(children[0])).grants).toHaveLength(0);
       expect((await state(parent)).grants).toHaveLength(0);
       expect((await state(children[1])).grants).toHaveLength(0);
-      await expect(manager.getByRole("switch", { name: "Approve all automatically" })).toHaveCount(
-        1,
-      );
+      await expect(manager.getByRole("radiogroup", { name: "Approval mode" })).toHaveCount(1);
+      for (const mode of ["Manual", "Approve all", "Approve for me"]) {
+        await expect(manager.getByRole("radio", { name: mode, exact: true })).toHaveCount(1);
+      }
       harness.provider.assertConsumed();
     } finally {
       observer.abort();

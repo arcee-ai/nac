@@ -1406,7 +1406,14 @@ mod tests {
         assert!(mark_thread_active(&runtime, "worker", "dispatch-a"));
         runtime
             .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "for A", None)
+            .queue(
+                &runtime.store_path,
+                "test-session",
+                "worker",
+                "for A",
+                None,
+                crate::store::InputOrigin::Automation,
+            )
             .unwrap()
             .unwrap();
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
@@ -1422,7 +1429,14 @@ mod tests {
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
         let reused = runtime
             .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "for B", None)
+            .queue(
+                &runtime.store_path,
+                "test-session",
+                "worker",
+                "for B",
+                None,
+                crate::store::InputOrigin::Automation,
+            )
             .unwrap()
             .unwrap();
         assert_eq!(reused.dispatch_id, "dispatch-b");
@@ -1436,6 +1450,7 @@ mod tests {
                 "worker",
                 "too late",
                 None,
+                crate::store::InputOrigin::Automation,
             )
             .unwrap()
             .is_none());

@@ -829,6 +829,191 @@ async fn direct_broker_authorizes_between_prepare_and_side_effects() {
     let _ = std::fs::remove_dir_all(directory);
 }
 
+struct ReadPathTool {
+    calls: Arc<AtomicUsize>,
+}
+
+impl NativeTool for ReadPathTool {
+    type Input = PathInput;
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            def_type: "function".into(),
+            function: FunctionDef {
+                name: "read_path".into(),
+                description: "read_path".into(),
+                parameters: json!({"type":"object"}),
+            },
+        }
+    }
+
+    fn admission(&self) -> ToolAdmission {
+        ToolAdmission::Exclusive
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        serde_json::from_value(input)
+            .map_err(|error| ToolResult::text(format!("invalid input: {error}"), true))
+    }
+
+    fn permission_resources(
+        &self,
+        input: &Self::Input,
+        services: ToolServices<'_>,
+    ) -> Result<Vec<PermissionResource>, ToolResult> {
+        let path = services
+            .runtime
+            .backend
+            .resolve_path(&input.path)
+            .map_err(|error| ToolResult::text(error.to_string(), true))?;
+        let path = path.display().to_string();
+        Ok(vec![
+            PermissionResource::new("read", path.clone()).with_display(path)
+        ])
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        _services: ToolServices<'a>,
+        _context: &'a ToolCallContext,
+    ) -> BoxFuture<'a, ToolResult> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move { ToolResult::text(input.path, false) })
+    }
+}
+
+/// Approves only when released, so the test can change the filesystem while
+/// a review is pending.
+struct ReleasedReviewer {
+    started: tokio::sync::Notify,
+    release: tokio::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+}
+
+impl crate::permissions::PermissionReviewer for ReleasedReviewer {
+    fn review<'a>(
+        &'a self,
+        _request: &'a crate::permissions::ReviewRequest,
+    ) -> BoxFuture<
+        'a,
+        Result<crate::permissions::ReviewVerdict, crate::permissions::ReviewUnavailable>,
+    > {
+        Box::pin(async move {
+            self.started.notify_one();
+            if let Some(release) = self.release.lock().await.take() {
+                let _ = release.await;
+            }
+            Ok(crate::permissions::ReviewVerdict::ApproveOnce)
+        })
+    }
+
+    fn check_available(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn identity(&self) -> String {
+        "released".to_string()
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_target_changed_during_review_is_not_executed() {
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!("nac-kernel-review-{}", uuid::Uuid::new_v4()));
+    let workspace = root.join("workspace");
+    std::fs::create_dir_all(workspace.join("first")).unwrap();
+    std::fs::create_dir_all(workspace.join("second")).unwrap();
+    symlink(workspace.join("first"), workspace.join("current")).unwrap();
+    let store_path = root.join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session-a");
+
+    let broker = Arc::new(crate::permissions::PermissionBroker::new(
+        store_path.clone(),
+        "session-a".to_string(),
+        crate::permissions::PermissionBackend::Local,
+        0,
+        [crate::permissions::PermissionRule::new(
+            "read",
+            "*",
+            crate::permissions::PermissionEffect::Ask,
+        )],
+    ));
+    let (release, receiver) = tokio::sync::oneshot::channel();
+    let reviewer = Arc::new(ReleasedReviewer {
+        started: tokio::sync::Notify::new(),
+        release: tokio::sync::Mutex::new(Some(receiver)),
+    });
+    broker.set_reviewer(Arc::clone(&reviewer) as Arc<dyn crate::permissions::PermissionReviewer>);
+    broker
+        .set_approval_mode(crate::permissions::PermissionApprovalMode::Review)
+        .await
+        .unwrap();
+    crate::store::record_review_intent(
+        &crate::store::open_runtime_connection(&store_path).unwrap(),
+        "session-a",
+        "count it",
+    )
+    .unwrap();
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let registry = ToolRegistry::builder()
+        .register(ReadPathTool {
+            calls: Arc::clone(&calls),
+        })
+        .finish()
+        .unwrap();
+    let snapshot = registry.snapshot(["read_path"]).unwrap();
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = workspace.clone();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace);
+    runtime.store_path = store_path;
+    runtime.session_id = Some("session-a".to_string());
+    runtime.permission_broker = Some(Arc::clone(&broker));
+    let client = crate::model::ModelClient::new_for_test();
+    let services = ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+    let context = ToolCallContext::default();
+
+    let invoke = snapshot.invoke(
+        "read_path",
+        json!({"path":"current/file"}),
+        services,
+        &context,
+    );
+    let swap = async {
+        reviewer.started.notified().await;
+        std::fs::remove_file(workspace.join("current")).unwrap();
+        symlink(workspace.join("second"), workspace.join("current")).unwrap();
+        release.send(()).unwrap();
+    };
+    let (result, ()) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(invoke, swap)
+    })
+    .await
+    .expect("review must start with fresh human intent and finish after the target swap");
+
+    assert!(result.is_error, "{}", result.content);
+    assert!(
+        result
+            .content
+            .to_string()
+            .contains("changed while read_path awaited authorization"),
+        "{}",
+        result.content
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "the approved target was not executed"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test]
 async fn executed_calls_report_duration_for_success_and_error() {
     let registry = ToolRegistry::builder()

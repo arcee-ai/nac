@@ -539,15 +539,24 @@ impl SessionClientHandle {
         clippy::result_large_err,
         reason = "submission errors carry the complete active-operation conflict snapshot"
     )]
+    /// Submits a prepared prompt. `review_intent` is set only for a prompt a
+    /// person typed on a human-facing route: their text as typed, before
+    /// expansion, recorded as review intent in the same transaction that
+    /// hands the prompt to the model.
     pub fn try_submit_prepared_prompt_with_lease(
         &self,
         prompt: PreparedPrompt,
         lease: sessions::SessionOperationLease,
+        review_intent: Option<String>,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.service.try_submit_prompt_for_client_with_lease(
-            self.client_id.clone(),
+        self.service.try_submit_prompt_inner(
+            Some(self.client_id.clone()),
             prompt.agent_prompt,
-            lease,
+            Some(lease),
+            RunAdmissionKind {
+                review_intent,
+                ..RunAdmissionKind::default()
+            },
         )
     }
 
@@ -724,6 +733,7 @@ struct ActiveRunState {
     transcript_baseline: Option<usize>,
     command_cancellation: crate::tools::ThreadCancellation,
     inbox_item_id: Option<i64>,
+    review_intent: Option<String>,
     _operation_lease: Option<Arc<sessions::SessionOperationLease>>,
     _workspace_activity_lease: Option<sessions::WorkspaceActivityLease>,
 }
@@ -732,6 +742,8 @@ struct ActiveRunState {
 struct RunAdmissionKind {
     terminal_selection: Option<crate::store::TerminalSelectionEvidence>,
     inbox_item_id: Option<i64>,
+    /// What a person typed for a prompt submitted on a human-facing route.
+    review_intent: Option<String>,
     goal_continuation: bool,
     child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,
     managed_orchestrator_execution_mode: Option<crate::store::ManagedOrchestratorExecutionMode>,
@@ -863,8 +875,9 @@ impl SessionService {
         &self,
         thread_name: &str,
         instruction: &str,
+        origin: crate::store::InputOrigin,
     ) -> Result<crate::store::ThreadSteeringRecord> {
-        self.queue_thread_steering_for_run(thread_name, instruction, None)
+        self.queue_thread_steering_for_run(thread_name, instruction, None, origin)
     }
 
     pub fn queue_thread_steering_for_run(
@@ -872,6 +885,7 @@ impl SessionService {
         thread_name: &str,
         instruction: &str,
         expected_run_id: Option<&str>,
+        origin: crate::store::InputOrigin,
     ) -> Result<crate::store::ThreadSteeringRecord> {
         let session_id = self
             .metadata
@@ -889,6 +903,7 @@ impl SessionService {
                 thread_name,
                 instruction,
                 expected_run_id,
+                origin,
             )?
             .ok_or_else(|| {
                 anyhow::anyhow!("thread '{thread_name}' is not active in this session")
@@ -904,6 +919,7 @@ impl SessionService {
     pub fn queue_orchestrator_steering(
         &self,
         instruction: &str,
+        origin: crate::store::InputOrigin,
     ) -> Result<crate::store::ThreadSteeringRecord> {
         let session_id = self
             .metadata
@@ -920,7 +936,11 @@ impl SessionService {
             }
             _ => return Err(anyhow::anyhow!("session has no active run")),
         };
-        let record = crate::store::queue_thread_steering(
+        let queue = match origin {
+            crate::store::InputOrigin::Person => crate::store::queue_person_thread_steering,
+            crate::store::InputOrigin::Automation => crate::store::queue_thread_steering,
+        };
+        let record = queue(
             &self.metadata.store_path,
             session_id,
             crate::store::ORCHESTRATOR_STEERING_TARGET,

@@ -568,6 +568,16 @@ impl SessionService {
         (&active_run.snapshot.run_id == run_id).then(|| active_run.prompt_commit.clone())
     }
 
+    pub(super) fn run_review_intent(&self, run_id: &SessionRunId) -> Option<String> {
+        let guard = self.lock_active_operation();
+        let Some(ActiveSessionOperation::Run(active_run)) = guard.as_ref() else {
+            return None;
+        };
+        (&active_run.snapshot.run_id == run_id)
+            .then(|| active_run.review_intent.clone())
+            .flatten()
+    }
+
     pub(super) fn run_inbox_item_id(&self, run_id: &SessionRunId) -> Option<i64> {
         let guard = self.lock_active_operation();
         let Some(ActiveSessionOperation::Run(active_run)) = guard.as_ref() else {
