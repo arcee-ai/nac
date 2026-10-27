@@ -80,8 +80,11 @@ export function TaskLaunchModal({
             )}
           </>
         )}
-        {launch.start.error && (
-          <p role="alert">{launch.start.error.message} Retry uses the same request identity.</p>
+        {launch.error && (
+          <p role="alert">
+            {launch.error.message}
+            {launch.intent && " Retry uses the same request identity."}
+          </p>
         )}
         {!launch.receipt && (
           <Button

@@ -2,17 +2,47 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
+import type { EmbeddedHarness } from "./harness";
 import type { TaskLaunchRecord } from "../src/app/types/api";
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
 
 const execute = promisify(execFile);
 test.use({ managedNativeWeb: false });
 
-test("Local UI opens and steers two pinned retained tasks after restart", async ({
-  harness,
-  page,
-  request,
-}, testInfo) => {
+for (const withoutRandomUUID of [false, true]) {
+  test(`Local UI opens and steers two pinned retained tasks after restart${withoutRandomUUID ? " without randomUUID" : ""}`, (fixtures, info) =>
+    retainedJourney(fixtures, info, withoutRandomUUID));
+}
+
+async function withTaskIdentityCapability(
+  page: Page,
+  withoutRandomUUID: boolean,
+  launch: () => Promise<void>,
+) {
+  if (withoutRandomUUID) {
+    // Simulate HTTP capabilities only during the retained-task click. Keep
+    // real getRandomValues; this loopback origin is not LAN qualification.
+    await page.evaluate(() =>
+      Object.defineProperty(globalThis.crypto, "randomUUID", {
+        value: undefined,
+        configurable: true,
+      }),
+    );
+  }
+  try {
+    await launch();
+  } finally {
+    if (withoutRandomUUID)
+      await page.evaluate(() => Reflect.deleteProperty(globalThis.crypto, "randomUUID"));
+  }
+}
+
+async function retainedJourney(
+  { harness, page, request }: { harness: EmbeddedHarness; page: Page; request: APIRequestContext },
+  testInfo: TestInfo,
+  withoutRandomUUID: boolean,
+) {
   const repo = path.join(harness.runRoot, "workspace");
   const git = (...args: string[]) => execute("git", ["-C", repo, ...args]);
   await fs.mkdir(path.join(repo, "nested"));
@@ -83,7 +113,9 @@ test("Local UI opens and steers two pinned retained tasks after restart", async 
     { token: "FIRST_RETAINED_BRIEF" },
     { kind: "text", text: "First task ready" },
   );
-  await dialog.getByRole("button", { name: "Start isolated task", exact: true }).click();
+  await withTaskIdentityCapability(page, withoutRandomUUID, () =>
+    dialog.getByRole("button", { name: "Start isolated task", exact: true }).click(),
+  );
   const firstCard = dialog.locator("article").filter({ hasText: "First retained task" });
   await expect(firstCard).toContainText("Task ready");
   await expect(firstCard).toContainText(head);
@@ -101,7 +133,9 @@ test("Local UI opens and steers two pinned retained tasks after restart", async 
     { token: "SECOND_RETAINED_BRIEF" },
     { kind: "text", text: "Second task ready" },
   );
-  await dialog.getByRole("button", { name: "Start isolated task", exact: true }).click();
+  await withTaskIdentityCapability(page, withoutRandomUUID, () =>
+    dialog.getByRole("button", { name: "Start isolated task", exact: true }).click(),
+  );
   await expect(dialog.locator("article").filter({ hasText: "Second retained task" })).toContainText(
     "Task ready",
   );
@@ -157,4 +191,4 @@ test("Local UI opens and steers two pinned retained tasks after restart", async 
   expect(await fs.readFile(path.join(repo, ".git/index"))).toEqual(index);
   expect(await fs.readFile(path.join(repo, "nested/seed"), "utf8")).toBe("unstaged source");
   expect(await fs.readFile(path.join(repo, "untracked"), "utf8")).toBe("source only");
-});
+}
