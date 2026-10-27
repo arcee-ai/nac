@@ -26,6 +26,7 @@ import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { RunFailureRecovery } from "@/app/components/inspector/RunFailureRecovery";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
+import { useTranscriptModel } from "@/app/components/inspector/transcript/useTranscriptModel";
 import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -34,18 +35,13 @@ import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
-import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
+import { formatStoreTime } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import { routes, type SessionPanel } from "@/app/lib/routes";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
-import { perfMark, perfRender, perfTime } from "@/app/lib/perfDebug";
-import {
-  buildTranscript,
-  withStreamedOutput,
-  STREAMING_TURN_KEY,
-  type TranscriptTurn,
-} from "@/app/lib/transcript";
+import { perfRender } from "@/app/lib/perfDebug";
+import { STREAMING_TURN_KEY, type TranscriptTurn } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
@@ -54,7 +50,6 @@ import {
   useLoadOlderMessages,
   useRegenerateRun,
   useSessionGoal,
-  useSessionPermissions,
   useSubmitRun,
   useUpdateGoal,
   useWorkspaceRevisions,
@@ -104,16 +99,6 @@ function resendTargetIndex(turns: TranscriptTurn[]): number | null {
   return null;
 }
 
-/** Text of the newest user bubble, or null when the chat opens with the model. */
-function lastUserText(turns: TranscriptTurn[]): string | null {
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index];
-    if (turn.kind === "delegated-completion") return null;
-    if (turn.kind === "user") return turn.text;
-  }
-  return null;
-}
-
 /**
  * Read-only transcript from the canonical snapshot plus a live typing indicator
  * fed by the SSE runtime store. Follows new content unless the user scrolls up.
@@ -126,17 +111,10 @@ export function Transcript({
   errorNotice = null,
 }: TranscriptProps) {
   const {
-    useStreamText,
-    useStreamReasoning,
     useModelRetryAttempt,
-    useRunning,
     useRunFailure,
     useRunError,
-    useOptimisticUserPrompt,
-    useLiveThreads,
     useCancelArmed,
-    usePrimaryToolEvents,
-    useFinishedToolCalls,
     useActivity,
     setOptimisticUserPrompt,
     pushLocalEvent,
@@ -153,18 +131,11 @@ export function Transcript({
     selectFile,
   } = useNativeRuntime().stores.sessionLayoutStore;
 
-  const running = useRunning(sessionId);
   const stopping = useCancelArmed(sessionId);
   const activity = useActivity();
   const error = useRunError();
   const liveFailure = useRunFailure();
   const modelRetryAttempt = useModelRetryAttempt();
-  const liveThreads = useLiveThreads();
-  const finishedToolCalls = useFinishedToolCalls();
-  const primaryToolEvents = usePrimaryToolEvents();
-  const streamText = useStreamText();
-  const streamReasoning = useStreamReasoning();
-  const optimisticPrompt = useOptimisticUserPrompt();
   const selectedThreadEpisode = useSelectedThreadEpisode();
   const selectedWorkset = useSelectedWorkset();
   const selectedFile = useSelectedFile();
@@ -188,16 +159,6 @@ export function Transcript({
     snapshot?.metadata.behavior === "direct-with-orchestrator";
   const goalQuery = useSessionGoal(sessionId, direct);
   const updateGoal = useUpdateGoal();
-  const { data: permissions } = useSessionPermissions(sessionId, direct);
-  const pendingPermissionCallIds = useMemo(
-    () =>
-      new Set(
-        (permissions?.requests ?? [])
-          .map((request) => request.call_id)
-          .filter((callId): callId is string => Boolean(callId)),
-      ),
-    [permissions?.requests],
-  );
   const { scrollRef, contentRef, showJumpButton, jumpToLatest, followLatest } = useStickToBottom({
     resetKey: sessionId,
     // Intentionally not keyed on running / active_run / message count: those
@@ -237,36 +198,16 @@ export function Transcript({
 
   perfRender("Transcript");
 
-  // Split so a delta rebuilds only the turn it lands in: the snapshot half is
-  // untouched between refetches, and the stream half hands its earlier turns
-  // straight back, which is what keeps the memoized rows from re-rendering.
-  const snapshotTurns = useMemo(
-    () =>
-      perfTime("buildTranscript", () =>
-        buildTranscript(
-          snapshot,
-          liveThreads,
-          finishedToolCalls,
-          primaryToolEvents,
-          pendingPermissionCallIds,
-        ),
-      ),
-    [snapshot, liveThreads, finishedToolCalls, primaryToolEvents, pendingPermissionCallIds],
-  );
-  // Prefer the live active_run copy; fall back to the optimistic prompt set at
-  // Send so the bubble is already above the model pill before the round-trip.
-  const submitted = running ? snapshot?.active_run?.submitted_user_message : undefined;
-  const pendingText = submitted
-    ? displayPromptFromMessageText(submitted.content)
-    : (optimisticPrompt ?? "");
-  // The optimistic copy is raw typed text; only the stored message can carry
-  // an expansion.
-  const pendingSkills = submitted ? invokedSkillNames(submitted.content) : null;
-  // Compared against the last *user* turn rather than the last turn of any
-  // kind: everything the run produces lands after the prompt it answers, so
-  // once that prompt is in the snapshot the copy is a duplicate no matter how
-  // many model turns have piled up on top of it.
-  const showPending = Boolean(pendingText && lastUserText(snapshotTurns) !== pendingText);
+  const {
+    turns,
+    running,
+    optimisticPrompt,
+    submitted,
+    pendingText,
+    pendingSkills,
+    showPending,
+    streamingTurn,
+  } = useTranscriptModel(sessionId, snapshot);
   useLayoutEffect(() => {
     hadPending.current = false;
     sendFollowReady.current = false;
@@ -282,23 +223,6 @@ export function Transcript({
     hadPending.current = showPending;
     if (appeared && sendFollowReady.current) followLatest(300);
   }, [showPending, followLatest]);
-  const turns = useMemo(
-    () =>
-      withStreamedOutput(
-        snapshotTurns,
-        { text: streamText, reasoning: streamReasoning },
-        showPending,
-      ),
-    [snapshotTurns, streamText, streamReasoning, showPending],
-  );
-  // A stream that had to open a turn of its own is answering a prompt the
-  // snapshot has not caught up with, so the optimistic bubble moves into the
-  // list with it instead of being rendered under the whole thing.
-  const streamingTurn = showPending && turns[turns.length - 1]?.key === STREAMING_TURN_KEY;
-  perfMark("transcript:turns", {
-    fields: { turns: turns.length, streamChars: streamText.length },
-    throttleMs: 1000,
-  });
 
   const refreshIndex = useMemo(() => resendTargetIndex(turns), [turns]);
   const actionsBusy =
