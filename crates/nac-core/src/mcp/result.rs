@@ -270,6 +270,7 @@ fn flatten_tool_result_blocking(
             content,
             is_error: result.is_error.unwrap_or(false),
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Err(error) => ToolResult::text(format!("Error: invalid MCP tool result: {error}"), true),
     }

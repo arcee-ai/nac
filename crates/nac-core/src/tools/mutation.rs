@@ -311,6 +311,7 @@ pub(crate) fn success_tool_result<T: Serialize>(result: &T) -> ToolResult {
             .into(),
         is_error: false,
         execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     }
 }
 
@@ -323,6 +324,7 @@ fn error_tool_result(error: MutationError) -> ToolResult {
             .into(),
         is_error: true,
         execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     }
 }
 pub(crate) fn argument_error(message: impl Into<String>) -> ToolResult {
@@ -576,6 +578,7 @@ pub(crate) fn read_opened_file(
             content,
             is_error: false,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         };
     }
     let mut bytes = Vec::new();

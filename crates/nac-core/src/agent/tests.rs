@@ -450,6 +450,7 @@ fn exec_command_result_preview_uses_structured_previews() {
         .into(),
         is_error: false,
         execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     };
 
     assert_eq!(preview_tool_result("exec_command", &result), "line two...");
@@ -550,6 +551,7 @@ fn exec_command_result_preview_includes_nonzero_exit() {
         .into(),
         is_error: false,
         execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     };
 
     assert_eq!(
@@ -571,6 +573,7 @@ fn exec_command_finished_event_carries_structured_outcome() {
         .into(),
         is_error: false,
         execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     };
     let event = AgentEvent::tool_call_finished(
         Some("worker".to_string()),
@@ -643,6 +646,7 @@ fn finished_pty_result_preview_keeps_terminal_output() {
         .into(),
         is_error: false,
         execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     };
 
     assert_eq!(preview_tool_result("exec_command", &result), "line two");
@@ -667,6 +671,7 @@ fn exec_command_finished_events_distinguish_terminal_statuses() {
             .into(),
             is_error: serialized == "spawn_error",
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         };
         let event = AgentEvent::tool_call_finished(
             Some("worker".to_string()),
@@ -1017,7 +1022,8 @@ async fn image_limit_error_is_the_only_finished_event_for_the_result() {
             ToolResult {
                 content: image_content,
                 is_error: false,
-                execution_duration_ms: None,
+                execution_duration_ms: Some(42),
+                execution_duration_excludes_authorization: true,
             },
         )],
         &EventSink::channel(events_tx),
@@ -1033,6 +1039,7 @@ async fn image_limit_error_is_the_only_finished_event_for_the_result() {
         AgentEvent::ToolCallFinished {
             call_id,
             is_error: true,
+            execution_duration_ms: Some(42),
             ..
         } if call_id == "call-image"
     ));
@@ -1142,6 +1149,7 @@ fn json_tool_error(id: &str, name: &str, body: serde_json::Value) -> (String, St
             content: (body.to_string()).into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
     )
 }

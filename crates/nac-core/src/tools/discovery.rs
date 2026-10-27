@@ -125,6 +125,7 @@ pub(crate) async fn execute(tool: &'static str, args: Value, runtime: &ToolRunti
             content: (value.to_string()).into(),
             is_error: false,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Err(error) => error_result(error.code, &error.message, error.path.as_deref()),
     }

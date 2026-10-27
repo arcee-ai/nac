@@ -573,6 +573,7 @@ pub(crate) async fn execute_remote_cancellable(
                                 content,
                                 is_error: false,
                                 execution_duration_ms: None,
+                                execution_duration_excludes_authorization: false,
                             };
                         }
                     }
@@ -581,6 +582,7 @@ pub(crate) async fn execute_remote_cancellable(
                     content: content.into(),
                     is_error: !output.status.success(),
                     execution_duration_ms: None,
+                    execution_duration_excludes_authorization: false,
                 };
             }
             Err(error) => {

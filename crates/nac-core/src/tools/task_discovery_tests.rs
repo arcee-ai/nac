@@ -797,3 +797,112 @@ async fn concurrent_internal_approvals_keep_denial_and_elapsed_per_invocation() 
     cleanup(&first);
     cleanup(&second);
 }
+
+async fn assert_deadline_during_internal_approval(cancel: bool) {
+    use crate::events::{AgentEvent, ToolCompletionStatus};
+    use std::time::Duration;
+
+    let runtime = runtime(vec![PermissionRule::new(
+        "task_read",
+        "project:p1",
+        PermissionEffect::Ask,
+    )]);
+    let broker = Arc::clone(runtime.permission_broker.as_ref().unwrap());
+    assert_eq!(broker.caller_project(), None);
+    let bus = crate::events::SessionEventBus::new(Some(CALLER.into()));
+    let _approver = bus.subscribe_assistant_deltas();
+    broker.attach_event_bus(bus);
+    let client = crate::model::ModelClient::new_for_test();
+    let context = ToolCallContext::default();
+    let limit = if cancel { 5_000 } else { 300 };
+    let invoke = crate::tools::execute_tool_with_context(
+        "find_tasks",
+        json!({"_nac":{"timeout_ms":limit}}),
+        &runtime,
+        &client,
+        &context,
+    );
+    let wait = async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while broker.pending().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        if cancel {
+            runtime.command_cancellation.cancel();
+        }
+    };
+    let (result, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(invoke, wait)
+    })
+    .await
+    .unwrap();
+    assert!(result.is_error);
+    let original = result.content.as_text().unwrap().to_owned();
+    let envelope: Value = serde_json::from_str(&original).unwrap();
+    let metadata = &envelope["_nac"];
+    let wall = metadata["execution_duration_ms"].as_u64().unwrap();
+    assert!(wall >= 100, "{original}");
+    assert!(
+        result
+            .execution_duration_ms
+            .is_some_and(|work| work + 100 < wall),
+        "{original}; private {:?}",
+        result.execution_duration_ms
+    );
+    let status = if cancel { "cancelled" } else { "timed_out" };
+    assert_eq!(metadata["status"], status);
+    assert_eq!(metadata["timeout_ms"], limit);
+    assert_eq!(metadata.as_object().unwrap().len(), 5);
+    assert_eq!(
+        envelope["error"],
+        format!(
+            "Tool 'find_tasks' {status} after {wall} ms (limit {limit} ms; cleanup {} ms).",
+            metadata["cleanup_duration_ms"]
+        )
+    );
+    let AgentEvent::ToolCallFinished {
+        execution_duration_ms,
+        effective_timeout_ms,
+        cleanup_duration_ms,
+        completion_status,
+        remote_outcome_uncertain,
+        ..
+    } = AgentEvent::tool_call_finished(None, "late-project".into(), "find_tasks".into(), &result)
+    else {
+        panic!("expected finished event");
+    };
+    assert_eq!(
+        execution_duration_ms, result.execution_duration_ms,
+        "{original}"
+    );
+    assert_eq!(effective_timeout_ms, Some(limit));
+    assert_eq!(
+        cleanup_duration_ms,
+        metadata["cleanup_duration_ms"].as_u64()
+    );
+    assert_eq!(
+        completion_status,
+        Some(if cancel {
+            ToolCompletionStatus::Cancelled
+        } else {
+            ToolCompletionStatus::TimedOut
+        })
+    );
+    assert!(!remote_outcome_uncertain);
+    assert_eq!(result.content.as_text().unwrap(), original);
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn timeout_during_internal_approval_excludes_wait_in_finished_event() {
+    assert_deadline_during_internal_approval(false).await;
+}
+
+#[tokio::test]
+async fn cancellation_during_internal_approval_excludes_wait_in_finished_event() {
+    assert_deadline_during_internal_approval(true).await;
+}

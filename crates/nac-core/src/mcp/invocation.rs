@@ -29,6 +29,7 @@ impl McpToolCapture {
                     content: format!("Error: MCP tool '{name}' requires object arguments").into(),
                     is_error: true,
                     execution_duration_ms: None,
+                    execution_duration_excludes_authorization: false,
                 }
             }
         };
@@ -93,6 +94,7 @@ impl McpToolCapture {
                                     .into(),
                                     is_error: true,
                                     execution_duration_ms: None,
+                                    execution_duration_excludes_authorization: false,
                                 };
                             }
                         }
@@ -119,6 +121,7 @@ impl McpToolCapture {
                             .into(),
                         is_error: true,
                         execution_duration_ms: None,
+                        execution_duration_excludes_authorization: false,
                     },
                 }
             }
@@ -130,6 +133,7 @@ impl McpToolCapture {
                     .into(),
                 is_error: true,
                 execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             },
         }
     }

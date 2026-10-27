@@ -250,6 +250,7 @@ impl NativeTool for CountTool {
                 content: ToolContent::text("counted"),
                 is_error: false,
                 execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             }
         })
     }

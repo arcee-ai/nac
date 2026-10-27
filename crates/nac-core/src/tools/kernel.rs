@@ -929,6 +929,7 @@ impl ToolSnapshot {
                 let timing = timing
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                result.execution_duration_excludes_authorization = !timing.authorization.is_zero();
                 result.execution_duration_ms = (!timing.denied).then(|| {
                     started
                         .elapsed()

@@ -1469,3 +1469,31 @@ fn rejected_publication_remains_an_explicit_replay_gap() {
         })
     );
 }
+
+#[test]
+fn authorization_adjusted_duration_overrides_only_the_finished_event_metric() {
+    let body = serde_json::json!({
+        "error": "Tool 'remote_tool' timed_out after 120 ms (limit 100 ms; cleanup 3 ms).",
+        "_nac": { "status":"timed_out", "timeout_ms":100, "execution_duration_ms":120, "cleanup_duration_ms":3, "remote_outcome_uncertain":false }
+    }).to_string();
+    for measured in [Some(4), None] {
+        let mut result = crate::tools::ToolResult::text(body.clone(), true);
+        result.execution_duration_ms = measured;
+        result.execution_duration_excludes_authorization = true;
+        let AgentEvent::ToolCallFinished {
+            execution_duration_ms,
+            completion_status,
+            effective_timeout_ms,
+            cleanup_duration_ms,
+            ..
+        } = AgentEvent::tool_call_finished(None, "call".into(), "remote_tool".into(), &result)
+        else {
+            panic!("expected finished event");
+        };
+        assert_eq!(execution_duration_ms, measured);
+        assert_eq!(completion_status, Some(ToolCompletionStatus::TimedOut));
+        assert_eq!(effective_timeout_ms, Some(100));
+        assert_eq!(cleanup_duration_ms, Some(3));
+        assert_eq!(result.content.as_text(), Some(body.as_str()));
+    }
+}

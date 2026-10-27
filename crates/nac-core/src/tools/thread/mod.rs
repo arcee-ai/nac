@@ -177,6 +177,7 @@ pub fn parse_dispatch_args(
                     content: (format!("Error: {error}")).into(),
                     is_error: true,
                     execution_duration_ms: None,
+                    execution_duration_excludes_authorization: false,
                 })?,
         )
     } else {
@@ -245,6 +246,7 @@ pub async fn execute_parsed_dispatch(
             .into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         };
     };
 
@@ -278,7 +280,7 @@ pub async fn execute_parsed_dispatch(
         Err(error) => {
             close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
             if cancellation.is_cancelled() {
-                return ToolResult { content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before host admission.").into(), is_error: true, execution_duration_ms: None };
+                return ToolResult { content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before host admission.").into(), is_error: true, execution_duration_ms: None, execution_duration_excludes_authorization: false };
             }
             let message = format!("Failed to admit worker dispatch: {error}");
             runtime
@@ -302,6 +304,7 @@ pub async fn execute_parsed_dispatch(
                 content: message.into(),
                 is_error: true,
                 execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             };
         }
     };
@@ -329,6 +332,7 @@ pub async fn execute_parsed_dispatch(
             content: format!("Required thread start publication failed: {error:#}").into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         }
         .executed_since(started);
     }
@@ -356,6 +360,7 @@ pub async fn execute_parsed_dispatch(
             content: message.into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         }
         .executed_since(started);
     }
@@ -411,6 +416,7 @@ pub async fn execute_parsed_dispatch(
                 content: (message).into(),
                 is_error: true,
                 execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             }
             .executed_since(started);
         }
@@ -487,6 +493,7 @@ pub async fn execute_parsed_dispatch(
             .into(),
             is_error: finish.is_err(),
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         }
         .executed_since(started);
     };
@@ -499,6 +506,7 @@ pub async fn execute_parsed_dispatch(
             content: (format!("{TOOL_CALL_CANCELLED_MARKER} {}", failure.message)).into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         }
         .executed_since(started);
     }
@@ -518,6 +526,7 @@ pub async fn execute_parsed_dispatch(
         content: (failure.message).into(),
         is_error: true,
         execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     }
     .executed_since(started)
 }
@@ -654,6 +663,7 @@ pub async fn execute_dispatch(
             .into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         };
     }
     let result = execute_parsed_dispatch(params, runtime, &client).await;
@@ -683,6 +693,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
                 content: (format!("Error listing threads: {error}")).into(),
                 is_error: true,
                 execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             }
             .executed_since(started)
         }
@@ -691,6 +702,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
                 content: (format!("Internal error listing threads: {join_error}")).into(),
                 is_error: true,
                 execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             }
             .executed_since(started)
         }
@@ -701,6 +713,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             content: ("No active threads in this session.".to_string()).into(),
             is_error: false,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         }
         .executed_since(started);
     }
@@ -720,6 +733,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
         content: (output).into(),
         is_error: false,
         execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     }
     .executed_since(started)
 }
@@ -747,17 +761,20 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
             content: (store::render_thread_document(&thread_name, &episodes)).into(),
             is_error: false,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error reading thread '{thread_name}': {error}")).into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error reading thread '{thread_name}': {join_error}"))
                 .into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
     };
     result.executed_since(started)
@@ -781,6 +798,7 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             .into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         };
     }
     let started = Instant::now();
@@ -797,22 +815,26 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             content: (format!("Deleted thread '{thread_name}' and its retained episodes.")).into(),
             is_error: false,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Ok(Ok(false)) => ToolResult {
             content: (format!("Thread '{thread_name}' does not exist in this session.")).into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error deleting thread '{thread_name}': {error}")).into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error deleting thread '{thread_name}': {join_error}"))
                 .into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
     };
     result.executed_since(started)
@@ -834,6 +856,7 @@ fn require_session(runtime: &ToolRuntime) -> Result<&str, ToolResult> {
         content: ("Error: thread tools require an active session".to_string()).into(),
         is_error: true,
         execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     })
 }
 
@@ -856,6 +879,7 @@ fn resolve_scheduled_skills(
             content: ("Error: no skills are available for thread dispatch".to_string()).into(),
             is_error: true,
             execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         });
     };
 
@@ -865,6 +889,7 @@ fn resolve_scheduled_skills(
                 content: (format!("Error: unknown skill '{skill}'")).into(),
                 is_error: true,
                 execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             });
         }
     }
