@@ -1,5 +1,43 @@
 use super::*;
 
+#[tokio::test(flavor = "current_thread")]
+async fn placeholder_credentials_do_not_authorize_an_abandoned_flow() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let (_home, _restore) = test_environment("placeholder-credentials");
+    let endpoint = "https://mcp.example.test/mcp";
+    let mut config = configuration();
+    config.authorization_metadata = Some(McpOAuthAuthorizationMetadata {
+        authorization_endpoint: "https://auth.example.test/authorize".into(),
+        token_endpoint: "https://auth.example.test/token".into(),
+        registration_endpoint: None,
+        issuer: Some("https://auth.example.test/".into()),
+        jwks_uri: None,
+        scopes_supported: None,
+        response_types_supported: None,
+        code_challenge_methods_supported: None,
+        additional_fields: BTreeMap::new(),
+    });
+    configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, config).unwrap();
+    edit_store(
+        &oauth_store_path(Path::new("/workspace")).unwrap(),
+        |store| {
+            store.profiles.get_mut("slack").unwrap().credentials = Some(StoredCredentials::new(
+                "public-test-client".into(),
+                None,
+                Vec::new(),
+                None,
+            ));
+            Ok(())
+        },
+    )
+    .unwrap();
+    let error = match authorized_manager(Path::new("/workspace"), "slack", endpoint).await {
+        Ok(_) => panic!("placeholder credentials unexpectedly authorized the MCP client"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("authorization is required"));
+}
+
 #[test]
 fn expired_pending_authorization_is_not_advertised_or_connected() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();

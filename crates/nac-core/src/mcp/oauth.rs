@@ -1241,6 +1241,7 @@ pub(crate) struct McpOAuthScopeStepUp {
     pub(crate) uses_loopback: bool,
     pub(crate) authorization_in_progress: bool,
     pub(crate) authorization_scopes: Vec<String>,
+    pub(crate) logout_generation: u64,
 }
 pub(crate) fn prepare_mcp_oauth_scope_step_up(
     cwd: &Path,
@@ -1272,6 +1273,7 @@ pub(crate) fn prepare_mcp_oauth_scope_step_up(
                 == MCP_OAUTH_REDIRECT_URI,
             authorization_in_progress,
             authorization_scopes: authorization_scopes(profile),
+            logout_generation: profile.logout_generation,
         })
     })
 }
@@ -1346,6 +1348,16 @@ pub(crate) async fn authorized_manager(
     server_name: &str,
     endpoint: &str,
 ) -> Result<AuthorizationManager> {
+    authorized_manager_with_generation(cwd, server_name, endpoint)
+        .await
+        .map(|(manager, _)| manager)
+}
+
+pub(super) async fn authorized_manager_with_generation(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+) -> Result<(AuthorizationManager, u64)> {
     let (mut manager, profile, _) = manager_and_profile(
         cwd,
         server_name,
@@ -1381,7 +1393,7 @@ pub(crate) async fn authorized_manager(
     manager
         .configure_client(client)
         .context("MCP OAuth client could not be initialized")?;
-    Ok(manager)
+    Ok((manager, profile.logout_generation))
 }
 
 #[cfg(test)]
@@ -1898,41 +1910,6 @@ mod tests {
                 .get("client_id_metadata_document_supported"),
             Some(&serde_json::Value::Bool(true))
         );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn placeholder_credentials_do_not_authorize_an_abandoned_flow() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
-        let (_home, _restore) = test_environment("placeholder-credentials");
-        let endpoint = "https://mcp.example.test/mcp";
-        let mut config = configuration();
-        config.authorization_metadata = Some(McpOAuthAuthorizationMetadata {
-            authorization_endpoint: "https://auth.example.test/authorize".into(),
-            token_endpoint: "https://auth.example.test/token".into(),
-            registration_endpoint: None,
-            issuer: Some("https://auth.example.test/".into()),
-            jwks_uri: None,
-            scopes_supported: None,
-            response_types_supported: None,
-            code_challenge_methods_supported: None,
-            additional_fields: BTreeMap::new(),
-        });
-        configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, config).unwrap();
-        edit_store(
-            &oauth_store_path(Path::new("/workspace")).unwrap(),
-            |store| {
-                store.profiles.get_mut("slack").unwrap().credentials = Some(
-                    StoredCredentials::new("public-test-client".into(), None, Vec::new(), None),
-                );
-                Ok(())
-            },
-        )
-        .unwrap();
-        let error = match authorized_manager(Path::new("/workspace"), "slack", endpoint).await {
-            Ok(_) => panic!("placeholder credentials unexpectedly authorized the MCP client"),
-            Err(error) => error,
-        };
-        assert!(error.to_string().contains("authorization is required"));
     }
 
     #[tokio::test(flavor = "current_thread")]

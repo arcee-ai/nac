@@ -1,7 +1,7 @@
 use super::*;
 use futures_util::stream::BoxStream;
 use rmcp::model::ClientJsonRpcMessage;
-use rmcp::transport::auth::AuthClient;
+use rmcp::transport::auth::{AuthClient, AuthorizationManager};
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClient, StreamableHttpError, StreamableHttpPostResponse,
 };
@@ -9,13 +9,43 @@ use rmcp::transport::streamable_http_client::{
 #[derive(Clone)]
 struct NacOAuthClient {
     inner: AuthClient<reqwest::Client>,
-    step_up_manager: Arc<tokio::sync::OnceCell<rmcp::transport::auth::AuthorizationManager>>,
+    step_up_manager: Arc<tokio::sync::Mutex<Option<(u64, AuthorizationManager)>>>,
     cwd: PathBuf,
     server_name: String,
     endpoint: String,
 }
 
 impl NacOAuthClient {
+    async fn scope_upgrade_url(
+        &self,
+        step_up: &super::oauth::McpOAuthScopeStepUp,
+    ) -> Result<String> {
+        let mut cached = self.step_up_manager.lock().await;
+        if cached
+            .as_ref()
+            .is_none_or(|(generation, _)| *generation != step_up.logout_generation)
+        {
+            let (manager, generation) = super::oauth::authorized_manager_with_generation(
+                &self.cwd,
+                &self.server_name,
+                &self.endpoint,
+            )
+            .await?;
+            if generation != step_up.logout_generation {
+                bail!("MCP OAuth was logged out while this scope upgrade was in progress");
+            }
+            *cached = Some((generation, manager));
+        }
+        // Keep one manager's SDK attempt budget until logout begins a new authorization generation.
+        let Some((_, manager)) = cached.as_ref() else {
+            bail!("MCP OAuth scope-upgrade manager is unavailable");
+        };
+        manager
+            .request_scope_upgrade(&step_up.authorization_scopes.join(" "))
+            .await
+            .context("MCP OAuth scope upgrade could not start")
+    }
+
     /// The stored token for a request; after logout nothing is sent unauthenticated.
     async fn access_token(
         &self,
@@ -56,27 +86,7 @@ impl NacOAuthClient {
             if step_up.uses_loopback {
                 return result;
             }
-            let manager = self
-                .step_up_manager
-                .get_or_try_init(|| async {
-                    super::oauth::authorized_manager(&self.cwd, &self.server_name, &self.endpoint)
-                        .await
-                })
-                .await;
-            let authorization_url = match manager {
-                Ok(manager) => {
-                    manager
-                        .request_scope_upgrade(&step_up.authorization_scopes.join(" "))
-                        .await
-                }
-                Err(error) => {
-                    eprintln!(
-                        "MCP server '{}': failed to initialize OAuth scope upgrade: {error:#}",
-                        self.server_name
-                    );
-                    return result;
-                }
-            };
+            let authorization_url = self.scope_upgrade_url(&step_up).await;
             match authorization_url {
                 Ok(url) => {
                     if let Err(error) = super::oauth::record_mcp_oauth_pending_authorization_url(
@@ -403,7 +413,7 @@ async fn connect_http_server(
         let manager = super::oauth::authorized_manager(cwd, name, parameters.url).await?;
         let client = NacOAuthClient {
             inner: AuthClient::new(reqwest::Client::new(), manager),
-            step_up_manager: Arc::new(tokio::sync::OnceCell::new()),
+            step_up_manager: Arc::new(tokio::sync::Mutex::new(None)),
             cwd: cwd.to_path_buf(),
             server_name: name.to_string(),
             endpoint: parameters.url.to_string(),
@@ -423,6 +433,10 @@ async fn connect_http_server(
             .with_context(|| format!("failed to connect HTTP MCP server '{name}'"))
     }
 }
+
+#[cfg(test)]
+#[path = "transport/scope_upgrade_tests.rs"]
+mod scope_upgrade_tests;
 
 pub(super) fn authorization_required(error: &(dyn std::error::Error + 'static)) -> bool {
     let mut current = Some(error);
