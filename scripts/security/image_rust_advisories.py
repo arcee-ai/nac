@@ -61,12 +61,14 @@ def advisory_records(repo, records, coverage):
                 "missing/malformed Rust advisory identity")
         require(advisory not in ids, "duplicate Rust advisory")
         ids.add(advisory)
-        require(record.get("state") == "published" and isinstance(record.get("html_url"), str) and
+        require(record.get("state") in {"published", "withdrawn"} and isinstance(record.get("html_url"), str) and
                 record["html_url"] == f"https://github.com/rust-lang/{repo}/security/advisories/{advisory}",
                 "Rust advisory source/state mismatch")
         for name in ("published_at", "updated_at"):
             timestamp(record.get(name))
         withdrawn = record.get("withdrawn_at")
+        require(record["state"] != "withdrawn" or withdrawn is not None,
+                "withdrawn Rust advisory lacks withdrawal timestamp")
         if withdrawn is not None:
             timestamp(withdrawn)
         severity = record.get("severity")
@@ -84,9 +86,10 @@ def advisory_records(repo, records, coverage):
             component = REPOSITORIES[repo][name]
             ranges = parse_range(affected.get("vulnerable_version_range"))
             patched = affected.get("patched_versions")
-            require(isinstance(patched, str), "missing Rust advisory patched version metadata")
-            if patched:
-                version_tuple(patched)
+            require("patched_versions" in affected and (patched is None or isinstance(patched, str)),
+                    "malformed Rust advisory patched version metadata")
+            # GitHub defines this as nullable report text, not an affected-version range.
+            patched = patched or ""
             matched, evaluated = False, []
             for bounds in ranges:
                 major = bounds[0][1][0]
@@ -176,7 +179,7 @@ def query_rust(coverage, output, *, fetch=fetch_page, now=None):
             require(headers.get("http_status") == 200, "Rust advisory HTTP status/auth/rate-limit failure")
             from email.utils import parsedate_to_datetime
             server_date = parsedate_to_datetime(headers.get("date", ""))
-            require(server_date.tzinfo is not None and 0 <= (clock() - server_date).total_seconds() <= 86400,
+            require(server_date.tzinfo is not None and -300 <= (clock() - server_date).total_seconds() <= 86400,
                     "stale/future Rust advisory response")
             require(0 <= (clock() - queried).total_seconds() <= 86400, "expired Rust advisory query")
             require("application/json" in headers.get("content-type", ""), "unexpected Rust advisory response type")
