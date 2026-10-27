@@ -60,6 +60,55 @@ describe("transcript stream attribution", () => {
     });
     expect(hook.result.current.showPending).toBe(false);
     expect(hook.result.current.turns.at(-1)?.kind).toBe("user");
+    // Transcript retires the optimistic copy once this snapshot owns it.
+    act(() => store.setOptimisticUserPrompt(null, "committed"));
+    expect(store.getRuntimeState().streamPredatesPrompt).toBe(true);
+    expect(hook.result.current.turns.at(-1)?.kind).toBe("user");
+    act(() => {
+      store.applyEnvelope({
+        sequence_id: 2,
+        event: { type: "run_started", started_at_epoch_ms: 100 },
+      } as never);
+      store.applyAssistantDelta({ text: "new answer", reasoning: "new reasoning" });
+    });
+    expect(hook.result.current.turns.at(-1)).toMatchObject({
+      kind: "model",
+      key: "model-3",
+      blocks: [{ text: "new reasoning" }, { text: "new answer" }],
+    });
+  });
+  it.each([true, false])(
+    "restores prior replies after a rejected send (previous answer stored: %s)",
+    (stored) => {
+      store.resetRuntime("s");
+      store.applyAssistantDelta({ reasoning: "second reasoning" });
+      store.applyEnvelope({
+        sequence_id: 1,
+        event: { type: "run_completed", response: "second answer" },
+      } as never);
+      const messages: Message[] = [
+        { role: "user", content: "first question" },
+        { role: "assistant", content: "first answer" },
+        { role: "user", content: "second question" },
+        ...(stored ? [{ role: "assistant", content: "second answer" } as Message] : []),
+      ];
+      const snap = snapshot(messages);
+      const hook = renderHook(() => useTranscriptModel("s", snap));
+      const before = hook.result.current.turns;
+      act(() => store.setOptimisticUserPrompt("third question"));
+      act(() => store.setOptimisticUserPrompt(null));
+      expect(hook.result.current.turns).toEqual(before);
+      expect(store.getRuntimeState().streamPredatesPrompt).toBe(false);
+    },
+  );
+  it("removes a rejected first prompt without opening an answer", () => {
+    store.resetRuntime("s");
+    const snap = snapshot([]);
+    const hook = renderHook(() => useTranscriptModel("s", snap));
+    act(() => store.setOptimisticUserPrompt("first question"));
+    expect(hook.result.current.turns).toMatchObject([{ kind: "user", text: "first question" }]);
+    act(() => store.setOptimisticUserPrompt(null));
+    expect(hook.result.current.turns).toEqual([]);
   });
   it("a quick new answer stays below its uncommitted prompt", () => {
     store.resetRuntime("s");

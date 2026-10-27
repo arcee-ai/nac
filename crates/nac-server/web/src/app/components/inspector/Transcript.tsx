@@ -322,7 +322,7 @@ export function Transcript({
 
   useEffect(() => {
     if (!showPending && optimisticPrompt) {
-      setOptimisticUserPrompt(null);
+      setOptimisticUserPrompt(null, "committed");
     }
   }, [showPending, optimisticPrompt, setOptimisticUserPrompt]);
 

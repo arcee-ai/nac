@@ -234,10 +234,21 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
     });
   }
 
-  /** Paint the user bubble immediately on submit; cleared once the transcript owns it. */
-  function setOptimisticUserPrompt(prompt: string | null): void {
-    if (prompt === null) setState({ optimisticUserPrompt: null });
-    else setState({ optimisticUserPrompt: prompt, streamPredatesPrompt: true });
+  /**
+   * Paint the prompt immediately on submit. A rejected/unsent prompt takes its
+   * stream fence with it; a prompt committed to the transcript keeps the fence
+   * until its run starts or streams, even though its optimistic copy can leave.
+   */
+  function setOptimisticUserPrompt(
+    prompt: string | null,
+    settlement: "rejected" | "committed" = "rejected",
+  ): void {
+    if (prompt === null) {
+      setState((state) => ({
+        optimisticUserPrompt: null,
+        streamPredatesPrompt: settlement === "committed" && state.streamPredatesPrompt,
+      }));
+    } else setState({ optimisticUserPrompt: prompt, streamPredatesPrompt: true });
   }
 
   /**
