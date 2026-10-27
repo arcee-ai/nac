@@ -32,7 +32,7 @@ def rust_fixture(output):
     raw = {"active": toolchain + " (default)", "toolchains": [toolchain], "targets": TARGET,
            "which": {n: f"/usr/local/rustup/toolchains/{toolchain}/bin/{n}" for n in BINARIES},
            "proxies": {n: {"path": "/usr/local/cargo/bin/" + n,
-                           "resolved": "/usr/local/cargo/bin/" + n, "sha256": pins["RUSTUP_SHA256"]}
+                           "resolved": "/usr/local/cargo/bin/rustup", "sha256": pins["RUSTUP_SHA256"]}
                        for n in (*BINARIES, "rustup")}, "versions": versions,
            "components": "cargo-x86_64-unknown-linux-gnu\nclippy-x86_64-unknown-linux-gnu\n"
                          "rust-std-x86_64-unknown-linux-gnu\nrustc-x86_64-unknown-linux-gnu\n"

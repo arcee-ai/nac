@@ -179,9 +179,11 @@ def rust_inventory(raw, pins, output):
     proxies, which, versions = raw.get("proxies", {}), raw.get("which", {}), raw.get("versions", {})
     require(set(proxies) == {*BINARIES, "rustup"} and set(which) == set(BINARIES), "missing Rust proxy evidence")
     for name, proxy in proxies.items():
-        require(proxy == {"path": "/usr/local/cargo/bin/" + name,
-                           "resolved": "/usr/local/cargo/bin/" + name,
-                           "sha256": pins["RUSTUP_SHA256"]}, "Rust proxy/rustup hash or path mismatch")
+        path = "/usr/local/cargo/bin/" + name
+        # Rustup installs proxies as hard links or symlinks to its pinned executable.
+        require(any(proxy == {"path": path, "resolved": target, "sha256": pins["RUSTUP_SHA256"]}
+                    for target in (path, "/usr/local/cargo/bin/rustup")),
+                "Rust proxy/rustup hash or path mismatch")
     root = "/usr/local/rustup/toolchains/" + toolchain
     for name in BINARIES:
         require(which[name] == root + "/bin/" + name, "Rust proxy resolves to unexpected binary")
