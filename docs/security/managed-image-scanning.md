@@ -19,7 +19,9 @@ historical. Its retained 20 blockers/27 total/zero exceptions and earlier green
 infrastructure checks do not clear a new image. Final qualification waits for
 ALL-500/501 content, ALL-502 evidence, ALL-503 separately reviewed trusted
 applicability and ALL-504 installed Rust coverage on one coordinator-provided
-combined candidate. Applicability currently has an external platform restriction;
+combined candidate. This layer consumes ALL-504's v2 seven-file Rust inventory
+contract; that schema integration does not establish native qualification.
+Applicability currently has an external platform restriction;
 its acceptance is unmet. This lane does not retry or reimplement that work.
 The reporter retains the accepted `blocking`/`excepted`/`reporting` accounting;
 any future applicability result/bundle contract requires explicit integration

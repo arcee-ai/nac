@@ -119,6 +119,31 @@ class StrictEnforcementTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     report(root, 1 if blocked else 0)
 
+    def test_v2_requires_every_unchanged_rust_file_and_rejects_legacy_inventory(self):
+        for mutation in ("legacy", *RUST_FILES):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                fixture(root, False)
+                bundle = json.loads((root / "bundle.json").read_text())
+                if mutation == "legacy":
+                    bundle["schema_version"] = 1
+                    for name in RUST_FILES:
+                        del bundle["files"][name]
+                    write_json(root / "bundle.json", bundle)
+                else:
+                    (root / mutation).write_text("changed retained Rust evidence")
+                with self.assertRaises(ValueError):
+                    report(root, 0)
+                self.assertFalse((root / "ci-report.json").exists())
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture(root, False)
+            bundle = json.loads((root / "bundle.json").read_text())
+            del bundle["files"]["rust-payload.json"]
+            write_json(root / "bundle.json", bundle)
+            with self.assertRaises(ValueError):
+                report(root, 0)
+
     def test_new_disposition_keys_or_changed_rows_cannot_silently_drop_findings(self):
         for mutation in ("unknown-key", "changed-row", "missing-exception"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp:
