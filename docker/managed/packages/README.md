@@ -140,8 +140,9 @@ dynamic consumer linkage. Dedicated malformed-input regressions and 32-bit
 execution are separate acceptance evidence; ordinary tests do not establish
 them. No blocked applicability regression work is delegated to this build.
 
-libssh2 becomes a sixth owned APK and needs the scanner's corresponding owned
-package/upstream identity mapping before full scan acceptance. Physical
+libssh2 becomes a sixth owned APK with the scanner's corresponding exact owned
+package, canonical upstream CPE and plain-upstream Wolfi search identities. The
+same strict missing/unknown-owner checks remain effective. Physical
 backports may retain conservative `<=1.11.1` findings; neither NAC's revision nor
 these provenance records waive them. Retire the backport only after a supported
 supplier includes this full correction/follow-up chain and preserves the ABI and
