@@ -146,6 +146,12 @@ export enum IconName {
   ChatGpt = "chatGpt",
   Orchestrator = "orchestrator",
   Robot = "robot",
+  ReadFile = "readFile",
+  SearchFile = "searchFile",
+  SearchFiles = "searchFiles",
+  WriteCommand = "writeCommand",
+  Clock = "clock",
+  AddChat = "addChat",
 }
 
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {

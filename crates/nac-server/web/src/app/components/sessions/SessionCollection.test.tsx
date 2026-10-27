@@ -120,7 +120,7 @@ describe("global session collection", () => {
     expect(activeRow.getAttribute("aria-current")).toBe("page");
     activeRow.focus();
     expect(document.activeElement).toBe(activeRow);
-    expect(activeRow.className).toContain("focus-visible:outline");
+    expect(activeRow.parentElement?.className).toContain("has-[>button:focus-visible]:outline-2");
   });
 
   it("pins locally, navigates while marking viewed, and reuses rename/delete actions", () => {

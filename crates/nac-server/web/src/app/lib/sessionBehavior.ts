@@ -56,8 +56,17 @@ export function sessionBehaviorLabel(behavior: SessionBehavior): string {
   return sessionBehaviorPresentation(behavior).label;
 }
 
-/** Leading glyph on a chat row. Matches the new-session choices. */
-export function sessionBehaviorIcon(behavior: SessionBehavior | null | undefined): IconName {
+/**
+ * The session-type glyph, matching the new-session choices. A delegated
+ * session's durable relationship decides over its behavior, because the
+ * Subagents rows know only which topology they launched.
+ */
+export function sessionBehaviorIcon(
+  behavior: SessionBehavior | null | undefined,
+  lineage?: SessionLineage["kind"] | null,
+): IconName {
+  if (lineage === "managed-orchestrator") return IconName.Orchestrator;
+  if (lineage === "traditional-child") return IconName.Plane;
   switch (behavior) {
     case "direct":
       return IconName.Plane;

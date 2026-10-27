@@ -3,6 +3,11 @@ import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from
 interface ChatSessionActionsProps {
   title: string;
   pinned?: boolean;
+  /**
+   * Medium buttons with 20px glyphs for the mobile row. Desktop stays small:
+   * its 24px target is the WCAG 2.5.8 minimum.
+   */
+  isMobile?: boolean;
   onPin?: () => void;
   onRename?: () => void;
   onDelete?: () => void;
@@ -12,16 +17,18 @@ interface ChatSessionActionsProps {
 export function ChatSessionActions({
   title,
   pinned = false,
+  isMobile = false,
   onPin,
   onRename,
   onDelete,
 }: ChatSessionActionsProps) {
+  const size = isMobile ? ButtonSize.Medium : ButtonSize.Small;
   return (
     <>
       {onPin ? (
         <Button
           variant={ButtonVariant.Ghost}
-          size={ButtonSize.Small}
+          size={size}
           content={ButtonContent.Icon}
           title={pinned ? "Unpin chat" : "Pin chat"}
           aria-label={`${pinned ? "Unpin" : "Pin"} ${title}`}
@@ -33,7 +40,7 @@ export function ChatSessionActions({
       {onRename ? (
         <Button
           variant={ButtonVariant.Ghost}
-          size={ButtonSize.Small}
+          size={size}
           content={ButtonContent.Icon}
           title="Rename chat"
           aria-label={`Rename ${title}`}
@@ -45,7 +52,7 @@ export function ChatSessionActions({
       {onDelete ? (
         <Button
           variant={ButtonVariant.GhostDestructive}
-          size={ButtonSize.Small}
+          size={size}
           content={ButtonContent.Icon}
           title="Delete chat"
           aria-label={`Delete ${title}`}

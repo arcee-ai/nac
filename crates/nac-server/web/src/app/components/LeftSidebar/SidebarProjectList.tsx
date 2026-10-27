@@ -1,4 +1,5 @@
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -17,7 +18,7 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun } from "@/app/lib/format";
 import { groupByRecency, projectEntries } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
-import { sessionBehaviorIcon, sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
+import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
@@ -229,6 +230,7 @@ function ProjectSessions({
 }) {
   const sessionTitle = useSessionTitle();
   const policy = useUiPolicy();
+  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const sessionActions = useSessionActions();
   const groups = useMemo(
     () =>
@@ -264,7 +266,8 @@ function ProjectSessions({
                 <ChatSessionButton
                   key={entry.summary.session_id}
                   title={title}
-                  icon={sessionBehaviorIcon(entry.summary.behavior)}
+                  behavior={entry.summary.behavior}
+                  showBehaviorIcon={showBehaviorIcon}
                   aria-label={
                     policy.orchestrationEnabled ? `${title}, ${behavior.navigationLabel}` : title
                   }

@@ -1,4 +1,5 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -10,6 +11,7 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun } from "@/app/lib/format";
 import { buildSessionNavigation, isSessionUnread } from "@/app/lib/sessionNavigation";
 import { routes } from "@/app/lib/routes";
+import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
@@ -34,6 +36,7 @@ function SessionCollectionRow({
   const actions = useSessionActions();
   const sessionTitle = useSessionTitle();
   const isMobile = useIsMobile();
+  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const attention = useAttention(entry.summary.session_id);
   const viewedAt = useSessionViewedAt(entry.summary.session_id);
   const title = sessionTitle(entry.summary);
@@ -48,13 +51,20 @@ function SessionCollectionRow({
         : unread
           ? "Updated"
           : projectLabel;
-  const accessibleState = [status, unread ? "updated since last viewed" : null]
+  // The glyph is decorative, so the name carries what it shows.
+  const behaviorLabel = showBehaviorIcon
+    ? sessionBehaviorPresentation(entry.summary.behavior).label
+    : undefined;
+  const accessibleState = [status, unread ? "updated since last viewed" : null, behaviorLabel]
     .filter(Boolean)
     .join(", ");
 
   return (
     <ChatSessionButton
       title={title}
+      behavior={entry.summary.behavior}
+      showBehaviorIcon={showBehaviorIcon}
+      behaviorLabel={behaviorLabel}
       active={active}
       running={running}
       unread={unread}
@@ -71,6 +81,7 @@ function SessionCollectionRow({
         <ChatSessionActions
           title={title}
           pinned={pinned}
+          isMobile={isMobile}
           onPin={() => toggleSessionNavigationPin(entry.summary.session_id)}
           onRename={() => actions.rename(entry.summary)}
           onDelete={() => actions.remove(entry.summary)}

@@ -151,6 +151,9 @@
   --color-border-info-tertiary: var(--blue-trans-100);
   --color-border-info-muted: var(--blue-trans-50);
 
+  /* Border / Input */
+  --color-border-input: var(--white-trans-100);
+
   /* Border / Inversed */
   --color-border-primary-inversed: var(--black);
   --color-border-secondary-inversed: var(--dark-trans-500);
@@ -180,15 +183,18 @@
   --color-fill-btn-primary-disabled: var(--gray-500);
   /* Accent and destructive icons follow their label ramps under Text / Buttons. */
   --color-fill-btn-accent: var(--brand-300);
-  --color-fill-btn-accent-hovered: var(--brand-200);
-  --color-fill-btn-accent-pressed: var(--brand-100);
+  --color-fill-btn-accent-hovered: var(--brand-400);
+  --color-fill-btn-accent-pressed: var(--brand-450);
   --color-fill-btn-accent-muted: var(--brand-trans-500);
 
   --color-fill-btn-secondary: var(--gray-200);
-  --color-fill-btn-secondary-highlighted: var(--gray-100);
   --color-fill-btn-secondary-hovered: var(--gray-100);
   --color-fill-btn-secondary-pressed: var(--gray-100);
   --color-fill-btn-secondary-disabled: var(--white-trans-300);
+  --color-fill-btn-secondary-highlighted: var(--gray-100);
+  --color-fill-btn-secondary-hovered-highlighted: var(--gray-100);
+  --color-fill-btn-secondary-pressed-highlighted: var(--gray-100);
+  --color-fill-btn-secondary-disabled-highlighted: var(--white-trans-300);
 
   --color-fill-btn-destructive: var(--red-300);
   --color-fill-btn-destructive-hovered: var(--red-200);
@@ -240,18 +246,22 @@
   /* Text / Buttons */
   --color-text-btn-primary: var(--black);
   --color-text-btn-primary-disabled: var(--gray-500);
-  /* Accent and destructive labels lighten on hover and press. The Telos pressed
-     accent and hovered and pressed destructive reds fall below 4.5:1 on the
-     tinted fills. */
+  /* Accent labels darken on hover and press, as the design system draws them.
+     Destructive labels lighten instead: the design's hovered and pressed reds
+     fall below 4.5:1 on their tinted fills. */
   --color-text-btn-accent: var(--brand-300);
-  --color-text-btn-accent-hovered: var(--brand-200);
-  --color-text-btn-accent-pressed: var(--brand-100);
+  --color-text-btn-accent-hovered: var(--brand-400);
+  --color-text-btn-accent-pressed: var(--brand-450);
   --color-text-btn-accent-disabled: var(--brand-trans-500);
 
   --color-text-btn-secondary: var(--gray-150);
   --color-text-btn-secondary-hovered: var(--white);
   --color-text-btn-secondary-pressed: var(--white);
   --color-text-btn-secondary-disabled: var(--white-trans-400);
+  --color-text-btn-secondary-highlighted: var(--white);
+  --color-text-btn-secondary-hovered-highlighted: var(--white);
+  --color-text-btn-secondary-pressed-highlighted: var(--white);
+  --color-text-btn-secondary-disabled-highlighted: var(--white-trans-400);
 
   --color-text-btn-destructive: var(--red-300);
   --color-text-btn-destructive-hovered: var(--red-200);

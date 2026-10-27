@@ -13,6 +13,7 @@ import {
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
+import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useDelegatedPreviewStream } from "@/app/hooks/useDelegatedPreviewStream";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
@@ -57,6 +58,7 @@ export function SubagentPreview({
   icon: IconName;
 }) {
   const navigate = useNavigate();
+  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const snapshot = useSessionSnapshot(sessionId, { retry: false });
   const live = useDelegatedPreviewStream(sessionId);
   const older = useLoadOlderMessages(sessionId);
@@ -150,7 +152,9 @@ export function SubagentPreview({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-muted bg-elevation-ground px-4">
-        <Icon iconName={icon} size={20} className="shrink-0 text-basic-secondary" />
+        {showBehaviorIcon ? (
+          <Icon iconName={icon} size={20} className="shrink-0 text-basic-secondary" />
+        ) : null}
         <p
           className={cn(
             "label-small min-w-0 flex-1 truncate",

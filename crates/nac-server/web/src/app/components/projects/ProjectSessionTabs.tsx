@@ -1,5 +1,6 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -29,23 +30,13 @@ import { NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 
-import type {
-  ManagedSessionSummary,
-  SessionBehavior,
-  SessionSummarySnapshot,
-} from "@/app/types/api";
+import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
 // Size each tab from its title instead of distributing the strip's spare width:
 // equal flex growth leaves short titles with a visibly oversized empty tail.
 // Intrinsic, non-shrinking slots stay on one row and make the strip scroll once
 // their content reaches the existing 272px readability cap.
 const SESSION_TAB_SLOT_CLASS = "w-fit flex-none max-w-[272px]";
-
-const SESSION_BEHAVIOR_ICONS = {
-  orchestrator: IconName.Orchestrator,
-  direct: IconName.Plane,
-  "direct-with-orchestrator": IconName.PlaneAdd,
-} satisfies Record<SessionBehavior, IconName>;
 
 /** Which side of the tab under the pointer the dragged one would land on. */
 function edgeUnderPointer(element: HTMLElement, clientX: number): DropEdge {
@@ -88,6 +79,7 @@ export function ProjectSessionTabs({
     useNativeRuntime().stores.chatTabsStore;
 
   const policy = useUiPolicy();
+  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const navigate = useNavigate();
   const projectActions = useProjectActions();
   const sessionActions = useSessionActions();
@@ -279,7 +271,8 @@ export function ProjectSessionTabs({
                 ) : null}
                 <ChatSessionTab
                   title={sessionTitle(entry.summary)}
-                  behaviorIcon={SESSION_BEHAVIOR_ICONS[behavior.id]}
+                  behavior={entry.summary.behavior}
+                  showBehaviorIcon={showBehaviorIcon}
                   behaviorLabel={policy.orchestrationEnabled ? behavior.label : undefined}
                   active={sessionId === activeSessionId}
                   running={isActiveRun(entry.active_run)}

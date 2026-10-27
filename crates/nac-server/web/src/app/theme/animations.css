@@ -132,14 +132,14 @@
   }
 }
 
-/* Figma Loader cycles three frames: 0°, -120°, +120°. */
-@keyframes loader-steps {
+/* The Figma Loader turns counterclockwise. */
+@keyframes loader-spin {
   to {
     transform: rotate(-360deg);
   }
 }
 .loader {
-  animation: loader-steps 0.9s steps(3, end) infinite;
+  animation: loader-spin 0.9s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .loader {

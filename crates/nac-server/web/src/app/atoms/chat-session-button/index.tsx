@@ -1,8 +1,10 @@
 import type React from "react";
 
 import { cn } from "../../lib/cn";
+import type { SessionBehavior, SessionLineage } from "../../types/api";
 import ChatSessionLeadingMark from "../chat-session-fork-mark";
-import Icon, { IconName } from "../icon";
+import ModelLoader, { ModelLoaderSize } from "../model-loader";
+import SessionBehaviorIcon, { SessionBehaviorIconSize } from "../session-behavior-icon";
 
 interface ChatSessionButtonProps extends Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
@@ -10,13 +12,19 @@ interface ChatSessionButtonProps extends Omit<
 > {
   title: string;
   active?: boolean;
-  /** Shimmers the title while the session is running. The mode icon stays. */
+  /** Swaps the leading slot for the model loader and shimmers the title. */
   running?: boolean;
-  /** Session mode glyph. A direct agent is a plane. */
-  icon?: IconName;
+  /** Session type, drawn in the leading slot. */
+  behavior?: SessionBehavior | null;
+  /** A delegated session's relationship, which decides over its behavior. */
+  lineage?: SessionLineage["kind"] | null;
+  /** Figma `isNacEnable`: whether the behavior glyph is drawn at all. */
+  showBehaviorIcon?: boolean;
+  /** Full accessible and hover meaning of the behavior icon. */
+  behaviorLabel?: string;
   /** Display title of the chat this session was forked from. */
   forkedFromTitle?: string | null;
-  /** Compact identity shown after the title, such as the session behavior. */
+  /** Compact text after the title, such as a status or a project. */
   badge?: string;
   /** Full accessible meaning of the compact badge. */
   badgeLabel?: string;
@@ -24,25 +32,38 @@ interface ChatSessionButtonProps extends Omit<
   unread?: boolean;
   /** Taller touch target and always-visible actions for the mobile modal. */
   isMobile?: boolean;
-  /** Rename and delete controls, revealed on hover and on keyboard focus. */
+  /** Pin, rename and delete controls, revealed on hover and on keyboard focus. */
   actions?: React.ReactNode;
 }
 
+/** Unlike the title, Figma leaves the glyph at rest on the selected row. */
+const GLYPH_TONE =
+  "[&_path]:fill-btn-secondary group-hover:[&_path]:fill-btn-secondary-hovered group-has-[>button:active]:[&_path]:fill-btn-secondary-pressed group-has-[>button:disabled]:[&_path]:fill-btn-secondary-disabled";
+
 /**
- * One session as a list row, used by the chat popover and the mobile modal.
+ * One session as a list row.
  *
- * The row leads with the session-mode icon. A fork keeps the scheme glyph
- * after the title, including while the chat is running.
+ * The leading slot holds the behavior glyph, or the model loader while the
+ * session runs; the loader shows even where the glyph is hidden, and without
+ * either the title starts at the padding. A fork adds the scheme mark after
+ * the title.
  *
- * The actions live outside the button so they stay clickable. On desktop they
+ * Press, focus and disabled styles key off the row button rather than the row,
+ * so pressing or focusing an action neither presses the row nor rings it. The
+ * actions live outside the button so they stay clickable. On desktop they
  * leave the layout until the row is hovered or focused from the keyboard, so
- * the title keeps the full row until then.
+ * the title keeps the full row until then. They are visually hidden rather
+ * than removed: focus leaves the row before it reaches the first action, and
+ * a removed action could not take it.
  */
 const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   title,
   active = false,
   running = false,
-  icon = IconName.Plane,
+  behavior,
+  lineage,
+  showBehaviorIcon = false,
+  behaviorLabel,
   forkedFromTitle,
   badge,
   badgeLabel,
@@ -54,51 +75,58 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   "aria-label": ariaLabel,
   ...props
 }) => {
-  const toneClass = active
-    ? "text-btn-secondary-pressed"
-    : "text-btn-secondary group-hover:text-btn-secondary-hovered";
-  const labelClass = running ? "text-shimmer-basic" : toneClass;
+  const nameParts = [title, behaviorLabel, badgeLabel].filter(Boolean);
 
   return (
     <div
       className={cn(
         "group flex items-center min-w-0 rounded-[4px]",
-        isMobile ? "h-12 gap-3 px-3 py-2" : "h-9 gap-1.5 px-2 py-1",
+        "-outline-offset-2 outline-[var(--color-border-focus-outline)] has-[>button:focus-visible]:outline-2",
+        isMobile ? "h-12 gap-3 py-2 pl-2.5 pr-3" : "h-9 gap-1.5 px-2 py-1",
         active
-          ? "bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered"
-          : "hover:bg-btn-ghost-hovered",
+          ? "bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered has-[>button:active]:bg-btn-ghost-highlighted-pressed has-[>button:disabled]:bg-btn-ghost-highlighted-disabled"
+          : "hover:bg-btn-ghost-hovered has-[>button:active]:bg-btn-ghost-pressed has-[>button:disabled]:bg-btn-ghost-disabled",
         className,
       )}
     >
       <button
         type={type}
-        title={badgeLabel ? `${title} · ${badgeLabel}` : title}
-        aria-label={ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)}
+        title={nameParts.join(" · ")}
+        aria-label={ariaLabel ?? nameParts.join(", ")}
         aria-current={active ? "page" : undefined}
         className={cn(
-          "flex flex-1 items-center min-w-0 rounded-[3px] text-left",
-          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary",
+          "flex flex-1 items-center min-w-0 text-left outline-none",
+          active
+            ? "text-btn-secondary-pressed"
+            : "text-btn-secondary group-hover:text-btn-secondary-hovered active:text-btn-secondary-pressed",
+          "disabled:cursor-not-allowed disabled:text-btn-secondary-disabled",
           isMobile ? "gap-3" : "gap-1.5",
         )}
         {...props}
       >
-        <Icon
-          iconName={icon}
-          size={20}
-          aria-hidden
-          data-session-behavior-icon={icon}
-          className={cn("shrink-0", toneClass)}
-        />
+        {running ? (
+          <ModelLoader size={isMobile ? ModelLoaderSize.Large : ModelLoaderSize.Medium} />
+        ) : showBehaviorIcon ? (
+          <SessionBehaviorIcon
+            behavior={behavior}
+            lineage={lineage}
+            size={isMobile ? SessionBehaviorIconSize.Large : SessionBehaviorIconSize.Medium}
+            className={GLYPH_TONE}
+          />
+        ) : null}
         <span
           className={cn(
             "min-w-0 flex-1 truncate",
-            isMobile ? "text-medium" : "label-small",
-            labelClass,
+            isMobile ? "label-medium" : "label-small",
+            running && "text-shimmer-basic",
           )}
         >
           {title}
         </span>
-        <ChatSessionLeadingMark forkedFromTitle={forkedFromTitle} className={toneClass} />
+        <ChatSessionLeadingMark
+          forkedFromTitle={forkedFromTitle}
+          className="[&_path]:fill-btn-secondary-disabled"
+        />
         {badge ? (
           <span
             title={badgeLabel}
@@ -120,7 +148,9 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         <div
           className={cn(
             "flex items-center gap-1 shrink-0",
-            isMobile ? null : "hidden group-hover:flex group-has-[:focus-visible]:flex",
+            isMobile
+              ? null
+              : "sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden",
           )}
         >
           {actions}
