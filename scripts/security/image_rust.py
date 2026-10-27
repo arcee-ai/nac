@@ -75,7 +75,7 @@ def manifest_identities(data, version, expected_hash):
     require(manifest.get("manifest-version") == "2", "unsupported Rust manifest schema")
     packages = manifest.get("pkg", {})
     versions = {}
-    for name in COMPONENTS | {"rust"}:
+    for name in sorted(COMPONENTS | {"rust"}):
         package = packages.get(name, {})
         value = package.get("version", "")
         match = re.fullmatch(r"(\d+\.\d+\.\d+)(?: \(([0-9a-f]{9,40}) (\d{4}-\d{2}-\d{2})\))?", value)

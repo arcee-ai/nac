@@ -4,6 +4,9 @@ import datetime as dt
 from email.utils import format_datetime
 import io
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 import tarfile
 import tempfile
@@ -13,7 +16,7 @@ import image_rust as rust
 import image_rust_advisories as advisories
 import image_scan as scan
 from image_inventory import write_json
-from rust_test_support import rust_fixture, add_rust_bundle
+from rust_test_support import rust_fixture
 
 NOW = dt.datetime(2026, 10, 27, 12, tzinfo=dt.timezone.utc)
 
@@ -40,6 +43,17 @@ class RustInventoryTests(unittest.TestCase):
         self.assertEqual(result["components"]["cargo"]["version"], "0.99.0")
         self.assertEqual(result["components"]["rustfmt-preview"]["version"], "1.9.0")
         self.assertEqual(result["components"]["clippy-preview"]["version"], "0.1.98")
+
+    def test_manifest_identity_serialization_is_stable_across_processes(self):
+        code = ("import json,sys; from pathlib import Path; from image_rust import manifest_identities; "
+                "print(json.dumps(manifest_identities(Path(sys.argv[1]).read_bytes(),sys.argv[2],sys.argv[3])[1]))")
+        outputs = []
+        for seed in ("1", "2"):
+            env = dict(os.environ, PYTHONHASHSEED=seed, PYTHONPATH=str(Path(rust.__file__).parent))
+            outputs.append(subprocess.check_output([sys.executable, "-c", code,
+                str(self.root / "rust-distribution.toml"), self.pins["RUST_VERSION"],
+                self.pins["manifest_sha256"]], env=env))
+        self.assertEqual(outputs[0], outputs[1])
 
     def test_missing_components_wrong_target_and_unexpected_toolchain_fail(self):
         for field, value in (("targets", "aarch64-unknown-linux-gnu"), ("components", "rustc"),
