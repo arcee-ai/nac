@@ -1100,6 +1100,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_name_status_preserves_copy_type_change_and_rename_destinations() {
+        let files = parse_name_status(
+            "C100\toriginal.txt\tcopied.txt\nT\tsymlink.txt\nR100\told.txt\trenamed.txt\n",
+        );
+
+        assert_eq!(files.len(), 3);
+        for (path, status) in [
+            ("copied.txt", "C"),
+            ("symlink.txt", "T"),
+            ("renamed.txt", "R"),
+        ] {
+            assert_eq!(files[path].status, status);
+            assert_eq!(files[path].path, path);
+        }
+        assert!(!files.contains_key("original.txt"));
+        assert!(!files.contains_key("old.txt"));
+    }
+
+    #[test]
     fn parse_status_porcelain_tracks_untracked_and_staged() {
         let raw = "M  crates/nac-core/src/view.rs\nA  README.md\n?? notes.txt\n";
         let (counts, files) = parse_status_porcelain(raw);
