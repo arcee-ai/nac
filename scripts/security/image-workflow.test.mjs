@@ -106,3 +106,77 @@ test('daily rescan uses trusted dev and retains failing reports', () => {
   assert.equal(steps.at(-1).with['retention-days'], 14);
   assert.ok(!steps.some(s => s['continue-on-error']));
 });
+
+// Execute the actual YAML shell blocks with a scanner boundary fixture and the
+// real reporter. These are local propagation controls, not image/Actions receipts.
+test('PR and daily shell blocks preserve strict exits and evidence through both aggregates', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const crypto = await import('node:crypto');
+  const { execFileSync, spawnSync } = await import('node:child_process');
+  const repo = process.cwd();
+  const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).trim();
+  const image = `sha256:${'a'.repeat(64)}`;
+  const sha = 'b'.repeat(40);
+  for (const name of ['managed-image', 'image-security-rescan']) {
+    const steps = name === 'managed-image' ? workflow(name).jobs['build-smoke'].steps : workflow(name).jobs.rescan.steps;
+    const scan = steps.find(step => step.run?.includes('image_ci_report.py --scan-output'));
+    assert.ok(scan, 'strict reporting must run after capturing the scanner status');
+    assert.ok(!scan.run.includes('|| true'));
+    const artifact = steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+    assert.equal(artifact.if, 'always()');
+    assert.equal(artifact.with['if-no-files-found'], 'error');
+    for (const state of ['passed', 'blocked', 'unknown', 'error', 'cancelled', 'missing', ...(name === 'managed-image' ? ['mismatch'] : [])]) {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nac-image-propagation-'));
+      try {
+        const fixture = path.join(root, 'fixture'); fs.mkdirSync(fixture);
+        const write = (file, value) => fs.writeFileSync(path.join(fixture, file), JSON.stringify(value));
+        const findings = ['blocked', 'unknown'].includes(state)
+          ? [{ advisory: 'TEST-control', severity: state === 'unknown' ? 'Unknown' : 'High' }] : [];
+        for (const file of ['runtime.json', 'sbom.syft.json', 'coverage.json']) write(file, { retained: true });
+        write('identity.json', { image, source_revision: state === 'mismatch' ? 'c'.repeat(40) : sha });
+        const files = Object.fromEntries(['runtime.json', 'sbom.syft.json', 'coverage.json', 'identity.json'].map(file =>
+          [file, crypto.createHash('sha256').update(fs.readFileSync(path.join(fixture, file))).digest('hex')]));
+        write('bundle.json', { schema_version: 1, image, files });
+        write('findings.json', findings);
+        write('policy-result.json', { blocking: findings, excepted: [], reporting: [] });
+        write('result.json', { status: findings.length ? 'blocked' : 'passed', image, blocking: findings.length, findings: findings.length });
+        fs.writeFileSync(path.join(fixture, 'report.md'), 'Complete retained findings\n');
+        if (state === 'missing') fs.unlinkSync(path.join(fixture, 'result.json'));
+        const bin = path.join(root, 'bin'); fs.mkdirSync(bin);
+        fs.writeFileSync(path.join(bin, 'python3'), `#!${process.execPath}
+const fs = require('node:fs'); const path = require('node:path'); const cp = require('node:child_process');
+const [script, ...args] = process.argv.slice(2);
+if (script.endsWith('image_scan.py') || script.endsWith('image_rescan.py')) {
+  let output = args[args.indexOf('--output') + 1];
+  if (script.endsWith('image_rescan.py')) output = path.join(output, 'rescan');
+  fs.cpSync(process.env.SCANNER_FIXTURE, output, { recursive: true });
+  process.exit(Number(process.env.SCANNER_STATUS));
+}
+if (!script.endsWith('image_ci_report.py')) throw new Error('unexpected boundary');
+const result = cp.spawnSync(process.env.REAL_PYTHON, [path.join(process.env.REPO, script), ...args], { stdio: 'inherit' });
+process.exit(result.status ?? 2);
+`, { mode: 0o755 });
+        const scannerStatus = state === 'cancelled' ? 137 : state === 'error' ? 2 : findings.length ? 1 : 0;
+        const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', scan.run], {
+          cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`,
+            REAL_PYTHON: python, REPO: repo, SCANNER_FIXTURE: fixture, SCANNER_STATUS: String(scannerStatus),
+            IMAGE_ID: image, SOURCE_SHA: sha, POLICY_MODE: 'ordinary' },
+        });
+        const expected = state === 'passed' ? 0 : findings.length ? 1 : 2;
+        assert.equal(result.status, expected, `${name}/${state}: ${result.stderr}`);
+        const output = path.join(root, name === 'managed-image' ? 'image-security-evidence/security' : 'image-rescan-evidence/rescan');
+        assert.equal(fs.readFileSync(path.join(output, 'findings.json'), 'utf8'), fs.readFileSync(path.join(fixture, 'findings.json'), 'utf8'));
+        assert.ok(fs.existsSync(path.join(output, 'report.md')));
+        const needs = Object.fromEntries(managedJobs.map(job => [job, { result: 'success' }]));
+        needs.prepare.outputs = { sha };
+        needs['build-smoke'].result = result.status === 0 ? 'success' : 'failure';
+        const stable = Object.fromEntries(requiredJobs.map(job => [job, { result: 'success' }]));
+        stable.prepare.outputs = { sha, run: 'true' }; stable.managed = { result: needs['build-smoke'].result };
+        if (result.status === 0) { requireManagedComplete(needs, sha); requireComplete(stable, 'true', sha); }
+        else { assert.throws(() => requireManagedComplete(needs, sha)); assert.throws(() => requireComplete(stable, 'true', sha)); }
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    }
+  }
+});

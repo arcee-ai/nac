@@ -226,8 +226,8 @@ jobs:
       - name: Report exact-image security findings
         if: always()
         run: |
-          echo '### Image findings are advisory; enforcement is deferred' >> "$GITHUB_STEP_SUMMARY"
-          echo 'CI success does not establish image security clearance. Full findings remain below.' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Strict exact-image security result' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Blocking findings and incomplete scans fail this job. Full findings remain below.' >> "$GITHUB_STEP_SUMMARY"
           if test -f image-security-evidence/security/report.md; then
             cat image-security-evidence/security/report.md >> "$GITHUB_STEP_SUMMARY"
           else

@@ -1,19 +1,43 @@
 # Managed image security
 
-## Current rollout: advisory image findings
+## Strict reporting candidate and remaining qualification
 
-Image vulnerability enforcement is deliberately deferred. Repository CI and the
-daily rescan retain the complete findings and their `blocked` security verdict,
-but a completed scan with findings does not fail those reporting workflows.
-Their green status establishes implementation/build/smoke/reporting checks, not
-image security clearance. Scanner, inventory, tool, database, qualification and
-evidence errors still fail CI; no `continue-on-error` or exception is added.
+[ALL-505](https://linear.app/arcee/issue/ALL-505) changes PR CI and daily
+unchanged-image reporting to preserve complete evidence **and return failure**
+for every unresolved/unapproved High/Critical/Unknown blocker. Completed blocked
+scans return 1; scanner, inventory, tool, DB, network, qualification and evidence
+errors return failure separately. Lower severities remain reported. The reporter
+checks exact image/source identity, inventory hashes, finding rows/counts and
+scanner/verdict agreement; missing or unknown disposition accounting fails.
+No report-only option, `continue-on-error`, threshold change or new exception is
+introduced. Applicable image failures propagate through both always-run managed
+and complete required-PR aggregates. Daily failures make the rescan job red.
 
-Source dependency enforcement remains required. The strict scanner and local
-prepublication helper still reject image blockers. The private controller's
-publisher is unchanged and has not adopted this gate. Activating image
-enforcement, resolving the retained image findings and publisher integration
-are later work under ALL-452/ALL-461; do not infer them from these PRs passing.
+This is implementation behavior, **not a qualified clean baseline or deployed
+protection claim**. ALL-452's completed advisory-reporting milestone remains
+historical. Its retained 20 blockers/27 total/zero exceptions and earlier green
+infrastructure checks do not clear a new image. Final qualification waits for
+ALL-500/501 content, ALL-502 evidence, ALL-503 separately reviewed trusted
+applicability and ALL-504 installed Rust coverage on one coordinator-provided
+combined candidate. Applicability currently has an external platform restriction;
+its acceptance is unmet. This lane does not retry or reimplement that work.
+The reporter retains the accepted `blocking`/`excepted`/`reporting` accounting;
+any future applicability result/bundle contract requires explicit integration
+and affected tests rather than speculative disposition keys.
+
+Before calling the baseline clean or enforcement production-ready, retain a fresh
+native linux/amd64 build/smoke/full inventory/scan and unchanged-image rescan with
+complete coverage, DB build age <=24h, current trusted policy, and **zero
+unresolved/unapproved blockers**. Account for every historical and new record;
+zero approved blockers differs from zero raw matches. First real deployed daily
+schedule evidence is postlanding qualification and cannot be inferred from local
+fixtures or a manual run. No schedule receipt is claimed by this candidate.
+
+[ALL-506](https://linear.app/arcee/issue/ALL-506) owns the additive current-rules
+required-check administrator handoff; settings activation is separately
+authorized. [ALL-507](https://linear.app/arcee/issue/ALL-507) owns actual private
+publisher adoption and recovery qualification. ALL-461 owns later ArceeFM
+adoption only. No PR/Done label establishes these deployed outcomes.
 
 ## Strict scanner contract
 
@@ -225,9 +249,9 @@ The workflow first runs `--inventory-only` on the tested immutable image. This
 validates the actual runtime probes and one Syft inventory, writes the hashed
 bundle, and records `status: inventoried` with `security_verdict: false`. A
 separate required reporting step consumes that bundle with the full fresh scan.
-Inventory alone cannot satisfy that reporting step. A completed blocked scan can
-satisfy the deferred-enforcement CI stage, but cannot produce a security pass or
-publication receipt.
+Inventory alone cannot satisfy that reporting step. A completed blocked scan
+retains its report and strict CI receipt but fails the step and aggregates; it
+cannot produce a security pass or publication receipt.
 Schema v2 adds the three Rust distribution/payload evidence files. Legacy v1
 bundles, or bundles without Rust probes/source pins, require exact-image
 reinventory; they cannot inherit a Rust completeness assertion. Legacy bundles
@@ -255,8 +279,8 @@ newest qualifying inventory, then require its unique expected per-SHA artifact,
 unavailable, or corrupt selected evidence fails; it never falls back to an older
 green image. PR, manual, foreign, expired, and failed/skipped/cancelled inventory
 steps cannot qualify. Fresh findings against a retained blocked image remain
-blocked in its security verdict without a new image build. The deferred stage
-reports that verdict; incomplete scans and evidence errors still fail CI.
+blocked in its security verdict without a new image build. Strict reporting
+returns that blocking exit status; incomplete scans and evidence errors fail too.
 
 ```sh
 python3 scripts/security/image_scan.py --bundle <trusted-retained-bundle> \
@@ -312,8 +336,9 @@ Before production gate activation, collect a fresh actual image baseline and
 remediate findings or land explicitly reviewed narrow expiring exceptions.
 ALL-447 is Eric's merged remediation. ALL-462 owns the subsequently approved
 dependency/runtime and Wolfi corrections retained in this stack. Source
-enforcement is enabled after its zero-finding baseline; image enforcement and
-the remaining image remediation are deferred. Neither ticket automatically approves exceptions. Keep unresolved
+enforcement remains required. ALL-500–504 own the remaining content, evidence,
+trusted applicability and coverage prerequisites; ALL-505 owns strict reporting
+and combined qualification. None of these tickets automatically approves policy. Keep unresolved
 runtime coverage and external publication qualification visible; never describe
 an incomplete scan or an unqualified baseline as clean.
 
@@ -326,7 +351,8 @@ It builds once into an isolated local registry, selects the linux/amd64 manifest
 pulls that digest, runs an adapted copy of NAC smoke with beta and exact release
 identity/schema assertions, and later promotes a verified OCI transit bundle to
 ECR. The NAC workflow/helper alone does **not** enforce that existing publisher.
-Changing that repository or exercising ECR publication requires separate scope.
+ALL-507 now owns the separately scoped code/PR adoption; ECR publication and
+deployment remain unauthorized by these implementation tickets.
 
 The source-owned scanner supports that beta path: it checks the actual NAC
 binary revision and runtime inventory without assuming a `dev` build track.
@@ -363,3 +389,25 @@ publication blocking remain external acceptance gaps until that separately
 reviewed controller change lands and is qualified. This PR neither activates
 private enforcement nor claims a failed publication scan can be bypassed through
 Allison's PR-only merge override.
+
+
+## Failure operation and rollback
+
+Inspect the retained selected-run identity, inventory, full findings, policy
+result, DB/tool/advisory metadata and error output before retrying. Missing or
+corrupt selected evidence requires fresh exact-image inventory; never select an
+older green image to conceal it. Network/tool/DB failures require a successful
+fresh scan, not reuse of an old verdict. Rerun affected current-head checks after
+repair, keeping all historical failed evidence and lower-severity records.
+
+A blocked result needs physical remediation or separately human-reviewed narrow
+policy admission through the owning trusted contract. Candidate code, provenance
+alone and this reporter cannot approve a disposition. Do not fall back to
+report-only reporting, suppress findings, weaken thresholds, skip tools or claim
+that local model fixtures replace a native clean-image receipt.
+
+If strict enforcement exposes a regression, keep publication/merge gates red,
+retain evidence and prepare a reviewed repair. Any separately authorized ruleset
+rollback follows ALL-506's fresh drift/readback procedure; it must not change
+scanner decisions or authorize vulnerable publication. No rollback, activation,
+merge, deployment or image publication is performed by this PR.
