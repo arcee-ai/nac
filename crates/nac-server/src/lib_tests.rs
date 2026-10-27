@@ -1071,3 +1071,13 @@ mod terminal_selection;
 
 #[path = "tests/terminal_control.rs"]
 mod terminal_control;
+
+#[path = "tests/task_launches.rs"]
+mod task_launches;
+
+#[path = "tests/openapi.rs"]
+mod openapi_contract;
+
+#[cfg(unix)]
+#[path = "tests/task_launch_shutdown.rs"]
+mod task_launch_shutdown;

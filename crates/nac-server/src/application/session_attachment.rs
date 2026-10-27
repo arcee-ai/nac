@@ -123,6 +123,13 @@ impl<'a> SessionAttachmentApplication<'a> {
     }
 
     pub(crate) async fn wake_direct_inbox(&self, service: &SessionService) -> Result<()> {
+        // A retained session may have committed just before shutdown and be
+        // attached by an observer before its creator publishes the cache entry.
+        // Preserve pending input for restart; never wake it in a stopping lifetime.
+        if self.manager.inner.task_preparations.is_stopping() {
+            service.stop_run_admission().await?;
+            return Ok(());
+        }
         if let Some(parent_session_id) = service.metadata().session_id.as_deref() {
             if self.manager.inner._store_ownership.coordinator().is_some() {
                 let manager = crate::SessionManager::clone(self.manager);

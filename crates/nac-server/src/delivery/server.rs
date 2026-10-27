@@ -780,6 +780,11 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::sessions::list_handler,
             delivery::session_lifecycle::create_session
         ))
+        .routes(routes!(delivery::task_launches::start))
+        .routes(routes!(delivery::task_launches::status))
+        .routes(routes!(delivery::task_launches::cancel))
+        .routes(routes!(delivery::task_launches::inventory))
+        .routes(routes!(delivery::task_launches::source_info))
         .routes(routes!(delivery::sessions::reorder_handler))
         .routes(routes!(delivery::sessions::update_presentation_handler))
         .routes(routes!(delivery::session_state::session_messages))

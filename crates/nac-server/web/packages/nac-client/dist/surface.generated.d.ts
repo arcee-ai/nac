@@ -1,4 +1,9 @@
 export declare const NAC_API_SURFACE: {
+    readonly "POST /task-launches": "private:standalone Local retained task launch";
+    readonly "GET /task-launches/{request_id}": "private:standalone passive launch status";
+    readonly "POST /task-launches/{request_id}/cancel": "private:standalone launch cancellation";
+    readonly "GET /projects/{project_id}/task-launches": "private:standalone retained workspace inventory";
+    readonly "GET /projects/{project_id}/task-launch-source": "private:standalone Local launch eligibility";
     readonly "GET /sessions/{session_id}/executions/{execution_id}/input-control": "api.getTerminalInputControl";
     readonly "POST /sessions/{session_id}/executions/{execution_id}/input-control": "api.transferTerminalInputControl";
     readonly "POST /sessions/{session_id}/executions/{execution_id}/input": "api.inputControlledTerminal";

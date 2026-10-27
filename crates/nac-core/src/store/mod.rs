@@ -32,6 +32,7 @@ mod ssh_configurations;
 mod steering;
 mod task_discovery;
 mod task_evidence;
+pub(crate) mod task_launches;
 mod terminal_cleanups;
 mod terminal_selection;
 mod thread_events;
@@ -87,6 +88,11 @@ pub(crate) use task_evidence::record_run_outcome_with_connection;
 pub use task_evidence::{
     GoalOutcomeRecord, GoalRetirement, RunOutcomeDisposition, RunOutcomeRecord,
     RETAINED_GOAL_OUTCOMES, RETAINED_RUN_OUTCOMES, RUN_RESULT_EXCERPT_CHARS,
+};
+pub use task_launches::{
+    list_task_launches, load_project_git_source, load_task_launch, reconcile_task_launches,
+    reserve_task_launch, update_task_launch, TaskLaunchPhase, TaskLaunchRecord, TaskLaunchRequest,
+    TaskLaunchSource,
 };
 pub use terminal_cleanups::*;
 pub use terminal_selection::*;

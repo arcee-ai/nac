@@ -796,6 +796,11 @@ function Me(e) {
 	let t = e.transport.request.bind(e.transport);
 	return {
 		...je(e),
+		startTaskLaunch: (e) => t("POST", "/task-launches", { body: e }),
+		taskLaunchStatus: (e, n) => t("GET", `/task-launches/${encodeURIComponent(e)}`, { signal: n }),
+		taskLaunchInventory: (e, n) => t("GET", `/projects/${encodeURIComponent(e)}/task-launches`, { signal: n }),
+		taskLaunchSource: (e, n) => t("GET", `/projects/${encodeURIComponent(e)}/task-launch-source`, { signal: n }),
+		cancelTaskLaunch: (e) => t("POST", `/task-launches/${encodeURIComponent(e)}/cancel`),
 		getManagedUpgrade: (e) => t("GET", "/__managed/control/v0/upgrade", { signal: e }),
 		startManagedUpgrade: (e) => t("POST", "/__managed/control/v0/upgrade", {
 			body: {},

@@ -1,6 +1,11 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "POST /task-launches": "private:standalone Local retained task launch",
+  "GET /task-launches/{request_id}": "private:standalone passive launch status",
+  "POST /task-launches/{request_id}/cancel": "private:standalone launch cancellation",
+  "GET /projects/{project_id}/task-launches": "private:standalone retained workspace inventory",
+  "GET /projects/{project_id}/task-launch-source": "private:standalone Local launch eligibility",
   "GET /sessions/{session_id}/executions/{execution_id}/input-control":
     "api.getTerminalInputControl",
   "POST /sessions/{session_id}/executions/{execution_id}/input-control":

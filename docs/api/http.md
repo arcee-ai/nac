@@ -270,3 +270,35 @@ owner-equivalent NAC control, so the NAC endpoint must still sit behind an
 authenticated, encrypted ingress. The origin check protects against hostile
 web pages; it is not client authentication and bearer capability does not
 bypass it.
+
+## Retained Local task launches
+
+`POST /task-launches` accepts a canonical UUID `request_id`, exact saved
+`project_id`, title and initial prompt, with optional `invoking_session_id`,
+`git_ref` and first-binding `default_ref`. It always selects a new retained
+Local direct task, never an existing-checkout fallback. The source repository,
+effective subdirectory and destination path are derived and validated by the
+service; clients cannot supply arbitrary paths, a backend or trusted origin.
+The destination project's ordinary model defaults apply.
+Saved defaults bind canonical direct branch refs; symbolic/dynamic defaults
+are rejected. `git_ref: "HEAD"` remains valid per-launch intent. Exact retries
+compare their original arguments and return their original receipt.
+
+Accepted preparation, including source resolution and supervised Git processes,
+remains owned through complete server shutdown before persistence drains.
+Stopping fences late publication/wake-up; already committed pending input stays
+restartable without duplication.
+
+Identical retries return the original pin/session/input receipt. Changed
+arguments with the same request identity return 409. Two intentional identities
+create separate tasks. `GET /task-launches/{request_id}` and
+`GET /projects/{project_id}/task-launches` are passive status/inventory reads;
+`POST /task-launches/{request_id}/cancel` cancels preparation or the admitted run.
+`GET /projects/{project_id}/task-launch-source` reports eligibility and the saved
+default branch, distinguishing genuinely non-Git projects from broken bound Git
+sources. These standalone Local operations are classified separately from the
+experimental client package's public resource facade.
+
+See [retained task usage](../usage/retained-tasks.md) for defaults, preparation,
+restart reconciliation, source exclusion and retained-file behavior. No archive,
+cleanup, native-agent launch or remote isolation operation is provided here.
