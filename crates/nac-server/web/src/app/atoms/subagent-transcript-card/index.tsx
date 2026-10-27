@@ -1,4 +1,5 @@
 import type React from "react";
+import { useId } from "react";
 
 import { cn } from "../../lib/cn";
 import { sessionBehaviorName } from "../../lib/sessionBehavior";
@@ -24,6 +25,8 @@ interface SubagentTranscriptCardProps {
    * failed card's name ends with it, lowercased.
    */
   statusLabel?: string;
+  /** Why a failed card's call did not go through, under the title. */
+  error?: string | null;
   /** Session type, drawn in the header while the child is ready. */
   behavior?: SessionBehavior | null;
   /** A delegated session's relationship, which decides over its behavior. */
@@ -34,6 +37,8 @@ interface SubagentTranscriptCardProps {
   onOpen?: () => void;
   /** The child session route behind "Go to session". Without it there is no link. */
   sessionHref?: string | null;
+  /** Follows "Go to session" in the caller's router instead of loading the href. */
+  onSessionLinkClick?: React.MouseEventHandler<HTMLAnchorElement>;
   className?: string;
 }
 
@@ -110,17 +115,21 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
   title,
   status,
   statusLabel,
+  error,
   behavior,
   lineage,
   showBehaviorIcon,
   onOpen,
   sessionHref,
+  onSessionLinkClick,
   className,
 }) => {
+  const errorId = useId();
   const notFound = status === SubagentCardStatus.NotFound;
   const openable = !notFound && onOpen != null;
   const href = notFound ? null : sessionHref || null;
   const label = notFound ? undefined : statusLabel;
+  const reason = status === SubagentCardStatus.Failed ? error?.trim() || null : null;
   const statusName =
     status === SubagentCardStatus.Failed && label ? label.toLowerCase() : STATUS_NAME[status];
   // The glyph is decorative, so the name carries what it shows.
@@ -144,6 +153,7 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
         <button
           type="button"
           aria-label={openName}
+          aria-describedby={reason ? errorId : undefined}
           onClick={onOpen}
           className="absolute inset-0 rounded-[4px] outline-none hover:bg-btn-ghost-hovered active:bg-btn-ghost-pressed"
         />
@@ -160,9 +170,20 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
           lineage={lineage}
           showBehaviorIcon={showBehaviorIcon}
         />
-        <span className={cn("min-w-0 flex-1 truncate label-small", TITLE_TONE[status])}>
-          {notFound ? "Not found" : title}
-        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className={cn("truncate label-small", TITLE_TONE[status])}>
+            {notFound ? "Not found" : title}
+          </span>
+          {reason ? (
+            <p
+              id={errorId}
+              title={reason}
+              className="line-clamp-3 text-xs break-words text-error-primary"
+            >
+              {reason}
+            </p>
+          ) : null}
+        </div>
         {typeName && !openable ? <span className="sr-only">, {typeName}</span> : null}
       </div>
       {notFound ? (
@@ -180,7 +201,12 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
             <span className="min-w-0 truncate px-1 text-xs text-basic-muted">{label}</span>
           ) : null}
           {href ? (
-            <a href={href} aria-label={`Go to session ${title}`} className={LINK_CLASS}>
+            <a
+              href={href}
+              onClick={onSessionLinkClick}
+              aria-label={`Go to session ${title}`}
+              className={LINK_CLASS}
+            >
               <span className="truncate">Go to session</span>
               <Icon iconName={IconName.Right} size={16} aria-hidden className="shrink-0" />
             </a>

@@ -91,7 +91,7 @@ export function SubagentChatInputBox({
     >
       <div
         className={cn(
-          "relative flex items-end overflow-hidden rounded-[4px] bg-input py-2 pl-2",
+          "relative flex items-end rounded-[4px] bg-input pl-2 shadow-concave",
           running ? "pr-24" : "pr-12",
         )}
       >
@@ -102,7 +102,7 @@ export function SubagentChatInputBox({
           placeholder={placeholder}
           aria-label={placeholder}
           disabled={busy}
-          className="max-h-40 min-h-5 w-full resize-none bg-transparent px-1 text-small text-input outline-none placeholder:text-input-placeholder"
+          className="max-h-40 w-full resize-none bg-transparent px-2 py-3 text-medium text-input outline-none placeholder:text-input-placeholder"
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return;
@@ -114,7 +114,7 @@ export function SubagentChatInputBox({
         />
         <Button
           type="submit"
-          size={ButtonSize.Medium}
+          size={ButtonSize.Large}
           variant={ButtonVariant.Primary}
           content={ButtonContent.Icon}
           className="absolute right-0 bottom-0"
@@ -126,7 +126,7 @@ export function SubagentChatInputBox({
         {running ? (
           <Button
             type="button"
-            size={ButtonSize.Medium}
+            size={ButtonSize.Large}
             variant={ButtonVariant.Ghost}
             content={ButtonContent.Icon}
             className="absolute right-12 bottom-0"
@@ -169,7 +169,7 @@ export function SubagentChatInputBox({
               <Icon iconName={IconName.Info} size={16} />
             </span>
           </Tooltip>
-          {badge ? <Badge text={badge.text} color={badge.color} className="px-1 py-[2px]" /> : null}
+          {badge ? <Badge text={badge.text} color={badge.color} /> : null}
         </div>
         {permission}
       </div>

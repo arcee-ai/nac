@@ -27,7 +27,7 @@ import { RunFailureRecovery } from "@/app/components/inspector/RunFailureRecover
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useTranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
-import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
+import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
 import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -61,8 +61,8 @@ import type { SessionSnapshotResponse } from "@/app/types/api";
 interface TranscriptProps {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
-  /** Which side-panel tab is currently open. */
-  panel: SessionPanel;
+  /** Which side-panel tab is on screen; null while the side box is hidden. */
+  panel: SessionPanel | null;
   /** Brings the matching side panel forward when the chat points at a row. */
   onFocusPanel: (panel: SessionPanel) => void;
   /**
@@ -122,12 +122,10 @@ export function Transcript({
   } = useNativeRuntime().stores.runtimeStore;
 
   const {
-    useSelectedWorkset,
     useSelectedThreadEpisode,
     useSelectedInsight,
     useSelectedRevision,
     useSelectedFile,
-    selectWorkset,
     selectRevision,
     selectFile,
   } = useNativeRuntime().stores.sessionLayoutStore;
@@ -140,7 +138,7 @@ export function Transcript({
   const selectedInsight = useSelectedInsight();
   const threadEpisode = useSelectedThreadEpisode();
   const selectedThreadEpisode = selectedInsight?.kind === "thread" ? threadEpisode : null;
-  const selectedWorkset = useSelectedWorkset();
+  const selectedGroupId = selectedInsight?.kind === "group" ? selectedInsight.groupId : null;
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const toast = useToast();
@@ -334,13 +332,6 @@ export function Transcript({
   const showModelPending = (running || showPending) && !liveTurn;
 
   const { openThread } = useInsightsNavigation();
-  const focusWorkset = useCallback(
-    (id: string) => {
-      selectWorkset(id);
-      onFocusPanel("worksets");
-    },
-    [onFocusPanel, selectWorkset],
-  );
   // Opening a snapshot points the panel at that run's revision rather than at
   // the working tree: the run is what the badge describes, and the tree has
   // usually moved on — or been committed — since.
@@ -427,11 +418,11 @@ export function Transcript({
         role="status"
         aria-label={revealed ? undefined : "Loading conversation"}
         className={cn(
-          "pointer-events-none absolute inset-x-0 top-[96px] px-4 transition-opacity duration-150 ease-in-out md:top-[72px] md:px-0",
+          "pointer-events-none absolute inset-x-0 top-[96px] px-4 transition-opacity duration-150 ease-in-out md:top-[90px] md:px-0",
           revealed ? "opacity-0" : "opacity-100 delay-200",
         )}
       >
-        <div className="mx-auto w-full max-w-[720px]">
+        <div className="mx-auto w-full max-w-[640px]">
           <ShimmerLoader rows={3} rowClassName="h-[48px]" />
         </div>
       </div>
@@ -441,12 +432,12 @@ export function Transcript({
       {showInitialPrompts ? (
         <div
           className={cn(
-            "absolute inset-x-0 top-[96px] flex overflow-auto px-4 md:top-[72px] md:px-0",
+            "absolute inset-x-0 top-[96px] flex overflow-auto px-4 md:top-[90px] md:px-0",
             isMobile ? "bottom-[128px]" : "bottom-[136px]",
             fade,
           )}
         >
-          <div className="m-auto w-full max-w-[720px]">
+          <div className="m-auto w-full max-w-[640px]">
             <InitialPrompts />
           </div>
         </div>
@@ -458,10 +449,10 @@ export function Transcript({
         <div
           ref={contentRef}
           className={cn(
-            "flex flex-col pt-[96px] md:pt-[72px] [&>*]:shrink-0 px-4 md:px-0",
+            "flex flex-col pt-[96px] md:pt-[90px] [&>*]:shrink-0 px-4 md:px-0",
             // The phone's input is a bare pill rather than a padded card, so
             // the run-out under the last message shrinks with it.
-            isMobile ? "pb-[180px]" : "pb-[320px] mx-auto max-w-[720px]",
+            isMobile ? "pb-[180px]" : "pb-[320px] mx-auto max-w-[640px]",
           )}
         >
           {snapshot?.message_page?.has_older ? (
@@ -494,7 +485,7 @@ export function Transcript({
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {
               if (turn.kind === "delegated-completion") {
-                return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
+                return <DelegatedCompletionCard key={turn.key} turn={turn} />;
               }
               if (turn.kind === "user") {
                 const command = (snapshot?.shell_commands ?? []).find(
@@ -561,9 +552,8 @@ export function Transcript({
                   isLast={lastIsThisRun && !showModelPending}
                   activity={running && lastIsThisRun ? activity : undefined}
                   selectedThreadEpisode={panel === "insights" ? selectedThreadEpisode : null}
-                  selectedWorkset={panel === "worksets" ? selectedWorkset : null}
+                  selectedGroupId={panel === "insights" ? selectedGroupId : null}
                   onSelectThread={openThread}
-                  onSelectWorkset={focusWorkset}
                   userMessageIndex={precedingUser?.messageIndex}
                   userText={precedingUser?.text}
                   actionsDisabled={actionsBusy}
@@ -639,9 +629,7 @@ export function Transcript({
               active
               isLast
               selectedThreadEpisode={panel === "insights" ? selectedThreadEpisode : null}
-              selectedWorkset={panel === "worksets" ? selectedWorkset : null}
               onSelectThread={openThread}
-              onSelectWorkset={focusWorkset}
             />
           ) : null}
 

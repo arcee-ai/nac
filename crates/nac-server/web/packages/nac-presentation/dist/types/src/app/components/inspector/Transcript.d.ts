@@ -4,8 +4,8 @@ import type { SessionSnapshotResponse } from "../../types/api";
 interface TranscriptProps {
     sessionId: string;
     snapshot: SessionSnapshotResponse | null;
-    /** Which side-panel tab is currently open. */
-    panel: SessionPanel;
+    /** Which side-panel tab is on screen; null while the side box is hidden. */
+    panel: SessionPanel | null;
     /** Brings the matching side panel forward when the chat points at a row. */
     onFocusPanel: (panel: SessionPanel) => void;
     /**

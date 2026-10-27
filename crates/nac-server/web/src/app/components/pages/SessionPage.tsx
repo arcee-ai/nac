@@ -44,6 +44,13 @@ import {
   useWorkspaceRevisionChanges,
 } from "@/app/services/queries";
 
+// 80% of the row, between 480px and 800px, but never so wide that the chat
+// beside it gets less than the 200px it has in a 1280px window with the
+// sidebar open, or less than half of a narrower row. The bounds sit inside the
+// width rather than in `min-w` / `max-w`, which would stop the collapse tween
+// dead at a bound.
+const SIDE_PANEL_WIDTH = "w-[min(clamp(480px,80%,800px),max(50%,100%_-_200px))]";
+
 /**
  * Opens an SSH browse handshake once when landing on a remote session that is
  * not already marked connected. A failed attempt stays disconnected so the
@@ -261,6 +268,9 @@ export default function SessionPage() {
   // phone dialog. The detail pane publishes it with its running bit, so the
   // title shimmers along with it.
   const insightThread = effectivePanel === "insights" ? shownThread : null;
+  // The chat marks the rows the side box shows, so none while it is hidden:
+  // slid off to its rail, or on a phone, with the dialog closed.
+  const sideBoxShown = expanded || (!isMobile && !collapsed);
 
   const sideBox = (
     <SessionSideBox
@@ -275,12 +285,7 @@ export default function SessionPage() {
   const page = (
     <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground">
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
-        <div
-          className={cn(
-            "flex flex-col items-center flex-1 min-w-0 h-full",
-            isMobile ? "px-0" : "px-2",
-          )}
-        >
+        <div className="flex flex-col items-center flex-1 min-w-0 h-full">
           <div className="flex flex-col flex-1 min-h-0 w-full relative">
             {isMobile && (entry?.lineage ?? snapshot?.lineage) ? (
               <div className="pointer-events-none absolute inset-x-0 top-16 z-20 flex items-center px-3 pt-2">
@@ -303,7 +308,7 @@ export default function SessionPage() {
             <Transcript
               sessionId={id}
               snapshot={snapshot}
-              panel={effectivePanel}
+              panel={sideBoxShown ? effectivePanel : null}
               onFocusPanel={focusPanel}
               errorNotice={errorNotice}
             />
@@ -313,7 +318,7 @@ export default function SessionPage() {
                 "absolute bottom-0 left-0 right-0",
                 // The phone composer paints its own ground fade and owns its
                 // padding, so it has to reach past the column's inset.
-                isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[720px]",
+                isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[640px]",
               )}
             >
               <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
@@ -331,7 +336,7 @@ export default function SessionPage() {
               className={cn(
                 "relative h-full shrink-0",
                 animateSidePanel && "transition-[width] duration-300 ease-out",
-                collapsed ? "w-[52px]" : "w-1/2",
+                collapsed ? "w-[52px]" : SIDE_PANEL_WIDTH,
               )}
               style={animateSidePanel ? undefined : { transition: "none" }}
             >
@@ -356,7 +361,8 @@ export default function SessionPage() {
           */}
             <div
               className={cn(
-                "absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0 w-1/2",
+                "absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0",
+                SIDE_PANEL_WIDTH,
                 animateSidePanel && "transition-transform duration-300 ease-out",
                 collapsed && "translate-x-full",
               )}
@@ -365,7 +371,7 @@ export default function SessionPage() {
               inert={collapsed}
             >
               <div className="flex flex-col flex-1 min-h-0">
-                {/* While the dialog is up it owns the panels, so this half stays
+                {/* While the dialog is up it owns the panels, so this column stays
                   empty behind the scrim instead of running them twice. */}
                 <div className="flex-1 min-h-0">{expanded ? null : sideBox}</div>
               </div>

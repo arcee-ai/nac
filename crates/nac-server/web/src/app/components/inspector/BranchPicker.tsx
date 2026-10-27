@@ -2,6 +2,10 @@ import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useState } from "react";
 
 import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
   Icon,
   IconName,
   Input,
@@ -16,6 +20,7 @@ import {
   TabButton,
   TabButtonSize,
 } from "@/app/atoms";
+import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useBranches, useSwitchBranch } from "@/app/services/queries";
 
@@ -78,20 +83,32 @@ function Status({ busy, children }: { busy?: boolean; children: React.ReactNode 
 }
 
 /**
- * The branch chip in the session header, opening a list of local branches with an
- * escape hatch for making a new one. Switching is refused while an agent could
- * be working in the checkout; the server enforces the same rules, because
- * another session may share this directory.
+ * The branch button in the session header, opening a list of local branches
+ * with an escape hatch for making a new one. Switching is refused while an
+ * agent could be working in the checkout; the server enforces the same rules,
+ * because another session may share this directory.
  */
 export function BranchPicker({
   sessionId,
   branch,
   placement = PopoverPlacement.TopRight,
+  tertiary = false,
+  labelClassName,
+  iconClassName,
 }: {
   sessionId: string;
   branch: string;
   /** Footer chips open upward. A header chip opens downward. */
   placement?: PopoverPlacement;
+  /**
+   * The desktop session header draws a borderless tertiary button. The phone
+   * dialog title keeps the padded chip, the bigger target for a finger.
+   */
+  tertiary?: boolean;
+  /** Classes for the tertiary button's branch name; its accessible name stays. */
+  labelClassName?: string;
+  /** Classes for the tertiary button's branch icon. */
+  iconClassName?: string;
 }) {
   const { useRunning } = useNativeRuntime().stores.runtimeStore;
 
@@ -107,6 +124,7 @@ export function BranchPicker({
     setQuery("");
     switchBranch.reset();
   };
+  const toggle = () => (open ? close() : setOpen(true));
 
   const needle = query.trim();
   const branches = (data?.branches ?? []).filter((item) =>
@@ -215,18 +233,35 @@ export function BranchPicker({
         </div>
       }
     >
-      <button
-        type="button"
-        className="flex items-center gap-[6px] min-w-0 pl-1 pr-3 py-1 rounded-[4px] btn-ghost"
-        aria-expanded={open}
-        aria-label={`Branch: ${branch}`}
-        onClick={() => (open ? close() : setOpen(true))}
-      >
-        <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
-        <span className="label-micro text-btn-secondary truncate max-w-[64px] xl:max-w-[128px]">
-          {branch}
-        </span>
-      </button>
+      {tertiary ? (
+        <Button
+          variant={ButtonVariant.Tertiary}
+          size={ButtonSize.Small}
+          content={ButtonContent.IconLeft}
+          className="min-w-0"
+          aria-expanded={open}
+          aria-label={`Branch: ${branch}`}
+          onClick={toggle}
+        >
+          <Icon iconName={IconName.Scheme} size={16} className={cn("shrink-0", iconClassName)} />
+          <span className={cn("truncate max-w-[64px] xl:max-w-[128px]", labelClassName)}>
+            {branch}
+          </span>
+        </Button>
+      ) : (
+        <button
+          type="button"
+          className="flex items-center gap-[6px] min-w-0 pl-1 pr-3 py-1 rounded-[4px] btn-ghost"
+          aria-expanded={open}
+          aria-label={`Branch: ${branch}`}
+          onClick={toggle}
+        >
+          <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
+          <span className="label-micro text-btn-secondary truncate max-w-[64px] xl:max-w-[128px]">
+            {branch}
+          </span>
+        </button>
+      )}
     </Popover>
   );
 }

@@ -13,9 +13,10 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { formatMessageDate } from "@/app/features/insights/transcript/messageDate";
+import { usePromptCreatedAt } from "@/app/features/insights/transcript/transcriptTurns";
 import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 interface UserMessageProps {
   text: string;
@@ -28,7 +29,10 @@ interface UserMessageProps {
    * bubble so the injection is visible; null for an ordinary prompt.
    */
   invokedSkills?: string[] | null;
-  /** Shown on hover when the message has a known time. */
+  /**
+   * Shown when the transcript has no time of its own for the message. The
+   * transcript's time for `messageIndex` wins, in the chat's English format.
+   */
   timestamp?: string | null;
   /**
    * Raw snapshot index the actions address. Absent while the message is still
@@ -54,29 +58,29 @@ interface UserMessageProps {
   readOnly?: boolean;
 }
 
-/** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
-export const UserMessage = memo(function UserMessage({
+type UserMessageBodyProps = Omit<UserMessageProps, "timestamp"> & { date: string | null };
+
+const UserMessageBody = memo(function UserMessageBody({
   text,
   terminalSelection,
   sessionId,
   pending = false,
   invokedSkills = null,
-  timestamp = null,
+  date,
   messageIndex,
   onRefresh = null,
   onRevert = null,
   actionsDisabled = false,
   readOnly = false,
-}: UserMessageProps) {
+}: UserMessageBodyProps) {
   perfRender("UserMessage");
   const canRefresh = !readOnly && onRefresh != null && messageIndex != null;
   const canRevert = !readOnly && onRevert != null && messageIndex != null;
-  const isMobile = useIsMobile();
   return (
-    <div className="group/user-msg flex flex-col items-end w-full max-w-full pt-4 pb-8">
+    <div className="group/user-msg flex flex-col items-end w-full max-w-full py-6">
       <div
         className={cn(
-          "min-w-0 max-w-full py-3 px-5 rounded-[12px] bg-elevation-sublevel-variant-B shadow-convex",
+          "min-w-0 max-w-full p-5 rounded-[12px] bg-elevation-sublevel-variant-B shadow-convex",
           "label-small text-basic-primary whitespace-pre-wrap break-words",
           pending && "opacity-60",
         )}
@@ -108,7 +112,7 @@ export const UserMessage = memo(function UserMessage({
       {!pending ? (
         <div
           className={cn(
-            "flex items-center justify-end gap-3 pt-3",
+            "flex items-center justify-end gap-3 max-w-full min-w-0 pt-2",
             // Keep the row hittable while moving from the bubble to the actions.
             "opacity-0 pointer-events-none transition-opacity duration-150",
             "group-hover/user-msg:opacity-100 group-hover/user-msg:pointer-events-auto",
@@ -117,9 +121,9 @@ export const UserMessage = memo(function UserMessage({
             "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
           )}
         >
-          {timestamp ? (
-            <span className="label-micro text-basic-tertiary whitespace-nowrap truncate">
-              {timestamp}
+          {date ? (
+            <span className="min-w-0 label-micro text-basic-muted whitespace-nowrap truncate">
+              {date}
             </span>
           ) : null}
 
@@ -129,13 +133,12 @@ export const UserMessage = memo(function UserMessage({
               position={TooltipPosition.BottomLeft}
             >
               <Button
-                size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Ghost}
                 content={ButtonContent.Icon}
                 aria-label="Regenerate from original prompt"
                 disabled={actionsDisabled}
                 onClick={() => onRefresh(messageIndex)}
-                className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
               >
                 <Icon iconName={IconName.Refresh} size={16} />
               </Button>
@@ -145,13 +148,12 @@ export const UserMessage = memo(function UserMessage({
           {canRevert ? (
             <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomLeft}>
               <Button
-                size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Ghost}
                 content={ButtonContent.Icon}
                 aria-label="Revert to this snapshot"
                 disabled={actionsDisabled}
                 onClick={() => onRevert(messageIndex, text)}
-                className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
               >
                 <Icon iconName={IconName.TurnLeft} size={16} />
               </Button>
@@ -163,12 +165,11 @@ export const UserMessage = memo(function UserMessage({
             >
               <span className="inline-flex">
                 <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Ghost}
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
                   disabled
-                  className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
                 >
                   <Icon iconName={IconName.TurnLeft} size={16} />
                 </Button>
@@ -178,14 +179,19 @@ export const UserMessage = memo(function UserMessage({
 
           <CopyButton
             value={text}
-            size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-            variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+            size={ButtonSize.Small}
+            variant={ButtonVariant.Ghost}
             title={terminalSelection ? "Copy canonical message" : "Copy message"}
             position={TooltipPosition.BottomLeft}
-            className="md:!h-4 md:!min-h-4 md:!min-w-4 md:!p-0"
           />
         </div>
       ) : null}
     </div>
   );
+});
+
+/** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
+export const UserMessage = memo(function UserMessage({ timestamp, ...props }: UserMessageProps) {
+  const createdAt = usePromptCreatedAt(props.messageIndex);
+  return <UserMessageBody {...props} date={formatMessageDate(createdAt) ?? timestamp ?? null} />;
 });

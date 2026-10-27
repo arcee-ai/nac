@@ -381,6 +381,21 @@ const config = {
             animation: "none",
           },
         },
+        // Figma "Shimmer Text": primary through the disabled button text and back.
+        ".text-shimmer-primary": {
+          "background-image":
+            "linear-gradient(90deg, var(--color-text-basic-primary), var(--color-text-btn-secondary-disabled), var(--color-text-basic-primary))",
+          "background-size": "200% 100%",
+          "background-position": "200% 0",
+          animation: "shimmer 2s linear infinite",
+          "-webkit-background-clip": "text",
+          "background-clip": "text",
+          "-webkit-text-fill-color": "transparent",
+          color: "transparent",
+          "@media (prefers-reduced-motion: reduce)": {
+            animation: "none",
+          },
+        },
       });
     },
   ],

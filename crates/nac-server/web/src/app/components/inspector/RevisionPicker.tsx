@@ -1,6 +1,10 @@
 import { useState } from "react";
 
 import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
   Icon,
   IconName,
   Loader,
@@ -56,8 +60,8 @@ function Row({
 }
 
 /**
- * The snapshot chip in the session header, switching the panels between the live
- * working tree and the checkout as it stood at the end of an earlier run.
+ * The snapshot button in the session header, switching the panels between the
+ * live working tree and the checkout as it stood at the end of an earlier run.
  *
  * Nothing here writes: picking a revision only changes what is read, so it is
  * safe during a run and needs none of the guards the branch picker carries.
@@ -67,12 +71,18 @@ export function RevisionPicker({
   selected,
   onSelect,
   placement = PopoverPlacement.TopRight,
+  labelClassName,
+  iconClassName,
 }: {
   sessionId: string;
   selected: number | null;
   onSelect: (revision: number | null) => void;
   /** Footer chips open upward. A header chip opens downward. */
   placement?: PopoverPlacement;
+  /** Classes for the snapshot's name; the button's accessible name stays. */
+  labelClassName?: string;
+  /** Classes for the button's icon. */
+  iconClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -93,6 +103,7 @@ export function RevisionPicker({
       open={open}
       onClose={() => setOpen(false)}
       placement={placement}
+      sticky
       className="min-w-0"
       content={
         <>
@@ -135,21 +146,22 @@ export function RevisionPicker({
         </>
       }
     >
-      <button
-        type="button"
-        className={cn(
-          "flex items-center gap-[6px] min-w-0 pl-1 pr-3 py-1 rounded-[4px] btn-ghost",
-          selected != null && "text-info-primary",
-        )}
+      <Button
+        variant={ButtonVariant.Tertiary}
+        size={ButtonSize.Small}
+        content={ButtonContent.IconLeft}
+        className="min-w-0"
         aria-expanded={open}
         aria-label={`Snapshot: ${label}`}
         onClick={() => setOpen(!open)}
       >
-        <Icon iconName={IconName.History} size={16} className="shrink-0" />
-        <span className="label-micro text-btn-secondary truncate max-w-[64px] xl:max-w-[128px]">
+        <Icon iconName={IconName.History} size={16} className={cn("shrink-0", iconClassName)} />
+        {/* The button's own colour cannot be overridden, so a picked snapshot
+            tints the label it holds instead. */}
+        <span className={cn("truncate", selected != null && "text-info-primary", labelClassName)}>
           {label}
         </span>
-      </button>
+      </Button>
     </Popover>
   );
 }

@@ -114,7 +114,9 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
           await fs.readFile(path.join(workspace, "screen_geometry.json"), "utf8"),
         );
         return (
-          after.cols !== before.cols && geometry[0] === after.cols && geometry[1] === after.rows
+          (after.cols !== before.cols || after.rows !== before.rows) &&
+          geometry[0] === after.cols &&
+          geometry[1] === after.rows
         );
       })
       .toBe(true);

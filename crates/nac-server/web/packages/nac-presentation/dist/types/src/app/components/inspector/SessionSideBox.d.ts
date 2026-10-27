@@ -12,7 +12,7 @@ interface SessionSideBoxProps {
     onPanelChange: (panel: SessionPanel) => void;
 }
 /**
- * The right half of the session screen: one box with the Insights / Files /
+ * The right column of the session screen: one box with the Insights / Files /
  * Worksets / Subagents panels, sized by the shared layout store. Session
  * switching lives in the left sidebar. On a phone the panels are the body of
  * the modal box that SessionPage puts them in, and its chrome — header, bottom

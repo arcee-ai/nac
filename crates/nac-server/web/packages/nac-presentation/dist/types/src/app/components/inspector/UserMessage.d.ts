@@ -10,7 +10,10 @@ interface UserMessageProps {
      * bubble so the injection is visible; null for an ordinary prompt.
      */
     invokedSkills?: string[] | null;
-    /** Shown on hover when the message has a known time. */
+    /**
+     * Shown when the transcript has no time of its own for the message. The
+     * transcript's time for `messageIndex` wins, in the chat's English format.
+     */
     timestamp?: string | null;
     /**
      * Raw snapshot index the actions address. Absent while the message is still
@@ -36,5 +39,5 @@ interface UserMessageProps {
     readOnly?: boolean;
 }
 /** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
-export declare const UserMessage: import("react").MemoExoticComponent<({ text, terminalSelection, sessionId, pending, invokedSkills, timestamp, messageIndex, onRefresh, onRevert, actionsDisabled, readOnly, }: UserMessageProps) => import("react").JSX.Element>;
+export declare const UserMessage: import("react").MemoExoticComponent<({ timestamp, ...props }: UserMessageProps) => import("react").JSX.Element>;
 export {};
