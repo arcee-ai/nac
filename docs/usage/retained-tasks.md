@@ -48,6 +48,8 @@ remain at the same path. New launches and resume fail closed in that case.
 There is no automatic repository rebinding or rewriting of old launch receipts
 or materialization checkpoints. Inventory, receipts and retained workspaces
 remain available for inspection.
+Durable identity and trusted rebinding are scoped separately in
+[ALL-494](https://linear.app/arcee/issue/ALL-494/qualify-durable-git-source-identity-and-trusted-rebinding-after).
 
 Complete graceful server shutdown stops new preparation, terminates/reaps its
 Git processes and waits for accepted preparation and publication before draining
