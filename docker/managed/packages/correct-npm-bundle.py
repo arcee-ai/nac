@@ -33,6 +33,10 @@ def unpack(data, root):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(archive.extractfile(member).read())
                 target.chmod(member.mode & 0o755)
+    # These are public package assets. copytree preserves the private temporary
+    # root's mode, so normalize traversal/readability before copying as root.
+    for path in [root, *root.rglob("*")]:
+        path.chmod(0o755 if path.is_dir() else (path.stat().st_mode & 0o755) | 0o444)
 
 
 def probe(recipe, root, mode, vulnerable=False):
