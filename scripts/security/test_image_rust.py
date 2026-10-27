@@ -57,6 +57,7 @@ class RustInventoryTests(unittest.TestCase):
 
     def test_missing_components_wrong_target_and_unexpected_toolchain_fail(self):
         for field, value in (("targets", "aarch64-unknown-linux-gnu"), ("components", "rustc"),
+                             ("components", self.raw["components"].replace("clippy-", "clippy-preview-")),
                              ("active", "stable (default)"), ("toolchains", []), ("payload", {})):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 rust.rust_inventory(dict(self.raw, **{field: value}), self.pins, self.root)
@@ -161,6 +162,31 @@ class RustAdvisoryTests(unittest.TestCase):
             self.assertEqual(normal[0]["disposition"], "withdrawn")
             item["withdrawn_at"] = None
 
+    def test_withdrawn_state_requires_timestamp_and_keeps_disposition(self):
+        item = record()
+        item["state"] = "withdrawn"
+        with self.assertRaisesRegex(ValueError, "withdrawal timestamp"):
+            advisories.advisory_records("cargo", [item], self.coverage)
+        item["withdrawn_at"] = "2023-08-02T00:00:00Z"
+        normal, found = advisories.advisory_records("cargo", [item], self.coverage)
+        self.assertEqual(found, [])
+        self.assertEqual(normal[0]["disposition"], "withdrawn")
+
+    def test_nullable_or_free_text_fixed_metadata_never_controls_matching(self):
+        coverage = copy.deepcopy(self.coverage)
+        coverage["components"]["cargo"]["version"] = "0.72.1"
+        for value in (None, "", ">= 0.72.2", "0.72.2, 1.71.1", "no patch published"):
+            item = record()
+            item["vulnerabilities"][0]["patched_versions"] = value
+            normal, found = advisories.advisory_records("cargo", [item], coverage)
+            self.assertEqual(len(found), 1)
+            self.assertEqual(found[0]["severity"], "High")
+            self.assertEqual(found[0]["fixed"], [value] if value else [])
+            self.assertEqual(normal[0]["patched_versions"], value or "")
+        item["vulnerabilities"][0]["patched_versions"] = ["unsupported schema"]
+        with self.assertRaises(ValueError):
+            advisories.advisory_records("cargo", [item], coverage)
+
     def test_unsupported_mixed_ranges_or_identity_or_schema_never_clear(self):
         for expression in ("*", "^1.72", ">= 0.72, < 1.72", "< 1.72-beta", "", ">= 2.0.0", "<= 1.72", ">= 1.72.0, < 1.71.0"):
             with self.subTest(expression=expression), self.assertRaises(ValueError):
@@ -186,6 +212,12 @@ class RustAdvisoryTests(unittest.TestCase):
         self.assertEqual(len(evidence["queries"]), 5)
         for query in evidence["queries"]:
             self.assertEqual(rust.digest((self.root / query["file"]).read_bytes()), query["sha256"])
+
+    def test_small_server_clock_skew_is_bounded_without_extending_staleness(self):
+        def fetch(url):
+            return b"[]", {"http_status": 200, "content-type": "application/json",
+                           "date": format_datetime(NOW + dt.timedelta(seconds=300))}
+        self.assertEqual(advisories.query_rust(self.coverage, self.root, fetch=fetch, now=NOW), [])
 
     def test_multiple_complete_pages_are_evaluated_and_duplicates_fail(self):
         alphabet = "23456789cfghjmpqrvwx"
@@ -219,6 +251,7 @@ class RustAdvisoryTests(unittest.TestCase):
     def test_pagination_malformed_stale_failed_or_truncated_feeds_fail(self):
         headers = {"http_status": 200, "content-type": "application/json", "date": format_datetime(NOW)}
         for raw, extra in ((b'{}', {}), (b'[]', {"http_status": 403}), (b'[', {}), (b'[]', {"date": format_datetime(NOW - dt.timedelta(days=2))}),
+                           (b'[]', {"date": format_datetime(NOW + dt.timedelta(seconds=301))}),
                            (b'[]', {"link": '<https://evil.test/>; rel="next"'}),
                            (json.dumps([record()] * 100).encode(), {}),
                            (b'[]', {"link": '<https://api.github.com/repos/rust-lang/rust/security-advisories?per_page=100&page=2>; rel="next"'})):
