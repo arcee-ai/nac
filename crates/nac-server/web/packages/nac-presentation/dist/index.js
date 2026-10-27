@@ -3029,9 +3029,12 @@ var gl = /* @__PURE__ */ function(e) {
 				size: u.icon,
 				className: xl
 			}),
-			/* @__PURE__ */ Y("span", {
+			/* @__PURE__ */ X("span", {
 				className: P("min-w-0 flex-1 truncate text-left", u.label, d && P(d.name, xl)),
-				children: t
+				children: [t, d ? /* @__PURE__ */ X("span", {
+					className: "sr-only",
+					children: [", ", d.title]
+				}) : null]
 			}),
 			a && !f ? /* @__PURE__ */ Y(hl, {
 				status: a,

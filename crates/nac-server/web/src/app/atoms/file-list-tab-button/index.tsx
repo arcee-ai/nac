@@ -130,6 +130,7 @@ const FileListTabButton: React.FC<FileListTabButtonProps> = ({
         )}
       >
         {name}
+        {tone ? <span className="sr-only">, {tone.title}</span> : null}
       </span>
       {status && !folder ? (
         <GitStatusLabel status={status} className={DIMMED_WHEN_DISABLED} />
