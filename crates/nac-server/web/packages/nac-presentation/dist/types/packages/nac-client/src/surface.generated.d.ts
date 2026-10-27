@@ -29,6 +29,7 @@ export declare const NAC_API_SURFACE: {
     readonly "POST /sessions/{session_id}/user-terminals/{terminal_id}/resize": "api.resizeUserTerminal";
     readonly "GET /sessions/{session_id}/messages": "api.getMessages";
     readonly "GET /sessions/{session_id}/threads/{thread_name}/events": "api.getThreadEvents";
+    readonly "GET /sessions/{session_id}/tool-calls/{call_id}": "api.getToolCallContent";
     readonly "GET /auth": "api.listManagedAuth";
     readonly "DELETE /auth/{provider}": "api.managedLogout";
     readonly "POST /auth/{provider}/login": "api.startManagedLogin";

@@ -72,6 +72,8 @@ export interface UserTurn {
     messageIndex: number;
     /** When the message entered the transcript log, if the backend knows. */
     createdAt: string | null;
+    /** Submitted but not in the snapshot yet, so its index is only expected. */
+    pending?: true;
 }
 export interface ModelTurn {
     kind: "model";
@@ -104,6 +106,11 @@ export declare const STREAMING_TURN_KEY = "model-streaming";
 export interface StreamedOutput {
     text: string;
     reasoning: string;
+    /**
+     * No more of it is coming, as its call was committed or its run ended, so
+     * once the snapshot holds its answer it holds all of it.
+     */
+    settled?: boolean;
 }
 /** Public for the threads list, which ranks rows by the open DAG batch. */
 export declare function dispatchThreadName(call: ToolCall): string;
@@ -118,18 +125,6 @@ export declare function dispatchActions(messages: SessionSnapshotResponse["messa
  * Cycles / duplicate names fall back to a single row so the UI still renders.
  */
 export declare function partitionThreadCalls(calls: ToolCall[]): ToolCall[][];
-/**
- * Thread names whose latest dispatch exists only because the user stopped the
- * run. A later dispatch of the same name — finished or still in flight —
- * drops off this set, so Continue does not keep painting the live card as
- * cancelled.
- *
- * A stop does not always write a tool result for every dispatch — a name that
- * never started has no `[tool call cancelled by user]` row. Those still belong
- * here: the run ended without them, so a checkmark would claim work that never
- * ran.
- */
-export declare function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string>;
 /**
  * Show model output that has reached the browser ahead of the snapshot.
  *
@@ -148,7 +143,13 @@ export declare function withStreamedOutput(turns: TranscriptTurn[], stream: Stre
  * this run's output inside that turn and read as its work — its duration, and
  * the snapshot its run captured, would then describe this output too.
  */
-promptUncommitted?: boolean): TranscriptTurn[];
+promptUncommitted?: boolean,
+/**
+ * Key of a turn the output has to open, since its first message is not
+ * persisted yet. The default stays out of the committed namespace; a caller
+ * passes a committed key only when it is the one this turn will be given.
+ */
+key?: string): TranscriptTurn[];
 /**
  * Group the snapshot messages into user bubbles and model messages. Live thread
  * state comes from the SSE store so a wave animates before the snapshot lands.
