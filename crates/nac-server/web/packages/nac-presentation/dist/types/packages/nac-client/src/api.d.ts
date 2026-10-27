@@ -490,6 +490,7 @@ export declare function createNacApi(nacClient: NacClient): {
         required: boolean;
         server_name?: string | null;
         server_version?: string | null;
+        sessions_blocked: boolean;
         state: import("./openapi.generated.js").components["schemas"]["McpRuntimeState"];
         tool_count: number;
     }>;
@@ -501,6 +502,7 @@ export declare function createNacApi(nacClient: NacClient): {
         required: boolean;
         server_name?: string | null;
         server_version?: string | null;
+        sessions_blocked: boolean;
         state: import("./openapi.generated.js").components["schemas"]["McpRuntimeState"];
         tool_count: number;
     }>;
@@ -512,6 +514,7 @@ export declare function createNacApi(nacClient: NacClient): {
         required: boolean;
         server_name?: string | null;
         server_version?: string | null;
+        sessions_blocked: boolean;
         state: import("./openapi.generated.js").components["schemas"]["McpRuntimeState"];
         tool_count: number;
     }>;

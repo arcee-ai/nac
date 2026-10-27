@@ -221,4 +221,30 @@ describe("MCP OAuth controls", () => {
     await screen.findByRole("button", { name: "Authenticate" });
     expect(screen.queryByRole("link", { name: "Continue OAuth authorization" })).toBeNull();
   });
+  it("says log out does not revoke the provider grant, linking Slack's revoke steps", async () => {
+    const connected = () =>
+      new Response(JSON.stringify({ status: "connected" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => connected()),
+    );
+
+    render(<McpOAuthPanel serverName="slack" endpoint="https://mcp.slack.com/mcp" />);
+    await screen.findByRole("button", { name: "Log out" });
+    expect(screen.getByText(/It does not revoke NAC's access at the provider/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Revoke it in Slack" }).getAttribute("href")).toBe(
+      "https://slack.com/help/articles/360003125231",
+    );
+
+    cleanup();
+    render(<McpOAuthPanel serverName="docs" endpoint="https://mcp.example.test/mcp" />);
+    await screen.findByRole("button", { name: "Log out" });
+    expect(screen.queryByRole("link", { name: "Revoke it in Slack" })).toBeNull();
+    expect(
+      screen.getByText(/remove NAC's access in the provider's connected-app settings/),
+    ).toBeTruthy();
+  });
 });

@@ -1,5 +1,10 @@
 use super::*;
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static CONNECTION_CHANGE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +28,8 @@ pub struct McpRuntimeStatus {
     pub server_name: Option<String>,
     pub server_version: Option<String>,
     pub tool_count: usize,
+    /// The user disconnected this server; sessions refuse to use it until it is connected.
+    pub sessions_blocked: bool,
 }
 
 struct RuntimeEntry {
@@ -49,6 +56,7 @@ impl McpRuntimeManager {
 
     pub async fn statuses(&self) -> Result<Vec<McpRuntimeStatus>> {
         let (defaults, servers) = self.configured_servers()?;
+        let connection_state = self.connection_state()?;
         let entries = self.entries.read().await;
         let mut statuses = Vec::with_capacity(servers.len());
         for (name, config) in servers {
@@ -64,6 +72,15 @@ impl McpRuntimeManager {
                 status.state = McpRuntimeState::Failed;
                 status.error = Some(format!("invalid timeout configuration: {error:#}"));
             }
+            status.sessions_blocked = match connection_state.is_disconnected(&name) {
+                Ok(blocked) => blocked,
+                Err(error) => {
+                    status.error = Some(format!(
+                        "disconnect state is unreadable; connect to repair it: {error:#}"
+                    ));
+                    true
+                }
+            };
             statuses.push(status);
         }
         Ok(statuses)
@@ -75,10 +92,7 @@ impl McpRuntimeManager {
     }
 
     async fn connect_inner(&self, name: &str) -> Result<McpRuntimeStatus> {
-        let (defaults, mut servers) = self.configured_servers()?;
-        let config = servers
-            .remove(name)
-            .with_context(|| format!("MCP server '{name}' was not found"))?;
+        let (defaults, config) = self.change_connection(name, false)?;
         if !config.enabled {
             let status = McpRuntimeStatus {
                 state: McpRuntimeState::Disabled,
@@ -151,6 +165,7 @@ impl McpRuntimeManager {
                 .and_then(|info| info.server_info.as_ref())
                 .map(|info| info.version.clone()),
             tool_count: tools.len(),
+            sessions_blocked: false,
         };
         let service = Arc::new(tokio::sync::RwLock::new(service));
         self.set_entry(status.clone(), Some(service)).await;
@@ -159,11 +174,8 @@ impl McpRuntimeManager {
 
     pub async fn disconnect(&self, name: &str) -> Result<McpRuntimeStatus> {
         let _operation = self.operation.lock().await;
-        let (_defaults, mut servers) = self.configured_servers()?;
-        let config = servers
-            .remove(name)
-            .with_context(|| format!("MCP server '{name}' was not found"))?;
-        let status = if config.enabled {
+        let (_, config) = self.change_connection(name, true)?;
+        let mut status = if config.enabled {
             disconnected_status(name, &config)
         } else {
             McpRuntimeStatus {
@@ -171,8 +183,70 @@ impl McpRuntimeManager {
                 ..disconnected_status(name, &config)
             }
         };
+        status.sessions_blocked = true;
         self.set_entry(status.clone(), None).await;
         Ok(status)
+    }
+
+    /// Assigns a validated new server its own identity before making its config visible.
+    /// The caller holds the configuration write lease.
+    pub fn insert_configuration(
+        &self,
+        path: &Path,
+        configuration: McpServerConfigurationRecord,
+    ) -> std::result::Result<McpServerConfigurationRecord, McpServerConfigurationStoreError> {
+        let state = self
+            .connection_state()
+            .map_err(McpServerConfigurationStoreError::Store)?;
+        super::file_config::insert_mcp_server_configuration_with(path, configuration, |name| {
+            state
+                .claim(name)
+                .map_err(McpServerConfigurationStoreError::Store)
+        })
+    }
+
+    /// Publishes a validated patch while keeping both rename names bound until commit.
+    /// The caller holds the configuration write lease used to derive `revision`.
+    pub fn update_configuration_at_revision(
+        &self,
+        path: &Path,
+        name: &str,
+        configuration: McpServerConfigurationRecord,
+        revision: super::file_config::DocumentRevision,
+    ) -> std::result::Result<McpServerConfigurationRecord, McpServerConfigurationStoreError> {
+        use McpServerConfigurationStoreError::Store;
+        let state = self.connection_state().map_err(Store)?;
+        let record = super::file_config::update_mcp_server_configuration_with(
+            path,
+            name,
+            configuration,
+            revision,
+            |target| {
+                if name != target {
+                    state.prepare_rename(name, target).map_err(Store)?;
+                }
+                Ok(())
+            },
+        )?;
+        if name != record.name {
+            state.finish_rename(name, &record.name).map_err(Store)?;
+        }
+        Ok(record)
+    }
+
+    /// After a committed create, gives the server an identity of its own; runs under the config write lease.
+    pub fn claim_connection(&self, name: &str) -> Result<()> {
+        self.connection_state()?.claim(name)
+    }
+
+    /// After a committed rename, moves sessions that mounted the old name to the new one.
+    pub fn rename_connection(&self, old_name: &str, new_name: &str) -> Result<()> {
+        self.connection_state()?.rename(old_name, new_name)
+    }
+
+    /// After a committed delete, lets a new server reuse the name without inheriting its sessions.
+    pub fn forget_connection(&self, name: &str) -> Result<()> {
+        self.connection_state()?.forget(name)
     }
 
     pub async fn reload(&self, name: &str) -> Result<McpRuntimeStatus> {
@@ -208,6 +282,7 @@ impl McpRuntimeManager {
             server_name: None,
             server_version: None,
             tool_count: 0,
+            sessions_blocked: false,
         };
         self.set_entry(status.clone(), None).await;
         status
@@ -235,6 +310,42 @@ impl McpRuntimeManager {
         if let Some(removed) = removed {
             close_shared_mcp_service(removed).await;
         }
+    }
+
+    fn connection_state(&self) -> Result<super::admission::ConnectionState> {
+        super::admission::ConnectionState::for_home(&PathContext::new(&self.cwd))
+    }
+
+    /// The config revision and its admission edit share a lease; no await occurs inside it.
+    fn change_connection(
+        &self,
+        name: &str,
+        disconnected: bool,
+    ) -> Result<(McpDefaults, McpServerConfig)> {
+        let paths = PathContext::new(&self.cwd);
+        let path = default_config_path(&paths)
+            .with_context(|| format!("MCP server '{name}' was not found"))?;
+        let (_, changed) =
+            super::file_config::read_mcp_configuration_with(&path, |raw| -> Result<_> {
+                let config = mcp_config_for_policy(raw, McpTransportPolicy::All)?;
+                let server = config
+                    .mcp_servers
+                    .get(name)
+                    .cloned()
+                    .with_context(|| format!("MCP server '{name}' was not found"))?;
+                #[cfg(test)]
+                if let Some(callback) = CONNECTION_CHANGE_HOOK.with(|slot| slot.borrow_mut().take())
+                {
+                    callback();
+                }
+                self.connection_state()?.set_disconnected(
+                    name,
+                    disconnected,
+                    config.mcp_servers.keys(),
+                )?;
+                Ok((config.mcp, server))
+            })?;
+        changed
     }
 
     fn configured_servers(&self) -> Result<(McpDefaults, BTreeMap<String, McpServerConfig>)> {
@@ -269,6 +380,7 @@ fn disconnected_status(name: &str, config: &McpServerConfig) -> McpRuntimeStatus
         server_name: None,
         server_version: None,
         tool_count: 0,
+        sessions_blocked: false,
     }
 }
 

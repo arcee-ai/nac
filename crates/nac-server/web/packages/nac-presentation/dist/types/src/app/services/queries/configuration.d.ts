@@ -188,6 +188,7 @@ export declare function useMcpRuntimeAction(): import("@tanstack/react-query").U
     required: boolean;
     server_name?: string | null;
     server_version?: string | null;
+    sessions_blocked: boolean;
     state: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpRuntimeState"];
     tool_count: number;
 }, Error, {

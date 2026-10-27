@@ -34,6 +34,7 @@ use crate::sandbox::SandboxSession;
 use crate::tools::ToolResult;
 use crate::types::{FunctionDef, ToolDefinition};
 
+mod admission;
 pub(crate) mod capabilities;
 mod catalog_sync;
 mod config;
@@ -804,10 +805,10 @@ pub(crate) mod test_support {
         (url, handle)
     }
 
-    struct FakeHttpRequest {
-        method: String,
-        headers: std::collections::BTreeMap<String, String>,
-        body: Option<Value>,
+    pub(crate) struct FakeHttpRequest {
+        pub(crate) method: String,
+        pub(crate) headers: std::collections::BTreeMap<String, String>,
+        pub(crate) body: Option<Value>,
     }
 
     #[cfg(unix)]
@@ -847,7 +848,7 @@ pub(crate) mod test_support {
         assert_eq!(received.body, Some(json!({})));
     }
 
-    fn read_fake_http_request(stream: &mut TcpStream) -> Option<FakeHttpRequest> {
+    pub(crate) fn read_fake_http_request(stream: &mut TcpStream) -> Option<FakeHttpRequest> {
         // Darwin accepts inherit listener O_NONBLOCK; a timeout does not clear it.
         stream.set_nonblocking(false).ok()?;
         stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
@@ -990,7 +991,7 @@ pub(crate) mod test_support {
         }
     }
 
-    fn write_fake_http_response(
+    pub(crate) fn write_fake_http_response(
         stream: &mut TcpStream,
         status: &str,
         content_type: Option<&str>,
@@ -999,7 +1000,7 @@ pub(crate) mod test_support {
         write_fake_http_response_with_headers(stream, status, &[], content_type, body);
     }
 
-    fn write_fake_http_response_with_headers(
+    pub(crate) fn write_fake_http_response_with_headers(
         stream: &mut TcpStream,
         status: &str,
         headers: &[&str],
@@ -1024,6 +1025,12 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod policy_tests;
+
+#[cfg(test)]
+pub(crate) mod recording_server;
+
+#[cfg(test)]
+mod session_admission_tests;
 
 #[cfg(test)]
 mod tests;
