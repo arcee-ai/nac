@@ -44,6 +44,8 @@ impl McpToolCapture {
                 .redact(&format!("Error calling MCP tool '{name}': {error:#}"))
                 .into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         };
         let service = match self.server.admitted_service().await {
             Ok(service) => service,
