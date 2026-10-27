@@ -311,6 +311,25 @@ fn preparation_does_not_execute_checkout_filters_or_hooks() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+fn invoking_snapshot(cwd: PathBuf, project_id: &str) -> crate::sessions::SessionSnapshot {
+    let mut snapshot = crate::sessions::new_snapshot(
+        "invoking".into(),
+        cwd,
+        "gpt-5.2".into(),
+        "https://example.invalid/v1".into(),
+        crate::model::provider_for_model("gpt-5.2").unwrap(),
+        None,
+        None,
+        None,
+        Vec::new(),
+        None,
+        Default::default(),
+    );
+    snapshot.behavior = crate::sessions::SessionBehavior::Direct;
+    snapshot.project_id = Some(project_id.into());
+    snapshot
+}
+
 #[test]
 fn same_project_uses_invoking_commit_cross_project_uses_saved_branch_and_explicit_ref_wins() {
     let (root, project, mut request) = fixture();
@@ -343,34 +362,30 @@ fn same_project_uses_invoking_commit_cross_project_uses_saved_branch_and_explici
             &old,
         ],
     );
-    let mut invoking = crate::sessions::new_snapshot(
-        "invoking".into(),
-        invoking_path.join("nested"),
-        "gpt-5.2".into(),
-        "https://example.invalid/v1".into(),
-        crate::model::provider_for_model("gpt-5.2").unwrap(),
-        None,
-        None,
-        None,
-        Vec::new(),
-        None,
-        Default::default(),
-    );
-    invoking.project_id = Some(project.project_id.clone());
+    let mut invoking = invoking_snapshot(invoking_path.join("nested"), &project.project_id);
     request.invoking_session_id = Some("invoking".into());
     request.git_ref = None;
     let same = resolve_source(&project, &request, None, Some(&invoking)).unwrap();
     assert_eq!(same.commit, old);
     invoking.project_id = Some("another-project".into());
-    let cross = resolve_source(&project, &request, None, Some(&invoking)).unwrap();
-    assert_eq!(cross.commit, new);
-    request.git_ref = Some("predecessor".into());
-    assert_eq!(
-        resolve_source(&project, &request, None, Some(&invoking))
-            .unwrap()
-            .commit,
-        old
-    );
+    let mut ssh = invoking.clone();
+    ssh.ssh = Some(crate::sandbox::SshConnection::new("fixture.invalid"));
+    ssh.cwd = "/not-on-this-host/repo".into();
+    let mut podman = invoking.clone();
+    podman.sandbox_spec = Some(crate::sandbox::SandboxSpec::default());
+    podman.cwd = "/container-only/repo".into();
+    for invoking in [invoking, ssh, podman] {
+        request.git_ref = None;
+        let cross = resolve_source(&project, &request, None, Some(&invoking)).unwrap();
+        assert_eq!(cross.commit, new);
+        request.git_ref = Some("predecessor".into());
+        assert_eq!(
+            resolve_source(&project, &request, None, Some(&invoking))
+                .unwrap()
+                .commit,
+            old
+        );
+    }
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -639,4 +654,63 @@ fn deleted_legacy_default_allows_explicit_ref_without_guessing_or_rebinding() {
         first
     );
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn invoker_binding_and_same_project_guards_apply_with_or_without_explicit_refs() {
+    let (root, mut project, mut request) = fixture();
+    let (other_root, other_project, _) = fixture();
+    request.invoking_session_id = Some("invoking".into());
+    for explicit in [None, Some("dev".to_owned())] {
+        request.git_ref = explicit;
+        for sandbox in [false, true] {
+            let mut invoking = invoking_snapshot(project.cwd.clone(), &project.project_id);
+            if sandbox {
+                invoking.sandbox_spec = Some(crate::sandbox::SandboxSpec::default());
+            } else {
+                invoking.ssh = Some(crate::sandbox::SshConnection::new("fixture.invalid"));
+            }
+            assert!(resolve_source(&project, &request, None, Some(&invoking))
+                .unwrap_err()
+                .to_string()
+                .contains("Local backend"));
+            // Cross-project origin is ignored for ref selection, never for
+            // binding the supplied snapshot to the exact request identity.
+            invoking.project_id = Some("other-project".into());
+            invoking.session_id = "wrong-session".into();
+            assert!(resolve_source(&project, &request, None, Some(&invoking)).is_err());
+            invoking.session_id = "invoking".into();
+            let mut unbound_request = request.clone();
+            unbound_request.invoking_session_id = None;
+            assert!(resolve_source(&project, &unbound_request, None, Some(&invoking)).is_err());
+            assert!(
+                resolve_source(&project, &request, None, None).is_err(),
+                "a requested invoker must exist"
+            );
+            let mut unbound_request = request.clone();
+            unbound_request.invoking_session_id = None;
+            let other_source =
+                resolve_source(&other_project, &unbound_request, None, None).unwrap();
+            assert!(
+                resolve_source(&project, &request, Some(&other_source), Some(&invoking))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("saved project source")
+            );
+        }
+        let invoking = invoking_snapshot(other_project.cwd.clone(), &project.project_id);
+        assert!(resolve_source(&project, &request, None, Some(&invoking))
+            .unwrap_err()
+            .to_string()
+            .contains("another repository"));
+    }
+    let mut invoking = invoking_snapshot(project.cwd.clone(), "other-project");
+    invoking.ssh = Some(crate::sandbox::SshConnection::new("fixture.invalid"));
+    project.ssh_host = Some("destination.invalid".into());
+    assert!(resolve_source(&project, &request, None, Some(&invoking))
+        .unwrap_err()
+        .to_string()
+        .contains("saved Local projects"));
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(other_root).unwrap();
 }

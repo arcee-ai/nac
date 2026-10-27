@@ -169,12 +169,14 @@ impl TaskGit {
         }
         let invoking_ref = if let Some(invoking) = invoking {
             anyhow::ensure!(
-                Some(&invoking.session_id) == request.invoking_session_id.as_ref()
-                    && invoking.ssh.is_none()
-                    && invoking.sandbox_spec.is_none(),
-                "invalid request: invoking task must use the Local backend"
+                Some(&invoking.session_id) == request.invoking_session_id.as_ref(),
+                "invalid request: invoking task identity does not match the request"
             );
             if invoking.project_id.as_deref() == Some(project.project_id.as_str()) {
+                anyhow::ensure!(
+                    invoking.ssh.is_none() && invoking.sandbox_spec.is_none(),
+                    "invalid request: invoking task must use the Local backend"
+                );
                 let target = self.at(&canonical(&invoking.cwd)?);
                 let common = self
                     .resolve_common_git_dir(&target.repo_root().await?)

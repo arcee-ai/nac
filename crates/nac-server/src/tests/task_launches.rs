@@ -589,3 +589,123 @@ async fn retained_task_cancel_during_real_git_effect_keeps_inventory_and_never_a
     drop(environment);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+async fn cross_project_backend_origin_launches_in_local_destination(sandbox: bool) {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retained_cross_project_origin");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let manager = test_manager(&root);
+    let mut request = fixture(&root, &manager).await;
+    nac_core::projects::insert_project(
+        &manager.inner.store_path,
+        nac_core::projects::NewProject {
+            project_id: "origin-project".into(),
+            name: None,
+            description: None,
+            cwd: "/unavailable-origin/repo".into(),
+            ssh_host: (!sandbox).then(|| "fixture.invalid".into()),
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        },
+    )
+    .unwrap();
+    let mut origin = sessions::new_snapshot(
+        "origin".into(),
+        "/unavailable-origin/repo".into(),
+        "gpt-5.2".into(),
+        "https://example.invalid/v1".into(),
+        BackendKind::OpenAiResponses,
+        None,
+        None,
+        None,
+        Vec::new(),
+        None,
+        Default::default(),
+    );
+    origin.behavior = sessions::SessionBehavior::Direct;
+    origin.project_id = Some("origin-project".into());
+    if sandbox {
+        nac_core::test_support::set_default_sandbox_spec(&mut origin);
+    } else {
+        origin.ssh.get_or_insert_with(Default::default).host = "fixture.invalid".into();
+    }
+    sessions::save_session(&manager.inner.store_path, &origin).unwrap();
+    nac_core::projects::assign_session_to_project(
+        &manager.inner.store_path,
+        "origin-project",
+        &origin.session_id,
+    )
+    .unwrap();
+    let origin = sessions::load_session(&manager.inner.store_path, "origin").unwrap();
+    assert_eq!(origin.project_id.as_deref(), Some("origin-project"));
+    request.invoking_session_id = Some(origin.session_id.clone());
+    request.git_ref = None;
+    let before = std::fs::read(root.join("repo/.git/index")).unwrap();
+    std::fs::write(root.join("repo/nested/file"), "keep destination edits").unwrap();
+    let gate = Arc::new(application::session_creation::CreationProjectionGate::default());
+    *manager
+        .inner
+        .session_creation_after_persistence
+        .lock()
+        .unwrap() = Some(gate.clone());
+    let app = router(manager.clone());
+    let response = post_json(
+        app.clone(),
+        "/task-launches",
+        serde_json::to_value(&request).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&response_body(response).await)
+    );
+    tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+        .await
+        .unwrap();
+    let record = launch_status(app.clone(), &request.request_id).await;
+    assert_eq!(record.phase, TaskLaunchPhase::Ready);
+    assert_eq!(record.source.selected_ref, "refs/heads/dev");
+    let task = sessions::load_session(&manager.inner.store_path, &record.session_id).unwrap();
+    assert_eq!(
+        task.project_id.as_deref(),
+        Some(request.project_id.as_str())
+    );
+    assert_eq!(task.cwd, record.workspace_path.join("nested"));
+    assert!(task.ssh.is_none());
+    assert!(task.sandbox_spec.is_none());
+    assert_eq!(
+        std::fs::read_to_string(task.cwd.join("file")).unwrap(),
+        "committed"
+    );
+    assert_eq!(std::fs::read(root.join("repo/.git/index")).unwrap(), before);
+    assert_eq!(
+        std::fs::read_to_string(root.join("repo/nested/file")).unwrap(),
+        "keep destination edits"
+    );
+    let retained_origin = sessions::load_session(&manager.inner.store_path, "origin").unwrap();
+    assert_eq!(retained_origin.project_id, origin.project_id);
+    assert_eq!(retained_origin.cwd, origin.cwd);
+    assert_eq!(retained_origin.ssh, origin.ssh);
+    assert_eq!(retained_origin.sandbox_spec, origin.sandbox_spec);
+    assert_eq!(retained_origin.config_version, origin.config_version);
+    manager.stop_local_run_admission().await;
+    gate.resume.notify_one();
+    manager.quiesce_persistence_callers().await;
+    manager.drain_persistence().await.unwrap();
+    drop(app);
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cross_project_ssh_origin_can_launch_retained_local_task() {
+    cross_project_backend_origin_launches_in_local_destination(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cross_project_podman_origin_can_launch_retained_local_task() {
+    cross_project_backend_origin_launches_in_local_destination(true).await;
+}
