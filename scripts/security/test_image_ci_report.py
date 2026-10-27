@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 from image_ci_report import report
+from image_rust import RUST_FILES
 from image_inventory import sha256, write_json
 
 IMAGE = "sha256:" + "a" * 64
@@ -15,9 +16,10 @@ def fixture(root, blocked=True):
     identity = {"image": IMAGE, "source_revision": SOURCE}
     files = {"identity.json": identity, "runtime.json": {"probe": "retained"},
              "sbom.syft.json": {"artifacts": ["retained"]}, "coverage.json": {"complete": True}}
+    files.update({name: {"fixture": "retained Rust evidence"} for name in RUST_FILES})
     for name, value in files.items():
         write_json(root / name, value)
-    write_json(root / "bundle.json", {"schema_version": 1, "image": IMAGE,
+    write_json(root / "bundle.json", {"schema_version": 2, "image": IMAGE,
                "files": {name: sha256(root / name) for name in files}})
     findings = [{"advisory": "CVE-control", "severity": "High"}] if blocked else []
     write_json(root / "findings.json", findings)
