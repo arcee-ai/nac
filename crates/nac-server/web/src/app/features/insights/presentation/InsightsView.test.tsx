@@ -27,14 +27,13 @@ const steerThread = vi.spyOn(api, "steerThread");
 /** No turns: the detail shows the thread the chat pointed Insights at. */
 const MODEL: TranscriptModel = {
   turns: [],
-  snapshotTurns: [],
+  baseTurns: [],
   running: false,
   optimisticPrompt: null,
   submitted: null,
   pendingText: "",
-  pendingSkills: null,
   showPending: false,
-  streamingTurn: false,
+  replyKey: "model-0",
 };
 
 function NavigateAway() {

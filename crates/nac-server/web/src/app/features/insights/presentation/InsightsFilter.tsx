@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { memo, useId } from "react";
 
 import { ButtonSize, ButtonVariant, Select } from "@/app/atoms";
 import type {
@@ -13,7 +13,7 @@ import { cn } from "@/app/lib/cn";
  * "Show:" and the filter select: a bar above the list on a pointer, a pill
  * floating over its last rows on a phone.
  */
-export function InsightsFilter({
+export const InsightsFilter = memo(function InsightsFilter({
   options,
   value,
   onChange,
@@ -57,4 +57,4 @@ export function InsightsFilter({
       />
     </div>
   );
-}
+});

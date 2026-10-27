@@ -87,6 +87,11 @@ export interface RuntimeState {
    */
   streamSettled: boolean;
   /**
+   * The buffers hold output from before the prompt sent last, and its run has
+   * neither started nor streamed since, so none of that output answers it.
+   */
+  streamPredatesPrompt: boolean;
+  /**
    * Prompt shown in the chat from the moment Send is pressed until the
    * snapshot (or active_run) catches up. Without this the model pill appears
    * first and jumps down when the user bubble finally lands.
@@ -153,6 +158,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       streamText: "",
       streamReasoning: "",
       streamSettled: false,
+      streamPredatesPrompt: false,
       optimisticUserPrompt: null,
       runUsage: null,
       sessionSpend: null,
@@ -195,6 +201,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       streamText: "",
       streamReasoning: "",
       streamSettled: false,
+      streamPredatesPrompt: false,
       optimisticUserPrompt: null,
       runUsage: null,
       sessionSpend: null,
@@ -227,9 +234,21 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
     });
   }
 
-  /** Paint the user bubble immediately on submit; cleared once the transcript owns it. */
-  function setOptimisticUserPrompt(prompt: string | null): void {
-    setState({ optimisticUserPrompt: prompt });
+  /**
+   * Paint the prompt immediately on submit. A rejected/unsent prompt takes its
+   * stream fence with it; a prompt committed to the transcript keeps the fence
+   * until its run starts or streams, even though its optimistic copy can leave.
+   */
+  function setOptimisticUserPrompt(
+    prompt: string | null,
+    settlement: "rejected" | "committed" = "rejected",
+  ): void {
+    if (prompt === null) {
+      setState((state) => ({
+        optimisticUserPrompt: null,
+        streamPredatesPrompt: settlement === "committed" && state.streamPredatesPrompt,
+      }));
+    } else setState({ optimisticUserPrompt: prompt, streamPredatesPrompt: true });
   }
 
   /**
@@ -241,6 +260,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
     if (delta.reset) {
       setState({
         streamSettled: false,
+        streamPredatesPrompt: false,
         streamText: "",
         streamReasoning: "",
         modelRetryAttempt: delta.retry_attempt ?? null,
@@ -256,6 +276,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           };
       return {
         streamSettled: false,
+        streamPredatesPrompt: false,
         streamText: base.streamText + (delta.text ?? ""),
         streamReasoning: base.streamReasoning + (delta.reasoning ?? ""),
       };
@@ -461,6 +482,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           streamText: "",
           streamReasoning: "",
           streamSettled: false,
+          streamPredatesPrompt: false,
           // Only this run's live delta resets. Session spend lives on the
           // snapshot, including unattributed usage from cancelled or rewound turns.
           runUsage: null,
@@ -482,14 +504,14 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
         return "snapshot";
       case "run_completed":
         // The run's own answer is the authoritative version of whatever the
-        // stream last held, so it takes over until the snapshot lands. The run
-        // outlives every worker it dispatched, so a thread still marked running
-        // here only means its own finish event never arrived.
+        // stream last held, so it takes over until the snapshot lands; the
+        // reasoning behind it stays too, or its group would drop out of both
+        // panes until then. The run outlives every worker it dispatched, so a
+        // thread still marked running here only means its finish never arrived.
         setState((state) => ({
           running: false,
           activity: "",
           streamText: event.response,
-          streamReasoning: "",
           streamSettled: true,
           runFailure: null,
           modelRetryAttempt: null,

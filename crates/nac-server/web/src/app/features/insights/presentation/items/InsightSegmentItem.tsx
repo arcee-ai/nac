@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { InsightItem, InsightItemState } from "@/app/atoms";
 import { segmentAction } from "@/app/features/insights/model/actionKinds";
 import { inProgressLabel } from "@/app/features/insights/model/labels";
@@ -82,7 +84,7 @@ function loadingTitle(segment: InsightSegment, status: ActionStatus): string {
   return inProgressLabel(segment).replace(TRAILING_ELLIPSIS, "");
 }
 
-export function InsightSegmentItem({
+export const InsightSegmentItem = memo(function InsightSegmentItem({
   segment,
   active,
   context,
@@ -108,4 +110,4 @@ export function InsightSegmentItem({
       {content.body?.(state)}
     </InsightItem>
   );
-}
+});

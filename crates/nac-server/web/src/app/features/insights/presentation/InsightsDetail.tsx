@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useRef } from "react";
 
 import type { InsightGroup, InsightSegment } from "@/app/features/insights/model/types";
 import { InsightSegmentItem } from "@/app/features/insights/presentation/items/InsightSegmentItem";
@@ -33,7 +33,7 @@ function offsetIn(root: HTMLElement, element: HTMLElement): number {
 }
 
 /** Key it by group: whether the reader sits at the bottom is remembered per group. */
-export function InsightsDetail({
+export const InsightsDetail = memo(function InsightsDetail({
   group,
   segmentKey,
   focusNonce,
@@ -134,4 +134,4 @@ export function InsightsDetail({
       </div>
     </div>
   );
-}
+});

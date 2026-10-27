@@ -1948,6 +1948,7 @@ function br(e) {
 		streamText: "",
 		streamReasoning: "",
 		streamSettled: !1,
+		streamPredatesPrompt: !1,
 		optimisticUserPrompt: null,
 		runUsage: null,
 		sessionSpend: null,
@@ -1977,6 +1978,7 @@ function br(e) {
 			streamText: "",
 			streamReasoning: "",
 			streamSettled: !1,
+			streamPredatesPrompt: !1,
 			optimisticUserPrompt: null,
 			runUsage: null,
 			sessionSpend: null,
@@ -1995,12 +1997,19 @@ function br(e) {
 			return n?.input_tokens === t.sessionSpend?.input_tokens && n?.output_tokens === t.sessionSpend?.output_tokens && n?.cache_read_tokens === t.sessionSpend?.cache_read_tokens && n?.cache_write_tokens === t.sessionSpend?.cache_write_tokens && (n?.cost?.total ?? 0) === (t.sessionSpend?.cost?.total ?? 0) ? {} : { sessionSpend: n };
 		});
 	}
-	function d(e) {
-		r({ optimisticUserPrompt: e });
+	function d(e, t = "rejected") {
+		r(e === null ? (e) => ({
+			optimisticUserPrompt: null,
+			streamPredatesPrompt: t === "committed" && e.streamPredatesPrompt
+		}) : {
+			optimisticUserPrompt: e,
+			streamPredatesPrompt: !0
+		});
 	}
 	function f(e) {
 		e.thread_name || (e.reset ? r({
 			streamSettled: !1,
+			streamPredatesPrompt: !1,
 			streamText: "",
 			streamReasoning: "",
 			modelRetryAttempt: e.retry_attempt ?? null
@@ -2014,6 +2023,7 @@ function br(e) {
 			};
 			return {
 				streamSettled: !1,
+				streamPredatesPrompt: !1,
 				streamText: n.streamText + (e.text ?? ""),
 				streamReasoning: n.streamReasoning + (e.reasoning ?? "")
 			};
@@ -2163,6 +2173,7 @@ function br(e) {
 				streamText: "",
 				streamReasoning: "",
 				streamSettled: !1,
+				streamPredatesPrompt: !1,
 				runUsage: null,
 				finishedToolCalls: {},
 				runStartedAt: n.started_at_epoch_ms,
@@ -2179,7 +2190,6 @@ function br(e) {
 				running: !1,
 				activity: "",
 				streamText: n.response,
-				streamReasoning: "",
 				streamSettled: !0,
 				runFailure: null,
 				modelRetryAttempt: null,

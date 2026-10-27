@@ -15,9 +15,9 @@ interface TranscriptProps {
      */
     errorNotice?: ErrorNotice | null;
 }
-export declare function TranscriptRecoveryNotice({ warning }: {
+export declare const TranscriptRecoveryNotice: import("react").MemoExoticComponent<({ warning, }: {
     warning?: string | null;
-}): import("react").JSX.Element | null;
+}) => import("react").JSX.Element | null>;
 /**
  * Read-only transcript from the canonical snapshot plus a live typing indicator
  * fed by the SSE runtime store. Follows new content unless the user scrolls up.

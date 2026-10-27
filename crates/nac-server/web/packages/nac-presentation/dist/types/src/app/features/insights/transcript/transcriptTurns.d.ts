@@ -1,8 +1,8 @@
-import { type ModelTurn, type TranscriptTurn } from "../../../lib/transcript";
+import type { ModelTurn, TranscriptTurn } from "../../../lib/transcript";
 /**
- * A transcript drawn inside the session page that is not the page's own, such
- * as a child's preview. `turns` are its snapshot turns, which keep their
- * identity across stream deltas.
+ * The transcript a row belongs to: the session page's own, or one drawn inside
+ * it such as a child's preview. `turns` leave the stream out, so they keep
+ * their identity across deltas and a row reading them is not re-rendered.
  */
 interface TranscriptTurnsSource {
     sessionId: string;

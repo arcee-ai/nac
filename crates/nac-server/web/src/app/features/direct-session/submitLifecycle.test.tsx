@@ -53,3 +53,47 @@ for (const outcome of ["rejected", "uncertain"] as const) {
     client.clear();
   });
 }
+
+for (const outcome of ["rejected", "not-sent", "uncertain"] as const) {
+  it(`retains the prior stream and settles its prompt fence after current ${outcome} admission`, async () => {
+    const client = new QueryClient();
+    const admission = Promise.withResolvers<Awaited<ReturnType<typeof api.submitRun>>>();
+    const submit = vi.spyOn(api, "submitRun").mockReturnValue(admission.promise);
+    resetRuntime("a");
+    runtimeStore.setState({
+      streamText: "prior answer",
+      streamReasoning: "prior reasoning",
+      streamSettled: true,
+    });
+    const hook = renderHook(() => useSubmitRun(), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    const command = hook.result.current.mutateAsync({ id: "a", prompt: "new prompt" });
+    const failure = expect(command).rejects.toThrow();
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(runtimeStore.getState().streamPredatesPrompt).toBe(true);
+    await act(async () => {
+      if (outcome === "rejected") admission.reject(new Error("rejected"));
+      else if (outcome === "not-sent")
+        admission.resolve({ status: "not-sent", requestId: "aborted-request", reason: "aborted" });
+      else
+        admission.resolve({
+          status: "uncertain",
+          requestId: "uncertain-request",
+          error: new Error("connection lost"),
+        });
+      await failure;
+    });
+    expect(runtimeStore.getState()).toMatchObject({
+      optimisticUserPrompt: outcome === "uncertain" ? "new prompt" : null,
+      streamPredatesPrompt: outcome === "uncertain",
+      streamText: "prior answer",
+      streamReasoning: "prior reasoning",
+    });
+    expect(submit).toHaveBeenCalledOnce();
+    hook.unmount();
+    client.clear();
+  });
+}

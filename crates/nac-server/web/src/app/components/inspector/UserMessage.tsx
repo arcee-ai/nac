@@ -77,11 +77,17 @@ const UserMessageBody = memo(function UserMessageBody({
   const canRefresh = !readOnly && onRefresh != null && messageIndex != null;
   const canRevert = !readOnly && onRevert != null && messageIndex != null;
   return (
-    <div className="group/user-msg flex flex-col items-end w-full max-w-full py-6">
+    <div className="flex flex-col items-end w-full max-w-full py-6">
+      {date ? (
+        <span className="max-w-full min-w-0 pb-2 label-2xs text-basic-muted whitespace-nowrap truncate">
+          {date}
+        </span>
+      ) : null}
       <div
         className={cn(
           "min-w-0 max-w-full p-5 rounded-[12px] bg-elevation-sublevel-variant-B shadow-convex",
           "label-small text-basic-primary whitespace-pre-wrap break-words",
+          "transition-opacity duration-150",
           pending && "opacity-60",
         )}
       >
@@ -109,83 +115,73 @@ const UserMessageBody = memo(function UserMessageBody({
         </div>
       ) : null}
 
-      {!pending ? (
-        <div
-          className={cn(
-            "flex items-center justify-end gap-3 max-w-full min-w-0 pt-2",
-            // Keep the row hittable while moving from the bubble to the actions.
-            "opacity-0 pointer-events-none transition-opacity duration-150",
-            "group-hover/user-msg:opacity-100 group-hover/user-msg:pointer-events-auto",
-            "group-focus-within/user-msg:opacity-100 group-focus-within/user-msg:pointer-events-auto",
-            // Nothing hovers on a touch screen, so the row simply stays out.
-            "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
-          )}
-        >
-          {date ? (
-            <span className="min-w-0 label-micro text-basic-muted whitespace-nowrap truncate">
-              {date}
-            </span>
-          ) : null}
-
-          {canRefresh ? (
-            <Tooltip
-              title="Regenerate from the original prompt (rewinds later transcript and workspace changes)"
-              position={TooltipPosition.BottomLeft}
+      {/* A pending bubble keeps the room of the actions it gains once stored,
+          so nothing under it moves when the snapshot catches up. */}
+      <div
+        aria-hidden={pending || undefined}
+        className={cn(
+          "flex items-center justify-end gap-3 max-w-full min-w-0 pt-2",
+          pending && "invisible",
+        )}
+      >
+        {canRefresh ? (
+          <Tooltip
+            title="Regenerate from the original prompt (rewinds later transcript and workspace changes)"
+            position={TooltipPosition.BottomLeft}
+          >
+            <Button
+              size={ButtonSize.Small}
+              variant={ButtonVariant.Ghost}
+              content={ButtonContent.Icon}
+              aria-label="Regenerate from original prompt"
+              disabled={actionsDisabled}
+              onClick={() => onRefresh(messageIndex)}
             >
-              <Button
-                size={ButtonSize.Small}
-                variant={ButtonVariant.Ghost}
-                content={ButtonContent.Icon}
-                aria-label="Regenerate from original prompt"
-                disabled={actionsDisabled}
-                onClick={() => onRefresh(messageIndex)}
-              >
-                <Icon iconName={IconName.Refresh} size={16} />
-              </Button>
-            </Tooltip>
-          ) : null}
+              <Icon iconName={IconName.Refresh} size={16} />
+            </Button>
+          </Tooltip>
+        ) : null}
 
-          {canRevert ? (
-            <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomLeft}>
+        {canRevert ? (
+          <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomLeft}>
+            <Button
+              size={ButtonSize.Small}
+              variant={ButtonVariant.Ghost}
+              content={ButtonContent.Icon}
+              aria-label="Revert to this snapshot"
+              disabled={actionsDisabled}
+              onClick={() => onRevert(messageIndex, text)}
+            >
+              <Icon iconName={IconName.TurnLeft} size={16} />
+            </Button>
+          </Tooltip>
+        ) : readOnly ? null : (
+          <Tooltip
+            title="This message is not in the transcript yet"
+            position={TooltipPosition.BottomLeft}
+          >
+            <span className="inline-flex">
               <Button
                 size={ButtonSize.Small}
                 variant={ButtonVariant.Ghost}
                 content={ButtonContent.Icon}
                 aria-label="Revert to this snapshot"
-                disabled={actionsDisabled}
-                onClick={() => onRevert(messageIndex, text)}
+                disabled
               >
                 <Icon iconName={IconName.TurnLeft} size={16} />
               </Button>
-            </Tooltip>
-          ) : readOnly ? null : (
-            <Tooltip
-              title="This message is not in the transcript yet"
-              position={TooltipPosition.BottomLeft}
-            >
-              <span className="inline-flex">
-                <Button
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Ghost}
-                  content={ButtonContent.Icon}
-                  aria-label="Revert to this snapshot"
-                  disabled
-                >
-                  <Icon iconName={IconName.TurnLeft} size={16} />
-                </Button>
-              </span>
-            </Tooltip>
-          )}
+            </span>
+          </Tooltip>
+        )}
 
-          <CopyButton
-            value={text}
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Ghost}
-            title={terminalSelection ? "Copy canonical message" : "Copy message"}
-            position={TooltipPosition.BottomLeft}
-          />
-        </div>
-      ) : null}
+        <CopyButton
+          value={text}
+          size={ButtonSize.Small}
+          variant={ButtonVariant.Ghost}
+          title={terminalSelection ? "Copy canonical message" : "Copy message"}
+          position={TooltipPosition.BottomLeft}
+        />
+      </div>
     </div>
   );
 });
