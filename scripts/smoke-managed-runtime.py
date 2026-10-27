@@ -65,6 +65,10 @@ for payload in npm_provenance["installed_payload"].values():
 for mode in ["early-close", "compatible"]:
     subprocess.run(["node", str(npm_recipe / "npm-bundle-probe.cjs"),
                     "/usr/local/lib/node_modules/npm/node_modules/undici", mode], check=True, timeout=20)
+subprocess.run(["node", "-e", "const a=require('node:assert/strict');"
+                "const {Address4,Address6}=require('/usr/local/lib/node_modules/npm/node_modules/ip-address');"
+                "a.equal(new Address4('192.0.2.1').correctForm(),'192.0.2.1');"
+                "a.equal(new Address6('2001:0db8::1').correctForm(),'2001:db8::1');"], check=True, timeout=20)
 with tempfile.TemporaryDirectory(prefix="nac-runtime-", dir="/repositories") as directory:
     root = Path(directory)
     for compiler, suffix, source in [
