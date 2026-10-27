@@ -134,11 +134,13 @@ test('PR and daily shell blocks preserve strict exits and evidence through both 
         const write = (file, value) => fs.writeFileSync(path.join(fixture, file), JSON.stringify(value));
         const findings = ['blocked', 'unknown'].includes(state)
           ? [{ advisory: 'TEST-control', severity: state === 'unknown' ? 'Unknown' : 'High' }] : [];
-        for (const file of ['runtime.json', 'sbom.syft.json', 'coverage.json']) write(file, { retained: true });
+        const bundleFiles = ['runtime.json', 'sbom.syft.json', 'coverage.json', 'identity.json',
+          'rust-distribution.toml', 'rust-distribution.json', 'rust-payload.json'];
+        for (const file of bundleFiles.filter(file => file !== 'identity.json')) write(file, { retained: true });
         write('identity.json', { image, source_revision: state === 'mismatch' ? 'c'.repeat(40) : sha });
-        const files = Object.fromEntries(['runtime.json', 'sbom.syft.json', 'coverage.json', 'identity.json'].map(file =>
+        const files = Object.fromEntries(bundleFiles.map(file =>
           [file, crypto.createHash('sha256').update(fs.readFileSync(path.join(fixture, file))).digest('hex')]));
-        write('bundle.json', { schema_version: 1, image, files });
+        write('bundle.json', { schema_version: 2, image, files });
         write('findings.json', findings);
         write('policy-result.json', { blocking: findings, excepted: [], reporting: [] });
         write('result.json', { status: findings.length ? 'blocked' : 'passed', image, blocking: findings.length, findings: findings.length });
