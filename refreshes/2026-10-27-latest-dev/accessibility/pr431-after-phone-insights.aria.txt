@@ -1,0 +1,88 @@
+- dialog "Insights":
+  - banner:
+    - button "Close":
+      - img
+    - heading "Insights" [level=2]
+    - button "Show All":
+      - text: Show All
+      - img
+  - heading "26 Oct 2026 6:54 PM" [level=3]
+  - 'button "Total activity: 0.0s, 4" [pressed]':
+    - img
+    - text: "Total activity: 0.0s 4"
+  - tablist:
+    - tab "Insights" [selected]:
+      - img
+      - text: Insights
+    - tab "Subagents":
+      - img
+      - text: Subagents
+    - tab "Files":
+      - img
+      - text: Files
+    - tab "Terminal":
+      - img
+      - text: Terminal
+    - tab "History":
+      - img
+      - text: History
+- banner:
+  - button "All projects":
+    - img "NAC"
+  - paragraph: Review customer insights
+  - text: workspace 6 additions, 4 deletions
+  - button "Open panel":
+    - img
+  - button "Open the menu":
+    - img
+- main:
+  - status
+  - text: 26 Oct 2026 6:54 PM REFRESH_MAIN Inspect the customer insights component, rename its heading to Conversation insights, and summarize the change.
+  - button "Regenerate from original prompt":
+    - img
+  - button "Revert to this snapshot":
+    - img
+  - button "Copy message":
+    - img
+  - text: gpt-5.6-sol 26 Oct 2026 6:54 PM
+  - 'button "Total activity: 0.0s"'
+  - paragraph:
+    - text: Updated the conversation summary heading to
+    - strong: Conversation insights
+    - text: .
+  - paragraph: The panel keeps its accessible section label, readable description, and primary action.
+  - heading "What changed" [level=3]
+  - list:
+    - listitem:
+      - text: Renamed the heading in
+      - code: ConversationSummaryPanel.tsx
+      - text: .
+    - listitem: Preserved the existing layout and button.
+  - paragraph: Ready for visual review on desktop and mobile.
+  - button "Snapshot +1 -1"
+  - button "ConversationSummaryPanel.tsx +1 -1"
+  - button "Regenerate from original prompt":
+    - img
+  - button "Revert to this snapshot":
+    - img
+  - button "Create fork":
+    - img
+  - button "Copy message":
+    - img
+  - button "Last messages":
+    - text: Last messages
+    - img
+  - status
+  - combobox "Message"
+  - button "Set durable goal":
+    - img
+  - button "Send" [disabled]:
+    - img
+  - button "Model": GPT-5.6 Sol OpenAI Responses
+  - button "High"
+  - button "Usage":
+    - img
+  - button "Session settings":
+    - img
+  - button "Auto-approve on — open permissions":
+    - img

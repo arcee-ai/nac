@@ -1,0 +1,114 @@
+- dialog:
+  - banner:
+    - button "Close":
+      - img
+    - text: Insights
+    - 'button "Branch: main"':
+      - img
+      - text: main
+    - button "Open list":
+      - img
+  - region "Insights detail":
+    - group "Find files":
+      - text: Find files
+      - button "Copy Find files":
+        - img
+      - group "Input":
+        - paragraph: Input
+        - text: src/**/*.tsx
+        - button "Show full"
+      - group "Output":
+        - paragraph: Output
+        - text: "{\"entries\":[{\"kind\":\"file\",\"path\":\"src/features/customer-insights/components/conversation/ConversationSummaryPanel.tsx\"}],\"errors\":[],\"next_cursor\":null,\"trunca..."
+        - button "Show full"
+    - group "File Read":
+      - text: File Read
+      - button "ConversationSummaryPanel.tsx"
+    - group "Edit ConversationSummaryPanel.tsx":
+      - text: Edit ConversationSummaryPanel.tsx
+      - button "ConversationSummaryPanel.tsx, 1 addition, 1 deletion": ConversationSummaryPanel.tsx 1 addition, 1 deletion
+      - group "Changes to ConversationSummaryPanel.tsx": "1 export function ConversationSummaryPanel() { Deleted 2 const title = 'Customer insights'; Added 2 const title = 'Conversation insights'; 3 return <section aria-label={title}><h2>{title}</h2><p>Review customer conversations.</p><button>Open conversation</button></section>; 4 }"
+    - group "File Read":
+      - text: File Read
+      - button "README.md"
+  - tablist:
+    - tab "Insights" [selected]:
+      - img
+      - text: Insights
+    - tab "Subagents":
+      - img
+      - text: Subagents
+    - tab "Files":
+      - img
+      - text: Files
+    - tab "Terminal":
+      - img
+      - text: Terminal
+    - tab "History":
+      - img
+      - text: History
+- banner:
+  - link "All projects":
+    - /url: "#/"
+    - img "NAC"
+  - navigation "Breadcrumb":
+    - button "Switch chat or project":
+      - text: Review customer insights Customer insights
+      - img
+  - button "Open panel":
+    - img
+  - button "MCP servers":
+    - img
+  - button "Open the menu":
+    - img
+- main:
+  - status
+  - text: 26 Oct 2026 6:54 PM REFRESH_MAIN Inspect the customer insights component, rename its heading to Conversation insights, and summarize the change.
+  - button "Regenerate from original prompt":
+    - img
+  - button "Revert to this snapshot":
+    - img
+  - button "Copy message":
+    - img
+  - text: gpt-5.6-sol 26 Oct 2026 6:54 PM
+  - 'button "Total activity: 0.0s"'
+  - paragraph:
+    - text: Updated the conversation summary heading to
+    - strong: Conversation insights
+    - text: .
+  - paragraph: The panel keeps its accessible section label, readable description, and primary action.
+  - heading "What changed" [level=3]
+  - list:
+    - listitem:
+      - text: Renamed the heading in
+      - code: ConversationSummaryPanel.tsx
+      - text: .
+    - listitem: Preserved the existing layout and button.
+  - paragraph: Ready for visual review on desktop and mobile.
+  - button "Snapshot +1 -1"
+  - button "ConversationSummaryPanel.tsx +1 -1"
+  - button "Regenerate from original prompt":
+    - img
+  - button "Revert to this snapshot":
+    - img
+  - button "Create fork":
+    - img
+  - button "Copy message":
+    - img
+  - button "Last messages":
+    - text: Last messages
+    - img
+  - status
+  - combobox "Message"
+  - button "Set durable goal":
+    - img
+  - button "Send" [disabled]:
+    - img
+  - button "Model": GPT-5.6 Sol OpenAI Responses
+  - button "High"
+  - button "Usage":
+    - img
+  - button "Session settings":
+    - img
+  - button "Auto-approve on — open permissions":
+    - img

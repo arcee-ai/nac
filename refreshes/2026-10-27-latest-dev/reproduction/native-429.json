@@ -1,0 +1,20 @@
+{
+  "pid": 64672,
+  "backendPid": 64746,
+  "backend": "http://127.0.0.1:4864",
+  "backendSha": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+  "buildBanner": "project: /private/tmp/nac-insights-refresh/runtime429v4/workspace\npr429-v4 listening on http://127.0.0.1:4864\nbuild: dev dev-7e36de32a5e9a85acd8aaf71dac347b442f4a9b8 (7e36de32a5e9a85acd8aaf71dac347b442f4a9b8)\nstore: /private/tmp/nac-insights-refresh/runtime429v4/store.db\n",
+  "binary": "/private/tmp/nac-insights-refresh/binaries/pr429-v4",
+  "projectId": "f961f933-03bd-4437-896f-d60b0581a921",
+  "provider": "http://127.0.0.1:54814",
+  "sessions": {
+    "main": "61fc1422-d9e2-4016-ae8e-4d2f2163df19",
+    "launchFailure": "f7821603-bd11-4d1b-a86d-0d60818cbe80",
+    "stream": "01d44bbc-2be1-46c1-a14a-87fb587e7c4d",
+    "delegated": "aa6e3551-9cc6-4bca-9cc6-aa39e352ec14"
+  },
+  "workspace": "/private/tmp/nac-insights-refresh/runtime429v4/workspace",
+  "longPath": "src/features/customer-insights/components/conversation/ConversationSummaryPanel.tsx",
+  "gitStatus": " T README.md\nUU review-checklist.md\n M src/features/customer-insights/components/conversation/ConversationSummaryPanel.tsx\n",
+  "note": "Deterministic local provider driving real native glob/read/edit/read and a genuine failed launch. No app API interception; session IDs and native durations are factual."
+}

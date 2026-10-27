@@ -1,0 +1,116 @@
+- main:
+  - img "NAC"
+  - button "Hide sidebar":
+    - img
+  - img
+  - textbox "Search sessions":
+    - /placeholder: Search Sessions
+  - button "New Session":
+    - img
+    - text: New Session
+    - img
+  - button "All projects":
+    - img
+    - text: All projects
+  - button "New project":
+    - img
+  - button "MCP servers":
+    - img
+    - text: MCP
+  - button "SSH":
+    - img
+    - text: SSH
+  - button "Customer insights" [expanded]
+  - paragraph: Today
+  - button "Review conversation summary, Direct": Review conversation summary
+  - button "Review delegated completion, Direct": Review delegated completion
+  - button "Review a failed child launch, Direct": Review a failed child launch
+  - button "Review customer insights, Direct": Review customer insights
+  - button "Configurations":
+    - img
+    - text: Configurations
+  - button "Managed host":
+    - img
+    - text: Managed host
+  - text: "Store: /private/tmp/nac-insights-refresh/runtime431v4/store.db"
+  - button "Copy the store path":
+    - img
+  - paragraph: Review customer insights
+  - text: Agent
+  - group: Run details
+  - text: workspace Local
+  - 'button "Branch: main"':
+    - img
+    - text: main
+  - 'button "Snapshot: Working tree"':
+    - img
+    - text: Working tree
+  - text: +6 -4
+  - status
+  - text: REFRESH_MAIN Inspect the customer insights component, rename its heading to Conversation insights, and summarize the change. Oct 26, 06:54 PM
+  - button "Regenerate from original prompt":
+    - img
+  - button "Revert to this snapshot":
+    - img
+  - button "Copy message":
+    - img
+  - img
+  - text: gpt-5.6-sol 0.1s Find files src/**/*.tsx Succeeded
+  - paragraph: "{\"entries\":[{\"kind\":\"file\",\"path\":\"src/features/customer-insights/components/conversation/ConversationSummaryPanel.tsx\"}],\"errors\":[],\"next_cursor\":null,\"trunca..."
+  - text: Read file src/features/customer-insights/components/conversation/ConversationSummaryPanel.tsx Succeeded
+  - paragraph: /private/tmp/nac-insights-refresh/runtime431v4/workspace/src/features/customer-insights/components/conversation/ConversationSummaryPanel.tsx
+  - text: Edit file src/features/customer-insights/components/conversation/ConversationSummaryPanel.tsx Succeeded
+  - paragraph: /private/tmp/nac-insights-refresh/runtime431v4/workspace/src/features/customer-insights/components/conversation/ConversationSummaryPanel.tsx
+  - text: Read file README.md Succeeded
+  - paragraph: /private/tmp/nac-insights-refresh/runtime431v4/workspace/README.md
+  - paragraph:
+    - text: Updated the conversation summary heading to
+    - strong: Conversation insights
+    - text: .
+  - paragraph: The panel keeps its accessible section label, readable description, and primary action.
+  - heading "What changed" [level=3]
+  - list:
+    - listitem:
+      - text: Renamed the heading in
+      - code: ConversationSummaryPanel.tsx
+      - text: .
+    - listitem: Preserved the existing layout and button.
+  - paragraph: Ready for visual review on desktop and mobile.
+  - button "ConversationSummaryPanel.tsx +1 -1"
+  - button "Snapshot +1 -1"
+  - button "Regenerate from original prompt":
+    - img
+  - button "Revert to this snapshot":
+    - img
+  - button "Create fork":
+    - img
+  - button "Copy message":
+    - img
+  - button "Last messages":
+    - text: Last messages
+    - img
+  - status
+  - combobox "Message"
+  - button "Set durable goal":
+    - img
+  - button "Send" [disabled]:
+    - img
+  - button "Model":
+    - img
+    - text: GPT-5.6 Sol OpenAI Responses
+  - button "High":
+    - text: High
+    - img
+  - button "Session settings":
+    - img
+  - button "Auto-approve on — open permissions":
+    - img
+    - text: Accept all
+  - button "Show panel":
+    - img
+  - button "Subagents":
+    - img
+  - button "Files":
+    - img
+  - button "Terminal":
+    - img

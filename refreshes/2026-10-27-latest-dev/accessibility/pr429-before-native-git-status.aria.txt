@@ -1,0 +1,154 @@
+- main:
+  - img "NAC"
+  - button "Hide sidebar":
+    - img
+  - img
+  - textbox "Search sessions":
+    - /placeholder: Search Sessions
+  - button "New Session":
+    - img
+    - text: New Session
+    - img
+  - button "All projects":
+    - img
+    - text: All projects
+  - button "New project":
+    - img
+  - button "MCP servers":
+    - img
+    - text: MCP
+  - button "SSH":
+    - img
+    - text: SSH
+  - button "Customer insights" [expanded]
+  - paragraph: Today
+  - button "Review conversation summary, Direct": Review conversation summary
+  - button "Pin Review conversation summary":
+    - img
+  - button "Rename Review conversation summary":
+    - img
+  - button "Delete Review conversation summary":
+    - img
+  - button "Review delegated completion, Direct": Review delegated completion
+  - button "Pin Review delegated completion":
+    - img
+  - button "Rename Review delegated completion":
+    - img
+  - button "Delete Review delegated completion":
+    - img
+  - button "Review a failed child launch, Direct": Review a failed child launch
+  - button "Pin Review a failed child launch":
+    - img
+  - button "Rename Review a failed child launch":
+    - img
+  - button "Delete Review a failed child launch":
+    - img
+  - button "Review customer insights, Direct": Review customer insights
+  - button "Pin Review customer insights":
+    - img
+  - button "Rename Review customer insights":
+    - img
+  - button "Delete Review customer insights":
+    - img
+  - button "Configurations":
+    - img
+    - text: Configurations
+  - button "Managed host":
+    - img
+    - text: Managed host
+  - text: "Store: /private/tmp/nac-insights-refresh/runtime428v4/store.db"
+  - button "Copy the store path":
+    - img
+  - paragraph: Review customer insights
+  - text: Agent
+  - button "Usage":
+    - img
+    - text: Usage
+  - 'button "Branch: main"':
+    - img
+  - 'button "Snapshot: Working tree"':
+    - img
+  - text: 6 additions, 4 deletions
+  - status
+  - text: 26 Oct 2026 6:53 PM REFRESH_MAIN Inspect the customer insights component, rename its heading to Conversation insights, and summarize the change.
+  - button "Regenerate from original prompt":
+    - img
+  - button "Revert to this snapshot":
+    - img
+  - button "Copy message":
+    - img
+  - text: gpt-5.6-sol 26 Oct 2026 6:53 PM
+  - 'button "Total activity: 0.0s"'
+  - paragraph:
+    - text: Updated the conversation summary heading to
+    - strong: Conversation insights
+    - text: .
+  - paragraph: The panel keeps its accessible section label, readable description, and primary action.
+  - heading "What changed" [level=3]
+  - list:
+    - listitem:
+      - text: Renamed the heading in
+      - code: ConversationSummaryPanel.tsx
+      - text: .
+    - listitem: Preserved the existing layout and button.
+  - paragraph: Ready for visual review on desktop and mobile.
+  - button "Snapshot +1 -1"
+  - button "ConversationSummaryPanel.tsx +1 -1"
+  - button "Regenerate from original prompt":
+    - img
+  - button "Revert to this snapshot":
+    - img
+  - button "Create fork":
+    - img
+  - button "Copy message":
+    - img
+  - button "Last messages":
+    - text: Last messages
+    - img
+  - status
+  - combobox "Message"
+  - button "Set durable goal":
+    - img
+  - button "Send" [disabled]:
+    - img
+  - button "Model":
+    - img
+    - text: GPT-5.6 Sol OpenAI Responses
+  - button "High":
+    - text: High
+    - img
+  - button "Session settings":
+    - img
+  - button "Auto-approve on — open permissions":
+    - img
+    - text: Accept all
+  - button "Hide panel":
+    - img
+  - tablist:
+    - tab "Insights":
+      - img
+      - text: Insights
+    - tab "Subagents":
+      - img
+      - text: Subagents
+    - tab "Files" [selected]:
+      - img
+      - text: Files
+    - tab "Terminal":
+      - img
+      - text: Terminal
+  - button "Expand panel":
+    - img
+  - text: "README.md +1 -3 @@ -1,3 +1,1 1 # Customer insights 2 3 Review customer conversations and identify a useful next action. 1 review-checklist.md No newline at end of file"
+  - button "Show every file" [pressed]:
+    - img
+  - button "Show changed files only":
+    - img
+  - button "Commit"
+  - button "src/features/customer-insights/components/conversation , Modified" [expanded]:
+    - img
+    - text: src/features/customer-insights/components/conversation , Modified
+  - button "ConversationSummaryPanel.tsx , Modified"
+  - button "README.md , Modified" [pressed]
+  - button "review-checklist.md , Modified"
+  - separator "Resize list panel"

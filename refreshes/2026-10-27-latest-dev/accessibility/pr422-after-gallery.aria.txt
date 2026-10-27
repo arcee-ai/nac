@@ -1,0 +1,2189 @@
+- banner:
+  - img "NAC"
+  - text: design system
+- main:
+  - text: Buttons
+  - button "Primary"
+  - button "Secondary"
+  - button "Tertiary"
+  - button "Ghost"
+  - button "Destructive"
+  - button [disabled]:
+    - img
+  - button "Disabled" [disabled]
+  - button "With icon":
+    - img
+    - text: With icon
+  - text: Button Default Disabled Icon Icon, disabled Primary
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Secondary
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Secondary highlighted
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Secondary destructive
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Secondary accent
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Secondary accent highlighted
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Ghost
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Ghost highlighted
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Ghost destructive
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Ghost accent
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Ghost highlighted accent
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Tertiary
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Tertiary destructive
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Tertiary accent
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Icon Icon left Text Icon right Secondary, small
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Secondary, medium
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Secondary, large
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Ghost highlighted, small
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Ghost highlighted, medium
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Ghost highlighted, large
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Tertiary, small
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Tertiary, medium
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Tertiary, large
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Tab button Default Active Disabled Active, disabled Regular, small
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Regular, medium
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Regular, large
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Accent, small
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Accent, medium
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Accent, large
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Destructive, small
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Destructive, medium
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Destructive, large
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Horizontal tab item Icon left Icon right Icon Text Full Small, default
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Small, active
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Small, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Small, active, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Medium, default
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Medium, active
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Medium, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Medium, active, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Large, default
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Large, active
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Large, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Large, active, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Badges, loader, switch, tooltip Running Queued Failed Idle
+  - img
+  - switch [checked]
+  - img
+  - img
+  - text: Inputs Working directory
+  - textbox "/Users/me/project"
+  - text: Search
+  - img
+  - textbox "Filter sessions"
+  - paragraph: Matches name and cwd
+  - button "Claude Sonnet":
+    - img
+    - text: Claude Sonnet
+    - img
+  - button "Open modal"
+  - text: Popover, copy, shortcuts
+  - button "Open popover"
+  - button "Copy":
+    - img
+  - text: ⌘ ⇧ K Choices, multi-line and file input
+  - checkbox "Skip permission prompts" [checked]
+  - text: Skip permission prompts
+  - checkbox "Disabled" [disabled]
+  - text: Disabled
+  - radio "Working tree" [checked]
+  - text: Working tree
+  - radio "Latest snapshot"
+  - text: Latest snapshot System prompt
+  - textbox "Extra instructions for the agent"
+  - button "Upload file"
+  - paragraph: Text, Markdown or PDF.
+  - text: session-trace.txt 12 KB
+  - button "Remove session-trace.txt"
+  - text: Notices and loaders
+  - img
+  - text: Read-only snapshot Pick the working tree to edit files again.
+  - img
+  - text: Run failed The provider rejected the request.
+  - img
+  - text: Branch switched
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - text: Session avatars 9f2c1ab4 3de77c01 b81004ff 22aa93de 7c0518ba e4419d27 unassigned Project navigation Default Hovered Pressed Disabled NAC orchestrator Direct coding agent Direct + NAC orchestration
+  - button "Fix the parser"
+  - button "Rewrite the store layer"
+  - button "Investigating":
+    - img
+    - text: Investigating
+  - button "Without NAC"
+  - 'button "Fork: Fix the parser"':
+    - img
+    - text: "Fork: Fix the parser"
+  - button "Fork running":
+    - img
+    - text: Fork running
+  - text: Desktop Default Active Running Active, running Direct agent
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Direct + NAC
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Orchestrator
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Fork
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Unread
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Without NAC
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Disabled
+  - button "Chat session 1" [disabled]
+  - button "Chat session 1" [disabled]
+  - button "Chat session 1" [disabled]
+  - button "Chat session 1" [disabled]
+  - text: Mobile Default Active Running Active, running Direct agent
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Direct + NAC
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Orchestrator
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Fork
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Unread
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Without NAC
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Disabled
+  - button "Chat session 1" [disabled]
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1" [disabled]
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1" [disabled]
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1" [disabled]
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - 'button "Fork: Session title ID: 14231vsd7897"':
+    - img
+    - text: "Fork: Session title"
+    - img
+    - text: "ID: 14231vsd7897"
+  - img
+  - text: No fork found
+  - img
+  - text: "ID: 14231vsd7897"
+  - button "arcee-ai/nac"
+  - text: "4"
+  - button "arcee-ai/telos"
+  - text: "1"
+  - button "Unassigned session"
+  - text: Model loader Animated Frame 1 Frame 2 Frame 3 Default · Small 16px Default · Medium 20px Default · Large 24px Accent · Small 16px Accent · Medium 20px Accent · Large 24px Tools and reasoning badge Default Selected Done
+  - button "Worked for 12.3s"
+  - button "Worked for 12.3s" [pressed]
+  - text: Done, disabled
+  - button "Worked for 12.3s" [disabled]
+  - button "Worked for 12.3s" [disabled] [pressed]
+  - text: In progress, disabled
+  - button "Thinking…" [disabled]
+  - button "Thinking…" [disabled] [pressed]
+  - text: In progress
+  - button "Thinking…"
+  - button "Thinking…" [pressed]
+  - button "Searching the web…"
+  - button "Searching the web…" [pressed]
+  - button "Fetching arcee.ai…"
+  - button "Fetching arcee.ai…" [pressed]
+  - button "Reading index.tsx…"
+  - button "Reading index.tsx…" [pressed]
+  - button "Creating index.tsx…"
+  - button "Creating index.tsx…" [pressed]
+  - button "Editing index.tsx…"
+  - button "Editing index.tsx…" [pressed]
+  - button "Finding files…"
+  - button "Finding files…" [pressed]
+  - button "Searching files…"
+  - button "Searching files…" [pressed]
+  - button "Running npm test…"
+  - button "Running npm test…" [pressed]
+  - button "Writing to terminal…"
+  - button "Writing to terminal…" [pressed]
+  - button "Reading command output…"
+  - button "Reading command output…" [pressed]
+  - button "Creating goal…"
+  - button "Creating goal…" [pressed]
+  - button "Getting goal…"
+  - button "Getting goal…" [pressed]
+  - button "Updating goal…"
+  - button "Updating goal…" [pressed]
+  - button "Spawning agent…"
+  - button "Spawning agent…" [pressed]
+  - button "Spawning orchestrator…"
+  - button "Spawning orchestrator…" [pressed]
+  - button "Checking session status…"
+  - button "Checking session status…" [pressed]
+  - button "Steering session…"
+  - button "Steering session…" [pressed]
+  - button "Reading session…"
+  - button "Reading session…" [pressed]
+  - button "Waiting for session…"
+  - button "Waiting for session…" [pressed]
+  - button "Deleting session…"
+  - button "Deleting session…" [pressed]
+  - button "Defining workset…"
+  - button "Defining workset…" [pressed]
+  - button "Deleting thread…"
+  - button "Deleting thread…" [pressed]
+  - text: Insights Type Ready Pending Running Failed or canceled Thread
+  - button "impl/calendar, Thread, 3":
+    - img
+    - text: impl/calendar Thread, 3
+  - button "impl/calendar, Thread, 3, pending":
+    - img
+    - text: impl/calendar Thread, 3
+  - button "impl/calendar, running":
+    - img
+    - text: impl/calendar
+  - button "impl/calendar, failed":
+    - img
+    - text: impl/calendar
+  - text: Thoughts
+  - button "Thoughts, 13.8 s":
+    - img
+    - text: Thoughts 13.8 s
+  - button "Thoughts, 13.8 s, pending":
+    - img
+    - text: Thoughts 13.8 s
+  - button "Thinking…, running":
+    - img
+    - text: Thinking…
+  - button "Thoughts, failed":
+    - img
+    - text: Thoughts
+  - text: Define Workset
+  - button "calendar-sync, Workset":
+    - img
+    - text: calendar-sync Workset
+  - button "calendar-sync, Workset, pending":
+    - img
+    - text: calendar-sync Workset
+  - button "Defining Workset…, running":
+    - img
+    - text: Defining Workset…
+  - button "Define Workset, failed":
+    - img
+    - text: Define Workset
+  - text: Delete Workset
+  - 'button "Deleted: impl/calendar"':
+    - img
+    - text: "Deleted: impl/calendar"
+  - 'button "Deleted: impl/calendar, pending"':
+    - img
+    - text: "Deleted: impl/calendar"
+  - button "Deleting…, running":
+    - img
+    - text: Deleting…
+  - button "Delete thread, failed":
+    - img
+    - text: Delete thread
+  - text: Read File
+  - button "index.tsx, Read":
+    - img
+    - text: index.tsx Read
+  - button "index.tsx, Read, pending":
+    - img
+    - text: index.tsx Read
+  - button "Reading File…, running":
+    - img
+    - text: Reading File…
+  - button "Read File, failed":
+    - img
+    - text: Read File
+  - text: Write File
+  - button "index.tsx, Write":
+    - img
+    - text: index.tsx Write
+  - button "index.tsx, Write, pending":
+    - img
+    - text: index.tsx Write
+  - button "Creating File…, running":
+    - img
+    - text: Creating File…
+  - button "Create File, failed":
+    - img
+    - text: Create File
+  - text: Edit File
+  - button "index.tsx, Edit":
+    - img
+    - text: index.tsx Edit
+  - button "index.tsx, Edit, pending":
+    - img
+    - text: index.tsx Edit
+  - button "Editing File…, running":
+    - img
+    - text: Editing File…
+  - button "Edit File, failed":
+    - img
+    - text: Edit File
+  - text: Glob
+  - button "Find files, Glob":
+    - img
+    - text: Find files Glob
+  - button "Find files, Glob, pending":
+    - img
+    - text: Find files Glob
+  - button "Find files…, running":
+    - img
+    - text: Find files…
+  - button "Find files, failed":
+    - img
+    - text: Find files
+  - text: Grep
+  - button "Search files, Grep":
+    - img
+    - text: Search files Grep
+  - button "Search files, Grep, pending":
+    - img
+    - text: Search files Grep
+  - button "Search files…, running":
+    - img
+    - text: Search files…
+  - button "Search files, failed":
+    - img
+    - text: Search files
+  - text: Run Terminal
+  - button "Run command, Exec":
+    - img
+    - text: Run command Exec
+  - button "Run command, Exec, pending":
+    - img
+    - text: Run command Exec
+  - button "Running command…, running":
+    - img
+    - text: Running command…
+  - button "Run command, failed":
+    - img
+    - text: Run command
+  - text: Use Terminal
+  - button "Write command, Write":
+    - img
+    - text: Write command Write
+  - button "Write command, Write, pending":
+    - img
+    - text: Write command Write
+  - button "Write command…, running":
+    - img
+    - text: Write command…
+  - button "Write command, failed":
+    - img
+    - text: Write command
+  - text: Read Output Command
+  - button "Read Output Command, Read":
+    - img
+    - text: Read Output Command Read
+  - button "Read Output Command, Read, pending":
+    - img
+    - text: Read Output Command Read
+  - button "Read Output Command…, running":
+    - img
+    - text: Read Output Command…
+  - button "Read Output Command, failed":
+    - img
+    - text: Read Output Command
+  - text: Create goal
+  - button "Create goal, Create":
+    - img
+    - text: Create goal Create
+  - button "Create goal, Create, pending":
+    - img
+    - text: Create goal Create
+  - button "Creating goal…, running":
+    - img
+    - text: Creating goal…
+  - button "Create goal, failed":
+    - img
+    - text: Create goal
+  - text: Read goal
+  - button "Get goal, Read":
+    - img
+    - text: Get goal Read
+  - button "Get goal, Read, pending":
+    - img
+    - text: Get goal Read
+  - button "Get goal…, running":
+    - img
+    - text: Get goal…
+  - button "Get goal, failed":
+    - img
+    - text: Get goal
+  - text: Update goal
+  - button "Update goal, Edit":
+    - img
+    - text: Update goal Edit
+  - button "Update goal, Edit, pending":
+    - img
+    - text: Update goal Edit
+  - button "Updating goal…, running":
+    - img
+    - text: Updating goal…
+  - button "Update goal, failed":
+    - img
+    - text: Update goal
+  - text: Spawn Session - Agent
+  - button "Calendar sync agent, Spawn":
+    - img
+    - text: Calendar sync agent Spawn
+  - button "Calendar sync agent, Spawn, pending":
+    - img
+    - text: Calendar sync agent Spawn
+  - button "Spawn Agent…, running":
+    - img
+    - text: Spawn Agent…
+  - button "Spawn Agent, failed":
+    - img
+    - text: Spawn Agent
+  - text: Spawn Session - Orchestrator
+  - button "Calendar rollout, Spawn":
+    - img
+    - text: Calendar rollout Spawn
+  - button "Calendar rollout, Spawn, pending":
+    - img
+    - text: Calendar rollout Spawn
+  - button "Spawn Orchestrator…, running":
+    - img
+    - text: Spawn Orchestrator…
+  - button "Spawn Orchestrator, failed":
+    - img
+    - text: Spawn Orchestrator
+  - text: Check session status
+  - button "Calendar sync agent, Check":
+    - img
+    - text: Calendar sync agent Check
+  - button "Calendar sync agent, Check, pending":
+    - img
+    - text: Calendar sync agent Check
+  - button "Checking session status…, running":
+    - img
+    - text: Checking session status…
+  - button "Check session status, failed":
+    - img
+    - text: Check session status
+  - text: Steer Session
+  - button "Calendar rollout, Steer":
+    - img
+    - text: Calendar rollout Steer
+  - button "Calendar rollout, Steer, pending":
+    - img
+    - text: Calendar rollout Steer
+  - button "Steer session…, running":
+    - img
+    - text: Steer session…
+  - button "Steer session, failed":
+    - img
+    - text: Steer session
+  - text: Session Read
+  - button "Calendar rollout, Read":
+    - img
+    - text: Calendar rollout Read
+  - button "Calendar rollout, Read, pending":
+    - img
+    - text: Calendar rollout Read
+  - button "Reading session…, running":
+    - img
+    - text: Reading session…
+  - button "Read session, failed":
+    - img
+    - text: Read session
+  - text: Session Wait
+  - button "Calendar rollout, Wait":
+    - img
+    - text: Calendar rollout Wait
+  - button "Calendar rollout, Wait, pending":
+    - img
+    - text: Calendar rollout Wait
+  - button "Wait for session…, running":
+    - img
+    - text: Wait for session…
+  - button "Wait for session, failed":
+    - img
+    - text: Wait for session
+  - text: Cancel session
+  - button "Calendar sync agent, Delete":
+    - img
+    - text: Calendar sync agent Delete
+  - button "Calendar sync agent, Delete, pending":
+    - img
+    - text: Calendar sync agent Delete
+  - button "Deleting session…, running":
+    - img
+    - text: Deleting session…
+  - button "Delete session, failed":
+    - img
+    - text: Delete session
+  - text: ToolsSegment
+  - button "Worked for 13.3s, 12":
+    - img
+    - text: Worked for 13.3s 12
+  - button "Worked for 13.3s, 12, pending":
+    - img
+    - text: Worked for 13.3s 12
+  - button "Working…, running":
+    - img
+    - text: Working…
+  - button "Worked for 13.3s, failed":
+    - img
+    - text: Worked for 13.3s
+  - text: Web search
+  - button "tokio select timeout, Search":
+    - img
+    - text: tokio select timeout Search
+  - button "tokio select timeout, Search, pending":
+    - img
+    - text: tokio select timeout Search
+  - button "Searching the web…, running":
+    - img
+    - text: Searching the web…
+  - button "tokio select timeout, failed":
+    - img
+    - text: tokio select timeout
+  - text: Web fetch
+  - button "docs.rs, Fetch":
+    - img
+    - text: docs.rs Fetch
+  - button "docs.rs, Fetch, pending":
+    - img
+    - text: docs.rs Fetch
+  - button "Fetching docs.rs…, running":
+    - img
+    - text: Fetching docs.rs…
+  - button "docs.rs, failed":
+    - img
+    - text: docs.rs
+  - text: Other tool
+  - button "MCP · list_issues, Tool":
+    - img
+    - text: MCP · list_issues Tool
+  - button "MCP · list_issues, Tool, pending":
+    - img
+    - text: MCP · list_issues Tool
+  - button "Running list_issues…, running":
+    - img
+    - text: Running list_issues…
+  - button "MCP · list_issues, failed":
+    - img
+    - text: MCP · list_issues
+  - text: Thread, active
+  - button "impl/calendar, Thread, 3" [pressed]:
+    - img
+    - text: impl/calendar Thread, 3
+  - button "impl/calendar, Thread, 3, pending" [pressed]:
+    - img
+    - text: impl/calendar Thread, 3
+  - button "impl/calendar, running" [pressed]:
+    - img
+    - text: impl/calendar
+  - button "impl/calendar, failed" [pressed]:
+    - img
+    - text: impl/calendar
+  - text: Read File, active
+  - button "index.tsx, Read" [pressed]:
+    - img
+    - text: index.tsx Read
+  - button "index.tsx, Read, pending" [pressed]:
+    - img
+    - text: index.tsx Read
+  - button "Reading File…, running" [pressed]:
+    - img
+    - text: Reading File…
+  - button "Read File, failed" [pressed]:
+    - img
+    - text: Read File
+  - text: ToolsSegment, active
+  - button "Worked for 13.3s, 12" [expanded] [pressed]:
+    - img
+    - text: Worked for 13.3s 12
+  - button "Worked for 13.3s, 12, pending" [expanded] [pressed]:
+    - img
+    - text: Worked for 13.3s 12
+  - button "Working…, running" [expanded] [pressed]:
+    - img
+    - text: Working…
+  - button "Worked for 13.3s, failed" [expanded] [pressed]:
+    - img
+    - text: Worked for 13.3s
+  - button "Worked for 13.3s, 3" [expanded] [pressed]:
+    - img
+    - text: Worked for 13.3s 3
+  - button "Thoughts, 13.8 s" [pressed]:
+    - img
+    - text: Thoughts 13.8 s
+  - button "index.tsx, Read":
+    - img
+    - text: index.tsx Read
+  - button "index.tsx, Write":
+    - img
+    - text: index.tsx Write
+  - button "Calendar rollout, Read":
+    - img
+    - text: Calendar rollout Read
+  - button "Worked for 4.1s, 5":
+    - img
+    - text: Worked for 4.1s 5
+  - button "Calendar rollout, Spawn":
+    - img
+    - text: Calendar rollout Spawn
+  - button "Thoughts, 2.1 s":
+    - img
+    - text: Thoughts 2.1 s
+  - button "Thoughts, 13.8 s":
+    - img
+    - text: Thoughts 13.8 s
+  - button "impl/calendar, Thread, 3" [pressed]:
+    - img
+    - text: impl/calendar Thread, 3
+  - button "impl/recurring-events, Thread, 3":
+    - img
+    - text: impl/recurring-events Thread, 3
+  - button "review/calendar, Thread, 3":
+    - img
+    - text: review/calendar Thread, 3
+  - button "docs/calendar, Thread, 3":
+    - img
+    - text: docs/calendar Thread, 3
+  - button "Worked for 13.3s, 12":
+    - img
+    - text: Worked for 13.3s 12
+  - button "impl/time-zones, Thread, 3":
+    - img
+    - text: impl/time-zones Thread, 3
+  - button "Thoughts, 2.1 s":
+    - img
+    - text: Thoughts 2.1 s
+  - button "impl/calendar-sync-recurring-events-and-time-zones, Thread, 12":
+    - img
+    - text: impl/calendar-sync-recurring-events-and-time-zones Thread, 12
+  - button "Roll the recurring-events fix out to every calendar provider, Spawn":
+    - img
+    - text: Roll the recurring-events fix out to every calendar provider Spawn
+  - button "Investigate why the nightly export drops recurring events, Spawn, pending" [pressed]:
+    - img
+    - text: Investigate why the nightly export drops recurring events Spawn
+  - text: Code displayer Default, with Show full
+  - group "Input":
+    - paragraph: Input
+    - text: resetIndent|clearIndentStack|popIndent|pushIndent|indentLevel|dedentTokens|blankLineReset|tableRowIndent|listI…
+    - button "Show full"
+  - text: Default, without Show full
+  - group "Input":
+    - paragraph: Input
+    - text: resetIndent|clearIndentStack|popIndent|pushIndent|indentLevel|dedentTokens|blankLineReset|tableRowIndent|listI…
+  - text: Default, without a preview
+  - group "Input":
+    - paragraph: Input
+    - button "Show full"
+  - text: Default, the load failed (Show full retries)
+  - group "Input":
+    - paragraph: Input
+    - text: resetIndent|clearIndentStack|popIndent|pushIndent|indentLevel|dedentTokens|blankLineReset|tableRowIndent|listI…
+    - alert: Could not load the full input.
+    - button "Show full"
+  - text: Loading
+  - group "Input":
+    - paragraph: Input
+    - text: resetIndent|clearIndentStack|popIndent|pushIndent|indentLevel|dedentTokens|blankLineReset|tableRowIndent|listI…
+    - button "Show full" [disabled]
+  - text: Expanded
+  - group "Input":
+    - paragraph: Input
+    - text: "{ \"pattern\": \"resetIndent|clearIndentStack|popIndent|pushIndent|indentLevel|dedentTokens|blankLineReset|tableRowIndent|listItemIndent|nestedTableDepth\", \"path\": \"src/app/lib\", \"regex\": true }"
+    - button "Hide" [expanded]
+    - button "Copy Input":
+      - img
+  - text: Expanded, cut by the server
+  - group "Input":
+    - paragraph: Input
+    - text: "{ \"pattern\": \"resetIndent|clearIndentStack|popIndent|pushIndent|indentLevel|dedentTokens|blankLineReset|tableRowIndent|listItemIndent|nestedTableDepth\", \"path\": \"src/app/lib\", \"regex\": true }"
+    - paragraph: The server cut this input at its size limit.
+    - button "Hide" [expanded]
+    - button "Copy Input":
+      - img
+  - text: Without heading
+  - group "Input":
+    - text: resetIndent|clearIndentStack|popIndent|pushIndent|indentLevel|dedentTokens|blankLineReset|tableRowIndent|listI…
+    - button "Show full"
+  - text: Interactive
+  - group "Input":
+    - paragraph: Input
+    - text: resetIndent|clearIndentStack|popIndent|pushIndent|indentLevel|dedentTokens|blankLineReset|tableRowIndent|listI…
+    - button "Show full"
+  - text: Stacked, the first one active
+  - group "Thoughts, 2.3 s":
+    - text: Thoughts, 2.3 s
+    - button "Copy Thoughts, 2.3 s":
+      - img
+    - paragraph: "The parser drops nested tables because the lexer resets its indent stack on every blank line. Check where resetIndent is called before changing it: the list renderer relies on the same reset."
+  - group "Run command":
+    - text: Run command
+    - button "Copy Run command":
+      - img
+    - group "Input":
+      - paragraph: Input
+      - text: npm run typecheck
+      - button "Show full"
+    - group "Output":
+      - paragraph: Output
+      - text: "> nac-web@0.0.0 typecheck > tsc -p packages/nac-client/tsconfig.json --noEmit && tsc -b Checked src/app/components/inspector/insights/presentation/InsightDetailColumn.tsx without errors."
+      - button "Show full"
+  - group "Steer session":
+    - text: Steer session
+    - button "Copy Steer session":
+      - img
+    - paragraph: Pause after the staging deploy and wait for my review before touching production.
+    - link "Calendar rollout":
+      - /url: "#/design"
+      - text: Calendar rollout
+      - img
+  - group "Search files":
+    - text: Search files
+    - button "Copy Search files":
+      - img
+    - group "Input":
+      - paragraph: Input
+      - text: resetIndent\(
+      - button "Show full"
+    - group "Output":
+      - paragraph: Output
+      - text: src/app/lib/lexer.ts:42 src/app/lib/lexer.ts:118 src/app/lib/parser/table.ts:7
+      - button "Show full"
+  - text: Error, the message cut by its preview
+  - group "Edit lexer.ts":
+    - text: Edit lexer.ts
+    - paragraph: The file changed on disk after it was read, so the edit was not applied. Read src/app/lib/lexer.ts again and repeat the edit against its current content; the ol...
+    - button "Show full"
+  - text: Default Loading Error Reasoning
+  - group "Thoughts, 2.3 s":
+    - text: Thoughts, 2.3 s
+    - button "Copy Thoughts, 2.3 s":
+      - img
+    - paragraph: "The parser drops nested tables because the lexer resets its indent stack on every blank line. Check where resetIndent is called before changing it: the list renderer relies on the same reset."
+  - group "Thinking…"
+  - group "Thoughts, 2.3 s":
+    - text: Thoughts, 2.3 s
+    - paragraph: The model stopped before it finished reasoning.
+  - text: Reasoning, active
+  - group "Thoughts, 2.3 s":
+    - text: Thoughts, 2.3 s
+    - button "Copy Thoughts, 2.3 s":
+      - img
+    - paragraph: "The parser drops nested tables because the lexer resets its indent stack on every blank line. Check where resetIndent is called before changing it: the list renderer relies on the same reset."
+  - group "Thinking…"
+  - group "Thoughts, 2.3 s":
+    - text: Thoughts, 2.3 s
+    - paragraph: The model stopped before it finished reasoning.
+  - text: Run Command (Error keeps the input)
+  - group "Run command":
+    - text: Run command
+    - button "Copy Run command":
+      - img
+    - group "Input":
+      - paragraph: Input
+      - text: npm run typecheck
+      - button "Show full"
+    - group "Output":
+      - paragraph: Output
+      - text: "> nac-web@0.0.0 typecheck > tsc -p packages/nac-client/tsconfig.json --noEmit && tsc -b Checked src/app/components/inspector/insights/presentation/InsightDetailColumn.tsx without errors."
+      - button "Show full"
+  - group "Running command…"
+  - group "Run command":
+    - text: Run command
+    - group "Input":
+      - paragraph: Input
+      - text: npm run typecheck
+      - button "Show full"
+    - paragraph: Command exited with code 2.
+  - text: Run Command (Error keeps the input), active
+  - group "Run command":
+    - text: Run command
+    - button "Copy Run command":
+      - img
+    - group "Input":
+      - paragraph: Input
+      - text: npm run typecheck
+      - button "Show full"
+    - group "Output":
+      - paragraph: Output
+      - text: "> nac-web@0.0.0 typecheck > tsc -p packages/nac-client/tsconfig.json --noEmit && tsc -b Checked src/app/components/inspector/insights/presentation/InsightDetailColumn.tsx without errors."
+      - button "Show full"
+  - group "Running command…"
+  - group "Run command":
+    - text: Run command
+    - group "Input":
+      - paragraph: Input
+      - text: npm run typecheck
+      - button "Show full"
+    - paragraph: Command exited with code 2.
+  - text: Steer Session (Loading and Error keep the link)
+  - group "Steer session":
+    - text: Steer session
+    - button "Copy Steer session":
+      - img
+    - paragraph: Pause after the staging deploy and wait for my review before touching production.
+    - link "Calendar rollout":
+      - /url: "#/design"
+      - text: Calendar rollout
+      - img
+  - group "Steer session…":
+    - text: Steer session…
+    - button "Calendar rollout":
+      - text: Calendar rollout
+      - img
+  - group "Steer session":
+    - text: Steer session
+    - button "Calendar rollout":
+      - text: Calendar rollout
+      - img
+    - paragraph: The session is no longer running.
+  - text: Steer Session (Loading and Error keep the link), active
+  - group "Steer session":
+    - text: Steer session
+    - button "Copy Steer session":
+      - img
+    - paragraph: Pause after the staging deploy and wait for my review before touching production.
+    - link "Calendar rollout":
+      - /url: "#/design"
+      - text: Calendar rollout
+      - img
+  - group "Steer session…":
+    - text: Steer session…
+    - button "Calendar rollout":
+      - text: Calendar rollout
+      - img
+  - group "Steer session":
+    - text: Steer session
+    - button "Calendar rollout":
+      - text: Calendar rollout
+      - img
+    - paragraph: The session is no longer running.
+  - text: Search File
+  - group "Search files":
+    - text: Search files
+    - button "Copy Search files":
+      - img
+    - group "Input":
+      - paragraph: Input
+      - text: resetIndent\(
+      - button "Show full"
+    - group "Output":
+      - paragraph: Output
+      - text: src/app/lib/lexer.ts:42 src/app/lib/lexer.ts:118 src/app/lib/parser/table.ts:7
+      - button "Show full"
+  - group "Search files…"
+  - group "Search files":
+    - text: Search files
+    - group "Input":
+      - paragraph: Input
+      - text: resetIndent\(
+      - button "Show full"
+    - paragraph: The pattern is not a valid regular expression.
+  - text: Search File, active
+  - group "Search files":
+    - text: Search files
+    - button "Copy Search files":
+      - img
+    - group "Input":
+      - paragraph: Input
+      - text: resetIndent\(
+      - button "Show full"
+    - group "Output":
+      - paragraph: Output
+      - text: src/app/lib/lexer.ts:42 src/app/lib/lexer.ts:118 src/app/lib/parser/table.ts:7
+      - button "Show full"
+  - group "Search files…"
+  - group "Search files":
+    - text: Search files
+    - group "Input":
+      - paragraph: Input
+      - text: resetIndent\(
+      - button "Show full"
+    - paragraph: The pattern is not a valid regular expression.
+  - text: Files File button Large Medium Small Default
+  - button "index.tsx, 279 additions, 84 deletions": index.tsx 279 additions, 84 deletions
+  - button "index.tsx, 279 additions, 84 deletions": index.tsx 279 additions, 84 deletions
+  - button "index.tsx, 279 additions, 84 deletions": index.tsx 279 additions, 84 deletions
+  - text: Active
+  - button "index.tsx, 279 additions, 84 deletions": index.tsx 279 additions, 84 deletions
+  - button "index.tsx, 279 additions, 84 deletions": index.tsx 279 additions, 84 deletions
+  - button "index.tsx, 279 additions, 84 deletions": index.tsx 279 additions, 84 deletions
+  - text: Disabled
+  - button "index.tsx, 279 additions, 84 deletions" [disabled]: index.tsx 279 additions, 84 deletions
+  - button "index.tsx, 279 additions, 84 deletions" [disabled]: index.tsx 279 additions, 84 deletions
+  - button "index.tsx, 279 additions, 84 deletions" [disabled]: index.tsx 279 additions, 84 deletions
+  - text: Active, disabled
+  - button "index.tsx, 279 additions, 84 deletions" [disabled]: index.tsx 279 additions, 84 deletions
+  - button "index.tsx, 279 additions, 84 deletions" [disabled]: index.tsx 279 additions, 84 deletions
+  - button "index.tsx, 279 additions, 84 deletions" [disabled]: index.tsx 279 additions, 84 deletions
+  - text: Without counts
+  - button "index.tsx"
+  - button "index.tsx"
+  - button "index.tsx"
+  - text: A long name in 200px
+  - button "RecurringEventsTimeZonePicker.tsx, 1204 additions, 377 deletions": RecurringEventsTimeZonePicker.tsx 1204 additions, 377 deletions
+  - button "RecurringEventsTimeZonePicker.tsx, 1204 additions, 377 deletions": RecurringEventsTimeZonePicker.tsx 1204 additions, 377 deletions
+  - button "RecurringEventsTimeZonePicker.tsx, 1204 additions, 377 deletions": RecurringEventsTimeZonePicker.tsx 1204 additions, 377 deletions
+  - text: Code changes badge Both Additions only Deletions only Large 279 additions, 84 deletions 12 additions 1 deletion Medium 279 additions, 84 deletions 12 additions 1 deletion Small 279 additions, 84 deletions 12 additions 1 deletion List, 5 files, Large
+  - list "Changed files":
+    - listitem:
+      - button "index.tsx, 279 additions, 84 deletions": index.tsx 279 additions, 84 deletions
+    - listitem:
+      - button "parser.ts, 42 additions, 17 deletions": parser.ts 42 additions, 17 deletions
+    - listitem:
+      - button "lexer.ts, 8 additions, 3 deletions": lexer.ts 8 additions, 3 deletions
+    - listitem:
+      - button "tokens.css, 16 additions, 16 deletions": tokens.css 16 additions, 16 deletions
+    - listitem:
+      - button "getting-started.md, 31 additions, 0 deletions": getting-started.md 31 additions, 0 deletions
+  - text: "Open file: src/app/lib/parser.ts List, 5 files, Medium"
+  - list "Changed files":
+    - listitem:
+      - button "index.tsx, 279 additions, 84 deletions": index.tsx 279 additions, 84 deletions
+    - listitem:
+      - button "parser.ts, 42 additions, 17 deletions": parser.ts 42 additions, 17 deletions
+    - listitem:
+      - button "lexer.ts, 8 additions, 3 deletions": lexer.ts 8 additions, 3 deletions
+    - listitem:
+      - button "tokens.css, 16 additions, 16 deletions": tokens.css 16 additions, 16 deletions
+    - listitem:
+      - button "getting-started.md, 31 additions, 0 deletions": getting-started.md 31 additions, 0 deletions
+  - text: "Open file: src/app/lib/parser.ts List, 5 files, Small"
+  - list "Changed files":
+    - listitem:
+      - button "index.tsx, 279 additions, 84 deletions": index.tsx 279 additions, 84 deletions
+    - listitem:
+      - button "parser.ts, 42 additions, 17 deletions": parser.ts 42 additions, 17 deletions
+    - listitem:
+      - button "lexer.ts, 8 additions, 3 deletions": lexer.ts 8 additions, 3 deletions
+    - listitem:
+      - button "tokens.css, 16 additions, 16 deletions": tokens.css 16 additions, 16 deletions
+    - listitem:
+      - button "getting-started.md, 31 additions, 0 deletions": getting-started.md 31 additions, 0 deletions
+  - text: "Open file: src/app/lib/parser.ts List, 17 files, Small"
+  - list "Changed files":
+    - listitem:
+      - button "index.tsx, 279 additions, 84 deletions": index.tsx 279 additions, 84 deletions
+    - listitem:
+      - button "parser.ts, 42 additions, 17 deletions": parser.ts 42 additions, 17 deletions
+    - listitem:
+      - button "lexer.ts, 8 additions, 3 deletions": lexer.ts 8 additions, 3 deletions
+    - listitem:
+      - button "tokens.css, 16 additions, 16 deletions": tokens.css 16 additions, 16 deletions
+    - listitem:
+      - button "getting-started.md, 31 additions, 0 deletions": getting-started.md 31 additions, 0 deletions
+    - listitem:
+      - button "lib.rs, 120 additions, 45 deletions": lib.rs 120 additions, 45 deletions
+    - listitem:
+      - button "Cargo.toml, 2 additions, 1 deletion": Cargo.toml 2 additions, 1 deletion
+    - listitem:
+      - button "package.json, 3 additions, 2 deletions": package.json 3 additions, 2 deletions
+    - listitem:
+      - button "release.sh, 14 additions, 9 deletions": release.sh 14 additions, 9 deletions
+  - button "+8 more"
+  - text: "Open file: src/app/lib/parser.ts Git status labels File list tab button, Small File File, active File, disabled Folder Folder, open Default"
+  - button "index.tsx"
+  - button "index.tsx" [pressed]
+  - button "index.tsx" [disabled]
+  - button "components":
+    - img
+    - text: components
+  - button "components" [expanded]:
+    - img
+    - text: components
+  - text: Changed
+  - button "index.tsx , Modified"
+  - button "index.tsx , Modified" [pressed]
+  - button "index.tsx , Modified" [disabled]
+  - button "components , Modified":
+    - img
+    - text: components , Modified
+  - button "components , Modified" [expanded]:
+    - img
+    - text: components , Modified
+  - text: Added
+  - button "index.tsx , Added"
+  - button "index.tsx , Added" [pressed]
+  - button "index.tsx , Added" [disabled]
+  - button "components , Added":
+    - img
+    - text: components , Added
+  - button "components , Added" [expanded]:
+    - img
+    - text: components , Added
+  - text: Deleted
+  - button "index.tsx , Deleted"
+  - button "index.tsx , Deleted" [pressed]
+  - button "index.tsx , Deleted" [disabled]
+  - button "components , Deleted":
+    - img
+    - text: components , Deleted
+  - button "components , Deleted" [expanded]:
+    - img
+    - text: components , Deleted
+  - text: Changed name
+  - button "index.tsx , Renamed"
+  - button "index.tsx , Renamed" [pressed]
+  - button "index.tsx , Renamed" [disabled]
+  - button "components , Renamed":
+    - img
+    - text: components , Renamed
+  - button "components , Renamed" [expanded]:
+    - img
+    - text: components , Renamed
+  - text: Copied
+  - button "index.tsx , Copied"
+  - button "index.tsx , Copied" [pressed]
+  - button "index.tsx , Copied" [disabled]
+  - button "components , Copied":
+    - img
+    - text: components , Copied
+  - button "components , Copied" [expanded]:
+    - img
+    - text: components , Copied
+  - text: Changed type
+  - button "index.tsx , Type changed"
+  - button "index.tsx , Type changed" [pressed]
+  - button "index.tsx , Type changed" [disabled]
+  - button "components , Type changed":
+    - img
+    - text: components , Type changed
+  - button "components , Type changed" [expanded]:
+    - img
+    - text: components , Type changed
+  - text: Conflict
+  - button "index.tsx , Conflict"
+  - button "index.tsx , Conflict" [pressed]
+  - button "index.tsx , Conflict" [disabled]
+  - button "components , Conflict":
+    - img
+    - text: components , Conflict
+  - button "components , Conflict" [expanded]:
+    - img
+    - text: components , Conflict
+  - text: Not tracked
+  - button "index.tsx , Untracked"
+  - button "index.tsx , Untracked" [pressed]
+  - button "index.tsx , Untracked" [disabled]
+  - button "components , Untracked":
+    - img
+    - text: components , Untracked
+  - button "components , Untracked" [expanded]:
+    - img
+    - text: components , Untracked
+  - text: Ignored
+  - button "index.tsx , Ignored"
+  - button "index.tsx , Ignored" [pressed]
+  - button "index.tsx , Ignored" [disabled]
+  - button "components , Ignored":
+    - img
+    - text: components , Ignored
+  - button "components , Ignored" [expanded]:
+    - img
+    - text: components , Ignored
+  - text: File list tab button, Large
+  - button "index.tsx , Modified"
+  - button "index.tsx , Modified" [pressed]
+  - button "components , Modified":
+    - img
+    - text: components , Modified
+  - button "components , Modified" [expanded]:
+    - img
+    - text: components , Modified
+  - text: Code displayer, two hunks
+  - group "Changes to src/app/lib/parser.ts":
+    - text: "1 import { tokenize } from \"./lexer\"; Deleted 2 import type { Token } from \"./lexer\"; Added 2 import { type Token, TokenKind } from \"./lexer\"; 3"
+    - separator
+    - text: "24 export function parse(source: string): Token[] { Deleted 25 return tokenize(source); Added 25 const tokens = tokenize(source); Added 26 return tokens.filter((token) => token.kind !== TokenKind.Whitespace && token.kind !== TokenKind.Comment); 27 } No newline at end of file"
+  - text: Code displayer without tokens
+  - group "Changes to src/app/lib/parser.ts":
+    - text: "1 import { tokenize } from \"./lexer\"; Deleted 2 import type { Token } from \"./lexer\"; Added 2 import { type Token, TokenKind } from \"./lexer\"; 3"
+    - separator
+    - text: "24 export function parse(source: string): Token[] { Deleted 25 return tokenize(source); Added 25 const tokens = tokenize(source); Added 26 return tokens.filter((token) => token.kind !== TokenKind.Whitespace && token.kind !== TokenKind.Comment); 27 } No newline at end of file"
+  - text: Subagent transcript card NAC on NAC off Ready · direct agent
+  - button "Open Child session title in Subagents, Direct coding agent"
+  - text: Child session title
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - button "Open Child session title in Subagents"
+  - text: Child session title
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - text: Ready · direct + NAC
+  - button "Open Child session title in Subagents, Direct + NAC orchestration"
+  - text: Child session title
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - button "Open Child session title in Subagents"
+  - text: Child session title
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - text: Ready · managed orchestrator
+  - button "Open Child session title in Subagents, NAC orchestrator"
+  - text: Child session title
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - button "Open Child session title in Subagents"
+  - text: Child session title
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - text: Running
+  - button "Open Child session title in Subagents, running"
+  - text: Child session title
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - button "Open Child session title in Subagents, running"
+  - text: Child session title
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - text: Failed
+  - button "Open Child session title in Subagents, failed"
+  - text: Child session title Failed
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - button "Open Child session title in Subagents, failed"
+  - text: Child session title Failed
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - text: Failed · cancelled
+  - button "Open Child session title in Subagents, cancelled"
+  - text: Child session title Cancelled
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - button "Open Child session title in Subagents, cancelled"
+  - text: Child session title Cancelled
+  - link "Go to session Child session title":
+    - /url: "#/design"
+    - text: Go to session
+  - text: Not found Not found No session found Not found No session found Static Child session title , Direct coding agent Child session title Narrow container · 240px
+  - button "Open Investigate the flaky parser tests in the store layer in Subagents, Direct coding agent"
+  - text: Investigate the flaky parser tests in the store layer
+  - link "Go to session Investigate the flaky parser tests in the store layer":
+    - /url: "#/design"
+    - text: Go to session
+  - button "Open Investigate the flaky parser tests in the store layer in Subagents, cancelled"
+  - text: Investigate the flaky parser tests in the store layer Cancelled
+  - link "Go to session Investigate the flaky parser tests in the store layer":
+    - /url: "#/design"
+    - text: Go to session
+  - text: Avatars and editable header A N O 🛠 A
+  - button "Port the ArceeFM atoms"
+  - text: Numeric inputs, tags and pagination
+  - button "Decrease":
+    - img
+  - spinbutton "Parallel threads": "4"
+  - button "Increase":
+    - img
+  - slider "Temperature"
+  - text: "0.7"
+  - button "local" [pressed]
+  - button "docker"
+  - button "remote"
+  - button "sandbox"
+  - text: 1–10 of 84 sessions
+  - button "Previous page" [disabled]:
+    - img
+  - text: Page 1 of 9
+  - button "Next page":
+    - img
+  - text: Dates Created after
+  - button "Select date":
+    - img
+    - text: Select date
+    - img
+  - text: Window
+  - button "Select range":
+    - img
+    - text: Select range
+    - img
+  - paragraph: Two clicks pick the ends.
+  - group "Calendar":
+    - button "Previous month":
+      - img
+    - text: October 2026
+    - button "Next month":
+      - img
+    - row "Sun Mon Tue Wed Thu Fri Sat":
+      - columnheader "Sun"
+      - columnheader "Mon"
+      - columnheader "Tue"
+      - columnheader "Wed"
+      - columnheader "Thu"
+      - columnheader "Fri"
+      - columnheader "Sat"
+    - rowgroup:
+      - gridcell
+      - gridcell
+      - gridcell
+      - gridcell
+      - gridcell "1":
+        - button "1"
+      - gridcell "2":
+        - button "2"
+      - gridcell "3":
+        - button "3"
+      - gridcell "4":
+        - button "4"
+      - gridcell "5":
+        - button "5"
+      - gridcell "6":
+        - button "6"
+      - gridcell "7":
+        - button "7"
+      - gridcell "8":
+        - button "8"
+      - gridcell "9":
+        - button "9"
+      - gridcell "10":
+        - button "10"
+      - gridcell "11":
+        - button "11"
+      - gridcell "12":
+        - button "12"
+      - gridcell "13":
+        - button "13"
+      - gridcell "14":
+        - button "14"
+      - gridcell "15":
+        - button "15"
+      - gridcell "16":
+        - button "16"
+      - gridcell "17":
+        - button "17"
+      - gridcell "18":
+        - button "18"
+      - gridcell "19":
+        - button "19"
+      - gridcell "20":
+        - button "20"
+      - gridcell "21":
+        - button "21"
+      - gridcell "22":
+        - button "22"
+      - gridcell "23":
+        - button "23"
+      - gridcell "24":
+        - button "24"
+      - gridcell "25":
+        - button "25"
+      - gridcell "26":
+        - button "26"
+      - gridcell "27":
+        - button "27"
+      - gridcell "28":
+        - button "28"
+      - gridcell "29":
+        - button "29"
+      - gridcell "30":
+        - button "30"
+      - gridcell "31":
+        - button "31"
+  - text: Code block and chat loader events.rs
+  - button "Copy code":
+    - img
+  - button "Expand code":
+    - img
+  - code: "pub enum AgentEvent { RunStarted { thread_name: Option<String> }, AssistantMessage { thread_name: Option<String>, content: String, usage: Option<TokenUsage>, }, RunFinished { thread_name: Option<String> }, }"
+  - status "Waiting for a response"
+  - text: Typography Title Header medium Label small Paragraph medium on the secondary text token. code-small / IBM Plex Mono

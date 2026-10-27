@@ -1,0 +1,74 @@
+{
+  "repo": "/private/tmp/nac-insights-final",
+  "trunk": "dev",
+  "trunk_sha": "b3682c66f22bb338938e1b320998fc31f675fe82",
+  "frozen_through": 431,
+  "prs": [
+    {
+      "pr": 421,
+      "head": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+      "base": "b3682c66f22bb338938e1b320998fc31f675fe82",
+      "branch": "ac/insights-1-identity"
+    },
+    {
+      "pr": 422,
+      "head": "1f98ac5b91534f8b357bb83ba101e305b3c671bb",
+      "base": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+      "branch": "ac/insights-2-atoms"
+    },
+    {
+      "pr": 423,
+      "head": "3e76b72705a8592ba7f734f404a9d407b846bd3c",
+      "base": "1f98ac5b91534f8b357bb83ba101e305b3c671bb",
+      "branch": "ac/insights-3-model"
+    },
+    {
+      "pr": 424,
+      "head": "0bcfe323fc2815ae29a048a2744894699d334278",
+      "base": "3e76b72705a8592ba7f734f404a9d407b846bd3c",
+      "branch": "ac/insights-4-panel"
+    },
+    {
+      "pr": 425,
+      "head": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "base": "0bcfe323fc2815ae29a048a2744894699d334278",
+      "branch": "ac/insights-5-transcript"
+    },
+    {
+      "pr": 426,
+      "head": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "base": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "branch": "ac/insights-6-core"
+    },
+    {
+      "pr": 427,
+      "head": "68e1fc20ba363156e5fa96544b36248758e9a970",
+      "base": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "branch": "ac/insights-7-tool-content"
+    },
+    {
+      "pr": 428,
+      "head": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "base": "68e1fc20ba363156e5fa96544b36248758e9a970",
+      "branch": "ac/insights-8-streaming"
+    },
+    {
+      "pr": 429,
+      "head": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "base": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "branch": "ac/insights-9-git-status"
+    },
+    {
+      "pr": 430,
+      "head": "71087efcca1a3714f9de607d6da9429ab3250e39",
+      "base": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "branch": "ac/insights-10-composer"
+    },
+    {
+      "pr": 431,
+      "head": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "base": "71087efcca1a3714f9de607d6da9429ab3250e39",
+      "branch": "ac/insights-11-mobile"
+    }
+  ]
+}

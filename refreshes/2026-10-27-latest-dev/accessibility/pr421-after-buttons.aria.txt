@@ -1,0 +1,1184 @@
+- banner:
+  - img "NAC"
+  - text: design system
+- main:
+  - text: Buttons
+  - button "Primary"
+  - button "Secondary"
+  - button "Tertiary"
+  - button "Ghost"
+  - button "Destructive"
+  - button [disabled]:
+    - img
+  - button "Disabled" [disabled]
+  - button "With icon":
+    - img
+    - text: With icon
+  - text: Button Default Disabled Icon Icon, disabled Primary
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Secondary
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Secondary highlighted
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Secondary destructive
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Secondary accent
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Secondary accent highlighted
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Ghost
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Ghost highlighted
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Ghost destructive
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Ghost accent
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Ghost highlighted accent
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Tertiary
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Tertiary destructive
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Tertiary accent
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label" [disabled]:
+    - img
+    - text: Label
+  - button "Add":
+    - img
+  - button "Add" [disabled]:
+    - img
+  - text: Icon Icon left Text Icon right Secondary, small
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Secondary, medium
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Secondary, large
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Ghost highlighted, small
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Ghost highlighted, medium
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Ghost highlighted, large
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Tertiary, small
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Tertiary, medium
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Tertiary, large
+  - button "Add":
+    - img
+  - button "Label":
+    - img
+    - text: Label
+  - button "Label"
+  - button "Label":
+    - text: Label
+    - img
+  - text: Tab button Default Active Disabled Active, disabled Regular, small
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Regular, medium
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Regular, large
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Accent, small
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Accent, medium
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Accent, large
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Destructive, small
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Destructive, medium
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Destructive, large
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat":
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - button "New chat" [disabled]:
+    - img
+    - text: New chat
+    - img
+  - text: Horizontal tab item Icon left Icon right Icon Text Full Small, default
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Small, active
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Small, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Small, active, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Medium, default
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Medium, active
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Medium, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Medium, active, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Large, default
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Large, active
+  - button "Run":
+    - img
+    - text: Run
+  - button "Run":
+    - text: Run
+    - img
+  - button "Run":
+    - img
+  - button "Run"
+  - button "Run":
+    - img
+    - text: Run
+    - img
+  - text: Large, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Large, active, disabled
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+  - button "Run" [disabled]:
+    - text: Run
+    - img
+  - button "Run" [disabled]:
+    - img
+  - button "Run" [disabled]
+  - button "Run" [disabled]:
+    - img
+    - text: Run
+    - img
+  - text: Badges, loader, switch, tooltip Running Queued Failed Idle
+  - img
+  - switch [checked]
+  - img
+  - img
+  - text: Inputs Working directory
+  - textbox "/Users/me/project"
+  - text: Search
+  - img
+  - textbox "Filter sessions"
+  - paragraph: Matches name and cwd
+  - button "Claude Sonnet":
+    - img
+    - text: Claude Sonnet
+    - img
+  - button "Open modal"
+  - text: Popover, copy, shortcuts
+  - button "Open popover"
+  - button "Copy":
+    - img
+  - text: ⌘ ⇧ K Choices, multi-line and file input
+  - checkbox "Skip permission prompts" [checked]
+  - text: Skip permission prompts
+  - checkbox "Disabled" [disabled]
+  - text: Disabled
+  - radio "Working tree" [checked]
+  - text: Working tree
+  - radio "Latest snapshot"
+  - text: Latest snapshot System prompt
+  - textbox "Extra instructions for the agent"
+  - button "Upload file"
+  - paragraph: Text, Markdown or PDF.
+  - text: session-trace.txt 12 KB
+  - button "Remove session-trace.txt"
+  - text: Notices and loaders
+  - img
+  - text: Read-only snapshot Pick the working tree to edit files again.
+  - img
+  - text: Run failed The provider rejected the request.
+  - img
+  - text: Branch switched
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - text: Session avatars 9f2c1ab4 3de77c01 b81004ff 22aa93de 7c0518ba e4419d27 unassigned Project navigation Default Hovered Pressed Disabled NAC orchestrator Direct coding agent Direct + NAC orchestration
+  - button "Fix the parser"
+  - button "Rewrite the store layer"
+  - button "Investigating":
+    - img
+    - text: Investigating
+  - button "Without NAC"
+  - 'button "Fork: Fix the parser"':
+    - img
+    - text: "Fork: Fix the parser"
+  - button "Fork running":
+    - img
+    - text: Fork running
+  - text: Desktop Default Active Running Active, running Direct agent
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Direct + NAC
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Orchestrator
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Fork
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Unread
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Without NAC
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Disabled
+  - button "Chat session 1" [disabled]
+  - button "Chat session 1" [disabled]
+  - button "Chat session 1" [disabled]
+  - button "Chat session 1" [disabled]
+  - text: Mobile Default Active Running Active, running Direct agent
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Direct + NAC
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Orchestrator
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Fork
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1":
+    - text: Chat session 1
+    - img
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Unread
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1": Chat session 1 Unread
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Without NAC
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1"
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - text: Disabled
+  - button "Chat session 1" [disabled]
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1" [disabled]
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1" [disabled]
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - button "Chat session 1" [disabled]
+  - button "Pin Chat session 1":
+    - img
+  - button "Rename Chat session 1":
+    - img
+  - button "Delete Chat session 1":
+    - img
+  - 'button "Fork: Session title ID: 14231vsd7897"':
+    - img
+    - text: "Fork: Session title"
+    - img
+    - text: "ID: 14231vsd7897"
+  - img
+  - text: No fork found
+  - img
+  - text: "ID: 14231vsd7897"
+  - button "arcee-ai/nac"
+  - text: "4"
+  - button "arcee-ai/telos"
+  - text: "1"
+  - button "Unassigned session"
+  - text: Model loader Animated Frame 1 Frame 2 Frame 3 Default · Small 16px Default · Medium 20px Default · Large 24px Accent · Small 16px Accent · Medium 20px Accent · Large 24px Avatars and editable header A N O 🛠 A
+  - button "Port the ArceeFM atoms"
+  - text: Numeric inputs, tags and pagination
+  - button "Decrease":
+    - img
+  - spinbutton "Parallel threads": "4"
+  - button "Increase":
+    - img
+  - slider "Temperature"
+  - text: "0.7"
+  - button "local" [pressed]
+  - button "docker"
+  - button "remote"
+  - button "sandbox"
+  - text: 1–10 of 84 sessions
+  - button "Previous page" [disabled]:
+    - img
+  - text: Page 1 of 9
+  - button "Next page":
+    - img
+  - text: Dates Created after
+  - button "Select date":
+    - img
+    - text: Select date
+    - img
+  - text: Window
+  - button "Select range":
+    - img
+    - text: Select range
+    - img
+  - paragraph: Two clicks pick the ends.
+  - group "Calendar":
+    - button "Previous month":
+      - img
+    - text: October 2026
+    - button "Next month":
+      - img
+    - row "Sun Mon Tue Wed Thu Fri Sat":
+      - columnheader "Sun"
+      - columnheader "Mon"
+      - columnheader "Tue"
+      - columnheader "Wed"
+      - columnheader "Thu"
+      - columnheader "Fri"
+      - columnheader "Sat"
+    - rowgroup:
+      - gridcell
+      - gridcell
+      - gridcell
+      - gridcell
+      - gridcell "1":
+        - button "1"
+      - gridcell "2":
+        - button "2"
+      - gridcell "3":
+        - button "3"
+      - gridcell "4":
+        - button "4"
+      - gridcell "5":
+        - button "5"
+      - gridcell "6":
+        - button "6"
+      - gridcell "7":
+        - button "7"
+      - gridcell "8":
+        - button "8"
+      - gridcell "9":
+        - button "9"
+      - gridcell "10":
+        - button "10"
+      - gridcell "11":
+        - button "11"
+      - gridcell "12":
+        - button "12"
+      - gridcell "13":
+        - button "13"
+      - gridcell "14":
+        - button "14"
+      - gridcell "15":
+        - button "15"
+      - gridcell "16":
+        - button "16"
+      - gridcell "17":
+        - button "17"
+      - gridcell "18":
+        - button "18"
+      - gridcell "19":
+        - button "19"
+      - gridcell "20":
+        - button "20"
+      - gridcell "21":
+        - button "21"
+      - gridcell "22":
+        - button "22"
+      - gridcell "23":
+        - button "23"
+      - gridcell "24":
+        - button "24"
+      - gridcell "25":
+        - button "25"
+      - gridcell "26":
+        - button "26"
+      - gridcell "27":
+        - button "27"
+      - gridcell "28":
+        - button "28"
+      - gridcell "29":
+        - button "29"
+      - gridcell "30":
+        - button "30"
+      - gridcell "31":
+        - button "31"
+  - text: Code block and chat loader events.rs
+  - button "Copy code":
+    - img
+  - button "Expand code":
+    - img
+  - code: "pub enum AgentEvent { RunStarted { thread_name: Option<String> }, AssistantMessage { thread_name: Option<String>, content: String, usage: Option<TokenUsage>, }, RunFinished { thread_name: Option<String> }, }"
+  - status "Waiting for a response"
+  - text: Typography Title Header medium Label small Paragraph medium on the secondary text token. code-small / IBM Plex Mono

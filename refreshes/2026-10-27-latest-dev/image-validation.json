@@ -1,0 +1,470 @@
+[
+  {
+    "file": "pr421-after-buttons.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      24.571732047284716,
+      25.157782000943666,
+      25.05022774060243
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr421-after-session-row.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      27.490577451633484,
+      27.782334462579172,
+      27.85824134313285
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr421-before-buttons.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      22.97467338745459,
+      23.400924058549666,
+      23.16228072366054
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr421-before-session-row.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      27.51889554301424,
+      27.810051088216692,
+      27.885652971966675
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr422-after-gallery.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      21.26236630494776,
+      22.82782641750862,
+      22.748204277666492
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr422-after-session-card-atoms.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      23.79423921836118,
+      24.89506133831083,
+      23.989879814889093
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr422-before-gallery.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      21.76207243625503,
+      22.72405185882262,
+      22.60447695291173
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr422-before-session-card-atoms.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      21.76207243625503,
+      22.72405185882262,
+      22.60447695291173
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr423-after-desktop.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      27.490577451633484,
+      27.782334462579172,
+      27.85824134313285
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr423-before-desktop.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      27.490577451633484,
+      27.782334462579172,
+      27.85824134313285
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr424-after-insights.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      29.83461350817528,
+      30.122588645138187,
+      30.24018293463879
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr424-before-insights.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      30.819788410027883,
+      30.9457624357172,
+      30.95303554160773
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr425-after-expanded-completion-report.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      21.86660319378624,
+      22.204322760923507,
+      22.279693809531935
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr425-after-failed-launch.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      23.850542563124222,
+      23.81966820594607,
+      23.91062970910969
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr425-after-insights.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      28.822008507662954,
+      29.057574232042935,
+      29.202588610910517
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr425-before-expanded-completion-report.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      20.481759108198467,
+      22.516354394257913,
+      20.880683400484454
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr425-before-failed-launch.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      24.47017996620372,
+      24.725074569247703,
+      24.800646874467834
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr425-before-insights.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      29.83461350817528,
+      30.122588645138187,
+      30.24018293463879
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr426-after-native-metadata.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      28.843404034933815,
+      29.11988919466858,
+      29.274818075655485
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr426-before-native-metadata.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      29.022587368105217,
+      29.251232154255895,
+      29.393422786020505
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr427-after-expanded-native-output.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      30.093554028783835,
+      30.82223195360845,
+      30.740896493288187
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr427-after-insights.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      30.081990797170846,
+      30.804018233404697,
+      30.724778167546347
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr427-before-expanded-native-output.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      28.84174068610051,
+      29.07716497192889,
+      29.22199271097502
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr427-before-insights.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      28.84174068610051,
+      29.07716497192889,
+      29.22199271097502
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr428-after-stream.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      21.76918748027257,
+      21.956509135599347,
+      21.93142328006578
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr428-before-stream.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      21.748960754045466,
+      21.93528592729374,
+      21.913950429394806
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr429-after-native-git-status.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      28.20828069260686,
+      28.39829675961623,
+      28.027714622477504
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr429-before-native-git-status.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      28.46827564968721,
+      28.39520526992873,
+      28.177123449518625
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr430-after-desktop.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      25.42508079159753,
+      25.609101407151574,
+      25.763699221373837
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr430-after-phone.jpg",
+    "size": [
+      390,
+      844
+    ],
+    "channel_stddev": [
+      41.214163101525564,
+      41.42907291910029,
+      41.44398222858647
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr430-before-desktop.jpg",
+    "size": [
+      1440,
+      960
+    ],
+    "channel_stddev": [
+      25.716022240340823,
+      25.916023656032838,
+      26.007046947440177
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr430-before-phone.jpg",
+    "size": [
+      390,
+      844
+    ],
+    "channel_stddev": [
+      41.83482715353061,
+      42.14242138853205,
+      42.180559636703705
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr431-after-phone-insights.jpg",
+    "size": [
+      390,
+      844
+    ],
+    "channel_stddev": [
+      31.07713952455923,
+      31.674408779390365,
+      31.839189725838597
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr431-after-phone.jpg",
+    "size": [
+      390,
+      844
+    ],
+    "channel_stddev": [
+      40.53981793725366,
+      40.79192142761285,
+      40.785403071129
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr431-before-phone-insights.jpg",
+    "size": [
+      390,
+      844
+    ],
+    "channel_stddev": [
+      40.57691648270313,
+      42.53225486099429,
+      42.13334363841425
+    ],
+    "nonflat": true
+  },
+  {
+    "file": "pr431-before-phone.jpg",
+    "size": [
+      390,
+      844
+    ],
+    "channel_stddev": [
+      41.214163101525564,
+      41.42907291910029,
+      41.44398222858647
+    ],
+    "nonflat": true
+  }
+]

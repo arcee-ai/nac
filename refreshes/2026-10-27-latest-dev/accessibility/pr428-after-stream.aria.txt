@@ -1,0 +1,110 @@
+- main:
+  - img "NAC"
+  - button "Hide sidebar":
+    - img
+  - img
+  - textbox "Search sessions":
+    - /placeholder: Search Sessions
+  - button "New Session":
+    - img
+    - text: New Session
+    - img
+  - button "All projects":
+    - img
+    - text: All projects
+  - button "New project":
+    - img
+  - button "MCP servers":
+    - img
+    - text: MCP
+  - button "SSH":
+    - img
+    - text: SSH
+  - button "Customer insights" [expanded]
+  - paragraph: Today
+  - button "Review conversation summary, Direct": Review conversation summary
+  - button "Pin Review conversation summary":
+    - img
+  - button "Rename Review conversation summary":
+    - img
+  - button "Delete Review conversation summary":
+    - img
+  - button "Review delegated completion, Direct": Review delegated completion
+  - button "Pin Review delegated completion":
+    - img
+  - button "Rename Review delegated completion":
+    - img
+  - button "Delete Review delegated completion":
+    - img
+  - button "Review a failed child launch, Direct": Review a failed child launch
+  - button "Pin Review a failed child launch":
+    - img
+  - button "Rename Review a failed child launch":
+    - img
+  - button "Delete Review a failed child launch":
+    - img
+  - button "Review customer insights, Direct": Review customer insights
+  - button "Pin Review customer insights":
+    - img
+  - button "Rename Review customer insights":
+    - img
+  - button "Delete Review customer insights":
+    - img
+  - button "Configurations":
+    - img
+    - text: Configurations
+  - button "Managed host":
+    - img
+    - text: Managed host
+  - text: "Store: /private/tmp/nac-insights-refresh/runtime431v4/store.db"
+  - button "Copy the store path":
+    - img
+  - paragraph: Review conversation summary
+  - text: Agent
+  - button "Usage":
+    - img
+    - text: Usage
+  - text: workspace Local
+  - 'button "Branch: main"': main
+  - 'button "Snapshot: Working tree"': Working tree
+  - text: 6 additions, 4 deletions
+  - status
+  - text: 26 Oct 2026 6:54 PM REFRESH_STREAM Check the conversation summary heading and primary action on desktop and mobile.
+  - button "Regenerate from original prompt" [disabled]:
+    - img
+  - button "Revert to this snapshot" [disabled]:
+    - img
+  - button "Copy message":
+    - img
+  - status: Working…
+  - button "Last messages":
+    - text: Last messages
+    - img
+  - status
+  - combobox "Message"
+  - button "Set durable goal":
+    - img
+  - button "Stop run":
+    - img
+  - button "Queue Next" [disabled]
+  - button "Model":
+    - img
+    - text: GPT-5.6 Sol OpenAI Responses
+  - button "High":
+    - text: High
+    - img
+  - button "Session settings":
+    - img
+  - button "Auto-approve on — open permissions":
+    - img
+    - text: Accept all
+  - button "Show panel":
+    - img
+  - button "Insights":
+    - img
+  - button "Subagents":
+    - img
+  - button "Files":
+    - img
+  - button "Terminal":
+    - img

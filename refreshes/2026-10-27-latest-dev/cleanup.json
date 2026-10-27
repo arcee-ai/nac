@@ -1,0 +1,137 @@
+{
+  "jobs": [
+    {
+      "kind": "native425",
+      "pid": 55721,
+      "backendPid": 55799,
+      "backend": "http://127.0.0.1:4861",
+      "signal": "SIGTERM"
+    },
+    {
+      "kind": "native426",
+      "pid": 60126,
+      "backendPid": 60201,
+      "backend": "http://127.0.0.1:4862",
+      "signal": "SIGTERM"
+    },
+    {
+      "kind": "native428",
+      "pid": 62953,
+      "backendPid": 63030,
+      "backend": "http://127.0.0.1:4863",
+      "signal": "SIGTERM"
+    },
+    {
+      "kind": "native429",
+      "pid": 64672,
+      "backendPid": 64746,
+      "backend": "http://127.0.0.1:4864",
+      "signal": "SIGTERM"
+    },
+    {
+      "kind": "native431",
+      "pid": 65615,
+      "backendPid": 65739,
+      "backend": "http://127.0.0.1:4860",
+      "signal": "SIGTERM"
+    },
+    {
+      "kind": "frontend-latest-dev-evidence",
+      "pid": 67227,
+      "signal": "SIGTERM"
+    },
+    {
+      "kind": "native-latest-dev-evidence",
+      "pid": 67646,
+      "signal": "SIGTERM"
+    }
+  ],
+  "requestedAt": "2026-10-27T01:56:38.626Z",
+  "checkedAt": "2026-10-27T01:56:43.145Z",
+  "ports": [
+    {
+      "port": 4860,
+      "stopped": true
+    },
+    {
+      "port": 4861,
+      "stopped": true
+    },
+    {
+      "port": 4862,
+      "stopped": true
+    },
+    {
+      "port": 4863,
+      "stopped": true
+    },
+    {
+      "port": 4864,
+      "stopped": true
+    },
+    {
+      "port": 4900,
+      "stopped": true
+    },
+    {
+      "port": 4901,
+      "stopped": true
+    },
+    {
+      "port": 4902,
+      "stopped": true
+    },
+    {
+      "port": 4903,
+      "stopped": true
+    },
+    {
+      "port": 4904,
+      "stopped": true
+    },
+    {
+      "port": 4905,
+      "stopped": true
+    },
+    {
+      "port": 4906,
+      "stopped": true
+    },
+    {
+      "port": 4907,
+      "stopped": true
+    },
+    {
+      "port": 4908,
+      "stopped": true
+    },
+    {
+      "port": 4909,
+      "stopped": true
+    },
+    {
+      "port": 4910,
+      "stopped": true
+    },
+    {
+      "port": 4911,
+      "stopped": true
+    },
+    {
+      "port": 4915,
+      "stopped": true
+    },
+    {
+      "port": 4916,
+      "stopped": true
+    },
+    {
+      "port": 4917,
+      "stopped": true
+    },
+    {
+      "port": 4918,
+      "stopped": true
+    }
+  ]
+}

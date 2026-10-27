@@ -1,0 +1,93 @@
+{
+  "repo": "/private/tmp/nac-refresh-source",
+  "output": "/private/tmp/nac-insights-refresh/native-latest-dev-evidence",
+  "firstPort": 4915,
+  "revisions": [
+    {
+      "key": "425",
+      "sha": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "backend": "http://127.0.0.1:4861",
+      "backendSha": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "sessions": {
+        "main": "260f05d2-c038-4301-b296-306b5e1f919d",
+        "launchFailure": "ec078baf-c9d7-4492-94bc-70b1047a3d79",
+        "stream": "66b36a75-c039-49b9-b39a-4a03b1534e78",
+        "delegated": "3397513f-2729-42fd-9167-b208270cb281"
+      }
+    },
+    {
+      "key": "426",
+      "sha": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "backend": "http://127.0.0.1:4862",
+      "backendSha": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "sessions": {
+        "main": "d8f133d6-ee65-467b-8df0-aa02d387256d",
+        "launchFailure": "f43cbee9-3a1e-4897-90a2-c1cb2d52a889",
+        "stream": "e6713a6e-27a2-4061-9d3e-229a2f273f23",
+        "delegated": "79e48e7c-3678-4122-b9db-6a5becd3f6e4"
+      }
+    },
+    {
+      "key": "428",
+      "sha": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "backend": "http://127.0.0.1:4863",
+      "backendSha": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "sessions": {
+        "main": "17a03dd1-5a3b-44ac-8d23-c22fa88d72ed",
+        "launchFailure": "02fd2e68-d93c-4d02-a6e4-83e65a7e0551",
+        "stream": "ec8a2a61-9f4f-4d5d-95e9-f0b4377169e5",
+        "delegated": "84137553-faeb-4436-a4f1-1a14ba8c2e93"
+      }
+    },
+    {
+      "key": "429",
+      "sha": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "backend": "http://127.0.0.1:4864",
+      "backendSha": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "sessions": {
+        "main": "61fc1422-d9e2-4016-ae8e-4d2f2163df19",
+        "launchFailure": "f7821603-bd11-4d1b-a86d-0d60818cbe80",
+        "stream": "01d44bbc-2be1-46c1-a14a-87fb587e7c4d",
+        "delegated": "aa6e3551-9cc6-4bca-9cc6-aa39e352ec14"
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "pr": 426,
+      "key": "native-metadata",
+      "before": "425",
+      "after": "426",
+      "steps": [
+        {
+          "role": "button",
+          "name": "Show panel",
+          "optional": true
+        },
+        {
+          "role": "tab",
+          "name": "Insights"
+        }
+      ],
+      "note": "Exact immediate-base/head native binaries and frontend refs. Same initial files and native glob/read/edit/read inputs replayed independently; IDs/timestamps/durations naturally differ. No performance claim."
+    },
+    {
+      "pr": 429,
+      "key": "native-git-status",
+      "before": "428",
+      "after": "429",
+      "steps": [
+        {
+          "role": "button",
+          "name": "Show panel",
+          "optional": true
+        },
+        {
+          "role": "tab",
+          "name": "Files"
+        }
+      ],
+      "note": "Exact immediate-base/head native binaries and frontend refs. Identical genuine Git typechange README.md and merge conflict review-checklist.md, plus modified TSX; before projection labels M/M and after T/U."
+    }
+  ]
+}

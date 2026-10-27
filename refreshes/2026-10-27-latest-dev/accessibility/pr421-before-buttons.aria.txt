@@ -1,0 +1,229 @@
+- banner:
+  - img "NAC"
+  - text: design system
+- main:
+  - text: Buttons
+  - button "Primary"
+  - button "Secondary"
+  - button "Tertiary"
+  - button "Ghost"
+  - button "Destructive"
+  - button [disabled]:
+    - img
+  - button "Disabled" [disabled]
+  - button "With icon":
+    - img
+    - text: With icon
+  - text: Badges, loader, switch, tooltip Running Queued Failed Idle
+  - img
+  - switch [checked]
+  - img
+  - img
+  - text: Inputs Working directory
+  - textbox "/Users/me/project"
+  - text: Search
+  - img
+  - textbox "Filter sessions"
+  - paragraph: Matches name and cwd
+  - button "Claude Sonnet":
+    - img
+    - text: Claude Sonnet
+    - img
+  - button "Open modal"
+  - text: Popover, copy, shortcuts
+  - button "Open popover"
+  - button "Copy":
+    - img
+  - text: ⌘ ⇧ K Choices, multi-line and file input
+  - checkbox "Skip permission prompts" [checked]
+  - text: Skip permission prompts
+  - checkbox "Disabled" [disabled]
+  - text: Disabled
+  - radio "Working tree" [checked]
+  - text: Working tree
+  - radio "Latest snapshot"
+  - text: Latest snapshot System prompt
+  - textbox "Extra instructions for the agent"
+  - button "Upload file"
+  - paragraph: Text, Markdown or PDF.
+  - text: session-trace.txt 12 KB
+  - button "Remove session-trace.txt"
+  - text: Notices and loaders
+  - img
+  - text: Read-only snapshot Pick the working tree to edit files again.
+  - img
+  - text: Run failed The provider rejected the request.
+  - img
+  - text: Branch switched
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - paragraph: Message Title
+  - text: Message description
+  - button "Message CTA"
+  - img
+  - text: Session avatars 9f2c1ab4 3de77c01 b81004ff 22aa93de 7c0518ba e4419d27 unassigned Project navigation
+  - button "Fix the parser"
+  - button "Rewrite the store layer"
+  - button "Investigating":
+    - img
+    - text: Investigating
+  - 'button "Fork: Fix the parser"':
+    - img
+    - text: "Fork: Fix the parser"
+  - button "Fork running":
+    - img
+    - text: Fork running
+  - button "Fix the parser"
+  - button "Rewrite the store layer"
+  - button "Investigating"
+  - 'button "Fork: Fix the parser"':
+    - text: "Fork: Fix the parser"
+    - img
+  - button "Fork running":
+    - text: Fork running
+    - img
+  - 'button "Fork: Session title ID: 14231vsd7897"':
+    - img
+    - text: "Fork: Session title"
+    - img
+    - text: "ID: 14231vsd7897"
+  - img
+  - text: No fork found
+  - img
+  - text: "ID: 14231vsd7897"
+  - button "arcee-ai/nac"
+  - text: "4"
+  - button "arcee-ai/telos"
+  - text: "1"
+  - button "Unassigned session"
+  - text: Avatars and editable header A N O 🛠 A
+  - button "Port the ArceeFM atoms"
+  - text: Numeric inputs, tags and pagination
+  - button "Decrease":
+    - img
+  - spinbutton "Parallel threads": "4"
+  - button "Increase":
+    - img
+  - slider "Temperature"
+  - text: "0.7"
+  - button "local" [pressed]
+  - button "docker"
+  - button "remote"
+  - button "sandbox"
+  - text: 1–10 of 84 sessions
+  - button "Previous page" [disabled]:
+    - img
+  - text: Page 1 of 9
+  - button "Next page":
+    - img
+  - text: Dates Created after
+  - button "Select date":
+    - img
+    - text: Select date
+    - img
+  - text: Window
+  - button "Select range":
+    - img
+    - text: Select range
+    - img
+  - paragraph: Two clicks pick the ends.
+  - group "Calendar":
+    - button "Previous month":
+      - img
+    - text: October 2026
+    - button "Next month":
+      - img
+    - row "Sun Mon Tue Wed Thu Fri Sat":
+      - columnheader "Sun"
+      - columnheader "Mon"
+      - columnheader "Tue"
+      - columnheader "Wed"
+      - columnheader "Thu"
+      - columnheader "Fri"
+      - columnheader "Sat"
+    - rowgroup:
+      - gridcell
+      - gridcell
+      - gridcell
+      - gridcell
+      - gridcell "1":
+        - button "1"
+      - gridcell "2":
+        - button "2"
+      - gridcell "3":
+        - button "3"
+      - gridcell "4":
+        - button "4"
+      - gridcell "5":
+        - button "5"
+      - gridcell "6":
+        - button "6"
+      - gridcell "7":
+        - button "7"
+      - gridcell "8":
+        - button "8"
+      - gridcell "9":
+        - button "9"
+      - gridcell "10":
+        - button "10"
+      - gridcell "11":
+        - button "11"
+      - gridcell "12":
+        - button "12"
+      - gridcell "13":
+        - button "13"
+      - gridcell "14":
+        - button "14"
+      - gridcell "15":
+        - button "15"
+      - gridcell "16":
+        - button "16"
+      - gridcell "17":
+        - button "17"
+      - gridcell "18":
+        - button "18"
+      - gridcell "19":
+        - button "19"
+      - gridcell "20":
+        - button "20"
+      - gridcell "21":
+        - button "21"
+      - gridcell "22":
+        - button "22"
+      - gridcell "23":
+        - button "23"
+      - gridcell "24":
+        - button "24"
+      - gridcell "25":
+        - button "25"
+      - gridcell "26":
+        - button "26"
+      - gridcell "27":
+        - button "27"
+      - gridcell "28":
+        - button "28"
+      - gridcell "29":
+        - button "29"
+      - gridcell "30":
+        - button "30"
+      - gridcell "31":
+        - button "31"
+  - text: Code block and chat loader events.rs
+  - button "Copy code":
+    - img
+  - button "Expand code":
+    - img
+  - code: "pub enum AgentEvent { RunStarted { thread_name: Option<String> }, AssistantMessage { thread_name: Option<String>, content: String, usage: Option<TokenUsage>, }, RunFinished { thread_name: Option<String> }, }"
+  - status "Waiting for a response"
+  - text: Typography Title Header medium Label small Paragraph medium on the secondary text token. code-small / IBM Plex Mono

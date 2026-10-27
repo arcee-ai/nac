@@ -1,0 +1,135 @@
+- main:
+  - img "NAC"
+  - button "Hide sidebar":
+    - img
+  - img
+  - textbox "Search sessions":
+    - /placeholder: Search Sessions
+  - button "New Session":
+    - img
+    - text: New Session
+    - img
+  - button "All projects":
+    - img
+    - text: All projects
+  - button "New project":
+    - img
+  - button "MCP servers":
+    - img
+    - text: MCP
+  - button "SSH":
+    - img
+    - text: SSH
+  - button "Customer insights" [expanded]
+  - paragraph: Today
+  - button "Review conversation summary, Direct": Review conversation summary
+  - button "Pin Review conversation summary":
+    - img
+  - button "Rename Review conversation summary":
+    - img
+  - button "Delete Review conversation summary":
+    - img
+  - button "Review delegated completion, Direct": Review delegated completion
+  - button "Pin Review delegated completion":
+    - img
+  - button "Rename Review delegated completion":
+    - img
+  - button "Delete Review delegated completion":
+    - img
+  - button "Review a failed child launch, Direct": Review a failed child launch
+  - button "Pin Review a failed child launch":
+    - img
+  - button "Rename Review a failed child launch":
+    - img
+  - button "Delete Review a failed child launch":
+    - img
+  - button "Review customer insights, Direct": Review customer insights
+  - button "Pin Review customer insights":
+    - img
+  - button "Rename Review customer insights":
+    - img
+  - button "Delete Review customer insights":
+    - img
+  - button "Configurations":
+    - img
+    - text: Configurations
+  - button "Managed host":
+    - img
+    - text: Managed host
+  - text: "Store: /private/tmp/nac-insights-refresh/runtime431v4/store.db"
+  - button "Copy the store path":
+    - img
+  - paragraph: Review delegated completion
+  - text: Agent
+  - group: Run details
+  - text: workspace Local
+  - 'button "Branch: main"':
+    - img
+    - text: main
+  - 'button "Snapshot: Working tree"':
+    - img
+    - text: Working tree
+  - text: +6 -4
+  - status
+  - text: REFRESH_DELEGATED Ask a coding agent to review the heading and primary action. Oct 26, 06:54 PM
+  - button "Revert to this snapshot":
+    - img
+  - button "Copy message":
+    - img
+  - img
+  - text: gpt-5.6-sol 0.2s Start coding agent Check conversation accessibility Succeeded
+  - paragraph: "{\"child_session_id\":\"44b68622-750f-4825-98c4-85aac1377286\",\"parent_session_id\":\"fb3d9665-6380-46b7-aa54-dbc78de59ece\",\"root_session_id\":\"fb3d9665-6380-46b7-aa54..."
+  - paragraph: The coding-agent review completed. No further changes were necessary.
+  - button "ConversationSummaryPanel.tsx +1 -1"
+  - button "Snapshot +1 -1"
+  - button "Revert to this snapshot":
+    - img
+  - button "Create fork":
+    - img
+  - button "Copy message":
+    - img
+  - status "Coding agent completed":
+    - img
+    - paragraph: "Coding agent completed: Background accessibility review"
+    - text: "Generation 1 Background accessibility review completed. The heading and primary action remain readable. Changes: 1 files changed, +1 -1"
+    - button "Open exact transcript"
+  - img
+  - text: gpt-5.6-sol 0.0s
+  - paragraph: Background review receipt acknowledged.
+  - button "Revert to this snapshot" [disabled]:
+    - img
+  - button "Create fork":
+    - img
+  - button "Copy message":
+    - img
+  - button "Last messages":
+    - text: Last messages
+    - img
+  - status
+  - combobox "Message"
+  - button "Set durable goal":
+    - img
+  - button "Send" [disabled]:
+    - img
+  - button "Model":
+    - img
+    - text: GPT-5.6 Sol OpenAI Responses
+  - button "High":
+    - text: High
+    - img
+  - button "Session settings":
+    - img
+  - button "Auto-approve on — open permissions":
+    - img
+    - text: Accept all
+  - button "Show panel":
+    - img
+  - button "Insights":
+    - img
+  - button "Subagents":
+    - img
+  - text: "2"
+  - button "Files":
+    - img
+  - button "Terminal":
+    - img

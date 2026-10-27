@@ -1,0 +1,1093 @@
+{
+  "captured": "2026-10-27T01:56:11.465Z",
+  "method": "Unmodified exact committed frontend bundles; deterministic local provider drives real NAC native tools in disposable stores/workspaces. No live model requests, production data, HTTP API interception, or DOM replacement.",
+  "desktopCSS": {
+    "width": 1440,
+    "height": 960
+  },
+  "phoneCSS": {
+    "width": 390,
+    "height": 844
+  },
+  "deviceScaleFactor": 1,
+  "prs": [
+    {
+      "number": 421,
+      "base": "b3682c66f22bb338938e1b320998fc31f675fe82",
+      "head": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+      "label": "Button variants and session identity",
+      "before": "pr421-before-buttons.jpg",
+      "after": "pr421-after-buttons.jpg",
+      "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "extra": [
+        {
+          "label": "session-row",
+          "before": "pr421-before-session-row.jpg",
+          "after": "pr421-after-session-row.jpg",
+          "note": "Same real session/backend with exact immediate-base/head frontend bundles.",
+          "frontendBefore": "b3682c66f22bb338938e1b320998fc31f675fe82",
+          "frontendAfter": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+          "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "viewport": {
+            "width": 1440,
+            "height": 960
+          }
+        }
+      ]
+    },
+    {
+      "number": 422,
+      "base": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+      "head": "1f98ac5b91534f8b357bb83ba101e305b3c671bb",
+      "label": "New design-preview atoms",
+      "before": "pr422-before-gallery.jpg",
+      "after": "pr422-after-gallery.jpg",
+      "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "extra": [
+        {
+          "label": "session-card-atoms",
+          "before": "pr422-before-session-card-atoms.jpg",
+          "after": "pr422-after-session-card-atoms.jpg",
+          "note": "New preview-only session-card atom; before section is the existing Model loader because the card section does not exist yet. Accessibility snapshots record spoken behavior/lineage.",
+          "frontendBefore": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+          "frontendAfter": "1f98ac5b91534f8b357bb83ba101e305b3c671bb",
+          "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "viewport": {
+            "width": 1440,
+            "height": 960
+          }
+        }
+      ]
+    },
+    {
+      "number": 423,
+      "base": "1f98ac5b91534f8b357bb83ba101e305b3c671bb",
+      "head": "3e76b72705a8592ba7f734f404a9d407b846bd3c",
+      "label": "Model extraction — matching visible session",
+      "before": "pr423-before-desktop.jpg",
+      "after": "pr423-after-desktop.jpg",
+      "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "extra": []
+    },
+    {
+      "number": 424,
+      "base": "3e76b72705a8592ba7f734f404a9d407b846bd3c",
+      "head": "0bcfe323fc2815ae29a048a2744894699d334278",
+      "label": "Files/default panel → Insights",
+      "before": "pr424-before-insights.jpg",
+      "after": "pr424-after-insights.jpg",
+      "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "extra": []
+    },
+    {
+      "number": 425,
+      "base": "0bcfe323fc2815ae29a048a2744894699d334278",
+      "head": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "label": "Transcript layout, failed launch and durable report",
+      "before": "pr425-before-insights.jpg",
+      "after": "pr425-after-insights.jpg",
+      "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "extra": [
+        {
+          "label": "failed-launch",
+          "before": "pr425-before-failed-launch.jpg",
+          "after": "pr425-after-failed-launch.jpg",
+          "note": "Same real failed subagent launch before child creation. Diagnostic must remain visible after the card redesign.",
+          "frontendBefore": "0bcfe323fc2815ae29a048a2744894699d334278",
+          "frontendAfter": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+          "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "viewport": {
+            "width": 1440,
+            "height": 960
+          }
+        },
+        {
+          "label": "expanded-completion-report",
+          "before": "pr425-before-expanded-completion-report.jpg",
+          "after": "pr425-after-expanded-completion-report.jpg",
+          "note": "Same genuine background child generation1 completion and parent acknowledgement on exact current stack-tip backend. After disclosure expanded through real summary and wheel controls. Exact frontend base/head refs, common backend held constant.",
+          "frontendBefore": "0bcfe323fc2815ae29a048a2744894699d334278",
+          "frontendAfter": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+          "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "viewport": {
+            "width": 1440,
+            "height": 960
+          }
+        }
+      ]
+    },
+    {
+      "number": 426,
+      "base": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "head": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "label": "Exact native tool metadata comparison",
+      "before": "pr426-before-native-metadata.jpg",
+      "after": "pr426-after-native-metadata.jpg",
+      "backendBefore": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "backendAfter": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "note": "Exact immediate-base/head native binaries and frontend refs. Same initial files and native glob/read/edit/read inputs replayed independently; IDs/timestamps/durations naturally differ. No performance claim.",
+      "extra": []
+    },
+    {
+      "number": 427,
+      "base": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "head": "68e1fc20ba363156e5fa96544b36248758e9a970",
+      "label": "Native full content, paths and edit diff",
+      "before": "pr427-before-insights.jpg",
+      "after": "pr427-after-insights.jpg",
+      "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "extra": [
+        {
+          "label": "expanded-native-output",
+          "before": "pr427-before-expanded-native-output.jpg",
+          "after": "pr427-after-expanded-native-output.jpg",
+          "note": "Exact immediate-base/head frontend refs, same native stack-tip backend/session. After uses real retained full native tool output; no API interception.",
+          "frontendBefore": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+          "frontendAfter": "68e1fc20ba363156e5fa96544b36248758e9a970",
+          "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "viewport": {
+            "width": 1440,
+            "height": 960
+          }
+        }
+      ]
+    },
+    {
+      "number": 428,
+      "base": "68e1fc20ba363156e5fa96544b36248758e9a970",
+      "head": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "label": "Real active run waiting for response",
+      "before": "pr428-before-stream.jpg",
+      "after": "pr428-after-stream.jpg",
+      "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "note": "One genuine active native session held waiting at its deterministic local provider; same backend/session and exact immediate-base/head frontend refs. Still images do not establish absence of flicker, resets, or scroll jumps.",
+      "extra": []
+    },
+    {
+      "number": 429,
+      "base": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "head": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "label": "Exact native Git conflict and typechange projection",
+      "before": "pr429-before-native-git-status.jpg",
+      "after": "pr429-after-native-git-status.jpg",
+      "backendBefore": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "backendAfter": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "note": "Exact immediate-base/head native binaries and frontend refs. Identical genuine Git typechange README.md and merge conflict review-checklist.md, plus modified TSX; before projection labels M/M and after T/U.",
+      "extra": []
+    },
+    {
+      "number": 430,
+      "base": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "head": "71087efcca1a3714f9de607d6da9429ab3250e39",
+      "label": "Desktop and phone composer",
+      "before": "pr430-before-desktop.jpg",
+      "after": "pr430-after-desktop.jpg",
+      "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "extra": [
+        {
+          "label": "phone",
+          "before": "pr430-before-phone.jpg",
+          "after": "pr430-after-phone.jpg",
+          "note": "",
+          "frontendBefore": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+          "frontendAfter": "71087efcca1a3714f9de607d6da9429ab3250e39",
+          "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          }
+        }
+      ]
+    },
+    {
+      "number": 431,
+      "base": "71087efcca1a3714f9de607d6da9429ab3250e39",
+      "head": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "label": "Phone session header and panel navigation",
+      "before": "pr431-before-phone.jpg",
+      "after": "pr431-after-phone.jpg",
+      "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "extra": [
+        {
+          "label": "phone-insights",
+          "before": "pr431-before-phone-insights.jpg",
+          "after": "pr431-after-phone-insights.jpg",
+          "note": "Phone navigation must use the actual native header/panel controls; inspect and adjust the exact accessible name if needed.",
+          "frontendBefore": "71087efcca1a3714f9de607d6da9429ab3250e39",
+          "frontendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "backendBefore": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "backendAfter": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          }
+        }
+      ]
+    }
+  ],
+  "captures": [
+    {
+      "pr": 421,
+      "scenario": "buttons",
+      "side": "before",
+      "filename": "pr421-before-buttons.jpg",
+      "frontendSha": "b3682c66f22bb338938e1b320998fc31f675fe82",
+      "assetTree": "0e81dfc7c0c3afbdefe690a30922f6ce494ff1f0",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4900/#/design",
+      "sha256": "1e01e375ea01d250d253b501f3eaf18b229b18269611f5590423d361ce5b68a5",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr421-before-buttons.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 421,
+      "scenario": "buttons",
+      "side": "after",
+      "filename": "pr421-after-buttons.jpg",
+      "frontendSha": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+      "assetTree": "cdf673c949a270192a9886099af7e338b4ae80b5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4901/#/design",
+      "sha256": "44cb2b2c450d5643fe203870e6413f716e3fd87da9668b630de2e4dfb56b0315",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr421-after-buttons.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 421,
+      "scenario": "session-row",
+      "side": "before",
+      "filename": "pr421-before-session-row.jpg",
+      "frontendSha": "b3682c66f22bb338938e1b320998fc31f675fe82",
+      "assetTree": "0e81dfc7c0c3afbdefe690a30922f6ce494ff1f0",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4900/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "f7682b4fd6de5571da095abb5ea5c1a40431387826da3b905e143471ae867d38",
+      "errors": [],
+      "note": "Same real session/backend with exact immediate-base/head frontend bundles.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr421-before-session-row.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 421,
+      "scenario": "session-row",
+      "side": "after",
+      "filename": "pr421-after-session-row.jpg",
+      "frontendSha": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+      "assetTree": "cdf673c949a270192a9886099af7e338b4ae80b5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4901/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "5248616e4478bf11e0527e3ef7659f2dd10d4cb58621dcdd61b356e00efdc7db",
+      "errors": [],
+      "note": "Same real session/backend with exact immediate-base/head frontend bundles.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr421-after-session-row.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 422,
+      "scenario": "gallery",
+      "side": "before",
+      "filename": "pr422-before-gallery.jpg",
+      "frontendSha": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+      "assetTree": "cdf673c949a270192a9886099af7e338b4ae80b5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4901/#/design",
+      "sha256": "98ee232a44f2bee1307ce6353812cf30df7d0c68325bf0bd71cee40737335ba9",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr422-before-gallery.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 422,
+      "scenario": "gallery",
+      "side": "after",
+      "filename": "pr422-after-gallery.jpg",
+      "frontendSha": "1f98ac5b91534f8b357bb83ba101e305b3c671bb",
+      "assetTree": "be4f888157fa84f654559a9a1baea9a375318ac5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4902/#/design",
+      "sha256": "50a17fe60847ab1aaa1740b29712c882471bad97412869f8bcfd161cd292e34b",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr422-after-gallery.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 422,
+      "scenario": "session-card-atoms",
+      "side": "before",
+      "filename": "pr422-before-session-card-atoms.jpg",
+      "frontendSha": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+      "assetTree": "cdf673c949a270192a9886099af7e338b4ae80b5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4901/#/design",
+      "sha256": "98ee232a44f2bee1307ce6353812cf30df7d0c68325bf0bd71cee40737335ba9",
+      "errors": [],
+      "note": "New preview-only session-card atom; before section is the existing Model loader because the card section does not exist yet. Accessibility snapshots record spoken behavior/lineage.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr422-before-session-card-atoms.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 422,
+      "scenario": "session-card-atoms",
+      "side": "after",
+      "filename": "pr422-after-session-card-atoms.jpg",
+      "frontendSha": "1f98ac5b91534f8b357bb83ba101e305b3c671bb",
+      "assetTree": "be4f888157fa84f654559a9a1baea9a375318ac5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4902/#/design",
+      "sha256": "707b7b099cdf31f6613c66aa8d34272154a2d2a4968da87fd63393cfac473a17",
+      "errors": [],
+      "note": "New preview-only session-card atom; before section is the existing Model loader because the card section does not exist yet. Accessibility snapshots record spoken behavior/lineage.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr422-after-session-card-atoms.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 423,
+      "scenario": "desktop",
+      "side": "before",
+      "filename": "pr423-before-desktop.jpg",
+      "frontendSha": "1f98ac5b91534f8b357bb83ba101e305b3c671bb",
+      "assetTree": "be4f888157fa84f654559a9a1baea9a375318ac5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4902/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "5248616e4478bf11e0527e3ef7659f2dd10d4cb58621dcdd61b356e00efdc7db",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr423-before-desktop.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 423,
+      "scenario": "desktop",
+      "side": "after",
+      "filename": "pr423-after-desktop.jpg",
+      "frontendSha": "3e76b72705a8592ba7f734f404a9d407b846bd3c",
+      "assetTree": "98bda67ae3590e589fd7483b011fee486f60cfe4",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4903/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "5248616e4478bf11e0527e3ef7659f2dd10d4cb58621dcdd61b356e00efdc7db",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr423-after-desktop.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 424,
+      "scenario": "insights",
+      "side": "before",
+      "filename": "pr424-before-insights.jpg",
+      "frontendSha": "3e76b72705a8592ba7f734f404a9d407b846bd3c",
+      "assetTree": "98bda67ae3590e589fd7483b011fee486f60cfe4",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4903/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "c9084ba2380f1587a36f615bb1162d5769e071cae2ea0b8d83b6bb22a61e81b9",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr424-before-insights.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 424,
+      "scenario": "insights",
+      "side": "after",
+      "filename": "pr424-after-insights.jpg",
+      "frontendSha": "0bcfe323fc2815ae29a048a2744894699d334278",
+      "assetTree": "717fe32a7faf3c4931322dc91dfb2cac98619e72",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4904/#/session/563580b3-3e64-4c3f-a169-be6f25925487/insights",
+      "sha256": "a4c611142a5fd06b9035e699af4d610c1693ac60fdbc81e2992cacbc7ac35570",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr424-after-insights.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 425,
+      "scenario": "insights",
+      "side": "before",
+      "filename": "pr425-before-insights.jpg",
+      "frontendSha": "0bcfe323fc2815ae29a048a2744894699d334278",
+      "assetTree": "717fe32a7faf3c4931322dc91dfb2cac98619e72",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4904/#/session/563580b3-3e64-4c3f-a169-be6f25925487/insights",
+      "sha256": "a4c611142a5fd06b9035e699af4d610c1693ac60fdbc81e2992cacbc7ac35570",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr425-before-insights.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 425,
+      "scenario": "insights",
+      "side": "after",
+      "filename": "pr425-after-insights.jpg",
+      "frontendSha": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "assetTree": "9c0d246ea0bc443e5bdce7d2e34e64a807a6abea",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4905/#/session/563580b3-3e64-4c3f-a169-be6f25925487/insights",
+      "sha256": "37cc39611eff3eb2ad9949a46fe5bb83cca6508ee5d79766a4a42e8639727fde",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr425-after-insights.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 425,
+      "scenario": "failed-launch",
+      "side": "before",
+      "filename": "pr425-before-failed-launch.jpg",
+      "frontendSha": "0bcfe323fc2815ae29a048a2744894699d334278",
+      "assetTree": "717fe32a7faf3c4931322dc91dfb2cac98619e72",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4904/#/session/8277b2bf-5005-4a9b-9cc5-9db9eb077e27/files",
+      "sha256": "3e367e7bd543b7e275b37865b2c8c9bc8d556ed610842aaa5352b5cd28637c16",
+      "errors": [],
+      "note": "Same real failed subagent launch before child creation. Diagnostic must remain visible after the card redesign.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr425-before-failed-launch.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 425,
+      "scenario": "failed-launch",
+      "side": "after",
+      "filename": "pr425-after-failed-launch.jpg",
+      "frontendSha": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "assetTree": "9c0d246ea0bc443e5bdce7d2e34e64a807a6abea",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4905/#/session/8277b2bf-5005-4a9b-9cc5-9db9eb077e27/files",
+      "sha256": "9768a8ee1861fbb11339da146cae861387cd6e008915d17caf4e5f54fe0cba3e",
+      "errors": [],
+      "note": "Same real failed subagent launch before child creation. Diagnostic must remain visible after the card redesign.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr425-after-failed-launch.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 425,
+      "scenario": "expanded-completion-report",
+      "side": "before",
+      "filename": "pr425-before-expanded-completion-report.jpg",
+      "frontendSha": "0bcfe323fc2815ae29a048a2744894699d334278",
+      "assetTree": "717fe32a7faf3c4931322dc91dfb2cac98619e72",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "fb3d9665-6380-46b7-aa54-dbc78de59ece",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4904/#/session/fb3d9665-6380-46b7-aa54-dbc78de59ece/files",
+      "sha256": "0ffdbae66fc82133053b57a1eaccc118c5056cc00a44f78e4915c607321a6783",
+      "errors": [],
+      "note": "Same genuine background child generation1 completion and parent acknowledgement on exact current stack-tip backend. After disclosure expanded through real summary and wheel controls. Exact frontend base/head refs, common backend held constant.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/report-latest-dev-framed/captures/pr425-before-expanded-completion-report.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/report-latest-dev-framed/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:55:38.059Z"
+    },
+    {
+      "pr": 425,
+      "scenario": "expanded-completion-report",
+      "side": "after",
+      "filename": "pr425-after-expanded-completion-report.jpg",
+      "frontendSha": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "assetTree": "9c0d246ea0bc443e5bdce7d2e34e64a807a6abea",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "fb3d9665-6380-46b7-aa54-dbc78de59ece",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4905/#/session/fb3d9665-6380-46b7-aa54-dbc78de59ece/files",
+      "sha256": "20f38ba2e36fe82c88bec4b6376ef902a6297de7bd6d4b30765cfd0db7e1b4e8",
+      "errors": [],
+      "note": "Same genuine background child generation1 completion and parent acknowledgement on exact current stack-tip backend. After disclosure expanded through real summary and wheel controls. Exact frontend base/head refs, common backend held constant.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/report-latest-dev-framed/captures/pr425-after-expanded-completion-report.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/report-latest-dev-framed/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:55:38.059Z"
+    },
+    {
+      "pr": 426,
+      "scenario": "native-metadata",
+      "side": "before",
+      "filename": "pr426-before-native-metadata.jpg",
+      "frontendSha": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "assetTree": "9c0d246ea0bc443e5bdce7d2e34e64a807a6abea",
+      "backendSha": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "backend": "http://127.0.0.1:4861",
+      "sessionId": "260f05d2-c038-4301-b296-306b5e1f919d",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4915/#/session/260f05d2-c038-4301-b296-306b5e1f919d/insights",
+      "sha256": "4e0ce2953264179e33ad823bd8df581754efa089f16c9e90d8498ea54f551119",
+      "errors": [],
+      "note": "Exact immediate-base/head native binaries and frontend refs. Same initial files and native glob/read/edit/read inputs replayed independently; IDs/timestamps/durations naturally differ. No performance claim.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/native-latest-dev-evidence/captures/pr426-before-native-metadata.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/native-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:23.600Z"
+    },
+    {
+      "pr": 426,
+      "scenario": "native-metadata",
+      "side": "after",
+      "filename": "pr426-after-native-metadata.jpg",
+      "frontendSha": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "assetTree": "633a445014f78f68b24555338a6a3492126832be",
+      "backendSha": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "backend": "http://127.0.0.1:4862",
+      "sessionId": "d8f133d6-ee65-467b-8df0-aa02d387256d",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4916/#/session/d8f133d6-ee65-467b-8df0-aa02d387256d/insights",
+      "sha256": "571db521743da134183011e14b341f740184f394e342ba74916de55acacdfb70",
+      "errors": [],
+      "note": "Exact immediate-base/head native binaries and frontend refs. Same initial files and native glob/read/edit/read inputs replayed independently; IDs/timestamps/durations naturally differ. No performance claim.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/native-latest-dev-evidence/captures/pr426-after-native-metadata.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/native-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:23.600Z"
+    },
+    {
+      "pr": 427,
+      "scenario": "insights",
+      "side": "before",
+      "filename": "pr427-before-insights.jpg",
+      "frontendSha": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "assetTree": "633a445014f78f68b24555338a6a3492126832be",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4906/#/session/563580b3-3e64-4c3f-a169-be6f25925487/insights",
+      "sha256": "2af842bdbd672d91d482cea6cfb83ca6fb227a702404b113e09b1d7cc9f2bb18",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr427-before-insights.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 427,
+      "scenario": "insights",
+      "side": "after",
+      "filename": "pr427-after-insights.jpg",
+      "frontendSha": "68e1fc20ba363156e5fa96544b36248758e9a970",
+      "assetTree": "196f54cfd15379cd9ed613b8d2fb5a5cf41c87e0",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4907/#/session/563580b3-3e64-4c3f-a169-be6f25925487/insights",
+      "sha256": "5ca13600a48ba84ff410baf1726275af96955eb79f35e86cd7d7c217ef21c310",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr427-after-insights.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 427,
+      "scenario": "expanded-native-output",
+      "side": "before",
+      "filename": "pr427-before-expanded-native-output.jpg",
+      "frontendSha": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "assetTree": "633a445014f78f68b24555338a6a3492126832be",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4906/#/session/563580b3-3e64-4c3f-a169-be6f25925487/insights",
+      "sha256": "2af842bdbd672d91d482cea6cfb83ca6fb227a702404b113e09b1d7cc9f2bb18",
+      "errors": [],
+      "note": "Exact immediate-base/head frontend refs, same native stack-tip backend/session. After uses real retained full native tool output; no API interception.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr427-before-expanded-native-output.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 427,
+      "scenario": "expanded-native-output",
+      "side": "after",
+      "filename": "pr427-after-expanded-native-output.jpg",
+      "frontendSha": "68e1fc20ba363156e5fa96544b36248758e9a970",
+      "assetTree": "196f54cfd15379cd9ed613b8d2fb5a5cf41c87e0",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4907/#/session/563580b3-3e64-4c3f-a169-be6f25925487/insights",
+      "sha256": "08789fcdbeb06aad264360a3cc6961bed09712479f884d4ddad5f1958e483461",
+      "errors": [],
+      "note": "Exact immediate-base/head frontend refs, same native stack-tip backend/session. After uses real retained full native tool output; no API interception.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr427-after-expanded-native-output.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 428,
+      "scenario": "stream",
+      "side": "before",
+      "filename": "pr428-before-stream.jpg",
+      "frontendSha": "68e1fc20ba363156e5fa96544b36248758e9a970",
+      "assetTree": "196f54cfd15379cd9ed613b8d2fb5a5cf41c87e0",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4907/#/session/8b023d6b-a0f7-4b55-a2c9-8de504201528/files",
+      "sha256": "fe516d102cb8be6bd7ab022905c0dc4042a197fe18a3dca3b576e31a5cbdf808",
+      "errors": [],
+      "note": "One genuine active native session held waiting at its deterministic local provider; same backend/session and exact immediate-base/head frontend refs. Still images do not establish absence of flicker, resets, or scroll jumps.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr428-before-stream.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 428,
+      "scenario": "stream",
+      "side": "after",
+      "filename": "pr428-after-stream.jpg",
+      "frontendSha": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "assetTree": "70db8bfda32e3114f28fd481c01b276d80a00114",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4908/#/session/8b023d6b-a0f7-4b55-a2c9-8de504201528/files",
+      "sha256": "402e6bd8f4814325b98c55c8c68d687acdd6721e9ab193a1bdf83d97085b2319",
+      "errors": [],
+      "note": "One genuine active native session held waiting at its deterministic local provider; same backend/session and exact immediate-base/head frontend refs. Still images do not establish absence of flicker, resets, or scroll jumps.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr428-after-stream.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 429,
+      "scenario": "native-git-status",
+      "side": "before",
+      "filename": "pr429-before-native-git-status.jpg",
+      "frontendSha": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "assetTree": "70db8bfda32e3114f28fd481c01b276d80a00114",
+      "backendSha": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "backend": "http://127.0.0.1:4863",
+      "sessionId": "17a03dd1-5a3b-44ac-8d23-c22fa88d72ed",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4917/#/session/17a03dd1-5a3b-44ac-8d23-c22fa88d72ed/files",
+      "sha256": "3454cea8a99651dbe794762dd7eb6612dd161a1b788496abbe339b9d8757c48b",
+      "errors": [],
+      "note": "Exact immediate-base/head native binaries and frontend refs. Identical genuine Git typechange README.md and merge conflict review-checklist.md, plus modified TSX; before projection labels M/M and after T/U.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/native-latest-dev-evidence/captures/pr429-before-native-git-status.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/native-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:23.600Z"
+    },
+    {
+      "pr": 429,
+      "scenario": "native-git-status",
+      "side": "after",
+      "filename": "pr429-after-native-git-status.jpg",
+      "frontendSha": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "assetTree": "70db8bfda32e3114f28fd481c01b276d80a00114",
+      "backendSha": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "backend": "http://127.0.0.1:4864",
+      "sessionId": "61fc1422-d9e2-4016-ae8e-4d2f2163df19",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4918/#/session/61fc1422-d9e2-4016-ae8e-4d2f2163df19/files",
+      "sha256": "d5cc62996ff77187902a8574bdb5d2d461771e475ee083d9b0a500cb880ee6df",
+      "errors": [],
+      "note": "Exact immediate-base/head native binaries and frontend refs. Identical genuine Git typechange README.md and merge conflict review-checklist.md, plus modified TSX; before projection labels M/M and after T/U.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/native-latest-dev-evidence/captures/pr429-after-native-git-status.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/native-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:23.600Z"
+    },
+    {
+      "pr": 430,
+      "scenario": "desktop",
+      "side": "before",
+      "filename": "pr430-before-desktop.jpg",
+      "frontendSha": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "assetTree": "70db8bfda32e3114f28fd481c01b276d80a00114",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4909/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "fdf34c89b3aa2861a6a7829f83387e65461d2a22ae791114cc4f07441801a46a",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr430-before-desktop.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 430,
+      "scenario": "desktop",
+      "side": "after",
+      "filename": "pr430-after-desktop.jpg",
+      "frontendSha": "71087efcca1a3714f9de607d6da9429ab3250e39",
+      "assetTree": "fe004c99844183fc6f55b1bd89bfd8e360d8e9a5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "url": "http://127.0.0.1:4910/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "6e75d5e51c56e18a7dc4c1cd6d3c5370eab6c1834585dd7626f6531371afd79c",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr430-after-desktop.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 430,
+      "scenario": "phone",
+      "side": "before",
+      "filename": "pr430-before-phone.jpg",
+      "frontendSha": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "assetTree": "70db8bfda32e3114f28fd481c01b276d80a00114",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "url": "http://127.0.0.1:4909/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "d6c840a7a5fb4f7e9aeaf16f18306a3a93e9ae987c9de2d29fa2091496780ce1",
+      "errors": [],
+      "note": "",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr430-before-phone.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 430,
+      "scenario": "phone",
+      "side": "after",
+      "filename": "pr430-after-phone.jpg",
+      "frontendSha": "71087efcca1a3714f9de607d6da9429ab3250e39",
+      "assetTree": "fe004c99844183fc6f55b1bd89bfd8e360d8e9a5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "url": "http://127.0.0.1:4910/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "29104ae60fa91f54881adb5375eeaa42aaa45f903ba6e759803af74cc5406d29",
+      "errors": [],
+      "note": "",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr430-after-phone.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 431,
+      "scenario": "phone",
+      "side": "before",
+      "filename": "pr431-before-phone.jpg",
+      "frontendSha": "71087efcca1a3714f9de607d6da9429ab3250e39",
+      "assetTree": "fe004c99844183fc6f55b1bd89bfd8e360d8e9a5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "url": "http://127.0.0.1:4910/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "29104ae60fa91f54881adb5375eeaa42aaa45f903ba6e759803af74cc5406d29",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr431-before-phone.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 431,
+      "scenario": "phone",
+      "side": "after",
+      "filename": "pr431-after-phone.jpg",
+      "frontendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "assetTree": "2d15945118998ab8ea75e0dc699ef9e9f75ae4ee",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "url": "http://127.0.0.1:4911/#/session/563580b3-3e64-4c3f-a169-be6f25925487/files",
+      "sha256": "765c958f108422fbc4b209e898341907928677c83dae2fb26e25f9eeef8ed1cb",
+      "errors": [],
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr431-after-phone.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 431,
+      "scenario": "phone-insights",
+      "side": "before",
+      "filename": "pr431-before-phone-insights.jpg",
+      "frontendSha": "71087efcca1a3714f9de607d6da9429ab3250e39",
+      "assetTree": "fe004c99844183fc6f55b1bd89bfd8e360d8e9a5",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "url": "http://127.0.0.1:4910/#/session/563580b3-3e64-4c3f-a169-be6f25925487/insights",
+      "sha256": "d370ee2cc28c2bcebf80967cd2f9ef983629f2b46fec0e6c5eadb22393c5ced7",
+      "errors": [],
+      "note": "Phone navigation must use the actual native header/panel controls; inspect and adjust the exact accessible name if needed.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr431-before-phone-insights.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    },
+    {
+      "pr": 431,
+      "scenario": "phone-insights",
+      "side": "after",
+      "filename": "pr431-after-phone-insights.jpg",
+      "frontendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "assetTree": "2d15945118998ab8ea75e0dc699ef9e9f75ae4ee",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "sessionId": "563580b3-3e64-4c3f-a169-be6f25925487",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "url": "http://127.0.0.1:4911/#/session/563580b3-3e64-4c3f-a169-be6f25925487/insights",
+      "sha256": "5810ff1cdd8a7395c866488c27619eb8d1d75b9cc5edbab30b9a5d6f9bbd1b5a",
+      "errors": [],
+      "note": "Phone navigation must use the actual native header/panel controls; inspect and adjust the exact accessible name if needed.",
+      "sourceFile": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/captures/pr431-after-phone-insights.jpg",
+      "sourceManifest": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence/capture-manifest.json",
+      "capturedAt": "2026-10-27T01:54:24.117Z"
+    }
+  ],
+  "review": {
+    "status": "visually inspected",
+    "notes": "Worker inspected gallery, session, failed-launch, expanded durable report/full output, native Git status and phone navigation images. Still images do not prove animation/scrolling stability or rejected-submit attribution; focused tests cover those behaviors."
+  }
+}

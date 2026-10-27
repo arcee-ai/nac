@@ -1,0 +1,376 @@
+{
+  "repo": "/private/tmp/nac-refresh-source",
+  "output": "/private/tmp/nac-insights-refresh/frontend-latest-dev-evidence",
+  "firstPort": 4900,
+  "revisions": [
+    {
+      "key": "base",
+      "sha": "b3682c66f22bb338938e1b320998fc31f675fe82",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "421",
+      "sha": "99d224e33446e79a32368c3fb8ebc65c8a9dbe03",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "422",
+      "sha": "1f98ac5b91534f8b357bb83ba101e305b3c671bb",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "423",
+      "sha": "3e76b72705a8592ba7f734f404a9d407b846bd3c",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "424",
+      "sha": "0bcfe323fc2815ae29a048a2744894699d334278",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "425",
+      "sha": "2e6223c3d152af02fd3d198df9048fefa95d3795",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "426",
+      "sha": "5192cbef546e7b02ef18fa878c72738e5e433e96",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "427",
+      "sha": "68e1fc20ba363156e5fa96544b36248758e9a970",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "428",
+      "sha": "abdf3d21ed9d8f8357b997e68ac3e4944bf7910f",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "429",
+      "sha": "7e36de32a5e9a85acd8aaf71dac347b442f4a9b8",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "430",
+      "sha": "71087efcca1a3714f9de607d6da9429ab3250e39",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    },
+    {
+      "key": "431",
+      "sha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "backend": "http://127.0.0.1:4860",
+      "backendSha": "012dd3d1c928d5d73e4ddbde8e89241f17157f6b",
+      "sessions": {
+        "main": "563580b3-3e64-4c3f-a169-be6f25925487",
+        "launchFailure": "8277b2bf-5005-4a9b-9cc5-9db9eb077e27",
+        "stream": "8b023d6b-a0f7-4b55-a2c9-8de504201528",
+        "delegated": "fb3d9665-6380-46b7-aa54-dbc78de59ece"
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "pr": 421,
+      "key": "buttons",
+      "before": "base",
+      "after": "421",
+      "panel": "files",
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "gallery": {
+        "before": "Buttons",
+        "after": "Buttons"
+      }
+    },
+    {
+      "pr": 422,
+      "key": "gallery",
+      "before": "421",
+      "after": "422",
+      "panel": "files",
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "gallery": {
+        "before": "Model loader",
+        "after": "Tools and reasoning badge"
+      }
+    },
+    {
+      "pr": 423,
+      "key": "desktop",
+      "before": "422",
+      "after": "423",
+      "panel": "files",
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build."
+    },
+    {
+      "pr": 424,
+      "key": "insights",
+      "before": "423",
+      "after": "424",
+      "panel": "files",
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "steps": [
+        {
+          "role": "button",
+          "name": "Show panel",
+          "optional": true
+        },
+        {
+          "role": "tab",
+          "name": "Insights",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "pr": 425,
+      "key": "insights",
+      "before": "424",
+      "after": "425",
+      "panel": "files",
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "steps": [
+        {
+          "role": "button",
+          "name": "Show panel",
+          "optional": true
+        },
+        {
+          "role": "tab",
+          "name": "Insights",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "pr": 425,
+      "key": "failed-launch",
+      "before": "424",
+      "after": "425",
+      "session": "launchFailure",
+      "note": "Same real failed subagent launch before child creation. Diagnostic must remain visible after the card redesign."
+    },
+    {
+      "pr": 421,
+      "key": "session-row",
+      "before": "base",
+      "after": "421",
+      "note": "Same real session/backend with exact immediate-base/head frontend bundles."
+    },
+    {
+      "pr": 422,
+      "key": "session-card-atoms",
+      "before": "421",
+      "after": "422",
+      "gallery": {
+        "before": "Model loader",
+        "after": "Subagent transcript card"
+      },
+      "note": "New preview-only session-card atom; before section is the existing Model loader because the card section does not exist yet. Accessibility snapshots record spoken behavior/lineage."
+    },
+    {
+      "pr": 425,
+      "key": "expanded-completion-report",
+      "before": "424",
+      "after": "425",
+      "session": "delegated",
+      "steps": [
+        {
+          "text": "Generation 1 result",
+          "side": "after"
+        },
+        {
+          "text": "Generation 1 result",
+          "action": "wheel",
+          "deltaY": -180,
+          "side": "after"
+        }
+      ],
+      "note": "Same genuine background child generation1 completion and parent acknowledgement on exact current stack-tip backend. After disclosure expanded through real summary and wheel controls. Exact frontend base/head refs, common backend held constant."
+    },
+    {
+      "pr": 427,
+      "key": "insights",
+      "before": "426",
+      "after": "427",
+      "panel": "files",
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "steps": [
+        {
+          "role": "button",
+          "name": "Show panel",
+          "optional": true
+        },
+        {
+          "role": "tab",
+          "name": "Insights",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "pr": 428,
+      "key": "stream",
+      "before": "427",
+      "after": "428",
+      "panel": "files",
+      "note": "One genuine active native session held waiting at its deterministic local provider; same backend/session and exact immediate-base/head frontend refs. Still images do not establish absence of flicker, resets, or scroll jumps.",
+      "session": "stream",
+      "live": true
+    },
+    {
+      "pr": 430,
+      "key": "desktop",
+      "before": "429",
+      "after": "430",
+      "panel": "files",
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build."
+    },
+    {
+      "pr": 431,
+      "key": "phone",
+      "before": "430",
+      "after": "431",
+      "panel": "files",
+      "note": "Immediate-base/current-head frontend bundles held against the recorded common backend; not an exact per-layer backend build.",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "pr": 430,
+      "key": "phone",
+      "before": "429",
+      "after": "430",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "pr": 431,
+      "key": "phone-insights",
+      "before": "430",
+      "after": "431",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "steps": [
+        {
+          "role": "button",
+          "name": "Open panel"
+        },
+        {
+          "role": "tab",
+          "name": "Insights"
+        }
+      ],
+      "note": "Phone navigation must use the actual native header/panel controls; inspect and adjust the exact accessible name if needed."
+    },
+    {
+      "pr": 427,
+      "key": "expanded-native-output",
+      "before": "426",
+      "after": "427",
+      "steps": [
+        {
+          "role": "button",
+          "name": "Show panel",
+          "optional": true
+        },
+        {
+          "role": "tab",
+          "name": "Insights"
+        },
+        {
+          "role": "button",
+          "name": "Show full",
+          "index": 1,
+          "side": "after"
+        }
+      ],
+      "note": "Exact immediate-base/head frontend refs, same native stack-tip backend/session. After uses real retained full native tool output; no API interception."
+    }
+  ]
+}
