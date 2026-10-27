@@ -17351,7 +17351,7 @@ function Yy({ parentSessionId: e, target: t, permissionSessionId: n, permissionB
 		}), m.length ? /* @__PURE__ */ Y("div", {
 			role: "region",
 			"aria-label": "Subagent message delivery",
-			className: "flex max-h-48 flex-col gap-2 overflow-y-auto",
+			className: "pointer-events-auto flex max-h-48 flex-col gap-2 overflow-y-auto",
 			children: m.map((e) => /* @__PURE__ */ Y(Jy, {
 				recovery: e,
 				hasDraft: !!p.text,

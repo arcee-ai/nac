@@ -223,7 +223,7 @@ export function SubagentComposer({
         <div
           role="region"
           aria-label="Subagent message delivery"
-          className="flex max-h-48 flex-col gap-2 overflow-y-auto"
+          className="pointer-events-auto flex max-h-48 flex-col gap-2 overflow-y-auto"
         >
           {recoveries.map((recovery) => (
             <RecoveryMessage
