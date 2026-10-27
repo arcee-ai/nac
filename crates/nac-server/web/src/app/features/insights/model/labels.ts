@@ -261,7 +261,7 @@ export function groupSummaryLabel(group: InsightGroup): string {
 /** Label of a settled group, on its transcript badge and its Insights row. */
 export function doneLabel(group: InsightGroup): string {
   if (group.durationMs === null) return groupSummaryLabel(group);
-  return `Worked for ${formatBadgeDuration(group.durationMs)}`;
+  return `Total activity: ${formatBadgeDuration(group.durationMs)}`;
 }
 
 /**

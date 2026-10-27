@@ -712,6 +712,8 @@ impl McpRegistry {
             return ToolResult {
                 content: format!("Error: unknown MCP tool '{name}'").into(),
                 is_error: true,
+                execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             };
         };
         capture.call(args, image_results).await

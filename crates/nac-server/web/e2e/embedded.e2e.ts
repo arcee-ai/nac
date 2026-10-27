@@ -15,6 +15,13 @@ import {
 } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
+const TOTAL_ACTIVITY_BADGE = /^Total activity: \d+\.\ds$/;
+
+/** The Insights row of a measured group, named by its time and its step count or failure. */
+function totalActivityRow(meta: number | "failed"): RegExp {
+  return new RegExp(`^Total activity: \\d+\\.\\ds, ${meta}$`);
+}
+
 /** Match the page's browser profile, which can differ from the test host. */
 async function newChatChord(page: Page): Promise<string> {
   const isMac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
@@ -244,7 +251,7 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
     const row = (status?: string) =>
       status
         ? page.getByRole("button", { name: `${command}, Exec, ${status}`, exact: true })
-        : page.getByRole("button", { name: "Run command, 1", exact: true });
+        : page.getByRole("button", { name: totalActivityRow(1) });
     const item = page.getByRole("group", { name: command, exact: true });
     await expect(
       page.getByRole("button", { name: "Awaiting approval…", exact: true }),
@@ -260,7 +267,7 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
 
     await harness.provider.waitForRequestCount(2);
     await waitForRunIdle(request, harness, sessionId);
-    const badge = page.getByRole("button", { name: "Run command", exact: true });
+    const badge = page.getByRole("button", { name: TOTAL_ACTIVITY_BADGE });
     await expect(row()).toBeVisible();
     await expect(item).toContainText(command);
     await expect(item).toContainText("ALL1_TOOL_COMPLETE");
@@ -313,8 +320,8 @@ test("renders a per-call command deadline distinctly through settlement and relo
   await waitForRunIdle(request, harness, sessionId);
   await expect(page.getByText("deadline observed")).toBeVisible();
 
-  const badge = page.getByRole("button", { name: "Run command", exact: true });
-  const failedRow = page.getByRole("button", { name: "Run command, failed", exact: true });
+  const badge = page.getByRole("button", { name: TOTAL_ACTIVITY_BADGE });
+  const failedRow = page.getByRole("button", { name: totalActivityRow("failed") });
   const item = page.getByRole("group", { name: "sleep 30", exact: true });
   await badge.click();
   await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/insights$`));
@@ -420,14 +427,7 @@ test("keeps approval state and actions reachable with many remembered permission
   await harness.provider.waitForRequestCount(rememberedRequests + 2);
   await waitForRunIdle(request, harness, sessionId);
   await expect(page.getByText("permission journey complete")).toBeVisible();
-  await page.getByRole("button", { name: "Read File", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: `Read File, ${rememberedRequests + 1}`, exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("group", { name: "File Read", exact: true })).toHaveCount(
-    rememberedRequests + 1,
-  );
-
+  // Inspect the grant manager before opening Insights changes the chat width.
   await page.getByRole("button", { name: /^Permissions \(\d+\)$/ }).click();
   const manager = page.getByRole("dialog");
   const managerBody = manager.locator(":scope > .overflow-auto");
@@ -440,6 +440,17 @@ test("keeps approval state and actions reachable with many remembered permission
     manager.getByRole("button", { name: /^Forget read permission/ }).first(),
   ).toBeVisible();
   await expect(manager.getByRole("button", { name: "Reject" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(manager).toBeHidden();
+
+  await page.getByRole("button", { name: TOTAL_ACTIVITY_BADGE }).click();
+  await expect(
+    page.getByRole("button", { name: totalActivityRow(rememberedRequests + 1) }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("group", { name: "File Read", exact: true })).toHaveCount(
+    rememberedRequests + 1,
+  );
+
   harness.provider.assertConsumed();
 });
 
@@ -508,8 +519,8 @@ test("persists session auto-approval, drains pending asks, and restores manual m
     page.getByRole("button", { name: "Auto-approve on — open permissions" }),
   ).toBeVisible();
   // Both reads settle in one badge; Insights lists the group as two successful reads.
-  await page.getByRole("button", { name: "Read File", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Read File, 2", exact: true })).toHaveAttribute(
+  await page.getByRole("button", { name: TOTAL_ACTIVITY_BADGE }).click();
+  await expect(page.getByRole("button", { name: totalActivityRow(2) })).toHaveAttribute(
     "aria-pressed",
     "true",
   );

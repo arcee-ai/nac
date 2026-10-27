@@ -25,8 +25,8 @@ export interface ToolPresentation {
   status: ToolPresentationStatus;
   statusLabel: string;
   /**
-   * Execution time from the call's finish event. Absent unless the backend
-   * reports one, which today happens only for timed-out and cancelled calls.
+   * Execution time from the call's finish event. Absent when the call never
+   * ran, or when no finish event reports one.
    */
   durationMs?: number;
   /**

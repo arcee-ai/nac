@@ -2,8 +2,8 @@ import { Fragment } from "react";
 import { BoxSurface, IconName, ToolsAndReasoningBadge } from "@/app/atoms";
 
 const STATES = [
-  { caption: "Done", label: "Worked for 12.3s", inProgress: false, disabled: false },
-  { caption: "Done, disabled", label: "Worked for 12.3s", inProgress: false, disabled: true },
+  { caption: "Done", label: "Total activity: 12.3s", inProgress: false, disabled: false },
+  { caption: "Done, disabled", label: "Total activity: 12.3s", inProgress: false, disabled: true },
   { caption: "In progress, disabled", label: "Thinking…", inProgress: true, disabled: true },
 ];
 

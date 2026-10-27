@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex, Weak as StdWeak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::{Mutex, Notify, RwLock};
@@ -52,6 +52,14 @@ pub(crate) use thread_lifecycle::ThreadCancellation;
 pub struct ToolResult {
     pub content: ToolContent,
     pub is_error: bool,
+    /// Wall-clock time of the call's work, set by the execution kernel once an
+    /// authorized call has run, or by a thread or workset control tool once
+    /// its authorized work has started. Every exit before that leaves it empty.
+    pub(crate) execution_duration_ms: Option<u64>,
+    /// Kernel-owned provenance: this measurement excludes an internal
+    /// authorization span and supersedes the deadline's unadjusted wall clock
+    /// only for finished-event duration. The result body remains unchanged.
+    pub(crate) execution_duration_excludes_authorization: bool,
 }
 
 impl ToolResult {
@@ -59,7 +67,16 @@ impl ToolResult {
         Self {
             content: ToolContent::text(content),
             is_error,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         }
+    }
+
+    /// Records that the call ran, timed from `started`. Exits before a call
+    /// starts its work must not use it.
+    pub(crate) fn executed_since(mut self, started: Instant) -> Self {
+        self.execution_duration_ms = Some(started.elapsed().as_millis() as u64);
+        self
     }
 }
 
@@ -341,6 +358,8 @@ pub fn require_str(args: &Value, key: &str) -> Result<String, ToolResult> {
         .ok_or_else(|| ToolResult {
             content: (format!("Error: '{key}' argument required")).into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         })
 }
 
@@ -353,6 +372,8 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
         return Err(ToolResult {
             content: (format!("Error: '{key}' must be an array of strings")).into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         });
     };
 
@@ -362,6 +383,8 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
             return Err(ToolResult {
                 content: (format!("Error: '{key}' must be an array of strings")).into(),
                 is_error: true,
+                execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             });
         };
         out.push(value.to_string());
@@ -414,6 +437,8 @@ pub async fn execute_tool_with_context(
             return ToolResult {
                 content: (format!("Error: MCP tool '{name}' is not available")).into(),
                 is_error: true,
+                execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             };
         };
         return mcp_adapter::invoke(
@@ -451,6 +476,8 @@ pub async fn execute_tool_with_context(
         unknown => ToolResult {
             content: (format!("Error: unknown tool '{unknown}'")).into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
     }
 }

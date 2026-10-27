@@ -626,3 +626,283 @@ async fn denied_sessions_beyond_the_scan_bound_change_no_page_metadata() {
     assert_eq!(page().await, before);
     cleanup(&runtime);
 }
+
+#[tokio::test]
+async fn late_project_approval_is_not_execution_time_and_denial_has_none() {
+    use crate::permissions::PermissionReply;
+    use std::time::{Duration, Instant};
+
+    for (name, input) in [
+        ("find_tasks", json!({"reference":"ALL-469"})),
+        ("read_task", json!({"session_id":"peer-a"})),
+    ] {
+        for reply in [PermissionReply::Once, PermissionReply::Reject] {
+            let runtime = runtime(vec![PermissionRule::new(
+                "task_read",
+                "project:p1",
+                PermissionEffect::Ask,
+            )]);
+            // Match an attached projectless chat, followed by a product assignment
+            // that changes only the store. Its existing broker has no project hint.
+            let conn = crate::store::open_runtime_connection(&runtime.store_path).unwrap();
+            conn.execute(
+                "DELETE FROM session_projects WHERE session_id = ?1",
+                [CALLER],
+            )
+            .unwrap();
+            drop(conn);
+            let broker = Arc::clone(runtime.permission_broker.as_ref().unwrap());
+            assert_eq!(broker.caller_project(), None);
+            crate::store::assign_session_to_project(&runtime.store_path, "p1", CALLER).unwrap();
+            assert_eq!(broker.caller_project(), None);
+            let bus = crate::events::SessionEventBus::new(Some(CALLER.into()));
+            let _approver = bus.subscribe_assistant_deltas();
+            broker.attach_event_bus(bus);
+            let client = crate::model::ModelClient::new_for_test();
+            let context = ToolCallContext::default();
+            let started = Instant::now();
+            let invoke = crate::tools::execute_tool_with_context(
+                name,
+                input.clone(),
+                &runtime,
+                &client,
+                &context,
+            );
+            let answer = async {
+                let request = tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        if let Some(request) = broker.pending().pop() {
+                            break request;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                assert_eq!(request.resources[0].resource, "project:p1");
+                tokio::time::sleep(Duration::from_millis(120)).await;
+                // A simultaneous ordinary task read has its own timing even
+                // though both calls were given the same caller-owned context.
+                let ordinary = crate::tools::execute_tool_with_context(
+                    "read_task",
+                    json!({"session_id":"foreign","project_id":"p2"}),
+                    &runtime,
+                    &client,
+                    &context,
+                )
+                .await;
+                assert!(!ordinary.is_error, "{}", ordinary.content);
+                assert!(ordinary.execution_duration_ms.is_some());
+                broker.reply(&request.id, reply).unwrap();
+            };
+            let (result, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+                tokio::join!(invoke, answer)
+            })
+            .await
+            .unwrap();
+            let elapsed = started.elapsed().as_millis() as u64;
+            if reply == PermissionReply::Reject {
+                assert!(result.is_error);
+                assert_eq!(
+                    result.execution_duration_ms, None,
+                    "{name}: {}",
+                    result.content
+                );
+            } else {
+                assert!(!result.is_error, "{}", result.content);
+                assert!(
+                    result
+                        .execution_duration_ms
+                        .is_some_and(|work| work + 100 < elapsed),
+                    "{name}: work {:?}, wall {elapsed}",
+                    result.execution_duration_ms
+                );
+            }
+            cleanup(&runtime);
+        }
+    }
+}
+
+#[tokio::test]
+async fn concurrent_internal_approvals_keep_denial_and_elapsed_per_invocation() {
+    use crate::permissions::PermissionReply;
+    use std::time::Duration;
+
+    let first = runtime(vec![PermissionRule::new(
+        "task_read",
+        "project:p1",
+        PermissionEffect::Ask,
+    )]);
+    let second = runtime(vec![PermissionRule::new(
+        "task_read",
+        "project:p1",
+        PermissionEffect::Ask,
+    )]);
+    let mut approvers = Vec::new();
+    let brokers = [&first, &second].map(|runtime| {
+        let broker = Arc::clone(runtime.permission_broker.as_ref().unwrap());
+        let bus = crate::events::SessionEventBus::new(Some(CALLER.into()));
+        approvers.push(bus.subscribe_assistant_deltas());
+        broker.attach_event_bus(bus);
+        broker
+    });
+    let client = crate::model::ModelClient::new_for_test();
+    let context = ToolCallContext::default();
+    let denied =
+        crate::tools::execute_tool_with_context("find_tasks", json!({}), &first, &client, &context);
+    let allowed = crate::tools::execute_tool_with_context(
+        "read_task",
+        json!({"session_id":"peer-a"}),
+        &second,
+        &client,
+        &context,
+    );
+    let answer = async {
+        let requests = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let (Some(first), Some(second)) =
+                    (brokers[0].pending().pop(), brokers[1].pending().pop())
+                {
+                    break [first, second];
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        brokers[0]
+            .reply(&requests[0].id, PermissionReply::Reject)
+            .unwrap();
+        brokers[1]
+            .reply(&requests[1].id, PermissionReply::Once)
+            .unwrap();
+    };
+    let started = std::time::Instant::now();
+    let (denied, allowed, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(denied, allowed, answer)
+    })
+    .await
+    .unwrap();
+    assert!(denied.is_error);
+    assert_eq!(denied.execution_duration_ms, None);
+    assert!(!allowed.is_error, "{}", allowed.content);
+    assert!(
+        allowed
+            .execution_duration_ms
+            .is_some_and(|work| work + 100 < started.elapsed().as_millis() as u64),
+        "{:?}",
+        allowed.execution_duration_ms
+    );
+    cleanup(&first);
+    cleanup(&second);
+}
+
+async fn assert_deadline_during_internal_approval(cancel: bool) {
+    use crate::events::{AgentEvent, ToolCompletionStatus};
+    use std::time::Duration;
+
+    let runtime = runtime(vec![PermissionRule::new(
+        "task_read",
+        "project:p1",
+        PermissionEffect::Ask,
+    )]);
+    let broker = Arc::clone(runtime.permission_broker.as_ref().unwrap());
+    assert_eq!(broker.caller_project(), None);
+    let bus = crate::events::SessionEventBus::new(Some(CALLER.into()));
+    let _approver = bus.subscribe_assistant_deltas();
+    broker.attach_event_bus(bus);
+    let client = crate::model::ModelClient::new_for_test();
+    let context = ToolCallContext::default();
+    let limit = if cancel { 5_000 } else { 300 };
+    let invoke = crate::tools::execute_tool_with_context(
+        "find_tasks",
+        json!({"_nac":{"timeout_ms":limit}}),
+        &runtime,
+        &client,
+        &context,
+    );
+    let wait = async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while broker.pending().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        if cancel {
+            runtime.command_cancellation.cancel();
+        }
+    };
+    let (result, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(invoke, wait)
+    })
+    .await
+    .unwrap();
+    assert!(result.is_error);
+    let original = result.content.as_text().unwrap().to_owned();
+    let envelope: Value = serde_json::from_str(&original).unwrap();
+    let metadata = &envelope["_nac"];
+    let wall = metadata["execution_duration_ms"].as_u64().unwrap();
+    assert!(wall >= 100, "{original}");
+    assert!(
+        result
+            .execution_duration_ms
+            .is_some_and(|work| work + 100 < wall),
+        "{original}; private {:?}",
+        result.execution_duration_ms
+    );
+    let status = if cancel { "cancelled" } else { "timed_out" };
+    assert_eq!(metadata["status"], status);
+    assert_eq!(metadata["timeout_ms"], limit);
+    assert_eq!(metadata.as_object().unwrap().len(), 5);
+    assert_eq!(
+        envelope["error"],
+        format!(
+            "Tool 'find_tasks' {status} after {wall} ms (limit {limit} ms; cleanup {} ms).",
+            metadata["cleanup_duration_ms"]
+        )
+    );
+    let AgentEvent::ToolCallFinished {
+        execution_duration_ms,
+        effective_timeout_ms,
+        cleanup_duration_ms,
+        completion_status,
+        remote_outcome_uncertain,
+        ..
+    } = AgentEvent::tool_call_finished(None, "late-project".into(), "find_tasks".into(), &result)
+    else {
+        panic!("expected finished event");
+    };
+    assert_eq!(
+        execution_duration_ms, result.execution_duration_ms,
+        "{original}"
+    );
+    assert_eq!(effective_timeout_ms, Some(limit));
+    assert_eq!(
+        cleanup_duration_ms,
+        metadata["cleanup_duration_ms"].as_u64()
+    );
+    assert_eq!(
+        completion_status,
+        Some(if cancel {
+            ToolCompletionStatus::Cancelled
+        } else {
+            ToolCompletionStatus::TimedOut
+        })
+    );
+    assert!(!remote_outcome_uncertain);
+    assert_eq!(result.content.as_text().unwrap(), original);
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn timeout_during_internal_approval_excludes_wait_in_finished_event() {
+    assert_deadline_during_internal_approval(false).await;
+}
+
+#[tokio::test]
+async fn cancellation_during_internal_approval_excludes_wait_in_finished_event() {
+    assert_deadline_during_internal_approval(true).await;
+}

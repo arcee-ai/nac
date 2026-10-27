@@ -7,9 +7,9 @@ export function segmentDurationMs(segment: InsightSegment): number | null {
 }
 
 /**
- * The known durations added up. A segment without one, such as a tool from
- * before tool times were recorded or a workset, adds nothing, so the total can
- * undercount; null when no segment has one.
+ * Total recorded activity, not elapsed wall-clock time. Parallel calls each
+ * contribute their own duration. A segment without a recorded duration, such as
+ * an older tool or a workset, adds nothing; null when none is known.
  */
 export function sumSegmentDurations(segments: readonly InsightSegment[]): number | null {
   let total: number | null = null;

@@ -5,7 +5,7 @@ import Icon, { IconName } from "../icon";
 import ModelLoader, { ModelLoaderSize, ModelLoaderVariant } from "../model-loader";
 
 interface ToolsAndReasoningBadgeProps {
-  /** "Worked for 12.3s" once done, or the live step, e.g. "Reading index.tsx…". */
+  /** "Total activity: 12.3s" once done, or the live step, e.g. "Reading index.tsx…". */
   label: string;
   /** Leads with a ModelLoader. A finished group trails a chevron instead. */
   inProgress: boolean;

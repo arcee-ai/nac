@@ -13809,7 +13809,7 @@ var M_ = [
 	{
 		type: "ToolsSegment",
 		icon: R.Right,
-		label: "Worked for 13.3s",
+		label: "Total activity: 13.3s",
 		meta: "12",
 		runningLabel: "Working…",
 		group: !0
@@ -13924,7 +13924,7 @@ function B_() {
 		children: [
 			/* @__PURE__ */ Y(qi, {
 				icon: R.Right,
-				label: "Worked for 13.3s",
+				label: "Total activity: 13.3s",
 				meta: String(F_.length),
 				expanded: e,
 				selected: i,
@@ -13947,7 +13947,7 @@ function B_() {
 			}),
 			/* @__PURE__ */ Y(qi, {
 				icon: R.Right,
-				label: "Worked for 4.1s",
+				label: "Total activity: 4.1s",
 				meta: "5",
 				expanded: !1
 			}),
@@ -13986,7 +13986,7 @@ function V_() {
 			/* @__PURE__ */ Y(Ji, { children: I_.map(n) }),
 			/* @__PURE__ */ Y(qi, {
 				icon: R.Right,
-				label: "Worked for 13.3s",
+				label: "Total activity: 13.3s",
 				meta: "12",
 				expanded: !1
 			}),
@@ -14671,13 +14671,13 @@ function dv() {
 var fv = [
 	{
 		caption: "Done",
-		label: "Worked for 12.3s",
+		label: "Total activity: 12.3s",
 		inProgress: !1,
 		disabled: !1
 	},
 	{
 		caption: "Done, disabled",
-		label: "Worked for 12.3s",
+		label: "Total activity: 12.3s",
 		inProgress: !1,
 		disabled: !0
 	},
@@ -21120,7 +21120,7 @@ function zS(e) {
 	return t.length > 2 ? `${n} and more` : n;
 }
 function BS(e) {
-	return e.durationMs === null ? zS(e) : `Worked for ${dS(e.durationMs)}`;
+	return e.durationMs === null ? zS(e) : `Total activity: ${dS(e.durationMs)}`;
 }
 function VS(e) {
 	for (let t = e.segments.length - 1; t >= 0; --t) {

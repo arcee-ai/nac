@@ -182,7 +182,7 @@ const ACTION_SAMPLES: ActionSample[] = [
   {
     type: "ToolsSegment",
     icon: IconName.Right,
-    label: "Worked for 13.3s",
+    label: "Total activity: 13.3s",
     meta: "12",
     runningLabel: "Working…",
     group: true,
@@ -286,7 +286,7 @@ function GroupSegmentPreview() {
     <div className={LIST_COLUMN}>
       <ActionListButton
         icon={IconName.Right}
-        label="Worked for 13.3s"
+        label="Total activity: 13.3s"
         meta={String(GROUP_CHILDREN.length)}
         expanded={expanded}
         selected={groupShown}
@@ -315,7 +315,12 @@ function GroupSegmentPreview() {
         meta="Read"
         onClick={() => {}}
       />
-      <ActionListButton icon={IconName.Right} label="Worked for 4.1s" meta="5" expanded={false} />
+      <ActionListButton
+        icon={IconName.Right}
+        label="Total activity: 4.1s"
+        meta="5"
+        expanded={false}
+      />
       <ActionListButton
         icon={IconName.Orchestrator}
         label="Calendar rollout"
@@ -351,7 +356,12 @@ function ThreadWavePreview() {
     <div className={LIST_COLUMN}>
       <ActionListButton icon={IconName.Brain} label="Thoughts" meta="13.8 s" />
       <ActionListSegment>{WAVE_THREADS.map(thread)}</ActionListSegment>
-      <ActionListButton icon={IconName.Right} label="Worked for 13.3s" meta="12" expanded={false} />
+      <ActionListButton
+        icon={IconName.Right}
+        label="Total activity: 13.3s"
+        meta="12"
+        expanded={false}
+      />
       <ActionListSegment>{thread("impl/time-zones")}</ActionListSegment>
       <ActionListButton icon={IconName.Brain} label="Thoughts" meta="2.1 s" />
     </div>

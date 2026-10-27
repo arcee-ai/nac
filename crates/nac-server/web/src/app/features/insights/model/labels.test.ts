@@ -166,7 +166,7 @@ describe("insight labels", () => {
     ).toBe("Read File");
   });
 
-  it("says how long a settled group worked from the durations that are known", () => {
+  it("labels the sum as total recorded activity rather than elapsed work", () => {
     expect(
       doneLabel(
         group([
@@ -174,13 +174,24 @@ describe("insight labels", () => {
           toolDetail("exec_command", { status: "timed-out", durationMs: 324 }),
         ]),
       ),
-    ).toBe("Worked for 12.3s");
+    ).toBe("Total activity: 12.3s");
     expect(
       doneLabel(group([thoughts("thoughts-0", { durationMs: 900 }), toolDetail("read")])),
-    ).toBe("Worked for 0.9s");
+    ).toBe("Total activity: 0.9s");
     expect(doneLabel(group([thoughts("thoughts-0"), toolDetail("read")]))).toBe(
       "Thoughts, Read File",
     );
+  });
+
+  it("does not claim elapsed work for overlapping tool durations", () => {
+    const parallel = group([
+      toolDetail("web_search", { callId: "search-a", durationMs: 3_000 }),
+      toolDetail("web_search", { callId: "search-b", durationMs: 3_000 }),
+      toolDetail("web_search", { callId: "search-c", durationMs: 3_000 }),
+      toolDetail("web_search", { callId: "search-d", durationMs: 3_000 }),
+    ]);
+    expect(doneLabel(parallel)).toBe("Total activity: 12.0s");
+    expect(doneLabel(parallel)).not.toContain("Worked for");
   });
 
   it("follows the newest live segment in the badge", () => {
