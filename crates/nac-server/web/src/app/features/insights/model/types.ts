@@ -59,7 +59,7 @@ export interface InsightGroup {
   id: string;
   segments: readonly InsightSegment[];
   status: ActionStatus;
-  /** Sum of the segment durations that are known; null when none is. */
+  /** Total recorded segment activity, including overlap; not elapsed time. Null when none is known. */
   durationMs: number | null;
 }
 

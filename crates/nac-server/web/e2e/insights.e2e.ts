@@ -159,11 +159,11 @@ test("opens a transcript group in Insights from its badge", async ({ harness, pa
 
   // Every step of both groups is measured, so their badges share a label; they
   // keep the order of the runs.
-  const badges = page.getByRole("button", { name: /^Worked for \d+\.\ds$/ });
+  const badges = page.getByRole("button", { name: /^Total activity: \d+\.\ds$/ });
   const readBadge = badges.nth(0);
   const searchBadge = badges.nth(1);
-  const readRow = page.getByRole("button", { name: /^Worked for \d+\.\ds, 1$/ });
-  const searchRow = page.getByRole("button", { name: /^Worked for \d+\.\ds, 2$/ });
+  const readRow = page.getByRole("button", { name: /^Total activity: \d+\.\ds, 1$/ });
+  const searchRow = page.getByRole("button", { name: /^Total activity: \d+\.\ds, 2$/ });
   const fileRead = page.getByRole("group", { name: "File Read", exact: true });
   const findFiles = page.getByRole("group", { name: "Find files", exact: true });
 
