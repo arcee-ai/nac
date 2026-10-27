@@ -23,6 +23,14 @@ function lastUserText(turns: TranscriptTurn[]): string | null {
   return null;
 }
 
+/** Index of the newest user prompt, drawn or stored; -1 without one. */
+function lastPromptIndex(turns: readonly TranscriptTurn[]): number {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (turns[index].kind === "user") return index;
+  }
+  return -1;
+}
+
 export interface TranscriptModel {
   /** The snapshot's turns with the pending prompt and the live stream folded in. */
   turns: TranscriptTurn[];
@@ -158,28 +166,21 @@ export function useTranscriptModel(
   const reply = replyKey(baseTurns, windowStart);
   // Between Send and the run starting, the buffers still hold the previous
   // run's output. It may add to the turn it came from, but it must not open a
-  // turn under the new prompt and read as that prompt's answer. `running`
+  // turn under the new prompt and read as that prompt's answer, whether the
+  // prompt is drawn pending or the snapshot already stores it. `running`
   // cannot tell: a snapshot may report the run before `run_started` arrives,
   // and a short run may end before the snapshot shows its prompt.
   const stale = streamSettled && streamPredatesPrompt;
   const turns = useMemo(() => {
     const stream = { text: streamText, reasoning: streamReasoning, settled: streamSettled };
-    if (!stale || baseTurns === snapshotTurns) {
-      return withStreamedOutput(baseTurns, stream, false, reply);
-    }
-    const own = replyKey(snapshotTurns, windowStart);
-    const folded = withStreamedOutput(snapshotTurns, stream, false, own);
-    return folded === snapshotTurns ? baseTurns : [...folded, baseTurns[baseTurns.length - 1]];
-  }, [
-    baseTurns,
-    snapshotTurns,
-    streamText,
-    streamReasoning,
-    streamSettled,
-    stale,
-    reply,
-    windowStart,
-  ]);
+    const prompt = stale ? lastPromptIndex(baseTurns) : -1;
+    if (prompt < 0) return withStreamedOutput(baseTurns, stream, false, reply);
+    const before = baseTurns.slice(0, prompt);
+    const folded = before.length
+      ? withStreamedOutput(before, stream, false, replyKey(before, windowStart))
+      : before;
+    return folded === before ? baseTurns : [...folded, ...baseTurns.slice(prompt)];
+  }, [baseTurns, streamText, streamReasoning, streamSettled, stale, reply, windowStart]);
   perfMark("transcript:turns", {
     fields: { turns: turns.length, streamChars: streamText.length },
     throttleMs: 1000,
