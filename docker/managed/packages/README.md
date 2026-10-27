@@ -116,6 +116,9 @@ same release commit still declares `1.11.1_DEV`. The two official download
 locations yielded identical checksum-bound release archives; the release header
 is hashed alongside the corrected sources and checked before building. NAC does
 not rewrite a development banner into an invented release.
+All twelve patches change C sources only. The build uses the release archive's
+checksum-verified generated `configure` and bundled Makefile inputs, without
+regenerating them against the SDK's unrelated gettext infrastructure.
 
 The build preserves the supplier's CVE-2026-7598/55199 fixes using Debian's
 1.11.1 adaptations of the same accepted upstream changes, followed by the
