@@ -427,14 +427,7 @@ test("keeps approval state and actions reachable with many remembered permission
   await harness.provider.waitForRequestCount(rememberedRequests + 2);
   await waitForRunIdle(request, harness, sessionId);
   await expect(page.getByText("permission journey complete")).toBeVisible();
-  await page.getByRole("button", { name: TOTAL_ACTIVITY_BADGE }).click();
-  await expect(
-    page.getByRole("button", { name: totalActivityRow(rememberedRequests + 1) }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("group", { name: "File Read", exact: true })).toHaveCount(
-    rememberedRequests + 1,
-  );
-
+  // Inspect the grant manager before opening Insights changes the chat width.
   await page.getByRole("button", { name: /^Permissions \(\d+\)$/ }).click();
   const manager = page.getByRole("dialog");
   const managerBody = manager.locator(":scope > .overflow-auto");
@@ -447,6 +440,17 @@ test("keeps approval state and actions reachable with many remembered permission
     manager.getByRole("button", { name: /^Forget read permission/ }).first(),
   ).toBeVisible();
   await expect(manager.getByRole("button", { name: "Reject" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(manager).toBeHidden();
+
+  await page.getByRole("button", { name: TOTAL_ACTIVITY_BADGE }).click();
+  await expect(
+    page.getByRole("button", { name: totalActivityRow(rememberedRequests + 1) }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("group", { name: "File Read", exact: true })).toHaveCount(
+    rememberedRequests + 1,
+  );
+
   harness.provider.assertConsumed();
 });
 
