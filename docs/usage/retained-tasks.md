@@ -35,11 +35,19 @@ A launch has one request identity. **Retry same request** and **Resume same
 request** reuse its original arguments and pin, even when the named branch moved
 or was deleted. Reusing that identity with different arguments conflicts.
 **Start another intentional task** creates a new identity and separate checkout.
-After a host restart, interrupted preparation is shown as failed with a resume
+After a server process restart, interrupted preparation is shown as failed with a resume
 action. Merely reading preparation status does not resume work or wake an agent.
 An existing checkout without its durable materialization checkpoint remains
 failed for inspection: Git may have registered HEAD before populating files.
 Resume never treats that partial state as ready, fills it in, or resets it.
+
+Recovery requires the saved repository binding to remain valid: the canonical
+source location and recorded filesystem device/inode identity must still match.
+A remount or device-identity change can fail this check even when the same files
+remain at the same path. New launches and resume fail closed in that case.
+There is no automatic repository rebinding or rewriting of old launch receipts
+or materialization checkpoints. Inventory, receipts and retained workspaces
+remain available for inspection.
 
 Complete graceful server shutdown stops new preparation, terminates/reaps its
 Git processes and waits for accepted preparation and publication before draining
