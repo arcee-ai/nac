@@ -4,6 +4,8 @@ import test from "node:test";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { codeowners } from "./pr-ruleset.mjs";
+import { ownerArtifacts } from "./update-codeowners.mjs";
 import {
   managedApplicable,
   requiredJobs,
@@ -172,14 +174,25 @@ test("overlapping caller runs cannot replace pending managed work and pushes hav
 test("review request metadata operation verifies owners and excludes the author including bot PRs", () => {
   assert.equal(
     fs.readFileSync(".github/CODEOWNERS", "utf8"),
-    "* @allisoneer @Cecocho @ericlau98\n",
+    codeowners,
   );
   const workflow = fs.readFileSync(".github/workflows/pr-reviewers.yml", "utf8");
+  assert.equal(
+    workflow,
+    ownerArtifacts(workflow).get(".github/workflows/pr-reviewers.yml"),
+    "Reviewer metadata is stale; run make generate-codeowners",
+  );
   assert.match(workflow, /pull_request_target:/);
   assert.match(workflow, /types: \[opened, reopened, ready_for_review\]/);
   assert.doesNotMatch(workflow, /uses: actions\/checkout|run:/);
   assert.match(workflow, /getCollaboratorPermissionLevel/);
   assert.match(workflow, /owner.id !== pr.user.id/);
+});
+
+test("owner generation refuses missing or ambiguous reviewer rosters", () => {
+  const workflow = fs.readFileSync(".github/workflows/pr-reviewers.yml", "utf8");
+  assert.throws(() => ownerArtifacts(""), /exactly one embedded owner roster/);
+  assert.throws(() => ownerArtifacts(workflow + "\n" + workflow), /exactly one embedded owner roster/);
 });
 
 test("native macOS is candidate-bound and required even for docs-only PRs", () => {

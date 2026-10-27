@@ -134,6 +134,11 @@ test-capture-qualification:
 test-source-size:
 	bash scripts/check-source-size.sh
 
+.PHONY: generate-codeowners
+## Regenerate ownership files from the verified owner roster
+generate-codeowners:
+	node .github/scripts/update-codeowners.mjs --write
+
 ## Regenerate the checked-in OpenAPI document and frontend schema types
 generate-api-contract:
 	$(CARGO) run --locked -p nac-server --example export-openapi -- $(WEB_DIR)/openapi.json
@@ -232,6 +237,7 @@ check: test-source-size
 
 ## Check every tracked workflow, embedded shell block, and standalone shell script
 lint-workflows:
+	node .github/scripts/update-codeowners.mjs --check
 	node .github/scripts/workflow-lint.mjs
 
 ## Prove workflow/shell enforcement with real pinned tools and invalid fixtures

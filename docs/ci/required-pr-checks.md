@@ -75,10 +75,17 @@ approved narrow exceptions. ALL-447 remains Eric's separate remediation work.
 
 ## Reviewer policy and stack limits
 
-The entire CODEOWNERS file is `* @allisoneer @Cecocho @ericlau98` on one line.
-Their live access was verified on October 21, 2026: admin/write/write and user
-IDs 20910163/105443339/17348362. GitHub uses CODEOWNERS from **each PR's base**;
-the old owners remain effective on the foundation PR until it lands. The
+The verified owner roster and immutable GitHub account IDs live in
+`.github/scripts/pr-ruleset.mjs`. To add or remove an owner, verify that account's
+ID and repository write access, edit that roster, then run
+`make generate-codeowners`. This updates `.github/CODEOWNERS` and the embedded
+reviewer list in the metadata-only workflow. `make lint-workflows` and the PR
+contract tests reject stale generated ownership files with the regeneration command.
+Sam (`samantha662`), Gerred (`gerred`) and Travis (`tmcarcee`) were verified with
+write/admin/write access on October 27, 2026.
+
+GitHub uses CODEOWNERS from **each PR's base**;
+the base's existing owners remain effective until an ownership change lands. The
 metadata-only `pull_request_target` workflow requests the verified eligible set
 on open/reopen/ready, excludes the author, and does not execute candidate code.
 Bot authors receive the same owner requests. GitHub's native code-owner requests

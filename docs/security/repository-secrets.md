@@ -126,7 +126,7 @@ Push protection and PR rulesets are independent. Allison's deliberate,
 PR-specific merge override does not grant secret-scanning bypass or remove a
 push-time block. Leave secret protection enabled when handling a PR override.
 The required CI/designated-review ruleset's separate rollout status and the
-eligible reviewers `allisoneer` / `Cecocho` / `ericlau98` remain governed by
+eligible reviewer roster and verified account IDs remain governed by
 [required PR checks](../ci/required-pr-checks.md). One eligible non-author approval
 and deliberate human merge handling remain required; this change grants no
 merge authority or foundation-ruleset activation.
