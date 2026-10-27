@@ -93,6 +93,7 @@ export type SandboxAvailability = ApiSchema<"SandboxAvailability">;
 export type SwitchBranchRequest = ApiSchema<"SwitchBranchRequest">;
 export type ThreadEventPage = ApiSchema<"ThreadEventPage">;
 export type ThreadSteeringResponse = ApiSchema<"ThreadSteeringResponse">;
+export type ToolCallContentResponse = ApiSchema<"ToolCallContentResponse">;
 export type UpdateConfigRequest = ApiSchema<"UpdateConfigRequest">;
 export type UpdateGoalRequest = ApiSchema<"UpdateGoalRequest">;
 export type UpdateModelConfigurationRequest = ApiSchema<"UpdateModelConfigurationRequest">;

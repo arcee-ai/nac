@@ -20,7 +20,8 @@ export interface ToolCallRef {
  * the server. A result reaches the store only once its whole batch of
  * parallel calls is done, so an answer without one is asked again until it
  * has one; from then on the content no longer changes and is kept for good. A
- * failure is not retried on its own; the surface that asked offers the retry.
+ * failure, also of one of those asks, is not retried on its own; the surface
+ * that asked offers the retry.
  */
 export function useToolCallContent(sessionId: string, call: ToolCallRef | null, enabled = true) {
   const { api } = useNativeRuntime();
@@ -30,7 +31,8 @@ export function useToolCallContent(sessionId: string, call: ToolCallRef | null, 
     queryFn: ({ signal }) => api.getToolCallContent(sessionId, call!.id, signal),
     enabled: enabled && call != null,
     staleTime: (query) => (query.state.data?.output === null ? 0 : Infinity),
-    refetchInterval: (query) => (query.state.data?.output === null ? RESULT_POLL_MS : false),
+    refetchInterval: (query) =>
+      query.state.status !== "error" && query.state.data?.output === null ? RESULT_POLL_MS : false,
     retry: false,
   });
 }

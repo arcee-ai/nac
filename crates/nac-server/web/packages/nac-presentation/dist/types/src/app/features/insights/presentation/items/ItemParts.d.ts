@@ -7,10 +7,6 @@ export declare function BodyText({ children }: {
 export declare function SuccessText({ children }: {
     children: ReactNode;
 }): import("react").JSX.Element;
-export declare function FileChip({ path, name }: {
-    path: string;
-    name: string;
-}): import("react").JSX.Element;
 /** Rendered only for a session the delegation records confirm. */
 export declare function SessionLinkButton({ link, context, }: {
     link: SessionLink | null;

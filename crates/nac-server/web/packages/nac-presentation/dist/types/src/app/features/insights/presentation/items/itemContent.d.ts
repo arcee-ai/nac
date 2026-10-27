@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { InsightItemState } from "../../../../atoms";
 import type { DelegatedRowKey, InsightSegment } from "../../model/types";
 import type { SessionResolver } from "../useDelegatedSessions";
+import type { ToolCallRef } from "../../../../services/queries/toolCalls";
 export type ReasoningSegment = Extract<InsightSegment, {
     kind: "reasoning";
 }>;
@@ -12,9 +13,14 @@ export type WorksetSegment = Extract<InsightSegment, {
     kind: "workset";
 }>;
 export interface ItemContext {
+    sessionId: string;
     resolveSession: SessionResolver;
     openSubagent: (rowKey: DelegatedRowKey) => void;
     openWorkset: (worksetId: string) => void;
+    /** The session's roots an absolute tool path may start with, as chat links strip them. */
+    workspaceRoots: (string | null | undefined)[];
+    /** Opens a workspace-relative path in Files. */
+    openFile: (path: string) => void;
 }
 export interface ItemContent {
     /** Default and Error title; Loading shows the live label instead. */
@@ -24,6 +30,8 @@ export interface ItemContent {
     body?: (state: InsightItemState) => ReactNode;
 }
 export declare const isDefault: (state: InsightItemState) => state is InsightItemState.Default;
+/** The call whose full content a segment can load; none for a compact tool block. */
+export declare function segmentCall(segment: ToolSegment): ToolCallRef | null;
 /** Inputs stay visible after a failure; nothing shows while the call runs. */
 export declare const showsInput: (state: InsightItemState) => state is InsightItemState.Default | InsightItemState.Error;
 /** Durations appear only when the backend reports one. */

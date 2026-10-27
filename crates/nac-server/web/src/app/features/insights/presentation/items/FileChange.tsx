@@ -195,9 +195,12 @@ export function FileChange({ path, call, context }: FileChangeProps) {
   const filePath = change?.path ?? path;
   // The result lands once the call's batch of parallel calls is done.
   const awaitingResult = data?.output === null;
-  // Without data a new fetch starts over as pending, which would swap the
-  // retry button out from under focus.
-  const failed = !data && (query.isError || (query.errorUpdateCount > 0 && query.isFetching));
+  // A failed ask for the awaited result fails the change as well. Without data
+  // a new fetch starts over as pending, which would swap the retry button out
+  // from under focus.
+  const failed = query.isError
+    ? !data || awaitingResult
+    : !data && query.errorUpdateCount > 0 && query.isFetching;
   return (
     <>
       <span ref={setAnchor} hidden />
