@@ -719,3 +719,48 @@ async fn a_rejected_rename_does_not_prepare_connection_aliases() {
         .is_err());
     assert_eq!(fs::read(&state).unwrap(), before);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failed_create_claim_does_not_publish_a_stale_rename_alias() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let server = RecordingMcpServer::start();
+    let home = TestHome::new("nac-mcp-create-claim-failure", "recorded", &server.url);
+    let cwd = std::env::current_dir().unwrap();
+    let registry = load(&cwd).await.registry.unwrap();
+    let capture = registry.capture_tool("mcp__recorded__echo").unwrap();
+    let runtime = McpRuntimeManager::new(home.path.clone());
+    runtime.disconnect("recorded").await.unwrap();
+    let state = admission::ConnectionState::for_home(&PathContext::new(&home.path)).unwrap();
+    let config = home.path.join("config.toml");
+    let lease = acquire_mcp_configuration_write_lease(&config).unwrap();
+    state.prepare_rename("recorded", "renamed").unwrap();
+    rename_config(&config, "recorded", "renamed");
+    let (mut added, _) = load_mcp_server_configuration_snapshot(&config, "renamed").unwrap();
+    added.name = "recorded".into();
+    let lock = home.path.join("mcp_disconnected.json.lock");
+    fs::set_permissions(&lock, fs::Permissions::from_mode(0o000)).unwrap();
+    let failed = runtime.insert_configuration(&config, added.clone());
+    fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(failed.is_err());
+    drop(lease);
+    assert!(load_mcp_server_configuration(&config, "recorded").is_err());
+    assert!(blocked(&runtime.statuses().await.unwrap(), "renamed"));
+    assert!(capture.call(json!({}), false).await.is_error);
+
+    let lease = acquire_mcp_configuration_write_lease(&config).unwrap();
+    runtime.insert_configuration(&config, added).unwrap();
+    let before = fs::read(home.path.join("mcp_disconnected.json")).unwrap();
+    let (duplicate, _) = load_mcp_server_configuration_snapshot(&config, "recorded").unwrap();
+    assert!(runtime.insert_configuration(&config, duplicate).is_err());
+    assert_eq!(
+        fs::read(home.path.join("mcp_disconnected.json")).unwrap(),
+        before
+    );
+    drop(lease);
+    runtime.connect("recorded").await.unwrap();
+    assert!(blocked(&runtime.statuses().await.unwrap(), "renamed"));
+    assert!(capture.call(json!({}), false).await.is_error);
+    runtime.forget("recorded").await;
+}

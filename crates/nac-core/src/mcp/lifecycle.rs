@@ -188,6 +188,23 @@ impl McpRuntimeManager {
         Ok(status)
     }
 
+    /// Assigns a validated new server its own identity before making its config visible.
+    /// The caller holds the configuration write lease.
+    pub fn insert_configuration(
+        &self,
+        path: &Path,
+        configuration: McpServerConfigurationRecord,
+    ) -> std::result::Result<McpServerConfigurationRecord, McpServerConfigurationStoreError> {
+        let state = self
+            .connection_state()
+            .map_err(McpServerConfigurationStoreError::Store)?;
+        super::file_config::insert_mcp_server_configuration_with(path, configuration, |name| {
+            state
+                .claim(name)
+                .map_err(McpServerConfigurationStoreError::Store)
+        })
+    }
+
     /// Publishes a validated patch while keeping both rename names bound until commit.
     /// The caller holds the configuration write lease used to derive `revision`.
     pub fn update_configuration_at_revision(

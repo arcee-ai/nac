@@ -1272,6 +1272,15 @@ pub fn insert_mcp_server_configuration(
     path: &Path,
     configuration: McpServerConfigurationRecord,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
+    insert_mcp_server_configuration_with(path, configuration, |_| Ok(()))
+}
+
+/// Validates a create before preparing its durable identity and publishing config.
+pub(crate) fn insert_mcp_server_configuration_with(
+    path: &Path,
+    configuration: McpServerConfigurationRecord,
+    before_publish: impl FnOnce(&str) -> ConfigurationResult<()>,
+) -> ConfigurationResult<McpServerConfigurationRecord> {
     let record = validated_record(configuration)?;
     let (mut document, revision) = read_document_snapshot(path)?;
     let servers = servers_table(&mut document)?;
@@ -1281,6 +1290,7 @@ pub fn insert_mcp_server_configuration(
         ));
     }
     servers[record.name.as_str()] = Item::Table(table_of(&record));
+    before_publish(&record.name)?;
     write_document(path, &document, revision)?;
     Ok(record)
 }

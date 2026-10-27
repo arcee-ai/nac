@@ -24,6 +24,8 @@ Disconnect in MCP settings stops NAC from using a server:
   different server; it starts connected and does not affect those sessions.
   If a rename is interrupted, both names retain the same disconnect state until
   the settings operation finishes. A failed rename never re-enables the server.
+  Creating a server assigns its fresh identity before saving its config, so a
+  failed identity write leaves the name available for a safe retry.
 - If the saved state cannot be read, every server counts as disconnected and
   MCP settings say so. Connecting a server rewrites the record, admitting only
   that server for new sessions. Sessions that were already running stay
