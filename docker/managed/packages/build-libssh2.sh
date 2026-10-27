@@ -6,6 +6,9 @@ mkdir -p /work/libssh2 /work/libssh2-debian /packages/libssh2/usr/lib
 tar -xzf /work/downloads/libssh2.tar.gz -C /work/libssh2 --strip-components=1
 tar -xJf /work/downloads/libssh2-debian.tar.xz -C /work/libssh2-debian
 cd /work/libssh2
+# The official release tarball has the release header; the same tag's Git
+# snapshot still declares 1.11.1_DEV. Never manufacture a release banner.
+grep -Fx '#define LIBSSH2_VERSION "1.11.1"' include/libssh2.h
 for name in CVE-2026-7598 CVE-2026-55199; do
     patch -p1 --batch --fuzz=0 -i "/work/libssh2-debian/debian/patches/$name.patch"
 done
