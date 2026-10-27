@@ -1,257 +1,241 @@
 {
   "schema_version": 1,
-  "kind": "github-platform-qualification",
-  "fixture_repository": "REPLACE/SAFE-FIXTURE",
-  "payload_sha256": "307fdf0ae7d753847004b652abeb3da12c89e61b94bdc2cf1735a25a27b75a65",
+  "kind": "template-not-qualification",
+  "fixture_repository": "",
+  "baseline_sha256": "17838925ff2377b2ac33dc639b559f258db07204932be10ea2a21d6b21dbd61f",
+  "payload_sha256": "dbdf31959bf6cead69d0d44e66c4100e8d49486faffda100207aa72dcbd660fa",
   "completed_at": null,
   "cases": [
     {
       "name": "rust-pass",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "web-pass",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "workflow-pass",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "docs-pass",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "managed-pass",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "api-drift-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "assets-drift-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "browser-failure-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "image-failure-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
+    },
+    {
+      "name": "image-unknown-blocked",
+      "result": "unperformed",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null
+    },
+    {
+      "name": "strict-image-baseline-qualified",
+      "result": "unperformed",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null
     },
     {
       "name": "failed-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "pending-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "cancelled-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "missing-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "stale-check-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
+    },
+    {
+      "name": "wrong-app-blocked",
+      "result": "unperformed",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null
     },
     {
       "name": "unexpected-skip-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "allison-approval",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "aleksiej-approval",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "eric-approval",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "self-approval-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "outside-only-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "author-excluded-requests",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "bot-owner-requests",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
-      "name": "stale-review-dismissed",
-      "result": "pending",
+      "name": "last-push-self-approval-blocked",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
+    },
+    {
+      "name": "unattributed-extra-approval-required",
+      "result": "unperformed",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null
     },
     {
       "name": "unresolved-conversation-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "two-layer-stack-base-codeowners",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
-      "name": "allison-own-failed-pr-override",
-      "result": "pending",
+      "name": "ordinary-bypass-blocked",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
-      "name": "allison-own-pending-pr-override",
-      "result": "pending",
+      "name": "automation-bypass-blocked",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
-    },
-    {
-      "name": "ordinary-override-blocked",
-      "result": "pending",
-      "actor_id": null,
-      "head_sha": null,
-      "evidence_url": null,
-      "observation": null
-    },
-    {
-      "name": "automation-override-blocked",
-      "result": "pending",
-      "actor_id": null,
-      "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "direct-push-blocked",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     },
     {
       "name": "inherited-protections-preserved",
-      "result": "pending",
+      "result": "unperformed",
       "actor_id": null,
       "head_sha": null,
-      "evidence_url": null,
-      "observation": null
+      "evidence_url": null
     }
   ]
 }

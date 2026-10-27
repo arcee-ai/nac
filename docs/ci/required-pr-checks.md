@@ -106,7 +106,7 @@ or success, and durable evidence URLs. Do not grant any bypass to run the matrix
 | Self/outside-only/last-pusher approval | Cannot satisfy the preserved CODEOWNERS and last-push approval requirements |
 | Unattributed changes and threads | Required extra approval remains effective; unresolved conversation blocks |
 | Requests/bot PRs | Author excluded; eligible owner requests preserved |
-| Two-layer gh-stack | Both immediate bases contain intended CODEOWNERS; each PR emits complete candidate-bound checks and honors review/base rules |
+| Two-layer gh-stack | Both immediate bases contain intended CODEOWNERS; each PR emits complete candidate-bound checks; record the intermediate-base protection gap, then qualify strict/review enforcement after retarget to dev |
 | Ordinary/automation bypass and direct push | No bypass; inherited deletion/force-push/transfer restrictions remain effective |
 
 For the two-layer fixture, use the installed extension in the safe checkout:
@@ -121,11 +121,24 @@ gh stack view --json
 ```
 
 Capture both live PR bases, heads, diffs, requested reviewers and check runs.
-Exercise upper-layer current-base invalidation after a lower-layer update, and
-verify the base branch's CODEOWNERS is authoritative for each PR. No production
+Verify the base branch's CODEOWNERS is authoritative for each PR. This exact
+ruleset targets only `~DEFAULT_BRANCH`: an upper PR targeting
+`codex/fixture-lower` does **not** inherit its required checks or review rules.
+CODEOWNERS in that base and a green aggregate do not establish enforcement.
+Record that intermediate-base limitation explicitly; do not broaden branch
+protection or claim that an intermediate PR is safe to merge. After a separately
+authorized lower-layer landing, retarget the upper PR to `dev`, refresh its
+candidate checks/review requests, and qualify stale-base invalidation and all
+preserved review requirements there. If landing/retarget access is unavailable,
+leave that platform case unperformed. No production
 stack or another owner's branch may be rebased for this exercise. Successful
 fixture merges need their own explicit authorization; planner tests are not that
 authority. If unavailable, leave the exact successful-merge cases unperformed.
+
+The [current template](evidence/qualification-template.json) is deliberately
+marked `template-not-qualification`, with every case `unperformed`. It cannot
+pass the validator. Populate only real observed evidence after separate fixture
+authorization and human inspection; never change result fields to bypass a gate.
 
 The receipt schema is `schema_version: 1`, `kind: github-platform-qualification`,
 `fixture_repository`, `baseline_sha256`, `payload_sha256`, `completed_at`, and

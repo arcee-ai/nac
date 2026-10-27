@@ -154,3 +154,16 @@ test("model tests, stale/foreign/incomplete receipts and old override payload ca
     assert.ok(qualificationCases.includes(name));
   assert.ok(!qualificationCases.some((name) => name.includes("own-failed-pr-override")));
 });
+
+test("current handoff template matches the plan/matrix but cannot certify unperformed platform work", () => {
+  const template = JSON.parse(fs.readFileSync(new URL(
+    "../../docs/ci/evidence/qualification-template.json", import.meta.url), "utf8"));
+  assert.equal(template.payload_sha256, digest(proposal(snapshot())));
+  assert.equal(template.baseline_sha256, settingsIdentity(snapshot()));
+  assert.deepEqual(template.cases.map((item) => item.name), qualificationCases);
+  assert.ok(template.cases.every((item) => item.result === "unperformed"));
+  assert.throws(() => validateQualification(template, snapshot(), now));
+  const guide = fs.readFileSync(new URL("../../docs/ci/required-pr-checks.md", import.meta.url), "utf8");
+  assert.match(guide, /does \*\*not\*\* inherit its required checks or review rules/);
+  assert.match(guide, /retarget the upper PR to `dev`/);
+});
