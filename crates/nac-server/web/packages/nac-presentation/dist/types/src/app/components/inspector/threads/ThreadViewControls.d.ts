@@ -15,7 +15,10 @@ export declare function ViewPills({ view, action, canSteer, onSteer, onChange, }
     onSteer: () => void;
     onChange: (view: ThreadDetailView) => void;
 }): import("react").JSX.Element;
-/** Compact Command Log / Overview pills for the desktop detail header. */
+/**
+ * Compact Command Log / Overview pills for the desktop detail header. They are
+ * toggle buttons rather than tabs, so the set is a named group.
+ */
 export declare function ViewSwitcher({ view, onChange, }: {
     view: ThreadDetailView;
     onChange: (view: ThreadDetailView) => void;

@@ -26,7 +26,8 @@ interface ActionListButtonProps {
   selected?: boolean;
   /** Only for group rows, which expand and collapse their children. */
   expanded?: boolean;
-  onClick?: () => void;
+  /** Null for a row with nowhere to go, which then takes no focus. */
+  onClick?: (() => void) | null;
   className?: string;
 }
 
@@ -122,7 +123,8 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
       aria-pressed={selected}
       aria-expanded={expanded}
       aria-label={accessibleName}
-      onClick={onClick}
+      disabled={onClick === null}
+      onClick={onClick ?? undefined}
       className={cn("!h-7 !px-2", className)}
     >
       <StatusGlyph icon={icon} status={status} expanded={expanded} />

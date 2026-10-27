@@ -27,7 +27,7 @@ for (const mobile of [false, true]) {
     const response = await created;
     expect(response.ok()).toBe(true);
     const sessionId = (await response.json()).metadata.session_id;
-    await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/files`));
+    await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/insights`));
     const configUrl = `${harness.baseUrl}/sessions/${sessionId}/config`;
     const before = await (await request.get(configUrl)).json();
     expect(before).toMatchObject({

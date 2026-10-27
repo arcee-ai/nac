@@ -20,7 +20,7 @@ describe("session behavior presentation", () => {
       topLevel: expect.stringMatching(/planner/i),
       editsDirectly: false,
       delegation: expect.stringMatching(/retained NAC worker threads/i),
-      inspection: expect.stringMatching(/Threads and Worksets/i),
+      inspection: expect.stringMatching(/Insights and Worksets/i),
     });
     expect(sessionBehaviorPresentation("direct")).toMatchObject({
       navigationLabel: "Direct",
@@ -44,38 +44,38 @@ describe("session panel policy", () => {
 
   it("keeps every behavior-specific panel and leaves session switching to the sidebar", () => {
     expect(sessionPanelPolicy("orchestrator", null)).toEqual({
-      widePanels: ["threads", "files", "worksets"],
-      mobilePanels: ["threads", "files", "worksets", "history"],
-      defaultPanel: "files",
+      widePanels: ["insights", "files", "worksets"],
+      mobilePanels: ["insights", "files", "worksets", "history"],
+      defaultPanel: "insights",
       readOnly: false,
     });
     for (const behavior of ["direct", "direct-with-orchestrator"] satisfies SessionBehavior[]) {
       expect(sessionPanelPolicy(behavior, null)).toEqual({
-        widePanels: ["delegated", "files", "terminal"],
-        mobilePanels: ["delegated", "files", "terminal", "history"],
-        defaultPanel: "files",
+        widePanels: ["insights", "delegated", "files", "terminal"],
+        mobilePanels: ["insights", "delegated", "files", "terminal", "history"],
+        defaultPanel: "insights",
         readOnly: false,
       });
     }
   });
 
-  it("keeps traditional children read-only with Files only", () => {
+  it("keeps traditional children read-only with Insights and Files only", () => {
     for (const behavior of behaviors) {
       expect(sessionPanelPolicy(behavior, "traditional-child")).toEqual({
-        widePanels: ["files"],
-        mobilePanels: ["files", "history"],
-        defaultPanel: "files",
+        widePanels: ["insights", "files"],
+        mobilePanels: ["insights", "files", "history"],
+        defaultPanel: "insights",
         readOnly: true,
       });
     }
   });
 
-  it("gives managed orchestrators their own Threads and Worksets while remaining read-only", () => {
+  it("gives managed orchestrators their own Insights and Worksets while remaining read-only", () => {
     for (const behavior of behaviors) {
       expect(sessionPanelPolicy(behavior, "managed-orchestrator")).toEqual({
-        widePanels: ["threads", "files", "worksets"],
-        mobilePanels: ["threads", "files", "worksets", "history"],
-        defaultPanel: "files",
+        widePanels: ["insights", "files", "worksets"],
+        mobilePanels: ["insights", "files", "worksets", "history"],
+        defaultPanel: "insights",
         readOnly: true,
       });
     }

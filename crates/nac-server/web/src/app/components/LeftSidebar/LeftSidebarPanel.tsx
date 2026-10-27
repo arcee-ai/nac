@@ -56,10 +56,10 @@ export function LeftSidebarPanel({
 
   return (
     <div
-      className="flex h-full flex-col bg-elevation-ground border-r border-muted"
+      className="flex h-full flex-col bg-elevation-ground border-r border-tertiary"
       style={{ boxShadow: "var(--left-sidebar-open)" }}
     >
-      <div className="flex items-center justify-between px-4 py-2 border-b border-muted shrink-0">
+      <div className="flex items-center justify-between pl-3 pr-2 py-2 border-b border-muted shrink-0">
         <Logo height={28} className="text-basic-primary" />
         <Tooltip
           title="Hide sidebar"

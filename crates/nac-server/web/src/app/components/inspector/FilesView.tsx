@@ -8,22 +8,21 @@ import {
   ButtonSize,
   ButtonVariant,
   FileIcon,
+  FileListTabButton,
+  FileListTabButtonSize,
+  FileListTabButtonVariant,
+  GitStatus,
+  gitStatusOf,
   Icon,
   IconName,
   Loader,
   LoaderSize,
 } from "@/app/atoms";
 import { CommitPopover } from "@/app/components/inspector/CommitPopover";
-import {
-  PanelEmpty,
-  PanelLoading,
-  PanelRow,
-  PanelSplit,
-} from "@/app/components/inspector/PanelSplit";
+import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useLiveWorkspace } from "@/app/hooks/useLiveWorkspace";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
-import { statusLabelClass } from "@/app/lib/fileStatus";
 import {
   buildFileTree,
   changedDirPaths,
@@ -49,12 +48,30 @@ import type {
   WorkspaceFileDiff,
 } from "@/app/types/api";
 
-function Chevron({ open }: { open: boolean }) {
+const rowSize = (isMobile: boolean) =>
+  isMobile ? FileListTabButtonSize.Large : FileListTabButtonSize.Small;
+
+/** A file in the tree or the changed list, tinted and lettered by its git status. */
+function FileRow({
+  file,
+  size,
+  selected,
+  onSelect,
+}: {
+  file: FileNode;
+  size: FileListTabButtonSize;
+  selected: string | null;
+  onSelect: (path: string) => void;
+}) {
   return (
-    <Icon
-      iconName={IconName.Right}
-      size={16}
-      className={cn("shrink-0 transition-transform", open && "rotate-90")}
+    <FileListTabButton
+      name={fileLabel(file.path)}
+      path={file.path}
+      size={size}
+      active={selected === file.path}
+      status={gitStatusOf(file.status)}
+      title={file.path}
+      onClick={() => onSelect(file.path)}
     />
   );
 }
@@ -76,17 +93,23 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
     // top of the indent margin would push every deep level a few pixels past
     // the panel and raise a horizontal scrollbar for nothing.
     <div
-      className={cn("flex flex-col gap-[2px]", depth > 0 && "pl-1 ml-[3px] border-l border-muted")}
+      className={cn(
+        "flex flex-col gap-[2px]",
+        depth > 0 && "mb-2 border-l border-muted",
+        depth > 0 && (isMobile ? "pl-2 ml-2" : "pl-1 ml-1"),
+      )}
     >
       {dir.dirs.map((child) => {
         const expanded = open.has(child.path);
         return (
           <div key={child.path} className="flex flex-col gap-[2px] w-full">
-            <PanelRow
-              label={child.name}
-              icon={<Chevron open={expanded} />}
+            <FileListTabButton
+              name={child.name}
+              variant={FileListTabButtonVariant.Folder}
+              size={rowSize(isMobile)}
+              active={expanded}
               // Collapsed folders would otherwise hide where the work is.
-              labelClassName={child.hasChanges ? "text-danger-primary" : undefined}
+              status={child.hasChanges ? GitStatus.Changed : null}
               onClick={() => onToggle(child.path)}
             />
             {expanded ? (
@@ -103,16 +126,12 @@ function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
         );
       })}
       {dir.files.map((file) => (
-        <PanelRow
+        <FileRow
           key={file.path}
-          label={fileLabel(file.path)}
-          active={selected === file.path}
-          title={file.path}
-          labelClassName={statusLabelClass(file.status)}
-          // The status letter used to sit here; the label colour already says
-          // as much, so the slot shows what kind of file it is instead.
-          icon={<FileIcon path={file.path} size={isMobile ? 24 : 16} />}
-          onClick={() => onSelect(file.path)}
+          file={file}
+          size={rowSize(isMobile)}
+          selected={selected}
+          onSelect={onSelect}
         />
       ))}
     </div>
@@ -137,14 +156,12 @@ function ChangedList({
   return (
     <div className="flex flex-col gap-[2px]">
       {files.map((file) => (
-        <PanelRow
+        <FileRow
           key={file.path}
-          label={fileLabel(file.path)}
-          active={selected === file.path}
-          title={file.path}
-          labelClassName={statusLabelClass(file.status)}
-          icon={<FileIcon path={file.path} size={isMobile ? 24 : 16} />}
-          onClick={() => onSelect(file.path)}
+          file={file}
+          size={rowSize(isMobile)}
+          selected={selected}
+          onSelect={onSelect}
         />
       ))}
     </div>
@@ -155,20 +172,20 @@ function ListingButton({
   iconName,
   label,
   active,
-  round = false,
+  large = false,
   onClick,
 }: {
   iconName: IconName;
   label: string;
   active: boolean;
   /** The phone's 40px circle around a 24px glyph, for the floating pill. */
-  round?: boolean;
+  large?: boolean;
   onClick: () => void;
 }) {
   return (
     <Button
-      className={round ? "btn-round" : undefined}
-      size={round ? ButtonSize.Medium : ButtonSize.Small}
+      className="btn-round"
+      size={large ? ButtonSize.Medium : ButtonSize.Small}
       variant={active ? ButtonVariant.Primary : ButtonVariant.Ghost}
       content={ButtonContent.Icon}
       aria-pressed={active}
@@ -205,14 +222,14 @@ function ListToolbar({
         iconName={IconName.Folders}
         label="Show every file"
         active={listing === "tree"}
-        round={isMobile}
+        large={isMobile}
         onClick={() => selectFileListing("tree")}
       />
       <ListingButton
         iconName={IconName.Scheme}
         label="Show changed files only"
         active={listing === "changed"}
-        round={isMobile}
+        large={isMobile}
         onClick={() => selectFileListing("changed")}
       />
     </>
@@ -236,7 +253,7 @@ function ListToolbar({
 
   return (
     <div className="flex items-center gap-3 h-12 px-3 shrink-0 border-b border-muted @max-[560px]:gap-2 @max-[560px]:px-2">
-      <div className="flex items-center gap-2 flex-1">{listingButtons}</div>
+      <div className="flex items-center gap-3 flex-1">{listingButtons}</div>
       {commit}
     </div>
   );
@@ -366,7 +383,7 @@ function PaneHeader({ path, trailing }: { path: string; trailing: React.ReactNod
 
   return (
     <div
-      className="flex items-center gap-2 h-10 px-4 shrink-0 border-b border-muted bg-elevation-ground"
+      className="flex items-center gap-[10px] h-12 px-4 shrink-0 border-b border-muted bg-elevation-ground"
       title={path}
     >
       <div className="flex flex-1 items-center gap-[6px] min-w-0">

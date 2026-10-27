@@ -1,4 +1,5 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { InsightsNavigationProvider } from "@/app/features/insights/InsightsNavigationProvider";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { sessionAvailable } from "@/app/features/ui-policy/policy";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
@@ -20,6 +21,7 @@ import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { RightSidebarRail } from "@/app/components/inspector/RightSidebarRail";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
+import { TranscriptModelProvider } from "@/app/components/inspector/transcript/TranscriptModelProvider";
 import { TopSingleSessionHeader } from "@/app/components/inspector/TopSingleSessionHeader";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
@@ -91,17 +93,18 @@ function useAutoSshConnect(
   }, [target, status, connect, sshTargetKey, markSshConnected, markSshDisconnected]);
 }
 
-/** Session screen: the Files/Worksets/Threads box beside a permanent chat. */
+/** Session screen: the Insights/Files/Worksets box beside a permanent chat. */
 export default function SessionPage() {
   const {
     useSidePanelExpanded,
     useSidePanelCollapsed,
     useSidePanelAnimate,
     useSelectedWorkset,
-    useSelectedThreadRunning,
+    useShownThread,
     useSelectedThread,
     useSelectedRevision,
     useSelectedFile,
+    selectInsight,
     toggleSidePanelList,
     toggleSidePanelExpanded,
     toggleSidePanelCollapsed,
@@ -133,14 +136,14 @@ export default function SessionPage() {
   const animateSidePanel = useSidePanelAnimate();
   const expanded = useSidePanelExpanded();
   const selectedThread = useSelectedThread();
-  const selectedThreadRunning = useSelectedThreadRunning();
+  const shownThread = useShownThread();
   const selectedWorkset = useSelectedWorkset();
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const isMobile = useIsMobile();
 
   // An omitted behavior on a loaded session is the legacy orchestrator. An
-  // unloaded session is not that default: painting Threads/Files/Worksets and
+  // unloaded session is not that default: painting Insights/Files/Worksets and
   // then replacing them is a flash.
   const behaviorKnown = entry != null || snapshot != null;
   const behavior: SessionBehavior | null = behaviorKnown
@@ -155,17 +158,24 @@ export default function SessionPage() {
     behavior == null ? null : sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
   const sessionPanels = panelPolicy?.mobilePanels ?? [];
   const requestedPanel = isSessionPanel(panel) ? panel : DEFAULT_SESSION_PANEL;
+  // Insights took over the Threads panel; an old link keeps the selected thread.
+  const routedPanel = requestedPanel === "threads" ? "insights" : requestedPanel;
   const effectivePanel =
     panelPolicy == null
-      ? requestedPanel
-      : panelPolicy.mobilePanels.includes(requestedPanel)
-        ? requestedPanel
+      ? routedPanel
+      : panelPolicy.mobilePanels.includes(routedPanel)
+        ? routedPanel
         : panelPolicy.defaultPanel;
 
   useEffect(() => {
-    if (!id || !snapshot || !isSessionPanel(panel) || panel === effectivePanel) return;
-    navigate(routes.session(id, effectivePanel), { replace: true });
-  }, [effectivePanel, id, navigate, panel, snapshot]);
+    if (!id || !isSessionPanel(panel)) return;
+    // Other corrections wait for the snapshot's panels. An old Threads link moves
+    // at once: moving it later would close a dialog opened over the page meanwhile.
+    const target = snapshot ? effectivePanel : panel === "threads" ? routedPanel : panel;
+    if (target === panel) return;
+    if (panel === "threads" && selectedThread) selectInsight({ kind: "thread" });
+    navigate(routes.session(id, target), { replace: true });
+  }, [effectivePanel, id, navigate, panel, routedPanel, selectInsight, selectedThread, snapshot]);
   // The phone dialog header shows the selected file's +/- badge; a revision
   // reports its own totals rather than the live workspace ones.
   const revisionChanges = useWorkspaceRevisionChanges(
@@ -247,10 +257,10 @@ export default function SessionPage() {
       </div>
     ) : null;
 
-  // ThreadsView syncs the open thread's name and running bit into the store so
-  // this header stays aligned with the detail pane (including title shimmer).
-  const currentThreadName = selectedThread;
-  const threadTitleRunning = effectivePanel === "threads" && selectedThreadRunning;
+  // The thread the Insights detail shows, picked or the newest one, titles the
+  // phone dialog. The detail pane publishes it with its running bit, so the
+  // title shimmers along with it.
+  const insightThread = effectivePanel === "insights" ? shownThread : null;
 
   const sideBox = (
     <SessionSideBox
@@ -262,7 +272,7 @@ export default function SessionPage() {
     />
   );
 
-  return (
+  const page = (
     <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground">
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
         <div
@@ -320,7 +330,7 @@ export default function SessionPage() {
             <div
               className={cn(
                 "relative h-full shrink-0",
-                animateSidePanel && "transition-[width] duration-500 ease-in-out",
+                animateSidePanel && "transition-[width] duration-300 ease-out",
                 collapsed ? "w-[52px]" : "w-1/2",
               )}
               style={animateSidePanel ? undefined : { transition: "none" }}
@@ -347,7 +357,7 @@ export default function SessionPage() {
             <div
               className={cn(
                 "absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0 w-1/2",
-                animateSidePanel && "transition-transform duration-500 ease-in-out",
+                animateSidePanel && "transition-transform duration-300 ease-out",
                 collapsed && "translate-x-full",
               )}
               style={animateSidePanel ? undefined : { transition: "none" }}
@@ -379,11 +389,11 @@ export default function SessionPage() {
                   <span
                     className={cn(
                       "header-small",
-                      threadTitleRunning ? "text-shimmer-basic" : "text-basic-primary",
+                      insightThread?.running ? "text-shimmer-basic" : "text-basic-primary",
                     )}
                   >
-                    {effectivePanel === "threads"
-                      ? (currentThreadName ?? SESSION_PANEL_LABEL.threads)
+                    {effectivePanel === "insights"
+                      ? (insightThread?.name ?? SESSION_PANEL_LABEL.insights)
                       : effectivePanel === "worksets"
                         ? (selectedWorkset ??
                           snapshot?.worksets.items[0]?.id ??
@@ -445,5 +455,13 @@ export default function SessionPage() {
         </Modal>
       )}
     </section>
+  );
+
+  return (
+    <TranscriptModelProvider sessionId={id} snapshot={snapshot}>
+      <InsightsNavigationProvider sessionId={id} panels={sessionPanels} focusPanel={focusPanel}>
+        {page}
+      </InsightsNavigationProvider>
+    </TranscriptModelProvider>
   );
 }

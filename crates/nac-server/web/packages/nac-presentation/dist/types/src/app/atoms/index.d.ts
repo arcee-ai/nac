@@ -35,7 +35,7 @@ export { default as Input, InputLeading, InputSize, InputTrailing } from "./inpu
 export { default as InputWrapper } from "./input/InputWrapper";
 export { default as StickyInput, StickyInputVariant } from "./input/StickyInput";
 export { default as TextArea, TextAreaSize } from "./input/TextArea";
-export { default as InsightItem, InsightCodeBox, InsightItemCodeDisplayer, InsightItemCodeDisplayerState, InsightItemState, InsightLinkButton, InsightShowFullButton, } from "./insight-item";
+export { default as InsightItem, InsightItemCodeDisplayer, InsightItemCodeDisplayerState, InsightItemState, InsightLinkButton, InsightShowFullButton, } from "./insight-item";
 export { default as KeyboardShortcut } from "./keyboard-shortcut";
 export { default as Label, type HoverHintConfig, LabelSize } from "./label";
 export { default as Loader, LoaderSize, LoaderVariant } from "./loader";

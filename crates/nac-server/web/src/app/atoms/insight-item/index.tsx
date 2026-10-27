@@ -9,7 +9,6 @@ import Icon, { IconName } from "../icon";
 import Loader, { LoaderSize } from "../loader";
 import { TooltipPosition } from "../tooltip";
 
-export { default as InsightCodeBox } from "./InsightCodeBox";
 export {
   default as InsightItemCodeDisplayer,
   InsightItemCodeDisplayerState,

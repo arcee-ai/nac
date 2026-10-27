@@ -2,7 +2,19 @@
 // row the side box points at. Kept outside the URL because both are viewing
 // preferences, not locations.
 
+import type { InsightsFilter } from "@/app/features/insights/model/types";
 import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
+
+/** What the Insights detail shows. A thread reads its name from `selectedThread`. */
+export type InsightSelection =
+  | { kind: "group"; groupId: string; segmentKey: string | null }
+  | { kind: "thread" };
+
+/** Thread the Insights detail shows, picked or the newest one by default. */
+export interface ShownThread {
+  name: string;
+  running: boolean;
+}
 
 interface SessionLayoutState {
   /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
@@ -23,7 +35,7 @@ interface SessionLayoutState {
    * phone, in place of the detail on a tablet. Wide layouts ignore this.
    */
   panelList: boolean;
-  /** Thread the chat last pointed the Threads panel at. */
+  /** Thread the chat last pointed Insights at; its detail shows this one. */
   selectedThread: string | null;
   /**
    * Which of that thread's chat cards did the pointing, or null when the pick
@@ -32,10 +44,20 @@ interface SessionLayoutState {
    */
   selectedThreadEpisode: string | null;
   /**
-   * Whether the Threads detail pane considers the open thread running. The
-   * phone dialog header reads this so its title shimmer matches the panel.
+   * Published by the thread detail pane while it is up. The phone dialog
+   * header names this thread and shimmers while the pane shows it running.
    */
-  selectedThreadRunning: boolean;
+  shownThread: ShownThread | null;
+  /** Entry the Insights detail shows; null until the panel or the chat picks one. */
+  selectedInsight: InsightSelection | null;
+  /**
+   * Bumps on every Insights pick, so picking the entry already shown still
+   * scrolls the detail back to it.
+   */
+  insightFocusNonce: number;
+  /** Insights groups whose child rows are open, by group id. */
+  expandedInsightGroups: ReadonlySet<string>;
+  insightsFilter: InsightsFilter;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
   /** Open Subagents row per parent, kept so returning from a transcript reopens it. */
@@ -64,7 +86,11 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     panelList: false,
     selectedThread: null,
     selectedThreadEpisode: null,
-    selectedThreadRunning: false,
+    shownThread: null,
+    selectedInsight: null,
+    insightFocusNonce: 0,
+    expandedInsightGroups: new Set(),
+    insightsFilter: "all",
     selectedWorkset: null,
     selectedSubagents: new Map(),
     selectedRevision: null,
@@ -199,11 +225,39 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     if (selectedThread) showSidePanelList(false);
   }
 
-  /** Drive the phone dialog title shimmer from the Threads detail pane. */
-  function setSelectedThreadRunning(selectedThreadRunning: boolean): void {
-    if (getState().selectedThreadRunning !== selectedThreadRunning) {
-      setState({ selectedThreadRunning });
-    }
+  /** Drive the phone dialog title and its shimmer from the thread detail pane. */
+  function setShownThread(shownThread: ShownThread | null): void {
+    const current = getState().shownThread;
+    if (current?.name === shownThread?.name && current?.running === shownThread?.running) return;
+    setState({ shownThread });
+  }
+
+  /**
+   * Point the Insights detail at an entry. Leaves the narrow list alone: a
+   * group row both opens its children there and selects itself.
+   */
+  function selectInsight(selectedInsight: InsightSelection | null): void {
+    setState((state) =>
+      selectedInsight == null
+        ? { selectedInsight }
+        : { selectedInsight, insightFocusNonce: state.insightFocusNonce + 1 },
+    );
+  }
+
+  /** Open or close one Insights group's child rows; flips it when `expanded` is omitted. */
+  function toggleInsightGroup(groupId: string, expanded?: boolean): void {
+    setState((state) => {
+      const open = state.expandedInsightGroups.has(groupId);
+      if (expanded === open) return null;
+      const next = new Set(state.expandedInsightGroups);
+      if (open) next.delete(groupId);
+      else next.add(groupId);
+      return { expandedInsightGroups: next };
+    });
+  }
+
+  function selectInsightsFilter(insightsFilter: InsightsFilter): void {
+    if (getState().insightsFilter !== insightsFilter) setState({ insightsFilter });
   }
 
   function selectWorkset(selectedWorkset: string | null): void {
@@ -247,11 +301,11 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
 
   /**
    * Wipe the session-scoped pointers that belong to the inspector we just left.
-   * Threads, worksets, revisions, files and folders belong to one session, so
-   * carrying them into another would point the panels at something that is not
-   * theirs. A leftover selectedThread in particular was injected into the next
-   * session's thread list as a ghost row that vanished the moment you clicked a
-   * real one.
+   * Threads, Insights entries, worksets, revisions, files and folders belong
+   * to one session, so carrying them into another would point the panels at
+   * something that is not theirs. A leftover selectedThread in particular was
+   * injected into the next session's thread list as a ghost row that vanished
+   * the moment you clicked a real one.
    */
   function resetSessionSelection(): void {
     if (import.meta.env.DEV) {
@@ -264,12 +318,15 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     setState({
       selectedThread: null,
       selectedThreadEpisode: null,
+      selectedInsight: null,
+      insightFocusNonce: 0,
+      expandedInsightGroups: new Set(),
+      insightsFilter: "all",
       selectedWorkset: null,
       selectedRevision: null,
       selectedFile: null,
       toggledFolders: new Set(),
       panelList: false,
-      selectedThreadRunning: false,
     });
   }
 
@@ -283,7 +340,11 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   const useSidePanelList = () => useStore((s) => s.panelList);
   const useSelectedThread = () => useStore((s) => s.selectedThread);
   const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
-  const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
+  const useShownThread = () => useStore((s) => s.shownThread);
+  const useSelectedInsight = () => useStore((s) => s.selectedInsight);
+  const useInsightFocusNonce = () => useStore((s) => s.insightFocusNonce);
+  const useExpandedInsightGroups = () => useStore((s) => s.expandedInsightGroups);
+  const useInsightsFilter = () => useStore((s) => s.insightsFilter);
   const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
   const useSelectedSubagent = (parentSessionId: string) =>
     useStore((s) => s.selectedSubagents.get(parentSessionId) ?? null);
@@ -304,7 +365,10 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     toggleSidePanelList,
     revealSidePanel,
     selectThread,
-    setSelectedThreadRunning,
+    setShownThread,
+    selectInsight,
+    toggleInsightGroup,
+    selectInsightsFilter,
     selectWorkset,
     selectSubagent,
     selectRevision,
@@ -319,7 +383,11 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     useSidePanelList,
     useSelectedThread,
     useSelectedThreadEpisode,
-    useSelectedThreadRunning,
+    useShownThread,
+    useSelectedInsight,
+    useInsightFocusNonce,
+    useExpandedInsightGroups,
+    useInsightsFilter,
     useSelectedWorkset,
     useSelectedSubagent,
     useSelectedRevision,
@@ -340,7 +408,10 @@ export const {
   toggleSidePanelList,
   revealSidePanel,
   selectThread,
-  setSelectedThreadRunning,
+  setShownThread,
+  selectInsight,
+  toggleInsightGroup,
+  selectInsightsFilter,
   selectWorkset,
   selectSubagent,
   selectRevision,
@@ -355,7 +426,11 @@ export const {
   useSidePanelList,
   useSelectedThread,
   useSelectedThreadEpisode,
-  useSelectedThreadRunning,
+  useShownThread,
+  useSelectedInsight,
+  useInsightFocusNonce,
+  useExpandedInsightGroups,
+  useInsightsFilter,
   useSelectedWorkset,
   useSelectedSubagent,
   useSelectedRevision,

@@ -119,18 +119,6 @@ export declare function dispatchActions(messages: SessionSnapshotResponse["messa
  */
 export declare function partitionThreadCalls(calls: ToolCall[]): ToolCall[][];
 /**
- * Thread names whose latest dispatch exists only because the user stopped the
- * run. A later dispatch of the same name — finished or still in flight —
- * drops off this set, so Continue does not keep painting the live card as
- * cancelled.
- *
- * A stop does not always write a tool result for every dispatch — a name that
- * never started has no `[tool call cancelled by user]` row. Those still belong
- * here: the run ended without them, so a checkmark would claim work that never
- * ran.
- */
-export declare function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string>;
-/**
  * Show model output that has reached the browser ahead of the snapshot.
  *
  * The buffers outlive the message being committed, so the text does not blink
