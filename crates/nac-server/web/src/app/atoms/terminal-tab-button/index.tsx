@@ -97,7 +97,7 @@ const TerminalTabButton: React.FC<TerminalTabButtonProps> = ({
   return (
     <div
       className={cn(
-        "group/terminal-tab-button relative flex w-full min-w-0 items-center rounded-[4px]",
+        "group/terminal-tab-button relative flex w-full min-w-0 items-center rounded-interaction",
         "transition-colors duration-150 ease-out",
         style.box,
         disabled
@@ -118,7 +118,7 @@ const TerminalTabButton: React.FC<TerminalTabButtonProps> = ({
         onClick={onClick}
         className={cn(
           "flex min-w-0 flex-1 items-center self-stretch text-left outline-none",
-          "after:absolute after:inset-0 after:rounded-[4px] disabled:cursor-not-allowed",
+          "after:absolute after:inset-0 after:rounded-interaction disabled:cursor-not-allowed",
           "before:pointer-events-none before:absolute before:-inset-1 before:hidden before:rounded-[6px] before:border-2 before:border-[var(--color-border-focus-outline)] focus-visible:before:block",
           style.name,
         )}

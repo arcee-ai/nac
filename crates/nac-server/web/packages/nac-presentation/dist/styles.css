@@ -4219,9 +4219,9 @@
     inset: 0;
   }
 
-[data-nac-runtime]:is(.after\:rounded-\[4px\]:after), [data-nac-runtime] .after\:rounded-\[4px\]:after {
+[data-nac-runtime]:is(.after\:rounded-interaction:after), [data-nac-runtime] .after\:rounded-interaction:after {
     content: var(--nac-presentation-tw-content);
-    border-radius: 4px;
+    border-radius: var(--interaction-rounded);
   }
 
 [data-nac-runtime]:is(.empty\:hidden:empty), [data-nac-runtime] .empty\:hidden:empty {

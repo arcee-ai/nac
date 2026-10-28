@@ -4273,7 +4273,7 @@ var ld = ({ title: e, status: t, statusLabel: n, error: r, behavior: i, lineage:
 }, yd = I("[&_path]:fill-btn-destructive", "hover:[&_path]:fill-btn-destructive-hovered", "active:[&_path]:fill-btn-destructive-pressed", "disabled:[&_path]:fill-btn-destructive-disabled"), bd = ({ label: e, agent: t = !1, description: n, size: r = "small", active: i = !1, disabled: a = !1, title: o, onClick: s, remove: c, className: l }) => {
 	let u = _d[r], d = r === "small";
 	return /* @__PURE__ */ Z("div", {
-		className: I("group/terminal-tab-button relative flex w-full min-w-0 items-center rounded-[4px]", "transition-colors duration-150 ease-out", u.box, a ? I(i ? vd.disabledHighlighted : vd.disabled, "cursor-not-allowed") : i ? vd.highlighted : vd.regular, l),
+		className: I("group/terminal-tab-button relative flex w-full min-w-0 items-center rounded-interaction", "transition-colors duration-150 ease-out", u.box, a ? I(i ? vd.disabledHighlighted : vd.disabled, "cursor-not-allowed") : i ? vd.highlighted : vd.regular, l),
 		children: [/* @__PURE__ */ Z("button", {
 			type: "button",
 			"data-terminal-tab": "",
@@ -4286,7 +4286,7 @@ var ld = ({ title: e, status: t, statusLabel: n, error: r, behavior: i, lineage:
 			disabled: a,
 			title: o,
 			onClick: s,
-			className: I("flex min-w-0 flex-1 items-center self-stretch text-left outline-none", "after:absolute after:inset-0 after:rounded-[4px] disabled:cursor-not-allowed", "before:pointer-events-none before:absolute before:-inset-1 before:hidden before:rounded-[6px] before:border-2 before:border-[var(--color-border-focus-outline)] focus-visible:before:block", u.name),
+			className: I("flex min-w-0 flex-1 items-center self-stretch text-left outline-none", "after:absolute after:inset-0 after:rounded-interaction disabled:cursor-not-allowed", "before:pointer-events-none before:absolute before:-inset-1 before:hidden before:rounded-[6px] before:border-2 before:border-[var(--color-border-focus-outline)] focus-visible:before:block", u.name),
 			children: [/* @__PURE__ */ X("span", {
 				className: I("min-w-0 truncate", u.label),
 				children: e
