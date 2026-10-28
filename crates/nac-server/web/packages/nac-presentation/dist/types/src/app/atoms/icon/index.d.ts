@@ -146,7 +146,8 @@ export declare enum IconName {
     SearchFiles = "searchFiles",
     WriteCommand = "writeCommand",
     Clock = "clock",
-    AddChat = "addChat"
+    AddChat = "addChat",
+    Goal = "goal"
 }
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
     iconName: IconName;

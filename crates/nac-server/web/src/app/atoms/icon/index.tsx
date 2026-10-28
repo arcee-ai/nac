@@ -53,6 +53,7 @@ import {
   Funnel,
   GitBranch,
   Globe,
+  Goal,
   GripVertical,
   Group,
   Hand,
@@ -289,6 +290,7 @@ export enum IconName {
   WriteCommand = "writeCommand",
   Clock = "clock",
   AddChat = "addChat",
+  Goal = "goal",
 }
 
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
@@ -461,6 +463,7 @@ const lucideIcons: Partial<Record<IconName, LucideIcon>> = {
   [IconName.WriteCommand]: Terminal,
   [IconName.Clock]: Clock,
   [IconName.AddChat]: MessageSquarePlus,
+  [IconName.Goal]: Goal,
 } satisfies Record<Exclude<IconName, BrandIconName>, LucideIcon>;
 
 /** The `color` prop as a fallback the stylesheet reads, so classes keep the final say. */
