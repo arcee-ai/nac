@@ -1,4 +1,4 @@
-import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Bt as f, C as p, Ci as m, Cn as h, Cr as g, Ct as _, D as v, Di as y, Dn as b, Dr as x, Dt as S, E as C, Ei as w, En as T, Er as E, Et as D, F as O, Fi as k, Fn as ee, Fr as A, Ft as te, G as j, Gi as ne, Gn as re, Gr as M, Gt as ie, H as ae, Hi as oe, Hn as se, Hr as N, Ht as ce, I as le, Ii as ue, In as de, Ir as P, It as fe, J as pe, Ji as me, Jn as F, Jr as I, Jt as he, K as ge, Ki as _e, Kn as L, Kr as R, Kt as ve, L as ye, Li as be, Ln as xe, Lr as Se, Lt as Ce, M as we, Mi as Te, Mn as Ee, Mr as De, Mt as Oe, N as ke, Ni as Ae, Nn as je, Nr as Me, Nt as Ne, O as Pe, Oi as Fe, On as Ie, Or as Le, Ot as Re, P as ze, Pi as Be, Pn as Ve, Pr as He, Pt as Ue, Q as We, Qn as Ge, Qr as Ke, Qt as qe, R as Je, Ri as Ye, Rn as Xe, Rr as Ze, Rt as Qe, S as $e, Si as et, Sn as tt, Sr as z, St as nt, T as rt, Ti as it, Tn as at, Tr as B, Tt as ot, U as st, Ui as ct, Un as lt, Ur as ut, Ut as dt, V as ft, Vi as pt, Vn as mt, Vr as ht, Vt as gt, W as _t, Wi as vt, Wn as yt, Wr as bt, Wt as xt, X as St, Xi as Ct, Xn as wt, Xr as Tt, Xt as Et, Y as Dt, Yi as Ot, Yn as kt, Yr as At, Yt as jt, Z as Mt, Zn as Nt, Zr as Pt, Zt as Ft, _ as It, _i as Lt, _n as Rt, _r as zt, _t as Bt, a as Vt, ai as Ht, an as Ut, ar as Wt, at as Gt, b as Kt, bi as qt, bn as Jt, br as Yt, bt as Xt, c as Zt, ci as Qt, cn as $t, cr as en, ct as tn, d as nn, di as rn, dn as an, dr as on, dt as sn, ei as cn, en as ln, er as un, et as dn, f as fn, fi as pn, fn as mn, fr as hn, ft as gn, g as _n, gi as vn, gn as yn, gr as bn, gt as xn, h as Sn, hi as Cn, hn as wn, hr as Tn, ht as En, i as Dn, ii as On, in as kn, ir as An, it as jn, j as Mn, ji as Nn, jn as Pn, jr as Fn, jt as In, k as Ln, ki as Rn, kn as zn, kr as Bn, kt as Vn, l as Hn, li as Un, ln as Wn, lr as Gn, lt as Kn, m as qn, mi as Jn, mn as Yn, mr as Xn, mt as Zn, n as Qn, ni as V, nn as $n, nr as er, nt as tr, o as nr, oi as rr, on as ir, or as ar, ot as or, p as sr, pi as cr, pn as lr, pt as ur, q as dr, qi as fr, qn as pr, qr as H, qt as mr, ri as hr, rn as gr, rr as _r, rt as vr, s as yr, si as br, sn as xr, sr as Sr, st as Cr, t as wr, ti as Tr, tn as Er, tr as Dr, tt as Or, u as kr, ui as Ar, un as jr, ur as Mr, ut as Nr, v as Pr, vi as Fr, vn as Ir, vr as Lr, vt as Rr, w as zr, wi as Br, wn as Vr, wr as U, wt as Hr, x as Ur, xi as Wr, xn as Gr, xr as Kr, xt as qr, y as Jr, yi as Yr, yn as Xr, yr as Zr, yt as Qr, z as $r, zi as ei, zn as ti, zr as ni, zt as ri } from "./chunks/PerfProfiler-Bk2QWLP8.js";
+import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Bt as f, C as p, Ci as m, Cn as h, Cr as g, Ct as _, D as v, Di as y, Dn as b, Dr as x, Dt as S, E as C, Ei as w, En as T, Er as E, Et as D, F as O, Fi as k, Fn as ee, Fr as A, Ft as te, G as j, Gi as ne, Gn as re, Gr as M, Gt as ie, H as ae, Hi as oe, Hn as se, Hr as N, Ht as ce, I as le, Ii as ue, In as de, Ir as P, It as fe, J as pe, Ji as me, Jn as F, Jr as I, Jt as he, K as ge, Ki as _e, Kn as L, Kr as R, Kt as ve, L as ye, Li as be, Ln as xe, Lr as Se, Lt as Ce, M as we, Mi as Te, Mn as Ee, Mr as De, Mt as Oe, N as ke, Ni as Ae, Nn as je, Nr as Me, Nt as Ne, O as Pe, Oi as Fe, On as Ie, Or as Le, Ot as Re, P as ze, Pi as Be, Pn as Ve, Pr as He, Pt as Ue, Q as We, Qn as Ge, Qr as Ke, Qt as qe, R as Je, Ri as Ye, Rn as Xe, Rr as Ze, Rt as Qe, S as $e, Si as et, Sn as tt, Sr as z, St as nt, T as rt, Ti as it, Tn as at, Tr as B, Tt as ot, U as st, Ui as ct, Un as lt, Ur as ut, Ut as dt, V as ft, Vi as pt, Vn as mt, Vr as ht, Vt as gt, W as _t, Wi as vt, Wn as yt, Wr as bt, Wt as xt, X as St, Xi as Ct, Xn as wt, Xr as Tt, Xt as Et, Y as Dt, Yi as Ot, Yn as kt, Yr as At, Yt as jt, Z as Mt, Zn as Nt, Zr as Pt, Zt as Ft, _ as It, _i as Lt, _n as Rt, _r as zt, _t as Bt, a as Vt, ai as Ht, an as Ut, ar as Wt, at as Gt, b as Kt, bi as qt, bn as Jt, br as Yt, bt as Xt, c as Zt, ci as Qt, cn as $t, cr as en, ct as tn, d as nn, di as rn, dn as an, dr as on, dt as sn, ei as cn, en as ln, er as un, et as dn, f as fn, fi as pn, fn as mn, fr as hn, ft as gn, g as _n, gi as vn, gn as yn, gr as bn, gt as xn, h as Sn, hi as Cn, hn as wn, hr as Tn, ht as En, i as Dn, ii as On, in as kn, ir as An, it as jn, j as Mn, ji as Nn, jn as Pn, jr as Fn, jt as In, k as Ln, ki as Rn, kn as zn, kr as Bn, kt as Vn, l as Hn, li as Un, ln as Wn, lr as Gn, lt as Kn, m as qn, mi as Jn, mn as Yn, mr as Xn, mt as Zn, n as Qn, ni as V, nn as $n, nr as er, nt as tr, o as nr, oi as rr, on as ir, or as ar, ot as or, p as sr, pi as cr, pn as lr, pt as ur, q as dr, qi as fr, qn as pr, qr as H, qt as mr, ri as hr, rn as gr, rr as _r, rt as vr, s as yr, si as br, sn as xr, sr as Sr, st as Cr, t as wr, ti as Tr, tn as Er, tr as Dr, tt as Or, u as kr, ui as Ar, un as jr, ur as Mr, ut as Nr, v as Pr, vi as Fr, vn as Ir, vr as Lr, vt as Rr, w as zr, wi as Br, wn as Vr, wr as U, wt as Hr, x as Ur, xi as Wr, xn as Gr, xr as Kr, xt as qr, y as Jr, yi as Yr, yn as Xr, yr as Zr, yt as Qr, z as $r, zi as ei, zn as ti, zr as ni, zt as ri } from "./chunks/PerfProfiler-DOHxr8lH.js";
 import ii, { Fragment as ai, Suspense as oi, createContext as si, lazy as ci, memo as li, use as ui, useCallback as W, useContext as di, useEffect as G, useId as fi, useLayoutEffect as pi, useMemo as K, useRef as q, useState as J, useSyncExternalStore as mi } from "react";
 import { QueryClientProvider as hi, QueryObserver as gi, replaceEqualDeep as _i, useIsFetching as vi, useMutation as yi, useQueries as bi, useQuery as xi, useQueryClient as Si } from "@tanstack/react-query";
 import { Link as Ci, Navigate as wi, Outlet as Ti, Route as Ei, Routes as Di, useHref as Oi, useLinkClickHandler as ki, useLocation as Ai, useNavigate as ji, useParams as Mi } from "react-router-dom";
@@ -562,21 +562,21 @@ var Ba = /* @__PURE__ */ function(e) {
 		"data-session-behavior-icon": i,
 		className: I("shrink-0", r)
 	});
-}, Ua = "text-fill-btn-secondary group-hover:text-fill-btn-secondary-hovered group-has-[>button:active]:text-fill-btn-secondary-pressed group-has-[>button:disabled]:text-fill-btn-secondary-disabled", Wa = ({ title: e, active: t = !1, running: n = !1, behavior: r, lineage: i, showBehaviorIcon: a = !1, behaviorLabel: o, forkedFromTitle: s, badge: c, badgeLabel: l, unread: u = !1, isMobile: d = !1, actions: f, className: p = "", type: m = "button", "aria-label": h, ...g }) => {
-	let _ = [
+}, Ua = "text-fill-btn-secondary group-hover:text-fill-btn-secondary-hovered group-has-[>button:active]:text-fill-btn-secondary-pressed group-has-[>button:disabled]:text-fill-btn-secondary-disabled", Wa = ({ title: e, active: t = !1, running: n = !1, behavior: r, lineage: i, showBehaviorIcon: a = !1, behaviorLabel: o, forkedFromTitle: s, badge: c, badgeLabel: l, unread: u = !1, isMobile: d = !1, smallTitle: f = !1, actions: p, className: m = "", type: h = "button", "aria-label": g, ..._ }) => {
+	let v = [
 		e,
 		o,
 		l
 	].filter(Boolean);
 	return /* @__PURE__ */ Z("div", {
-		className: I("group flex items-center min-w-0 rounded-interaction", "-outline-offset-2 outline-[var(--color-border-focus-outline)] has-[>button:focus-visible]:outline-2", d ? "h-12 gap-3 py-2 pl-2.5 pr-3" : "h-9 gap-1.5 px-2 py-1", t ? "bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered has-[>button:active]:bg-btn-ghost-highlighted-pressed has-[>button:disabled]:bg-btn-ghost-highlighted-disabled" : "hover:bg-btn-ghost-hovered has-[>button:active]:bg-btn-ghost-pressed has-[>button:disabled]:bg-btn-ghost-disabled", p),
+		className: I("group relative isolate flex items-center min-w-0 rounded-interaction", "-outline-offset-2 outline-[var(--color-border-focus-outline)] has-[>button:focus-visible]:outline-2", d ? "h-12 gap-3 py-2 pl-2.5 pr-3" : "h-9 gap-1.5 px-2 py-1", t ? "bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered has-[>button:active]:bg-btn-ghost-highlighted-pressed has-[>button:disabled]:bg-btn-ghost-highlighted-disabled" : "hover:bg-btn-ghost-hovered has-[>button:active]:bg-btn-ghost-pressed has-[>button:disabled]:bg-btn-ghost-disabled", m),
 		children: [/* @__PURE__ */ Z("button", {
-			type: m,
-			title: _.join(" · "),
-			"aria-label": h ?? _.join(", "),
+			type: h,
+			title: v.join(" · "),
+			"aria-label": g ?? v.join(", "),
 			"aria-current": t ? "page" : void 0,
-			className: I("flex flex-1 items-center min-w-0 text-left outline-none", t ? "text-btn-secondary-pressed" : "text-btn-secondary group-hover:text-btn-secondary-hovered active:text-btn-secondary-pressed", "disabled:cursor-not-allowed disabled:text-btn-secondary-disabled", d ? "gap-3" : "gap-1.5"),
-			...g,
+			className: I("flex flex-1 items-center min-w-0 text-left outline-none", "after:absolute after:inset-0 after:-z-10 after:rounded-interaction", t ? "text-btn-secondary-pressed" : "text-btn-secondary group-hover:text-btn-secondary-hovered active:text-btn-secondary-pressed", "disabled:cursor-not-allowed disabled:text-btn-secondary-disabled", d ? "gap-3" : "gap-1.5"),
+			..._,
 			children: [
 				n ? /* @__PURE__ */ X(Aa, { size: d ? fa.Large : fa.Medium }) : a ? /* @__PURE__ */ X(Ha, {
 					behavior: r,
@@ -585,7 +585,7 @@ var Ba = /* @__PURE__ */ function(e) {
 					className: Ua
 				}) : null,
 				/* @__PURE__ */ X("span", {
-					className: I("min-w-0 flex-1 truncate", d ? "label-medium" : "label-small", n && "text-shimmer-basic"),
+					className: I("min-w-0 flex-1 truncate", d ? "label-medium" : f ? "label-micro" : "label-small", n && "text-shimmer-primary"),
 					children: e
 				}),
 				/* @__PURE__ */ X(la, {
@@ -606,9 +606,9 @@ var Ba = /* @__PURE__ */ function(e) {
 					})
 				}) : null
 			]
-		}), f ? /* @__PURE__ */ X("div", {
+		}), p ? /* @__PURE__ */ X("div", {
 			className: I("flex items-center shrink-0", d ? "gap-3" : "gap-1 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden"),
-			children: f
+			children: p
 		}) : null]
 	});
 }, Ga = /* @__PURE__ */ function(e) {
@@ -3312,7 +3312,7 @@ $.Size = Q, $.Leading = Ul, $.Trailing = Wl;
 var $l = /* @__PURE__ */ function(e) {
 	return e.Default = "default", e.Search = "search", e;
 }({}), eu = ({ variant: e = "default", leading: t = Ul.None, leadingOnClick: n, trailing: r = Wl.None, trailingOnClick: i, leadingIconName: a = H.Add, trailingIconName: o = H.Search, inputClassName: s = "", className: c = "", rounded: l = !0, isDisabled: u = !1, validation: d = !1, onClear: f, value: p, ref: m, ...h }) => {
-	let _ = e === "search", v = p != null && String(p).length > 0, y = _ ? Ul.Icon : t, b = _ ? H.Search : a, x = _ ? v ? Wl.Button : Wl.None : r, S = _ ? H.Close : o, C = _ ? f : i, w = c.includes("flex-grow") || c.includes("flex-1"), T = l ? "rounded-full" : "rounded-interaction", E = u ? "var(--color-fill-basic-muted)" : "var(--color-fill-btn-secondary)", D = {
+	let _ = e === "search", v = p != null && String(p).length > 0, y = _ ? Ul.Icon : t, b = _ ? H.Search : a, x = _ ? v && f ? Wl.Button : Wl.None : r, S = _ ? H.Close : o, C = _ ? f : i, w = c.includes("flex-grow") || c.includes("flex-1"), T = l ? "rounded-full" : "rounded-interaction", E = u ? "var(--color-fill-basic-muted)" : "var(--color-fill-btn-secondary)", D = {
 		[Ul.None]: "pl-3",
 		[Ul.Icon]: "pl-10",
 		[Ul.Button]: "pl-12"
@@ -3840,22 +3840,22 @@ var Vu = ({ id: e, size: t = 40, isRunning: n = !1, className: r = "", ...i }) =
 }, Hu = /* @__PURE__ */ function(e) {
 	return e.Project = "project", e.Orphan = "orphan", e;
 }({}), Uu = ({ entityId: e, name: t, variant: n = "project", active: r = !1, running: i = !1, trailing: a, isMobile: o = !1, actions: s, className: c = "", type: l = "button", ...u }) => /* @__PURE__ */ Z("div", {
-	className: I("group flex items-center min-w-0 rounded-interaction hover:bg-btn-ghost-hovered", o ? "h-12 gap-3 px-3 py-2" : "h-9 gap-1.5 px-2 py-1", r && "bg-btn-ghost-highlighted", c),
+	className: I("group flex items-center min-w-0 rounded-interaction", "-outline-offset-2 outline-[var(--color-border-focus-outline)] has-[>button:focus-visible]:outline-2", o ? "h-12 gap-3 px-3 py-2" : "h-9 gap-1.5 px-2 py-1", r ? "bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered has-[>button:active]:bg-btn-ghost-highlighted-pressed has-[>button:disabled]:bg-btn-ghost-highlighted-disabled" : "hover:bg-btn-ghost-hovered has-[>button:active]:bg-btn-ghost-pressed has-[>button:disabled]:bg-btn-ghost-disabled", c),
 	children: [
 		/* @__PURE__ */ Z("button", {
 			type: l,
-			className: I("flex flex-1 items-center min-w-0 text-left", o ? "gap-3" : "gap-1.5"),
+			className: I("flex flex-1 items-center min-w-0 text-left outline-none", r ? "text-btn-secondary-pressed" : "text-btn-secondary group-hover:text-btn-secondary-hovered active:text-btn-secondary-pressed", "disabled:cursor-not-allowed disabled:text-btn-secondary-disabled", o ? "gap-3" : "gap-1.5"),
 			...u,
 			children: [n === "orphan" ? /* @__PURE__ */ X(Qa, {
-				size: o ? 20 : 24,
+				size: 24,
 				isRunning: i
 			}) : /* @__PURE__ */ X(Vu, {
 				id: e,
-				size: o ? 20 : 24,
+				size: 20,
 				isRunning: i,
 				className: "rounded-[2px]"
 			}), /* @__PURE__ */ X("span", {
-				className: I("flex-1 truncate", o ? "label-medium" : "label-small", i ? "text-shimmer-basic" : o ? "text-btn-secondary" : "text-basic-primary"),
+				className: I("flex-1 truncate", o ? "label-medium" : "label-small", i && "text-shimmer-primary"),
 				children: t
 			})]
 		}),
@@ -9172,12 +9172,12 @@ function nh({ sessions: e, inset: t = !1 }) {
 			value: y,
 			onValueChange: (e) => f(e)
 		})
-	] }), T = t ? "px-3 py-2" : "py-2";
+	] }), T = t ? "px-3 py-2" : "p-4";
 	return /* @__PURE__ */ Z("div", {
-		className: "flex flex-col gap-2",
+		className: I("flex flex-col", t && "gap-2"),
 		children: [
 			/* @__PURE__ */ X("div", {
-				className: I("flex flex-col gap-6", T),
+				className: I("flex flex-col", t ? "gap-6" : "gap-2", T),
 				children: w
 			}),
 			S.length > 1 ? /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X($m, {}), /* @__PURE__ */ X("div", {
@@ -9273,87 +9273,93 @@ function ch({ project: e }) {
 }
 // src/app/components/LeftSidebar/MobileSearchModal.tsx
 function lh({ open: e, onClose: t, onNavigate: n, kind: r, activeSessionId: i, activeProjectId: a }) {
-	let [o, s] = J(""), c = () => {
-		s(""), t();
-	}, l = () => {
-		c(), n();
-	}, u = o.trim().toLowerCase(), d = r === "chats";
-	return /* @__PURE__ */ Z(Xn, {
+	let o = P(), s = q(null), [c, l] = J(""), u = () => {
+		l(""), t();
+	}, d = () => {
+		u(), n?.();
+	}, f = c.trim().toLowerCase(), p = r === "chats";
+	return G(() => {
+		e && !o && s.current?.focus();
+	}, [e, o]), /* @__PURE__ */ Z(Xn, {
 		open: e,
-		onClose: c,
-		title: d ? "Search Chats" : "Search Projects",
+		onClose: u,
+		title: p ? "Search Chats" : "Search Projects",
+		className: "max-w-[380px] h-[700px]",
 		bodyClassName: "p-0 [&>*]:shrink-0",
 		children: [/* @__PURE__ */ X("div", {
 			className: "sticky top-0 z-10 flex p-3",
 			children: /* @__PURE__ */ X(eu, {
+				ref: s,
 				className: "flex-1 min-w-0",
 				variant: $l.Search,
-				placeholder: d ? "Search chats…" : "Search projects…",
-				value: o,
-				onChange: (e) => s(e.target.value),
-				onClear: () => s(""),
-				"aria-label": d ? "Search chats" : "Search projects"
+				placeholder: p ? "Search chats…" : "Search projects…",
+				value: c,
+				onChange: (e) => l(e.target.value),
+				onClear: o ? () => l("") : void 0,
+				"aria-label": p ? "Search chats" : "Search projects"
 			})
 		}), /* @__PURE__ */ X("div", {
 			className: "flex flex-col gap-2 px-2 py-8 [&>*]:shrink-0",
-			children: d ? /* @__PURE__ */ X(uh, {
-				needle: u,
+			children: p ? /* @__PURE__ */ X(uh, {
+				needle: f,
 				activeSessionId: i,
-				onPicked: l
+				isMobile: o,
+				onPicked: d
 			}) : /* @__PURE__ */ X(dh, {
-				needle: u,
+				needle: f,
 				activeProjectId: a,
-				onPicked: l
+				isMobile: o,
+				onPicked: d
 			})
 		})]
 	});
 }
-function uh({ needle: e, activeSessionId: t, onPicked: n }) {
-	let r = ji(), i = Tt(), a = ah(), o = Um(), s = wd(), { data: c = [] } = _(), l = K(() => Td(c).filter((t) => !e || s(t.summary).toLowerCase().includes(e)).sort((e, t) => Number(!!t.summary.pinned) - Number(!!e.summary.pinned) || Rn(t.summary.updated_at) - Rn(e.summary.updated_at)), [
+function uh({ needle: e, activeSessionId: t, isMobile: n, onPicked: r }) {
+	let i = ji(), a = Tt(), o = ah(), s = Um(), c = wd(), { data: l = [] } = _(), u = K(() => Td(l).filter((t) => !e || c(t.summary).toLowerCase().includes(e)).sort((e, t) => Number(!!t.summary.pinned) - Number(!!e.summary.pinned) || Rn(t.summary.updated_at) - Rn(e.summary.updated_at)), [
 		e,
-		s,
-		c
+		c,
+		l
 	]);
-	return l.length === 0 ? /* @__PURE__ */ X(fh, { children: e ? "No matching chats" : "No chats yet" }) : l.map((e) => {
-		let c = s(e.summary), l = Ma(e.summary.behavior);
+	return u.length === 0 ? /* @__PURE__ */ X(fh, { children: e ? "No matching chats" : "No chats yet" }) : u.map((e) => {
+		let l = c(e.summary), u = Ma(e.summary.behavior);
 		return /* @__PURE__ */ X(Wa, {
-			title: c,
+			title: l,
 			behavior: e.summary.behavior,
-			showBehaviorIcon: a,
-			"aria-label": i.orchestrationEnabled ? `${c}, ${l.navigationLabel}` : c,
+			showBehaviorIcon: o,
+			"aria-label": a.orchestrationEnabled ? `${l}, ${u.navigationLabel}` : l,
 			active: e.summary.session_id === t,
 			running: y(e.active_run),
 			forkedFromTitle: e.summary.forked_from?.title,
-			isMobile: !0,
+			isMobile: n,
 			onClick: () => {
-				n(), r(fn.session(e.summary.session_id));
+				r(), i(fn.session(e.summary.session_id));
 			},
-			actions: /* @__PURE__ */ X(sh, {
-				title: c,
+			actions: n ? /* @__PURE__ */ X(sh, {
+				title: l,
 				pinned: e.summary.pinned,
 				isMobile: !0,
-				onPin: () => void o.togglePin(e.summary),
-				onRename: () => o.rename(e.summary),
-				onDelete: () => o.remove(e.summary)
-			})
+				onPin: () => void s.togglePin(e.summary),
+				onRename: () => s.rename(e.summary),
+				onDelete: () => s.remove(e.summary)
+			}) : void 0
 		}, e.summary.session_id);
 	});
 }
-function dh({ needle: e, activeProjectId: t, onPicked: n }) {
-	let r = ji(), { data: i } = _t(), { data: a = [] } = _(), o = K(() => Ad(i?.projects ?? [], a).filter((t) => !e || t.project.name.toLowerCase().includes(e)), [
+function dh({ needle: e, activeProjectId: t, isMobile: n, onPicked: r }) {
+	let i = ji(), { data: a } = _t(), { data: o = [] } = _(), s = K(() => Ad(a?.projects ?? [], o).filter((t) => !e || t.project.name.toLowerCase().includes(e)), [
 		e,
-		i,
-		a
+		a,
+		o
 	]);
-	return o.length === 0 ? /* @__PURE__ */ X(fh, { children: e ? "No matching projects" : "No projects yet" }) : o.map((e) => /* @__PURE__ */ X(Uu, {
+	return s.length === 0 ? /* @__PURE__ */ X(fh, { children: e ? "No matching projects" : "No projects yet" }) : s.map((e) => /* @__PURE__ */ X(Uu, {
 		entityId: e.project.project_id,
 		name: e.project.name,
 		active: e.project.project_id === t,
 		running: e.running > 0,
-		isMobile: !0,
-		actions: /* @__PURE__ */ X(ch, { project: e.project }),
+		isMobile: n,
+		actions: n ? /* @__PURE__ */ X(ch, { project: e.project }) : void 0,
 		onClick: () => {
-			n(), r(fn.project(e.project.project_id));
+			r(), i(fn.project(e.project.project_id));
 		}
 	}, e.project.project_id));
 }
@@ -9701,12 +9707,9 @@ function Sh({ projects: e, sessions: t, query: n, activeSessionId: r, activeProj
 				"aria-expanded": i,
 				onClick: () => S(n)
 			});
-			return /* @__PURE__ */ Z(ai, { children: [a && t > 0 ? /* @__PURE__ */ X(ed, {}) : null, /* @__PURE__ */ Z("section", {
-				className: a ? "flex flex-col" : "border-b border-muted py-4",
-				children: [a ? d : /* @__PURE__ */ X("div", {
-					className: "px-2 py-1",
-					children: d
-				}), /* @__PURE__ */ X(Lo, {
+			return /* @__PURE__ */ Z(ai, { children: [t > 0 ? /* @__PURE__ */ X(ed, {}) : null, /* @__PURE__ */ Z("section", {
+				className: I("flex flex-col", !a && "p-2"),
+				children: [d, /* @__PURE__ */ X(Lo, {
 					isOpen: i,
 					inert: !i,
 					"aria-hidden": !i,
@@ -9725,8 +9728,8 @@ function Sh({ projects: e, sessions: t, query: n, activeSessionId: r, activeProj
 					})
 				})]
 			})] }, n);
-		}), w.length > 0 ? /* @__PURE__ */ Z(Y, { children: [a && C.length > 0 ? /* @__PURE__ */ X(ed, {}) : null, /* @__PURE__ */ X("section", {
-			className: I("flex flex-col", a ? "gap-1" : "px-2 py-1"),
+		}), w.length > 0 ? /* @__PURE__ */ Z(Y, { children: [C.length > 0 ? /* @__PURE__ */ X(ed, {}) : null, /* @__PURE__ */ X("section", {
+			className: I("flex flex-col gap-1", !a && "p-2"),
 			children: w.map((e) => /* @__PURE__ */ X(Uu, {
 				entityId: e.summary.session_id,
 				name: l(e.summary),
@@ -9778,14 +9781,14 @@ function Th({ sessions: e, activeSessionId: t, revealed: n, onReveal: r, now: i,
 	});
 	let f = Ch(wh(d, n), d, t), p = f.reduce((e, t) => e + t.items.length, 0), m = Math.max(0, e.length - p);
 	return /* @__PURE__ */ Z("div", {
-		className: I("flex flex-col", a ? "gap-0.5 pt-1 pb-4" : "gap-1 px-2 pb-2"),
+		className: I("flex flex-col pt-1 pb-4", a ? "gap-0.5" : "gap-1"),
 		children: [f.map((e) => /* @__PURE__ */ Z("div", {
-			className: I("flex flex-col", a && "gap-2 pt-4"),
+			className: "flex flex-col gap-2 pt-4",
 			children: [/* @__PURE__ */ X("p", {
-				className: I("tag-label text-basic-tertiary uppercase px-2", a ? null : "pt-4 pb-4"),
+				className: "tag-label text-basic-muted uppercase px-2",
 				children: e.label
 			}), /* @__PURE__ */ X("div", {
-				className: I("flex flex-col", a ? "gap-1" : "gap-0.5"),
+				className: "flex flex-col gap-1",
 				children: e.items.map((e) => {
 					let n = s(e.summary), r = Ma(e.summary.behavior);
 					return /* @__PURE__ */ X(Wa, {
@@ -12167,20 +12170,20 @@ function xg() {
 	});
 }
 // src/app/components/LeftSidebar/LeftSidebarPanel.tsx
-function Sg({ isOpen: e, onToggle: t, toggleKeys: n, commands: r, variant: i }) {
-	let { useFilterQuery: a, setQuery: o } = V().stores.sessionFiltersStore, s = i === "projects", [c, l] = J(""), u = a(), { data: d = [] } = _(), { data: f } = _t(), { data: p } = kn(), m = p?.store_path ?? "", h = f?.projects ?? [];
+function Sg({ isOpen: e, onToggle: t, onSearch: n, toggleKeys: r, commands: i, variant: a }) {
+	let o = a === "projects", s = o ? "Search projects" : "Search chats", { data: c = [] } = _(), { data: l } = _t(), { data: u } = kn(), d = u?.store_path ?? "", f = l?.projects ?? [];
 	return /* @__PURE__ */ Z("div", {
 		className: "flex h-full flex-col bg-elevation-ground border-r border-tertiary",
 		style: { boxShadow: "var(--left-sidebar-open)" },
 		children: [
 			/* @__PURE__ */ Z("div", {
-				className: "flex items-center justify-between pl-3 pr-2 py-2 border-b border-muted shrink-0",
+				className: "flex items-center justify-between pl-4 pr-2 py-2 border-b border-muted shrink-0",
 				children: [/* @__PURE__ */ X(hu, {
 					height: 28,
 					className: "text-basic-primary"
 				}), /* @__PURE__ */ X(E, {
 					title: "Hide sidebar",
-					keyboardShortcuts: n,
+					keyboardShortcuts: r,
 					position: N.CenterLeft,
 					sticky: !0,
 					disabled: !e,
@@ -12194,151 +12197,143 @@ function Sg({ isOpen: e, onToggle: t, toggleKeys: n, commands: r, variant: i }) 
 				})]
 			}),
 			/* @__PURE__ */ Z("div", {
-				className: "flex flex-col gap-3 px-2 py-3 border-b border-muted shrink-0",
-				children: [/* @__PURE__ */ X("div", {
-					className: "px-1",
-					children: /* @__PURE__ */ X($, {
-						inputSize: Q.Medium,
-						leading: Ul.Icon,
-						leadingIconName: H.Search,
-						placeholder: s ? "Search Projects" : "Search Sessions",
-						value: s ? u : c,
-						"aria-label": s ? "Search projects" : "Search sessions",
-						onChange: (e) => s ? o(e.target.value) : l(e.target.value)
-					})
-				}), /* @__PURE__ */ Z("div", {
-					className: "flex flex-col gap-0.5",
-					children: [
-						s ? /* @__PURE__ */ Z(Wi, {
-							onClick: r.newProject,
+				className: "flex flex-col gap-0.5 p-2 border-b border-muted shrink-0",
+				children: [
+					/* @__PURE__ */ Z("div", {
+						className: "flex items-center gap-2",
+						children: [o ? /* @__PURE__ */ Z(Wi, {
+							className: "flex-1 !w-auto",
+							onClick: i.newProject,
 							children: [/* @__PURE__ */ X(R, { iconName: H.Add }), /* @__PURE__ */ X("span", {
-								className: "text-left flex-grow",
-								children: r.createLabel
+								className: "text-left flex-grow truncate",
+								children: i.createLabel
 							})]
-						}) : /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X(yh, {
-							projectId: r.projectId,
-							onUnavailable: r.newSession,
-							className: "w-full",
+						}) : /* @__PURE__ */ X(yh, {
+							projectId: i.projectId,
+							onUnavailable: i.newSession,
+							className: "flex-1 min-w-0",
 							children: (e) => /* @__PURE__ */ Z(Wi, {
 								onClick: e,
-								children: [
-									/* @__PURE__ */ X(R, { iconName: H.Add }),
-									/* @__PURE__ */ X("span", {
-										className: "text-left flex-grow",
-										children: "New Session"
-									}),
-									/* @__PURE__ */ X(R, { iconName: H.Right })
-								]
-							})
-						}), /* @__PURE__ */ Z("div", {
-							className: "flex items-center gap-2",
-							children: [/* @__PURE__ */ Z(Wi, {
-								className: "flex-1 !w-auto",
-								onClick: r.openProjects,
-								children: [/* @__PURE__ */ X(R, { iconName: H.Folders }), /* @__PURE__ */ X("span", {
+								children: [/* @__PURE__ */ X(R, { iconName: H.Add }), /* @__PURE__ */ X("span", {
 									className: "text-left flex-grow truncate",
-									children: "All projects"
+									children: "New Session"
 								})]
-							}), /* @__PURE__ */ X(E, {
-								title: "Create a new project",
-								position: N.CenterRight,
-								sticky: !0,
-								children: /* @__PURE__ */ X(z, {
-									variant: B.Ghost,
-									content: g.Icon,
-									"aria-label": "New project",
-									onClick: r.newProject,
-									children: /* @__PURE__ */ X(R, { iconName: H.AddCircle })
-								})
+							})
+						}), /* @__PURE__ */ X(E, {
+							title: s,
+							position: N.CenterRight,
+							sticky: !0,
+							children: /* @__PURE__ */ X(z, {
+								variant: B.Ghost,
+								content: g.Icon,
+								"aria-label": s,
+								onClick: n,
+								children: /* @__PURE__ */ X(R, { iconName: H.Search })
+							})
+						})]
+					}),
+					o ? null : /* @__PURE__ */ Z("div", {
+						className: "flex items-center gap-2",
+						children: [/* @__PURE__ */ Z(Wi, {
+							className: "flex-1 !w-auto",
+							onClick: i.openProjects,
+							children: [/* @__PURE__ */ X(R, { iconName: H.Folders }), /* @__PURE__ */ X("span", {
+								className: "text-left flex-grow truncate",
+								children: "All projects"
 							})]
-						})] }),
-						/* @__PURE__ */ Z(Wi, {
-							onClick: r.openMcp,
-							"aria-label": r.mcpLabel,
-							children: [
-								/* @__PURE__ */ X(R, { iconName: H.Toolbox }),
-								/* @__PURE__ */ X("span", {
-									className: "text-left flex-grow",
-									children: "MCP"
-								}),
-								r.activeMcp > 0 ? /* @__PURE__ */ X(aa, {
-									text: `${r.activeMcp} ACTIVE`,
-									color: ra.Blue
-								}) : null
-							]
-						}),
-						/* @__PURE__ */ Z(Wi, {
-							onClick: r.openSsh,
-							children: [
-								/* @__PURE__ */ X(R, { iconName: H.Globe }),
-								/* @__PURE__ */ X("span", {
-									className: "text-left flex-grow",
-									children: "SSH"
-								}),
-								r.sshCount > 0 ? /* @__PURE__ */ X("span", {
-									className: "label-small text-basic-secondary tabular-nums",
-									children: r.sshCount
-								}) : null
-							]
-						})
-					]
-				})]
+						}), /* @__PURE__ */ X(E, {
+							title: "Create a new project",
+							position: N.CenterRight,
+							sticky: !0,
+							children: /* @__PURE__ */ X(z, {
+								variant: B.Ghost,
+								content: g.Icon,
+								"aria-label": "New project",
+								onClick: i.newProject,
+								children: /* @__PURE__ */ X(R, { iconName: H.AddCircle })
+							})
+						})]
+					}),
+					/* @__PURE__ */ Z(Wi, {
+						onClick: i.openMcp,
+						"aria-label": i.mcpLabel,
+						children: [
+							/* @__PURE__ */ X(R, { iconName: H.Toolbox }),
+							/* @__PURE__ */ X("span", {
+								className: "text-left flex-grow",
+								children: "MCP"
+							}),
+							i.activeMcp > 0 ? /* @__PURE__ */ X(aa, {
+								text: `${i.activeMcp} ACTIVE`,
+								color: ra.Blue,
+								background: !1
+							}) : null
+						]
+					}),
+					/* @__PURE__ */ Z(Wi, {
+						onClick: i.openSsh,
+						children: [
+							/* @__PURE__ */ X(R, { iconName: H.Globe }),
+							/* @__PURE__ */ X("span", {
+								className: "text-left flex-grow",
+								children: "SSH"
+							}),
+							i.sshCount > 0 ? /* @__PURE__ */ X(aa, {
+								text: String(i.sshCount),
+								color: ra.Gray,
+								background: !1
+							}) : null
+						]
+					}),
+					/* @__PURE__ */ Z(Wi, {
+						onClick: i.openConfigurations,
+						children: [/* @__PURE__ */ X(R, { iconName: H.Gear }), /* @__PURE__ */ X("span", {
+							className: "text-left flex-grow",
+							children: "Configurations"
+						})]
+					}),
+					/* @__PURE__ */ Z(Wi, {
+						onClick: i.openManaged,
+						children: [/* @__PURE__ */ X(R, { iconName: H.Controls }), /* @__PURE__ */ X("span", {
+							className: "text-left flex-grow",
+							children: "Managed host"
+						})]
+					})
+				]
 			}),
-			s ? /* @__PURE__ */ X("div", {
-				className: "flex-1 min-h-0 overflow-y-auto p-4 [&>*]:shrink-0",
-				children: /* @__PURE__ */ X(nh, { sessions: d })
+			o ? /* @__PURE__ */ X("div", {
+				className: "flex-1 min-h-0 overflow-y-auto py-2 [&>*]:shrink-0",
+				children: /* @__PURE__ */ X(nh, { sessions: c })
 			}) : /* @__PURE__ */ X("div", {
 				className: "flex-1 min-h-0 overflow-y-auto",
 				children: /* @__PURE__ */ X(Sh, {
-					projects: h,
-					sessions: d,
-					query: c,
-					activeSessionId: r.sessionId,
-					activeProjectId: r.projectId
+					projects: f,
+					sessions: c,
+					query: "",
+					activeSessionId: i.sessionId,
+					activeProjectId: i.projectId
 				})
 			}),
 			/* @__PURE__ */ Z("div", {
-				className: "shrink-0 border-t border-muted",
+				className: "flex items-center gap-2 px-4 py-2 border-t border-muted shrink-0",
 				children: [
-					/* @__PURE__ */ Z("div", {
-						className: "px-2 py-1",
-						children: [/* @__PURE__ */ Z(Wi, {
-							onClick: r.openConfigurations,
-							children: [/* @__PURE__ */ X(R, { iconName: H.Gear }), /* @__PURE__ */ X("span", {
-								className: "text-left flex-grow",
-								children: "Configurations"
-							})]
-						}), /* @__PURE__ */ Z(Wi, {
-							onClick: r.openManaged,
-							children: [/* @__PURE__ */ X(R, { iconName: H.Controls }), /* @__PURE__ */ X("span", {
-								className: "text-left flex-grow",
-								children: "Managed host"
-							})]
-						})]
+					/* @__PURE__ */ X("span", {
+						className: "label-micro text-basic-muted shrink-0",
+						children: "Store:"
 					}),
-					/* @__PURE__ */ X(ed, {}),
-					/* @__PURE__ */ Z("div", {
-						className: "flex items-center gap-2 h-10 pl-4 pr-2",
-						children: [
-							/* @__PURE__ */ X("span", {
-								className: "label-micro text-basic-primary shrink-0",
-								children: "Store:"
-							}),
-							/* @__PURE__ */ X("span", {
-								className: "code code-micro text-basic-tertiary flex-1 min-w-0 truncate",
-								title: m,
-								children: m || "store path pending"
-							}),
-							/* @__PURE__ */ X(Yt, {
-								value: m,
-								size: U.Small,
-								variant: B.Tertiary,
-								title: "Copy the store path",
-								disabled: !m,
-								position: N.TopLeft,
-								className: "scale-90"
-							})
-						]
+					/* @__PURE__ */ X("span", {
+						className: "code code-small font-medium text-basic-muted flex-1 min-w-0 truncate",
+						title: d,
+						children: d || "store path pending"
+					}),
+					/* @__PURE__ */ X(Yt, {
+						value: d,
+						size: U.Small,
+						variant: B.Ghost,
+						title: "Copy the store path",
+						disabled: !d,
+						position: N.TopLeft,
+						className: "opacity-50"
 					})
 				]
 			})
@@ -12346,70 +12341,71 @@ function Sg({ isOpen: e, onToggle: t, toggleKeys: n, commands: r, variant: i }) 
 	});
 }
 // src/app/components/LeftSidebar/LeftSidebarRail.tsx
-function Cg({ commands: e, onToggle: t, toggleKeys: n, variant: r }) {
-	let i = r === "projects";
+function Cg({ commands: e, onToggle: t, onSearch: n, toggleKeys: r, variant: i }) {
+	let a = i === "projects";
 	return /* @__PURE__ */ Z("div", {
-		className: "flex h-full flex-col justify-between border-r border-tertiary py-2 pr-[7px] pl-2",
-		children: [/* @__PURE__ */ Z("div", {
-			className: "flex flex-col items-center gap-4 [&>*]:shrink-0",
-			children: [
-				/* @__PURE__ */ X("button", {
-					type: "button",
-					className: "text-basic-primary",
-					"aria-label": "All projects",
-					onClick: e.openProjects,
-					children: /* @__PURE__ */ X(hu, {
-						markOnly: !0,
-						height: 25
-					})
-				}),
-				/* @__PURE__ */ X(wg, {
-					label: "Show sidebar",
-					keys: n,
-					onClick: t,
-					children: /* @__PURE__ */ X(R, { iconName: H.LeftSidebar })
-				}),
-				i ? null : /* @__PURE__ */ X(wg, {
-					label: "All projects",
-					onClick: e.openProjects,
-					children: /* @__PURE__ */ X(R, { iconName: H.Folders })
-				}),
-				i ? /* @__PURE__ */ X(wg, {
-					label: e.createLabel,
-					onClick: e.newProject,
-					children: /* @__PURE__ */ X(R, { iconName: H.Add })
-				}) : /* @__PURE__ */ X(yh, {
-					projectId: e.projectId,
-					onUnavailable: e.newSession,
-					children: (e) => /* @__PURE__ */ X(wg, {
-						label: "New session",
-						onClick: e,
-						children: /* @__PURE__ */ X(R, { iconName: H.Add })
-					})
-				}),
-				/* @__PURE__ */ X(wg, {
-					label: e.mcpLabel,
-					onClick: e.openMcp,
-					children: /* @__PURE__ */ X(R, { iconName: H.Toolbox })
-				}),
-				/* @__PURE__ */ X(wg, {
-					label: "SSH",
-					onClick: e.openSsh,
-					children: /* @__PURE__ */ X(R, { iconName: H.Globe })
+		className: "flex h-full flex-col items-center gap-4 border-r border-tertiary py-2 pr-[7px] pl-2 [&>*]:shrink-0",
+		children: [
+			/* @__PURE__ */ X("button", {
+				type: "button",
+				className: "text-basic-primary",
+				"aria-label": "All projects",
+				onClick: e.openProjects,
+				children: /* @__PURE__ */ X(hu, {
+					markOnly: !0,
+					height: 25
 				})
-			]
-		}), /* @__PURE__ */ Z("div", {
-			className: "flex flex-col items-center gap-1 [&>*]:shrink-0",
-			children: [/* @__PURE__ */ X(wg, {
-				label: "Configurations",
-				onClick: e.openConfigurations,
-				children: /* @__PURE__ */ X(R, { iconName: H.Gear })
-			}), /* @__PURE__ */ X(wg, {
+			}),
+			/* @__PURE__ */ X(wg, {
+				label: "Show sidebar",
+				keys: r,
+				onClick: t,
+				children: /* @__PURE__ */ X(R, { iconName: H.LeftSidebar })
+			}),
+			a ? /* @__PURE__ */ X(wg, {
+				label: e.createLabel,
+				onClick: e.newProject,
+				children: /* @__PURE__ */ X(R, { iconName: H.Add })
+			}) : /* @__PURE__ */ X(yh, {
+				projectId: e.projectId,
+				onUnavailable: e.newSession,
+				children: (e) => /* @__PURE__ */ X(wg, {
+					label: "New session",
+					onClick: e,
+					children: /* @__PURE__ */ X(R, { iconName: H.Add })
+				})
+			}),
+			/* @__PURE__ */ X(wg, {
+				label: a ? "Search projects" : "Search chats",
+				onClick: n,
+				children: /* @__PURE__ */ X(R, { iconName: H.Search })
+			}),
+			a ? null : /* @__PURE__ */ X(wg, {
+				label: "All projects",
+				onClick: e.openProjects,
+				children: /* @__PURE__ */ X(R, { iconName: H.Folders })
+			}),
+			/* @__PURE__ */ X(wg, {
+				label: e.mcpLabel,
+				onClick: e.openMcp,
+				children: /* @__PURE__ */ X(R, { iconName: H.Toolbox })
+			}),
+			/* @__PURE__ */ X(wg, {
+				label: "SSH",
+				onClick: e.openSsh,
+				children: /* @__PURE__ */ X(R, { iconName: H.Globe })
+			}),
+			/* @__PURE__ */ X(wg, {
 				label: "Managed host",
 				onClick: e.openManaged,
 				children: /* @__PURE__ */ X(R, { iconName: H.Controls })
-			})]
-		})]
+			}),
+			/* @__PURE__ */ X(wg, {
+				label: "Configurations",
+				onClick: e.openConfigurations,
+				children: /* @__PURE__ */ X(R, { iconName: H.Gear })
+			})
+		]
 	});
 }
 function wg({ label: e, keys: t, onClick: n, children: r }) {
@@ -12438,7 +12434,7 @@ function Eg({ variant: e = "session" }) {
 		a,
 		n,
 		r
-	]), u = pg();
+	]), u = pg(), [d, f] = J(!1);
 	return pi(() => {
 		t(i ? 0 : c ? 280 : 52);
 	}, [
@@ -12458,6 +12454,7 @@ function Eg({ variant: e = "session" }) {
 				children: /* @__PURE__ */ X(Cg, {
 					commands: u,
 					onToggle: l,
+					onSearch: () => f(!0),
 					toggleKeys: Tg,
 					variant: e
 				})
@@ -12470,11 +12467,19 @@ function Eg({ variant: e = "session" }) {
 					isOpen: c,
 					commands: u,
 					onToggle: l,
+					onSearch: () => f(!0),
 					toggleKeys: Tg,
 					variant: e
 				})
 			}),
-			u.modals
+			u.modals,
+			/* @__PURE__ */ X(lh, {
+				open: d,
+				onClose: () => f(!1),
+				kind: e === "projects" ? "projects" : "chats",
+				activeSessionId: u.sessionId,
+				activeProjectId: u.projectId
+			})
 		]
 	});
 }
@@ -15277,7 +15282,7 @@ function Bv({ title: e, icon: t, onClick: n, variant: r = B.Ghost, disabled: i =
 }
 function Vv({ orphan: e, pinned: t, onDelete: n, onTogglePin: r, onRename: i, onAssign: a, reorder: o }) {
 	return /* @__PURE__ */ Z("div", {
-		className: o ? "flex items-center gap-1.5 shrink-0" : "flex items-center gap-4 xl:gap-1.5 shrink-0",
+		className: I("flex items-center shrink-0", e ? "gap-2" : "gap-1.5"),
 		children: [o ? /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X(Bv, {
 			title: "Move down",
 			icon: H.ArrowDown,
@@ -15294,17 +15299,22 @@ function Vv({ orphan: e, pinned: t, onDelete: n, onTogglePin: r, onRename: i, on
 				icon: H.Edit,
 				onClick: i
 			}) : null,
-			a ? /* @__PURE__ */ X(Bv, {
-				title: "Assign to project",
-				icon: H.FolderOpen,
-				onClick: a
-			}) : null,
 			/* @__PURE__ */ X(Bv, {
 				title: "Delete chat",
 				icon: H.Trash,
 				variant: B.GhostDestructive,
 				onClick: n
-			})
+			}),
+			a ? /* @__PURE__ */ Z(z, {
+				variant: B.Primary,
+				size: U.Small,
+				content: g.IconLeft,
+				className: "!pr-2",
+				onClick: (e) => {
+					e.stopPropagation(), a();
+				},
+				children: [/* @__PURE__ */ X(R, { iconName: H.FolderOpen }), "Assign to project"]
+			}) : null
 		] }) : /* @__PURE__ */ Z(Y, { children: [
 			r ? /* @__PURE__ */ X(Bv, {
 				title: t ? "Unpin project" : "Pin project",
@@ -15421,7 +15431,7 @@ function qv({ getCardElement: e, onReorderStart: t }) {
 	});
 }
 function Jv({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogglePin: a, onRename: o, onAssign: s, reorder: c, dragging: l = !1 }) {
-	let u = Wv(e, wd()), d = u.representative?.model_config_error, f = P(), p = A(), [m, h] = J(!1), [g, _] = J(!1), [v, y] = J(!1), b = q(!1), x = q(null), S = !p || m || g || t, C = !!c && p, w = !!c && !p, T = p && m, D = () => {
+	let u = Wv(e, wd()), d = u.representative?.model_config_error, f = A(), p = ah(), [m, h] = J(!1), [g, _] = J(!1), [v, y] = J(!1), b = q(!1), x = q(null), S = !f || m || g || t, C = !!c && f, w = !!c && !f, T = f && m, D = () => {
 		b.current ? b.current = !1 : r();
 	};
 	return /* @__PURE__ */ Z("div", {
@@ -15429,7 +15439,7 @@ function Jv({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 		"data-item-id": u.id,
 		"data-item-kind": u.orphan ? "orphan" : "project",
 		"data-item-pinned": u.pinned ? "true" : "false",
-		className: I("group fade relative flex flex-col rounded-[8px] overflow-hidden cursor-default", f ? "gap-4 px-4 pt-4 pb-2" : "gap-4 px-6 pt-5 pb-3", "shadow-convex bg-elevation-level-1", l && "shadow-lg"),
+		className: I("group fade relative flex flex-col gap-4 rounded-[16px] overflow-hidden cursor-default", f ? "px-6 pt-5 pb-3" : "p-4", "shadow-convex bg-elevation-level-1", l && "shadow-lg"),
 		role: "button",
 		tabIndex: 0,
 		"aria-pressed": t,
@@ -15438,7 +15448,7 @@ function Jv({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 			e.target === e.currentTarget && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), D());
 		},
 		onMouseEnter: () => {
-			p && h(!0);
+			f && h(!0);
 		},
 		onMouseLeave: () => {
 			h(!1), y(!1);
@@ -15452,7 +15462,7 @@ function Jv({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 		onPointerCancel: () => y(!1),
 		children: [
 			/* @__PURE__ */ X("div", {
-				className: "absolute inset-0 rounded-[8px] pointer-events-none ease-out",
+				className: "absolute inset-0 rounded-[inherit] pointer-events-none ease-out",
 				style: { backgroundColor: `var(${Uv({
 					highlighted: u.running,
 					hover: T,
@@ -15460,7 +15470,7 @@ function Jv({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 				})})` }
 			}),
 			t || g || l ? /* @__PURE__ */ X("div", {
-				className: "absolute inset-0 rounded-[8px] pointer-events-none border-2",
+				className: "absolute inset-0 rounded-[inherit] pointer-events-none border-2",
 				style: { borderColor: "var(--blue-500)" }
 			}) : null,
 			n ? /* @__PURE__ */ X(E, {
@@ -15468,7 +15478,7 @@ function Jv({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 				position: N.BottomLeft,
 				sticky: !0,
 				className: "absolute left-2 top-2 z-1",
-				children: /* @__PURE__ */ X("span", { className: "block size-2 rounded-full bg-accent-primary" })
+				children: /* @__PURE__ */ X("span", { className: "block size-2 rounded-full bg-brand-450" })
 			}) : null,
 			C && c ? /* @__PURE__ */ X(qv, {
 				getCardElement: () => x.current,
@@ -15479,22 +15489,28 @@ function Jv({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 				}
 			}) : null,
 			/* @__PURE__ */ Z("div", {
-				className: "relative flex items-center gap-4 w-full",
-				children: [u.orphan ? /* @__PURE__ */ X(Qa, { isRunning: u.running }) : /* @__PURE__ */ X(Vu, {
+				className: I("relative flex gap-4 w-full", f ? "items-center" : "items-start"),
+				children: [u.orphan ? null : /* @__PURE__ */ X(Vu, {
 					id: u.id,
 					size: 40,
 					isRunning: u.running
 				}), /* @__PURE__ */ Z("div", {
-					className: "flex flex-col gap-0.5 flex-1 min-w-0",
+					className: I("flex flex-col flex-1 min-w-0", u.orphan ? "gap-2" : u.pinned ? "gap-1" : "gap-0.5"),
 					children: [/* @__PURE__ */ Z("div", {
-						className: "flex items-center gap-1.5 w-full",
+						className: I("flex items-center w-full", u.orphan ? "gap-2" : "gap-1.5"),
 						children: [
+							u.orphan ? u.running ? /* @__PURE__ */ X(Aa, { size: fa.Large }) : p ? /* @__PURE__ */ X(Ha, {
+								behavior: u.representative?.behavior,
+								size: Ba.Large,
+								className: "text-fill-btn-secondary"
+							}) : null : null,
 							u.pinned ? /* @__PURE__ */ X(R, {
 								iconName: H.Pin,
-								className: "text-basic-secondary shrink-0"
+								size: 16,
+								className: "shrink-0 text-fill-basic-primary"
 							}) : null,
 							/* @__PURE__ */ X("div", {
-								className: I("header-md flex-1 min-w-0 truncate", u.running ? "text-shimmer-basic" : "text-basic-primary"),
+								className: I("header-md flex-1 min-w-0 truncate", u.running ? "text-shimmer-primary" : "text-basic-primary"),
 								children: u.title
 							}),
 							d ? /* @__PURE__ */ X(E, {
@@ -15506,14 +15522,14 @@ function Jv({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 									className: "text-error-primary shrink-0"
 								})
 							}) : null,
-							u.running ? u.orphan ? /* @__PURE__ */ X(ut, {
-								size: bt.XSmall,
-								className: "shrink-0"
-							}) : /* @__PURE__ */ Z("div", {
+							u.running && !u.orphan ? /* @__PURE__ */ Z("div", {
 								className: "flex items-center gap-1 shrink-0",
-								children: [/* @__PURE__ */ X(ut, { size: bt.XSmall }), /* @__PURE__ */ Z("span", {
+								children: [/* @__PURE__ */ X(Aa, { size: fa.Small }), /* @__PURE__ */ Z("span", {
 									className: "text-micro text-basic-primary whitespace-nowrap",
-									children: [u.runningCount, " Running"]
+									children: [u.runningCount, /* @__PURE__ */ X("span", {
+										className: "sr-only",
+										children: " running"
+									})]
 								})]
 							}) : null
 						]
@@ -15523,7 +15539,7 @@ function Jv({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 					})]
 				})]
 			}),
-			p ? null : /* @__PURE__ */ X(Kv, { facts: u }),
+			f ? null : /* @__PURE__ */ X(Kv, { facts: u }),
 			/* @__PURE__ */ Z("div", {
 				className: "relative flex items-center justify-between w-full h-6 gap-2",
 				children: [/* @__PURE__ */ X(Gv, { facts: u }), S ? /* @__PURE__ */ X(Vv, {
@@ -15636,7 +15652,7 @@ function Zv({ children: e, single: t }) {
 function Qv() {
 	return /* @__PURE__ */ X("div", {
 		"aria-hidden": !0,
-		className: "min-h-[112px] rounded-[8px] border-2",
+		className: "min-h-[112px] rounded-[16px] border-2",
 		style: { borderColor: "var(--blue-500)" }
 	});
 }
@@ -15702,122 +15718,116 @@ function ry(e, t) {
 	return e.filter((e) => e.pinned === t).sort((e, t) => e.sort_order - t.sort_order);
 }
 function iy() {
-	let { useVisibleProjectItems: e, useIsDefaultSort: t, useFilterQuery: n, setQuery: r } = V().stores.sessionFiltersStore, { trackAttention: i, clearAttentionAll: a } = V().stores.attentionStore, o = ji(), s = P(), c = km(), l = ih(), u = nr(), d = n(), f = t(), p = st(), m = tn(), [h, _] = J(null), [v, y] = J(null), [b, x] = J(!1), S = q(null), C = q(null), w = q(!1), { data: T, isLoading: E, error: D, refetch: O } = En(), k = _t(), ee = Tt(), A = K(() => cn(ee, T ?? []), [T, ee]), te = K(() => k.data?.projects ?? [], [k.data]), j = K(() => Nd(te, A), [te, A]), ne = e(j);
+	let { useVisibleProjectItems: e, useIsDefaultSort: t } = V().stores.sessionFiltersStore, { trackAttention: n, clearAttentionAll: r } = V().stores.attentionStore, i = ji(), a = P(), o = km(), s = ih(), c = nr(), l = t(), u = st(), d = tn(), [f, p] = J(null), [m, h] = J(null), [_, v] = J(!1), y = q(null), b = q(null), x = q(!1), { data: S, isLoading: C, error: w, refetch: T } = En(), E = _t(), D = Tt(), O = K(() => cn(D, S ?? []), [S, D]), k = K(() => E.data?.projects ?? [], [E.data]), ee = K(() => Nd(k, O), [k, O]), A = e(ee);
 	G(() => {
-		T && i(T, null);
-	}, [T, i]), G(() => {
-		s && d && r("");
-	}, [
-		s,
-		d,
-		r
-	]);
-	let re = (e) => {
+		S && n(S, null);
+	}, [S, n]);
+	let te = (e) => {
 		let t = Md(e);
-		a($v(e)), o(e.kind === "project" ? fn.project(t) : fn.session(t));
-	}, M = ne.filter(ey), ie = ne.filter((e) => e.kind === "project" && !ey(e)), ae = ne.filter((e) => e.kind === "orphan"), oe = K(() => ry(te, !0), [te]), se = K(() => ry(te, !1), [te]), N = K(() => jd(A), [A]), ce = K(() => In(A, !1), [A]), le = W(() => {
-		S.current = null, C.current = null, w.current = !1, _(null), y(null), x(!1);
-	}, []), ue = W(async (e, t, n) => {
-		let r = ry(te, t).findIndex((t) => t.project_id === e), i = te.find((t) => t.project_id === e);
-		if (i && i.pinned === t && r === n) le();
+		r($v(e)), i(e.kind === "project" ? fn.project(t) : fn.session(t));
+	}, j = A.filter(ey), ne = A.filter((e) => e.kind === "project" && !ey(e)), re = A.filter((e) => e.kind === "orphan"), M = K(() => ry(k, !0), [k]), ie = K(() => ry(k, !1), [k]), ae = K(() => jd(O), [O]), oe = K(() => In(O, !1), [O]), se = W(() => {
+		y.current = null, b.current = null, x.current = !1, p(null), h(null), v(!1);
+	}, []), N = W(async (e, t, n) => {
+		let r = ry(k, t).findIndex((t) => t.project_id === e), i = k.find((t) => t.project_id === e);
+		if (i && i.pinned === t && r === n) se();
 		else try {
-			await p.mutateAsync({
-				projects: te,
+			await u.mutateAsync({
+				projects: k,
 				projectId: e,
 				targetPinned: t,
 				targetIndex: n
 			});
 		} catch (e) {
-			u.error(`Failed to reorder projects: ${Vt(Kd(e))}`);
+			c.error(`Failed to reorder projects: ${Vt(Kd(e))}`);
 		} finally {
-			le();
+			se();
 		}
 	}, [
-		te,
-		le,
-		p,
-		u
-	]), de = W(async (e, t) => {
+		k,
+		se,
+		u,
+		c
+	]), ce = W(async (e, t) => {
 		try {
-			await m.mutateAsync({
-				sessions: A,
+			await d.mutateAsync({
+				sessions: O,
 				sessionId: e,
 				targetPinned: !1,
 				targetIndex: t
 			});
 		} catch (e) {
-			u.error(`Failed to reorder chats: ${Vt(Kd(e))}`);
+			c.error(`Failed to reorder chats: ${Vt(Kd(e))}`);
 		} finally {
-			le();
+			se();
 		}
 	}, [
-		A,
-		le,
-		m,
-		u
-	]), fe = W(async (e, t) => {
-		let n = A.find((t) => t.summary.session_id === e), r = te.find((e) => e.project_id === t);
-		if (!n || !r) le();
-		else if (Ld(te, n.summary)?.project_id !== r.project_id) u.error("That chat does not run in this project's location"), le();
+		O,
+		se,
+		d,
+		c
+	]), le = W(async (e, t) => {
+		let n = O.find((t) => t.summary.session_id === e), r = k.find((e) => e.project_id === t);
+		if (!n || !r) se();
+		else if (Ld(k, n.summary)?.project_id !== r.project_id) c.error("That chat does not run in this project's location"), se();
 		else try {
-			c.assign(n.summary);
+			o.assign(n.summary);
 		} finally {
-			le();
+			se();
 		}
 	}, [
-		A,
-		le,
-		c,
-		te,
-		u
-	]), pe = W((e, t) => {
-		let n = e.pinned ? oe : se, r = n.findIndex((t) => t.project_id === e.project_id);
+		O,
+		se,
+		o,
+		k,
+		c
+	]), ue = W((e, t) => {
+		let n = e.pinned ? M : ie, r = n.findIndex((t) => t.project_id === e.project_id);
 		if (r < 0) return;
 		let i = r + t;
-		i < 0 || i >= n.length || ue(e.project_id, e.pinned, i);
+		i < 0 || i >= n.length || N(e.project_id, e.pinned, i);
 	}, [
-		oe,
-		se,
-		ue
-	]), me = W((e, t) => {
-		let n = N.findIndex((t) => t.summary.session_id === e), r = n < 0 ? void 0 : N[n + t];
+		M,
+		ie,
+		N
+	]), de = W((e, t) => {
+		let n = ae.findIndex((t) => t.summary.session_id === e), r = n < 0 ? void 0 : ae[n + t];
 		if (!r) return;
-		let i = Oe(ce, r.summary.session_id, t === -1 ? "before" : "after", e);
-		de(e, i);
+		let i = Oe(oe, r.summary.session_id, t === -1 ? "before" : "after", e);
+		ce(e, i);
 	}, [
-		N,
-		ce,
-		de
-	]), F = W((e, t, n) => {
+		ae,
+		oe,
+		ce
+	]), fe = W((e, t, n) => {
 		if (t === "orphan") {
-			let t = te.find((e) => e.project_id === n.itemId);
+			let t = k.find((e) => e.project_id === n.itemId);
 			if (t) {
-				fe(e, t.project_id);
+				le(e, t.project_id);
 				return;
 			}
 			if (n.itemId === e) {
-				le();
+				se();
 				return;
 			}
-			let r = Oe(ce, n.itemId, n.edge, e);
-			de(e, r);
+			let r = Oe(oe, n.itemId, n.edge, e);
+			ce(e, r);
 			return;
 		}
-		let r = te.find((e) => e.project_id === n.itemId);
+		let r = k.find((e) => e.project_id === n.itemId);
 		if (!r || n.itemId === e) {
-			le();
+			se();
 			return;
 		}
-		let i = ry(te, r.pinned).map((e) => e.project_id).filter((t) => t !== e).indexOf(n.itemId);
-		i < 0 ? le() : ue(e, r.pinned, n.edge === "before" ? i : i + 1);
+		let i = ry(k, r.pinned).map((e) => e.project_id).filter((t) => t !== e).indexOf(n.itemId);
+		i < 0 ? se() : N(e, r.pinned, n.edge === "before" ? i : i + 1);
 	}, [
-		fe,
 		le,
+		se,
+		oe,
 		ce,
-		de,
-		ue,
-		te
-	]), he = W((e) => {
+		N,
+		k
+	]), pe = W((e) => {
 		if (!e.itemId) return;
 		let t = {
 			itemId: e.itemId,
@@ -15829,133 +15839,133 @@ function iy() {
 			x: e.clientX - e.offsetX,
 			y: e.clientY - e.offsetY
 		};
-		S.current = t, _(t);
+		y.current = t, p(t);
 	}, []);
 	G(() => {
-		if (!h) return;
+		if (!f) return;
 		let e = (e) => {
-			let t = S.current;
+			let t = y.current;
 			if (!t) return;
 			let n = {
 				...t,
 				x: e.clientX - t.offsetX,
 				y: e.clientY - t.offsetY
 			};
-			S.current = n, _(n);
+			y.current = n, p(n);
 			let r = ny(e.clientX, e.clientY, t.itemId, t.kind);
-			r === "pin-zone" ? (w.current = !0, C.current = null, x(!0), y(null)) : (w.current = !1, x(!1), r && (C.current = r, y((e) => e?.itemId === r.itemId && e.edge === r.edge ? e : r)));
+			r === "pin-zone" ? (x.current = !0, b.current = null, v(!0), h(null)) : (x.current = !1, v(!1), r && (b.current = r, h((e) => e?.itemId === r.itemId && e.edge === r.edge ? e : r)));
 		}, t = () => {
-			let e = S.current;
+			let e = y.current;
 			if (!e) {
-				le();
+				se();
 				return;
 			}
-			if (w.current && e.kind === "project") {
-				ue(e.itemId, !0, 0);
+			if (x.current && e.kind === "project") {
+				N(e.itemId, !0, 0);
 				return;
 			}
-			let t = C.current;
-			t ? F(e.itemId, e.kind, t) : le();
+			let t = b.current;
+			t ? fe(e.itemId, e.kind, t) : se();
 		};
 		return window.addEventListener("pointermove", e), window.addEventListener("pointerup", t), window.addEventListener("pointercancel", t), () => {
 			window.removeEventListener("pointermove", e), window.removeEventListener("pointerup", t), window.removeEventListener("pointercancel", t);
 		};
 	}, [
-		F,
-		le,
-		h,
-		ue
+		fe,
+		se,
+		f,
+		N
 	]);
-	let ge = (e) => {
-		let t = Md(e), n = e.kind === "project" ? e.entry.project : null, r = n ? n.pinned ? oe : se : [], i = n ? r.findIndex((e) => e.project_id === n.project_id) : -1, a = e.kind === "orphan" ? N.findIndex((e) => e.summary.session_id === t) : -1, o = n ? i : a, s = n ? r.length : N.length, c = h?.itemId === t, l = !c && v?.itemId === t ? v.edge : null;
+	let me = (e) => {
+		let t = Md(e), n = e.kind === "project" ? e.entry.project : null, r = n ? n.pinned ? M : ie : [], i = n ? r.findIndex((e) => e.project_id === n.project_id) : -1, a = e.kind === "orphan" ? ae.findIndex((e) => e.summary.session_id === t) : -1, o = n ? i : a, s = n ? r.length : ae.length, c = f?.itemId === t, u = !c && m?.itemId === t ? m.edge : null;
 		return /* @__PURE__ */ Z(ai, { children: [
-			l === "before" ? /* @__PURE__ */ X(Qv, {}) : null,
+			u === "before" ? /* @__PURE__ */ X(Qv, {}) : null,
 			/* @__PURE__ */ X("div", {
 				"data-item-id": t,
 				"data-item-kind": e.kind,
 				"data-dragging": c ? "true" : void 0,
 				className: "relative",
-				style: c && h ? {
+				style: c && f ? {
 					position: "fixed",
-					left: h.x,
-					top: h.y,
-					width: h.width,
+					left: f.x,
+					top: f.y,
+					width: f.width,
 					zIndex: 50,
 					pointerEvents: "none",
 					margin: 0
 				} : void 0,
 				children: /* @__PURE__ */ X(ty, {
 					item: e,
-					onOpen: re,
-					reorderable: f,
+					onOpen: te,
+					reorderable: l,
 					dragging: c,
 					canMoveUp: o > 0,
 					canMoveDown: o >= 0 && o < s - 1,
 					onMoveUp: () => {
-						n ? pe(n, -1) : e.kind === "orphan" && me(t, -1);
+						n ? ue(n, -1) : e.kind === "orphan" && de(t, -1);
 					},
 					onMoveDown: () => {
-						n ? pe(n, 1) : e.kind === "orphan" && me(t, 1);
+						n ? ue(n, 1) : e.kind === "orphan" && de(t, 1);
 					},
-					onReorderStart: he
+					onReorderStart: pe
 				})
 			}),
-			l === "after" ? /* @__PURE__ */ X(Qv, {}) : null
+			u === "after" ? /* @__PURE__ */ X(Qv, {}) : null
 		] }, t);
 	};
-	if (!E && !D && j.length === 0) return /* @__PURE__ */ Z("div", {
+	if (!C && !w && ee.length === 0) return /* @__PURE__ */ Z("div", {
 		className: "flex h-full min-h-0",
-		children: [s ? null : /* @__PURE__ */ X(Eg, { variant: "projects" }), /* @__PURE__ */ X("div", {
+		children: [a ? null : /* @__PURE__ */ X(Eg, { variant: "projects" }), /* @__PURE__ */ X("div", {
 			className: "min-h-0 min-w-0 flex-1",
 			children: /* @__PURE__ */ X(Yv, {
-				mobile: s,
-				onStart: c.create,
-				onAddRepository: l.isManaged ? l.addRepository : void 0,
-				onManagedSettings: l.isManaged ? l.openSettings : void 0,
-				modelReady: l.status?.model_ready,
-				githubConnected: l.status?.github_status === "connected"
+				mobile: a,
+				onStart: o.create,
+				onAddRepository: s.isManaged ? s.addRepository : void 0,
+				onManagedSettings: s.isManaged ? s.openSettings : void 0,
+				modelReady: s.status?.model_ready,
+				githubConnected: s.status?.github_status === "connected"
 			})
 		})]
 	});
-	let _e = f && h != null && h.kind === "project" && M.length === 0 && !te.find((e) => e.project_id === h.itemId)?.pinned;
+	let F = l && f != null && f.kind === "project" && j.length === 0 && !k.find((e) => e.project_id === f.itemId)?.pinned;
 	return /* @__PURE__ */ Z("div", {
 		className: "flex h-full min-h-0",
-		children: [s ? null : /* @__PURE__ */ X(Eg, { variant: "projects" }), /* @__PURE__ */ X("div", {
-			className: I("flex-1 min-h-0 overflow-auto", s ? "px-2" : "px-8", h && "select-none cursor-grabbing"),
+		children: [a ? null : /* @__PURE__ */ X(Eg, { variant: "projects" }), /* @__PURE__ */ X("div", {
+			className: I("flex-1 min-h-0 overflow-auto", a ? "px-2" : "px-8", f && "select-none cursor-grabbing"),
 			children: /* @__PURE__ */ Z("div", {
-				className: I("flex flex-col gap-6 [&>*]:shrink-0", s ? "pt-18 pb-8" : "py-4"),
+				className: I("flex flex-col gap-6 [&>*]:shrink-0", a ? "pt-18 pb-8" : "py-4"),
 				children: [
-					D ? /* @__PURE__ */ Z("div", {
+					w ? /* @__PURE__ */ Z("div", {
 						className: "flex items-center gap-2 label-small text-error-primary",
-						children: [/* @__PURE__ */ X("span", { children: Vt(D) }), /* @__PURE__ */ X(z, {
+						children: [/* @__PURE__ */ X("span", { children: Vt(w) }), /* @__PURE__ */ X(z, {
 							variant: B.Ghost,
 							size: U.Small,
 							content: g.Text,
 							onClick: () => {
-								O();
+								T();
 							},
 							children: "Try again"
 						})]
 					}) : null,
-					!E && !D && ne.length === 0 ? /* @__PURE__ */ X("div", {
+					!C && !w && A.length === 0 ? /* @__PURE__ */ X("div", {
 						className: "label-small text-basic-muted text-center py-16",
 						children: "No projects match the current filters."
 					}) : null,
-					M.length > 0 || _e ? /* @__PURE__ */ Z(Zv, {
-						single: s,
-						children: [M.map(ge), _e ? /* @__PURE__ */ X("div", {
+					j.length > 0 || F ? /* @__PURE__ */ Z(Zv, {
+						single: a,
+						children: [j.map(me), F ? /* @__PURE__ */ X("div", {
 							"data-pin-drop-zone": "true",
-							className: I("min-h-[112px] rounded-[8px] border-2 border-dashed", b && "bg-info-primary/10"),
+							className: I("min-h-[112px] rounded-[16px] border-2 border-dashed", _ && "bg-info-primary/10"),
 							style: { borderColor: "var(--blue-500)" }
 						}) : null]
 					}) : null,
-					ie.length > 0 ? /* @__PURE__ */ X(Zv, {
-						single: s,
-						children: ie.map(ge)
+					ne.length > 0 ? /* @__PURE__ */ X(Zv, {
+						single: a,
+						children: ne.map(me)
 					}) : null,
-					ae.length > 0 ? /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X(Sd, { children: "Unassigned chat sessions" }), /* @__PURE__ */ X(Zv, {
-						single: s,
-						children: ae.map(ge)
+					re.length > 0 ? /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X(Sd, { children: "Unassigned chat sessions" }), /* @__PURE__ */ X(Zv, {
+						single: a,
+						children: re.map(me)
 					})] }) : null
 				]
 			})
@@ -20856,7 +20866,7 @@ function wS({ state: e, controller: t, availability: n }) {
 // src/app/lib/markdownChunk.ts
 var TS = null, ES = !1;
 function DS() {
-	return TS ??= import("./chunks/markdown-renderer-B1hecj1i.js").then((e) => e.t).then((e) => (ES = !0, e)), TS;
+	return TS ??= import("./chunks/markdown-renderer-vmPATWSf.js").then((e) => e.t).then((e) => (ES = !0, e)), TS;
 }
 function OS() {
 	return ES;

@@ -291,7 +291,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       className={cn(
         "flex items-center",
         subheader ? "min-h-14" : "h-full",
-        isMobile ? "gap-4 py-1 pl-1 pr-4" : "gap-2 py-1 pl-4 pr-1",
+        isMobile ? cn("gap-4 py-1 pl-2", headerActions ? "pr-1" : "pr-4") : "gap-2 py-1 pl-4 pr-2",
       )}
     >
       {isMobile && onClose ? closeButton(mobileCloseIcon) : null}
@@ -366,7 +366,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                   size,
                   chromeless
                     ? "shadow-none"
-                    : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-2xl bg-elevation-level-2 shadow-xl",
+                    : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-[20px] bg-elevation-level-2 shadow-xl",
                   isFullScreen && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden",
                 ),
             className,

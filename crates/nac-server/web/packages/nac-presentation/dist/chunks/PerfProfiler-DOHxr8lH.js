@@ -8545,7 +8545,7 @@ function dm({ open: e, label: t, onClose: n, children: r }) {
 // src/app/atoms/popover/index.tsx
 var fm = /* @__PURE__ */ function(e) {
 	return e.Small = "w-[240px]", e.Medium = "w-[320px]", e.Large = "w-[400px]", e.Fit = "w-max", e;
-}({}), pm = "flex flex-col gap-1 p-2 rounded-[8px] bg-elevation-level-3 shadow-2xl fade [&>*]:shrink-0", mm = ({ open: e, onClose: t, content: n, children: r, placement: i = Dp.BottomRight, size: a = "w-[320px]", sticky: o = !1, closeOnOutsideClick: l = !0, closeOnEscape: f = !0, sheetOnMobile: p = !0, className: m = "", panelClassName: h = "", sheetClassName: g = "", focusScope: _ }) => {
+}({}), pm = "flex flex-col gap-1 p-2 rounded-[12px] bg-elevation-level-3 shadow-2xl fade [&>*]:shrink-0", mm = ({ open: e, onClose: t, content: n, children: r, placement: i = Dp.BottomRight, size: a = "w-[320px]", sticky: o = !1, closeOnOutsideClick: l = !0, closeOnEscape: f = !0, sheetOnMobile: p = !0, className: m = "", panelClassName: h = "", sheetClassName: g = "", focusScope: _ }) => {
 	let v = Hp(), y = qp() && p, b = u(null), x = u(null), [ee, te] = d(null), T = _ ? /* @__PURE__ */ S(dm, {
 		open: e && (y || !o || ee !== null),
 		label: _,
@@ -9216,7 +9216,7 @@ var lh = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([
 		onClick: t,
 		children: /* @__PURE__ */ S(Cp, { iconName: e })
 	}), be = f && !E, xe = E && !i, Se = p && (be || E) && t && !h, Ce = /* @__PURE__ */ C("div", {
-		className: P("flex items-center", i ? "min-h-14" : "h-full", E ? "gap-4 py-1 pl-1 pr-4" : "gap-2 py-1 pl-4 pr-1"),
+		className: P("flex items-center", i ? "min-h-14" : "h-full", E ? P("gap-4 py-1 pl-2", a ? "pr-1" : "pr-4") : "gap-2 py-1 pl-4 pr-2"),
 		children: [
 			E && t ? ye(m) : null,
 			/* @__PURE__ */ S("div", {
@@ -9252,7 +9252,7 @@ var lh = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([
 			"aria-label": typeof r == "string" ? r : void 0,
 			tabIndex: -1,
 			"data-modal-open": e ? "true" : void 0,
-			className: P("pointer-events-auto relative flex flex-col outline-none", E ? P("rounded-none transition-transform duration-300 ease-in-out", ge && e ? "translate-x-full" : Te, !p && "bg-elevation-ground") : P("fade w-full", o, p ? "shadow-none" : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-2xl bg-elevation-level-2 shadow-xl", be && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden"), _, E && "h-[100dvh] max-h-[100dvh] min-h-[100dvh] w-full min-w-full max-w-full"),
+			className: P("pointer-events-auto relative flex flex-col outline-none", E ? P("rounded-none transition-transform duration-300 ease-in-out", ge && e ? "translate-x-full" : Te, !p && "bg-elevation-ground") : P("fade w-full", o, p ? "shadow-none" : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-[20px] bg-elevation-level-2 shadow-xl", be && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden"), _, E && "h-[100dvh] max-h-[100dvh] min-h-[100dvh] w-full min-w-full max-w-full"),
 			children: [
 				Se ? /* @__PURE__ */ S("div", {
 					className: "absolute top-1 right-2 z-10",
