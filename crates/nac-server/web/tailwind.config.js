@@ -352,7 +352,6 @@ const config = {
         "3xl": "var(--shadow-3xl)",
         convex: "var(--shadow-convex)",
         concave: "var(--shadow-concave)",
-        "composer-send": "var(--shadow-composer-send)",
         "left-sidebar-open": "var(--left-sidebar-open)",
       },
       screens: {

@@ -1510,9 +1510,21 @@ test("replaces a completed durable goal from the production dialog", async ({
     replacement,
   );
 
+  await composer.blur();
   await expect(page.getByRole("button", { name: "Edit goal: Complete" })).toBeVisible();
   await page.getByRole("button", { name: "Edit goal: Complete" }).click();
   await page.getByRole("textbox", { name: "Goal objective" }).fill("replacement objective");
+  const goalViewport = page.viewportSize() ?? { width: 1280, height: 800 };
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("dialog", { name: "Set Durable Goal" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Goal objective" })).toHaveValue(
+    "replacement objective",
+  );
+  await page.setViewportSize(goalViewport);
+  await expect(page.getByRole("dialog", { name: "Set Durable Goal" })).not.toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Goal objective" })).toHaveValue(
+    "replacement objective",
+  );
   await page.getByRole("button", { name: "Replace goal" }).click();
   await replacement.accepted;
   await expect

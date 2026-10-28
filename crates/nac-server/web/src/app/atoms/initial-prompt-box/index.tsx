@@ -29,7 +29,7 @@ const InitialPromptBox: React.FC<InitialPromptBoxProps> = ({
     onClick={onClick}
     className={cn(
       "group relative flex h-[100px] w-full flex-col items-start overflow-hidden",
-      "rounded-[4px] bg-elevation-level-1 text-left shadow-convex",
+      "rounded-[16px] bg-elevation-level-1 text-left",
       "focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--blue-500)]",
       className,
     )}
@@ -38,7 +38,7 @@ const InitialPromptBox: React.FC<InitialPromptBoxProps> = ({
       aria-hidden
       className="absolute inset-0 bg-btn-ghost transition-colors duration-200 ease-out group-hover:bg-btn-ghost-hovered group-active:bg-btn-ghost-pressed"
     />
-    <span className="relative flex w-full items-center gap-[10px] px-4 pb-2 pt-4">
+    <span className="relative flex w-full items-center gap-2 px-4 pb-2 pt-4">
       <Icon iconName={icon} size={20} className="shrink-0 text-fill-basic-tertiary" />
       <span className="flex-1 min-w-0 truncate label-small text-basic-primary">{title}</span>
     </span>
