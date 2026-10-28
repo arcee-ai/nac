@@ -114,6 +114,7 @@ import {
   Tag,
   Tags,
   Terminal,
+  TextSearch,
   Thermometer,
   Timer,
   ToolCase,
@@ -292,7 +293,7 @@ export enum IconName {
 
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
   iconName: IconName;
-  /** CSS color for the glyph. A class or stylesheet rule that colors the icon still overrides it. */
+  /** CSS color for the glyph. A class or stylesheet rule that colors the icon overrides it. */
   color?: string;
   size?: number;
 }
@@ -455,7 +456,7 @@ const lucideIcons: Partial<Record<IconName, LucideIcon>> = {
   [IconName.Orchestrator]: Network,
   [IconName.Robot]: Bot,
   [IconName.ReadFile]: ScanText,
-  [IconName.SearchFile]: FileSearch,
+  [IconName.SearchFile]: TextSearch,
   [IconName.SearchFiles]: FolderSearch,
   [IconName.WriteCommand]: Terminal,
   [IconName.Clock]: Clock,

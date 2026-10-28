@@ -150,7 +150,7 @@ export declare enum IconName {
 }
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
     iconName: IconName;
-    /** CSS color for the glyph. A class or stylesheet rule that colors the icon still overrides it. */
+    /** CSS color for the glyph. A class or stylesheet rule that colors the icon overrides it. */
     color?: string;
     size?: number;
 }

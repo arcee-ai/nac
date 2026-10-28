@@ -5060,14 +5060,6 @@
     margin-bottom: 0 !important;
   }
 
-[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-\[var\(--white\)\] > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-\[var\(--white\)\] > path {
-    fill: var(--white) !important;
-  }
-
-[data-nac-runtime]:is(.\[\&\>path\]\:fill-\[var\(--white\)\] > path), [data-nac-runtime] .\[\&\>path\]\:fill-\[var\(--white\)\] > path {
-    fill: var(--white);
-  }
-
 @media (hover: none) {
     [data-nac-runtime]:is(.\[\@media\(hover\:none\)\]\:opacity-100), [data-nac-runtime] .\[\@media\(hover\:none\)\]\:opacity-100 {
       opacity: 1;
@@ -6107,6 +6099,10 @@
 
 [data-nac-runtime]:is(.icon > *), [data-nac-runtime] .icon > * {
   transition: color .15s ease-out;
+}
+
+[data-nac-runtime] {
+  --icon-color: initial;
 }
 
 [data-nac-runtime]:is(.btn), [data-nac-runtime] .btn {

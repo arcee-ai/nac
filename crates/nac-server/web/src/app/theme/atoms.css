@@ -18,6 +18,11 @@
     color: var(--icon-color, currentColor);
   }
 }
+/* Custom properties inherit, so a host page's own `--icon-color` would otherwise
+   reach the packaged presentation's icons. */
+:root {
+  --icon-color: initial;
+}
 
 /* ============================ BUTTON ============================ */
 .btn {
