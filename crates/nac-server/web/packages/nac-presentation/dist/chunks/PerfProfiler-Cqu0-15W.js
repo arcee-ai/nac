@@ -5170,12 +5170,15 @@ var Mo = (e, t) => {
 }, sc = (e, t, n) => {
 	let r = t[n];
 	r !== void 0 && (e[n] = e[n] ? e[n].concat(r) : r);
-}, cc = ((e, ...t) => typeof e == "function" ? ls(nc, e, ...t) : ls(() => rc(nc(), e), ...t))({ extend: { classGroups: { "font-size": [{ text: [
-	"big",
-	"medium",
-	"small",
-	"micro"
-] }] } } });
+}, cc = ((e, ...t) => typeof e == "function" ? ls(nc, e, ...t) : ls(() => rc(nc(), e), ...t))({ extend: {
+	theme: { radius: ["interaction"] },
+	classGroups: { "font-size": [{ text: [
+		"big",
+		"medium",
+		"small",
+		"micro"
+	] }] }
+} });
 function N(...e) {
 	return cc(jo(e));
 }
