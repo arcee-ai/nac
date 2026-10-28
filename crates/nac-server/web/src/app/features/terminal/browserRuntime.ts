@@ -203,7 +203,7 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
     const resize = Effect.suspend(() => {
       const geometry = view.fit();
       if (geometry) latestGeometry = geometry;
-      // The grid always follows the box; a process it may not resize keeps its own size.
+      // The local grid may differ from the PTY: only a writable, resizable source is ever resized.
       if (
         resizeRunning ||
         !connected ||
