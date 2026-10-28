@@ -30,3 +30,36 @@ export function PanelFailure({ listTitle, children }: { listTitle: string; child
     </PanelPhoneScreen>
   );
 }
+
+/**
+ * A panel with nothing in it yet, centred in the whole box instead of split
+ * into a list and its detail. A phone still draws it as a screen of its own,
+ * with the header's way out and the tab bar.
+ */
+export function PanelEmptyState({
+  listTitle,
+  title,
+  description,
+}: {
+  listTitle: string;
+  title: string;
+  description?: string;
+}) {
+  const isMobile = useIsMobile();
+  const message = (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 min-h-0 w-full p-8 text-center">
+      <p className="header-md w-full truncate text-basic-primary">{title}</p>
+      {description ? (
+        <p className="text-small w-full truncate text-basic-tertiary" title={description}>
+          {description}
+        </p>
+      ) : null}
+    </div>
+  );
+  if (!isMobile) return message;
+  return (
+    <PanelPhoneScreen title={listTitle} bar>
+      <div className="flex flex-1 flex-col min-h-0 py-14">{message}</div>
+    </PanelPhoneScreen>
+  );
+}

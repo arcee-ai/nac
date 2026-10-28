@@ -1619,10 +1619,6 @@
     max-width: 280px;
   }
 
-[data-nac-runtime]:is(.max-w-\[311px\]), [data-nac-runtime] .max-w-\[311px\] {
-    max-width: 311px;
-  }
-
 [data-nac-runtime]:is(.max-w-\[320px\]), [data-nac-runtime] .max-w-\[320px\] {
     max-width: 320px;
   }
@@ -3053,6 +3049,10 @@
     padding-block: calc(var(--spacing) * 8);
   }
 
+[data-nac-runtime]:is(.py-14), [data-nac-runtime] .py-14 {
+    padding-block: calc(var(--spacing) * 14);
+  }
+
 [data-nac-runtime]:is(.py-16), [data-nac-runtime] .py-16 {
     padding-block: calc(var(--spacing) * 16);
   }
@@ -3195,6 +3195,10 @@
 
 [data-nac-runtime]:is(.pb-32), [data-nac-runtime] .pb-32 {
     padding-bottom: calc(var(--spacing) * 32);
+  }
+
+[data-nac-runtime]:is(.pb-\[7px\]), [data-nac-runtime] .pb-\[7px\] {
+    padding-bottom: 7px;
   }
 
 [data-nac-runtime]:is(.pb-\[23px\]), [data-nac-runtime] .pb-\[23px\] {

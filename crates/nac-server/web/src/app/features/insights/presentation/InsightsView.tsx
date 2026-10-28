@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
+import { PanelEmptyState } from "@/app/components/inspector/PanelMessages";
 import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { TaskButton, TaskPill } from "@/app/components/inspector/TaskPreview";
 import { ThreadSteeringModal } from "@/app/components/inspector/ThreadSteeringModal";
@@ -262,6 +263,16 @@ export function InsightsView({
   );
 
   if (!snapshot) return <PanelLoading listTitle="Insights" />;
+  // A thread the chat pointed Insights at still opens with no turns.
+  if (!shown && !hasOlder && model.turns.length === 0) {
+    return (
+      <PanelEmptyState
+        listTitle="Insights"
+        title="No insights yet"
+        description="Send the first message in this session to be able to see them"
+      />
+    );
+  }
 
   let title: ReactNode;
   let detail: ReactNode;

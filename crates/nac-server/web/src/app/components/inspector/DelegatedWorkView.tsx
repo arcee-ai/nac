@@ -17,6 +17,7 @@ import {
 import { SubagentComposer } from "@/app/components/inspector/SubagentComposer";
 import { SubagentRowActions } from "@/app/components/inspector/SubagentListControls";
 import { SubagentPreview } from "@/app/components/inspector/SubagentPreview";
+import { PanelEmptyState } from "@/app/components/inspector/PanelMessages";
 import { PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
@@ -86,20 +87,6 @@ function rowFromOrchestrator(orchestrator: ManagedOrchestratorRecord): SubagentR
     updatedAt: orchestrator.updated_at,
     fallbackText: nonempty(orchestrator.failure) ?? nonempty(orchestrator.report),
   };
-}
-
-/** Subagents are started by the agent; the panel only shows and manages them. */
-function NoSubagents() {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4">
-      <Icon iconName={IconName.Plane} size={32} className="text-basic-primary" />
-      <p className="label-big mt-2 text-center text-basic-primary">No subagents yet</p>
-      <p className="label-small mt-2 max-w-[311px] text-center text-basic-tertiary">
-        Ask the agent to delegate work. Subagents it starts appear here, where you can browse,
-        steer, continue, and cancel them.
-      </p>
-    </div>
-  );
 }
 
 export function DelegatedWorkView({
@@ -181,6 +168,16 @@ export function DelegatedWorkView({
     rows.length === 0 && (children.isError || (supportsOrchestrators && orchestrators.isError));
   // "None yet" is only true once every list the panel shows has answered.
   const loaded = children.isSuccess && (!supportsOrchestrators || orchestrators.isSuccess);
+  // Subagents are started by the agent; the panel only shows and manages them.
+  if (loaded && rows.length === 0) {
+    return (
+      <PanelEmptyState
+        listTitle="Subagents"
+        title="No subagents yet"
+        description="Subagents will appear here once the agent decides to spawn them."
+      />
+    );
+  }
   const loadError = (
     <div role="alert" className="m-2 rounded-[6px] border border-error-primary p-3">
       <div className="text-small text-error-primary">Subagents could not be loaded.</div>
@@ -290,13 +287,7 @@ export function DelegatedWorkView({
       listClassName="py-6"
       list={
         isMobile ? (
-          // A phone opens the panel on its list, so that is where it says
-          // nothing has been delegated yet.
-          loaded && rows.length === 0 ? (
-            <NoSubagents />
-          ) : (
-            <div className="pt-6">{list}</div>
-          )
+          <div className="pt-6">{list}</div>
         ) : isTablet ? (
           // The desktop column's insets, out of the tablet list's own 8px.
           <div className="-mx-1 -mt-2 py-6">{list}</div>
@@ -327,13 +318,9 @@ export function DelegatedWorkView({
               />
             </div>
           </>
-        ) : listState ? (
-          narrow ? (
-            listState
-          ) : null
-        ) : (
-          <NoSubagents />
-        )}
+        ) : narrow ? (
+          listState
+        ) : null}
       </div>
     </PanelSplit>
   );
