@@ -19032,9 +19032,8 @@ function ox(e) {
 			r() && (h(), e.inputFailure(e.previousFailure.current), e.notice(e.previousFailure.current ? "Input delivery was not confirmed. Check the shell before enabling fresh input." : "Previous input will not be retried. Only fresh typing will be sent."));
 		}) ?? (() => {}));
 		let _ = !1, v = null, y = pr(() => {
-			if (e.readonly || e.source && e.source.origin !== "human" && e.source.resize === !1) return e.source && t.terminal.resize(e.source.cols, e.source.rows), Ee;
 			let i = t.fit();
-			return i && (v = i), _ || !o || !s || e.source?.resize === !1 ? Ee : (_ = !0, xe(function* () {
+			return i && (v = i), _ || !o || !s || e.readonly || e.source?.resize === !1 ? Ee : (_ = !0, xe(function* () {
 				for (; v && r() && s;) {
 					let e = v;
 					v = null, yield* ix("resize", () => u.resize(e.cols, e.rows, n.signal));
