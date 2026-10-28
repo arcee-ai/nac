@@ -164,27 +164,28 @@ function Qi({ icon: e, status: t, expanded: n, size: r }) {
 		});
 	}
 }
-var $i = ({ icon: e, label: t, meta: n, status: r = "ready", size: i = "small", selected: a, expanded: o, onClick: s, className: c }) => {
-	let l = Ji[i], u = [
+var $i = ({ icon: e, label: t, meta: n, status: r = "ready", size: i = "small", selected: a, shown: o, expanded: s, onClick: c, className: l }) => {
+	let u = Ji[i], d = [
 		t,
 		n,
 		Xi[r]
 	].filter(Boolean).join(", ");
 	return /* @__PURE__ */ X(Gi, {
 		type: "button",
-		size: l.button,
+		size: u.button,
 		active: a === !0,
 		"aria-pressed": a,
-		"aria-expanded": o,
-		"aria-label": u,
-		disabled: s === null,
-		onClick: s ?? void 0,
-		className: F(l.box, c),
+		"data-shown": o || void 0,
+		"aria-expanded": s,
+		"aria-label": d,
+		disabled: c === null,
+		onClick: c ?? void 0,
+		className: F(u.box, l),
 		children: [
 			/* @__PURE__ */ Y(Qi, {
 				icon: e,
 				status: r,
-				expanded: o,
+				expanded: s,
 				size: i
 			}),
 			/* @__PURE__ */ Y("span", {
@@ -23203,12 +23204,14 @@ function AE({ entry: e, controller: t, size: n }) {
 		...r,
 		size: n,
 		selected: t.entrySelected(e),
+		shown: t.entryShown(e),
 		expanded: i ? a : void 0,
 		onClick: t.entryAction(e)
 	}), a && e.kind === "group" ? /* @__PURE__ */ Y(ea, { children: e.group.segments.map((r) => /* @__PURE__ */ Y($i, {
 		...t.segmentView(r),
 		size: n,
 		selected: t.segmentSelected(e, r),
+		shown: t.segmentShown(e, r),
 		onClick: t.segmentAction(e, r)
 	}, r.key)) }) : null] });
 }
@@ -23252,7 +23255,7 @@ function FE(e) {
 var IE = ui(function({ sections: e, pendingPrompt: t, emptyCopy: n, focusNonce: r, controller: i, footer: a }) {
 	let o = K(null), s = N() ? qi.Large : qi.Small;
 	if (W(() => {
-		let e = o.current?.querySelectorAll("[aria-pressed=\"true\"]"), t = e?.[e.length - 1];
+		let e = o.current?.querySelectorAll("[data-shown]"), t = e?.[e.length - 1];
 		t && FE(t);
 	}, [r]), !e.length) return /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y("p", {
 		className: "p-1 label-micro text-basic-muted",
@@ -23495,6 +23498,8 @@ function nD({ sessionId: e, snapshot: t, topology: n, canSteerWorkers: r }) {
 			segmentView: (e) => BE(e, ie),
 			entrySelected: (e) => qE(e, j),
 			segmentSelected: (e, t) => JE(e, t, j),
+			entryShown: (e) => qE(e, te) === !0,
+			segmentShown: (e, t) => JE(e, t, te) === !0,
 			entryAction: (t) => {
 				if (t.kind === "thread") return () => {
 					f(t.thread.name, t.id), u({ kind: "thread" });
@@ -23518,6 +23523,7 @@ function nD({ sessionId: e, snapshot: t, topology: n, canSteerWorkers: r }) {
 		k,
 		ie,
 		j,
+		te,
 		g,
 		w,
 		u,

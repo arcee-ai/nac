@@ -195,6 +195,8 @@ export function InsightsView({
       segmentView: (segment) => segmentRowView(segment, sources),
       entrySelected: (entry) => entrySelected(entry, marked),
       segmentSelected: (entry, segment) => segmentSelected(entry, segment, marked),
+      entryShown: (entry) => entrySelected(entry, highlighted) === true,
+      segmentShown: (entry, segment) => segmentSelected(entry, segment, highlighted) === true,
       entryAction,
       segmentAction,
     };
@@ -202,6 +204,7 @@ export function InsightsView({
     expanded,
     sources,
     marked,
+    highlighted,
     navigation,
     resolveSession,
     selectInsight,

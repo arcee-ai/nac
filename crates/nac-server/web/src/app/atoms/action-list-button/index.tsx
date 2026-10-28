@@ -49,6 +49,8 @@ interface ActionListButtonProps {
   size?: ActionListButtonSize;
   /** Leave unset on rows that navigate away instead of selecting themselves. */
   selected?: boolean;
+  /** The row the panel shows, marked or not, so that its list can reveal it. */
+  shown?: boolean;
   /** Only for group rows, which expand and collapse their children. */
   expanded?: boolean;
   /** Null for a row with nowhere to go, which then takes no focus. */
@@ -135,6 +137,7 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
   status = ActionListButtonStatus.Ready,
   size = ActionListButtonSize.Small,
   selected,
+  shown,
   expanded,
   onClick,
   className,
@@ -148,6 +151,7 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
       size={style.button}
       active={selected === true}
       aria-pressed={selected}
+      data-shown={shown || undefined}
       aria-expanded={expanded}
       aria-label={accessibleName}
       disabled={onClick === null}
