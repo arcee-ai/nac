@@ -8801,24 +8801,25 @@ function Dm() {
 	};
 }
 // src/app/atoms/button/CopyButton.tsx
-var Om = ({ value: e, size: t = ym.Small, variant: n = bm.Tertiary, content: r = xm.Icon, position: i = Dp.BottomCenter, title: a = "Copy", onCopy: o, className: s = "", children: c, ...l }) => {
-	let { copied: u, copy: d } = Dm(), f = u ? "Copied" : a;
+var Om = ({ value: e, size: t = ym.Small, variant: n = bm.Tertiary, content: r = xm.Icon, position: i = Dp.BottomCenter, title: a = "Copy", iconSize: o, onCopy: s, className: c = "", children: l, ...u }) => {
+	let { copied: d, copy: f } = Dm(), p = d ? "Copied" : a;
 	return /* @__PURE__ */ S(vm, {
-		title: f,
+		title: p,
 		position: i,
 		sticky: !0,
 		children: /* @__PURE__ */ S(wm, {
 			size: t,
 			variant: n,
 			content: r,
-			className: s,
-			"aria-label": f,
+			className: c,
+			"aria-label": p,
 			onClick: () => {
-				d(e), o?.();
+				f(e), s?.();
 			},
-			...l,
-			children: c ?? /* @__PURE__ */ S(Cp, {
-				iconName: u ? xp.Check : xp.FileCopy,
+			...u,
+			children: l ?? /* @__PURE__ */ S(Cp, {
+				iconName: d ? xp.Check : xp.FileCopy,
+				size: o,
 				className: "fade"
 			})
 		})
