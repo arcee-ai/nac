@@ -55,6 +55,7 @@ import {
   useInsightsNavigation,
 } from "@/app/features/insights/useInsightsNavigation";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { cn } from "@/app/lib/cn";
 import { useSharedValue, useStructuralSharing } from "@/app/lib/useSharedValue";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
@@ -131,6 +132,7 @@ export function InsightsView({
   // Rows only ask whether they are the one shown, so they follow its identity
   // rather than the entry object, which a streaming group replaces per delta.
   const highlighted = useSharedValue(shown, sameInsight);
+  const marked = usePanelListMarksOpen() ? highlighted : null;
 
   // A pick from another surface can name an entry the current filter hides,
   // and only a list showing it may sit beside its detail.
@@ -191,15 +193,15 @@ export function InsightsView({
       expanded,
       entryView: (entry) => entryRowView(entry, sources),
       segmentView: (segment) => segmentRowView(segment, sources),
-      entrySelected: (entry) => entrySelected(entry, highlighted),
-      segmentSelected: (entry, segment) => segmentSelected(entry, segment, highlighted),
+      entrySelected: (entry) => entrySelected(entry, marked),
+      segmentSelected: (entry, segment) => segmentSelected(entry, segment, marked),
       entryAction,
       segmentAction,
     };
   }, [
     expanded,
     sources,
-    highlighted,
+    marked,
     navigation,
     resolveSession,
     selectInsight,

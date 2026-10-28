@@ -20,6 +20,7 @@ import { SubagentPreview } from "@/app/components/inspector/SubagentPreview";
 import { PanelEmptyState } from "@/app/components/inspector/PanelMessages";
 import { PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
+import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { useNow } from "@/app/hooks/useNow";
 import { cn } from "@/app/lib/cn";
 import { groupByRecency } from "@/app/lib/projects";
@@ -107,6 +108,7 @@ export function DelegatedWorkView({
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   const narrow = isMobile || isTablet;
+  const marksOpen = usePanelListMarksOpen();
 
   const navigate = useNavigate();
   const expanded = useSidePanelExpanded();
@@ -222,7 +224,7 @@ export function DelegatedWorkView({
                   lineage={MODE_LINEAGE[row.mode]}
                   showBehaviorIcon={showBehaviorIcon}
                   running={row.status === "running"}
-                  active={selected?.key === row.key}
+                  active={marksOpen && selected?.key === row.key}
                   isMobile={isMobile}
                   onClick={() => chooseRow(row.key)}
                   actions={

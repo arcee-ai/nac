@@ -4,6 +4,7 @@ import { Badge, BadgeColor, Icon, IconName } from "@/app/atoms";
 import { PanelEmptyState, PanelFailure } from "@/app/components/inspector/PanelMessages";
 import { PanelLoading, PanelRow, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { cn } from "@/app/lib/cn";
 import type {
   SessionSnapshotResponse,
@@ -146,6 +147,7 @@ export function WorksetsView({
   onSelect: (id: string) => void;
 }) {
   const isMobile = useIsMobile();
+  const marksOpen = usePanelListMarksOpen();
   if (!snapshot) return <PanelLoading listTitle="Worksets" />;
 
   const worksets = snapshot.worksets;
@@ -163,8 +165,6 @@ export function WorksetsView({
   }
 
   const current = worksets.items.find((item) => item.id === selected) ?? worksets.items[0];
-  // A phone opens on the list, so only a workset you opened is marked there.
-  const marked = isMobile ? selected : current.id;
 
   return (
     <PanelSplit
@@ -177,7 +177,7 @@ export function WorksetsView({
             <PanelRow
               key={workset.id}
               label={workset.id}
-              active={workset.id === marked}
+              active={marksOpen && workset.id === current.id}
               trailing={
                 isMobile ? <Icon iconName={IconName.Right} size={24} className="shrink-0" /> : null
               }
