@@ -2376,6 +2376,10 @@
     border-radius: 3.40282e38px;
   }
 
+[data-nac-runtime]:is(.rounded-interaction), [data-nac-runtime] .rounded-interaction {
+    border-radius: var(--interaction-rounded);
+  }
+
 [data-nac-runtime]:is(.rounded-lg), [data-nac-runtime] .rounded-lg {
     border-radius: var(--radius-lg);
   }
@@ -2461,9 +2465,9 @@
     border-bottom-right-radius: .25rem;
   }
 
-[data-nac-runtime]:is(.rounded-r-\[4px\]), [data-nac-runtime] .rounded-r-\[4px\] {
-    border-top-right-radius: 4px;
-    border-bottom-right-radius: 4px;
+[data-nac-runtime]:is(.rounded-r-interaction), [data-nac-runtime] .rounded-r-interaction {
+    border-top-right-radius: var(--interaction-rounded);
+    border-bottom-right-radius: var(--interaction-rounded);
   }
 
 [data-nac-runtime]:is(.rounded-r-none), [data-nac-runtime] .rounded-r-none {
@@ -4938,6 +4942,7 @@
   --color-outline-input-focus: var(--color-accent-primary);
   --color-outline-input-hovered: var(--color-accent-secondary);
   --color-outline-input-error: var(--color-error-primary);
+  --interaction-rounded: 8px;
   --brand-50: #eafafa;
   --brand-100: #d5f6f6;
   --brand-200: #c0f2f2;
@@ -5972,9 +5977,9 @@
   cursor: auto;
   text-overflow: ellipsis;
   white-space: nowrap;
+  border-radius: var(--interaction-rounded);
   box-shadow: none;
   border: none;
-  border-radius: 4px;
   justify-content: center;
   align-items: center;
   transition: color .15s ease-out, background-color .15s ease-out, border-color .15s ease-out;
@@ -6081,7 +6086,7 @@
 }
 
 [data-nac-runtime]:is(.btn.btn-tertiary), [data-nac-runtime] .btn.btn-tertiary, [data-nac-runtime]:is(.btn.btn-tertiary-destructive), [data-nac-runtime] .btn.btn-tertiary-destructive, [data-nac-runtime]:is(.btn.btn-tertiary-accent), [data-nac-runtime] .btn.btn-tertiary-accent {
-  border-radius: 8px;
+  border-radius: var(--interaction-rounded);
   height: auto;
   padding: 0;
 }
@@ -6558,7 +6563,7 @@
 }
 
 [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary-destructive), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary-destructive, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary-accent), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary-accent, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary.btn-icon), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary.btn-icon, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary.btn-icon-left), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary.btn-icon-left, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary.btn-icon-right), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary.btn-icon-right, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary.btn-text), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary.btn-text, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary-destructive.btn-icon), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary-destructive.btn-icon, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-left), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-left, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-right), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-right, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary-destructive.btn-text), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary-destructive.btn-text, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary-accent.btn-icon), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary-accent.btn-icon, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary-accent.btn-icon-left), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary-accent.btn-icon-left, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary-accent.btn-icon-right), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary-accent.btn-icon-right, [data-nac-runtime]:is(.btn-sticky.btn-large.btn-tertiary-accent.btn-text), [data-nac-runtime] .btn-sticky.btn-large.btn-tertiary-accent.btn-text {
-  border-radius: 8px;
+  border-radius: var(--interaction-rounded);
   height: 24px;
   padding: 0;
 }
@@ -6748,7 +6753,7 @@
 }
 
 [data-nac-runtime]:is(.horizontal-tab-item), [data-nac-runtime] .horizontal-tab-item {
-  border-radius: 4px;
+  border-radius: var(--interaction-rounded);
   box-shadow: inset 0 -2px #0000;
 }
 

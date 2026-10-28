@@ -80,7 +80,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   return (
     <div
       className={cn(
-        "group flex items-center min-w-0 rounded-[4px]",
+        "group flex items-center min-w-0 rounded-interaction",
         "-outline-offset-2 outline-[var(--color-border-focus-outline)] has-[>button:focus-visible]:outline-2",
         isMobile ? "h-12 gap-3 py-2 pl-2.5 pr-3" : "h-9 gap-1.5 px-2 py-1",
         active

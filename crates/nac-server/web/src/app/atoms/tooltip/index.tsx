@@ -12,7 +12,7 @@ export { AnchorPlacement as TooltipPosition };
 type TooltipPosition = AnchorPlacement;
 
 const BOX_BASE =
-  "tooltip-box text-left w-max h-fit max-w-[240px] flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-[4px] fade";
+  "tooltip-box text-left w-max h-fit max-w-[240px] flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-interaction fade";
 
 interface TooltipBoxProps {
   boxRef?: React.Ref<HTMLDivElement>;

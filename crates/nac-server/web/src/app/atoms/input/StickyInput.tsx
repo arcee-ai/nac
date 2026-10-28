@@ -65,7 +65,7 @@ const StickyInput: React.FC<StickyInputProps> & {
   const actualTrailingOnClick = isSearch ? onClear : trailingOnClick;
 
   const stretches = className.includes("flex-grow") || className.includes("flex-1");
-  const radius = rounded ? "rounded-full" : "rounded-[4px]";
+  const radius = rounded ? "rounded-full" : "rounded-interaction";
   const iconColor = isDisabled
     ? "var(--color-fill-basic-muted)"
     : "var(--color-fill-btn-secondary)";
