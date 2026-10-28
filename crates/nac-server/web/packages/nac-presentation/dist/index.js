@@ -4302,7 +4302,7 @@ var ld = ({ title: e, status: t, statusLabel: n, error: r, behavior: i, lineage:
 			title: c.label,
 			disabled: c.disabled,
 			onClick: c.onClick,
-			className: I("relative z-10 flex shrink-0 items-center justify-center rounded-[8px]", "transition-opacity duration-150 ease-out disabled:cursor-not-allowed", "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]", d && "opacity-0 group-hover/terminal-tab-button:opacity-100 focus-visible:opacity-100", yd),
+			className: I("relative z-10 flex shrink-0 items-center justify-center rounded-[8px]", "transition-opacity duration-150 ease-out disabled:cursor-not-allowed", "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]", d && "opacity-0 group-hover/terminal-tab-button:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100", yd),
 			children: /* @__PURE__ */ X(R, {
 				iconName: H.Trash,
 				size: u.icon
@@ -20014,14 +20014,18 @@ function rS({ sessionId: e, onReviewSelection: t }) {
 			s.isError ? /* @__PURE__ */ Z(ox, { children: [s.error.message, " Opening was not confirmed; retry uses the same launch identity."] }) : null,
 			a.isPending ? /* @__PURE__ */ X(Gb, { children: "Loading terminals…" }) : null,
 			a.isSuccess && h.length === 0 ? /* @__PURE__ */ X(Gb, { children: "No terminals are open." }) : null,
-			h.map((t, n) => /* @__PURE__ */ X(iS, {
-				sessionId: e,
-				source: t,
-				label: Rx(t, n),
-				active: u == null && t.id === _,
-				size: O,
-				onOpen: () => C(t)
-			}, t.id)),
+			h.map((t, n) => {
+				let a = u == null && t.id === _;
+				return /* @__PURE__ */ X(iS, {
+					sessionId: e,
+					source: t,
+					label: Rx(t, n),
+					active: a,
+					beside: a && !r && !i,
+					size: O,
+					onOpen: () => C(t)
+				}, t.id);
+			}),
 			/* @__PURE__ */ X(Kx, {
 				history: o.data?.history,
 				pending: o.isPending,
@@ -20076,21 +20080,21 @@ function rS({ sessionId: e, onReviewSelection: t }) {
 		})
 	});
 }
-function iS({ sessionId: e, source: t, label: n, active: r, size: i, onOpen: a }) {
-	let o = tS(e, t.id), s = mx(e, t, !r);
+function iS({ sessionId: e, source: t, label: n, active: r, beside: i, size: a, onOpen: o }) {
+	let s = tS(e, t.id), c = mx(e, t, !i);
 	return /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X(bd, {
 		label: n,
-		agent: Vx(t, s),
+		agent: Vx(t, c),
 		description: zx(t),
-		size: i,
+		size: a,
 		active: r,
-		onClick: a,
+		onClick: o,
 		remove: t.stop ? {
 			label: `${t.origin === "human" ? "Close" : "Stop"} ${n}`,
-			disabled: o.isPending,
-			onClick: () => o.mutate()
+			disabled: s.isPending,
+			onClick: () => s.mutate()
 		} : void 0
-	}), o.isError ? /* @__PURE__ */ Z(ox, { children: [o.error.message, " Stop was not confirmed; check its status."] }) : null] });
+	}), s.isError ? /* @__PURE__ */ Z(ox, { children: [s.error.message, " Stop was not confirmed; check its status."] }) : null] });
 }
 // src/app/features/terminal-selection/SelectionReview.tsx
 function aS({ state: e, controller: t, availability: n }) {

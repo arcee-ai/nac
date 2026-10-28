@@ -36,9 +36,10 @@ export interface TerminalOption {
  * narrower split draws the header itself and lends this its `menuSlot` for
  * the options. Everything the header's hint explains is also spoken.
  *
- * The output's scroller pads its own content rather than sitting inset, so
- * what scrolls runs to the frame's edges; on a phone, from the top of the
- * screen, under the floating header.
+ * The output's scroller pads its own content rather than sitting inset, so a
+ * log, or a grid larger than its box, scrolls to the frame's edges; on a
+ * phone, from the top of the screen, under the floating header. xterm's own
+ * scrollback stays within that padding.
  */
 export function TerminalFrame({
   heading,

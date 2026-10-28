@@ -171,17 +171,22 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
       {list.isSuccess && terminals.length === 0 ? (
         <PanelListNote>No terminals are open.</PanelListNote>
       ) : null}
-      {terminals.map((item, index) => (
-        <TerminalRow
-          key={item.id}
-          sessionId={sessionId}
-          source={item}
-          label={terminalTitle(item, index)}
-          active={recent == null && item.id === id}
-          size={rowSize}
-          onOpen={() => openLive(item)}
-        />
-      ))}
+      {terminals.map((item, index) => {
+        const open = recent == null && item.id === id;
+        return (
+          <TerminalRow
+            key={item.id}
+            sessionId={sessionId}
+            source={item}
+            label={terminalTitle(item, index)}
+            active={open}
+            // Narrower layouts draw the list in place of the open terminal.
+            beside={open && !isMobile && !isTablet}
+            size={rowSize}
+            onOpen={() => openLive(item)}
+          />
+        );
+      })}
       <RecentExecutions
         history={history.data?.history}
         pending={history.isPending}
@@ -274,6 +279,7 @@ function TerminalRow({
   source,
   label,
   active,
+  beside,
   size,
   onOpen,
 }: {
@@ -281,11 +287,13 @@ function TerminalRow({
   source: ExecutionStatus;
   label: string;
   active: boolean;
+  /** Open beside the list, whose detail already polls the shell's controller. */
+  beside: boolean;
   size: TerminalTabButtonSize;
   onOpen: () => void;
 }) {
   const stop = useStopExecution(sessionId, source.id);
-  const controller = useShellController(sessionId, source, !active);
+  const controller = useShellController(sessionId, source, !beside);
   return (
     <>
       <TerminalTabButton

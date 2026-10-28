@@ -19,8 +19,8 @@ interface TerminalTabButtonProps {
     title?: string;
     onClick?: () => void;
     /**
-     * The design's trailing trash. A desktop row shows it on hover; a phone has
-     * no hover, so its row always does.
+     * The design's trailing trash. A small row shows it on hover, or always on a
+     * screen without hover, such as a touch tablet's; a phone's row always does.
      */
     remove?: {
         label: string;

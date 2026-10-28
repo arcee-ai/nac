@@ -25,8 +25,8 @@ interface TerminalTabButtonProps {
   title?: string;
   onClick?: () => void;
   /**
-   * The design's trailing trash. A desktop row shows it on hover; a phone has
-   * no hover, so its row always does.
+   * The design's trailing trash. A small row shows it on hover, or always on a
+   * screen without hover, such as a touch tablet's; a phone's row always does.
    */
   remove?: { label: string; onClick: () => void; disabled?: boolean };
   className?: string;
@@ -140,7 +140,7 @@ const TerminalTabButton: React.FC<TerminalTabButtonProps> = ({
             "transition-opacity duration-150 ease-out disabled:cursor-not-allowed",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]",
             small &&
-              "opacity-0 group-hover/terminal-tab-button:opacity-100 focus-visible:opacity-100",
+              "opacity-0 group-hover/terminal-tab-button:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
             REMOVE_TONE,
           )}
         >
