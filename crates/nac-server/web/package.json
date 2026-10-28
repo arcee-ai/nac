@@ -26,6 +26,7 @@
     "@xterm/xterm": "6.0.0",
     "clsx": "^2.1.1",
     "effect": "3.22.2",
+    "lucide-react": "1.61.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",

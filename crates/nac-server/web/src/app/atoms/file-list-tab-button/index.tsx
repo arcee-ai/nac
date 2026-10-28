@@ -58,10 +58,10 @@ const TONE = {
 
 /** A chevron without a status follows the label through the button's states. */
 const CHEVRON_TONE = cn(
-  "[&_path]:fill-btn-secondary",
-  "group-hover/file-list-tab-button:[&_path]:fill-btn-secondary-hovered",
-  "group-active/file-list-tab-button:[&_path]:fill-btn-secondary-pressed",
-  "group-disabled/file-list-tab-button:[&_path]:fill-btn-secondary-disabled",
+  "text-fill-btn-secondary",
+  "group-hover/file-list-tab-button:text-fill-btn-secondary-hovered",
+  "group-active/file-list-tab-button:text-fill-btn-secondary-pressed",
+  "group-disabled/file-list-tab-button:text-fill-btn-secondary-disabled",
 );
 
 const DIMMED_WHEN_DISABLED = "group-disabled/file-list-tab-button:opacity-50";

@@ -1,5 +1,140 @@
 import type React from "react";
-import { iconPaths } from "./icon-paths";
+import {
+  Activity,
+  AppWindow,
+  Archive,
+  ArrowDown,
+  ArrowDownUp,
+  ArrowLeft,
+  ArrowLeftFromLine,
+  ArrowLeftRight,
+  ArrowRight,
+  ArrowRightFromLine,
+  ArrowUp,
+  ArrowUpRight,
+  ArrowUpToLine,
+  Book,
+  BookOpen,
+  Bot,
+  Brain,
+  Calendar,
+  ChartLine,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  CircleAlert,
+  CircleCheck,
+  CirclePlay,
+  CirclePlus,
+  Clock,
+  Cloud,
+  Coins,
+  Combine,
+  ContactRound,
+  Copy,
+  CreditCard,
+  DollarSign,
+  Download,
+  Ellipsis,
+  EllipsisVertical,
+  Eye,
+  EyeOff,
+  FilePlus,
+  FileSearch,
+  FileText,
+  FileUp,
+  Flag,
+  Folder,
+  FolderOpen,
+  Folders,
+  FolderSearch,
+  Funnel,
+  GitBranch,
+  Globe,
+  GripVertical,
+  Group,
+  Hand,
+  Hash,
+  Headphones,
+  History,
+  House,
+  ImageIcon,
+  IndentDecrease,
+  Info,
+  KeyRound,
+  Layers,
+  LayoutGrid,
+  LayoutList,
+  List,
+  ListChecks,
+  ListOrdered,
+  LoaderCircle,
+  Lock,
+  LogOut,
+  Maximize,
+  Menu,
+  MessageSquare,
+  MessageSquarePlus,
+  Mic,
+  Minimize,
+  Minus,
+  Monitor,
+  Moon,
+  MousePointer2,
+  Network,
+  PanelRightOpen,
+  Paperclip,
+  Pause,
+  Pin,
+  PinOff,
+  Play,
+  Plus,
+  Redo2,
+  RefreshCw,
+  RotateCcw,
+  Rows3,
+  ScanText,
+  Search,
+  Send,
+  Server,
+  Settings,
+  ShieldUser,
+  ShoppingCart,
+  SlidersHorizontal,
+  Sparkles,
+  Square,
+  SquareCode,
+  SquareFunction,
+  SquarePen,
+  SquarePlus,
+  SquareTerminal,
+  Sun,
+  Tag,
+  Tags,
+  Terminal,
+  Thermometer,
+  Timer,
+  ToolCase,
+  Trash2,
+  TriangleAlert,
+  Type,
+  Undo2,
+  UserRound,
+  UsersRound,
+  Variable,
+  Workflow,
+  Wrench,
+  X,
+  Zap,
+  ZapOff,
+  ZoomIn,
+  ZoomOut,
+  createLucideIcon,
+  type LucideIcon,
+} from "lucide-react";
+import { brandIconPaths } from "./icon-paths";
 
 // Enums
 export enum IconName {
@@ -157,31 +292,178 @@ export enum IconName {
 
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
   iconName: IconName;
-  /** CSS color for the glyph. Stylesheets can still override it via `fill`. */
+  /** CSS color for the glyph. A class or stylesheet rule that colors the icon still overrides it. */
   color?: string;
   size?: number;
 }
 
-const DEFAULT_VIEW_BOX = "0 0 24 24";
+// Lucide has no brand marks, so these keep their filled paths.
+type BrandIconName =
+  | IconName.Arcee
+  | IconName.ChatGpt
+  | IconName.Discord
+  | IconName.Github
+  | IconName.Google
+  | IconName.Javascript
+  | IconName.Python;
 
-const pathSegments = (d: string | readonly string[] | undefined): readonly string[] =>
-  d == null ? [""] : typeof d === "string" ? [d] : d;
+// Lucide's send with a plus in the corner it leaves empty.
+const SendPlus = createLucideIcon("send-plus", [
+  [
+    "path",
+    {
+      d: "M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z",
+      key: "send",
+    },
+  ],
+  ["path", { d: "m21.854 2.147-10.94 10.939", key: "send-fold" }],
+  ["path", { d: "M5 16v6", key: "plus-vertical" }],
+  ["path", { d: "M2 19h6", key: "plus-horizontal" }],
+]);
 
-const getGlyph = (iconName: IconName) => {
-  const entry = iconPaths[iconName];
-  if (entry?.kind === "glyph") {
-    return {
-      viewBox: entry.viewBox,
-      segments: pathSegments(entry.d),
-      fillRule: entry.fillRule,
-    };
-  }
-  return {
-    viewBox: DEFAULT_VIEW_BOX,
-    segments: pathSegments(entry?.d),
-    fillRule: entry?.fillRule,
-  };
-};
+const lucideIcons: Partial<Record<IconName, LucideIcon>> = {
+  [IconName.Checklist]: ListChecks,
+  [IconName.Features]: LayoutList,
+  [IconName.Publish]: ArrowUpToLine,
+  [IconName.Toolbox]: ToolCase,
+  [IconName.Play]: Play,
+  [IconName.Add]: Plus,
+  [IconName.Chat]: MessageSquare,
+  [IconName.Home]: House,
+  [IconName.Coursor]: MousePointer2,
+  [IconName.Hand]: Hand,
+  [IconName.Order]: ListOrdered,
+  [IconName.ZoomIn]: ZoomIn,
+  [IconName.ZoomOut]: ZoomOut,
+  [IconName.TurnLeft]: Undo2,
+  [IconName.TurnRight]: Redo2,
+  [IconName.History]: History,
+  [IconName.Env]: Variable,
+  [IconName.AddNote]: FilePlus,
+  [IconName.Controls]: SlidersHorizontal,
+  [IconName.ArrowLeft]: ArrowLeft,
+  [IconName.Down]: ChevronDown,
+  [IconName.Left]: ChevronLeft,
+  [IconName.ArrowRight]: ArrowRight,
+  [IconName.Right]: ChevronRight,
+  [IconName.Top]: ChevronUp,
+  [IconName.Grid]: LayoutGrid,
+  [IconName.ArrowTop]: ArrowUp,
+  [IconName.Trash]: Trash2,
+  [IconName.ArrowDown]: ArrowDown,
+  [IconName.Close]: X,
+  [IconName.Hamburger]: Menu,
+  [IconName.BookOpen]: BookOpen,
+  [IconName.Ai]: Sparkles,
+  [IconName.Book]: Book,
+  [IconName.FileCopy]: Copy,
+  [IconName.FileCopyFilled]: Copy,
+  [IconName.FileUpload]: FileUp,
+  [IconName.Search]: Search,
+  [IconName.PlayHistory]: CirclePlay,
+  [IconName.MenuHorizontal]: Ellipsis,
+  [IconName.HideSidebar]: IndentDecrease,
+  [IconName.MenuVertical]: EllipsisVertical,
+  [IconName.Tag]: Tag,
+  [IconName.TagAdd]: Tags,
+  [IconName.Moon]: Moon,
+  [IconName.Sun]: Sun,
+  [IconName.Desktop]: Monitor,
+  [IconName.DoubleArrowsVertical]: ArrowDownUp,
+  [IconName.FinanceMode]: ChartLine,
+  [IconName.Refresh]: RefreshCw,
+  [IconName.Info]: Info,
+  [IconName.FolderCopy]: Folders,
+  [IconName.Important]: CircleAlert,
+  [IconName.Globe]: Globe,
+  [IconName.Filter]: Funnel,
+  [IconName.Microphone]: Mic,
+  [IconName.Image]: ImageIcon,
+  [IconName.Attachment]: Paperclip,
+  [IconName.Plane]: Send,
+  [IconName.PlaneAdd]: SendPlus,
+  [IconName.Headphones]: Headphones,
+  [IconName.Bolt]: Zap,
+  [IconName.Private]: ShieldUser,
+  [IconName.Scheme]: GitBranch,
+  [IconName.Repair]: Wrench,
+  [IconName.Flow]: Workflow,
+  [IconName.Folder]: Folder,
+  [IconName.Folders]: Folders,
+  [IconName.Edit]: SquarePen,
+  [IconName.AddCircle]: CirclePlus,
+  [IconName.Loader]: LoaderCircle,
+  [IconName.Gear]: Settings,
+  [IconName.Exit]: LogOut,
+  [IconName.Archive]: Archive,
+  [IconName.FolderOpen]: FolderOpen,
+  [IconName.Flag]: Flag,
+  [IconName.DoubleArrowHorizontal]: ArrowLeftRight,
+  [IconName.Code]: SquareCode,
+  [IconName.List]: List,
+  [IconName.UserData]: ContactRound,
+  [IconName.Text]: FileText,
+  [IconName.Check]: Check,
+  [IconName.FullScreen]: Maximize,
+  [IconName.Function]: SquareFunction,
+  [IconName.Combine]: Combine,
+  [IconName.Danger]: TriangleAlert,
+  [IconName.Download]: Download,
+  [IconName.Stop]: Square,
+  [IconName.Pause]: Pause,
+  [IconName.Remove]: Minus,
+  [IconName.AddBox]: SquarePlus,
+  [IconName.Layers]: Layers,
+  [IconName.Eye]: Eye,
+  [IconName.EyeStrikethrough]: EyeOff,
+  [IconName.BoltStrikethrough]: ZapOff,
+  [IconName.Drag]: GripVertical,
+  [IconName.Lock]: Lock,
+  [IconName.FullScreenExit]: Minimize,
+  [IconName.Person]: UserRound,
+  [IconName.People]: UsersRound,
+  [IconName.Group]: Group,
+  [IconName.Cart]: ShoppingCart,
+  [IconName.Timelaps]: Timer,
+  [IconName.Token]: Coins,
+  [IconName.SidebarChevronLeft]: ArrowLeftFromLine,
+  [IconName.SidebarChevronRight]: ArrowRightFromLine,
+  [IconName.Money]: CreditCard,
+  [IconName.AddCreditCard]: CreditCard,
+  [IconName.External]: ArrowUpRight,
+  [IconName.ScreenView]: AppWindow,
+  [IconName.Activity]: Activity,
+  [IconName.Purchase]: ShoppingCart,
+  [IconName.Key]: KeyRound,
+  [IconName.Dollar]: DollarSign,
+  [IconName.Temperature]: Thermometer,
+  [IconName.CheckCircle]: CircleCheck,
+  [IconName.Server]: Server,
+  [IconName.Retry]: RotateCcw,
+  [IconName.Provider]: Cloud,
+  [IconName.Price]: DollarSign,
+  [IconName.Calendar]: Calendar,
+  [IconName.Terminal]: SquareTerminal,
+  [IconName.Chunk]: Rows3,
+  [IconName.Markdown]: Hash,
+  [IconName.String]: Type,
+  [IconName.Brain]: Brain,
+  [IconName.SearchPage]: FileSearch,
+  [IconName.Pin]: Pin,
+  [IconName.Unpin]: PinOff,
+  [IconName.OpenMobileModal]: PanelRightOpen,
+  [IconName.Orchestrator]: Network,
+  [IconName.Robot]: Bot,
+  [IconName.ReadFile]: ScanText,
+  [IconName.SearchFile]: FileSearch,
+  [IconName.SearchFiles]: FolderSearch,
+  [IconName.WriteCommand]: Terminal,
+  [IconName.Clock]: Clock,
+  [IconName.AddChat]: MessageSquarePlus,
+} satisfies Record<Exclude<IconName, BrandIconName>, LucideIcon>;
+
+/** The `color` prop as a fallback the stylesheet reads, so classes keep the final say. */
+type IconStyle = React.CSSProperties & { "--icon-color"?: string };
 
 /**
  * Normalize icon name string by converting to lowercase, trimming, and removing underscores/dashes
@@ -234,25 +516,38 @@ const Icon: React.FC<IconProps> & { Name: typeof IconName } = ({
   iconName = IconName.Checklist,
   color,
   size = 20,
+  strokeWidth = 1.75,
   className = "",
   style,
   ...props
 }) => {
-  const { segments, viewBox, fillRule } = getGlyph(iconName);
+  const iconStyle: IconStyle | undefined = color ? { "--icon-color": color, ...style } : style;
+  const LucideGlyph = lucideIcons[iconName];
+
+  if (LucideGlyph) {
+    return (
+      <LucideGlyph
+        className={`icon ${className}`}
+        size={size}
+        strokeWidth={strokeWidth}
+        style={iconStyle}
+        {...props}
+      />
+    );
+  }
+
   return (
     <svg
       className={`icon ${className}`}
       width={size}
       height={size}
-      viewBox={viewBox}
+      viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      style={color ? { color, ...style } : style}
+      style={iconStyle}
       {...props}
     >
-      {segments.map((d, index) => (
-        <path key={index} d={d} fill="currentColor" fillRule={fillRule} />
-      ))}
+      <path d={brandIconPaths[iconName] ?? ""} fill="currentColor" />
     </svg>
   );
 };

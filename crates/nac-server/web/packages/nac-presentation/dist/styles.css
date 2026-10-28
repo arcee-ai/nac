@@ -460,6 +460,10 @@
     display: none;
   }
 
+[data-nac-runtime]:is(.icon), [data-nac-runtime] .icon {
+    color: var(--icon-color, currentColor);
+  }
+
 [data-nac-runtime]:is(.\@container), [data-nac-runtime] .\@container {
     container-type: inline-size;
   }
@@ -3525,6 +3529,30 @@
     white-space: pre-wrap;
   }
 
+[data-nac-runtime]:is(.\!text-\[var\(--white\)\]), [data-nac-runtime] .\!text-\[var\(--white\)\] {
+    color: var(--white) !important;
+  }
+
+[data-nac-runtime]:is(.\!text-fill-basic-muted), [data-nac-runtime] .\!text-fill-basic-muted {
+    color: var(--color-fill-basic-muted) !important;
+  }
+
+[data-nac-runtime]:is(.\!text-fill-basic-primary), [data-nac-runtime] .\!text-fill-basic-primary {
+    color: var(--color-fill-basic-primary) !important;
+  }
+
+[data-nac-runtime]:is(.\!text-fill-btn-destructive), [data-nac-runtime] .\!text-fill-btn-destructive {
+    color: var(--color-fill-btn-destructive) !important;
+  }
+
+[data-nac-runtime]:is(.\!text-fill-btn-secondary-disabled), [data-nac-runtime] .\!text-fill-btn-secondary-disabled {
+    color: var(--color-fill-btn-secondary-disabled) !important;
+  }
+
+[data-nac-runtime]:is(.\!text-fill-error-primary), [data-nac-runtime] .\!text-fill-error-primary {
+    color: var(--color-fill-error-primary) !important;
+  }
+
 [data-nac-runtime]:is(.text-\[var\(--white\)\]), [data-nac-runtime] .text-\[var\(--white\)\] {
     color: var(--white);
   }
@@ -3591,6 +3619,62 @@
 
 [data-nac-runtime]:is(.text-error-secondary), [data-nac-runtime] .text-error-secondary {
     color: var(--color-text-error-secondary);
+  }
+
+[data-nac-runtime]:is(.text-fill-accent-primary), [data-nac-runtime] .text-fill-accent-primary {
+    color: var(--color-fill-accent-primary);
+  }
+
+[data-nac-runtime]:is(.text-fill-basic-primary), [data-nac-runtime] .text-fill-basic-primary {
+    color: var(--color-fill-basic-primary);
+  }
+
+[data-nac-runtime]:is(.text-fill-basic-tertiary), [data-nac-runtime] .text-fill-basic-tertiary {
+    color: var(--color-fill-basic-tertiary);
+  }
+
+[data-nac-runtime]:is(.text-fill-btn-destructive), [data-nac-runtime] .text-fill-btn-destructive {
+    color: var(--color-fill-btn-destructive);
+  }
+
+[data-nac-runtime]:is(.text-fill-btn-secondary), [data-nac-runtime] .text-fill-btn-secondary {
+    color: var(--color-fill-btn-secondary);
+  }
+
+[data-nac-runtime]:is(.text-fill-btn-secondary-disabled), [data-nac-runtime] .text-fill-btn-secondary-disabled {
+    color: var(--color-fill-btn-secondary-disabled);
+  }
+
+[data-nac-runtime]:is(.text-fill-btn-secondary-hovered), [data-nac-runtime] .text-fill-btn-secondary-hovered {
+    color: var(--color-fill-btn-secondary-hovered);
+  }
+
+[data-nac-runtime]:is(.text-fill-btn-secondary-pressed), [data-nac-runtime] .text-fill-btn-secondary-pressed {
+    color: var(--color-fill-btn-secondary-pressed);
+  }
+
+[data-nac-runtime]:is(.text-fill-danger-primary), [data-nac-runtime] .text-fill-danger-primary {
+    color: var(--color-fill-danger-primary);
+  }
+
+[data-nac-runtime]:is(.text-fill-danger-secondary), [data-nac-runtime] .text-fill-danger-secondary {
+    color: var(--color-fill-danger-secondary);
+  }
+
+[data-nac-runtime]:is(.text-fill-error-primary), [data-nac-runtime] .text-fill-error-primary {
+    color: var(--color-fill-error-primary);
+  }
+
+[data-nac-runtime]:is(.text-fill-error-secondary), [data-nac-runtime] .text-fill-error-secondary {
+    color: var(--color-fill-error-secondary);
+  }
+
+[data-nac-runtime]:is(.text-fill-info-primary), [data-nac-runtime] .text-fill-info-primary {
+    color: var(--color-fill-info-primary);
+  }
+
+[data-nac-runtime]:is(.text-fill-info-secondary), [data-nac-runtime] .text-fill-info-secondary {
+    color: var(--color-fill-info-secondary);
   }
 
 [data-nac-runtime]:is(.text-info-primary), [data-nac-runtime] .text-info-primary {
@@ -4052,6 +4136,18 @@
       color: var(--color-text-btn-secondary-hovered);
     }
 
+    [data-nac-runtime]:is(.group-hover\:text-fill-accent-secondary:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:text-fill-accent-secondary:is(:where(.group):hover *) {
+      color: var(--color-fill-accent-secondary);
+    }
+
+    [data-nac-runtime]:is(.group-hover\:text-fill-basic-secondary:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:text-fill-basic-secondary:is(:where(.group):hover *) {
+      color: var(--color-fill-basic-secondary);
+    }
+
+    [data-nac-runtime]:is(.group-hover\:text-fill-btn-secondary-hovered:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:text-fill-btn-secondary-hovered:is(:where(.group):hover *) {
+      color: var(--color-fill-btn-secondary-hovered);
+    }
+
     [data-nac-runtime]:is(.group-hover\:text-inherit:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:text-inherit:is(:where(.group):hover *) {
       color: inherit;
     }
@@ -4062,6 +4158,10 @@
 
     [data-nac-runtime]:is(.group-hover\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):hover *) {
       -webkit-text-fill-color: currentColor;
+    }
+
+    [data-nac-runtime]:is(.group-hover\/file-list-tab-button\:text-fill-btn-secondary-hovered:is(:where(.group\/file-list-tab-button):hover *)), [data-nac-runtime] .group-hover\/file-list-tab-button\:text-fill-btn-secondary-hovered:is(:where(.group\/file-list-tab-button):hover *) {
+      color: var(--color-fill-btn-secondary-hovered);
     }
 
     [data-nac-runtime]:is(.group-hover\/terminal-tab-button\:opacity-100:is(:where(.group\/terminal-tab-button):hover *)), [data-nac-runtime] .group-hover\/terminal-tab-button\:opacity-100:is(:where(.group\/terminal-tab-button):hover *) {
@@ -4093,6 +4193,14 @@
     background-image: none;
   }
 
+[data-nac-runtime]:is(.group-active\:text-fill-accent-tertiary:is(:where(.group):active *)), [data-nac-runtime] .group-active\:text-fill-accent-tertiary:is(:where(.group):active *) {
+    color: var(--color-fill-accent-tertiary);
+  }
+
+[data-nac-runtime]:is(.group-active\:text-fill-basic-primary:is(:where(.group):active *)), [data-nac-runtime] .group-active\:text-fill-basic-primary:is(:where(.group):active *) {
+    color: var(--color-fill-basic-primary);
+  }
+
 [data-nac-runtime]:is(.group-active\:text-inherit:is(:where(.group):active *)), [data-nac-runtime] .group-active\:text-inherit:is(:where(.group):active *) {
     color: inherit;
   }
@@ -4101,12 +4209,24 @@
     -webkit-text-fill-color: currentColor;
   }
 
+[data-nac-runtime]:is(.group-active\/file-list-tab-button\:text-fill-btn-secondary-pressed:is(:where(.group\/file-list-tab-button):active *)), [data-nac-runtime] .group-active\/file-list-tab-button\:text-fill-btn-secondary-pressed:is(:where(.group\/file-list-tab-button):active *) {
+    color: var(--color-fill-btn-secondary-pressed);
+  }
+
 [data-nac-runtime]:is(.group-disabled\:animate-none:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:animate-none:is(:where(.group):disabled *) {
     animation: none;
   }
 
 [data-nac-runtime]:is(.group-disabled\:bg-none:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:bg-none:is(:where(.group):disabled *) {
     background-image: none;
+  }
+
+[data-nac-runtime]:is(.group-disabled\:text-fill-accent-muted:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:text-fill-accent-muted:is(:where(.group):disabled *) {
+    color: var(--color-fill-accent-muted);
+  }
+
+[data-nac-runtime]:is(.group-disabled\:text-fill-basic-muted:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:text-fill-basic-muted:is(:where(.group):disabled *) {
+    color: var(--color-fill-basic-muted);
   }
 
 [data-nac-runtime]:is(.group-disabled\:text-inherit:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:text-inherit:is(:where(.group):disabled *) {
@@ -4121,7 +4241,15 @@
     -webkit-text-fill-color: currentColor;
   }
 
-[data-nac-runtime]:is(.group-disabled\/file-button\:opacity-50:is(:where(.group\/file-button):disabled *)), [data-nac-runtime] .group-disabled\/file-button\:opacity-50:is(:where(.group\/file-button):disabled *), [data-nac-runtime]:is(.group-disabled\/file-list-tab-button\:opacity-50:is(:where(.group\/file-list-tab-button):disabled *)), [data-nac-runtime] .group-disabled\/file-list-tab-button\:opacity-50:is(:where(.group\/file-list-tab-button):disabled *) {
+[data-nac-runtime]:is(.group-disabled\/file-button\:opacity-50:is(:where(.group\/file-button):disabled *)), [data-nac-runtime] .group-disabled\/file-button\:opacity-50:is(:where(.group\/file-button):disabled *) {
+    opacity: .5;
+  }
+
+[data-nac-runtime]:is(.group-disabled\/file-list-tab-button\:text-fill-btn-secondary-disabled:is(:where(.group\/file-list-tab-button):disabled *)), [data-nac-runtime] .group-disabled\/file-list-tab-button\:text-fill-btn-secondary-disabled:is(:where(.group\/file-list-tab-button):disabled *) {
+    color: var(--color-fill-btn-secondary-disabled);
+  }
+
+[data-nac-runtime]:is(.group-disabled\/file-list-tab-button\:opacity-50:is(:where(.group\/file-list-tab-button):disabled *)), [data-nac-runtime] .group-disabled\/file-list-tab-button\:opacity-50:is(:where(.group\/file-list-tab-button):disabled *) {
     opacity: .5;
   }
 
@@ -4156,8 +4284,16 @@
     opacity: 1;
   }
 
+[data-nac-runtime]:is(.group-has-\[\>button\:active\]\:text-fill-btn-secondary-pressed:is(:where(.group):has( > button:active) *)), [data-nac-runtime] .group-has-\[\>button\:active\]\:text-fill-btn-secondary-pressed:is(:where(.group):has( > button:active) *) {
+    color: var(--color-fill-btn-secondary-pressed);
+  }
+
 [data-nac-runtime]:is(.group-has-\[\>button\:disabled\]\:hidden:is(:where(.group):has( > button:disabled) *)), [data-nac-runtime] .group-has-\[\>button\:disabled\]\:hidden:is(:where(.group):has( > button:disabled) *) {
     display: none;
+  }
+
+[data-nac-runtime]:is(.group-has-\[\>button\:disabled\]\:text-fill-btn-secondary-disabled:is(:where(.group):has( > button:disabled) *)), [data-nac-runtime] .group-has-\[\>button\:disabled\]\:text-fill-btn-secondary-disabled:is(:where(.group):has( > button:disabled) *) {
+    color: var(--color-fill-btn-secondary-disabled);
   }
 
 [data-nac-runtime]:is(.peer-focus-visible\:opacity-100:is(:where(.peer):focus-visible ~ *)), [data-nac-runtime] .peer-focus-visible\:opacity-100:is(:where(.peer):focus-visible ~ *) {
@@ -4280,6 +4416,10 @@
       color: var(--color-text-btn-secondary-hovered);
     }
 
+    [data-nac-runtime]:is(.hover\:text-fill-btn-destructive-hovered:hover), [data-nac-runtime] .hover\:text-fill-btn-destructive-hovered:hover {
+      color: var(--color-fill-btn-destructive-hovered);
+    }
+
     [data-nac-runtime]:is(.hover\:underline:hover), [data-nac-runtime] .hover\:underline:hover {
       text-decoration-line: underline;
     }
@@ -4361,6 +4501,10 @@
     color: var(--color-text-btn-secondary-pressed-highlighted);
   }
 
+[data-nac-runtime]:is(.active\:text-fill-btn-destructive-pressed:active), [data-nac-runtime] .active\:text-fill-btn-destructive-pressed:active {
+    color: var(--color-fill-btn-destructive-pressed);
+  }
+
 @media (hover: hover) {
     [data-nac-runtime]:is(.enabled\:hover\:bg-btn-ghost-highlighted-hovered:enabled:hover), [data-nac-runtime] .enabled\:hover\:bg-btn-ghost-highlighted-hovered:enabled:hover {
       background-color: var(--color-bg-btn-ghost-highlighted-hovered);
@@ -4421,6 +4565,10 @@
 
 [data-nac-runtime]:is(.disabled\:text-btn-secondary-disabled-highlighted:disabled), [data-nac-runtime] .disabled\:text-btn-secondary-disabled-highlighted:disabled {
     color: var(--color-text-btn-secondary-disabled-highlighted);
+  }
+
+[data-nac-runtime]:is(.disabled\:text-fill-btn-destructive-disabled:disabled), [data-nac-runtime] .disabled\:text-fill-btn-destructive-disabled:disabled {
+    color: var(--color-fill-btn-destructive-disabled);
   }
 
 [data-nac-runtime]:is(.has-\[\>button\:active\]\:bg-btn-ghost-highlighted-pressed:has( > button:active)), [data-nac-runtime] .has-\[\>button\:active\]\:bg-btn-ghost-highlighted-pressed:has( > button:active) {
@@ -4842,100 +4990,18 @@
     }
   }
 
-[data-nac-runtime]:is(.\[\&_path\]\:fill-accent-primary path), [data-nac-runtime] .\[\&_path\]\:fill-accent-primary path {
-    fill: var(--color-fill-accent-primary);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-basic-tertiary path), [data-nac-runtime] .\[\&_path\]\:fill-basic-tertiary path {
-    fill: var(--color-fill-basic-tertiary);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-btn-destructive path), [data-nac-runtime] .\[\&_path\]\:fill-btn-destructive path {
-    fill: var(--color-fill-btn-destructive);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-btn-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-btn-secondary path {
-    fill: var(--color-fill-btn-secondary);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-btn-secondary-disabled path), [data-nac-runtime] .\[\&_path\]\:fill-btn-secondary-disabled path {
-    fill: var(--color-fill-btn-secondary-disabled);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-btn-secondary-hovered path), [data-nac-runtime] .\[\&_path\]\:fill-btn-secondary-hovered path {
-    fill: var(--color-fill-btn-secondary-hovered);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-btn-secondary-pressed path), [data-nac-runtime] .\[\&_path\]\:fill-btn-secondary-pressed path {
-    fill: var(--color-fill-btn-secondary-pressed);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-danger-primary path), [data-nac-runtime] .\[\&_path\]\:fill-danger-primary path {
-    fill: var(--color-fill-danger-primary);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-danger-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-danger-secondary path {
-    fill: var(--color-fill-danger-secondary);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-error-primary path), [data-nac-runtime] .\[\&_path\]\:fill-error-primary path {
-    fill: var(--color-fill-error-primary);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-error-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-error-secondary path {
-    fill: var(--color-fill-error-secondary);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-info-primary path), [data-nac-runtime] .\[\&_path\]\:fill-info-primary path {
-    fill: var(--color-fill-info-primary);
-  }
-
-[data-nac-runtime]:is(.\[\&_path\]\:fill-info-secondary path), [data-nac-runtime] .\[\&_path\]\:fill-info-secondary path {
-    fill: var(--color-fill-info-secondary);
+[data-nac-runtime]:is(.\[\&_\.icon\]\:text-fill-btn-secondary .icon), [data-nac-runtime] .\[\&_\.icon\]\:text-fill-btn-secondary .icon {
+    color: var(--color-fill-btn-secondary);
   }
 
 @media (hover: hover) {
-    [data-nac-runtime]:is(.group-hover\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group):hover *) path), [data-nac-runtime] .group-hover\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group):hover *) path, [data-nac-runtime]:is(.group-hover\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group\/file-list-tab-button):hover *) path), [data-nac-runtime] .group-hover\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-hovered:is(:where(.group\/file-list-tab-button):hover *) path {
-      fill: var(--color-fill-btn-secondary-hovered);
+    [data-nac-runtime]:is(.hover\:\[\&_\.icon\]\:text-fill-btn-secondary-hovered:hover .icon), [data-nac-runtime] .hover\:\[\&_\.icon\]\:text-fill-btn-secondary-hovered:hover .icon {
+      color: var(--color-fill-btn-secondary-hovered);
     }
   }
 
-[data-nac-runtime]:is(.group-active\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group\/file-list-tab-button):active *) path), [data-nac-runtime] .group-active\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group\/file-list-tab-button):active *) path {
-    fill: var(--color-fill-btn-secondary-pressed);
-  }
-
-[data-nac-runtime]:is(.group-disabled\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group\/file-list-tab-button):disabled *) path), [data-nac-runtime] .group-disabled\/file-list-tab-button\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group\/file-list-tab-button):disabled *) path {
-    fill: var(--color-fill-btn-secondary-disabled);
-  }
-
-[data-nac-runtime]:is(.group-has-\[\>button\:active\]\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group):has( > button:active) *) path), [data-nac-runtime] .group-has-\[\>button\:active\]\:\[\&_path\]\:fill-btn-secondary-pressed:is(:where(.group):has( > button:active) *) path {
-    fill: var(--color-fill-btn-secondary-pressed);
-  }
-
-[data-nac-runtime]:is(.group-has-\[\>button\:disabled\]\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group):has( > button:disabled) *) path), [data-nac-runtime] .group-has-\[\>button\:disabled\]\:\[\&_path\]\:fill-btn-secondary-disabled:is(:where(.group):has( > button:disabled) *) path {
-    fill: var(--color-fill-btn-secondary-disabled);
-  }
-
-@media (hover: hover) {
-    [data-nac-runtime]:is(.hover\:\[\&_path\]\:fill-btn-destructive-hovered:hover path), [data-nac-runtime] .hover\:\[\&_path\]\:fill-btn-destructive-hovered:hover path {
-      fill: var(--color-fill-btn-destructive-hovered);
-    }
-
-    [data-nac-runtime]:is(.hover\:\[\&_path\]\:fill-btn-secondary-hovered:hover path), [data-nac-runtime] .hover\:\[\&_path\]\:fill-btn-secondary-hovered:hover path {
-      fill: var(--color-fill-btn-secondary-hovered);
-    }
-  }
-
-[data-nac-runtime]:is(.active\:\[\&_path\]\:fill-btn-destructive-pressed:active path), [data-nac-runtime] .active\:\[\&_path\]\:fill-btn-destructive-pressed:active path {
-    fill: var(--color-fill-btn-destructive-pressed);
-  }
-
-[data-nac-runtime]:is(.active\:\[\&_path\]\:fill-btn-secondary-pressed:active path), [data-nac-runtime] .active\:\[\&_path\]\:fill-btn-secondary-pressed:active path {
-    fill: var(--color-fill-btn-secondary-pressed);
-  }
-
-[data-nac-runtime]:is(.disabled\:\[\&_path\]\:fill-btn-destructive-disabled:disabled path), [data-nac-runtime] .disabled\:\[\&_path\]\:fill-btn-destructive-disabled:disabled path {
-    fill: var(--color-fill-btn-destructive-disabled);
+[data-nac-runtime]:is(.active\:\[\&_\.icon\]\:text-fill-btn-secondary-pressed:active .icon), [data-nac-runtime] .active\:\[\&_\.icon\]\:text-fill-btn-secondary-pressed:active .icon {
+    color: var(--color-fill-btn-secondary-pressed);
   }
 
 [data-nac-runtime]:is(.\[\&_svg\]\:size-4 svg), [data-nac-runtime] .\[\&_svg\]\:size-4 svg {
@@ -4998,70 +5064,8 @@
     fill: var(--white) !important;
   }
 
-[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-basic-muted > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-basic-muted > path {
-    fill: var(--color-fill-basic-muted) !important;
-  }
-
-[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-basic-primary > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-basic-primary > path {
-    fill: var(--color-fill-basic-primary) !important;
-  }
-
-[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-btn-destructive > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-btn-destructive > path {
-    fill: var(--color-fill-btn-destructive) !important;
-  }
-
-[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-btn-secondary-disabled > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-btn-secondary-disabled > path {
-    fill: var(--color-fill-btn-secondary-disabled) !important;
-  }
-
-[data-nac-runtime]:is(.\[\&\>path\]\:\!fill-error-primary > path), [data-nac-runtime] .\[\&\>path\]\:\!fill-error-primary > path {
-    fill: var(--color-fill-error-primary) !important;
-  }
-
 [data-nac-runtime]:is(.\[\&\>path\]\:fill-\[var\(--white\)\] > path), [data-nac-runtime] .\[\&\>path\]\:fill-\[var\(--white\)\] > path {
     fill: var(--white);
-  }
-
-[data-nac-runtime]:is(.\[\&\>path\]\:fill-accent-primary > path), [data-nac-runtime] .\[\&\>path\]\:fill-accent-primary > path {
-    fill: var(--color-fill-accent-primary);
-  }
-
-[data-nac-runtime]:is(.\[\&\>path\]\:fill-basic-primary > path), [data-nac-runtime] .\[\&\>path\]\:fill-basic-primary > path {
-    fill: var(--color-fill-basic-primary);
-  }
-
-[data-nac-runtime]:is(.\[\&\>path\]\:fill-basic-tertiary > path), [data-nac-runtime] .\[\&\>path\]\:fill-basic-tertiary > path {
-    fill: var(--color-fill-basic-tertiary);
-  }
-
-[data-nac-runtime]:is(.\[\&\>path\]\:fill-error-primary > path), [data-nac-runtime] .\[\&\>path\]\:fill-error-primary > path {
-    fill: var(--color-fill-error-primary);
-  }
-
-@media (hover: hover) {
-    [data-nac-runtime]:is(.group-hover\:\[\&\>path\]\:fill-accent-secondary:is(:where(.group):hover *) > path), [data-nac-runtime] .group-hover\:\[\&\>path\]\:fill-accent-secondary:is(:where(.group):hover *) > path {
-      fill: var(--color-fill-accent-secondary);
-    }
-
-    [data-nac-runtime]:is(.group-hover\:\[\&\>path\]\:fill-basic-secondary:is(:where(.group):hover *) > path), [data-nac-runtime] .group-hover\:\[\&\>path\]\:fill-basic-secondary:is(:where(.group):hover *) > path {
-      fill: var(--color-fill-basic-secondary);
-    }
-  }
-
-[data-nac-runtime]:is(.group-active\:\[\&\>path\]\:fill-accent-tertiary:is(:where(.group):active *) > path), [data-nac-runtime] .group-active\:\[\&\>path\]\:fill-accent-tertiary:is(:where(.group):active *) > path {
-    fill: var(--color-fill-accent-tertiary);
-  }
-
-[data-nac-runtime]:is(.group-active\:\[\&\>path\]\:fill-basic-primary:is(:where(.group):active *) > path), [data-nac-runtime] .group-active\:\[\&\>path\]\:fill-basic-primary:is(:where(.group):active *) > path {
-    fill: var(--color-fill-basic-primary);
-  }
-
-[data-nac-runtime]:is(.group-disabled\:\[\&\>path\]\:fill-accent-muted:is(:where(.group):disabled *) > path), [data-nac-runtime] .group-disabled\:\[\&\>path\]\:fill-accent-muted:is(:where(.group):disabled *) > path {
-    fill: var(--color-fill-accent-muted);
-  }
-
-[data-nac-runtime]:is(.group-disabled\:\[\&\>path\]\:fill-basic-muted:is(:where(.group):disabled *) > path), [data-nac-runtime] .group-disabled\:\[\&\>path\]\:fill-basic-muted:is(:where(.group):disabled *) > path {
-    fill: var(--color-fill-basic-muted);
   }
 
 @media (hover: none) {
@@ -6101,8 +6105,8 @@
   display: block;
 }
 
-[data-nac-runtime]:is(.icon path), [data-nac-runtime] .icon path {
-  transition: fill .15s ease-out;
+[data-nac-runtime]:is(.icon > *), [data-nac-runtime] .icon > * {
+  transition: color .15s ease-out;
 }
 
 [data-nac-runtime]:is(.btn), [data-nac-runtime] .btn {
@@ -6529,76 +6533,76 @@
   min-height: 24px;
 }
 
-[data-nac-runtime]:is(.btn-primary .icon path), [data-nac-runtime] .btn-primary .icon path {
-  fill: var(--color-fill-btn-primary);
+[data-nac-runtime]:is(.btn-primary .icon), [data-nac-runtime] .btn-primary .icon {
+  color: var(--color-fill-btn-primary);
 }
 
-[data-nac-runtime]:is(.btn-primary.btn-disabled .icon path), [data-nac-runtime] .btn-primary.btn-disabled .icon path {
-  fill: var(--color-fill-btn-primary-disabled);
+[data-nac-runtime]:is(.btn-primary.btn-disabled .icon), [data-nac-runtime] .btn-primary.btn-disabled .icon {
+  color: var(--color-fill-btn-primary-disabled);
 }
 
-[data-nac-runtime]:is(.btn-secondary .icon path), [data-nac-runtime] .btn-secondary .icon path, [data-nac-runtime]:is(.btn-ghost .icon path), [data-nac-runtime] .btn-ghost .icon path, [data-nac-runtime]:is(.btn-tertiary .icon path), [data-nac-runtime] .btn-tertiary .icon path {
-  fill: var(--color-fill-btn-secondary);
+[data-nac-runtime]:is(.btn-secondary .icon), [data-nac-runtime] .btn-secondary .icon, [data-nac-runtime]:is(.btn-ghost .icon), [data-nac-runtime] .btn-ghost .icon, [data-nac-runtime]:is(.btn-tertiary .icon), [data-nac-runtime] .btn-tertiary .icon {
+  color: var(--color-fill-btn-secondary);
 }
 
-[data-nac-runtime]:is(.btn-secondary:hover .icon path), [data-nac-runtime] .btn-secondary:hover .icon path, [data-nac-runtime]:is(.btn-ghost:hover .icon path), [data-nac-runtime] .btn-ghost:hover .icon path, [data-nac-runtime]:is(.btn-tertiary:hover .icon path), [data-nac-runtime] .btn-tertiary:hover .icon path {
-  fill: var(--color-fill-btn-secondary-hovered);
+[data-nac-runtime]:is(.btn-secondary:hover .icon), [data-nac-runtime] .btn-secondary:hover .icon, [data-nac-runtime]:is(.btn-ghost:hover .icon), [data-nac-runtime] .btn-ghost:hover .icon, [data-nac-runtime]:is(.btn-tertiary:hover .icon), [data-nac-runtime] .btn-tertiary:hover .icon {
+  color: var(--color-fill-btn-secondary-hovered);
 }
 
-[data-nac-runtime]:is(.btn-secondary:active .icon path), [data-nac-runtime] .btn-secondary:active .icon path, [data-nac-runtime]:is(.btn-ghost:active .icon path), [data-nac-runtime] .btn-ghost:active .icon path, [data-nac-runtime]:is(.btn-tertiary:active .icon path), [data-nac-runtime] .btn-tertiary:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed);
+[data-nac-runtime]:is(.btn-secondary:active .icon), [data-nac-runtime] .btn-secondary:active .icon, [data-nac-runtime]:is(.btn-ghost:active .icon), [data-nac-runtime] .btn-ghost:active .icon, [data-nac-runtime]:is(.btn-tertiary:active .icon), [data-nac-runtime] .btn-tertiary:active .icon {
+  color: var(--color-fill-btn-secondary-pressed);
 }
 
-[data-nac-runtime]:is(.btn-secondary.btn-disabled .icon path), [data-nac-runtime] .btn-secondary.btn-disabled .icon path, [data-nac-runtime]:is(.btn-ghost.btn-disabled .icon path), [data-nac-runtime] .btn-ghost.btn-disabled .icon path, [data-nac-runtime]:is(.btn-tertiary.btn-disabled .icon path), [data-nac-runtime] .btn-tertiary.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled);
+[data-nac-runtime]:is(.btn-secondary.btn-disabled .icon), [data-nac-runtime] .btn-secondary.btn-disabled .icon, [data-nac-runtime]:is(.btn-ghost.btn-disabled .icon), [data-nac-runtime] .btn-ghost.btn-disabled .icon, [data-nac-runtime]:is(.btn-tertiary.btn-disabled .icon), [data-nac-runtime] .btn-tertiary.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled);
 }
 
-[data-nac-runtime]:is(.btn-secondary-highlighted .icon path), [data-nac-runtime] .btn-secondary-highlighted .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted .icon path), [data-nac-runtime] .btn-ghost-highlighted .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted);
+[data-nac-runtime]:is(.btn-secondary-highlighted .icon), [data-nac-runtime] .btn-secondary-highlighted .icon, [data-nac-runtime]:is(.btn-ghost-highlighted .icon), [data-nac-runtime] .btn-ghost-highlighted .icon {
+  color: var(--color-fill-btn-secondary-highlighted);
 }
 
-[data-nac-runtime]:is(.btn-secondary-highlighted:hover .icon path), [data-nac-runtime] .btn-secondary-highlighted:hover .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted:hover .icon path), [data-nac-runtime] .btn-ghost-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-secondary-hovered-highlighted);
+[data-nac-runtime]:is(.btn-secondary-highlighted:hover .icon), [data-nac-runtime] .btn-secondary-highlighted:hover .icon, [data-nac-runtime]:is(.btn-ghost-highlighted:hover .icon), [data-nac-runtime] .btn-ghost-highlighted:hover .icon {
+  color: var(--color-fill-btn-secondary-hovered-highlighted);
 }
 
-[data-nac-runtime]:is(.btn-secondary-highlighted:active .icon path), [data-nac-runtime] .btn-secondary-highlighted:active .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted:active .icon path), [data-nac-runtime] .btn-ghost-highlighted:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed-highlighted);
+[data-nac-runtime]:is(.btn-secondary-highlighted:active .icon), [data-nac-runtime] .btn-secondary-highlighted:active .icon, [data-nac-runtime]:is(.btn-ghost-highlighted:active .icon), [data-nac-runtime] .btn-ghost-highlighted:active .icon {
+  color: var(--color-fill-btn-secondary-pressed-highlighted);
 }
 
-[data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled .icon path), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted.btn-disabled .icon path), [data-nac-runtime] .btn-ghost-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled-highlighted);
+[data-nac-runtime]:is(.btn-secondary-highlighted.btn-disabled .icon), [data-nac-runtime] .btn-secondary-highlighted.btn-disabled .icon, [data-nac-runtime]:is(.btn-ghost-highlighted.btn-disabled .icon), [data-nac-runtime] .btn-ghost-highlighted.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled-highlighted);
 }
 
-[data-nac-runtime]:is(.btn-secondary-accent .icon path), [data-nac-runtime] .btn-secondary-accent .icon path, [data-nac-runtime]:is(.btn-secondary-accent-highlighted .icon path), [data-nac-runtime] .btn-secondary-accent-highlighted .icon path, [data-nac-runtime]:is(.btn-ghost-accent .icon path), [data-nac-runtime] .btn-ghost-accent .icon path, [data-nac-runtime]:is(.btn-tertiary-accent .icon path), [data-nac-runtime] .btn-tertiary-accent .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted-accent .icon path), [data-nac-runtime] .btn-ghost-highlighted-accent .icon path {
-  fill: var(--color-fill-btn-accent);
+[data-nac-runtime]:is(.btn-secondary-accent .icon), [data-nac-runtime] .btn-secondary-accent .icon, [data-nac-runtime]:is(.btn-secondary-accent-highlighted .icon), [data-nac-runtime] .btn-secondary-accent-highlighted .icon, [data-nac-runtime]:is(.btn-ghost-accent .icon), [data-nac-runtime] .btn-ghost-accent .icon, [data-nac-runtime]:is(.btn-tertiary-accent .icon), [data-nac-runtime] .btn-tertiary-accent .icon, [data-nac-runtime]:is(.btn-ghost-highlighted-accent .icon), [data-nac-runtime] .btn-ghost-highlighted-accent .icon {
+  color: var(--color-fill-btn-accent);
 }
 
-[data-nac-runtime]:is(.btn-secondary-accent:hover .icon path), [data-nac-runtime] .btn-secondary-accent:hover .icon path, [data-nac-runtime]:is(.btn-secondary-accent-highlighted:hover .icon path), [data-nac-runtime] .btn-secondary-accent-highlighted:hover .icon path, [data-nac-runtime]:is(.btn-ghost-accent:hover .icon path), [data-nac-runtime] .btn-ghost-accent:hover .icon path, [data-nac-runtime]:is(.btn-tertiary-accent:hover .icon path), [data-nac-runtime] .btn-tertiary-accent:hover .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted-accent:hover .icon path), [data-nac-runtime] .btn-ghost-highlighted-accent:hover .icon path {
-  fill: var(--color-fill-btn-accent-hovered);
+[data-nac-runtime]:is(.btn-secondary-accent:hover .icon), [data-nac-runtime] .btn-secondary-accent:hover .icon, [data-nac-runtime]:is(.btn-secondary-accent-highlighted:hover .icon), [data-nac-runtime] .btn-secondary-accent-highlighted:hover .icon, [data-nac-runtime]:is(.btn-ghost-accent:hover .icon), [data-nac-runtime] .btn-ghost-accent:hover .icon, [data-nac-runtime]:is(.btn-tertiary-accent:hover .icon), [data-nac-runtime] .btn-tertiary-accent:hover .icon, [data-nac-runtime]:is(.btn-ghost-highlighted-accent:hover .icon), [data-nac-runtime] .btn-ghost-highlighted-accent:hover .icon {
+  color: var(--color-fill-btn-accent-hovered);
 }
 
-[data-nac-runtime]:is(.btn-secondary-accent:active .icon path), [data-nac-runtime] .btn-secondary-accent:active .icon path, [data-nac-runtime]:is(.btn-secondary-accent-highlighted:active .icon path), [data-nac-runtime] .btn-secondary-accent-highlighted:active .icon path, [data-nac-runtime]:is(.btn-ghost-accent:active .icon path), [data-nac-runtime] .btn-ghost-accent:active .icon path, [data-nac-runtime]:is(.btn-tertiary-accent:active .icon path), [data-nac-runtime] .btn-tertiary-accent:active .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted-accent:active .icon path), [data-nac-runtime] .btn-ghost-highlighted-accent:active .icon path {
-  fill: var(--color-fill-btn-accent-pressed);
+[data-nac-runtime]:is(.btn-secondary-accent:active .icon), [data-nac-runtime] .btn-secondary-accent:active .icon, [data-nac-runtime]:is(.btn-secondary-accent-highlighted:active .icon), [data-nac-runtime] .btn-secondary-accent-highlighted:active .icon, [data-nac-runtime]:is(.btn-ghost-accent:active .icon), [data-nac-runtime] .btn-ghost-accent:active .icon, [data-nac-runtime]:is(.btn-tertiary-accent:active .icon), [data-nac-runtime] .btn-tertiary-accent:active .icon, [data-nac-runtime]:is(.btn-ghost-highlighted-accent:active .icon), [data-nac-runtime] .btn-ghost-highlighted-accent:active .icon {
+  color: var(--color-fill-btn-accent-pressed);
 }
 
-[data-nac-runtime]:is(.btn-secondary-accent.btn-disabled .icon path), [data-nac-runtime] .btn-secondary-accent.btn-disabled .icon path, [data-nac-runtime]:is(.btn-secondary-accent-highlighted.btn-disabled .icon path), [data-nac-runtime] .btn-secondary-accent-highlighted.btn-disabled .icon path, [data-nac-runtime]:is(.btn-ghost-accent.btn-disabled .icon path), [data-nac-runtime] .btn-ghost-accent.btn-disabled .icon path, [data-nac-runtime]:is(.btn-tertiary-accent.btn-disabled .icon path), [data-nac-runtime] .btn-tertiary-accent.btn-disabled .icon path, [data-nac-runtime]:is(.btn-ghost-highlighted-accent.btn-disabled .icon path), [data-nac-runtime] .btn-ghost-highlighted-accent.btn-disabled .icon path {
-  fill: var(--color-fill-btn-accent-muted);
+[data-nac-runtime]:is(.btn-secondary-accent.btn-disabled .icon), [data-nac-runtime] .btn-secondary-accent.btn-disabled .icon, [data-nac-runtime]:is(.btn-secondary-accent-highlighted.btn-disabled .icon), [data-nac-runtime] .btn-secondary-accent-highlighted.btn-disabled .icon, [data-nac-runtime]:is(.btn-ghost-accent.btn-disabled .icon), [data-nac-runtime] .btn-ghost-accent.btn-disabled .icon, [data-nac-runtime]:is(.btn-tertiary-accent.btn-disabled .icon), [data-nac-runtime] .btn-tertiary-accent.btn-disabled .icon, [data-nac-runtime]:is(.btn-ghost-highlighted-accent.btn-disabled .icon), [data-nac-runtime] .btn-ghost-highlighted-accent.btn-disabled .icon {
+  color: var(--color-fill-btn-accent-muted);
 }
 
-[data-nac-runtime]:is(.btn-secondary-destructive .icon path), [data-nac-runtime] .btn-secondary-destructive .icon path, [data-nac-runtime]:is(.btn-ghost-destructive .icon path), [data-nac-runtime] .btn-ghost-destructive .icon path, [data-nac-runtime]:is(.btn-tertiary-destructive .icon path), [data-nac-runtime] .btn-tertiary-destructive .icon path {
-  fill: var(--color-fill-btn-destructive);
+[data-nac-runtime]:is(.btn-secondary-destructive .icon), [data-nac-runtime] .btn-secondary-destructive .icon, [data-nac-runtime]:is(.btn-ghost-destructive .icon), [data-nac-runtime] .btn-ghost-destructive .icon, [data-nac-runtime]:is(.btn-tertiary-destructive .icon), [data-nac-runtime] .btn-tertiary-destructive .icon {
+  color: var(--color-fill-btn-destructive);
 }
 
-[data-nac-runtime]:is(.btn-secondary-destructive:hover .icon path), [data-nac-runtime] .btn-secondary-destructive:hover .icon path, [data-nac-runtime]:is(.btn-ghost-destructive:hover .icon path), [data-nac-runtime] .btn-ghost-destructive:hover .icon path, [data-nac-runtime]:is(.btn-tertiary-destructive:hover .icon path), [data-nac-runtime] .btn-tertiary-destructive:hover .icon path {
-  fill: var(--color-fill-btn-destructive-hovered);
+[data-nac-runtime]:is(.btn-secondary-destructive:hover .icon), [data-nac-runtime] .btn-secondary-destructive:hover .icon, [data-nac-runtime]:is(.btn-ghost-destructive:hover .icon), [data-nac-runtime] .btn-ghost-destructive:hover .icon, [data-nac-runtime]:is(.btn-tertiary-destructive:hover .icon), [data-nac-runtime] .btn-tertiary-destructive:hover .icon {
+  color: var(--color-fill-btn-destructive-hovered);
 }
 
-[data-nac-runtime]:is(.btn-secondary-destructive:active .icon path), [data-nac-runtime] .btn-secondary-destructive:active .icon path, [data-nac-runtime]:is(.btn-ghost-destructive:active .icon path), [data-nac-runtime] .btn-ghost-destructive:active .icon path, [data-nac-runtime]:is(.btn-tertiary-destructive:active .icon path), [data-nac-runtime] .btn-tertiary-destructive:active .icon path {
-  fill: var(--color-fill-btn-destructive-pressed);
+[data-nac-runtime]:is(.btn-secondary-destructive:active .icon), [data-nac-runtime] .btn-secondary-destructive:active .icon, [data-nac-runtime]:is(.btn-ghost-destructive:active .icon), [data-nac-runtime] .btn-ghost-destructive:active .icon, [data-nac-runtime]:is(.btn-tertiary-destructive:active .icon), [data-nac-runtime] .btn-tertiary-destructive:active .icon {
+  color: var(--color-fill-btn-destructive-pressed);
 }
 
-[data-nac-runtime]:is(.btn-secondary-destructive.btn-disabled .icon path), [data-nac-runtime] .btn-secondary-destructive.btn-disabled .icon path, [data-nac-runtime]:is(.btn-ghost-destructive.btn-disabled .icon path), [data-nac-runtime] .btn-ghost-destructive.btn-disabled .icon path, [data-nac-runtime]:is(.btn-tertiary-destructive.btn-disabled .icon path), [data-nac-runtime] .btn-tertiary-destructive.btn-disabled .icon path {
-  fill: var(--color-fill-btn-destructive-disabled);
+[data-nac-runtime]:is(.btn-secondary-destructive.btn-disabled .icon), [data-nac-runtime] .btn-secondary-destructive.btn-disabled .icon, [data-nac-runtime]:is(.btn-ghost-destructive.btn-disabled .icon), [data-nac-runtime] .btn-ghost-destructive.btn-disabled .icon, [data-nac-runtime]:is(.btn-tertiary-destructive.btn-disabled .icon), [data-nac-runtime] .btn-tertiary-destructive.btn-disabled .icon {
+  color: var(--color-fill-btn-destructive-disabled);
 }
 
 [data-nac-runtime]:is(.input), [data-nac-runtime] .input {
@@ -6840,48 +6844,48 @@
   color: var(--color-text-btn-destructive-disabled);
 }
 
-[data-nac-runtime]:is(.tab-btn-regular .icon path), [data-nac-runtime] .tab-btn-regular .icon path {
-  fill: var(--color-fill-btn-secondary);
+[data-nac-runtime]:is(.tab-btn-regular .icon), [data-nac-runtime] .tab-btn-regular .icon {
+  color: var(--color-fill-btn-secondary);
 }
 
-[data-nac-runtime]:is(.tab-btn-regular:hover .icon path), [data-nac-runtime] .tab-btn-regular:hover .icon path {
-  fill: var(--color-fill-btn-secondary-hovered);
+[data-nac-runtime]:is(.tab-btn-regular:hover .icon), [data-nac-runtime] .tab-btn-regular:hover .icon {
+  color: var(--color-fill-btn-secondary-hovered);
 }
 
-[data-nac-runtime]:is(.tab-btn-regular:active .icon path), [data-nac-runtime] .tab-btn-regular:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed);
+[data-nac-runtime]:is(.tab-btn-regular:active .icon), [data-nac-runtime] .tab-btn-regular:active .icon {
+  color: var(--color-fill-btn-secondary-pressed);
 }
 
-[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active .icon path), [data-nac-runtime] .tab-btn-regular.tab-btn-active .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted);
+[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active .icon), [data-nac-runtime] .tab-btn-regular.tab-btn-active .icon {
+  color: var(--color-fill-btn-secondary-highlighted);
 }
 
-[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active:active .icon path), [data-nac-runtime] .tab-btn-regular.tab-btn-active:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed-highlighted);
+[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active:active .icon), [data-nac-runtime] .tab-btn-regular.tab-btn-active:active .icon {
+  color: var(--color-fill-btn-secondary-pressed-highlighted);
 }
 
-[data-nac-runtime]:is(.tab-btn-accent .icon path), [data-nac-runtime] .tab-btn-accent .icon path {
-  fill: var(--color-fill-btn-accent);
+[data-nac-runtime]:is(.tab-btn-accent .icon), [data-nac-runtime] .tab-btn-accent .icon {
+  color: var(--color-fill-btn-accent);
 }
 
-[data-nac-runtime]:is(.tab-btn-destructive .icon path), [data-nac-runtime] .tab-btn-destructive .icon path {
-  fill: var(--color-fill-btn-destructive);
+[data-nac-runtime]:is(.tab-btn-destructive .icon), [data-nac-runtime] .tab-btn-destructive .icon {
+  color: var(--color-fill-btn-destructive);
 }
 
-[data-nac-runtime]:is(.tab-btn-regular.btn-disabled .icon path), [data-nac-runtime] .tab-btn-regular.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled);
+[data-nac-runtime]:is(.tab-btn-regular.btn-disabled .icon), [data-nac-runtime] .tab-btn-regular.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled);
 }
 
-[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active.btn-disabled .icon path), [data-nac-runtime] .tab-btn-regular.tab-btn-active.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled-highlighted);
+[data-nac-runtime]:is(.tab-btn-regular.tab-btn-active.btn-disabled .icon), [data-nac-runtime] .tab-btn-regular.tab-btn-active.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled-highlighted);
 }
 
-[data-nac-runtime]:is(.tab-btn-accent.btn-disabled .icon path), [data-nac-runtime] .tab-btn-accent.btn-disabled .icon path {
-  fill: var(--color-fill-btn-accent-muted);
+[data-nac-runtime]:is(.tab-btn-accent.btn-disabled .icon), [data-nac-runtime] .tab-btn-accent.btn-disabled .icon {
+  color: var(--color-fill-btn-accent-muted);
 }
 
-[data-nac-runtime]:is(.tab-btn-destructive.btn-disabled .icon path), [data-nac-runtime] .tab-btn-destructive.btn-disabled .icon path {
-  fill: var(--color-fill-btn-destructive-disabled);
+[data-nac-runtime]:is(.tab-btn-destructive.btn-disabled .icon), [data-nac-runtime] .tab-btn-destructive.btn-disabled .icon {
+  color: var(--color-fill-btn-destructive-disabled);
 }
 
 [data-nac-runtime]:is(.horizontal-tab-item), [data-nac-runtime] .horizontal-tab-item {

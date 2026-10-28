@@ -66,10 +66,10 @@ const TONE = {
 };
 
 const REMOVE_TONE = cn(
-  "[&_path]:fill-btn-destructive",
-  "hover:[&_path]:fill-btn-destructive-hovered",
-  "active:[&_path]:fill-btn-destructive-pressed",
-  "disabled:[&_path]:fill-btn-destructive-disabled",
+  "text-fill-btn-destructive",
+  "hover:text-fill-btn-destructive-hovered",
+  "active:text-fill-btn-destructive-pressed",
+  "disabled:text-fill-btn-destructive-disabled",
 );
 
 /**
