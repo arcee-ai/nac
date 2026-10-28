@@ -236,7 +236,7 @@ export function SessionSideBox({
               aria-label="Hide panel"
               onClick={toggleSidePanelCollapsed}
             >
-              <Icon iconName={IconName.SidebarChevronRight} />
+              <Icon iconName={IconName.HideRightSidebar} />
             </Button>
           </Tooltip>
         )}

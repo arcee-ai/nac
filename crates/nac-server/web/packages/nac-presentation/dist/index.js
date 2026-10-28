@@ -1,4 +1,4 @@
-import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Bt as f, C as p, Ci as m, Cn as h, Cr as g, Ct as _, D as v, Di as y, Dn as b, Dr as x, Dt as S, E as C, Ei as w, En as T, Er as E, Et as D, F as O, Fi as k, Fn as ee, Fr as A, Ft as te, G as j, Gi as ne, Gn as re, Gr as ie, Gt as ae, H as oe, Hi as se, Hn as ce, Hr as M, Ht as le, I as ue, Ii as de, In as fe, Ir as N, It as pe, J as me, Ji as he, Jn as P, Jr as F, Jt as ge, K as _e, Ki as ve, Kn as I, Kr as L, Kt as ye, L as be, Li as xe, Ln as Se, Lr as Ce, Lt as we, M as Te, Mi as Ee, Mn as De, Mr as Oe, Mt as ke, N as Ae, Ni as je, Nn as Me, Nr as Ne, Nt as Pe, O as Fe, Oi as Ie, On as Le, Or as Re, Ot as ze, P as Be, Pi as Ve, Pn as He, Pr as Ue, Pt as We, Q as Ge, Qn as Ke, Qr as qe, Qt as Je, R as Ye, Ri as Xe, Rn as Ze, Rr as Qe, Rt as $e, S as et, Si as tt, Sn as nt, Sr as R, St as rt, T as it, Ti as at, Tn as ot, Tr as z, Tt as st, U as ct, Ui as lt, Un as ut, Ur as dt, Ut as ft, V as pt, Vi as mt, Vn as ht, Vr as gt, Vt as _t, W as vt, Wi as yt, Wn as bt, Wr as xt, Wt as St, X as Ct, Xi as wt, Xn as Tt, Xr as Et, Xt as Dt, Y as Ot, Yi as kt, Yn as At, Yr as jt, Yt as Mt, Z as Nt, Zn as Pt, Zr as Ft, Zt as It, _ as Lt, _i as Rt, _n as zt, _r as Bt, _t as Vt, a as Ht, ai as Ut, an as Wt, ar as Gt, at as Kt, b as qt, bi as Jt, bn as Yt, br as Xt, bt as Zt, c as Qt, ci as $t, cn as en, cr as tn, ct as nn, d as rn, di as an, dn as on, dr as sn, dt as cn, ei as ln, en as un, er as dn, et as fn, f as pn, fi as mn, fn as hn, fr as gn, ft as _n, g as vn, gi as yn, gn as bn, gr as xn, gt as Sn, h as Cn, hi as wn, hn as Tn, hr as En, ht as Dn, i as On, ii as kn, in as An, ir as jn, it as Mn, j as Nn, ji as Pn, jn as Fn, jr as In, jt as Ln, k as Rn, ki as zn, kn as Bn, kr as Vn, kt as Hn, l as Un, li as Wn, ln as Gn, lr as Kn, lt as qn, m as Jn, mi as Yn, mn as Xn, mr as Zn, mt as Qn, n as $n, ni as B, nn as er, nr as tr, nt as nr, o as rr, oi as ir, on as ar, or, ot as sr, p as cr, pi as lr, pn as ur, pt as dr, q as fr, qi as pr, qn as mr, qr as V, qt as hr, ri as gr, rn as _r, rr as vr, rt as yr, s as br, si as xr, sn as Sr, sr as Cr, st as wr, t as Tr, ti as Er, tn as Dr, tr as Or, tt as kr, u as Ar, ui as jr, un as Mr, ur as Nr, ut as Pr, v as Fr, vi as Ir, vn as Lr, vr as Rr, vt as zr, w as Br, wi as Vr, wn as Hr, wr as H, wt as Ur, x as Wr, xi as Gr, xn as Kr, xr as qr, xt as Jr, y as Yr, yi as Xr, yn as Zr, yr as Qr, yt as $r, z as ei, zi as ti, zn as ni, zr as ri, zt as ii } from "./chunks/PerfProfiler-tr5Xd5m6.js";
+import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Bt as f, C as p, Ci as m, Cn as h, Cr as g, Ct as _, D as v, Di as y, Dn as b, Dr as x, Dt as S, E as C, Ei as w, En as T, Er as E, Et as D, F as O, Fi as k, Fn as ee, Fr as A, Ft as te, G as j, Gi as ne, Gn as re, Gr as ie, Gt as ae, H as oe, Hi as se, Hn as ce, Hr as M, Ht as le, I as ue, Ii as de, In as fe, Ir as N, It as pe, J as me, Ji as he, Jn as P, Jr as F, Jt as ge, K as _e, Ki as ve, Kn as I, Kr as L, Kt as ye, L as be, Li as xe, Ln as Se, Lr as Ce, Lt as we, M as Te, Mi as Ee, Mn as De, Mr as Oe, Mt as ke, N as Ae, Ni as je, Nn as Me, Nr as Ne, Nt as Pe, O as Fe, Oi as Ie, On as Le, Or as Re, Ot as ze, P as Be, Pi as Ve, Pn as He, Pr as Ue, Pt as We, Q as Ge, Qn as Ke, Qr as qe, Qt as Je, R as Ye, Ri as Xe, Rn as Ze, Rr as Qe, Rt as $e, S as et, Si as tt, Sn as nt, Sr as R, St as rt, T as it, Ti as at, Tn as ot, Tr as z, Tt as st, U as ct, Ui as lt, Un as ut, Ur as dt, Ut as ft, V as pt, Vi as mt, Vn as ht, Vr as gt, Vt as _t, W as vt, Wi as yt, Wn as bt, Wr as xt, Wt as St, X as Ct, Xi as wt, Xn as Tt, Xr as Et, Xt as Dt, Y as Ot, Yi as kt, Yn as At, Yr as jt, Yt as Mt, Z as Nt, Zn as Pt, Zr as Ft, Zt as It, _ as Lt, _i as Rt, _n as zt, _r as Bt, _t as Vt, a as Ht, ai as Ut, an as Wt, ar as Gt, at as Kt, b as qt, bi as Jt, bn as Yt, br as Xt, bt as Zt, c as Qt, ci as $t, cn as en, cr as tn, ct as nn, d as rn, di as an, dn as on, dr as sn, dt as cn, ei as ln, en as un, er as dn, et as fn, f as pn, fi as mn, fn as hn, fr as gn, ft as _n, g as vn, gi as yn, gn as bn, gr as xn, gt as Sn, h as Cn, hi as wn, hn as Tn, hr as En, ht as Dn, i as On, ii as kn, in as An, ir as jn, it as Mn, j as Nn, ji as Pn, jn as Fn, jr as In, jt as Ln, k as Rn, ki as zn, kn as Bn, kr as Vn, kt as Hn, l as Un, li as Wn, ln as Gn, lr as Kn, lt as qn, m as Jn, mi as Yn, mn as Xn, mr as Zn, mt as Qn, n as $n, ni as B, nn as er, nr as tr, nt as nr, o as rr, oi as ir, on as ar, or, ot as sr, p as cr, pi as lr, pn as ur, pt as dr, q as fr, qi as pr, qn as mr, qr as V, qt as hr, ri as gr, rn as _r, rr as vr, rt as yr, s as br, si as xr, sn as Sr, sr as Cr, st as wr, t as Tr, ti as Er, tn as Dr, tr as Or, tt as kr, u as Ar, ui as jr, un as Mr, ur as Nr, ut as Pr, v as Fr, vi as Ir, vn as Lr, vr as Rr, vt as zr, w as Br, wi as Vr, wn as Hr, wr as H, wt as Ur, x as Wr, xi as Gr, xn as Kr, xr as qr, xt as Jr, y as Yr, yi as Xr, yn as Zr, yr as Qr, yt as $r, z as ei, zi as ti, zn as ni, zr as ri, zt as ii } from "./chunks/PerfProfiler-Co_fo4B4.js";
 import ai, { Fragment as oi, Suspense as si, createContext as ci, lazy as li, memo as ui, use as di, useCallback as U, useContext as fi, useEffect as W, useId as pi, useLayoutEffect as mi, useMemo as G, useRef as K, useState as q, useSyncExternalStore as hi } from "react";
 import { QueryClientProvider as gi, QueryObserver as _i, replaceEqualDeep as vi, useIsFetching as yi, useMutation as bi, useQueries as xi, useQuery as Si, useQueryClient as Ci } from "@tanstack/react-query";
 import { Link as wi, Navigate as Ti, Outlet as Ei, Route as Di, Routes as Oi, useHref as ki, useLinkClickHandler as Ai, useLocation as ji, useNavigate as Mi, useParams as Ni } from "react-router-dom";
@@ -12202,7 +12202,7 @@ function Tg({ isOpen: e, onToggle: t, toggleKeys: n, commands: r, variant: i }) 
 						content: g.Icon,
 						"aria-label": "Hide sidebar",
 						onClick: t,
-						children: /* @__PURE__ */ Y(L, { iconName: V.SidebarChevronLeft })
+						children: /* @__PURE__ */ Y(L, { iconName: V.LeftSidebar })
 					})
 				})]
 			}),
@@ -12380,7 +12380,7 @@ function Eg({ commands: e, onToggle: t, toggleKeys: n, variant: r }) {
 					label: "Show sidebar",
 					keys: n,
 					onClick: t,
-					children: /* @__PURE__ */ Y(L, { iconName: V.SidebarChevronRight })
+					children: /* @__PURE__ */ Y(L, { iconName: V.LeftSidebar })
 				}),
 				i ? null : /* @__PURE__ */ Y(Dg, {
 					label: "All projects",
@@ -18608,7 +18608,7 @@ function zb({ sessionId: e, snapshot: t, behavior: n, panels: r, onOpen: i, onSe
 			children: [/* @__PURE__ */ Y(Bb, {
 				label: "Show panel",
 				onClick: i,
-				children: /* @__PURE__ */ Y(L, { iconName: V.SidebarChevronLeft })
+				children: /* @__PURE__ */ Y(L, { iconName: V.ShowRightSidebar })
 			}), /* @__PURE__ */ Y("div", {
 				className: "flex flex-col items-center gap-4",
 				children: r.map((e) => {
@@ -20654,7 +20654,7 @@ function yS({ state: e, controller: t, availability: n }) {
 // src/app/lib/markdownChunk.ts
 var bS = null, xS = !1;
 function SS() {
-	return bS ??= import("./chunks/markdown-renderer-Cw3011b_.js").then((e) => e.t).then((e) => (xS = !0, e)), bS;
+	return bS ??= import("./chunks/markdown-renderer-jOcaZmgM.js").then((e) => e.t).then((e) => (xS = !0, e)), bS;
 }
 function CS() {
 	return xS;
@@ -26079,7 +26079,7 @@ function Pk({ sessionId: e, snapshot: t, behavior: n, panel: r, onPanelChange: i
 						content: g.Icon,
 						"aria-label": "Hide panel",
 						onClick: l,
-						children: /* @__PURE__ */ Y(L, { iconName: V.SidebarChevronRight })
+						children: /* @__PURE__ */ Y(L, { iconName: V.HideRightSidebar })
 					})
 				}),
 				/* @__PURE__ */ Y("div", {
@@ -27055,7 +27055,7 @@ function fA({ sessionId: t, snapshot: n, entry: r, onShowPanel: i }) {
 							content: g.Icon,
 							"aria-label": "Show panel",
 							onClick: i,
-							children: /* @__PURE__ */ Y(L, { iconName: V.SidebarChevronLeft })
+							children: /* @__PURE__ */ Y(L, { iconName: V.ShowRightSidebar })
 						})
 					}) : null
 				]

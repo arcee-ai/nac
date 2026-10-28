@@ -194,7 +194,7 @@ export function TopSingleSessionHeader({
                 aria-label="Show panel"
                 onClick={onShowPanel}
               >
-                <Icon iconName={IconName.SidebarChevronLeft} />
+                <Icon iconName={IconName.ShowRightSidebar} />
               </Button>
             </Tooltip>
           ) : null}

@@ -5394,25 +5394,6 @@ var Ac = F(kc), jc = {
 };
 jc.node;
 var Mc = F(jc), Nc = {
-	name: "arrow-left-from-line",
-	size: 24,
-	node: [
-		["path", {
-			d: "m9 6-6 6 6 6",
-			key: "7v63n9"
-		}],
-		["path", {
-			d: "M3 12h14",
-			key: "13k4hi"
-		}],
-		["path", {
-			d: "M21 19V5",
-			key: "b4bplr"
-		}]
-	]
-};
-Nc.node;
-var Pc = F(Nc), Fc = {
 	name: "arrow-left-right",
 	size: 24,
 	node: [
@@ -5434,8 +5415,8 @@ var Pc = F(Nc), Fc = {
 		}]
 	]
 };
-Fc.node;
-var Ic = F(Fc), Lc = {
+Nc.node;
+var Pc = F(Nc), Fc = {
 	name: "arrow-left",
 	size: 24,
 	node: [["path", {
@@ -5446,27 +5427,8 @@ var Ic = F(Fc), Lc = {
 		key: "x3x0zl"
 	}]]
 };
-Lc.node;
-var Rc = F(Lc), zc = {
-	name: "arrow-right-from-line",
-	size: 24,
-	node: [
-		["path", {
-			d: "M3 5v14",
-			key: "1nt18q"
-		}],
-		["path", {
-			d: "M21 12H7",
-			key: "13ipq5"
-		}],
-		["path", {
-			d: "m15 18 6-6-6-6",
-			key: "6tx3qv"
-		}]
-	]
-};
-zc.node;
-var Bc = F(zc), Vc = {
+Fc.node;
+var Ic = F(Fc), Lc = {
 	name: "arrow-right",
 	size: 24,
 	node: [["path", {
@@ -5477,8 +5439,8 @@ var Bc = F(zc), Vc = {
 		key: "xquz4c"
 	}]]
 };
-Vc.node;
-var Hc = F(Vc), Uc = {
+Lc.node;
+var Rc = F(Lc), zc = {
 	name: "arrow-up-right",
 	size: 24,
 	node: [["path", {
@@ -5489,8 +5451,8 @@ var Hc = F(Vc), Uc = {
 		key: "1vkiza"
 	}]]
 };
-Uc.node;
-var Wc = F(Uc), Gc = {
+zc.node;
+var Bc = F(zc), Vc = {
 	name: "arrow-up-to-line",
 	size: 24,
 	node: [
@@ -5508,8 +5470,8 @@ var Wc = F(Uc), Gc = {
 		}]
 	]
 };
-Gc.node;
-var Kc = F(Gc), qc = {
+Vc.node;
+var Hc = F(Vc), Uc = {
 	name: "arrow-up",
 	size: 24,
 	node: [["path", {
@@ -5520,8 +5482,8 @@ var Kc = F(Gc), qc = {
 		key: "x0mq9r"
 	}]]
 };
-qc.node;
-var Jc = F(qc), Yc = {
+Uc.node;
+var Wc = F(Uc), Gc = {
 	name: "book-open",
 	size: 24,
 	node: [["path", {
@@ -5532,8 +5494,8 @@ var Jc = F(qc), Yc = {
 		key: "1fyvmf"
 	}]]
 };
-Yc.node;
-var Xc = F(Yc), Zc = {
+Gc.node;
+var Kc = F(Gc), qc = {
 	name: "book",
 	size: 24,
 	node: [["path", {
@@ -5541,8 +5503,8 @@ var Xc = F(Yc), Zc = {
 		key: "k3hazp"
 	}]]
 };
-Zc.node;
-var Qc = F(Zc), $c = {
+qc.node;
+var Jc = F(qc), Yc = {
 	name: "bot",
 	size: 24,
 	node: [
@@ -5576,8 +5538,8 @@ var Qc = F(Zc), $c = {
 		}]
 	]
 };
-$c.node;
-var el = F($c), tl = {
+Yc.node;
+var Xc = F(Yc), Zc = {
 	name: "brain",
 	size: 24,
 	node: [
@@ -5615,8 +5577,8 @@ var el = F($c), tl = {
 		}]
 	]
 };
-tl.node;
-var nl = F(tl), rl = {
+Zc.node;
+var Qc = F(Zc), $c = {
 	name: "calendar",
 	size: 24,
 	node: [
@@ -5642,8 +5604,8 @@ var nl = F(tl), rl = {
 		}]
 	]
 };
-rl.node;
-var il = F(rl), al = {
+$c.node;
+var el = F($c), tl = {
 	name: "chart-line",
 	size: 24,
 	node: [["path", {
@@ -5655,8 +5617,8 @@ var il = F(rl), al = {
 	}]],
 	aliases: ["line-chart"]
 };
-al.node;
-var ol = F(al), sl = {
+tl.node;
+var nl = F(tl), rl = {
 	name: "check",
 	size: 24,
 	node: [["path", {
@@ -5664,8 +5626,8 @@ var ol = F(al), sl = {
 		key: "1gmf2c"
 	}]]
 };
-sl.node;
-var cl = F(sl), ll = {
+rl.node;
+var il = F(rl), al = {
 	name: "chevron-down",
 	size: 24,
 	node: [["path", {
@@ -5673,8 +5635,8 @@ var cl = F(sl), ll = {
 		key: "qrunsl"
 	}]]
 };
-ll.node;
-var ul = F(ll), dl = {
+al.node;
+var ol = F(al), sl = {
 	name: "chevron-left",
 	size: 24,
 	node: [["path", {
@@ -5682,8 +5644,8 @@ var ul = F(ll), dl = {
 		key: "1wnfg3"
 	}]]
 };
-dl.node;
-var fl = F(dl), pl = {
+sl.node;
+var cl = F(sl), ll = {
 	name: "chevron-right",
 	size: 24,
 	node: [["path", {
@@ -5691,8 +5653,8 @@ var fl = F(dl), pl = {
 		key: "mthhwq"
 	}]]
 };
-pl.node;
-var ml = F(pl), hl = {
+ll.node;
+var ul = F(ll), dl = {
 	name: "chevron-up",
 	size: 24,
 	node: [["path", {
@@ -5700,8 +5662,8 @@ var ml = F(pl), hl = {
 		key: "153udz"
 	}]]
 };
-hl.node;
-var gl = F(hl), _l = {
+dl.node;
+var fl = F(dl), pl = {
 	name: "circle-alert",
 	size: 24,
 	node: [
@@ -5728,8 +5690,8 @@ var gl = F(hl), _l = {
 	],
 	aliases: ["alert-circle"]
 };
-_l.node;
-var vl = F(_l), yl = {
+pl.node;
+var ml = F(pl), hl = {
 	name: "circle-check",
 	size: 24,
 	node: [["circle", {
@@ -5743,8 +5705,8 @@ var vl = F(_l), yl = {
 	}]],
 	aliases: ["check-circle-2"]
 };
-yl.node;
-var bl = F(yl), xl = {
+hl.node;
+var gl = F(hl), _l = {
 	name: "circle-play",
 	size: 24,
 	node: [["path", {
@@ -5758,8 +5720,8 @@ var bl = F(yl), xl = {
 	}]],
 	aliases: ["play-circle"]
 };
-xl.node;
-var Sl = F(xl), Cl = {
+_l.node;
+var vl = F(_l), yl = {
 	name: "circle-plus",
 	size: 24,
 	node: [
@@ -5780,8 +5742,8 @@ var Sl = F(xl), Cl = {
 	],
 	aliases: ["plus-circle"]
 };
-Cl.node;
-var wl = F(Cl), Tl = {
+yl.node;
+var bl = F(yl), xl = {
 	name: "clock",
 	size: 24,
 	node: [["circle", {
@@ -5794,8 +5756,8 @@ var wl = F(Cl), Tl = {
 		key: "mmk7yg"
 	}]]
 };
-Tl.node;
-var El = F(Tl), Dl = {
+xl.node;
+var Sl = F(xl), Cl = {
 	name: "cloud",
 	size: 24,
 	node: [["path", {
@@ -5803,8 +5765,8 @@ var El = F(Tl), Dl = {
 		key: "p7xjir"
 	}]]
 };
-Dl.node;
-var Ol = F(Dl), kl = {
+Cl.node;
+var wl = F(Cl), Tl = {
 	name: "coins",
 	size: 24,
 	node: [
@@ -5828,8 +5790,8 @@ var Ol = F(Dl), kl = {
 		}]
 	]
 };
-kl.node;
-var Al = F(kl), jl = {
+Tl.node;
+var El = F(Tl), Dl = {
 	name: "combine",
 	size: 24,
 	node: [
@@ -5867,8 +5829,8 @@ var Al = F(kl), jl = {
 		}]
 	]
 };
-jl.node;
-var Ml = F(jl), Nl = {
+Dl.node;
+var Ol = F(Dl), kl = {
 	name: "contact-round",
 	size: 24,
 	node: [
@@ -5901,8 +5863,8 @@ var Ml = F(jl), Nl = {
 	],
 	aliases: ["contact-2"]
 };
-Nl.node;
-var Pl = F(Nl), Fl = {
+kl.node;
+var Al = F(kl), jl = {
 	name: "copy",
 	size: 24,
 	node: [["rect", {
@@ -5918,8 +5880,8 @@ var Pl = F(Nl), Fl = {
 		key: "zix9uf"
 	}]]
 };
-Fl.node;
-var Il = F(Fl), Ll = {
+jl.node;
+var Ml = F(jl), Nl = {
 	name: "credit-card",
 	size: 24,
 	node: [
@@ -5944,8 +5906,8 @@ var Il = F(Fl), Ll = {
 		}]
 	]
 };
-Ll.node;
-var Rl = F(Ll), zl = {
+Nl.node;
+var Pl = F(Nl), Fl = {
 	name: "dollar-sign",
 	size: 24,
 	node: [["line", {
@@ -5959,8 +5921,8 @@ var Rl = F(Ll), zl = {
 		key: "1b0p4s"
 	}]]
 };
-zl.node;
-var Bl = F(zl), Vl = {
+Fl.node;
+var Il = F(Fl), Ll = {
 	name: "download",
 	size: 24,
 	node: [
@@ -5978,8 +5940,8 @@ var Bl = F(zl), Vl = {
 		}]
 	]
 };
-Vl.node;
-var Hl = F(Vl), Ul = {
+Ll.node;
+var Rl = F(Ll), zl = {
 	name: "ellipsis-vertical",
 	size: 24,
 	node: [
@@ -6004,8 +5966,8 @@ var Hl = F(Vl), Ul = {
 	],
 	aliases: ["more-vertical"]
 };
-Ul.node;
-var Wl = F(Ul), Gl = {
+zl.node;
+var Bl = F(zl), Vl = {
 	name: "ellipsis",
 	size: 24,
 	node: [
@@ -6030,8 +5992,8 @@ var Wl = F(Ul), Gl = {
 	],
 	aliases: ["more-horizontal"]
 };
-Gl.node;
-var Kl = F(Gl), ql = {
+Vl.node;
+var Hl = F(Vl), Ul = {
 	name: "eye-off",
 	size: 24,
 	node: [
@@ -6053,8 +6015,8 @@ var Kl = F(Gl), ql = {
 		}]
 	]
 };
-ql.node;
-var Jl = F(ql), Yl = {
+Ul.node;
+var Wl = F(Ul), Gl = {
 	name: "eye",
 	size: 24,
 	node: [["path", {
@@ -6067,8 +6029,8 @@ var Jl = F(ql), Yl = {
 		key: "1v7zrd"
 	}]]
 };
-Yl.node;
-var Xl = F(Yl), Zl = {
+Gl.node;
+var Kl = F(Gl), ql = {
 	name: "file-plus",
 	size: 24,
 	node: [
@@ -6090,8 +6052,8 @@ var Xl = F(Yl), Zl = {
 		}]
 	]
 };
-Zl.node;
-var Ql = F(Zl), $l = {
+ql.node;
+var Jl = F(ql), Yl = {
 	name: "file-search",
 	size: 24,
 	node: [
@@ -6115,8 +6077,8 @@ var Ql = F(Zl), $l = {
 		}]
 	]
 };
-$l.node;
-var eu = F($l), tu = {
+Yl.node;
+var Xl = F(Yl), Zl = {
 	name: "file-text",
 	size: 24,
 	node: [
@@ -6142,8 +6104,8 @@ var eu = F($l), tu = {
 		}]
 	]
 };
-tu.node;
-var nu = F(tu), ru = {
+Zl.node;
+var Ql = F(Zl), $l = {
 	name: "file-up",
 	size: 24,
 	node: [
@@ -6165,8 +6127,8 @@ var nu = F(tu), ru = {
 		}]
 	]
 };
-ru.node;
-var iu = F(ru), au = {
+$l.node;
+var eu = F($l), tu = {
 	name: "flag",
 	size: 24,
 	node: [["path", {
@@ -6174,8 +6136,8 @@ var iu = F(ru), au = {
 		key: "1jaruq"
 	}]]
 };
-au.node;
-var ou = F(au), su = {
+tu.node;
+var nu = F(tu), ru = {
 	name: "folder-open",
 	size: 24,
 	node: [["path", {
@@ -6183,8 +6145,8 @@ var ou = F(au), su = {
 		key: "usdka0"
 	}]]
 };
-su.node;
-var cu = F(su), lu = {
+ru.node;
+var iu = F(ru), au = {
 	name: "folder-search",
 	size: 24,
 	node: [
@@ -6204,8 +6166,8 @@ var cu = F(su), lu = {
 		}]
 	]
 };
-lu.node;
-var uu = F(lu), du = {
+au.node;
+var ou = F(au), su = {
 	name: "folder",
 	size: 24,
 	node: [["path", {
@@ -6213,8 +6175,8 @@ var uu = F(lu), du = {
 		key: "1kt360"
 	}]]
 };
-du.node;
-var fu = F(du), pu = {
+su.node;
+var cu = F(su), lu = {
 	name: "folders",
 	size: 24,
 	node: [["path", {
@@ -6225,8 +6187,8 @@ var fu = F(du), pu = {
 		key: "yxbcw3"
 	}]]
 };
-pu.node;
-var mu = F(pu), hu = {
+lu.node;
+var uu = F(lu), du = {
 	name: "funnel",
 	size: 24,
 	node: [["path", {
@@ -6235,8 +6197,8 @@ var mu = F(pu), hu = {
 	}]],
 	aliases: ["filter"]
 };
-hu.node;
-var gu = F(hu), _u = {
+du.node;
+var fu = F(du), pu = {
 	name: "git-branch",
 	size: 24,
 	node: [
@@ -6258,8 +6220,8 @@ var gu = F(hu), _u = {
 		}]
 	]
 };
-_u.node;
-var vu = F(_u), yu = {
+pu.node;
+var mu = F(pu), hu = {
 	name: "globe",
 	size: 24,
 	node: [
@@ -6279,8 +6241,8 @@ var vu = F(_u), yu = {
 		}]
 	]
 };
-yu.node;
-var bu = F(yu), xu = {
+hu.node;
+var gu = F(hu), _u = {
 	name: "goal",
 	size: 24,
 	node: [
@@ -6298,8 +6260,8 @@ var bu = F(yu), xu = {
 		}]
 	]
 };
-xu.node;
-var Su = F(xu), Cu = {
+_u.node;
+var vu = F(_u), yu = {
 	name: "grip-vertical",
 	size: 24,
 	node: [
@@ -6341,8 +6303,8 @@ var Su = F(xu), Cu = {
 		}]
 	]
 };
-Cu.node;
-var wu = F(Cu), Tu = {
+yu.node;
+var bu = F(yu), xu = {
 	name: "group",
 	size: 24,
 	node: [
@@ -6380,8 +6342,8 @@ var wu = F(Cu), Tu = {
 		}]
 	]
 };
-Tu.node;
-var Eu = F(Tu), Du = {
+xu.node;
+var Su = F(xu), Cu = {
 	name: "hand",
 	size: 24,
 	node: [
@@ -6403,8 +6365,8 @@ var Eu = F(Tu), Du = {
 		}]
 	]
 };
-Du.node;
-var Ou = F(Du), ku = {
+Cu.node;
+var wu = F(Cu), Tu = {
 	name: "hash",
 	size: 24,
 	node: [
@@ -6438,8 +6400,8 @@ var Ou = F(Du), ku = {
 		}]
 	]
 };
-ku.node;
-var Au = F(ku), ju = {
+Tu.node;
+var Eu = F(Tu), Du = {
 	name: "headphones",
 	size: 24,
 	node: [["path", {
@@ -6447,8 +6409,8 @@ var Au = F(ku), ju = {
 		key: "1xhozi"
 	}]]
 };
-ju.node;
-var Mu = F(ju), Nu = {
+Du.node;
+var Ou = F(Du), ku = {
 	name: "house",
 	size: 24,
 	node: [["path", {
@@ -6460,8 +6422,8 @@ var Mu = F(ju), Nu = {
 	}]],
 	aliases: ["home"]
 };
-Nu.node;
-var Pu = F(Nu), Fu = {
+ku.node;
+var Au = F(ku), ju = {
 	name: "image",
 	size: 24,
 	node: [
@@ -6486,8 +6448,8 @@ var Pu = F(Nu), Fu = {
 		}]
 	]
 };
-Fu.node;
-var Iu = F(Fu), Lu = {
+ju.node;
+var Mu = F(ju), Nu = {
 	name: "info",
 	size: 24,
 	node: [
@@ -6507,8 +6469,8 @@ var Iu = F(Fu), Lu = {
 		}]
 	]
 };
-Lu.node;
-var Ru = F(Lu), zu = {
+Nu.node;
+var Pu = F(Nu), Fu = {
 	name: "key-round",
 	size: 24,
 	node: [["path", {
@@ -6522,8 +6484,8 @@ var Ru = F(Lu), zu = {
 		key: "w0ekpg"
 	}]]
 };
-zu.node;
-var Bu = F(zu), Vu = {
+Fu.node;
+var Iu = F(Fu), Lu = {
 	name: "layers",
 	size: 24,
 	node: [
@@ -6542,8 +6504,8 @@ var Bu = F(zu), Vu = {
 	],
 	aliases: ["layers-3"]
 };
-Vu.node;
-var Hu = F(Vu), Uu = {
+Lu.node;
+var Ru = F(Lu), zu = {
 	name: "layout-grid",
 	size: 24,
 	node: [
@@ -6581,8 +6543,8 @@ var Hu = F(Vu), Uu = {
 		}]
 	]
 };
-Uu.node;
-var Wu = F(Uu), Gu = {
+zu.node;
+var Bu = F(zu), Vu = {
 	name: "layout-list",
 	size: 24,
 	node: [
@@ -6620,8 +6582,8 @@ var Wu = F(Uu), Gu = {
 		}]
 	]
 };
-Gu.node;
-var Ku = F(Gu), qu = {
+Vu.node;
+var Hu = F(Vu), Uu = {
 	name: "list-checks",
 	size: 24,
 	node: [
@@ -6647,8 +6609,8 @@ var Ku = F(Gu), qu = {
 		}]
 	]
 };
-qu.node;
-var Ju = F(qu), Yu = {
+Uu.node;
+var Wu = F(Uu), Gu = {
 	name: "list-indent-decrease",
 	size: 24,
 	node: [
@@ -6671,8 +6633,8 @@ var Ju = F(qu), Yu = {
 	],
 	aliases: ["outdent", "indent-decrease"]
 };
-Yu.node;
-var Xu = F(Yu), Zu = {
+Gu.node;
+var Ku = F(Gu), qu = {
 	name: "list-ordered",
 	size: 24,
 	node: [
@@ -6702,8 +6664,8 @@ var Xu = F(Yu), Zu = {
 		}]
 	]
 };
-Zu.node;
-var Qu = F(Zu), $u = {
+qu.node;
+var Ju = F(qu), Yu = {
 	name: "list",
 	size: 24,
 	node: [
@@ -6733,8 +6695,8 @@ var Qu = F(Zu), $u = {
 		}]
 	]
 };
-$u.node;
-var ed = F($u), td = {
+Yu.node;
+var Xu = F(Yu), Zu = {
 	name: "loader-circle",
 	size: 24,
 	node: [["path", {
@@ -6743,8 +6705,8 @@ var ed = F($u), td = {
 	}]],
 	aliases: ["loader-2"]
 };
-td.node;
-var nd = F(td), rd = {
+Zu.node;
+var Qu = F(Zu), $u = {
 	name: "lock",
 	size: 24,
 	node: [["rect", {
@@ -6760,8 +6722,8 @@ var nd = F(td), rd = {
 		key: "fwvmzm"
 	}]]
 };
-rd.node;
-var id = F(rd), ad = {
+$u.node;
+var ed = F($u), td = {
 	name: "log-out",
 	size: 24,
 	node: [
@@ -6779,8 +6741,8 @@ var id = F(rd), ad = {
 		}]
 	]
 };
-ad.node;
-var od = F(ad), sd = {
+td.node;
+var nd = F(td), rd = {
 	name: "maximize",
 	size: 24,
 	node: [
@@ -6802,8 +6764,8 @@ var od = F(ad), sd = {
 		}]
 	]
 };
-sd.node;
-var cd = F(sd), ld = {
+rd.node;
+var id = F(rd), ad = {
 	name: "menu",
 	size: 24,
 	node: [
@@ -6821,8 +6783,8 @@ var cd = F(sd), ld = {
 		}]
 	]
 };
-ld.node;
-var ud = F(ld), dd = {
+ad.node;
+var od = F(ad), sd = {
 	name: "message-square-plus",
 	size: 24,
 	node: [
@@ -6840,8 +6802,8 @@ var ud = F(ld), dd = {
 		}]
 	]
 };
-dd.node;
-var fd = F(dd), pd = {
+sd.node;
+var cd = F(sd), ld = {
 	name: "message-square",
 	size: 24,
 	node: [["path", {
@@ -6849,8 +6811,8 @@ var fd = F(dd), pd = {
 		key: "18887p"
 	}]]
 };
-pd.node;
-var md = F(pd), hd = {
+ld.node;
+var ud = F(ld), dd = {
 	name: "mic",
 	size: 24,
 	node: [
@@ -6872,8 +6834,8 @@ var md = F(pd), hd = {
 		}]
 	]
 };
-hd.node;
-var gd = F(hd), _d = {
+dd.node;
+var fd = F(dd), pd = {
 	name: "minimize",
 	size: 24,
 	node: [
@@ -6895,8 +6857,8 @@ var gd = F(hd), _d = {
 		}]
 	]
 };
-_d.node;
-var vd = F(_d), yd = {
+pd.node;
+var md = F(pd), hd = {
 	name: "minus",
 	size: 24,
 	node: [["path", {
@@ -6904,8 +6866,8 @@ var vd = F(_d), yd = {
 		key: "1ays0h"
 	}]]
 };
-yd.node;
-var bd = F(yd), xd = {
+hd.node;
+var gd = F(hd), _d = {
 	name: "monitor",
 	size: 24,
 	node: [
@@ -6933,8 +6895,8 @@ var bd = F(yd), xd = {
 		}]
 	]
 };
-xd.node;
-var Sd = F(xd), Cd = {
+_d.node;
+var vd = F(_d), yd = {
 	name: "moon",
 	size: 24,
 	node: [["path", {
@@ -6942,8 +6904,8 @@ var Sd = F(xd), Cd = {
 		key: "kfwtm"
 	}]]
 };
-Cd.node;
-var wd = F(Cd), Td = {
+yd.node;
+var bd = F(yd), xd = {
 	name: "mouse-pointer-2",
 	size: 24,
 	node: [["path", {
@@ -6951,8 +6913,8 @@ var wd = F(Cd), Td = {
 		key: "edeuup"
 	}]]
 };
-Td.node;
-var Ed = F(Td), Dd = {
+xd.node;
+var Sd = F(xd), Cd = {
 	name: "network",
 	size: 24,
 	node: [
@@ -6987,6 +6949,46 @@ var Ed = F(Td), Dd = {
 		["path", {
 			d: "M12 12V8",
 			key: "2874zd"
+		}]
+	]
+};
+Cd.node;
+var wd = F(Cd), Td = {
+	name: "panel-left",
+	size: 24,
+	node: [["rect", {
+		width: "18",
+		height: "18",
+		x: "3",
+		y: "3",
+		rx: "2",
+		key: "afitv7"
+	}], ["path", {
+		d: "M9 3v18",
+		key: "fh3hqa"
+	}]],
+	aliases: ["sidebar"]
+};
+Td.node;
+var Ed = F(Td), Dd = {
+	name: "panel-right-close",
+	size: 24,
+	node: [
+		["rect", {
+			width: "18",
+			height: "18",
+			x: "3",
+			y: "3",
+			rx: "2",
+			key: "afitv7"
+		}],
+		["path", {
+			d: "M15 3v18",
+			key: "14nvp0"
+		}],
+		["path", {
+			d: "m8 9 3 3-3 3",
+			key: "12hl5m"
 		}]
 	]
 };
@@ -8026,65 +8028,65 @@ var yp = F(vp), bp = {
 	javascript: "M6 3C5.20435 3 4.44129 3.31607 3.87868 3.87868C3.31607 4.44129 3 5.20435 3 6V18C3 18.7956 3.31607 19.5587 3.87868 20.1213C4.44129 20.6839 5.20435 21 6 21H18C18.7956 21 19.5587 20.6839 20.1213 20.1213C20.6839 19.5587 21 18.7956 21 18V6C21 5.20435 20.6839 4.44129 20.1213 3.87868C19.5587 3.31607 18.7956 3 18 3H6ZM13.334 16.055C14.054 16.635 14.7727 16.921 15.49 16.913C15.93 16.913 16.2673 16.8323 16.502 16.671C16.6113 16.6001 16.7002 16.5019 16.76 16.3862C16.8197 16.2705 16.8484 16.1412 16.843 16.011C16.8445 15.869 16.8149 15.7285 16.7561 15.5992C16.6974 15.47 16.611 15.3552 16.503 15.263C16.2683 15.0583 15.8243 14.853 15.171 14.647C14.3863 14.4203 13.7813 14.127 13.356 13.767C12.9387 13.407 12.726 12.9047 12.718 12.26C12.718 11.6513 12.982 11.1417 13.51 10.731C14.0233 10.3203 14.68 10.115 15.48 10.115C16.5947 10.115 17.489 10.3863 18.163 10.929L17.393 12.128C17.1157 11.9124 16.7977 11.7553 16.458 11.666C16.1528 11.5637 15.8338 11.5081 15.512 11.501C15.132 11.501 14.8277 11.5707 14.599 11.71C14.3723 11.85 14.259 12.0333 14.259 12.26C14.259 12.5093 14.398 12.722 14.676 12.898C14.956 13.0673 15.4327 13.2543 16.106 13.459C16.92 13.701 17.4993 14.0237 17.844 14.427C18.1887 14.8303 18.361 15.3437 18.361 15.967C18.361 16.605 18.1153 17.155 17.624 17.617C17.14 18.0717 16.436 18.31 15.512 18.332C14.302 18.332 13.29 17.969 12.476 17.243L13.334 16.055ZM7.804 16.693C8.03867 16.8397 8.321 16.913 8.651 16.913C8.99567 16.913 9.28167 16.814 9.509 16.616C9.73567 16.4107 9.84933 16.055 9.85 15.549V10.247H11.335V15.835C11.313 16.7003 11.0637 17.3237 10.587 17.705C10.3262 17.9255 10.0229 18.0902 9.696 18.189C9.39282 18.2813 9.07792 18.3295 8.761 18.332C8.211 18.332 7.72333 18.2367 7.298 18.046C6.84333 17.8413 6.462 17.4783 6.154 16.957L7.188 16.11C7.378 16.3667 7.58333 16.561 7.804 16.693Z",
 	python: "M21.5694 9.42899C21.2154 8.07399 20.5694 7.00899 19.2144 7.00899H17.4094V9.13899C17.4094 10.784 15.9894 12.171 14.4734 12.171H9.66441C8.34241 12.171 7.30941 13.301 7.30941 14.623V19.173C7.30941 20.43 8.43941 21.205 9.66441 21.624C11.1494 22.076 12.6004 22.173 14.4394 21.624C15.6334 21.269 16.7954 20.592 16.7954 19.172V17.365H12.0524V16.785H19.2144C20.5694 16.785 21.1184 15.817 21.5694 14.365C22.0534 12.784 22.0534 11.332 21.5694 9.42899ZM14.7294 18.462C15.2144 18.462 15.6334 18.882 15.6334 19.366C15.6334 19.85 15.2134 20.269 14.7304 20.269C14.2464 20.301 13.8264 19.849 13.8264 19.366C13.7944 18.882 14.2134 18.462 14.7304 18.462M9.44041 11.558H14.2154C15.5374 11.558 16.5704 10.461 16.5704 9.10599V4.62099C16.5704 3.36299 15.4734 2.39499 14.2144 2.16899C12.6344 1.94399 10.8914 1.94399 9.44041 2.16899C7.40741 2.52399 7.08441 3.26599 7.08441 4.62099V6.42799H11.8594V7.00799H5.34141C3.98641 7.00799 2.76041 7.87999 2.40541 9.42799C1.95341 11.235 1.95341 12.364 2.40541 14.236C2.76041 15.656 3.53541 16.656 4.95441 16.656H6.50341V14.494C6.47041 12.913 7.85841 11.558 9.43941 11.558M9.14941 5.20199C8.91134 5.19715 8.68436 5.10048 8.5159 4.93221C8.34743 4.76393 8.25052 4.53705 8.24541 4.29899C8.24541 3.81499 8.66541 3.39499 9.14841 3.39499C9.63141 3.39499 10.0524 3.81499 10.0524 4.29899C10.0524 4.78299 9.63341 5.20199 9.14941 5.20199Z"
 }, xp = /* @__PURE__ */ function(e) {
-	return e.Checklist = "checklist", e.Features = "features", e.Publish = "publish", e.Toolbox = "toolbox", e.Play = "play", e.Add = "add", e.Chat = "chat", e.Home = "home", e.Coursor = "coursor", e.Hand = "hand", e.Order = "order", e.ZoomIn = "zoomIn", e.ZoomOut = "zoomOut", e.TurnLeft = "turnLeft", e.TurnRight = "turnRight", e.History = "history", e.Env = "env", e.AddNote = "addNote", e.Controls = "controls", e.ArrowLeft = "arrowLeft", e.Down = "down", e.Left = "left", e.ArrowRight = "arrowRight", e.Right = "right", e.Top = "top", e.Grid = "grid", e.ArrowTop = "arrowTop", e.Trash = "trash", e.ArrowDown = "arrowDown", e.Close = "close", e.Hamburger = "hamburger", e.BookOpen = "bookOpen", e.Ai = "ai", e.Book = "book", e.FileCopy = "fileCopy", e.FileCopyFilled = "fileCopyFilled", e.FileUpload = "fileUpload", e.Search = "search", e.PlayHistory = "playHistory", e.MenuHorizontal = "menuHorizontal", e.HideSidebar = "hideSidebar", e.MenuVertical = "menuVertical", e.Tag = "tag", e.TagAdd = "tagAdd", e.Moon = "moon", e.Sun = "sun", e.Desktop = "desktop", e.DoubleArrowsVertical = "doubleArrowsVertical", e.FinanceMode = "financeMode", e.Refresh = "refresh", e.Info = "info", e.FolderCopy = "folderCopy", e.Important = "important", e.Globe = "globe", e.Filter = "filter", e.Microphone = "microphone", e.Image = "image", e.Attachment = "attachment", e.Plane = "plane", e.PlaneAdd = "planeAdd", e.Headphones = "headphones", e.Bolt = "bolt", e.Private = "private", e.Scheme = "scheme", e.Repair = "repair", e.Flow = "flow", e.Folder = "folder", e.Folders = "folders", e.Edit = "edit", e.AddCircle = "addCircle", e.Loader = "loader", e.Gear = "gear", e.Exit = "exit", e.Archive = "archive", e.FolderOpen = "folderOpen", e.Flag = "flag", e.DoubleArrowHorizontal = "doubleArrowHorizontal", e.Code = "code", e.List = "list", e.UserData = "userData", e.Text = "text", e.Check = "check", e.FullScreen = "fullScreen", e.Function = "function", e.Combine = "combine", e.Danger = "danger", e.Download = "download", e.Stop = "stop", e.Pause = "pause", e.JSON = "code", e.File = "attachment", e.Remove = "remove", e.AddBox = "addBox", e.Layers = "layers", e.Eye = "eye", e.EyeStrikethrough = "eyeStrikethrough", e.BoltStrikethrough = "boltStrikethrough", e.Drag = "drag", e.Lock = "lock", e.Javascript = "javascript", e.Python = "python", e.FullScreenExit = "fullScreenExit", e.Person = "person", e.People = "people", e.Group = "group", e.Arcee = "arcee", e.Cart = "cart", e.Google = "google", e.Timelaps = "timelaps", e.Token = "token", e.SidebarChevronLeft = "sidebarChevronLeft", e.SidebarChevronRight = "sidebarChevronRight", e.Money = "money", e.AddCreditCard = "addCreditCard", e.External = "external", e.ScreenView = "screenView", e.Activity = "activity", e.Purchase = "purchase", e.Key = "key", e.Discord = "discord", e.Dollar = "dollar", e.Temperature = "temperature", e.CheckCircle = "checkCircle", e.Server = "server", e.Retry = "retry", e.Provider = "provider", e.Github = "github", e.Price = "price", e.Calendar = "calendar", e.Terminal = "terminal", e.Chunk = "chunk", e.Markdown = "markdown", e.String = "string", e.Brain = "brain", e.SearchPage = "searchPage", e.Pin = "pin", e.Unpin = "unpin", e.OpenMobileModal = "openMobileModal", e.ChatGpt = "chatGpt", e.Orchestrator = "orchestrator", e.Robot = "robot", e.ReadFile = "readFile", e.SearchFile = "searchFile", e.SearchFiles = "searchFiles", e.WriteCommand = "writeCommand", e.Clock = "clock", e.AddChat = "addChat", e.Goal = "goal", e;
+	return e.Checklist = "checklist", e.Features = "features", e.Publish = "publish", e.Toolbox = "toolbox", e.Play = "play", e.Add = "add", e.Chat = "chat", e.Home = "home", e.Coursor = "coursor", e.Hand = "hand", e.Order = "order", e.ZoomIn = "zoomIn", e.ZoomOut = "zoomOut", e.TurnLeft = "turnLeft", e.TurnRight = "turnRight", e.History = "history", e.Env = "env", e.AddNote = "addNote", e.Controls = "controls", e.ArrowLeft = "arrowLeft", e.Down = "down", e.Left = "left", e.ArrowRight = "arrowRight", e.Right = "right", e.Top = "top", e.Grid = "grid", e.ArrowTop = "arrowTop", e.Trash = "trash", e.ArrowDown = "arrowDown", e.Close = "close", e.Hamburger = "hamburger", e.BookOpen = "bookOpen", e.Ai = "ai", e.Book = "book", e.FileCopy = "fileCopy", e.FileCopyFilled = "fileCopyFilled", e.FileUpload = "fileUpload", e.Search = "search", e.PlayHistory = "playHistory", e.MenuHorizontal = "menuHorizontal", e.HideSidebar = "hideSidebar", e.MenuVertical = "menuVertical", e.Tag = "tag", e.TagAdd = "tagAdd", e.Moon = "moon", e.Sun = "sun", e.Desktop = "desktop", e.DoubleArrowsVertical = "doubleArrowsVertical", e.FinanceMode = "financeMode", e.Refresh = "refresh", e.Info = "info", e.FolderCopy = "folderCopy", e.Important = "important", e.Globe = "globe", e.Filter = "filter", e.Microphone = "microphone", e.Image = "image", e.Attachment = "attachment", e.Plane = "plane", e.PlaneAdd = "planeAdd", e.Headphones = "headphones", e.Bolt = "bolt", e.Private = "private", e.Scheme = "scheme", e.Repair = "repair", e.Flow = "flow", e.Folder = "folder", e.Folders = "folders", e.Edit = "edit", e.AddCircle = "addCircle", e.Loader = "loader", e.Gear = "gear", e.Exit = "exit", e.Archive = "archive", e.FolderOpen = "folderOpen", e.Flag = "flag", e.DoubleArrowHorizontal = "doubleArrowHorizontal", e.Code = "code", e.List = "list", e.UserData = "userData", e.Text = "text", e.Check = "check", e.FullScreen = "fullScreen", e.Function = "function", e.Combine = "combine", e.Danger = "danger", e.Download = "download", e.Stop = "stop", e.Pause = "pause", e.JSON = "code", e.File = "attachment", e.Remove = "remove", e.AddBox = "addBox", e.Layers = "layers", e.Eye = "eye", e.EyeStrikethrough = "eyeStrikethrough", e.BoltStrikethrough = "boltStrikethrough", e.Drag = "drag", e.Lock = "lock", e.Javascript = "javascript", e.Python = "python", e.FullScreenExit = "fullScreenExit", e.Person = "person", e.People = "people", e.Group = "group", e.Arcee = "arcee", e.Cart = "cart", e.Google = "google", e.Timelaps = "timelaps", e.Token = "token", e.LeftSidebar = "leftSidebar", e.ShowRightSidebar = "showRightSidebar", e.HideRightSidebar = "hideRightSidebar", e.Money = "money", e.AddCreditCard = "addCreditCard", e.External = "external", e.ScreenView = "screenView", e.Activity = "activity", e.Purchase = "purchase", e.Key = "key", e.Discord = "discord", e.Dollar = "dollar", e.Temperature = "temperature", e.CheckCircle = "checkCircle", e.Server = "server", e.Retry = "retry", e.Provider = "provider", e.Github = "github", e.Price = "price", e.Calendar = "calendar", e.Terminal = "terminal", e.Chunk = "chunk", e.Markdown = "markdown", e.String = "string", e.Brain = "brain", e.SearchPage = "searchPage", e.Pin = "pin", e.Unpin = "unpin", e.OpenMobileModal = "openMobileModal", e.ChatGpt = "chatGpt", e.Orchestrator = "orchestrator", e.Robot = "robot", e.ReadFile = "readFile", e.SearchFile = "searchFile", e.SearchFiles = "searchFiles", e.WriteCommand = "writeCommand", e.Clock = "clock", e.AddChat = "addChat", e.Goal = "goal", e;
 }({}), Sp = {
-	checklist: Ju,
-	features: Ku,
-	publish: Kc,
+	checklist: Wu,
+	features: Hu,
+	publish: Hc,
 	toolbox: Gf,
 	play: Bd,
 	add: Hd,
-	chat: md,
-	home: Pu,
-	coursor: Ed,
-	hand: Ou,
-	order: Qu,
+	chat: ud,
+	home: Au,
+	coursor: Sd,
+	hand: wu,
+	order: Ju,
 	zoomIn: _p,
 	zoomOut: yp,
 	turnLeft: $f,
 	turnRight: Wd,
 	history: Jd,
 	env: ap,
-	addNote: Ql,
+	addNote: Jl,
 	controls: hf,
-	arrowLeft: Rc,
-	down: ul,
-	left: fl,
-	arrowRight: Hc,
-	right: ml,
-	top: gl,
-	grid: Wu,
-	arrowTop: Jc,
+	arrowLeft: Ic,
+	down: ol,
+	left: cl,
+	arrowRight: Rc,
+	right: ul,
+	top: fl,
+	grid: Bu,
+	arrowTop: Wc,
 	trash: qf,
 	arrowDown: Mc,
 	close: dp,
-	hamburger: ud,
-	bookOpen: Xc,
+	hamburger: od,
+	bookOpen: Kc,
 	ai: _f,
-	book: Qc,
-	fileCopy: Il,
-	fileCopyFilled: Il,
-	fileUpload: iu,
+	book: Jc,
+	fileCopy: Ml,
+	fileCopyFilled: Ml,
+	fileUpload: eu,
 	search: nf,
-	playHistory: Sl,
-	menuHorizontal: Kl,
-	hideSidebar: Xu,
-	menuVertical: Wl,
+	playHistory: vl,
+	menuHorizontal: Hl,
+	hideSidebar: Ku,
+	menuVertical: Bl,
 	tag: Nf,
 	tagAdd: Ff,
-	moon: wd,
+	moon: bd,
 	sun: jf,
-	desktop: Sd,
+	desktop: vd,
 	doubleArrowsVertical: Ac,
-	financeMode: ol,
+	financeMode: nl,
 	refresh: Kd,
-	info: Ru,
-	folderCopy: mu,
-	important: vl,
-	globe: bu,
-	filter: gu,
-	microphone: gd,
-	image: Iu,
+	info: Pu,
+	folderCopy: uu,
+	important: ml,
+	globe: gu,
+	filter: fu,
+	microphone: fd,
+	image: Mu,
 	attachment: Md,
 	plane: af,
 	planeAdd: F("send-plus", [
@@ -8105,85 +8107,86 @@ var yp = F(vp), bp = {
 			key: "plus-horizontal"
 		}]
 	]),
-	headphones: Mu,
+	headphones: Ou,
 	bolt: hp,
 	private: df,
-	scheme: vu,
+	scheme: mu,
 	repair: lp,
 	flow: sp,
-	folder: fu,
-	folders: mu,
+	folder: cu,
+	folders: uu,
 	edit: Cf,
-	addCircle: wl,
-	loader: nd,
+	addCircle: bl,
+	loader: Qu,
 	gear: lf,
-	exit: od,
+	exit: nd,
 	archive: Oc,
-	folderOpen: cu,
-	flag: ou,
-	doubleArrowHorizontal: Ic,
+	folderOpen: iu,
+	flag: nu,
+	doubleArrowHorizontal: Pc,
 	code: yf,
-	list: ed,
-	userData: Pl,
-	text: nu,
-	check: cl,
-	fullScreen: cd,
+	list: Xu,
+	userData: Al,
+	text: Ql,
+	check: il,
+	fullScreen: id,
 	function: xf,
-	combine: Ml,
+	combine: Ol,
 	danger: Yf,
-	download: Hl,
+	download: Rl,
 	stop: kf,
 	pause: Pd,
-	remove: bd,
+	remove: gd,
 	addBox: Tf,
-	layers: Hu,
-	eye: Xl,
-	eyeStrikethrough: Jl,
+	layers: Ru,
+	eye: Kl,
+	eyeStrikethrough: Wl,
 	boltStrikethrough: pp,
-	drag: wu,
-	lock: id,
-	fullScreenExit: vd,
+	drag: bu,
+	lock: ed,
+	fullScreenExit: md,
 	person: tp,
 	people: rp,
-	group: Eu,
+	group: Su,
 	cart: pf,
 	timelaps: Uf,
-	token: Al,
-	sidebarChevronLeft: Pc,
-	sidebarChevronRight: Bc,
-	money: Rl,
-	addCreditCard: Rl,
-	external: Wc,
+	token: El,
+	leftSidebar: Ed,
+	showRightSidebar: Ad,
+	hideRightSidebar: Od,
+	money: Pl,
+	addCreditCard: Pl,
+	external: Bc,
 	screenView: Ec,
 	activity: wc,
 	purchase: pf,
-	key: Bu,
-	dollar: Bl,
+	key: Iu,
+	dollar: Il,
 	temperature: Vf,
-	checkCircle: bl,
+	checkCircle: gl,
 	server: sf,
 	retry: Xd,
-	provider: Ol,
-	price: Bl,
-	calendar: il,
+	provider: wl,
+	price: Il,
+	calendar: el,
 	terminal: Df,
 	chunk: Qd,
-	markdown: Au,
+	markdown: Eu,
 	string: Zf,
-	brain: nl,
-	searchPage: eu,
+	brain: Qc,
+	searchPage: Xl,
 	pin: Rd,
 	unpin: Id,
 	openMobileModal: Ad,
-	orchestrator: Od,
-	robot: el,
+	orchestrator: wd,
+	robot: Xc,
 	readFile: ef,
 	searchFile: zf,
-	searchFiles: uu,
+	searchFiles: ou,
 	writeCommand: Lf,
-	clock: El,
-	addChat: fd,
-	goal: Su
+	clock: Sl,
+	addChat: cd,
+	goal: vu
 }, Cp = ({ iconName: e = "checklist", color: t, size: n = 20, strokeWidth: r = 1.75, className: i = "", style: a, ...o }) => {
 	let s = t ? {
 		"--icon-color": t,

@@ -33,7 +33,7 @@ export function LeftSidebarRail({
           <Logo markOnly height={25} />
         </button>
         <RailButton label="Show sidebar" keys={toggleKeys} onClick={onToggle}>
-          <Icon iconName={IconName.SidebarChevronRight} />
+          <Icon iconName={IconName.LeftSidebar} />
         </RailButton>
         {projectsPage ? null : (
           <RailButton label="All projects" onClick={commands.openProjects}>
