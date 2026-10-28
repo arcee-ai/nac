@@ -597,11 +597,16 @@ export function FilesView({
   if (!listing) {
     return <PanelLoading listTitle="Files" />;
   }
-  if (nodes.length === 0) {
-    return <PanelEmptyState listTitle="Files" title="No Files" />;
-  }
 
   const branch = workspace?.branch;
+  // A phone's only branch switcher, so an empty checkout keeps it as well.
+  const branchRow =
+    isMobile && branch ? (
+      <FilesBranchRow sessionId={sessionId} branch={branch} readOnly={readOnly} />
+    ) : null;
+  if (nodes.length === 0) {
+    return <PanelEmptyState listTitle="Files" title="No Files" phoneLead={branchRow} />;
+  }
 
   return (
     <PanelSplit
@@ -627,9 +632,7 @@ export function FilesView({
       }
       list={
         <>
-          {isMobile && branch ? (
-            <FilesBranchRow sessionId={sessionId} branch={branch} readOnly={readOnly} />
-          ) : null}
+          {branchRow}
           {fileListing === "changed" ? (
             <ChangedList files={changedNodes} selected={marked} onSelect={selectFile} />
           ) : (

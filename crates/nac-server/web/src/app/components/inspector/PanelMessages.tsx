@@ -40,10 +40,13 @@ export function PanelEmptyState({
   listTitle,
   title,
   description,
+  phoneLead,
 }: {
   listTitle: string;
   title: string;
   description?: string;
+  /** What heads the list on a phone, kept above the message there. */
+  phoneLead?: ReactNode;
 }) {
   const isMobile = useIsMobile();
   const message = (
@@ -59,7 +62,10 @@ export function PanelEmptyState({
   if (!isMobile) return message;
   return (
     <PanelPhoneScreen title={listTitle} bar>
-      <div className="flex flex-1 flex-col min-h-0 py-14">{message}</div>
+      {phoneLead ? <div className="shrink-0 px-2 pt-16">{phoneLead}</div> : null}
+      <div className={cn("flex flex-1 flex-col min-h-0", phoneLead ? "pb-14" : "py-14")}>
+        {message}
+      </div>
     </PanelPhoneScreen>
   );
 }

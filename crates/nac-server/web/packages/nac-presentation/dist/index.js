@@ -20203,8 +20203,8 @@ function zx({ listTitle: e, children: t }) {
 		children: r
 	}) : r;
 }
-function Bx({ listTitle: e, title: t, description: n }) {
-	let r = N(), i = /* @__PURE__ */ Z("div", {
+function Bx({ listTitle: e, title: t, description: n, phoneLead: r }) {
+	let i = N(), a = /* @__PURE__ */ Z("div", {
 		className: "flex flex-1 flex-col items-center justify-center gap-2 min-h-0 w-full p-8 text-center",
 		children: [/* @__PURE__ */ X("p", {
 			className: "header-md w-full truncate text-basic-primary",
@@ -20215,14 +20215,17 @@ function Bx({ listTitle: e, title: t, description: n }) {
 			children: n
 		}) : null]
 	});
-	return r ? /* @__PURE__ */ X(Lx, {
+	return i ? /* @__PURE__ */ Z(Lx, {
 		title: e,
 		bar: !0,
-		children: /* @__PURE__ */ X("div", {
-			className: "flex flex-1 flex-col min-h-0 py-14",
-			children: i
-		})
-	}) : i;
+		children: [r ? /* @__PURE__ */ X("div", {
+			className: "shrink-0 px-2 pt-16",
+			children: r
+		}) : null, /* @__PURE__ */ X("div", {
+			className: I("flex flex-1 flex-col min-h-0", r ? "pb-14" : "py-14"),
+			children: a
+		})]
+	}) : a;
 }
 // src/app/components/inspector/PanelSplit.tsx
 function Vx({ list: e, listToolbar: t, listClassName: n, listTitle: r, title: i, titleAction: a, actions: o, children: s }) {
@@ -24041,12 +24044,16 @@ function dD({ sessionId: t, snapshot: n, revision: r = null, readOnly: i = !1 })
 		children: Vt(k)
 	});
 	if (!h) return /* @__PURE__ */ X(Ux, { listTitle: "Files" });
-	if (b.length === 0) return /* @__PURE__ */ X(Bx, {
+	let ee = v?.branch, A = d && ee ? /* @__PURE__ */ X(LE, {
+		sessionId: t,
+		branch: ee,
+		readOnly: i
+	}) : null;
+	return b.length === 0 ? /* @__PURE__ */ X(Bx, {
 		listTitle: "Files",
-		title: "No Files"
-	});
-	let ee = v?.branch;
-	return /* @__PURE__ */ X(Vx, {
+		title: "No Files",
+		phoneLead: A
+	}) : /* @__PURE__ */ X(Vx, {
 		listTitle: "Files",
 		title: T ? /* @__PURE__ */ X(rD, { path: T }) : void 0,
 		titleAction: D ? /* @__PURE__ */ X(ml, {
@@ -24061,11 +24068,7 @@ function dD({ sessionId: t, snapshot: n, revision: r = null, readOnly: i = !1 })
 			revision: r,
 			readOnly: i
 		}),
-		list: /* @__PURE__ */ Z(Y, { children: [d && ee ? /* @__PURE__ */ X(LE, {
-			sessionId: t,
-			branch: ee,
-			readOnly: i
-		}) : null, m === "changed" ? /* @__PURE__ */ X(XE, {
+		list: /* @__PURE__ */ Z(Y, { children: [A, m === "changed" ? /* @__PURE__ */ X(XE, {
 			files: S,
 			selected: O,
 			onSelect: l
