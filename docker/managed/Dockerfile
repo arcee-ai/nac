@@ -49,7 +49,7 @@ COPY docker/managed/packages/build-krb5.sh docker/managed/packages/krb5-librarie
 RUN sh /recipe/build-krb5.sh
 COPY docker/managed/packages/build-curl.sh /recipe/
 RUN sh /recipe/build-curl.sh
-COPY docker/managed/packages/build-libssh2.sh docker/managed/packages/test-libssh2-consumers.sh docker/managed/packages/libssh2-list-followups.patch docker/managed/packages/libssh2-pointer-followup.patch /recipe/
+COPY docker/managed/packages/build-libssh2.sh docker/managed/packages/test-libssh2-consumers.sh docker/managed/packages/libssh2-regressions.c docker/managed/packages/libssh2-list-followups.patch docker/managed/packages/libssh2-pointer-followup.patch /recipe/
 RUN sh /recipe/build-libssh2.sh
 COPY docker/managed/packages/build-sasl.sh /recipe/
 RUN sh /recipe/build-sasl.sh
