@@ -185,27 +185,71 @@ test("rename and delete preserve the responsive pilot journey and accessibility"
     });
     await expect(dialog).toBeVisible();
     await cdp.send("Input.insertText", { text: "日本" });
+    const staleSessions = await (await request.get(`${harness.baseUrl}/sessions`)).json();
+    let holdStaleList = true;
+    await page.route(
+      (url) => url.origin === new URL(harness.baseUrl).origin && url.pathname === "/sessions",
+      async (route) => {
+        if (holdStaleList && route.request().method() === "GET")
+          return route.fulfill({ json: staleSessions });
+        return route.continue();
+      },
+    );
+    await dialog.getByRole("checkbox").check();
     await field.fill("Pilot renamed");
     const writes: string[] = [];
     page.on("request", (req) => {
       if (["PUT", "DELETE"].includes(req.method()) && req.url().includes(`/sessions/${id}`))
         writes.push(req.method());
     });
+    const firstSave = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/sessions/${id}/presentation`) &&
+        response.request().method() === "PUT" &&
+        response.status() === 200,
+    );
     await page.keyboard.press("Enter");
+    const accepted = await (await firstSave).json();
     await expect(dialog).toHaveCount(0);
     expect(writes).toEqual(["PUT"]);
-    const remove = page.getByRole("button", { name: "Delete Pilot renamed", exact: true });
+    // The list deliberately remains at its old snapshot while the accepted
+    // response is already authoritative for the modal's next open and save.
+    await rename.click();
+    await expect(field).toHaveValue("Pilot renamed");
+    await expect(dialog.getByRole("checkbox")).toBeChecked();
+    const acceptedCapture = info.outputPath("candidate-saved-rename-reopened.png");
+    await page.screenshot({ path: acceptedCapture, animations: "disabled", caret: "hide" });
+    await info.attach("saved rename reopened before list refresh", {
+      path: acceptedCapture,
+      contentType: "image/png",
+    });
+    await field.fill("Pilot renamed again");
+    const repeatSave = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/sessions/${id}/presentation`) &&
+        response.request().method() === "PUT" &&
+        response.status() === 200,
+    );
+    await page.keyboard.press("Enter");
+    const repeated = await repeatSave;
+    expect(repeated.request().postDataJSON().expected_version).toBe(accepted.presentation_version);
+    await expect(dialog).toHaveCount(0);
+    expect(writes).toEqual(["PUT", "PUT"]);
+    holdStaleList = false;
+    await page.reload();
+    const remove = page.getByRole("button", { name: "Delete Pilot renamed again", exact: true });
+    await remove.focus();
     await remove.click();
     const alert = page.getByRole("alertdialog", { name: "Delete session", exact: true });
     await expect(alert).toHaveAccessibleDescription(/cannot be undone/);
     await alert.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(remove).toBeFocused();
-    expect(writes).toEqual(["PUT"]);
+    expect(writes).toEqual(["PUT", "PUT"]);
     await remove.click();
     await alert.getByRole("button", { name: "Delete session", exact: true }).dblclick();
     await expect(alert).toHaveCount(0);
     await expect(remove).toHaveCount(0);
-    expect(writes).toEqual(["PUT", "DELETE"]);
+    expect(writes).toEqual(["PUT", "PUT", "DELETE"]);
   }
   await info.attach("pilot capture contract", {
     contentType: "application/json",

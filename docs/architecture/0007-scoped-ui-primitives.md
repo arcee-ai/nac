@@ -130,15 +130,14 @@ graph, and the complete migration at most 50 KiB and 15 KiB.
 
 | Graph | Baseline JS | Baseline CSS | Pilot adds | Left for later slices |
 | --- | --- | --- | --- | --- |
-| App | 470,380 B | 23,184 B | 22.9 KiB JS, 0.2 KiB CSS | 27.1 KiB JS, 14.8 KiB CSS |
-| Presentation | 435,096 B | 1,180,676 B | 27.0 KiB JS, 0.3 KiB CSS | 23.0 KiB JS, 14.7 KiB CSS |
+| App | 470,380 B | 23,184 B | 23.1 KiB JS, 0.2 KiB CSS | 26.9 KiB JS, 14.8 KiB CSS |
+| Presentation | 435,096 B | 1,180,676 B | 27.2 KiB JS, 0.3 KiB CSS | 22.8 KiB JS, 14.7 KiB CSS |
 
 These measurements use Node 26.12.0, gzip level 9, and the committed baseline
 bundles on the same host as the repaired pilot build. Gzip byte counts can vary
 with the runtime's compression implementation; compare both revisions together.
-Keeping keyboard hints open through a scroll, added after that measurement,
-adds 0.1 KiB of startup JavaScript to each graph (Node 24.16.0, both revisions
-measured together).
+The table includes keyboard hints surviving container scrolling and accepted
+rename revisions surviving the exit form's lifetime.
 
 Every later slice measures against this baseline. Exceeding a budget calls for
 optimization or an explicit scope review; it is never waived silently.

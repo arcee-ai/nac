@@ -15,21 +15,49 @@ interface RenameModalProps {
   summary: SessionSummarySnapshot | null;
 }
 
-/** Retain the form through the exit slide; each idle reopen starts from current presentation. */
+type Presentation = Pick<SessionSummarySnapshot, "title" | "pinned" | "presentation_version">;
+
+/** Keep revision authority per session, without retaining unrelated summary metadata. */
+function rememberPresentation(
+  known: ReadonlyMap<string, Presentation>,
+  incoming: SessionSummarySnapshot,
+): ReadonlyMap<string, Presentation> {
+  const previous = known.get(incoming.session_id);
+  if (previous && (previous.presentation_version ?? 0) >= (incoming.presentation_version ?? 0))
+    return known;
+  const { title, pinned, presentation_version } = incoming;
+  return new Map(known).set(incoming.session_id, { title, pinned, presentation_version });
+}
+
+/** Retain accepted presentation authority beyond the form's temporary exit lifetime. */
 export function RenameModal({ open, onClose, summary }: RenameModalProps) {
   const mounted = useExitTransition(open);
-  if (!mounted || !summary) return null;
-  return <RenameForm key={summary.session_id} open={open} summary={summary} onClose={onClose} />;
+  const [baselines, setBaselines] = useState<ReadonlyMap<string, Presentation>>(() => new Map());
+  const observed = summary ? rememberPresentation(baselines, summary) : baselines;
+  if (observed !== baselines) setBaselines(observed);
+  const current = summary ? { ...summary, ...observed.get(summary.session_id) } : null;
+  if (!mounted || !current) return null;
+  return (
+    <RenameForm
+      key={current.session_id}
+      open={open}
+      summary={current}
+      onClose={onClose}
+      onSaved={(accepted) => setBaselines((known) => rememberPresentation(known, accepted))}
+    />
+  );
 }
 
 function RenameForm({
   open,
   summary,
   onClose,
+  onSaved,
 }: {
   open: boolean;
   summary: SessionSummarySnapshot;
   onClose: () => void;
+  onSaved: (accepted: SessionSummarySnapshot) => void;
 }) {
   const toast = useToast();
   const sessionTitle = useSessionTitle();
@@ -58,12 +86,13 @@ function RenameForm({
     submitting.current = true;
     setSaving(true);
     try {
-      await update.mutateAsync({
+      const accepted = await update.mutateAsync({
         id: summary.session_id,
         title: title.trim(),
         pinned: canPin ? pinned : false,
         expectedVersion: summary.presentation_version ?? 0,
       });
+      onSaved(accepted);
       toast.success("Session presentation saved");
       onClose();
     } catch (error) {

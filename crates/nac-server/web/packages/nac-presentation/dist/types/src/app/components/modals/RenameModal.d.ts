@@ -4,6 +4,6 @@ interface RenameModalProps {
     onClose: () => void;
     summary: SessionSummarySnapshot | null;
 }
-/** Retain the form through the exit slide; each idle reopen starts from current presentation. */
+/** Retain accepted presentation authority beyond the form's temporary exit lifetime. */
 export declare function RenameModal({ open, onClose, summary }: RenameModalProps): import("react").JSX.Element | null;
 export {};
