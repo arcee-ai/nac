@@ -128,7 +128,7 @@ graph, and the complete migration at most 50 KiB and 15 KiB.
 | Graph | Baseline JS | Baseline CSS | Pilot adds | Left for later slices |
 | --- | --- | --- | --- | --- |
 | App | 470,380 B | 23,184 B | 22.9 KiB JS, 0.2 KiB CSS | 27.1 KiB JS, 14.8 KiB CSS |
-| Presentation | 435,096 B | 1,180,676 B | 26.9 KiB JS, 0.3 KiB CSS | 23.1 KiB JS, 14.7 KiB CSS |
+| Presentation | 435,096 B | 1,180,676 B | 27.0 KiB JS, 0.3 KiB CSS | 23.0 KiB JS, 14.7 KiB CSS |
 
 These measurements use Node 26.12.0, gzip level 9, and the committed baseline
 bundles on the same host as the repaired pilot build. Gzip byte counts can vary

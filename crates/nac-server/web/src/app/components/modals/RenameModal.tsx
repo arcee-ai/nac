@@ -15,7 +15,7 @@ interface RenameModalProps {
   summary: SessionSummarySnapshot | null;
 }
 
-/** Mounted only while open, so the fields start from the current presentation. */
+/** Retain the form through the exit slide; each idle reopen starts from current presentation. */
 export function RenameModal({ open, onClose, summary }: RenameModalProps) {
   const mounted = useExitTransition(open);
   if (!mounted || !summary) return null;
@@ -38,13 +38,25 @@ function RenameForm({
   // `isPending` only shows up on the next render, so a second Enter in the
   // same frame would otherwise send the write twice.
   const submitting = useRef(false);
+  const [saving, setSaving] = useState(false);
   const [title, setTitle] = useState(summary.title ?? "");
   const [pinned, setPinned] = useState(Boolean(summary.pinned));
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    // A canceled form can reopen before the exit timer unmounts it. Reset
+    // that abandoned draft, but retain any accepted save and its ref guard.
+    if (open && !saving) {
+      setTitle(summary.title ?? "");
+      setPinned(Boolean(summary.pinned));
+    }
+  }
   const canPin = Boolean(summary.project_id);
 
   const submit = async () => {
     if (submitting.current) return;
     submitting.current = true;
+    setSaving(true);
     try {
       await update.mutateAsync({
         id: summary.session_id,
@@ -63,6 +75,7 @@ function RenameForm({
       );
     } finally {
       submitting.current = false;
+      setSaving(false);
     }
   };
 

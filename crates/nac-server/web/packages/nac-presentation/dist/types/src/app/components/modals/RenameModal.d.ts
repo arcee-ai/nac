@@ -4,6 +4,6 @@ interface RenameModalProps {
     onClose: () => void;
     summary: SessionSummarySnapshot | null;
 }
-/** Mounted only while open, so the fields start from the current presentation. */
+/** Retain the form through the exit slide; each idle reopen starts from current presentation. */
 export declare function RenameModal({ open, onClose, summary }: RenameModalProps): import("react").JSX.Element | null;
 export {};

@@ -8233,21 +8233,23 @@ function Im({ open: e, onClose: t, summary: n }) {
 	}, n.session_id);
 }
 function Lm({ open: e, summary: t, onClose: n }) {
-	let r = ar(), i = kd(), a = ot(), o = gi(), s = K(!1), [c, l] = q(t.title ?? ""), [u, d] = q(!!t.pinned), f = !!t.project_id, p = async () => {
+	let r = ar(), i = kd(), a = ot(), o = gi(), s = K(!1), [c, l] = q(!1), [u, d] = q(t.title ?? ""), [f, p] = q(!!t.pinned), [m, h] = q(e);
+	m !== e && (h(e), e && !c && (d(t.title ?? ""), p(!!t.pinned)));
+	let g = !!t.project_id, v = async () => {
 		if (!s.current) {
-			s.current = !0;
+			s.current = !0, l(!0);
 			try {
 				await a.mutateAsync({
 					id: t.session_id,
-					title: c.trim(),
-					pinned: f ? u : !1,
+					title: u.trim(),
+					pinned: g ? f : !1,
 					expectedVersion: t.presentation_version ?? 0
 				}), r.success("Session presentation saved"), n();
 			} catch (e) {
 				let t = e instanceof Ft && e.status === 409;
 				r.error(t ? "Version conflict — the session changed in the meantime" : `Error: ${Wt($(e))}`);
 			} finally {
-				s.current = !1;
+				s.current = !1, l(!1);
 			}
 		}
 	};
@@ -8274,21 +8276,21 @@ function Lm({ open: e, summary: t, onClose: n }) {
 			id: o,
 			className: "flex flex-col gap-4",
 			onSubmit: (e) => {
-				e.preventDefault(), p();
+				e.preventDefault(), v();
 			},
 			children: [/* @__PURE__ */ Y(Q, {
 				label: "Title",
 				placeholder: i(t) || "Session name",
 				hintText: "Leave empty to restore the automatic title (last prompt).",
-				value: c,
+				value: u,
 				loading: a.isPending,
-				onChange: (e) => l(e.target.value)
-			}), f ? /* @__PURE__ */ X("label", {
+				onChange: (e) => d(e.target.value)
+			}), g ? /* @__PURE__ */ X("label", {
 				className: "flex items-center gap-2 label-small text-basic-secondary select-none",
 				children: [/* @__PURE__ */ Y("input", {
 					type: "checkbox",
-					checked: u,
-					onChange: (e) => d(e.target.checked),
+					checked: f,
+					onChange: (e) => p(e.target.checked),
 					className: "accent-[var(--color-fill-accent-primary)]"
 				}), "Pin to top of the list"]
 			}) : null]

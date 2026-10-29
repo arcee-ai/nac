@@ -270,11 +270,10 @@ describe("session actions", () => {
     const opener = openFrom("Rename Draft plan");
     const cancelled = screen.getByRole("dialog", { name: "Rename session" });
     fireEvent.change(within(cancelled).getByLabelText("Title"), { target: { value: "Abandoned" } });
+    fireEvent.click(within(cancelled).getByRole("checkbox"));
     fireEvent.click(within(cancelled).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(document.activeElement).toBe(opener));
-    // RenameModal keeps its form through a 300 ms exit transition.
-    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
-
+    // Reopen before the exit transition unmounts the retained form.
     openFrom("Rename Draft plan");
     const dialog = screen.getByRole("dialog", { name: "Rename session" });
     expect(document.activeElement).toBe(dialog);
@@ -289,6 +288,26 @@ describe("session actions", () => {
       pinned: false,
       expectedVersion: 3,
     });
+  });
+
+  it("preserves a pending rename and its single-write guard across a quick reopen", async () => {
+    const save = deferred();
+    fakes.update.mockReturnValue(save.promise);
+    mount();
+    openFrom("Rename Draft plan");
+    let dialog = screen.getByRole("dialog", { name: "Rename session" });
+    let field = within(dialog).getByLabelText<HTMLInputElement>("Title");
+    fireEvent.change(field, { target: { value: "Pending title" } });
+    fireEvent.submit(field.form!);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    openFrom("Rename Draft plan");
+    dialog = screen.getByRole("dialog", { name: "Rename session" });
+    field = within(dialog).getByLabelText<HTMLInputElement>("Title");
+    expect(field.value).toBe("Pending title");
+    fireEvent.submit(field.form!);
+    expect(fakes.update).toHaveBeenCalledTimes(1);
+    await act(async () => save.resolve());
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("reopen a cancelled delete and confirm it once", async () => {
