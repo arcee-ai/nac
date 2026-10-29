@@ -34,7 +34,7 @@ make -j2
 # restoring the pre-patch behaviour.
 gcc -DHAVE_CONFIG_H -I. -Isrc -Iinclude -Wl,--allow-multiple-definition \
     -o /tmp/libssh2-regressions /recipe/libssh2-regressions.c \
-    src/publickey.c src/misc.c src/sftp.c src/.libs/libssh2.a -lcrypto
+    src/publickey.c src/misc.c src/sftp.c src/.libs/libssh2.a -lcrypto -lz
 /tmp/libssh2-regressions
 # Ordinary upstream standalone and local OpenSSH tests. No new attack fixtures.
 mkdir -p /run/sshd
