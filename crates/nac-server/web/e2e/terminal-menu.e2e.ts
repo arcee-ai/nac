@@ -18,6 +18,8 @@ for (const mobile of [false, true]) {
     await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     if (!mobile) await page.getByRole("button", { name: "Expand panel", exact: true }).click();
+    // Expanding replaces the observer along with its containing panel.
+    await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     const processActions: string[] = [];
     page.on("request", (sent) => {
       if (
@@ -45,6 +47,7 @@ for (const mobile of [false, true]) {
     await expect(review).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(reconnect).toBeFocused();
+    await expect(review).toBeInViewport({ ratio: 1 });
     await page.screenshot({ path: testInfo.outputPath("keyboard-actions.png") });
     await page.keyboard.press("Escape");
     await expect(actions).toHaveCount(0);
@@ -65,6 +68,8 @@ for (const mobile of [false, true]) {
     if (mobile) await pane.getByRole("button", { name: "Open list", exact: true }).click();
     const recent = pane.getByRole("region", { name: "Recent terminal activity", exact: true });
     await recent.getByRole("button", { name: /^Shell · / }).click();
+    // History owns a fresh read-only observer; its reconnect starts disabled.
+    await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     await expect(pane.getByLabel("Terminal input ownership")).toHaveCount(0);
     await trigger.focus();
     await page.keyboard.press("Enter");
