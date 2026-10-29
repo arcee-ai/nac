@@ -106,6 +106,58 @@ function wheelStopped(target: Element) {
 }
 
 describe("nested overlays", () => {
+  it("skips unavailable controls at the dialog boundary and holds an empty surface", () => {
+    render(
+      <MemoryRouter>
+        <PresentationBoundary>
+          <Modal open onClose={vi.fn()} title="Visible controls">
+            <button>Last visible</button>
+            <button disabled>Disabled</button>
+            <fieldset disabled>
+              <button>Disabled fieldset</button>
+            </fieldset>
+            <button tabIndex={-1}>Programmatic only</button>
+            <div hidden>
+              <button>Hidden</button>
+            </div>
+            <div style={{ display: "none" }}>
+              <button>CSS hidden</button>
+            </div>
+            <div inert>
+              <button>Inert</button>
+            </div>
+          </Modal>
+        </PresentationBoundary>
+      </MemoryRouter>,
+    );
+    const dialog = screen.getByRole("dialog");
+    const last = within(dialog).getByRole("button", { name: "Last visible" });
+    const first = within(dialog).getByRole("button", { name: "Close" });
+    act(() => last.focus());
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("keeps Tab on a dialog with no available controls", () => {
+    render(
+      <MemoryRouter>
+        <PresentationBoundary>
+          <Modal open title="Read only">
+            <p>Information</p>
+          </Modal>
+        </PresentationBoundary>
+      </MemoryRouter>,
+    );
+    const dialog = screen.getByRole("dialog");
+    act(() => dialog.focus());
+    expect(fireEvent.keyDown(dialog, { key: "Tab" })).toBe(false);
+    expect(document.activeElement).toBe(dialog);
+    expect(fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true })).toBe(false);
+    expect(document.activeElement).toBe(dialog);
+  });
+
   it("close top first on Escape, then hand focus back to the dialog's opener", async () => {
     mount("main");
     const { opener, dialog } = openDialog("main");
@@ -182,6 +234,30 @@ describe("nested overlays", () => {
 });
 
 describe("two embedded instances", () => {
+  it("keeps both dialogs' Tab boundaries local after the other instance opens", () => {
+    mount("left", "right");
+    const left = openDialog("left").dialog;
+    const leftFirst = within(left).getByRole("button", { name: "Close" });
+    const leftLast = within(left).getByRole("button", { name: "Status" });
+    act(() => leftLast.focus());
+    expect(fireEvent.keyDown(leftLast, { key: "Tab" })).toBe(false);
+    expect(document.activeElement).toBe(leftFirst);
+
+    const right = openDialog("right").dialog;
+    for (const dialog of [left, right, left]) {
+      const first = within(dialog).getByRole("button", { name: "Close" });
+      const last = within(dialog).getByRole("button", { name: "Status" });
+      act(() => last.focus());
+      expect(fireEvent.keyDown(last, { key: "Tab" })).toBe(false);
+      expect(document.activeElement).toBe(first);
+      expect(fireEvent.keyDown(first, { key: "Tab", shiftKey: true })).toBe(false);
+      expect(document.activeElement).toBe(last);
+      act(() => dialog.focus());
+      fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+      expect(document.activeElement).toBe(last);
+    }
+  });
+
   it("keep separate stacks: Escape, inertness and menus stay with their own view", () => {
     mount("left", "right");
     const left = openDialog("left").dialog;

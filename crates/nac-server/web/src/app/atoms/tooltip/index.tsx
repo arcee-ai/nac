@@ -1,8 +1,9 @@
-import React, { useRef, useState } from "react";
+import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { ANCHOR_GAP, AnchorPlacement, anchorSides } from "../../lib/anchor";
 import { cn } from "../../lib/cn";
 import { TooltipContent, TooltipTrigger, Tooltip as UITooltip } from "../../ui/tooltip";
+import { composeRefs } from "../../ui/compose-refs";
 import Icon, { IconName } from "../icon";
 import KeyboardShortcut from "../keyboard-shortcut";
 import Popover from "../popover";
@@ -151,6 +152,65 @@ interface TooltipProps {
 }
 
 /**
+ * Keep arbitrary children and their refs/events intact. Radix describes this
+ * layout wrapper, so also associate its hint with the controls inside it.
+ */
+function TooltipAnchor({
+  ref,
+  "aria-describedby": describedBy,
+  ...props
+}: React.ComponentPropsWithRef<"div">) {
+  const anchor = useRef<HTMLDivElement>(null);
+  const composedRef = useMemo(() => composeRefs(ref, anchor), [ref]);
+  useLayoutEffect(() => {
+    const node = anchor.current;
+    if (!node || !describedBy) return undefined;
+    const ids = describedBy.split(/\s+/).filter(Boolean);
+    const owned = new Map<HTMLElement, Set<string>>();
+    const sync = () => {
+      for (const target of node.querySelectorAll<HTMLElement>(
+        "a[href], button, input, select, textarea, [tabindex], [contenteditable=true]",
+      )) {
+        const current = target.getAttribute("aria-describedby")?.split(/\s+/).filter(Boolean) ?? [];
+        const added = owned.get(target) ?? new Set<string>();
+        for (const id of ids) {
+          if (!current.includes(id)) {
+            current.push(id);
+            added.add(id);
+          }
+        }
+        owned.set(target, added);
+        const next = current.join(" ");
+        if (target.getAttribute("aria-describedby") !== next)
+          target.setAttribute("aria-describedby", next);
+      }
+    };
+    sync();
+    // A compound child can mount controls or change its own description
+    // without rerendering the Tooltip. Preserve those updates while open.
+    const observer = new MutationObserver(sync);
+    observer.observe(node, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["aria-describedby"],
+    });
+    return () => {
+      observer.disconnect();
+      for (const [target, added] of owned) {
+        const remaining = (target.getAttribute("aria-describedby") ?? "")
+          .split(/\s+/)
+          .filter((id) => id && !added.has(id))
+          .join(" ");
+        if (remaining) target.setAttribute("aria-describedby", remaining);
+        else target.removeAttribute("aria-describedby");
+      }
+    };
+  }, [describedBy]);
+  return <div {...props} ref={composedRef} aria-describedby={describedBy} />;
+}
+
+/**
  * A hint shown while the trigger is hovered or holds keyboard focus. Escape
  * dismisses it before anything beneath it, and a press on the trigger hides
  * it until the pointer comes back.
@@ -198,7 +258,7 @@ const Tooltip: React.FC<TooltipProps> & {
       disableHoverableContent
     >
       <TooltipTrigger asChild>
-        <div
+        <TooltipAnchor
           className={cn(
             sticky ? "w-fit h-fit leading-[0]" : "relative w-fit h-fit leading-[0] group",
             className,
@@ -215,7 +275,7 @@ const Tooltip: React.FC<TooltipProps> & {
           }}
         >
           {children}
-        </div>
+        </TooltipAnchor>
       </TooltipTrigger>
       <TooltipContent
         side={side}

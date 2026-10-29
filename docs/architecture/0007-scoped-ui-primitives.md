@@ -13,7 +13,8 @@ Each presentation instance owns one overlay layer stack (`ui/layer-stack.ts`),
 created by `PresentationBoundary`. It is the single owner of Escape,
 outside-press dismissal, background inertness and focus return for every
 primitive. Radix runs non-modal: it portals into the instance's overlay root,
-positions, wires ARIA and loops Tab inside an open dialog, but its own Escape,
+positions and wires ARIA; the instance's dialog surface owns its Tab boundaries.
+Radix's own Escape,
 outside-interaction and close auto-focus handling is cancelled. Radix's modal
 mode (`react-remove-scroll` and `aria-hidden`'s `hideOthers`) acts on the whole
 document, so it would reach into the host page and into any sibling instance.
@@ -104,8 +105,10 @@ Embedding still observes these document-level Radix behaviors:
 - `preventDefault` on an Escape keydown that reaches an open Radix layer;
 - a document `tooltip.open` event that closes tooltips in other Radix trees,
   including another instance's;
-- a module-global focus scope stack, so a dialog open in one instance pauses
-  the Tab loop of a dialog open in another.
+- a module-global focus scope stack, so opening a dialog in one instance pauses
+  Radix's scope in another. Dialog and sheet surfaces enforce their own visible
+  first/last Tab boundaries against the instance's top layer, preserving their
+  keyboard loop even when Radix's scope is paused.
 
 A press outside a panel dismisses it even when it lands in another instance,
 as before the migration.
@@ -124,8 +127,12 @@ graph, and the complete migration at most 50 KiB and 15 KiB.
 
 | Graph | Baseline JS | Baseline CSS | Pilot adds | Left for later slices |
 | --- | --- | --- | --- | --- |
-| App | 471,545 B | 23,232 B | 22.3 KiB JS, 0.2 KiB CSS | 27.7 KiB JS, 14.8 KiB CSS |
-| Presentation | 435,177 B | 1,174,101 B | 26.5 KiB JS, 0.3 KiB CSS | 23.5 KiB JS, 14.7 KiB CSS |
+| App | 470,380 B | 23,184 B | 22.9 KiB JS, 0.2 KiB CSS | 27.1 KiB JS, 14.8 KiB CSS |
+| Presentation | 435,096 B | 1,180,676 B | 26.9 KiB JS, 0.3 KiB CSS | 23.1 KiB JS, 14.7 KiB CSS |
+
+These measurements use Node 26.12.0, gzip level 9, and the committed baseline
+bundles on the same host as the repaired pilot build. Gzip byte counts can vary
+with the runtime's compression implementation; compare both revisions together.
 
 Every later slice measures against this baseline. Exceeding a budget calls for
 optimization or an explicit scope review; it is never waived silently.
@@ -134,8 +141,13 @@ Behavior coverage lives next to its owners: `ui/layer-stack.test.ts` (Escape
 order, outside presses, inertness, focus return), `ui/overlays.test.tsx` (nested
 legacy and migrated layers, the dropdown menu, tooltips, standalone and
 embedded keyboard ownership, two embedded instances), `atoms/modal/index.test.tsx`
-(the phone panel), `atoms/input/index.test.tsx`, and the rename and delete
-journey in `providers/SessionActionsProvider.test.tsx`.
+(the phone panel), `atoms/input/index.test.tsx`, tooltip accessible-description
+coverage in `atoms/tooltip/index.test.tsx`, and the rename and delete journey in
+`providers/SessionActionsProvider.test.tsx`. Production-browser qualification in
+`e2e/overlay-isolation.e2e.ts` exercises two runtimes' Tab boundaries, nested
+panels, Escape, focus return, inertness, portals, tooltip descriptions and
+shortcuts. Browser emulation does not replace real screen-reader, physical
+device or OS input-method acceptance.
 
 ## Extension
 

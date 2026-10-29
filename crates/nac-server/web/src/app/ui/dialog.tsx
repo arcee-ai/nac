@@ -136,10 +136,26 @@ type DialogContentProps = Omit<
   "onEscapeKeyDown" | "onInteractOutside" | "onPointerDownOutside" | "onFocusOutside"
 >;
 
+/** Controls in native Tab order, excluding hidden, disabled and inert descendants. */
+function tabStops(surface: HTMLElement): HTMLElement[] {
+  return Array.from(surface.querySelectorAll<HTMLElement>(FOCUSABLE))
+    .filter((node) => {
+      if (node.tabIndex < 0 || node.matches(":disabled, input[type=hidden]")) return false;
+      if (node.closest("[hidden], [inert]")) return false;
+      if (getComputedStyle(node).visibility === "hidden") return false;
+      for (let ancestor: HTMLElement | null = node; ancestor; ancestor = ancestor.parentElement) {
+        if (getComputedStyle(ancestor).display === "none") return false;
+        if (ancestor === surface) break;
+      }
+      return true;
+    })
+    .sort((a, b) => (a.tabIndex || Infinity) - (b.tabIndex || Infinity));
+}
+
 /**
  * The dialog surface alone; compose `DialogPortal` and `DialogOverlay` around
- * it. Radix wraps Tab between the first and last control, but not Shift+Tab
- * from the surface itself, which holds the focus when nothing inside took it.
+ * it. Tab boundaries belong to this instance's top layer: Radix's global
+ * FocusScope stack can be paused by a dialog in an unrelated embedded view.
  */
 function DialogContent({
   onCloseAutoFocus,
@@ -169,12 +185,23 @@ function DialogContent({
       onKeyDown={(event) => {
         onKeyDown?.(event);
         const surface = event.currentTarget;
-        if (event.defaultPrevented || event.key !== "Tab" || !event.shiftKey) return;
-        if (document.activeElement !== surface) return;
-        const last = Array.from(surface.querySelectorAll<HTMLElement>(FOCUSABLE)).at(-1);
-        if (!last) return;
-        event.preventDefault();
-        last.focus();
+        if (event.defaultPrevented || event.key !== "Tab" || !layer.isTop()) return;
+        // React portal events bubble through their parent dialog, but the
+        // portalled panel owns its own controls and must keep their Tab order.
+        const active = surface.ownerDocument.activeElement;
+        if (!surface.contains(active)) return;
+        const stops = tabStops(surface);
+        const first = stops[0];
+        const last = stops.at(-1);
+        const destination = event.shiftKey ? last : first;
+        if (
+          !destination ||
+          active === surface ||
+          (event.shiftKey ? active === first : active === last)
+        ) {
+          event.preventDefault();
+          (destination ?? surface).focus();
+        }
       }}
     />
   );

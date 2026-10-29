@@ -30,8 +30,8 @@ declare function DialogOverlay({ asChild, dismissible, className, onMouseDown, o
 type DialogContentProps = Omit<React.ComponentProps<typeof DialogPrimitive.Content>, "onEscapeKeyDown" | "onInteractOutside" | "onPointerDownOutside" | "onFocusOutside">;
 /**
  * The dialog surface alone; compose `DialogPortal` and `DialogOverlay` around
- * it. Radix wraps Tab between the first and last control, but not Shift+Tab
- * from the surface itself, which holds the focus when nothing inside took it.
+ * it. Tab boundaries belong to this instance's top layer: Radix's global
+ * FocusScope stack can be paused by a dialog in an unrelated embedded view.
  */
 declare function DialogContent({ onCloseAutoFocus, onKeyDown, onMouseDownCapture, ref, ...props }: DialogContentProps): React.JSX.Element;
 declare function DialogHeader({ className, ...props }: React.ComponentProps<"div">): React.JSX.Element;
