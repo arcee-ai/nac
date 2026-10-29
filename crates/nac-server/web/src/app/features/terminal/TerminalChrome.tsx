@@ -130,6 +130,7 @@ function TerminalOptions({ options }: { options: () => readonly TerminalOption[]
       placement={PopoverPlacement.BottomLeft}
       size="w-[251px]"
       sticky
+      focusScope="Terminal actions"
       panelClassName="shadow-xl"
       sheetClassName="px-2 rounded-t-[16px] bg-elevation-level-3"
       content={

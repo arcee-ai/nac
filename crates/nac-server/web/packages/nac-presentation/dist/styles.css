@@ -507,6 +507,10 @@
     overflow: visible;
   }
 
+[data-nac-runtime]:is(.\!sticky), [data-nac-runtime] .\!sticky {
+    position: sticky !important;
+  }
+
 [data-nac-runtime]:is(.absolute), [data-nac-runtime] .absolute {
     position: absolute;
   }
