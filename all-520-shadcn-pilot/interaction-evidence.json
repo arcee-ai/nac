@@ -1,0 +1,261 @@
+{
+  "head": "aa9f5b0a671379eb948f97dd8d760930dd6d8e40",
+  "base": "cd7d3730bd47cc3c7b9de5204fd08496b19b155d",
+  "browser": "chromium 151.0.7922.34",
+  "motion": {
+    "before/desktop-1440/no-preference": {
+      "tooltip": {
+        "animationName": "fade",
+        "transitionProperty": "all"
+      },
+      "dialog": {
+        "animationName": "fade",
+        "transitionProperty": "all"
+      },
+      "panel": {
+        "animationName": "fade",
+        "transitionProperty": "all"
+      }
+    },
+    "before/desktop-1440/reduce": {
+      "tooltip": {
+        "animationName": "fade",
+        "transitionProperty": "all"
+      },
+      "dialog": {
+        "animationName": "fade",
+        "transitionProperty": "all"
+      },
+      "panel": {
+        "animationName": "fade",
+        "transitionProperty": "all"
+      }
+    },
+    "after/desktop-1440/no-preference": {
+      "tooltip": {
+        "animationName": "fade",
+        "transitionProperty": "all"
+      },
+      "dialog": {
+        "animationName": "fade",
+        "transitionProperty": "all"
+      },
+      "panel": {
+        "animationName": "fade",
+        "transitionProperty": "all"
+      }
+    },
+    "after/desktop-1440/reduce": {
+      "tooltip": {
+        "animationName": "none",
+        "transitionProperty": "all"
+      },
+      "dialog": {
+        "animationName": "none",
+        "transitionProperty": "all"
+      },
+      "panel": {
+        "animationName": "none",
+        "transitionProperty": "all"
+      }
+    }
+  },
+  "transitions": {
+    "before/desktop-1440/no-preference": {
+      "surface": {
+        "transitionProperty": "all",
+        "transitionDuration": "0s",
+        "animationName": "fade"
+      },
+      "scrim": {
+        "transitionProperty": "opacity",
+        "transitionDuration": "0.15s",
+        "animationName": "none"
+      }
+    },
+    "before/desktop-1440/reduce": {
+      "surface": {
+        "transitionProperty": "all",
+        "transitionDuration": "0s",
+        "animationName": "fade"
+      },
+      "scrim": {
+        "transitionProperty": "opacity",
+        "transitionDuration": "0.15s",
+        "animationName": "none"
+      }
+    },
+    "before/phone-390/no-preference": {
+      "surface": {
+        "transitionProperty": "transform, translate, scale, rotate",
+        "transitionDuration": "0.3s",
+        "animationName": "none"
+      },
+      "scrim": {
+        "transitionProperty": "opacity",
+        "transitionDuration": "0.3s",
+        "animationName": "none"
+      }
+    },
+    "before/phone-390/reduce": {
+      "surface": {
+        "transitionProperty": "transform, translate, scale, rotate",
+        "transitionDuration": "0.3s",
+        "animationName": "none"
+      },
+      "scrim": {
+        "transitionProperty": "opacity",
+        "transitionDuration": "0.3s",
+        "animationName": "none"
+      }
+    },
+    "after/desktop-1440/no-preference": {
+      "surface": {
+        "transitionProperty": "all",
+        "transitionDuration": "0s",
+        "animationName": "fade"
+      },
+      "scrim": {
+        "transitionProperty": "opacity",
+        "transitionDuration": "0.15s",
+        "animationName": "none"
+      }
+    },
+    "after/desktop-1440/reduce": {
+      "surface": {
+        "transitionProperty": "all",
+        "transitionDuration": "0s",
+        "animationName": "none"
+      },
+      "scrim": {
+        "transitionProperty": "none",
+        "transitionDuration": "0.15s",
+        "animationName": "none"
+      }
+    },
+    "after/phone-390/no-preference": {
+      "surface": {
+        "transitionProperty": "transform, translate, scale, rotate",
+        "transitionDuration": "0.3s",
+        "animationName": "none"
+      },
+      "scrim": {
+        "transitionProperty": "opacity",
+        "transitionDuration": "0.3s",
+        "animationName": "none"
+      }
+    },
+    "after/phone-390/reduce": {
+      "surface": {
+        "transitionProperty": "none",
+        "transitionDuration": "0.3s",
+        "animationName": "none"
+      },
+      "scrim": {
+        "transitionProperty": "none",
+        "transitionDuration": "0.3s",
+        "animationName": "none"
+      }
+    }
+  },
+  "focusReturn": {
+    "before/tablet-768": {
+      "rename": {
+        "opener": "button \"Rename Draft release notes\"",
+        "afterEscape": "body"
+      },
+      "delete": {
+        "opener": "button \"Delete Draft release notes\"",
+        "afterEscape": "body"
+      }
+    },
+    "before/phone-390": {
+      "rename": {
+        "opener": "button \"Rename Draft release notes\"",
+        "afterEscape": "body"
+      },
+      "delete": {
+        "opener": "button \"Delete Draft release notes\"",
+        "afterEscape": "body"
+      }
+    },
+    "after/tablet-768": {
+      "rename": {
+        "opener": "button \"Rename Draft release notes\"",
+        "afterEscape": "button \"Rename Draft release notes\""
+      },
+      "delete": {
+        "opener": "button \"Delete Draft release notes\"",
+        "afterEscape": "button \"Delete Draft release notes\""
+      }
+    },
+    "after/phone-390": {
+      "rename": {
+        "opener": "button \"Rename Draft release notes\"",
+        "afterEscape": "button \"Rename Draft release notes\""
+      },
+      "delete": {
+        "opener": "button \"Delete Draft release notes\"",
+        "afterEscape": "button \"Delete Draft release notes\""
+      }
+    }
+  },
+  "ime": {
+    "before/desktop-1440": {
+      "fieldLabel": null,
+      "confirmingEnter": {
+        "writes": [
+          "にほん"
+        ],
+        "dialogOpen": false,
+        "events": [
+          {
+            "type": "compositionstart",
+            "data": ""
+          },
+          {
+            "type": "keydown",
+            "key": "Enter",
+            "keyCode": 229,
+            "isComposing": true
+          }
+        ]
+      },
+      "committedEnter": null
+    },
+    "after/desktop-1440": {
+      "fieldLabel": "Title",
+      "confirmingEnter": {
+        "writes": [],
+        "dialogOpen": true,
+        "events": [
+          {
+            "type": "compositionstart",
+            "data": ""
+          },
+          {
+            "type": "keydown",
+            "key": "Enter",
+            "keyCode": 229,
+            "isComposing": true
+          }
+        ]
+      },
+      "committedEnter": {
+        "value": "にほん",
+        "writes": [
+          "にほん"
+        ],
+        "dialogOpen": false,
+        "events": [
+          {
+            "type": "keydown",
+            "key": "Enter",
+            "keyCode": 13,
+            "isComposing": false
+          }
+        ]
+      }
+    }
+  }
+}

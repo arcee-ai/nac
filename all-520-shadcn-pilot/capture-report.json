@@ -1,0 +1,154 @@
+{
+  "captures": [
+    "before-desktop-1440-row-hover",
+    "before-desktop-1440-rename",
+    "before-desktop-1440-delete",
+    "before-tablet-768-rename",
+    "before-tablet-768-delete",
+    "before-phone-390-rename",
+    "before-phone-390-delete",
+    "before-zoom-200-rename",
+    "before-zoom-200-delete",
+    "before-desktop-1440-light-rename",
+    "before-desktop-1440-keyboard-tooltip",
+    "after-desktop-1440-row-hover",
+    "after-desktop-1440-rename",
+    "after-desktop-1440-delete",
+    "after-tablet-768-rename",
+    "after-tablet-768-delete",
+    "after-phone-390-rename",
+    "after-phone-390-delete",
+    "after-zoom-200-rename",
+    "after-zoom-200-delete",
+    "after-desktop-1440-light-rename",
+    "after-desktop-1440-keyboard-tooltip"
+  ],
+  "checks": {
+    "before/desktop-1440/rename": "ok",
+    "before/desktop-1440/delete": "ok",
+    "before/tablet-768/rename": "ok",
+    "before/tablet-768/delete": "ok",
+    "before/phone-390/rename": "ok",
+    "before/phone-390/delete": "ok",
+    "before/zoom-200/rename": "ok",
+    "before/zoom-200/delete": "ok",
+    "before/light": "ok",
+    "before/row-title-attributes": [
+      {
+        "label": "Rename Refactor configuration loader",
+        "title": "Rename chat"
+      },
+      {
+        "label": "Delete Refactor configuration loader",
+        "title": "Delete chat"
+      }
+    ],
+    "before/keyboard-rename-escape": {
+      "onOpen": "div[role=dialog] \"Rename session\"",
+      "tabs": [
+        "button \"Close\"",
+        "input \"Draft release notes\"",
+        "input \"\"",
+        "button \"Cancel\"",
+        "button \"Save\"",
+        "button \"Close\""
+      ],
+      "afterEscape": "body",
+      "aria": "- dialog \"Rename session\":\n  - banner:\n    - text: Rename session\n    - button \"Close\":\n      - img\n  - text: Title\n  - textbox \"Draft release notes\"\n  - paragraph: Leave empty to restore the automatic title (last prompt).\n  - checkbox \"Pin to top of the list\"\n  - text: Pin to top of the list\n  - contentinfo:\n    - button \"Cancel\"\n    - button \"Save\""
+    },
+    "before/keyboard-delete-cancel": {
+      "role": "dialog",
+      "describedBy": null,
+      "aria": "- dialog \"Delete session\":\n  - banner:\n    - text: Delete session\n    - button \"Close\":\n      - img\n  - paragraph: Are you sure you want to delete the session \"Draft release notes\" (bc0adc96:c80e)? This action cannot be undone.\n  - contentinfo:\n    - button \"Cancel\"\n    - button \"Delete session\"",
+      "afterEscape": "body",
+      "stillListed": 1
+    },
+    "before/keyboard-tooltip": {
+      "focused": "button \"Rename Draft release notes\"",
+      "tooltipsAfterFocus": 0,
+      "tooltipsAfterEscape": 0
+    },
+    "before/reduced-motion": {
+      "card": {
+        "animation": "fade",
+        "transition": "0s"
+      },
+      "scrim": {
+        "animation": "none",
+        "transition": "0.15s"
+      }
+    },
+    "after/desktop-1440/rename": "ok",
+    "after/desktop-1440/delete": "ok",
+    "after/tablet-768/rename": "ok",
+    "after/tablet-768/delete": "ok",
+    "after/phone-390/rename": "ok",
+    "after/phone-390/delete": "ok",
+    "after/zoom-200/rename": "ok",
+    "after/zoom-200/delete": "ok",
+    "after/light": "ok",
+    "after/row-title-attributes": [
+      {
+        "label": "Rename Refactor configuration loader",
+        "title": null
+      },
+      {
+        "label": "Delete Refactor configuration loader",
+        "title": null
+      }
+    ],
+    "after/keyboard-rename-escape": {
+      "onOpen": "div[role=dialog] \"Rename session\"",
+      "tabs": [
+        "button \"Close\"",
+        "input \"Draft release notes\"",
+        "input \"\"",
+        "button \"Cancel\"",
+        "button \"Save\"",
+        "button \"Close\""
+      ],
+      "afterEscape": "button \"Rename Draft release notes\"",
+      "aria": "- dialog \"Rename session\":\n  - banner:\n    - text: Rename session\n    - button \"Close\":\n      - img\n  - text: Title\n  - textbox \"Title\":\n    - /placeholder: Draft release notes\n    - text: Draft release notes\n  - paragraph: Leave empty to restore the automatic title (last prompt).\n  - checkbox \"Pin to top of the list\"\n  - text: Pin to top of the list\n  - contentinfo:\n    - button \"Cancel\"\n    - button \"Save\""
+    },
+    "after/keyboard-delete-cancel": {
+      "role": "alertdialog",
+      "describedBy": "radix-_r_1u_",
+      "aria": "- alertdialog \"Delete session\":\n  - banner:\n    - text: Delete session\n    - button \"Close\":\n      - img\n  - paragraph: Are you sure you want to delete the session \"Draft release notes\" (bc0adc96:c80e)? This action cannot be undone.\n  - contentinfo:\n    - button \"Cancel\"\n    - button \"Delete session\"",
+      "afterEscape": "button \"Delete Draft release notes\"",
+      "stillListed": 1
+    },
+    "after/keyboard-tooltip": {
+      "focused": "button \"Rename Draft release notes\"",
+      "tooltipsAfterFocus": 1,
+      "tooltipsAfterEscape": 0
+    },
+    "after/reduced-motion": {
+      "card": {
+        "animation": "none",
+        "transition": "0s"
+      },
+      "scrim": {
+        "animation": "none",
+        "transition": "0.15s"
+      }
+    },
+    "after/rename-submit": {
+      "writes": [
+        "PUT /sessions/bc0adc96-183b-4c44-9d39-4693eba1c80e/presentation"
+      ],
+      "focus": "button \"Rename Draft release notes v2\""
+    },
+    "after/delete-confirm": {
+      "writes": [
+        "DELETE /sessions/982e3ef1-e52b-49c7-8461-609fe4e61df4"
+      ],
+      "remaining": 0,
+      "focus": "body"
+    }
+  },
+  "writes": [
+    "03:36:19.468 after/rename-submit 47321 PUT /sessions/bc0adc96-183b-4c44-9d39-4693eba1c80e/presentation {\"title\":\"Draft release notes v2\",\"pinned\":false,\"expected_version\":12}",
+    "03:36:19.741 after/delete-confirm 47321 DELETE /sessions/982e3ef1-e52b-49c7-8461-609fe4e61df4 "
+  ],
+  "omittedWrites": "15 POST /providers/models model-list requests the composer sends on every load"
+}

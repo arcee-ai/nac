@@ -1,0 +1,91 @@
+{
+  "threshold": 24,
+  "frames": {
+    "desktop-1440-delete": {
+      "size": "1440x900",
+      "differentPixels": 0,
+      "maxChannelSum": 3,
+      "box": null
+    },
+    "desktop-1440-keyboard-tooltip": {
+      "size": "1440x900",
+      "differentPixels": 3202,
+      "maxChannelSum": 750,
+      "box": [
+        164,
+        384,
+        266,
+        444
+      ]
+    },
+    "desktop-1440-light-rename": {
+      "size": "1440x900",
+      "differentPixels": 0,
+      "maxChannelSum": 5,
+      "box": null
+    },
+    "desktop-1440-rename": {
+      "size": "1440x900",
+      "differentPixels": 0,
+      "maxChannelSum": 4,
+      "box": null
+    },
+    "desktop-1440-row-hover": {
+      "size": "1440x900",
+      "differentPixels": 3808,
+      "maxChannelSum": 750,
+      "box": [
+        164,
+        384,
+        266,
+        441
+      ]
+    },
+    "phone-390-delete": {
+      "size": "1170x2532",
+      "differentPixels": 2,
+      "maxChannelSum": 29,
+      "box": [
+        105,
+        34,
+        111,
+        38
+      ]
+    },
+    "phone-390-rename": {
+      "size": "1170x2532",
+      "differentPixels": 2,
+      "maxChannelSum": 29,
+      "box": [
+        105,
+        34,
+        111,
+        38
+      ]
+    },
+    "tablet-768-delete": {
+      "size": "768x1024",
+      "differentPixels": 0,
+      "maxChannelSum": 3,
+      "box": null
+    },
+    "tablet-768-rename": {
+      "size": "768x1024",
+      "differentPixels": 0,
+      "maxChannelSum": 4,
+      "box": null
+    },
+    "zoom-200-delete": {
+      "size": "1440x900",
+      "differentPixels": 0,
+      "maxChannelSum": 8,
+      "box": null
+    },
+    "zoom-200-rename": {
+      "size": "1440x900",
+      "differentPixels": 0,
+      "maxChannelSum": 6,
+      "box": null
+    }
+  }
+}
