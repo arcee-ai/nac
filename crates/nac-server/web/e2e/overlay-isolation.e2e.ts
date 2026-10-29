@@ -80,7 +80,8 @@ test("embedded dialogs retain local Tab, dismissal, hints and shortcuts across t
 
     const hide = left.getByRole("button", { name: "Hide sidebar", exact: true });
     await hide.focus();
-    await expect(left.getByRole("tooltip")).toBeVisible();
+    // The hint keyboard focus showed on the returned opener may still be fading out.
+    await expect(left.getByRole("tooltip", { name: /Hide sidebar/ })).toBeVisible();
     await expect(hide).toHaveAccessibleDescription(/Hide sidebar/);
     await page.keyboard.press("Escape");
     await expect(left.getByRole("tooltip")).toHaveCount(0);
