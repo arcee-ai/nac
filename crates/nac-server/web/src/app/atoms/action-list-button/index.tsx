@@ -95,7 +95,7 @@ function StatusGlyph({
 }) {
   const { glyph, loader } = SIZE_STYLE[size];
   if (expanded !== undefined) return <Chevron expanded={expanded} size={glyph} />;
-  // The `!` fills beat `.btn-ghost .icon path { fill: … }` from atoms.css, hover included.
+  // The `!` colors beat `.btn-ghost .icon { color: … }` from atoms.css, hover included.
   switch (status) {
     case ActionListButtonStatus.Running:
       return <Loader size={loader} className="shrink-0" />;
@@ -104,7 +104,7 @@ function StatusGlyph({
         <Icon
           iconName={IconName.Close}
           size={glyph}
-          className="shrink-0 [&>path]:!fill-btn-destructive"
+          className="shrink-0 !text-fill-btn-destructive"
         />
       );
     case ActionListButtonStatus.Pending:
@@ -112,7 +112,7 @@ function StatusGlyph({
         <Icon
           iconName={IconName.Clock}
           size={glyph}
-          className="shrink-0 [&>path]:!fill-btn-secondary-disabled"
+          className="shrink-0 !text-fill-btn-secondary-disabled"
         />
       );
     default:

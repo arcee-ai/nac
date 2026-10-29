@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
+import { PanelEmptyState } from "@/app/components/inspector/PanelMessages";
 import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { TaskButton, TaskPill } from "@/app/components/inspector/TaskPreview";
 import { ThreadSteeringModal } from "@/app/components/inspector/ThreadSteeringModal";
@@ -54,6 +55,7 @@ import {
   useInsightsNavigation,
 } from "@/app/features/insights/useInsightsNavigation";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { cn } from "@/app/lib/cn";
 import { useSharedValue, useStructuralSharing } from "@/app/lib/useSharedValue";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
@@ -130,6 +132,7 @@ export function InsightsView({
   // Rows only ask whether they are the one shown, so they follow its identity
   // rather than the entry object, which a streaming group replaces per delta.
   const highlighted = useSharedValue(shown, sameInsight);
+  const marked = usePanelListMarksOpen() ? highlighted : null;
 
   // A pick from another surface can name an entry the current filter hides,
   // and only a list showing it may sit beside its detail.
@@ -190,15 +193,15 @@ export function InsightsView({
       expanded,
       entryView: (entry) => entryRowView(entry, sources),
       segmentView: (segment) => segmentRowView(segment, sources),
-      entrySelected: (entry) => entrySelected(entry, highlighted),
-      segmentSelected: (entry, segment) => segmentSelected(entry, segment, highlighted),
+      entrySelected: (entry) => entrySelected(entry, marked),
+      segmentSelected: (entry, segment) => segmentSelected(entry, segment, marked),
       entryAction,
       segmentAction,
     };
   }, [
     expanded,
     sources,
-    highlighted,
+    marked,
     navigation,
     resolveSession,
     selectInsight,
@@ -262,6 +265,16 @@ export function InsightsView({
   );
 
   if (!snapshot) return <PanelLoading listTitle="Insights" />;
+  // A thread the chat pointed Insights at still opens with no turns.
+  if (!shown && !hasOlder && model.turns.length === 0) {
+    return (
+      <PanelEmptyState
+        listTitle="Insights"
+        title="No insights yet"
+        description="Send the first message in this session to be able to see them"
+      />
+    );
+  }
 
   let title: ReactNode;
   let detail: ReactNode;

@@ -1,7 +1,7 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -17,8 +17,10 @@ import {
 import { SubagentComposer } from "@/app/components/inspector/SubagentComposer";
 import { SubagentRowActions } from "@/app/components/inspector/SubagentListControls";
 import { SubagentPreview } from "@/app/components/inspector/SubagentPreview";
+import { PanelEmptyState } from "@/app/components/inspector/PanelMessages";
 import { PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
+import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { useNow } from "@/app/hooks/useNow";
 import { cn } from "@/app/lib/cn";
 import { groupByRecency } from "@/app/lib/projects";
@@ -88,20 +90,6 @@ function rowFromOrchestrator(orchestrator: ManagedOrchestratorRecord): SubagentR
   };
 }
 
-/** Subagents are started by the agent; the panel only shows and manages them. */
-function NoSubagents() {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4">
-      <Icon iconName={IconName.Plane} size={32} className="text-basic-primary" />
-      <p className="label-big mt-2 text-center text-basic-primary">No subagents yet</p>
-      <p className="label-small mt-2 max-w-[311px] text-center text-basic-tertiary">
-        Ask the agent to delegate work. Subagents it starts appear here, where you can browse,
-        steer, continue, and cancel them.
-      </p>
-    </div>
-  );
-}
-
 export function DelegatedWorkView({
   sessionId,
   behavior,
@@ -120,6 +108,7 @@ export function DelegatedWorkView({
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   const narrow = isMobile || isTablet;
+  const marksOpen = usePanelListMarksOpen();
 
   const navigate = useNavigate();
   const expanded = useSidePanelExpanded();
@@ -152,6 +141,19 @@ export function DelegatedWorkView({
     if (selectedKey == null && newestKey != null) selectSubagent(sessionId, newestKey);
   }, [newestKey, selectSubagent, selectedKey, sessionId]);
 
+  // The composer floats over the preview, whose run-out under the last
+  // message has to clear it however tall it grows.
+  const [detailColumn, setDetailColumn] = useState<HTMLDivElement | null>(null);
+  const [composerLayer, setComposerLayer] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!detailColumn || !composerLayer || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      detailColumn.style.setProperty("--composer-height", `${composerLayer.offsetHeight}px`);
+    });
+    observer.observe(composerLayer);
+    return () => observer.disconnect();
+  }, [detailColumn, composerLayer]);
+
   // A delegated session is in the session list too, with the name and pin given
   // to it there.
   const summaries = useMemo(
@@ -164,7 +166,10 @@ export function DelegatedWorkView({
     () =>
       groupByRecency(
         rows,
-        (row) => ({ updatedAt: row.updatedAt, pinned: Boolean(summaries.get(row.id)?.pinned) }),
+        (row) => ({
+          updatedAt: row.updatedAt,
+          pinned: Boolean(summaries.get(row.id)?.pinned),
+        }),
         now,
       ),
     [rows, summaries, now],
@@ -181,6 +186,16 @@ export function DelegatedWorkView({
     rows.length === 0 && (children.isError || (supportsOrchestrators && orchestrators.isError));
   // "None yet" is only true once every list the panel shows has answered.
   const loaded = children.isSuccess && (!supportsOrchestrators || orchestrators.isSuccess);
+  // Subagents are started by the agent; the panel only shows and manages them.
+  if (loaded && rows.length === 0) {
+    return (
+      <PanelEmptyState
+        listTitle="Subagents"
+        title="No subagents yet"
+        description="Subagents will appear here once the agent decides to spawn them."
+      />
+    );
+  }
   const loadError = (
     <div role="alert" className="m-2 rounded-[6px] border border-error-primary p-3">
       <div className="text-small text-error-primary">Subagents could not be loaded.</div>
@@ -210,10 +225,11 @@ export function DelegatedWorkView({
       {listState}
       {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-2">
-          <div className={cn("flex items-baseline gap-2", isMobile ? "px-3" : "px-2")}>
-            <span className="tag-label shrink-0 text-basic-muted">{group.label}</span>
-            <span className="h-px min-w-0 flex-1 bg-divider-muted" />
-          </div>
+          {/* `.badge` is Figma's Tag-label type; the shared `.tag-label` is
+              semibold and tracked. */}
+          <span className={cn("badge text-basic-muted", isMobile ? "px-3" : "px-2")}>
+            {group.label}
+          </span>
           <div className="flex flex-col gap-1">
             {group.items.map((row) => {
               const title = rowTitle(row);
@@ -225,8 +241,9 @@ export function DelegatedWorkView({
                   lineage={MODE_LINEAGE[row.mode]}
                   showBehaviorIcon={showBehaviorIcon}
                   running={row.status === "running"}
-                  active={selected?.key === row.key}
+                  active={marksOpen && selected?.key === row.key}
                   isMobile={isMobile}
+                  smallTitle
                   onClick={() => chooseRow(row.key)}
                   actions={
                     summary ? (
@@ -287,16 +304,10 @@ export function DelegatedWorkView({
         ) : undefined
       }
       actions={openButton}
-      listClassName="py-6"
+      listClassName="px-1 py-6"
       list={
         isMobile ? (
-          // A phone opens the panel on its list, so that is where it says
-          // nothing has been delegated yet.
-          loaded && rows.length === 0 ? (
-            <NoSubagents />
-          ) : (
-            <div className="pt-6">{list}</div>
-          )
+          <div className="pt-6">{list}</div>
         ) : isTablet ? (
           // The desktop column's insets, out of the tablet list's own 8px.
           <div className="-mx-1 -mt-2 py-6">{list}</div>
@@ -305,7 +316,7 @@ export function DelegatedWorkView({
         )
       }
     >
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={setDetailColumn} className="relative flex min-h-0 flex-1 flex-col">
         {selected ? (
           <>
             <SubagentPreview
@@ -316,7 +327,7 @@ export function DelegatedWorkView({
               header={!narrow}
               onOpen={() => openDetail(selected.id)}
             />
-            <div className="shrink-0 px-4 pt-4 pb-8">
+            <div ref={setComposerLayer} className="pointer-events-none absolute inset-x-0 bottom-0">
               <SubagentComposer
                 key={`${selected.mode}:${selected.id}`}
                 parentSessionId={sessionId}
@@ -324,16 +335,13 @@ export function DelegatedWorkView({
                 permissionSessionId={selected.id}
                 permissionBehavior={selected.mode === "orchestrator" ? "orchestrator" : "direct"}
                 showPermissions={false}
+                floating
               />
             </div>
           </>
-        ) : listState ? (
-          narrow ? (
-            listState
-          ) : null
-        ) : (
-          <NoSubagents />
-        )}
+        ) : narrow ? (
+          listState
+        ) : null}
       </div>
     </PanelSplit>
   );

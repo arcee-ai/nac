@@ -36,7 +36,7 @@ const ForkSessionItem: React.FC<ForkSessionItemProps> = ({
     return (
       <div
         className={cn(
-          "flex items-start gap-4 w-full min-w-0 pl-4 pr-2 py-4 rounded-r-[4px] max-w-[540px]",
+          "flex items-start gap-4 w-full min-w-0 pl-4 pr-2 py-4 rounded-r-interaction max-w-[540px]",
           "border-l-2 border-tertiary bg-elevation-sublevel-variant-A text-basic-tertiary",
         )}
       >
@@ -69,7 +69,7 @@ const ForkSessionItem: React.FC<ForkSessionItemProps> = ({
       type="button"
       onClick={onOpen}
       className={cn(
-        "flex items-start gap-4 w-full min-w-0 pl-4 pr-2 py-4 rounded-r-[4px] text-left max-w-[540px]",
+        "flex items-start gap-4 w-full min-w-0 pl-4 pr-2 py-4 rounded-r-interaction text-left max-w-[540px]",
         "border-l-2 border-accent-primary bg-btn-ghost-accent-highlighted text-btn-accent",
         "hover:bg-btn-ghost-accent-highlighted-hovered",
         "active:bg-btn-ghost-accent-highlighted-pressed",
