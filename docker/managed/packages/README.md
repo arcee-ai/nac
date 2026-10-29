@@ -144,9 +144,19 @@ SSH commands and SCP/SFTP upload/download under AES-GCM and AES-CTR/ETM. It uses
 upstream's public test keys only in the disposable builder, whose test account
 configuration is not inherited by the separate runtime stage. Runtime smoke
 binds installed payload hashes, loads libssh2, and verifies OpenSSL4 and curl
-dynamic consumer linkage. Dedicated malformed-input regressions and 32-bit
-execution are separate acceptance evidence; ordinary tests do not establish
-them. No blocked applicability regression work is delegated to this build.
+dynamic consumer linkage.
+
+`libssh2-regressions.c` adds one malformed-input case per corrected seam and is
+compiled and run by `build-libssh2.sh` against the patched tree, so a dropped or
+reverted correction fails the build. It is never installed. Each case was
+confirmed to abort on a tree carrying only the 7598/55199 corrections and to
+pass on the fully patched tree: 66032 double-frees the stale SFTP open reply,
+66033 trips the AES-GCM block assertion, 66034 frees an out-of-bounds publickey
+attribute pointer, 66035 corrupts the heap on a short ETM packet, 58050
+over-allocates on the attribute count, and 58051 frees an uninitialised list
+entry. 32-bit execution remains separate acceptance evidence; these cases run
+at the build architecture only. No blocked applicability regression work is
+delegated to this build.
 
 libssh2 becomes a sixth owned APK with the scanner's corresponding exact owned
 package, canonical upstream CPE and plain-upstream Wolfi search identities. The
