@@ -8,7 +8,14 @@ import {
   AlertDialogOverlay,
   AlertDialogTitle,
 } from "../../ui/alert-dialog";
-import { Dialog, DialogContent, DialogOverlay, DialogPortal, DialogTitle } from "../../ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle,
+} from "../../ui/dialog";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import StickyButton from "../button/StickyButton";
 import CoverBackground from "../cover-background";
@@ -77,7 +84,7 @@ interface ModalProps {
   keepOnNavigate?: boolean;
   /**
    * A confirmation before something that cannot be undone: the card is an
-   * `alertdialog`, described by the `AlertDialogDescription` in its body.
+   * `alertdialog`, described by the `ModalDescription` in its body.
    */
   alert?: boolean;
   className?: string;
@@ -378,5 +385,8 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
 };
 
 Modal.Size = ModalSize;
+
+/** Body text the dialog is described by; an `alert` confirmation says in it what goes. */
+export const ModalDescription = DialogDescription;
 
 export default Modal;

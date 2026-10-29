@@ -2,8 +2,14 @@ import { useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { flushSync } from "react-dom";
 
-import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
-import { AlertDialogDescription } from "@/app/ui/alert-dialog";
+import {
+  Button,
+  ButtonContent,
+  ButtonVariant,
+  Modal,
+  ModalDescription,
+  ModalSize,
+} from "@/app/atoms";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { parseStoreTime, shortId } from "@/app/lib/format";
 import { toRunError } from "@/app/lib/providerError";
@@ -103,12 +109,12 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
         </>
       }
     >
-      <AlertDialogDescription>
+      <ModalDescription>
         Are you sure you want to delete the session{" "}
         <span className="text-basic-primary">&quot;{sessionTitle(summary)}&quot;</span>{" "}
         <span className="font-mono text-basic-muted">({shortId(summary?.session_id)})</span>? This
         action cannot be undone.
-      </AlertDialogDescription>
+      </ModalDescription>
     </Modal>
   );
 }

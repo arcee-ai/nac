@@ -1,4 +1,4 @@
-import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Br as f, Bt as p, C as m, Ci as h, Cn as g, Cr as _, Ct as v, D as y, Di as b, Dn as x, Dr as S, Dt as C, E as w, Ei as T, En as E, Er as D, Et as O, F as k, Fi as A, Fn as ee, Fr as j, Ft as M, G as te, Gi as ne, Gn as re, Gr as N, Gt as ie, H as ae, Hi as oe, Hn as se, Hr as P, Ht as ce, I as le, Ii as ue, In as de, Ir as fe, It as pe, J as me, Ji as he, Jn as F, Jr as I, Jt as ge, K as _e, Ki as ve, Kn as L, Kr as ye, Kt as be, L as xe, Li as Se, Ln as Ce, Lr as we, Lt as Te, M as Ee, Mi as De, Mn as Oe, Mr as ke, Mt as Ae, N as je, Ni as Me, Nn as Ne, Nr as Pe, Nt as Fe, O as Ie, Oi as Le, On as Re, Or as ze, Ot as Be, P as Ve, Pi as He, Pn as Ue, Pr as We, Pt as Ge, Q as Ke, Qi as qe, Qn as Je, Qr as Ye, Qt as Xe, R as Ze, Ri as Qe, Rn as $e, Rr as et, Rt as tt, S as nt, Si as rt, Sn as it, Sr as at, St as ot, T as st, Ti as ct, Tn as lt, Tr as R, Tt as ut, U as dt, Ui as ft, Un as pt, Ur as mt, Ut as ht, V as gt, Vi as _t, Vn as vt, Vr as yt, Vt as bt, W as xt, Wi as St, Wn as Ct, Wr as wt, Wt as Tt, X as Et, Xi as Dt, Xn as Ot, Xr as z, Xt as kt, Y as At, Yi as jt, Yn as Mt, Yr as B, Yt as Nt, Z as Pt, Zi as Ft, Zn as It, Zr as Lt, Zt as Rt, _ as zt, _i as Bt, _n as Vt, _r as Ht, _t as Ut, a as Wt, ai as Gt, an as Kt, ar as qt, at as Jt, b as Yt, bi as Xt, bn as Zt, br as Qt, bt as $t, c as en, ci as tn, cn as nn, cr as rn, ct as an, d as on, di as sn, dn as cn, dr as ln, dt as un, ei as dn, en as fn, er as pn, et as mn, f as hn, fi as gn, fn as _n, fr as vn, ft as yn, g as bn, gi as xn, gn as Sn, gr as Cn, gt as wn, h as Tn, hi as En, hn as Dn, hr as On, ht as kn, i as An, ii as V, in as jn, ir as Mn, it as Nn, j as Pn, ji as Fn, jn as In, jr as Ln, jt as Rn, k as zn, ki as Bn, kn as Vn, kr as Hn, kt as Un, l as Wn, li as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mi as Xn, mn as Zn, mr as Qn, mt as $n, n as er, ni as tr, nn as nr, nr as rr, nt as ir, o as ar, oi as or, on as sr, or as cr, ot as lr, p as ur, pi as dr, pn as fr, pt as pr, q as mr, qi as hr, qn as gr, qr as _r, qt as vr, ri as yr, rn as br, rr as xr, rt as Sr, s as Cr, si as wr, sn as Tr, sr as Er, st as Dr, t as Or, ti as kr, tn as Ar, tr as jr, tt as Mr, u as Nr, ui as Pr, un as Fr, ur as Ir, ut as Lr, v as Rr, vi as zr, vn as Br, vr as Vr, vt as Hr, w as Ur, wi as Wr, wn as Gr, wr as H, wt as Kr, x as qr, xi as Jr, xn as Yr, xr as Xr, xt as Zr, y as Qr, yi as $r, yn as ei, yr as ti, yt as ni, z as ri, zi as ii, zn as ai, zt as oi } from "./chunks/PerfProfiler-CDqBOQn9.js";
+import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Br as f, Bt as p, C as m, Ci as h, Cn as g, Cr as _, Ct as v, D as y, Di as b, Dn as x, Dr as S, Dt as C, E as w, Ei as T, En as E, Er as D, Et as O, F as k, Fi as A, Fn as ee, Fr as j, Ft as M, G as te, Gi as ne, Gn as re, Gr as N, Gt as ie, H as ae, Hi as oe, Hn as se, Hr as P, Ht as ce, I as le, Ii as ue, In as de, Ir as fe, It as pe, J as me, Ji as he, Jn as F, Jr as I, Jt as ge, K as _e, Ki as ve, Kn as L, Kr as ye, Kt as be, L as xe, Li as Se, Ln as Ce, Lr as we, Lt as Te, M as Ee, Mi as De, Mn as Oe, Mr as ke, Mt as Ae, N as je, Ni as Me, Nn as Ne, Nr as Pe, Nt as Fe, O as Ie, Oi as Le, On as Re, Or as ze, Ot as Be, P as Ve, Pi as He, Pn as Ue, Pr as We, Pt as Ge, Q as Ke, Qi as qe, Qn as Je, Qr as Ye, Qt as Xe, R as Ze, Ri as Qe, Rn as $e, Rr as et, Rt as tt, S as nt, Si as rt, Sn as it, Sr as at, St as ot, T as st, Ti as ct, Tn as lt, Tr as R, Tt as ut, U as dt, Ui as ft, Un as pt, Ur as mt, Ut as ht, V as gt, Vi as _t, Vn as vt, Vr as yt, Vt as bt, W as xt, Wi as St, Wn as Ct, Wr as wt, Wt as Tt, X as Et, Xi as Dt, Xn as Ot, Xr as z, Xt as kt, Y as At, Yi as jt, Yn as Mt, Yr as B, Yt as Nt, Z as Pt, Zi as Ft, Zn as It, Zr as Lt, Zt as Rt, _ as zt, _i as Bt, _n as Vt, _r as Ht, _t as Ut, a as Wt, ai as Gt, an as Kt, ar as qt, at as Jt, b as Yt, bi as Xt, bn as Zt, br as Qt, bt as $t, c as en, ci as tn, cn as nn, cr as rn, ct as an, d as on, di as sn, dn as cn, dr as ln, dt as un, ei as dn, en as fn, er as pn, et as mn, f as hn, fi as gn, fn as _n, fr as vn, ft as yn, g as bn, gi as xn, gn as Sn, gr as Cn, gt as wn, h as Tn, hi as En, hn as Dn, hr as On, ht as kn, i as An, ii as V, in as jn, ir as Mn, it as Nn, j as Pn, ji as Fn, jn as In, jr as Ln, jt as Rn, k as zn, ki as Bn, kn as Vn, kr as Hn, kt as Un, l as Wn, li as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mi as Xn, mn as Zn, mr as Qn, mt as $n, n as er, ni as tr, nn as nr, nr as rr, nt as ir, o as ar, oi as or, on as sr, or as cr, ot as lr, p as ur, pi as dr, pn as fr, pt as pr, q as mr, qi as hr, qn as gr, qr as _r, qt as vr, ri as yr, rn as br, rr as xr, rt as Sr, s as Cr, si as wr, sn as Tr, sr as Er, st as Dr, t as Or, ti as kr, tn as Ar, tr as jr, tt as Mr, u as Nr, ui as Pr, un as Fr, ur as Ir, ut as Lr, v as Rr, vi as zr, vn as Br, vr as Vr, vt as Hr, w as Ur, wi as Wr, wn as Gr, wr as H, wt as Kr, x as qr, xi as Jr, xn as Yr, xr as Xr, xt as Zr, y as Qr, yi as $r, yn as ei, yr as ti, yt as ni, z as ri, zi as ii, zn as ai, zt as oi } from "./chunks/PerfProfiler-CpNUEOvE.js";
 import * as si from "react";
 import ci, { Fragment as li, Suspense as ui, createContext as di, lazy as fi, memo as pi, use as mi, useCallback as U, useContext as hi, useEffect as W, useId as gi, useLayoutEffect as _i, useMemo as G, useRef as K, useState as q, useSyncExternalStore as vi } from "react";
 import { QueryClientProvider as yi, QueryObserver as bi, replaceEqualDeep as xi, useIsFetching as Si, useMutation as Ci, useQueries as wi, useQuery as Ti, useQueryClient as Ei } from "@tanstack/react-query";
@@ -4714,7 +4714,7 @@ function mf({ open: e, onClose: t, summary: n }) {
 		open: e,
 		onClose: t,
 		title: "Assign to Project",
-		size: On.Small,
+		size: Cn.Small,
 		footer: /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y(_, {
 			variant: D.Tertiary,
 			content: H.Text,
@@ -5511,7 +5511,7 @@ function _p({ open: e, kind: t, initialPath: n, ssh: r, title: i, showHidden: a 
 		open: e,
 		onClose: c,
 		title: i ?? (t === "toml" ? "Select Config File" : t === "file" ? "Select File" : r ? `Select Working Folder on ${r.ssh_host}` : "Select Working Folder"),
-		size: On.Wide,
+		size: Cn.Wide,
 		flush: !0,
 		className: "h-[560px]",
 		bodyClassName: "min-h-0",
@@ -7419,7 +7419,7 @@ function vm({ open: e, defaultCwd: t, onClose: n }) {
 		open: e,
 		onClose: n,
 		title: "New Project",
-		size: On.Wide,
+		size: Cn.Wide,
 		flush: !0,
 		className: "h-[680px]",
 		footer: ve ? /* @__PURE__ */ Y(Qt, {
@@ -7843,7 +7843,7 @@ function Cm({ projectId: e, firstChat: t, onClose: r }) {
 	return /* @__PURE__ */ X(Qn, {
 		open: !0,
 		onClose: r,
-		size: On.Wide,
+		size: Cn.Wide,
 		flush: !0,
 		className: "h-[700px]",
 		title: "New Chat",
@@ -7914,7 +7914,7 @@ function Tm({ open: e, onClose: t, project: n }) {
 		open: e,
 		onClose: t,
 		title: "Remove Project?",
-		size: On.Medium,
+		size: Cn.Medium,
 		footer: /* @__PURE__ */ X(J, { children: [
 			!s && /* @__PURE__ */ Y(_, {
 				variant: D.Tertiary,
@@ -7992,7 +7992,7 @@ function Dm({ open: e, project: t, onClose: n }) {
 		open: e,
 		onClose: n,
 		title: "Rename project",
-		size: On.Small,
+		size: Cn.Small,
 		footer: /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y(_, {
 			variant: D.Tertiary,
 			content: H.Text,
@@ -8172,7 +8172,7 @@ function Fm({ open: e, onClose: t, summary: n }) {
 		open: e,
 		onClose: t,
 		title: "Delete session",
-		size: On.Small,
+		size: Cn.Small,
 		alert: !0,
 		footer: /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y(_, {
 			variant: D.Tertiary,
@@ -8200,7 +8200,7 @@ function Fm({ open: e, onClose: t, summary: n }) {
 			loading: s.isPending,
 			children: "Delete session"
 		})] }),
-		children: /* @__PURE__ */ X(Cn, { children: [
+		children: /* @__PURE__ */ X(On, { children: [
 			"Are you sure you want to delete the session",
 			" ",
 			/* @__PURE__ */ X("span", {
@@ -8255,7 +8255,7 @@ function Lm({ open: e, summary: t, onClose: n }) {
 		open: e,
 		onClose: n,
 		title: "Rename session",
-		size: On.Small,
+		size: Cn.Small,
 		footer: /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y(_, {
 			variant: D.Tertiary,
 			content: H.Text,
@@ -8380,7 +8380,7 @@ function Hm({ open: e, onClose: t, footer: n, titleExtra: r, children: i }) {
 				children: "Session settings"
 			}), r]
 		}) : "Session settings",
-		size: On.Wide,
+		size: Cn.Wide,
 		flush: !0,
 		className: "h-[700px]",
 		footer: n,
@@ -9441,7 +9441,7 @@ function bh({ projectId: e, defaultRef: t, onClose: n, onExistingCheckout: r }) 
 	return /* @__PURE__ */ Y(Qn, {
 		open: !0,
 		title: "New isolated task",
-		size: On.Wide,
+		size: Cn.Wide,
 		onClose: n,
 		children: /* @__PURE__ */ X("div", {
 			className: "flex flex-col gap-3",
@@ -9933,7 +9933,7 @@ function Fh({ open: e, onClose: t }) {
 		open: e,
 		onClose: t,
 		title: "Configurations",
-		size: On.Large,
+		size: Cn.Large,
 		flush: !0,
 		className: "max-w-[820px] md:h-[720px]",
 		bodyClassName: "p-0 overflow-hidden",
@@ -11626,7 +11626,7 @@ function dg({ open: e, onClose: t }) {
 		open: e,
 		onClose: t,
 		title: "MCP servers",
-		size: On.Large,
+		size: Cn.Large,
 		flush: !0,
 		className: "md:h-[740px]",
 		bodyClassName: "p-0 overflow-hidden",
@@ -11689,7 +11689,7 @@ function hg({ open: e, onClose: t }) {
 		open: e,
 		onClose: t,
 		title: "SSH configs",
-		size: On.Large,
+		size: Cn.Large,
 		flush: !0,
 		className: "max-w-[780px] md:h-[480px]",
 		bodyClassName: "p-0 overflow-hidden",
@@ -16947,7 +16947,7 @@ function Xy({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 		/* @__PURE__ */ Y(Qn, {
 			open: ce,
 			onClose: le,
-			size: On.Wide,
+			size: Cn.Wide,
 			flush: !0,
 			title: de ? "Permission required" : "Permissions",
 			subheader: de ? `${de.tool} requested by ${fe} is paused before execution.` : O ? C ? "Automatic approval is inherited from the parent session; change it from the parent." : `${be} is inherited from the parent session; change it from the parent.` : C ? "Automatic approval is active for this session and its owned child agents." : w ? "Approve for me is enabled for this session and its owned child agents. This setting does not guarantee that the review service is available." : "Remembered access for this session.",
@@ -19651,7 +19651,7 @@ function Dx({ state: e, controller: t, availability: n }) {
 	return /* @__PURE__ */ Y(Qn, {
 		open: e.phase !== "empty",
 		title: "Review terminal selection",
-		size: On.Large,
+		size: Cn.Large,
 		onClose: i ? void 0 : () => t.clear(),
 		onNavigate: () => t.clear(),
 		closeOnOverlay: !i,
@@ -20435,7 +20435,7 @@ function Jx({ title: e, children: t }) {
 // src/app/lib/markdownChunk.ts
 var Yx = null, Xx = !1;
 function Zx() {
-	return Yx ??= import("./chunks/markdown-renderer-Di7oI1y5.js").then((e) => e.t).then((e) => (Xx = !0, e)), Yx;
+	return Yx ??= import("./chunks/markdown-renderer-XrqTonae.js").then((e) => e.t).then((e) => (Xx = !0, e)), Yx;
 }
 function Qx() {
 	return Xx;
@@ -20524,7 +20524,7 @@ function aS({ open: e, title: t, subheader: n, value: r, submitting: i, disabled
 		open: e,
 		onClose: i ? void 0 : c,
 		onNavigate: c,
-		size: On.Wide,
+		size: Cn.Wide,
 		title: t,
 		subheader: n,
 		children: /* @__PURE__ */ X("div", {
@@ -26221,7 +26221,7 @@ var Ok = pi(function({ open: e, onClose: t, sessionId: n, messageIdx: r, prompt:
 		open: e,
 		onClose: t,
 		title: "Revert to this snapshot",
-		size: On.Small,
+		size: Cn.Small,
 		footer: /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y(_, {
 			variant: D.Ghost,
 			size: R.Large,
@@ -27575,7 +27575,7 @@ function tA() {
 				open: e.confirmationOpen,
 				onClose: e.cancelStart,
 				title: "Upgrade Managed NAC?",
-				size: On.Small,
+				size: Cn.Small,
 				footer: /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y(_, {
 					variant: D.Tertiary,
 					content: H.Text,
@@ -27855,7 +27855,7 @@ function sA({ open: e, onClose: t, tab: n, onTabChange: r, onGitHubConnected: i 
 		open: e,
 		onClose: t,
 		title: "Managed host",
-		size: On.Large,
+		size: Cn.Large,
 		flush: !0,
 		className: "h-[min(760px,calc(100vh-32px))]",
 		bodyClassName: "min-h-0",
@@ -28121,7 +28121,7 @@ function uA({ open: e, onClose: t, onConnect: n }) {
 		open: e,
 		onClose: te ? void 0 : t,
 		title: "Add repository",
-		size: On.Large,
+		size: Cn.Large,
 		flush: !0,
 		className: "h-[min(760px,calc(100vh-32px))]",
 		bodyClassName: "min-h-0",

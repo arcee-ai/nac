@@ -61,6 +61,16 @@ function deferred() {
   return { promise, resolve };
 }
 
+/** How the server refuses to delete a delegated session. */
+const deleteRefusal = () =>
+  new ApiError(
+    409,
+    "DELETE",
+    "/sessions/chat-1",
+    "delegated sessions accept work only through their parent",
+    "test-request",
+  );
+
 function Row() {
   const actions = useSessionActions();
   const location = useLocation();
@@ -182,6 +192,43 @@ describe("session actions", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("keep a rename the server rejects open, with the typed title, for a retry", async () => {
+    fakes.update
+      .mockRejectedValueOnce(
+        new ApiError(
+          400,
+          "PATCH",
+          "/sessions/chat-1",
+          "session title must not exceed 120 characters",
+          "test-request",
+        ),
+      )
+      .mockResolvedValueOnce(undefined);
+    mount();
+    openFrom("Rename Draft plan");
+    const dialog = screen.getByRole("dialog", { name: "Rename session" });
+    const field = within(dialog).getByLabelText<HTMLInputElement>("Title");
+    const tooLong = "x".repeat(121);
+    fireEvent.change(field, { target: { value: tooLong } });
+
+    await act(async () => {
+      fireEvent.submit(field.form!);
+    });
+    expect(fakes.toast.error).toHaveBeenCalledWith(
+      expect.stringMatching(/^Error: .*session title must not exceed 120 characters/),
+    );
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(field.value).toBe(tooLong);
+
+    fireEvent.change(field, { target: { value: "Final plan" } });
+    await act(async () => {
+      fireEvent.submit(field.form!);
+    });
+    expect(fakes.update).toHaveBeenCalledTimes(2);
+    expect(fakes.update).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Final plan" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("hold the field and the dialog's controls while a save is in flight", () => {
     fakes.pending = true;
     mount();
@@ -215,6 +262,52 @@ describe("session actions", () => {
     expect(fakes.update).not.toHaveBeenCalled();
     expect(fakes.remove).not.toHaveBeenCalled();
     expect(location()).toBe("/session/chat-2");
+  });
+
+  it("reopen a cancelled rename from the current title", async () => {
+    fakes.update.mockResolvedValue(undefined);
+    mount();
+    const opener = openFrom("Rename Draft plan");
+    const cancelled = screen.getByRole("dialog", { name: "Rename session" });
+    fireEvent.change(within(cancelled).getByLabelText("Title"), { target: { value: "Abandoned" } });
+    fireEvent.click(within(cancelled).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    // RenameModal keeps its form through a 300 ms exit transition.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+
+    openFrom("Rename Draft plan");
+    const dialog = screen.getByRole("dialog", { name: "Rename session" });
+    expect(document.activeElement).toBe(dialog);
+    const field = within(dialog).getByLabelText<HTMLInputElement>("Title");
+    expect(field.value).toBe("Draft plan");
+    await act(async () => {
+      fireEvent.submit(field.form!);
+    });
+    expect(fakes.update).toHaveBeenCalledExactlyOnceWith({
+      id: "chat-1",
+      title: "Draft plan",
+      pinned: false,
+      expectedVersion: 3,
+    });
+  });
+
+  it("reopen a cancelled delete and confirm it once", async () => {
+    fakes.remove.mockResolvedValue(undefined);
+    mount();
+    const opener = openFrom("Delete Draft plan");
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }),
+    );
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+
+    openFrom("Delete Draft plan");
+    const dialog = screen.getByRole("alertdialog", { name: "Delete session" });
+    expect(document.activeElement).toBe(dialog);
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete session" }));
+    });
+    expect(fakes.remove).toHaveBeenCalledExactlyOnceWith("chat-1");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
   it("confirm a delete exactly once, from an alert that says what goes", async () => {
@@ -253,5 +346,46 @@ describe("session actions", () => {
     await act(async () => done.resolve());
     expect(fakes.remove).toHaveBeenCalledExactlyOnceWith("chat-1");
     expect(fakes.toast.success).toHaveBeenCalledWith("Session deleted");
+  });
+
+  it("keep a refused delete open for a retry", async () => {
+    fakes.remove.mockRejectedValueOnce(deleteRefusal()).mockResolvedValueOnce(undefined);
+    mount();
+    openFrom("Delete Draft plan");
+    const dialog = screen.getByRole("alertdialog", { name: "Delete session" });
+    const confirm = within(dialog).getByRole("button", { name: "Delete session" });
+
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(fakes.toast.error).toHaveBeenCalledWith(
+      expect.stringMatching(/^Failed to delete: .*accept work only through their parent/),
+    );
+    expect(fakes.toast.success).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBe(dialog);
+
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(fakes.remove).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("put a refused delete of the open chat back on its route", async () => {
+    fakes.remove.mockRejectedValueOnce(deleteRefusal());
+    mount("/session/chat-1");
+    openFrom("Delete Draft plan");
+
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete session" }),
+      );
+    });
+    expect(location()).toBe("/session/chat-1");
+    expect(fakes.remove).toHaveBeenCalledExactlyOnceWith("chat-1");
+    expect(fakes.toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("accept work only through their parent"),
+    );
+    expect(fakes.toast.success).not.toHaveBeenCalled();
   });
 });

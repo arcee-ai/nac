@@ -7,6 +7,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Button, Modal, Select, Tooltip } from "@/app/atoms";
 import { PresentationBoundary } from "@/app/providers/PresentationBoundary";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 
 vi.mock("@/app/hooks/useMediaQuery", async (importOriginal) => ({
@@ -60,6 +66,19 @@ function mount(...names: string[]) {
   );
 }
 
+/** The standalone app, which owns the whole page's keyboard. */
+function mountStandalone() {
+  return render(
+    <MemoryRouter>
+      <section aria-label="main">
+        <PresentationBoundary globalKeyboard>
+          <Workspace name="main" />
+        </PresentationBoundary>
+      </section>
+    </MemoryRouter>,
+  );
+}
+
 const instance = (name: string) => screen.getByRole("region", { name });
 const content = (name: string) => instance(name).querySelector("[data-nac-content]");
 const scrim = (name: string) => instance(name).querySelector('[data-slot="dialog-overlay"]')!;
@@ -77,6 +96,13 @@ function openDialog(name: string) {
 function click(target: Element) {
   fireEvent.mouseDown(target);
   fireEvent.click(target);
+}
+
+/** Whether a wheel over `target` is kept from scrolling the page. */
+function wheelStopped(target: Element) {
+  const event = new Event("wheel", { bubbles: true, cancelable: true });
+  target.dispatchEvent(event);
+  return event.defaultPrevented;
 }
 
 describe("nested overlays", () => {
@@ -174,5 +200,134 @@ describe("two embedded instances", () => {
     fireEvent.keyDown(within(instance("right")).getByText("Archive"), { key: "Escape" });
     expect(within(instance("right")).queryByText("Archive")).toBeNull();
     expect(within(instance("right")).getByRole("dialog")).toBe(right);
+  });
+
+  it("portal into their own overlay roots and hold each scrim's scroll lock separately", () => {
+    mount("left", "right");
+    const left = openDialog("left").dialog;
+    const right = openDialog("right").dialog;
+    expect(instance("left").querySelector("[data-nac-overlays]")?.contains(left)).toBe(true);
+    expect(instance("right").querySelector("[data-nac-overlays]")?.contains(right)).toBe(true);
+    expect(wheelStopped(scrim("left"))).toBe(true);
+    expect(wheelStopped(scrim("right"))).toBe(true);
+
+    fireEvent.keyDown(left, { key: "Escape" });
+    expect(instance("left").querySelector('[data-slot="dialog-overlay"]')).toBeNull();
+    expect(wheelStopped(content("left")!)).toBe(false);
+    expect(wheelStopped(scrim("right"))).toBe(true);
+  });
+
+  it("let a press in one view dismiss the other's menu, but never its dialog", () => {
+    mount("left", "right");
+    const left = openDialog("left").dialog;
+    fireEvent.click(within(left).getByRole("button", { name: "More" }));
+    const right = openDialog("right").dialog;
+    expect(within(instance("left")).getByText("Archive")).toBeTruthy();
+
+    click(within(right).getByText("right settings"));
+    expect(within(instance("left")).queryByText("Archive")).toBeNull();
+    expect(within(instance("left")).getByRole("dialog")).toBe(left);
+    expect(within(instance("right")).getByRole("dialog")).toBe(right);
+
+    click(within(left).getByText("left settings"));
+    expect(within(instance("right")).getByRole("dialog")).toBe(right);
+  });
+
+  it("hand focus back to each view's own opener", async () => {
+    mount("left", "right");
+    const left = openDialog("left");
+    const right = openDialog("right");
+
+    act(() => left.dialog.focus());
+    fireEvent.keyDown(left.dialog, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(left.opener));
+    expect(within(instance("right")).getByRole("dialog")).toBe(right.dialog);
+
+    act(() => right.dialog.focus());
+    fireEvent.keyDown(right.dialog, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(right.opener));
+  });
+});
+
+describe("keyboard ownership", () => {
+  it("let the standalone app close its top layer on an Escape from anywhere on the page", () => {
+    mountStandalone();
+    const { dialog } = openDialog("main");
+    act(() => dialog.blur());
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("leave an embedded view's layers alone on an Escape meant for its host page", () => {
+    mount("main");
+    const { dialog } = openDialog("main");
+    act(() => dialog.blur());
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBe(dialog);
+  });
+});
+
+function ActionsMenu({ onArchive }: { onArchive: () => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger>Actions</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem onSelect={onArchive}>Archive chat</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+describe("dropdown menu", () => {
+  it("close on Escape or a press outside, select once and hand focus back to its trigger", async () => {
+    const onArchive = vi.fn();
+    render(
+      <MemoryRouter>
+        <PresentationBoundary>
+          <ActionsMenu onArchive={onArchive} />
+          <button type="button">Elsewhere</button>
+        </PresentationBoundary>
+      </MemoryRouter>,
+    );
+    const trigger = screen.getByRole("button", { name: "Actions" });
+    act(() => trigger.focus());
+
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    click(screen.getByRole("button", { name: "Elsewhere" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    act(() => trigger.focus());
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Archive chat" }));
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("close before the dialog it sits in", () => {
+    const onClose = vi.fn();
+    render(
+      <MemoryRouter>
+        <PresentationBoundary>
+          <Modal open onClose={onClose} title="Chat settings">
+            <ActionsMenu onArchive={vi.fn()} />
+          </Modal>
+        </PresentationBoundary>
+      </MemoryRouter>,
+    );
+    const trigger = screen.getByRole("button", { name: "Actions" });
+    act(() => trigger.focus());
+    fireEvent.keyDown(trigger, { key: "Enter" });
+
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -6,7 +6,8 @@ Design-system atoms under `crates/nac-server/web/src/app/atoms/` keep their
 public props, refs, events and form behavior, and are built on scoped
 primitives in `src/app/ui/`. The primitives are adapted from shadcn/ui registry
 source and run on Radix through the `radix-ui` package. Product components keep
-importing atoms; only atoms, providers and other primitives import `ui/`.
+importing atoms; only atoms, providers and other primitives import `ui/`, and
+ESLint's `no-restricted-imports` rejects any other import of it.
 
 Each presentation instance owns one overlay layer stack (`ui/layer-stack.ts`),
 created by `PresentationBoundary`. It is the single owner of Escape,
@@ -31,11 +32,16 @@ Notices live in `web/public/licenses/` and ship in `assets/dist/licenses/` and
 in the presentation package's `dist/licenses/`. The build strips legal comments,
 so every newly bundled dependency adds its notice there.
 
-`components.json` records the registry style and points the CLI at `src/app/ui/`
-and `src/app/ui/tokens.css`, so adding a component never rewrites global CSS or
-the Tailwind configuration. Run the CLI only at the release cut from the pinned
-commit, `npx shadcn@4.23.0 add <component>`, and review the copied source like
-any imported code. Builds and CI never fetch from the registry.
+The primitives were adapted by hand from `apps/v4/registry/new-york-v4/ui/` at
+the pinned commit, which releases CLI `shadcn@4.23.0`; the CLI was not run.
+`components.json` records the registry style and the aliases, and points at
+`src/app/ui/` and `src/app/ui/tokens.css` instead of global CSS or a Tailwind
+configuration. Do not run `shadcn add` on this tree: it reads the hosted
+registry (`https://ui.shadcn.com/r` unless `REGISTRY_URL` overrides it), not
+the pinned commit, and the registry sources import lucide-react and
+class-variance-authority, which NAC does not install. A new primitive starts
+from the same path at the pinned commit, or at a newly pinned one, and is
+reviewed like any imported code. Builds and CI never fetch from the registry.
 
 ## Adaptation rules
 
@@ -50,7 +56,8 @@ any imported code. Builds and CI never fetch from the registry.
   off for reduced motion; the unmodified utility loses to it.
 - `ui/alert-dialog` is built on `ui/dialog` because Radix's AlertDialog forces
   modal mode. It keeps the `alertdialog` role, a described body and a scrim
-  that dismisses only when asked to.
+  that dismisses only when asked to. The Modal atom's `alert` prop renders it,
+  and product code marks the body text with `ModalDescription`.
 - Popover content drops Radix's default `dialog` role unless its owner sets
   one. Atoms that focus a field when they open render the content
   conditionally with `forceMount`, so the panel exists in the commit that
@@ -105,18 +112,30 @@ as before the migration.
 
 ## Budget and verification
 
-Every migration slice measures the complete initial-load graph before and after
-the change with `web/scripts/startup-size.mjs`, for the app and for the
-presentation package. The graph is the entry module, statically imported chunks
-and linked stylesheets; lazy `import()` chunks are excluded and stay lazy. The
-gate is at most +30 KiB gzip of startup JavaScript and +10 KiB gzip of CSS per
-app. Exceeding it calls for optimization or an explicit scope review.
+`web/scripts/startup-size.mjs` measures the complete initial-load graph of the
+app and of the presentation package in gzip bytes: the entry module, statically
+imported chunks and linked stylesheets. Lazy `import()` chunks are excluded and
+stay lazy.
+
+Budgets are fixed against one baseline, `dev` at
+`cd7d3730bd47cc3c7b9de5204fd08496b19b155d`, not against the previous slice. The
+pilot may add at most 30 KiB of startup JavaScript and 10 KiB of CSS to each
+graph, and the complete migration at most 50 KiB and 15 KiB.
+
+| Graph | Baseline JS | Baseline CSS | Pilot adds | Left for later slices |
+| --- | --- | --- | --- | --- |
+| App | 471,545 B | 23,232 B | 22.3 KiB JS, 0.2 KiB CSS | 27.7 KiB JS, 14.8 KiB CSS |
+| Presentation | 435,177 B | 1,174,101 B | 26.5 KiB JS, 0.3 KiB CSS | 23.5 KiB JS, 14.7 KiB CSS |
+
+Every later slice measures against this baseline. Exceeding a budget calls for
+optimization or an explicit scope review; it is never waived silently.
 
 Behavior coverage lives next to its owners: `ui/layer-stack.test.ts` (Escape
 order, outside presses, inertness, focus return), `ui/overlays.test.tsx` (nested
-legacy and migrated layers, tooltips, two embedded instances),
-`atoms/input/index.test.tsx`, and the rename and delete journey in
-`providers/SessionActionsProvider.test.tsx`.
+legacy and migrated layers, the dropdown menu, tooltips, standalone and
+embedded keyboard ownership, two embedded instances), `atoms/modal/index.test.tsx`
+(the phone panel), `atoms/input/index.test.tsx`, and the rename and delete
+journey in `providers/SessionActionsProvider.test.tsx`.
 
 ## Extension
 

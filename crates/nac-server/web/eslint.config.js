@@ -37,6 +37,24 @@ export default tseslint.config([
     rules: { "react-refresh/only-export-components": "off" },
   },
   {
+    // Product code reaches the primitives through the atoms (ADR 0007).
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/app/atoms/**", "src/app/ui/**", "src/app/providers/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/ui", "**/ui/*"],
+              message: "Import the atom; only atoms, providers and primitives use src/app/ui.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["e2e/**/*.{ts,tsx}", "playwright.config.ts"],
     languageOptions: { globals: globals.node },
     rules: {
