@@ -4,9 +4,12 @@ declare function TooltipProvider({ delayDuration, ...props }: React.ComponentPro
 /**
  * Carries its own provider, so a tooltip works wherever it is rendered, and
  * registers as a hint layer: Escape closes it before anything beneath it.
+ * Radix closes an open tip whenever anything around its trigger scrolls; a tip
+ * that keyboard focus holds outlasts that, since moving the focus onto a
+ * control can scroll its container by itself.
  */
 declare function Tooltip({ open: openProp, defaultOpen, onOpenChange, delayDuration, disableHoverableContent, children, }: React.ComponentProps<typeof TooltipPrimitive.Root>): React.JSX.Element;
-declare function TooltipTrigger(props: React.ComponentProps<typeof TooltipPrimitive.Trigger>): React.JSX.Element;
+declare function TooltipTrigger({ ref, ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>): React.JSX.Element;
 type TooltipContentProps = Omit<React.ComponentProps<typeof TooltipPrimitive.Content>, "onEscapeKeyDown"> & {
     container?: HTMLElement | null;
 };

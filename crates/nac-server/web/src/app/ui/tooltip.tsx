@@ -6,7 +6,17 @@ import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundar
 import { composeRefs } from "./compose-refs";
 import { keepOpen, useLayer } from "./layer";
 
-const TooltipContentRef = React.createContext<React.RefObject<HTMLDivElement | null> | null>(null);
+interface TooltipParts {
+  content: React.RefObject<HTMLDivElement | null>;
+  trigger: React.RefObject<HTMLButtonElement | null>;
+}
+
+const TooltipPartsContext = React.createContext<TooltipParts | null>(null);
+
+function holdsKeyboardFocus(trigger: HTMLElement | null) {
+  const active = document.activeElement;
+  return !!active && !!trigger?.contains(active) && active.matches(":focus-visible");
+}
 
 function TooltipProvider({
   delayDuration = 0,
@@ -18,6 +28,9 @@ function TooltipProvider({
 /**
  * Carries its own provider, so a tooltip works wherever it is rendered, and
  * registers as a hint layer: Escape closes it before anything beneath it.
+ * Radix closes an open tip whenever anything around its trigger scrolls; a tip
+ * that keyboard focus holds outlasts that, since moving the focus onto a
+ * control can scroll its container by itself.
  */
 function Tooltip({
   open: openProp,
@@ -34,23 +47,47 @@ function Tooltip({
     onOpenChange?.(next);
   };
   const content = React.useRef<HTMLDivElement>(null);
+  const trigger = React.useRef<HTMLButtonElement>(null);
+  const parts = React.useMemo(() => ({ content, trigger }), []);
+  const scrolling = React.useRef(false);
   useLayer({ open, kind: "hint", content, onEscape: () => setOpen(false) });
+  // Radix listens for the scroll only once the tip is open, so this listener
+  // always runs first and marks the close that the scroll requests.
+  React.useLayoutEffect(() => {
+    const onScroll = (event: Event) => {
+      if (!(event.target instanceof Node) || !event.target.contains(trigger.current)) return;
+      scrolling.current = true;
+      setTimeout(() => {
+        scrolling.current = false;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { capture: true });
+    return () => window.removeEventListener("scroll", onScroll, { capture: true });
+  }, []);
   return (
-    <TooltipContentRef.Provider value={content}>
+    <TooltipPartsContext.Provider value={parts}>
       <TooltipProvider
         delayDuration={delayDuration}
         disableHoverableContent={disableHoverableContent}
       >
-        <TooltipPrimitive.Root open={open} onOpenChange={setOpen}>
+        <TooltipPrimitive.Root
+          open={open}
+          onOpenChange={(next) => {
+            if (!next && scrolling.current && holdsKeyboardFocus(trigger.current)) return;
+            setOpen(next);
+          }}
+        >
           {children}
         </TooltipPrimitive.Root>
       </TooltipProvider>
-    </TooltipContentRef.Provider>
+    </TooltipPartsContext.Provider>
   );
 }
 
-function TooltipTrigger(props: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+function TooltipTrigger({ ref, ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
+  const parts = React.useContext(TooltipPartsContext);
+  const composedRef = React.useMemo(() => composeRefs(ref, parts?.trigger), [ref, parts]);
+  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} ref={composedRef} />;
 }
 
 type TooltipContentProps = Omit<
@@ -69,8 +106,8 @@ function TooltipContent({
   ...props
 }: TooltipContentProps) {
   const target = usePresentationPortalTarget();
-  const content = React.useContext(TooltipContentRef);
-  const composedRef = React.useMemo(() => composeRefs(ref, content ?? undefined), [ref, content]);
+  const parts = React.useContext(TooltipPartsContext);
+  const composedRef = React.useMemo(() => composeRefs(ref, parts?.content), [ref, parts]);
   return (
     <TooltipPrimitive.Portal container={container ?? target}>
       <TooltipPrimitive.Content

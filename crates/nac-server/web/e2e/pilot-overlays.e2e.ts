@@ -143,6 +143,10 @@ test("rename and delete preserve the responsive pilot journey and accessibility"
     await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Tab");
     await expect(rename).toBeFocused();
+    // Focusing a row action scrolls the project's session list for as long as
+    // its 500ms height transition runs; the hint has to outlast that.
+    await page.waitForTimeout(600);
+    await expect(page.getByRole("tooltip", { name: "Rename chat", exact: true })).toBeVisible();
     await expect(rename).toHaveAccessibleDescription("Rename chat");
     await page.keyboard.press("Escape");
     await page.emulateMedia({ reducedMotion: "reduce" });

@@ -63,7 +63,10 @@ reviewed like any imported code. Builds and CI never fetch from the registry.
   one. Atoms that focus a field when they open render the content
   conditionally with `forceMount`, so the panel exists in the commit that
   opens it.
-- `ui/tooltip` carries its own provider and registers a `hint` layer. The
+- `ui/tooltip` carries its own provider and registers a `hint` layer. A tip
+  that keyboard focus holds stays open when something around its trigger
+  scrolls, which Radix would close it for: moving the focus onto a control can
+  scroll its container, as a session row's actions do in the sidebar. The
   Tooltip atom shows no arrow and ignores focus without `:focus-visible`, such
   as focus a closing dialog hands back after a click.
 - `ui/tokens.css` aliases shadcn's color names onto NAC tokens with
@@ -133,6 +136,9 @@ graph, and the complete migration at most 50 KiB and 15 KiB.
 These measurements use Node 26.12.0, gzip level 9, and the committed baseline
 bundles on the same host as the repaired pilot build. Gzip byte counts can vary
 with the runtime's compression implementation; compare both revisions together.
+Keeping keyboard hints open through a scroll, added after that measurement,
+adds 0.1 KiB of startup JavaScript to each graph (Node 24.16.0, both revisions
+measured together).
 
 Every later slice measures against this baseline. Exceeding a budget calls for
 optimization or an explicit scope review; it is never waived silently.

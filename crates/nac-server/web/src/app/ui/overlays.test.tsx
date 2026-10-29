@@ -231,6 +231,26 @@ describe("nested overlays", () => {
     expect(screen.getByRole("dialog")).toBe(dialog);
     expect(document.activeElement).toBe(status);
   });
+
+  it("keep a keyboard hint through a scroll around its control, but not a hover hint", () => {
+    mount("main");
+    const { dialog } = openDialog("main");
+    const status = within(dialog).getByRole("button", { name: "Status" });
+
+    act(() => status.focus());
+    fireEvent.scroll(dialog);
+    expect(screen.getByRole("tooltip").textContent).toBe("Saved automatically");
+    expect(
+      within(dialog).getByRole("button", { name: "Status", description: "Saved automatically" }),
+    ).toBe(status);
+    act(() => status.blur());
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.mouseEnter(status);
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    fireEvent.scroll(dialog);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
 });
 
 describe("two embedded instances", () => {
