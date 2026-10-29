@@ -1,8 +1,7 @@
-import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundary";
 import React, { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 import { cn } from "../../lib/cn";
+import { Sheet, SheetContent, SheetOverlay, SheetPortal } from "../../ui/sheet";
 import CoverBackground from "../cover-background";
 
 /** Kept in step with the transition below, so the sheet is torn down after it. */
@@ -27,8 +26,6 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
   className = "",
   children,
 }) => {
-  const portalTarget = usePresentationPortalTarget();
-
   const [mounted, setMounted] = useState(open);
   const [down, setDown] = useState(true);
   const [wasOpen, setWasOpen] = useState(open);
@@ -78,25 +75,38 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
 
   if (!mounted) return null;
 
-  return createPortal(
-    <>
-      <CoverBackground open={!down} zIndex={zIndex} className="!duration-300" onClick={onClose} />
-      <div
-        style={{ zIndex }}
-        className={cn(
-          "fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[75dvh] overflow-y-auto",
-          "rounded-t-3xl py-4 bg-elevation-level-2 shadow-2xl",
-          "transition-transform duration-300 ease-in-out [&>*]:shrink-0",
-          down ? "translate-y-full" : "translate-y-0",
-          className,
-        )}
-        onMouseDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
-    </>,
-    portalTarget,
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <SheetPortal forceMount>
+        <SheetOverlay asChild>
+          <CoverBackground open={!down} zIndex={zIndex} className="!duration-300" />
+        </SheetOverlay>
+        <SheetContent
+          side="bottom"
+          forceMount
+          // A popover's panel in another form: a list to pick from, not a dialog.
+          role={undefined}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          style={{ zIndex }}
+          className={cn(
+            "fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[75dvh] overflow-y-auto overscroll-contain",
+            "rounded-t-3xl py-4 bg-elevation-level-2 shadow-2xl",
+            "transition-transform duration-300 ease-in-out motion-reduce:transition-none [&>*]:shrink-0",
+            down ? "translate-y-full" : "translate-y-0",
+            className,
+          )}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {children}
+        </SheetContent>
+      </SheetPortal>
+    </Sheet>
   );
 };
 

@@ -1,15 +1,8 @@
-import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundary";
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import React, { useMemo, useState } from "react";
 import { useIsMobile } from "../../hooks/useMediaQuery";
-import {
-  AnchorPlacement,
-  anchorClasses,
-  anchorCoords,
-  clippingAncestors,
-  visibleBounds,
-} from "../../lib/anchor";
+import { ANCHOR_GAP, AnchorPlacement, anchorSides, clippingAncestors } from "../../lib/anchor";
 import { cn } from "../../lib/cn";
+import { PopoverAnchor, PopoverContent, Popover as UIPopover } from "../../ui/popover";
 import BottomSheet from "./BottomSheet";
 
 export { AnchorPlacement as PopoverPlacement };
@@ -18,12 +11,14 @@ export enum PopoverSize {
   Small = "w-[240px]",
   Medium = "w-[320px]",
   Large = "w-[400px]",
-  /** As wide as the content, useful together with `min-w-full` on the panel. */
+  /** As wide as the content. */
   Fit = "w-max",
+  /** At least as wide as the trigger, and wider when the content asks for it. */
+  TriggerWidth = "min-w-[var(--radix-popover-trigger-width)]",
 }
 
 const PANEL_BASE =
-  "flex flex-col gap-1 p-2 rounded-[8px] bg-elevation-level-3 shadow-2xl fade [&>*]:shrink-0";
+  "flex flex-col gap-1 p-2 rounded-[8px] bg-elevation-level-3 shadow-2xl fade motion-reduce:!animate-none [&>*]:shrink-0";
 
 interface PopoverProps {
   open: boolean;
@@ -35,8 +30,8 @@ interface PopoverProps {
   placement?: AnchorPlacement;
   size?: PopoverSize | string;
   /**
-   * Portal the panel to the body and place it from measured coordinates, so an
-   * ancestor with clipped overflow cannot cut it off.
+   * Portal the panel to the presentation's overlay layer, so an ancestor with
+   * clipped overflow cannot cut it off.
    */
   sticky?: boolean;
   closeOnOutsideClick?: boolean;
@@ -70,105 +65,64 @@ const Popover: React.FC<PopoverProps> & {
   panelClassName = "",
   sheetClassName = "",
 }) => {
-  const portalTarget = usePresentationPortalTarget();
-
   const asSheet = useIsMobile() && sheetOnMobile;
-  const containerRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
-
-  useEffect(() => {
-    if (!open || !closeOnOutsideClick || asSheet) return undefined;
-    const onDown = (event: MouseEvent) => {
-      // SAFETY: a mousedown target is always a Node; the cast only widens the
-      // EventTarget the DOM event types declare.
-      const target = event.target as Node;
-      // The panel is checked separately: when portalled it is not a descendant
-      // of the trigger wrapper.
-      if (containerRef.current?.contains(target)) return;
-      if (panelRef.current?.contains(target)) return;
-      onClose();
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open, closeOnOutsideClick, asSheet, onClose]);
-
-  useEffect(() => {
-    if (!open || !closeOnEscape) return undefined;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, closeOnEscape, onClose]);
-
-  // Runs before paint, so coordinates left over from the previous opening are
-  // corrected before the panel is ever shown at them.
-  useLayoutEffect(() => {
-    if (!open || asSheet || !sticky) return undefined;
-    const trigger = containerRef.current;
-    const panel = panelRef.current;
-    if (!trigger || !panel) return undefined;
-
-    // The trigger's own box — a dialog that scrolls its body, a card that hides
-    // its overflow — is where the panel is expected to appear, so it is kept
-    // inside it even though the portal frees it from the clipping.
-    const clippers = clippingAncestors(trigger);
-    const place = () =>
-      setCoords(
-        anchorCoords(
-          placement,
-          trigger.getBoundingClientRect(),
-          panel.getBoundingClientRect(),
-          visibleBounds(clippers),
-        ),
-      );
-    place();
-
-    const observer = new ResizeObserver(place);
-    observer.observe(panel);
-    // Fixed coordinates go stale as soon as anything underneath moves.
-    window.addEventListener("scroll", place, true);
-    window.addEventListener("resize", place);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("scroll", place, true);
-      window.removeEventListener("resize", place);
-    };
-  }, [open, asSheet, sticky, placement]);
-
-  const panel = (
-    <div
-      ref={panelRef}
-      className={cn(
-        PANEL_BASE,
-        size,
-        sticky
-          ? cn("fixed z-[120]", coords ? null : "invisible")
-          : cn("absolute z-30", anchorClasses[placement]),
-        panelClassName,
-      )}
-      style={sticky ? { left: coords?.left ?? 0, top: coords?.top ?? 0 } : undefined}
-    >
-      {content}
-    </div>
+  const panelOpen = open && !asSheet;
+  const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
+  // Read once per opening: walking the cascade is the expensive part, and the
+  // positioning reads the live rects of these elements on every update.
+  const boundary = useMemo(
+    () => (panelOpen && sticky && anchor ? clippingAncestors(anchor) : []),
+    [panelOpen, sticky, anchor],
   );
+  const { side, align } = anchorSides[placement];
 
   return (
-    <div ref={containerRef} className={cn("relative w-fit h-fit leading-[0]", className)}>
-      {children}
-      {asSheet ? (
-        <BottomSheet open={open} onClose={onClose} className={sheetClassName}>
-          {content}
-        </BottomSheet>
-      ) : open ? (
-        sticky ? (
-          createPortal(panel, portalTarget)
-        ) : (
-          panel
-        )
-      ) : null}
-    </div>
+    <UIPopover
+      open={panelOpen}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      closeOnEscape={closeOnEscape}
+      closeOnOutsidePress={closeOnOutsideClick}
+    >
+      <PopoverAnchor ref={setAnchor} className={cn("relative w-fit h-fit leading-[0]", className)}>
+        {children}
+        {asSheet ? (
+          <BottomSheet open={open} onClose={onClose} className={sheetClassName}>
+            {content}
+          </BottomSheet>
+        ) : null}
+        {/* Mounted in the same commit as `open`, so an owner's effect on `open`
+            can already focus a field inside the panel. */}
+        {panelOpen ? (
+          <PopoverContent
+            forceMount
+            portal={sticky}
+            side={side}
+            align={align}
+            sideOffset={ANCHOR_GAP}
+            collisionPadding={ANCHOR_GAP}
+            // The trigger's own box — a dialog that scrolls its body, a card that
+            // hides its overflow — is where a portalled panel is expected to
+            // appear, so it stays inside it whenever it fits there.
+            collisionBoundary={sticky ? boundary : undefined}
+            // The trigger keeps the focus: a panel opening under a field must not
+            // take the caret out of it.
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            className={cn(
+              PANEL_BASE,
+              // Panels take their text colour from where they open.
+              "text-inherit",
+              size,
+              sticky ? "z-[120]" : "z-30",
+              panelClassName,
+            )}
+          >
+            {content}
+          </PopoverContent>
+        ) : null}
+      </PopoverAnchor>
+    </UIPopover>
   );
 };
 

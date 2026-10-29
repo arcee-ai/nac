@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { Button, ButtonContent, ButtonVariant, Input, Modal, ModalSize } from "@/app/atoms";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
@@ -34,12 +34,17 @@ function RenameForm({
   const toast = useToast();
   const sessionTitle = useSessionTitle();
   const update = useUpdatePresentation();
+  const formId = useId();
+  // `isPending` only shows up on the next render, so a second Enter in the
+  // same frame would otherwise send the write twice.
+  const submitting = useRef(false);
   const [title, setTitle] = useState(summary.title ?? "");
   const [pinned, setPinned] = useState(Boolean(summary.pinned));
   const canPin = Boolean(summary.project_id);
 
   const submit = async () => {
-    if (update.isPending) return;
+    if (submitting.current) return;
+    submitting.current = true;
     try {
       await update.mutateAsync({
         id: summary.session_id,
@@ -56,6 +61,8 @@ function RenameForm({
           ? "Version conflict — the session changed in the meantime"
           : `Error: ${errorMessage(toRunError(error))}`,
       );
+    } finally {
+      submitting.current = false;
     }
   };
 
@@ -76,9 +83,10 @@ function RenameForm({
             Cancel
           </Button>
           <Button
+            type="submit"
+            form={formId}
             variant={ButtonVariant.Primary}
             content={ButtonContent.Text}
-            onClick={submit}
             loading={update.isPending}
           >
             Save
@@ -86,16 +94,23 @@ function RenameForm({
         </>
       }
     >
-      <div className="flex flex-col gap-4">
+      {/* Enter submits through the form, which the browser holds back while an
+          IME composition is still open. */}
+      <form
+        id={formId}
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
         <Input
           label="Title"
           placeholder={sessionTitle(summary) || "Session name"}
           hintText="Leave empty to restore the automatic title (last prompt)."
           value={title}
+          loading={update.isPending}
           onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void submit();
-          }}
         />
         {canPin ? (
           <label className="flex items-center gap-2 label-small text-basic-secondary select-none">
@@ -108,7 +123,7 @@ function RenameForm({
             Pin to top of the list
           </label>
         ) : null}
-      </div>
+      </form>
     </Modal>
   );
 }

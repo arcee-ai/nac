@@ -1,7 +1,9 @@
+import { useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { flushSync } from "react-dom";
 
 import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
+import { AlertDialogDescription } from "@/app/ui/alert-dialog";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { parseStoreTime, shortId } from "@/app/lib/format";
 import { toRunError } from "@/app/lib/providerError";
@@ -41,9 +43,13 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
   const location = useLocation();
   const remove = useDeleteSession();
   const { data: sessions = [] } = useSessions();
+  // `isPending` only shows up on the next render, so a double click would
+  // otherwise send the delete twice.
+  const deleting = useRef(false);
 
   const submit = async () => {
-    if (!summary || remove.isPending) return;
+    if (!summary || deleting.current) return;
+    deleting.current = true;
     const id = summary.session_id;
     const openPath = location.pathname;
     const leaveOpenSession =
@@ -64,6 +70,8 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
         navigate(openPath, { replace: true });
       }
       toast.error(`Failed to delete: ${errorMessage(toRunError(error))}`);
+    } finally {
+      deleting.current = false;
     }
   };
 
@@ -73,6 +81,7 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
       onClose={onClose}
       title="Delete session"
       size={ModalSize.Small}
+      alert
       footer={
         <>
           <Button
@@ -94,12 +103,12 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
         </>
       }
     >
-      <p>
+      <AlertDialogDescription>
         Are you sure you want to delete the session{" "}
         <span className="text-basic-primary">&quot;{sessionTitle(summary)}&quot;</span>{" "}
         <span className="font-mono text-basic-muted">({shortId(summary?.session_id)})</span>? This
         action cannot be undone.
-      </p>
+      </AlertDialogDescription>
     </Modal>
   );
 }

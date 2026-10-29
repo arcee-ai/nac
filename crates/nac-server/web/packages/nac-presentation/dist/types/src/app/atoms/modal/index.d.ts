@@ -49,6 +49,11 @@ interface ModalProps {
      * puts the route there — the session side box switches panels by navigating.
      */
     keepOnNavigate?: boolean;
+    /**
+     * A confirmation before something that cannot be undone: the card is an
+     * `alertdialog`, described by the `AlertDialogDescription` in its body.
+     */
+    alert?: boolean;
     className?: string;
     /** Overrides the body's own padding and scrolling, for full-bleed content. */
     bodyClassName?: string;
