@@ -27,6 +27,15 @@ jq -r '.libssh2.reviewed_source_files | to_entries[] | [.value, .key] | join("  
 # configure/Makefile inputs; regeneration needlessly imports host gettext data.
 ./configure --prefix=/usr --libdir=/usr/lib --with-crypto=openssl --disable-docker-tests
 make -j2
+# Seam-level malformed-input regressions for the six corrections applied above.
+# Compiled against the patched tree and run here; never installed or shipped.
+# Each case drives the corrected seam with the input shape the correction
+# rejects, so a dropped or reverted patch fails the build instead of silently
+# restoring the pre-patch behaviour.
+gcc -DHAVE_CONFIG_H -I. -Isrc -Iinclude -Wl,--allow-multiple-definition \
+    -o /tmp/libssh2-regressions /recipe/libssh2-regressions.c \
+    src/publickey.c src/misc.c src/sftp.c src/.libs/libssh2.a -lcrypto
+/tmp/libssh2-regressions
 # Ordinary upstream standalone and local OpenSSH tests. No new attack fixtures.
 mkdir -p /run/sshd
 # Public upstream fixture keys authenticate only the disposable build account.
