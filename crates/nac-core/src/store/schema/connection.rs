@@ -1,5 +1,6 @@
 //! SQLite connection checkout: per-process and per-store descriptor limits,
 //! the executor authority check, and the owned connection handle.
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -14,6 +15,10 @@ use super::{resolved_store_path, transaction_observation};
 #[cfg(test)]
 #[path = "connection_capacity_tests.rs"]
 mod connection_capacity_tests;
+
+#[cfg(test)]
+#[path = "connection_reuse_tests.rs"]
+mod connection_reuse_tests;
 
 /// Hard SQLite checkout limits for one NAC process.
 ///
@@ -155,21 +160,37 @@ static CONNECTION_CAPACITY: std::sync::LazyLock<Arc<ConnectionCapacity>> =
 
 pub(crate) struct StoreConnection {
     connection: Option<Connection>,
-    _permit: ConnectionPermit,
-    _transaction_observation: Option<Box<transaction_observation::TransactionObservation>>,
+    permit: Option<ConnectionPermit>,
+    transaction_observation: Option<Box<transaction_observation::TransactionObservation>>,
+    /// Set when this is the persistence executor's own connection, which goes
+    /// back to the executor on drop instead of closing.
+    reuse: Option<Reuse>,
 }
 
 impl Drop for StoreConnection {
     fn drop(&mut self) {
-        if let Some(connection) = self.connection.take() {
-            if let Some(observation) = &self._transaction_observation {
-                observation.detach(&connection);
-            }
-            drop(connection);
-            if let Some(observation) = &mut self._transaction_observation {
-                observation.finish_abandoned();
+        if let Some(reuse) = self.reuse.take() {
+            if let Some(idle) = self.take_reusable(reuse) {
+                return_executor_connection(idle);
+                return;
             }
         }
+        if let Some(connection) = self.connection.take() {
+            close(connection, self.transaction_observation.take());
+        }
+    }
+}
+
+fn close(
+    connection: Connection,
+    mut observation: Option<Box<transaction_observation::TransactionObservation>>,
+) {
+    if let Some(observation) = &observation {
+        observation.detach(&connection);
+    }
+    drop(connection);
+    if let Some(observation) = &mut observation {
+        observation.finish_abandoned();
     }
 }
 
@@ -212,6 +233,157 @@ impl StoreConnection {
     }
 }
 
+/// What a reused executor connection is checked out for. A read-only checkout
+/// keeps the guarantee of a read-only open with `PRAGMA query_only`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Access {
+    ReadWrite,
+    ReadOnly,
+}
+
+struct Reuse {
+    access: Access,
+    path: PathBuf,
+    file: FileIdentity,
+}
+
+/// The store file a connection was opened on. A replaced or removed store
+/// must never be served by a connection to the old file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+impl FileIdentity {
+    #[cfg(unix)]
+    fn of(path: &Path) -> Option<Self> {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = std::fs::symlink_metadata(path).ok()?;
+        metadata.is_file().then(|| Self {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+
+    #[cfg(not(unix))]
+    fn of(_: &Path) -> Option<Self> {
+        None
+    }
+}
+
+/// The persistence executor's idle connection to its own store. Commands run
+/// one at a time on that thread, so keeping one connection open avoids a
+/// fresh WAL/shared-memory setup, a full schema parse and (as the store's
+/// last connection) a checkpoint plus WAL deletion for every command. Its
+/// `reuse` is unset while idle, so dropping it closes it normally.
+struct IdleConnection {
+    path: PathBuf,
+    file: FileIdentity,
+    connection: StoreConnection,
+}
+
+std::thread_local! {
+    static EXECUTOR_CONNECTION: RefCell<Option<IdleConnection>> = const { RefCell::new(None) };
+}
+
+impl StoreConnection {
+    /// Hand the connection back only when nothing about it is left mid-flight:
+    /// no open transaction, no unwinding command, and a read-only checkout's
+    /// write guard lifted again.
+    fn take_reusable(&mut self, reuse: Reuse) -> Option<IdleConnection> {
+        let connection = self.connection.as_ref()?;
+        if std::thread::panicking()
+            || !connection.is_autocommit()
+            || (reuse.access == Access::ReadOnly
+                && connection.execute_batch("PRAGMA query_only = 0").is_err())
+        {
+            return None;
+        }
+        Some(IdleConnection {
+            path: reuse.path,
+            file: reuse.file,
+            connection: StoreConnection {
+                connection: self.connection.take(),
+                permit: self.permit.take(),
+                transaction_observation: self.transaction_observation.take(),
+                reuse: None,
+            },
+        })
+    }
+}
+
+fn return_executor_connection(idle: IdleConnection) {
+    let leftover = EXECUTOR_CONNECTION.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() && crate::store::coordinator::is_execution_store(&idle.path) {
+            *slot = Some(idle);
+            None
+        } else {
+            Some(idle)
+        }
+    });
+    drop(leftover);
+}
+
+/// Check out the persistence executor's idle connection when this thread
+/// executes `path`'s commands. `None` means open normally: another thread or
+/// store, no idle connection yet, an outer frame already holds it, or the
+/// store file it was opened on is no longer the one at `path`.
+pub(super) fn checkout_executor_connection(
+    path: &Path,
+    access: Access,
+) -> Result<Option<StoreConnection>> {
+    if !crate::store::coordinator::is_execution_store(path) {
+        return Ok(None);
+    }
+    let Some(idle) = EXECUTOR_CONNECTION.with(|slot| slot.borrow_mut().take()) else {
+        return Ok(None);
+    };
+    if idle.path.as_path() != path || FileIdentity::of(path) != Some(idle.file) {
+        return Ok(None);
+    }
+    let IdleConnection {
+        path,
+        file,
+        connection: mut conn,
+    } = idle;
+    conn.reuse = Some(Reuse { access, path, file });
+    // A command may have replaced the busy handler; restore the store policy.
+    conn.busy_timeout(Duration::from_secs(5))?;
+    if access == Access::ReadOnly {
+        conn.execute_batch("PRAGMA query_only = 1")?;
+    }
+    Ok(Some(conn))
+}
+
+/// Open a read-write connection and, on the persistence executor of `path`,
+/// keep it for later commands. A store file replaced while it was being opened
+/// is left uncached.
+pub(super) fn open_reusable(
+    path: &Path,
+    open: impl FnOnce() -> Result<StoreConnection>,
+) -> Result<StoreConnection> {
+    let executor = crate::store::coordinator::is_execution_store(path);
+    let before = executor.then(|| FileIdentity::of(path)).flatten();
+    let mut conn = open()?;
+    if let Some(file) = before.filter(|file| FileIdentity::of(path) == Some(*file)) {
+        conn.reuse = Some(Reuse {
+            access: Access::ReadWrite,
+            path: path.to_path_buf(),
+            file,
+        });
+    }
+    Ok(conn)
+}
+
+/// Close the executor's idle connection before its ownership of the store
+/// ends.
+pub(in crate::store) fn release_executor_connection() {
+    let idle = EXECUTOR_CONNECTION.with(|slot| slot.borrow_mut().take());
+    drop(idle);
+}
+
 #[cfg(test)]
 static TRACKED_CONNECTION_OPENS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<PathBuf, usize>>,
@@ -245,8 +417,9 @@ fn connect_after_authority_check(
             let transaction_observation = transaction_observation::install(&connection);
             let conn = StoreConnection {
                 connection: Some(connection),
-                _permit: permit,
-                _transaction_observation: transaction_observation,
+                permit: Some(permit),
+                transaction_observation,
+                reuse: None,
             };
             #[cfg(test)]
             {

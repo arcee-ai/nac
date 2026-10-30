@@ -49,8 +49,9 @@ mod future_schema_tests;
 #[path = "schema/permission_reviewer_tests.rs"]
 mod permission_reviewer_tests;
 
+pub(super) use connection::release_executor_connection;
 pub(crate) use connection::StoreConnection;
-use connection::{connect, connect_existing, connect_probe_read_only, connect_read_only};
+use connection::{connect, connect_existing, connect_probe_read_only, connect_read_only, Access};
 #[cfg(test)]
 pub(crate) use connection::{track_connection_opens, tracked_connection_opens};
 use wal_preflight::read_schema_version_header;
@@ -327,7 +328,10 @@ pub(crate) fn open_probe_read_connection(path: &Path) -> Result<StoreConnection>
 /// repairs database-wide pragmas. Callers fail closed if initialization is not
 /// complete.
 pub(crate) fn open_initialized_read_connection(path: &Path) -> Result<StoreConnection> {
-    let conn = connect_read_only(path)?;
+    let conn = match connection::checkout_executor_connection(path, Access::ReadOnly)? {
+        Some(conn) => conn,
+        None => connect_read_only(path)?,
+    };
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version != STORE_SCHEMA_VERSION {
         return Err(anyhow!(
@@ -338,8 +342,15 @@ pub(crate) fn open_initialized_read_connection(path: &Path) -> Result<StoreConne
 }
 
 pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
-    reject_future_schema_before_open(path)?;
-    let conn = connect(path)?;
+    // The executor's reused connection already passed the pre-open check; the
+    // version checks below still see any schema a peer has since committed.
+    let conn = match connection::checkout_executor_connection(path, Access::ReadWrite)? {
+        Some(conn) => conn,
+        None => {
+            reject_future_schema_before_open(path)?;
+            connection::open_reusable(path, || connect(path))?
+        }
+    };
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version > STORE_SCHEMA_VERSION {
         return Err(anyhow!(
@@ -362,7 +373,17 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
 }
 
 pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
-    open_connection_with_hooks(path, || {}, || {}, || Ok(()))
+    if let Some(conn) = connection::checkout_executor_connection(path, Access::ReadWrite)? {
+        let schema_version: i64 =
+            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if schema_version == STORE_SCHEMA_VERSION {
+            conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            return Ok(conn);
+        }
+    }
+    connection::open_reusable(path, || {
+        open_connection_with_hooks(path, || {}, || {}, || Ok(()))
+    })
 }
 
 fn open_connection_with_hooks(
