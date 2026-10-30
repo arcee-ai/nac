@@ -18,8 +18,10 @@ function shortSessionId(sessionId: string): string {
   return sessionId.replace(/-/g, "").slice(0, 12);
 }
 
+// A truncated title is nowrap, so the card's fit-content width would follow the
+// whole title; the 100% bound keeps a long one inside narrow transcripts.
 const CARD_CLASS =
-  "flex w-fit max-w-[540px] min-w-0 items-start gap-4 rounded-interaction p-4 text-left";
+  "flex w-fit max-w-[min(540px,100%)] min-w-0 items-start gap-4 rounded-interaction p-4 text-left";
 
 const FOCUS_CLASS =
   "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2";
@@ -37,7 +39,10 @@ function ForkCardContent({
     <div className="flex min-w-0 items-start gap-2">
       <Icon iconName={IconName.Scheme} size={20} aria-hidden className="shrink-0" />
       <div className="flex min-w-0 flex-col items-start gap-3 pr-1.5">
-        <span className={cn("max-w-full truncate", deleted ? "header-sm" : "label-small")}>
+        <span
+          title={deleted ? undefined : label}
+          className={cn("max-w-full truncate", deleted ? "header-sm" : "label-small")}
+        >
           {label}
         </span>
         <span className="text-2xs whitespace-nowrap opacity-50">{idLabel}</span>
@@ -71,7 +76,7 @@ const ForkSessionItem: React.FC<ForkSessionItemProps> = ({
             aria-label="Dismiss deleted fork"
             onClick={onDismiss}
             className={cn(
-              "inline-flex shrink-0 rounded-interaction hover:text-basic-primary",
+              "-m-0.5 inline-flex shrink-0 rounded-interaction p-0.5 hover:text-basic-primary",
               FOCUS_CLASS,
             )}
           >

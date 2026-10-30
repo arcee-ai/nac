@@ -3089,7 +3089,7 @@ var Al = /* @__PURE__ */ function(e) {
 function Ll(e) {
 	return e.replace(/-/g, "").slice(0, 12);
 }
-var Rl = "flex w-fit max-w-[540px] min-w-0 items-start gap-4 rounded-interaction p-4 text-left", zl = "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2";
+var Rl = "flex w-fit max-w-[min(540px,100%)] min-w-0 items-start gap-4 rounded-interaction p-4 text-left", zl = "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2";
 function Bl({ label: e, idLabel: t, deleted: n }) {
 	return /* @__PURE__ */ Z("div", {
 		className: "flex min-w-0 items-start gap-2",
@@ -3101,6 +3101,7 @@ function Bl({ label: e, idLabel: t, deleted: n }) {
 		}), /* @__PURE__ */ Z("div", {
 			className: "flex min-w-0 flex-col items-start gap-3 pr-1.5",
 			children: [/* @__PURE__ */ X("span", {
+				title: n ? void 0 : e,
 				className: I("max-w-full truncate", n ? "header-sm" : "label-small"),
 				children: e
 			}), /* @__PURE__ */ X("span", {
@@ -3123,7 +3124,7 @@ var Vl = ({ sessionId: e, title: t, deleted: n = !1, onOpen: r, onDismiss: i }) 
 			title: "Dismiss",
 			"aria-label": "Dismiss deleted fork",
 			onClick: i,
-			className: I("inline-flex shrink-0 rounded-interaction hover:text-basic-primary", zl),
+			className: I("-m-0.5 inline-flex shrink-0 rounded-interaction p-0.5 hover:text-basic-primary", zl),
 			children: /* @__PURE__ */ X(R, {
 				iconName: H.Close,
 				size: 20,
