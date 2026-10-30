@@ -85,6 +85,8 @@ Sam (`samantha662`), Gerred (`gerred`) and Travis (`tmcarcee`) were verified wit
 write/admin/write access on October 27, 2026.
 Ada (`adalundhe`, immutable account ID `23642200`) was verified with repository
 write access on October 30, 2026.
+Scott (`ScottZembsch`, immutable account ID `109129358`) was also verified with
+repository write access on October 30, 2026.
 
 GitHub uses CODEOWNERS from **each PR's base**;
 the base's existing owners remain effective until an ownership change lands. The

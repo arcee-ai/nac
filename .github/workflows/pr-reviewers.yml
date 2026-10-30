@@ -26,6 +26,7 @@ jobs:
               { login: "gerred", id: 365659 },
               { login: "tmcarcee", id: 338224923 },
               { login: "adalundhe", id: 23642200 },
+              { login: "ScottZembsch", id: 109129358 },
             ];
             const pr = context.payload.pull_request;
             const reviewers = [];
