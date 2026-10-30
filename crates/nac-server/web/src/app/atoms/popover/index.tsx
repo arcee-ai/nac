@@ -24,7 +24,7 @@ export enum PopoverSize {
 }
 
 const PANEL_BASE =
-  "flex flex-col gap-1 p-2 rounded-[8px] bg-elevation-level-3 shadow-2xl fade [&>*]:shrink-0";
+  "flex flex-col gap-1 p-2 rounded-[12px] bg-elevation-level-3 shadow-2xl fade [&>*]:shrink-0";
 
 interface PopoverProps {
   open: boolean;

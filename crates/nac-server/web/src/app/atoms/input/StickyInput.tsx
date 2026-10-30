@@ -24,7 +24,7 @@ interface StickyInputProps extends Omit<React.ComponentPropsWithRef<"input">, "s
   rounded?: boolean;
   isDisabled?: boolean;
   validation?: boolean;
-  /** Search variant only: clears the field through its trailing button. */
+  /** Search variant only: clears the field through a trailing button, absent without it. */
   onClear?: () => void;
 }
 
@@ -57,7 +57,7 @@ const StickyInput: React.FC<StickyInputProps> & {
   const actualLeadingIconName = isSearch ? IconName.Search : leadingIconName;
   // The clear button only earns its slot once there is something to clear.
   const actualTrailing = isSearch
-    ? hasText
+    ? hasText && onClear
       ? InputTrailing.Button
       : InputTrailing.None
     : trailing;

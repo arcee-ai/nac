@@ -49,32 +49,37 @@ const ProjectButton: React.FC<ProjectButtonProps> & {
 }) => (
   <div
     className={cn(
-      "group flex items-center min-w-0 rounded-interaction hover:bg-btn-ghost-hovered",
+      "group flex items-center min-w-0 rounded-interaction",
+      "-outline-offset-2 outline-[var(--color-border-focus-outline)] has-[>button:focus-visible]:outline-2",
       isMobile ? "h-12 gap-3 px-3 py-2" : "h-9 gap-1.5 px-2 py-1",
-      active && "bg-btn-ghost-highlighted",
+      active
+        ? "bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered has-[>button:active]:bg-btn-ghost-highlighted-pressed has-[>button:disabled]:bg-btn-ghost-highlighted-disabled"
+        : "hover:bg-btn-ghost-hovered has-[>button:active]:bg-btn-ghost-pressed has-[>button:disabled]:bg-btn-ghost-disabled",
       className,
     )}
   >
     <button
       type={type}
-      className={cn("flex flex-1 items-center min-w-0 text-left", isMobile ? "gap-3" : "gap-1.5")}
+      className={cn(
+        "flex flex-1 items-center min-w-0 text-left outline-none",
+        active
+          ? "text-btn-secondary-pressed"
+          : "text-btn-secondary group-hover:text-btn-secondary-hovered active:text-btn-secondary-pressed",
+        "disabled:cursor-not-allowed disabled:text-btn-secondary-disabled",
+        isMobile ? "gap-3" : "gap-1.5",
+      )}
       {...props}
     >
       {variant === ProjectButtonVariant.Orphan ? (
-        <ChatSessionOrphanAvatar size={isMobile ? 20 : 24} isRunning={running} />
+        <ChatSessionOrphanAvatar size={24} isRunning={running} />
       ) : (
-        <SessionAvatar
-          id={entityId}
-          size={isMobile ? 20 : 24}
-          isRunning={running}
-          className="rounded-[2px]"
-        />
+        <SessionAvatar id={entityId} size={20} isRunning={running} className="rounded-[2px]" />
       )}
       <span
         className={cn(
           "flex-1 truncate",
           isMobile ? "label-medium" : "label-small",
-          running ? "text-shimmer-basic" : isMobile ? "text-btn-secondary" : "text-basic-primary",
+          running && "text-shimmer-primary",
         )}
       >
         {name}

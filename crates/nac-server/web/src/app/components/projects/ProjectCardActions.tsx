@@ -8,6 +8,7 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { cn } from "@/app/lib/cn";
 
 interface IconActionProps {
   title: string;
@@ -79,13 +80,7 @@ export function ProjectCardActions({
   reorder,
 }: ProjectCardActionsProps) {
   return (
-    <div
-      className={
-        reorder
-          ? "flex items-center gap-1.5 shrink-0"
-          : "flex items-center gap-4 xl:gap-1.5 shrink-0"
-      }
-    >
+    <div className={cn("flex items-center shrink-0", orphan ? "gap-2" : "gap-1.5")}>
       {reorder ? (
         <>
           <IconAction
@@ -105,15 +100,27 @@ export function ProjectCardActions({
       {orphan ? (
         <>
           {onRename ? <IconAction title="Edit" icon={IconName.Edit} onClick={onRename} /> : null}
-          {onAssign ? (
-            <IconAction title="Assign to project" icon={IconName.FolderOpen} onClick={onAssign} />
-          ) : null}
           <IconAction
             title="Delete chat"
             icon={IconName.Trash}
             variant={ButtonVariant.GhostDestructive}
             onClick={onDelete}
           />
+          {onAssign ? (
+            <Button
+              variant={ButtonVariant.Primary}
+              size={ButtonSize.Small}
+              content={ButtonContent.IconLeft}
+              className="!pr-2"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAssign();
+              }}
+            >
+              <Icon iconName={IconName.FolderOpen} />
+              Assign to project
+            </Button>
+          ) : null}
         </>
       ) : (
         <>
