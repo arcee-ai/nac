@@ -156,6 +156,27 @@ fn file_projection_adds_external_guard_and_hard_protects_metadata_and_store() {
         true,
     );
     assert!(store[0].hard_denial.is_some());
+    for leases in [
+        "/state/store.db.run-locks",
+        "/state/store.db.run-locks/00.lock",
+    ] {
+        let lease = file_resources(
+            "edit",
+            PathBuf::from(leases),
+            &backend,
+            Path::new("/state/store.db"),
+            true,
+        );
+        assert!(lease[0].hard_denial.is_some(), "{leases}");
+    }
+    let neighbour = file_resources(
+        "edit",
+        PathBuf::from("/state/store.db.run-locks-notes"),
+        &backend,
+        Path::new("/state/store.db"),
+        true,
+    );
+    assert!(neighbour[0].hard_denial.is_none());
 }
 
 #[cfg(unix)]
