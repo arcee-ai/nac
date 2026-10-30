@@ -36,7 +36,7 @@ export function SessionLinkButton({
 export function ReasoningText({ text, streaming }: { text: string; streaming: boolean }) {
   const [showAll, setShowAll] = useState(false);
   const lines = text.split("\n");
-  const clipped = !showAll && lines.length > TAIL_LINES;
+  const clipped = streaming && !showAll && lines.length > TAIL_LINES;
   return (
     <>
       {clipped ? (
@@ -46,7 +46,7 @@ export function ReasoningText({ text, streaming }: { text: string; streaming: bo
           </span>
           <button
             type="button"
-            className="text-basic-primary hover:underline"
+            className="min-h-11 px-2 text-basic-primary hover:underline focus-visible:outline-2"
             onClick={() => setShowAll(true)}
           >
             Show all
@@ -54,8 +54,8 @@ export function ReasoningText({ text, streaming }: { text: string; streaming: bo
         </div>
       ) : null}
       <div className="chat-response">
-        <div className="thinking-content">
-          <Markdown className="text-basic-tertiary" streaming={streaming}>
+        <div className="reasoning-prose">
+          <Markdown className="text-basic-secondary" streaming={streaming}>
             {clipped ? lines.slice(-TAIL_LINES).join("\n") : text}
           </Markdown>
         </div>

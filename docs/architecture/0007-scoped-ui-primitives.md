@@ -181,6 +181,23 @@ same way against `cd7d3730`, the pilot adds the same amounts.
 Exceeding a budget calls for optimization or an explicit scope review; it is
 never waived silently.
 
+### Conversation canary (ALL-525)
+
+The conversation keeps the existing activity-group link into Insights. Reasoning
+detail uses one disclosure per chronological reasoning segment, without copying
+Trace or introducing an AI SDK. `/design` exercises the production component and
+records its 14px/22px secondary prose, 12px paragraph rhythm, 16px inset, 1px rule,
+unfilled surface and 44px controls. Answer typography remains 14px/24px primary.
+Live reasoning opens initially; completed mounts start collapsed. Explicit reader
+choices survive chunks/refetch, and settlement preserves focused or selected
+content. No duration or success state is inferred from missing transcript data.
+
+With Node 26.12.0 and this same startup graph script/gzip implementation, ALL-525
+adds 867 B JS / 159 B CSS to the app and 1,031 B JS / 288 B CSS to presentation
+over preserved pilot `75b2c028`. Adding those deltas to the pilot's measured
+24,189/228 B and 28,077/265 B retains the cumulative +50/+15 KiB ceilings.
+These are build-size results, not a human visual-acceptance decision.
+
 Behavior coverage lives next to its owners: `ui/layer-stack.test.ts` (Escape
 order, outside presses, inertness, focus return), `ui/overlays.test.tsx` (nested
 legacy and migrated layers, the dropdown menu, tooltips, standalone and

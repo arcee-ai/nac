@@ -83,7 +83,7 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "group relative inline-flex max-w-full items-center gap-2 transition-colors",
+        "group relative inline-flex min-h-11 max-w-full items-center gap-2 border-l border-tertiary pl-3 transition-colors motion-reduce:transition-none",
         "focus-visible:outline-none disabled:cursor-not-allowed",
         labelTone,
         className,
@@ -120,7 +120,7 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
           size={20}
           aria-hidden
           className={cn(
-            "shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100",
+            "shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none",
             iconTone,
           )}
         />
