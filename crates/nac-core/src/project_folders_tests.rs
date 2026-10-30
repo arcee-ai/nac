@@ -300,6 +300,24 @@ fn hard_and_configured_deny_refuse_while_ask_needs_no_approval() {
     );
     assert!(entries(&root).is_empty());
 
+    // So is the session lease directory beside it: a folder planted there
+    // under a lease's name would make that session's operations fail.
+    let leases = root.join("store.db.run-locks");
+    std::fs::create_dir(&leases).unwrap();
+    let error = AuthorizedLocalFolder::issue(
+        &leases.display().to_string(),
+        "6162.lock",
+        vec![PermissionRule::new("*", "*", PermissionEffect::Allow)],
+        &store(&root),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&error, NewFolderError::Denied { reason, .. } if reason.contains("session store")),
+        "{error:?}"
+    );
+    assert!(entries(&leases).is_empty());
+    std::fs::remove_dir(&leases).unwrap();
+
     // Ask is answered by the invocation itself: no approval request is made.
     let ask = vec![PermissionRule::new("edit", "*", PermissionEffect::Ask)];
     let created =

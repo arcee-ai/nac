@@ -298,6 +298,11 @@ pub(super) fn is_store_path(path: &Path, store_path: &Path) -> bool {
     let Some(name) = store.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
+    // Session operation leases live beside the store; anything planted in that
+    // directory under a lease's name makes the session's operations fail.
+    if path.starts_with(store.with_file_name(format!("{name}.run-locks"))) {
+        return true;
+    }
     path.parent() == store.parent()
         && path
             .file_name()
