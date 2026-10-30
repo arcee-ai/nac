@@ -31,10 +31,11 @@ export function NoticesSection() {
             className="w-[280px]"
           />
         </div>
-        <div className="flex flex-col gap-2 w-[398px]">
+        <div className="flex flex-col gap-4 w-[398px] max-w-full">
           <ChatSessionMessage
             variant={ChatSessionMessageVariant.Danger}
             title="Message Title"
+            diagnostic="Message diagnostic"
             action={{ label: "Message CTA", onClick: () => {} }}
           >
             Message description
@@ -42,6 +43,7 @@ export function NoticesSection() {
           <ChatSessionMessage
             variant={ChatSessionMessageVariant.Error}
             title="Message Title"
+            diagnostic="Message diagnostic"
             action={{ label: "Message CTA", onClick: () => {} }}
           >
             Message description
@@ -49,6 +51,7 @@ export function NoticesSection() {
           <ChatSessionMessage
             variant={ChatSessionMessageVariant.Success}
             title="Message Title"
+            diagnostic="Message diagnostic"
             action={{ label: "Message CTA", onClick: () => {} }}
           >
             Message description
@@ -56,6 +59,7 @@ export function NoticesSection() {
           <ChatSessionMessage
             variant={ChatSessionMessageVariant.Info}
             title="Message Title"
+            diagnostic="Message diagnostic"
             action={{ label: "Message CTA", onClick: () => {} }}
           >
             Message description

@@ -112,15 +112,10 @@ export function RunFailureNotice({
       role={retryScheduled ? "status" : "alert"}
       variant={retryScheduled ? ChatSessionMessageVariant.Info : ChatSessionMessageVariant.Danger}
       title={title}
+      diagnostic={failure.diagnostic}
       action={action}
     >
-      <span>{explanation}</span>
-      <details className="mt-2">
-        <summary className="cursor-pointer">Diagnostics</summary>
-        <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-xs">
-          {failure.diagnostic}
-        </pre>
-      </details>
+      {explanation}
     </ChatSessionMessage>
   );
 }

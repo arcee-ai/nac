@@ -3545,6 +3545,10 @@
     color: var(--white) !important;
   }
 
+[data-nac-runtime]:is(.\!text-danger-primary), [data-nac-runtime] .\!text-danger-primary {
+    color: var(--color-text-danger-primary) !important;
+  }
+
 [data-nac-runtime]:is(.\!text-fill-basic-muted), [data-nac-runtime] .\!text-fill-basic-muted {
     color: var(--color-fill-basic-muted) !important;
   }
@@ -3563,6 +3567,10 @@
 
 [data-nac-runtime]:is(.\!text-fill-error-primary), [data-nac-runtime] .\!text-fill-error-primary {
     color: var(--color-fill-error-primary) !important;
+  }
+
+[data-nac-runtime]:is(.\!text-success-primary), [data-nac-runtime] .\!text-success-primary {
+    color: var(--color-text-success-primary) !important;
   }
 
 [data-nac-runtime]:is(.text-\[var\(--white\)\]), [data-nac-runtime] .text-\[var\(--white\)\] {
@@ -4995,6 +5003,14 @@
     [data-nac-runtime]:is(.\@sm\:\!hidden), [data-nac-runtime] .\@sm\:\!hidden {
       display: none !important;
     }
+  }
+
+[data-nac-runtime]:is(.\[\&_\.icon\]\:\!text-\[var\(--color-fill-danger-primary\)\] .icon), [data-nac-runtime] .\[\&_\.icon\]\:\!text-\[var\(--color-fill-danger-primary\)\] .icon {
+    color: var(--color-fill-danger-primary) !important;
+  }
+
+[data-nac-runtime]:is(.\[\&_\.icon\]\:\!text-\[var\(--color-fill-success-primary\)\] .icon), [data-nac-runtime] .\[\&_\.icon\]\:\!text-\[var\(--color-fill-success-primary\)\] .icon {
+    color: var(--color-fill-success-primary) !important;
   }
 
 [data-nac-runtime]:is(.\[\&_\.icon\]\:text-fill-btn-secondary .icon), [data-nac-runtime] .\[\&_\.icon\]\:text-fill-btn-secondary .icon {
