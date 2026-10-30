@@ -12,6 +12,7 @@ export const owners = [
   { login: "samantha662", id: 250395928 },
   { login: "gerred", id: 365659 },
   { login: "tmcarcee", id: 338224923 },
+  { login: "adalundhe", id: 23642200 },
 ];
 export const context = "Required PR checks";
 export const actionsApp = 15368;

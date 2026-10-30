@@ -83,6 +83,8 @@ reviewer list in the metadata-only workflow. `make lint-workflows` and the PR
 contract tests reject stale generated ownership files with the regeneration command.
 Sam (`samantha662`), Gerred (`gerred`) and Travis (`tmcarcee`) were verified with
 write/admin/write access on October 27, 2026.
+Ada (`adalundhe`, immutable account ID `23642200`) was verified with repository
+write access on October 30, 2026.
 
 GitHub uses CODEOWNERS from **each PR's base**;
 the base's existing owners remain effective until an ownership change lands. The
