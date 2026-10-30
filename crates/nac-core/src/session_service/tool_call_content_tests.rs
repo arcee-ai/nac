@@ -329,3 +329,131 @@ fn raw_document_keeps_duplicate_members_and_retains_the_nesting_bound() {
     let too_deep = format!("{}0{}", "[".repeat(129), "]".repeat(129));
     assert!(serde_json::from_str::<Document>(&too_deep).is_err());
 }
+
+async fn append_at_end(parts: &SessionServiceParts, messages: Vec<Message>) {
+    let start = parts.service.store_backed_transcript().await.unwrap().len() as u64;
+    let writer = parts.service.transcript_log.as_ref().unwrap().clone();
+    let session_id = parts.service.metadata.session_id.clone().unwrap();
+    tokio::task::spawn_blocking(move || writer.append_batch(&session_id, start, &messages))
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+async fn trim_from(parts: &SessionServiceParts, tail_idx: u64) {
+    let blob_len = parts
+        .service
+        .session_snapshot
+        .lock()
+        .await
+        .as_ref()
+        .map_or(0, |snapshot| snapshot.messages.len() as u64);
+    let writer = parts.service.transcript_log.as_ref().unwrap().clone();
+    let session_id = parts.service.metadata.session_id.clone().unwrap();
+    tokio::task::spawn_blocking(move || writer.delete_from(&session_id, blob_len + tail_idx))
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_result_recorded_after_an_earlier_lookup_is_found() {
+    let (parts, store_path) = test_active_service("tool_call_content_pending", "session");
+    seed_log_tail(&parts, vec![assistant(&[("call-a", "{}")])]).await;
+    let pending = parts
+        .service
+        .tool_call_content("call-a")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(pending.output, None);
+
+    append_at_end(
+        &parts,
+        vec![result("call-a", "done"), assistant(&[("call-b", "{}")])],
+    )
+    .await;
+    let done = parts
+        .service
+        .tool_call_content("call-a")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(done.output.as_deref(), Some("done"));
+    let later = parts
+        .service
+        .tool_call_content("call-b")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(later.output, None);
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn trimmed_rows_are_never_answered_from_an_earlier_lookup() {
+    let (parts, store_path) = test_active_service("tool_call_content_trimmed", "session");
+    seed_log_tail(
+        &parts,
+        vec![
+            Message::User {
+                content: "go".into(),
+            },
+            assistant(&[("call-old", r#"{"v":1}"#)]),
+            result("call-old", "old"),
+        ],
+    )
+    .await;
+    assert!(parts
+        .service
+        .tool_call_content("call-old")
+        .await
+        .unwrap()
+        .is_some());
+
+    trim_from(&parts, 1).await;
+    append_at_end(
+        &parts,
+        vec![assistant(&[("call-new", "{}")]), result("call-new", "new")],
+    )
+    .await;
+    assert_eq!(
+        parts.service.tool_call_content("call-old").await.unwrap(),
+        None
+    );
+    let new = parts
+        .service
+        .tool_call_content("call-new")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(new.output.as_deref(), Some("new"));
+
+    // An id reused after the trim names its only remaining occurrence...
+    append_at_end(
+        &parts,
+        vec![
+            assistant(&[("call-old", r#"{"v":2}"#)]),
+            result("call-old", "again"),
+        ],
+    )
+    .await;
+    let again = parts
+        .service
+        .tool_call_content("call-old")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(again.arguments, r#"{"v":2}"#);
+    assert_eq!(again.output.as_deref(), Some("again"));
+
+    // ...until a second occurrence makes it name no call again.
+    append_at_end(&parts, vec![assistant(&[("call-old", r#"{"v":3}"#)])]).await;
+    assert_eq!(
+        parts.service.tool_call_content("call-old").await.unwrap(),
+        None
+    );
+    drop(parts);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}

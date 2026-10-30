@@ -1396,3 +1396,73 @@ fn gap_repair_invalidates_intent_only_when_it_discards_user_history() {
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
+
+#[test]
+fn the_newest_row_answers_whether_entries_reach_an_index() {
+    let path = temp_store_path("has_entries_from");
+    initialize(&path).unwrap();
+    crate::store::insert_test_session(&path, "session-a");
+    crate::store::insert_test_session(&path, "session-b");
+    let writer = TranscriptLogWriter::new(&path).unwrap();
+    assert!(!writer.has_entries_from("session-a", 0).unwrap());
+
+    let messages = sample_messages();
+    let len = messages.len() as u64;
+    writer.append_batch("session-a", 0, &messages).unwrap();
+    writer.append_batch("session-b", 0, &messages).unwrap();
+    writer.append_batch("session-b", len, &messages).unwrap();
+    assert!(writer.has_entries_from("session-a", len - 1).unwrap());
+    assert!(!writer.has_entries_from("session-a", len).unwrap());
+
+    assert_eq!(
+        writer.delete_from("session-a", 2).unwrap(),
+        messages.len() - 2
+    );
+    // Each probe agrees with the full read it replaces.
+    for from_idx in 0..=len {
+        assert_eq!(
+            writer.has_entries_from("session-a", from_idx).unwrap(),
+            !writer.read_from("session-a", from_idx).unwrap().is_empty(),
+            "from_idx {from_idx}"
+        );
+    }
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn rows_after_a_row_id_come_with_the_count_retained_up_to_it() {
+    let path = temp_store_path("rows_after");
+    initialize(&path).unwrap();
+    crate::store::insert_test_session(&path, "session-a");
+    crate::store::insert_test_session(&path, "session-b");
+    let writer = TranscriptLogWriter::new(&path).unwrap();
+    let messages = sample_messages();
+    writer.append_batch("session-a", 0, &messages).unwrap();
+    writer.append_batch("session-b", 0, &messages).unwrap();
+
+    let (retained, rows) = writer.read_rows_after("session-a", 0, 100).unwrap();
+    assert_eq!(retained, 0);
+    assert_eq!(
+        rows.iter().map(|(_, idx, _)| *idx).collect::<Vec<_>>(),
+        (0..messages.len() as u64).collect::<Vec<_>>()
+    );
+    assert!(rows.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    for ((_, _, read), written) in rows.iter().zip(&messages) {
+        assert_eq!(canonical(read), canonical(written));
+    }
+
+    let second = rows[1].0;
+    let last = rows.last().unwrap().0;
+    let (retained, after) = writer.read_rows_after("session-a", second, 100).unwrap();
+    assert_eq!(retained, 2);
+    assert_eq!(after.first().map(|(_, idx, _)| *idx), Some(2));
+    let (_, limited) = writer.read_rows_after("session-a", 0, 2).unwrap();
+    assert_eq!(limited.len(), 2);
+
+    // A trim shows as fewer retained rows to a reader that held `last`.
+    writer.delete_from("session-a", 2).unwrap();
+    let (retained, after) = writer.read_rows_after("session-a", last, 100).unwrap();
+    assert_eq!(retained, 2);
+    assert!(after.is_empty());
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
