@@ -5005,11 +5005,11 @@
     }
   }
 
-[data-nac-runtime]:is(.\[\&_\.icon\]\:\!text-\[var\(--color-fill-danger-primary\)\] .icon), [data-nac-runtime] .\[\&_\.icon\]\:\!text-\[var\(--color-fill-danger-primary\)\] .icon {
+[data-nac-runtime]:is(.\[\&_\.icon\]\:\!text-fill-danger-primary .icon), [data-nac-runtime] .\[\&_\.icon\]\:\!text-fill-danger-primary .icon {
     color: var(--color-fill-danger-primary) !important;
   }
 
-[data-nac-runtime]:is(.\[\&_\.icon\]\:\!text-\[var\(--color-fill-success-primary\)\] .icon), [data-nac-runtime] .\[\&_\.icon\]\:\!text-\[var\(--color-fill-success-primary\)\] .icon {
+[data-nac-runtime]:is(.\[\&_\.icon\]\:\!text-fill-success-primary .icon), [data-nac-runtime] .\[\&_\.icon\]\:\!text-fill-success-primary .icon {
     color: var(--color-fill-success-primary) !important;
   }
 

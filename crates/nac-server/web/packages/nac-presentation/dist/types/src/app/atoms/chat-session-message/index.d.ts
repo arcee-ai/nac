@@ -23,8 +23,8 @@ interface ChatSessionMessageProps extends Omit<React.HTMLAttributes<HTMLDivEleme
  * it: a rounded card tinted with its variant's colour, so it stands apart from
  * the conversation without the weight of a bordered `MessageBox`.
  *
- * A folded diagnostic stays in the document while hidden, so the alert's text
- * still carries it for assistive technology and copy-paste.
+ * A folded diagnostic stays mounted while hidden, so the alert's text content
+ * still carries it.
  */
 declare const ChatSessionMessage: React.FC<ChatSessionMessageProps> & {
     Variant: typeof ChatSessionMessageVariant;

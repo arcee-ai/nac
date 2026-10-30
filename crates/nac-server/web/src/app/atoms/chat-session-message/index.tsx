@@ -49,11 +49,11 @@ const diagnosticToggles = {
   },
   [ChatSessionMessageVariant.Danger]: {
     variant: ButtonVariant.Secondary,
-    className: "!text-danger-primary [&_.icon]:!text-[var(--color-fill-danger-primary)]",
+    className: "!text-danger-primary [&_.icon]:!text-fill-danger-primary",
   },
   [ChatSessionMessageVariant.Success]: {
     variant: ButtonVariant.Secondary,
-    className: "!text-success-primary [&_.icon]:!text-[var(--color-fill-success-primary)]",
+    className: "!text-success-primary [&_.icon]:!text-fill-success-primary",
   },
 } satisfies Record<ChatSessionMessageVariant, { variant: ButtonVariant; className: string }>;
 
@@ -73,8 +73,8 @@ interface ChatSessionMessageProps extends Omit<React.HTMLAttributes<HTMLDivEleme
  * it: a rounded card tinted with its variant's colour, so it stands apart from
  * the conversation without the weight of a bordered `MessageBox`.
  *
- * A folded diagnostic stays in the document while hidden, so the alert's text
- * still carries it for assistive technology and copy-paste.
+ * A folded diagnostic stays mounted while hidden, so the alert's text content
+ * still carries it.
  */
 const ChatSessionMessage: React.FC<ChatSessionMessageProps> & {
   Variant: typeof ChatSessionMessageVariant;

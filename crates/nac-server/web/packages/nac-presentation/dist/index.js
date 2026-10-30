@@ -639,11 +639,11 @@ var Ba = /* @__PURE__ */ function(e) {
 	},
 	danger: {
 		variant: B.Secondary,
-		className: "!text-danger-primary [&_.icon]:!text-[var(--color-fill-danger-primary)]"
+		className: "!text-danger-primary [&_.icon]:!text-fill-danger-primary"
 	},
 	success: {
 		variant: B.Secondary,
-		className: "!text-success-primary [&_.icon]:!text-[var(--color-fill-success-primary)]"
+		className: "!text-success-primary [&_.icon]:!text-fill-success-primary"
 	}
 }, Xa = ({ title: e, variant: t = "info", diagnostic: n, action: r, className: i = "", children: a, ...o }) => {
 	let [s, c] = J(!1), l = fi(), u = Ya[t];
