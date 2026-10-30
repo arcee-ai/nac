@@ -42,6 +42,7 @@ import {
 export function PanelSplit({
   list,
   listToolbar,
+  listHeader,
   listClassName,
   listTitle,
   title,
@@ -56,6 +57,12 @@ export function PanelSplit({
    * trailing pills of a phone's.
    */
   listToolbar?: ReactNode;
+  /**
+   * What the list is showing, kept in view above its rows rather than
+   * scrolling away with them. A phone has no fixed room under its floating
+   * header, so there it leads the rows instead.
+   */
+  listHeader?: ReactNode;
   /** Insets of the desktop list column, for a panel drawn with its own. */
   listClassName?: string;
   /** What the list is of, titling its screen below the desktop width. */
@@ -152,6 +159,7 @@ export function PanelSplit({
         <PanelPhoneScreen title={listTitle} actions={listToolbar} bar>
           {/* Clear of the header above and of the tab bar over the last rows. */}
           <div className="flex flex-col flex-1 min-h-0 overflow-auto px-2 pt-16 pb-32 gap-1 [&>*]:shrink-0">
+            {listHeader}
             {list}
           </div>
         </PanelPhoneScreen>
@@ -211,6 +219,7 @@ export function PanelSplit({
                 <span className="min-w-0 truncate header-sm text-basic-primary">{listTitle}</span>
               )}
             </div>
+            {listHeader ? <div className="shrink-0 px-2 pt-2">{listHeader}</div> : null}
             <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-2 [&>*]:shrink-0">
               {list}
             </div>
@@ -230,6 +239,7 @@ export function PanelSplit({
         style={{ width: listWidth }}
       >
         {listToolbar}
+        {listHeader ? <div className="shrink-0 px-2 pt-3">{listHeader}</div> : null}
         <div
           className={cn(
             "flex flex-col flex-1 min-h-0 overflow-auto px-1 py-4 [&>*]:shrink-0",
@@ -314,11 +324,19 @@ export function PanelRow({
  * — so the columns and the divider are already where the rows will land, and
  * arriving data fills the panel instead of rebuilding it.
  */
-export function PanelLoading({ listTitle }: { listTitle?: string }) {
+export function PanelLoading({
+  listTitle,
+  listHeader,
+}: {
+  listTitle?: string;
+  /** What is being loaded, when the panel can already say so. */
+  listHeader?: ReactNode;
+}) {
   const isMobile = useIsMobile();
   return (
     <PanelSplit
       listTitle={listTitle}
+      listHeader={listHeader}
       list={
         <div className="px-1">
           <ShimmerLoader rows={2} rowClassName="h-7" />
