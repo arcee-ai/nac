@@ -6744,6 +6744,14 @@
   gap: 12px;
 }
 
+[data-nac-runtime]:is(.tab-btn.btn-small:not(:has( > .icon:first-child))), [data-nac-runtime] .tab-btn.btn-small:not(:has( > .icon:first-child)) {
+  padding-left: 8px;
+}
+
+[data-nac-runtime]:is(.tab-btn.btn-medium:not(:has( > .icon:first-child))), [data-nac-runtime] .tab-btn.btn-medium:not(:has( > .icon:first-child)) {
+  padding-left: 12px;
+}
+
 [data-nac-runtime]:is(.tab-btn-regular), [data-nac-runtime] .tab-btn-regular {
   color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-ghost);
