@@ -99,6 +99,7 @@ def package(name, owner, root, output, lock):
         sonames.update(re.findall(r"\(SONAME\).*?\[(.*?)\]", dynamic))
     deps = [f"so:{value}" for value in sorted(needed - sonames)]
     deps += {"krb5-libs": ["krb5-conf"], "libcurl-openssl4": [], "cyrus-sasl-heimdal-libs": [],
+             "libssh2": [],
              "libstdc++-dev": ["so:libstdc++.so.6"],
              "curl": [f"libcurl-openssl4={version}"]}[name]
     provides = [f"so:{value}={value.rsplit('.', 1)[-1]}" for value in sorted(sonames)]
@@ -138,5 +139,6 @@ if __name__ == "__main__":
     output = Path("/out")
     output.mkdir(exist_ok=True)
     for name, owner in [("krb5-libs", "krb5"), ("libcurl-openssl4", "curl"), ("curl", "curl"),
-                        ("cyrus-sasl-heimdal-libs", "sasl"), ("libstdc++-dev", "gcc_headers")]:
+                        ("cyrus-sasl-heimdal-libs", "sasl"), ("libstdc++-dev", "gcc_headers"),
+                        ("libssh2", "libssh2")]:
         package(name, owner, Path("/packages") / name, output, lock)

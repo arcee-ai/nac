@@ -5,6 +5,7 @@ import hashlib
 import json
 import locale
 import os
+import re
 from pathlib import Path
 import shlex
 import ssl
@@ -18,7 +19,7 @@ def run(*args):
 
 assert (os.getuid(), os.getgid()) == (10001, 10001)
 owned = list(Path("/usr/share/nac/package-provenance").glob("*.json"))
-assert len(owned) == 5, "owned package provenance incomplete"
+assert len(owned) == 6, "owned package provenance incomplete"
 for record in owned:
     package = json.loads(record.read_text())
     assert package["supplier"] == "NAC" and package["schema_version"] == 1
@@ -30,6 +31,20 @@ for record in owned:
             assert hashlib.sha256(path.read_bytes()).hexdigest() == evidence["sha256"], filename
 runtime_provenance = json.loads(Path("/usr/share/nac/runtime-provenance.json").read_text())
 assert runtime_provenance["packages"] and runtime_provenance["notice_files"]
+libssh2 = ctypes.CDLL("libssh2.so.1")
+libssh2.libssh2_version.restype = ctypes.c_char_p
+assert libssh2.libssh2_version(0) == b"1.11.1"
+ssh_dynamic = run("readelf", "-d", "/usr/lib/libssh2.so.1")
+assert "libcrypto.so.4" in ssh_dynamic and "libcrypto.so.3" not in ssh_dynamic
+# Wolfi omits the ldd wrapper. Ask curl's actual ELF interpreter to resolve
+# the complete executable dependency graph, preserving exact payload binding.
+curl_program_headers = run("readelf", "-l", "/usr/bin/curl")
+interpreter = re.search(r"\[Requesting program interpreter: (/[^\]]+)\]", curl_program_headers)
+assert interpreter, "curl ELF interpreter missing"
+linkage = run(interpreter[1], "--list", "/usr/bin/curl")
+ssh_binding = re.search(r"^\s*libssh2\.so\.1 => (/\S+) \(", linkage, re.MULTILINE)
+assert ssh_binding, "curl did not resolve its libssh2 dependency"
+assert Path(ssh_binding[1]).resolve(strict=True) == Path("/usr/lib/libssh2.so.1").resolve(strict=True)
 locale.setlocale(locale.LC_ALL, "")
 assert locale.getpreferredencoding(False).lower().replace("-", "") == "utf8"
 assert run("node", "-p", "JSON.stringify({value: 6 * 7, bytes: Buffer.byteLength('é')})") == '{"value":42,"bytes":2}'
