@@ -13,7 +13,8 @@
 # open its source. It is absent from the committed build that ./start.sh serves.
 #
 # Environment:
-#   DEV_BIND      address nac-web binds to (default 127.0.0.1:3210)
+#   DEV_BIND      address nac-web binds to (default 127.0.0.1:3210); Vite's
+#                 proxy follows it, so no matching frontend override is needed
 #   DEV_STORE_PATH optional authoritative store-path override
 #   VITE_HOST     Vite host (default 127.0.0.1)
 #   VITE_PORT     port for the Vite dev server (default 5173)
@@ -113,12 +114,31 @@ trap 'exit 143' TERM
 
 API_URL="http://$BIND"
 APP_URL="http://$VITE_HOST:$VITE_PORT"
+
+# Refuse an occupied address up front and name the override for it. Never stop,
+# reuse, or silently move away from a process this script did not start.
+# curl exits 0 for any HTTP answer, 52/56 for a listener that is not HTTP, and
+# 28 for one that accepts but never answers. A free port refuses (7).
+port_in_use() {
+  local status=0
+  curl -sS --noproxy '*' --connect-timeout 1 --max-time 2 -o /dev/null -- "$1" \
+    >/dev/null 2>&1 || status=$?
+  [[ "$status" -eq 0 || "$status" -eq 28 || "$status" -eq 52 || "$status" -eq 56 ]]
+}
+
 if curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 -- "$API_URL/health" >/dev/null 2>&1; then
-  echo "start_dev.sh: NAC is already responding at $API_URL" >&2
+  echo "start_dev.sh: NAC is already responding at $API_URL (DEV_BIND)." >&2
+  echo "start_dev.sh: stop it, or choose another API address: DEV_BIND=127.0.0.1:4321 make dev" >&2
   exit 1
 fi
-if curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 -- "$APP_URL/" >/dev/null 2>&1; then
-  echo "start_dev.sh: another frontend is already responding at $APP_URL" >&2
+if port_in_use "$API_URL/"; then
+  echo "start_dev.sh: another process is already listening at $API_URL (DEV_BIND)." >&2
+  echo "start_dev.sh: stop it, or choose another API address: DEV_BIND=127.0.0.1:4321 make dev" >&2
+  exit 1
+fi
+if port_in_use "$APP_URL/"; then
+  echo "start_dev.sh: another process is already listening at $APP_URL (VITE_PORT)." >&2
+  echo "start_dev.sh: stop it, or choose another app port: VITE_PORT=5174 make dev" >&2
   exit 1
 fi
 

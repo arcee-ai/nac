@@ -88,16 +88,23 @@ exit "${FAKE_CARGO_STATUS:-0}"
 EOF
 cat >"$fake_bin/curl" <<'EOF'
 #!/bin/sh
-count_file=${FAKE_CURL_COUNT_FILE:?}
-count=0
-if [ -f "$count_file" ]; then count=$(cat "$count_file"); fi
-count=$((count + 1))
-printf '%s\n' "$count" >"$count_file"
-# The first two probes verify that the ports are free. Later probes are ready.
-[ "$count" -gt 2 ]
+for url do :; done
+# Simulate an already-running NAC, or a foreign listener that answers /health
+# with an HTTP error and anything else as a non-HTTP socket (curl status 52).
+case "$url" in
+  "${FAKE_CURL_NAC:-unset}"*) exit 0 ;;
+  "${FAKE_CURL_OTHER:-unset}"/health) exit 22 ;;
+  "${FAKE_CURL_OTHER:-unset}"*) exit 52 ;;
+esac
+# Otherwise a port is free (connection refused) until its fake process starts.
+case "$url" in
+  */health) [ -f "${FAKE_BACKEND_LEADER:?}" ] || exit 7 ;;
+  *) [ -f "${FAKE_VITE_LEADER:?}" ] || exit 7 ;;
+esac
 EOF
 cat >"$fake_bin/npm" <<'EOF'
 #!/bin/sh
+printf '%s\n' "$NAC_API_URL $*" >"${FAKE_VITE_ARGS:?}"
 printf '%s\n' "$$" >"${FAKE_VITE_LEADER:?}"
 if [ "${FAKE_VITE_FAIL:-0}" = 1 ]; then exit 23; fi
 sh -c 'trap "exit 0" TERM INT; while :; do sleep 1; done' &
@@ -127,16 +134,15 @@ chmod +x "$fake_bin/cargo" "$fake_bin/curl" "$fake_bin/npm" "$fake_bin/sleep" "$
 
 run_supervisor() {
   local label=$1
-  local curl_count="$TMP/$label-curl-count"
-  FAKE_CURL_COUNT_FILE="$curl_count" \
   FAKE_BACKEND_LEADER="$TMP/$label-backend-leader" \
   FAKE_BACKEND_DESCENDANT="$TMP/$label-backend-child" \
   FAKE_BACKEND_ARGS="$TMP/$label-backend-args" \
   FAKE_VITE_LEADER="$TMP/$label-vite-leader" \
+  FAKE_VITE_ARGS="$TMP/$label-vite-args" \
   FAKE_VITE_DESCENDANT="$TMP/$label-vite-child" \
   FAKE_SLEEP_LOG="$TMP/$label-sleep-groups" \
   NAC_DEV_SERVER_BIN="$TMP/backend" \
-  DEV_BIND=127.0.0.1:43210 DEV_OPEN=0 PATH="$fake_bin:$PATH" \
+  DEV_BIND=127.0.0.1:43210 VITE_PORT=45173 DEV_OPEN=0 PATH="$fake_bin:$PATH" \
     "$ROOT/start_dev.sh" >"$TMP/$label.log" 2>&1 &
   SUPERVISOR_PID=$!
 }
@@ -152,6 +158,8 @@ done
    -f "$TMP/interrupt-vite-leader" && -f "$TMP/interrupt-vite-child" ]] || \
   fail "fake process trees were not started"
 grep -F -- '--bind 127.0.0.1:43210' "$TMP/interrupt-backend-args" >/dev/null || fail "DEV_BIND did not reach nac-web"
+grep -F -- 'http://127.0.0.1:43210 --prefix crates/nac-server/web run dev -- --host 127.0.0.1 --port 45173' "$TMP/interrupt-vite-args" \
+  >/dev/null || fail "DEV_BIND/VITE_PORT did not reach the Vite proxy and port"
 backend_leader=$(cat "$TMP/interrupt-backend-leader")
 vite_leader=$(cat "$TMP/interrupt-vite-leader")
 backend_pgid=$(/bin/ps -o pgid= -p "$backend_leader")
@@ -194,5 +202,28 @@ fi
 backend_failure_child=$(cat "$TMP/backend-failure-backend-child")
 sleep 0.2
 kill -0 "$backend_failure_child" 2>/dev/null && fail "descendant of exited backend survived cleanup"
+
+# An occupied address is refused before anything starts, naming the override.
+expect_collision() {
+  local label=$1 expected_owner=$2 expected_hint=$3
+  if wait "$SUPERVISOR_PID"; then
+    fail "$label collision unexpectedly succeeded"
+  fi
+  grep -F -- "$expected_owner" "$TMP/$label.log" >/dev/null || \
+    fail "$label collision did not name the occupied address: $(cat "$TMP/$label.log")"
+  grep -F -- "$expected_hint" "$TMP/$label.log" >/dev/null || \
+    fail "$label collision did not name the supported override"
+  [[ ! -f "$TMP/$label-backend-leader" && ! -f "$TMP/$label-vite-leader" ]] || \
+    fail "$label collision still started a process"
+}
+FAKE_CURL_NAC=http://127.0.0.1:43210 run_supervisor nac-collision
+expect_collision nac-collision 'NAC is already responding at http://127.0.0.1:43210 (DEV_BIND)' \
+  'DEV_BIND=127.0.0.1:4321 make dev'
+FAKE_CURL_OTHER=http://127.0.0.1:43210 run_supervisor api-collision
+expect_collision api-collision 'another process is already listening at http://127.0.0.1:43210 (DEV_BIND)' \
+  'DEV_BIND=127.0.0.1:4321 make dev'
+FAKE_CURL_OTHER=http://127.0.0.1:45173 run_supervisor app-collision
+expect_collision app-collision 'another process is already listening at http://127.0.0.1:45173 (VITE_PORT)' \
+  'VITE_PORT=5174 make dev'
 
 echo "source workflow contracts passed"
