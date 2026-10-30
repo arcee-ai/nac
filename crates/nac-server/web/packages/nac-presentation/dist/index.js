@@ -19747,9 +19747,8 @@ function Hx(e) {
 			r() && (h(), e.inputFailure(e.previousFailure.current), e.notice(e.previousFailure.current ? "Input delivery was not confirmed. Check the shell before enabling fresh input." : "Previous input will not be retried. Only fresh typing will be sent."));
 		}) ?? (() => {}));
 		let _ = !1, v = null, y = gr(() => {
-			if (e.readonly || e.source && e.source.origin !== "human" && e.source.resize === !1) return e.source && t.terminal.resize(e.source.cols, e.source.rows), Oe;
 			let i = t.fit();
-			return i && (v = i), _ || !o || !s || e.source?.resize === !1 ? Oe : (_ = !0, Ce(function* () {
+			return i && (v = i), _ || !o || !s || e.readonly || e.source?.resize === !1 ? Oe : (_ = !0, Ce(function* () {
 				for (; v && r() && s;) {
 					let e = v;
 					v = null, yield* Bx("resize", () => u.resize(e.cols, e.rows, n.signal));
