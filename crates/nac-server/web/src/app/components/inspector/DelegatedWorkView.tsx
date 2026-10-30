@@ -222,10 +222,11 @@ export function DelegatedWorkView({
       {listState}
       {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-2">
-          <div className={cn("flex items-baseline gap-2", isMobile ? "px-3" : "px-2")}>
-            <span className="tag-label shrink-0 text-basic-muted">{group.label}</span>
-            <span className="h-px min-w-0 flex-1 bg-divider-muted" />
-          </div>
+          {/* `.badge` is Figma's Tag-label type; the shared `.tag-label` is
+              semibold and tracked. */}
+          <span className={cn("badge text-basic-muted", isMobile ? "px-3" : "px-2")}>
+            {group.label}
+          </span>
           <div className="flex flex-col gap-1">
             {group.items.map((row) => {
               const title = rowTitle(row);
@@ -239,6 +240,7 @@ export function DelegatedWorkView({
                   running={row.status === "running"}
                   active={marksOpen && selected?.key === row.key}
                   isMobile={isMobile}
+                  smallTitle
                   onClick={() => chooseRow(row.key)}
                   actions={
                     summary ? (
@@ -299,7 +301,7 @@ export function DelegatedWorkView({
         ) : undefined
       }
       actions={openButton}
-      listClassName="py-6"
+      listClassName="px-1 py-6"
       list={
         isMobile ? (
           <div className="pt-6">{list}</div>

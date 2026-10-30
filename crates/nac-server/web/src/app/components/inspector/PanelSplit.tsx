@@ -196,7 +196,7 @@ export function PanelSplit({
       ) : null}
       {listScreen ? (
         <div className="flex flex-col flex-1 min-h-0 bg-elevation-ground">
-          <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground">
+          <div className="flex items-center gap-2 h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground">
             <Button
               className="shrink-0"
               size={ButtonSize.Medium}
@@ -210,7 +210,7 @@ export function PanelSplit({
             {listToolbar ? (
               <div className="flex min-w-0 flex-1 items-center">{listToolbar}</div>
             ) : (
-              <span className="min-w-0 truncate header-sm text-basic-primary">{listTitle}</span>
+              <span className="min-w-0 truncate label-small text-basic-primary">{listTitle}</span>
             )}
           </div>
           <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-2 [&>*]:shrink-0">
@@ -229,7 +229,7 @@ export function PanelSplit({
           {listToolbar}
           <div
             className={cn(
-              "flex flex-col flex-1 min-h-0 overflow-auto px-1 py-4 [&>*]:shrink-0",
+              "flex flex-col flex-1 min-h-0 overflow-auto px-2 py-4 [&>*]:shrink-0",
               listClassName,
             )}
           >

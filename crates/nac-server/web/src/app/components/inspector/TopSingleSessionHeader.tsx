@@ -106,12 +106,6 @@ export function TopSingleSessionHeader({
   const branch = workspace?.branch ?? null;
   const lineage = entry?.lineage ?? snapshot?.lineage ?? null;
   const readOnly = lineage != null;
-  const relationship =
-    lineage?.kind === "traditional-child"
-      ? "Traditional coding agent"
-      : lineage?.kind === "managed-orchestrator"
-        ? "Managed NAC orchestrator"
-        : null;
   const parent = lineage
     ? sessions.find((item) => item.summary.session_id === lineage.parent_session_id)
     : undefined;
@@ -121,8 +115,15 @@ export function TopSingleSessionHeader({
   };
   const policy = useUiPolicy();
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
-  const badge =
-    relationship ?? (behavior && policy.orchestrationEnabled ? BEHAVIOR_BADGE[behavior] : null);
+  // The parent link before the title already marks a child, so only a managed
+  // orchestrator spells out what kind of child it is.
+  const badge = lineage
+    ? lineage.kind === "managed-orchestrator"
+      ? "Managed NAC orchestrator"
+      : null
+    : behavior && policy.orchestrationEnabled
+      ? BEHAVIOR_BADGE[behavior]
+      : null;
   const title = sessionTitle(entry?.summary);
 
   return (

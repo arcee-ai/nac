@@ -19018,7 +19018,7 @@ function $b({ list: e, listToolbar: t, listClassName: n, listTitle: r, title: i,
 			E ? /* @__PURE__ */ Z("div", {
 				className: "flex flex-col flex-1 min-h-0 bg-elevation-ground",
 				children: [/* @__PURE__ */ Z("div", {
-					className: "flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground",
+					className: "flex items-center gap-2 h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground",
 					children: [/* @__PURE__ */ X(z, {
 						className: "shrink-0",
 						size: U.Medium,
@@ -19031,7 +19031,7 @@ function $b({ list: e, listToolbar: t, listClassName: n, listTitle: r, title: i,
 						className: "flex min-w-0 flex-1 items-center",
 						children: t
 					}) : /* @__PURE__ */ X("span", {
-						className: "min-w-0 truncate header-sm text-basic-primary",
+						className: "min-w-0 truncate label-small text-basic-primary",
 						children: r
 					})]
 				}), /* @__PURE__ */ X("div", {
@@ -19049,7 +19049,7 @@ function $b({ list: e, listToolbar: t, listClassName: n, listTitle: r, title: i,
 				children: [
 					t,
 					/* @__PURE__ */ X("div", {
-						className: I("flex flex-col flex-1 min-h-0 overflow-auto px-1 py-4 [&>*]:shrink-0", n),
+						className: I("flex flex-col flex-1 min-h-0 overflow-auto px-2 py-4 [&>*]:shrink-0", n),
 						children: e
 					}),
 					/* @__PURE__ */ X("div", {
@@ -24120,9 +24120,9 @@ function gD({ sessionId: e, listing: t, changed: n, revision: r, readOnly: i }) 
 	});
 	let l = /* @__PURE__ */ X("div", {
 		className: "flex flex-1 min-w-0 items-center gap-1",
-		children: hD.map((e) => /* @__PURE__ */ X(Vl, {
-			size: zl.Small,
-			active: t === e.listing,
+		children: hD.map((e) => /* @__PURE__ */ X(z, {
+			size: U.Small,
+			variant: t === e.listing ? B.GhostHighlighted : B.Ghost,
 			"aria-pressed": t === e.listing,
 			"aria-label": e.name,
 			onClick: () => a(e.listing),
@@ -25865,12 +25865,9 @@ function bk({ sessionId: e, behavior: t }) {
 		className: "flex flex-col gap-8",
 		children: [re, ee.map((e) => /* @__PURE__ */ Z("div", {
 			className: "flex flex-col gap-2",
-			children: [/* @__PURE__ */ Z("div", {
-				className: I("flex items-baseline gap-2", s ? "px-3" : "px-2"),
-				children: [/* @__PURE__ */ X("span", {
-					className: "tag-label shrink-0 text-basic-muted",
-					children: e.label
-				}), /* @__PURE__ */ X("span", { className: "h-px min-w-0 flex-1 bg-divider-muted" })]
+			children: [/* @__PURE__ */ X("span", {
+				className: I("badge text-basic-muted", s ? "px-3" : "px-2"),
+				children: e.label
 			}), /* @__PURE__ */ X("div", {
 				className: "flex flex-col gap-1",
 				children: e.items.map((e) => {
@@ -25882,6 +25879,7 @@ function bk({ sessionId: e, behavior: t }) {
 						running: e.status === "running",
 						active: u && C?.key === e.key,
 						isMobile: s,
+						smallTitle: !0,
 						onClick: () => A(e.key),
 						actions: n ? /* @__PURE__ */ X(qD, {
 							summary: n,
@@ -25915,7 +25913,7 @@ function bk({ sessionId: e, behavior: t }) {
 			children: k(C)
 		}) : void 0,
 		actions: ae,
-		listClassName: "py-6",
+		listClassName: "px-1 py-6",
 		list: s ? /* @__PURE__ */ X("div", {
 			className: "pt-6",
 			children: M
@@ -27212,9 +27210,9 @@ function vA({ sessionId: t, snapshot: n, entry: r, onShowPanel: i }) {
 	let w = a(n, r, b || x ? S : null, C), T = Rt(), D = Be(n), O = w.usage?.total_tokens || D?.total_tokens || null, k = l(), ee = u(), A = p(), te = e(t, A), j = n?.workspace ?? null, ne = A == null ? j : te.data ?? {
 		total_additions: 0,
 		total_deletions: 0
-	}, re = ne?.total_additions ?? 0, M = ne?.total_deletions ?? 0, ie = j?.repo_label ?? j?.workspace_display ?? null, ae = j?.branch ?? null, oe = r?.lineage ?? n?.lineage ?? null, se = oe != null, ce = oe?.kind === "traditional-child" ? "Traditional coding agent" : oe?.kind === "managed-orchestrator" ? "Managed NAC orchestrator" : null, le = oe ? y.find((e) => e.summary.session_id === oe.parent_session_id) : void 0, ue = le ? v(le.summary) : "Parent session", de = () => {
+	}, re = ne?.total_additions ?? 0, M = ne?.total_deletions ?? 0, ie = j?.repo_label ?? j?.workspace_display ?? null, ae = j?.branch ?? null, oe = r?.lineage ?? n?.lineage ?? null, se = oe != null, ce = oe ? y.find((e) => e.summary.session_id === oe.parent_session_id) : void 0, le = ce ? v(ce.summary) : "Parent session", ue = () => {
 		oe && h(fn.session(oe.parent_session_id, "delegated"));
-	}, P = Tt(), fe = r?.summary.behavior ?? n?.metadata.behavior ?? null, pe = ce ?? (fe && P.orchestrationEnabled ? _A[fe] : null), me = v(r?.summary);
+	}, de = Tt(), P = r?.summary.behavior ?? n?.metadata.behavior ?? null, fe = oe ? oe.kind === "managed-orchestrator" ? "Managed NAC orchestrator" : null : P && de.orchestrationEnabled ? _A[P] : null, pe = v(r?.summary);
 	return /* @__PURE__ */ X("div", {
 		className: "pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col border-b border-muted bg-elevation-ground px-4 pt-4 pb-4",
 		children: /* @__PURE__ */ Z("div", {
@@ -27228,12 +27226,12 @@ function vA({ sessionId: t, snapshot: n, entry: r, onShowPanel: i }) {
 							variant: B.Tertiary,
 							size: U.Medium,
 							className: "min-w-0 max-w-[120px]",
-							"aria-label": `${ue}, parent chat`,
-							title: ue,
-							onClick: de,
+							"aria-label": `${le}, parent chat`,
+							title: le,
+							onClick: ue,
 							children: /* @__PURE__ */ X("span", {
 								className: "truncate underline",
-								children: ue
+								children: le
 							})
 						}), /* @__PURE__ */ X(R, {
 							iconName: H.Right,
@@ -27243,11 +27241,11 @@ function vA({ sessionId: t, snapshot: n, entry: r, onShowPanel: i }) {
 							className: "flex min-w-0 items-center gap-2",
 							children: [/* @__PURE__ */ X("p", {
 								className: I("header-sm min-w-0 truncate", b ? "text-shimmer-basic" : "text-basic-primary"),
-								children: me
-							}), pe ? /* @__PURE__ */ X("span", {
-								className: "tag-label min-w-0 truncate rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-2 py-[3px] text-basic-tertiary",
-								title: pe,
 								children: pe
+							}), fe ? /* @__PURE__ */ X("span", {
+								className: "tag-label min-w-0 truncate rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-2 py-[3px] text-basic-tertiary",
+								title: fe,
+								children: fe
 							}) : null]
 						})]
 					}),
