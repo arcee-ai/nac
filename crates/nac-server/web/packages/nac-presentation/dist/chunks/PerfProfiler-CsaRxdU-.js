@@ -6312,31 +6312,32 @@ fl.Size = sl, fl.Variant = cl, fl.Content = ll;
 // src/app/hooks/useCopyToClipboard.ts
 var pl = 2e3;
 function ml(e) {
-	let t = document.createElement("textarea");
-	t.value = e, t.style.position = "fixed", t.style.top = "-9999px", document.body.appendChild(t);
+	let t = document.activeElement instanceof HTMLElement ? document.activeElement : null, n = document.createElement("textarea");
+	n.value = e, n.style.position = "fixed", n.style.top = "-9999px", document.body.appendChild(n);
 	try {
-		return t.focus(), t.select(), document.execCommand("copy");
+		return n.focus(), n.select(), document.execCommand("copy");
 	} catch {
 		return !1;
 	} finally {
-		document.body.removeChild(t);
+		document.body.removeChild(n), t?.focus();
 	}
 }
 function hl() {
-	let [e, t] = l(!1), n = c(null);
+	let [e, t] = l("idle"), n = c(null);
 	a(() => () => {
 		n.current && clearTimeout(n.current);
 	}, []);
-	let i = r(() => {
-		n.current && clearTimeout(n.current), t(!0), n.current = setTimeout(() => t(!1), pl);
-	}, []);
+	let i = r((e) => {
+		n.current && clearTimeout(n.current), t(e), n.current = e === "copied" ? setTimeout(() => t("idle"), pl) : null;
+	}, []), o = r((e) => {
+		if (!e) return;
+		let t = () => i(ml(e) ? "copied" : "failed");
+		navigator.clipboard?.writeText ? navigator.clipboard.writeText(e).then(() => i("copied")).catch(t) : t();
+	}, [i]);
 	return {
-		copied: e,
-		copy: r((e) => {
-			e && (navigator.clipboard?.writeText ? navigator.clipboard.writeText(e).then(i).catch(() => {
-				ml(e) && i();
-			}) : ml(e) && i());
-		}, [i])
+		copied: e === "copied",
+		outcome: e,
+		copy: o
 	};
 }
 // src/app/atoms/button/CopyButton.tsx
