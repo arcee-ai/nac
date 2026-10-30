@@ -10,8 +10,8 @@ interface ForkSessionItemProps {
     onDismiss?: () => void;
 }
 /**
- * Marker under a model turn on the chat that was forked from. Live rows open
- * the fork; a deleted row stays until the user dismisses it.
+ * Marker under a model turn on the chat that was forked from. Live cards open
+ * the fork; a deleted card stays until the user dismisses it.
  */
 declare const ForkSessionItem: React.FC<ForkSessionItemProps>;
 export default ForkSessionItem;

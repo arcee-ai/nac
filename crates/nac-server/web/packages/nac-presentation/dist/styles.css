@@ -2498,11 +2498,6 @@
     border-bottom-right-radius: .25rem;
   }
 
-[data-nac-runtime]:is(.rounded-r-interaction), [data-nac-runtime] .rounded-r-interaction {
-    border-top-right-radius: var(--interaction-rounded);
-    border-bottom-right-radius: var(--interaction-rounded);
-  }
-
 [data-nac-runtime]:is(.rounded-r-none), [data-nac-runtime] .rounded-r-none {
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
@@ -4419,6 +4414,10 @@
       color: var(--color-text-accent-secondary);
     }
 
+    [data-nac-runtime]:is(.hover\:text-basic-primary:hover), [data-nac-runtime] .hover\:text-basic-primary:hover {
+      color: var(--color-text-basic-primary);
+    }
+
     [data-nac-runtime]:is(.hover\:text-basic-secondary:hover), [data-nac-runtime] .hover\:text-basic-secondary:hover {
       color: var(--color-text-basic-secondary);
     }
@@ -5847,6 +5846,12 @@
   font-family: NACPresentationInter;
   font-size: .75rem;
   line-height: 1rem;
+}
+
+[data-nac-runtime]:is(.text-2xs), [data-nac-runtime] .text-2xs {
+  font-family: NACPresentationInter;
+  font-size: .6875rem;
+  line-height: .875rem;
 }
 
 [data-nac-runtime]:is(.paragraph-big), [data-nac-runtime] .paragraph-big {
