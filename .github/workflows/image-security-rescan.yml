@@ -33,7 +33,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo '### Image findings are advisory; enforcement is deferred' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Strict exact-image security result' >> "$GITHUB_STEP_SUMMARY"
           if test -f image-rescan-evidence/rescan/report.md; then
             cat image-rescan-evidence/rescan/report.md >> "$GITHUB_STEP_SUMMARY"
           else
