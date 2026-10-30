@@ -9,14 +9,12 @@ import {
 
 // An observed server response, not a reconstruction of the old ALL-450 proposal.
 const observed = JSON.parse(fs.readFileSync(new URL(
-  "../../docs/ci/evidence/2026-10-30-required-check-before-eight-owners.json", import.meta.url), "utf8"));
+  "../../docs/ci/evidence/2026-10-30-required-check-before-eight-owners-landed.json", import.meta.url), "utf8"));
 const now = Date.parse(observed.captured_at);
-// Prospective local activation model only: the observed server snapshot retains
-// six-owner CODEOWNERS until the separate Ada/Scott roster PR lands on dev. Synthetic
-// positives model that future prerequisite plus a successful exact-head check.
+// Preserve the actual landed eight-owner CODEOWNERS. Only the successful
+// exact-head check below is synthetic local activation-model data.
 const snapshot = () => {
   const result = structuredClone(observed);
-  result.codeowners = codeowners;
   result.checks = [{ id: 100, name: context, head_sha: result.dev_sha,
     app: { id: actionsApp }, status: "completed", conclusion: "success" }];
   return result;
@@ -67,12 +65,14 @@ test("plan adds only strict exact Actions checks to the observed current ruleset
   assert.equal(plan.proposed_sha256, digest(payload));
 });
 
-test("actual prelanding six-owner CODEOWNERS cannot activate the eight-owner plan", () => {
-  assert.equal(observed.codeowners.includes("@adalundhe"), false);
-  assert.equal(observed.codeowners.includes("@ScottZembsch"), false);
-  assert.notEqual(observed.codeowners, codeowners);
+test("historical prelanding six-owner CODEOWNERS cannot activate the landed eight-owner plan", () => {
+  const prelanding = JSON.parse(fs.readFileSync(new URL(
+    "../../docs/ci/evidence/2026-10-30-required-check-before-eight-owners.json", import.meta.url), "utf8"));
+  assert.equal(prelanding.codeowners.includes("@adalundhe"), false);
+  assert.equal(prelanding.codeowners.includes("@ScottZembsch"), false);
+  assert.equal(observed.codeowners, codeowners);
   const current = snapshot();
-  current.codeowners = observed.codeowners;
+  current.codeowners = prelanding.codeowners;
   // Even a synthetic passing check and complete receipt cannot replace landed
   // CODEOWNERS; no observed data is rewritten to manufacture activation.
   assert.throws(() => activationPlan(observed, current, receipt(), now), /CODEOWNERS has not landed/);
@@ -184,7 +184,7 @@ test("model tests, stale/foreign/incomplete receipts and old override payload ca
 
 test("current handoff template matches the plan/matrix but cannot certify unperformed platform work", () => {
   const plan = JSON.parse(fs.readFileSync(new URL(
-    "../../docs/ci/evidence/2026-10-30-required-check-plan-eight-owners.json", import.meta.url), "utf8"));
+    "../../docs/ci/evidence/2026-10-30-required-check-plan-eight-owners-landed.json", import.meta.url), "utf8"));
   assert.deepEqual(plan, dryRunPlan(observed));
   const template = JSON.parse(fs.readFileSync(new URL(
     "../../docs/ci/evidence/qualification-template.json", import.meta.url), "utf8"));

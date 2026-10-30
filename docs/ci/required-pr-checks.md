@@ -4,23 +4,23 @@
 NAC's **observed** ruleset 25983949. Live activation requires separate human
 authorization. No settings are changed by the tooling or this PR.
 
-The October 30 [before snapshot](evidence/2026-10-30-required-check-before-eight-owners.json)
+The October 30 [landed before snapshot](evidence/2026-10-30-required-check-before-eight-owners-landed.json)
 shows active `main` on `~DEFAULT_BRANCH` (currently `dev`), no bypass actors,
 one approval, CODEOWNERS, last-push approval, resolved threads, and extra approval
 for unattributed changes. Stale-review dismissal is currently false. Existing
 merge methods, deletion/force-push protections, and inherited enterprise rules
-remain unchanged. [The intended plan](evidence/2026-10-30-required-check-plan-eight-owners.json)
+remain unchanged. [The intended plan](evidence/2026-10-30-required-check-plan-eight-owners-landed.json)
 appends exactly one required-status-check rule: `Required PR checks`, GitHub
 Actions integration **15368**, strict current-base checks, enforced on creation.
 It updates that existing ruleset; it does not introduce a second review policy.
 
 This snapshot records all eight designated owners' actual live permissions,
 including Ada (`adalundhe`, ID `23642200`, write) and Scott (`ScottZembsch`, ID
-`109129358`, write), and the **six-owner CODEOWNERS actually served by dev** at
-capture time. The eight-owner source is inherited from the separate
+`109129358`, write), and the **eight-owner CODEOWNERS actually served by dev** at
+`298ca094ce1826ab6a47d0505cd066c5d5660f4d`, after a human merged the separate
 [Ada/Scott roster PR #470](https://github.com/arcee-ai/nac/pull/470).
-Until that roster lands on dev, production activation correctly rejects the
-observed CODEOWNERS. Capturing permission to write is not proof of landed ownership.
+The positive local model now uses that actual landed ownership data. Capturing
+permission to write alone is not proof of landed ownership or required-check activation.
 
 The original [three-owner snapshot](evidence/2026-10-27-required-check-before.json)
 and [plan](evidence/2026-10-27-required-check-plan.json), plus the
@@ -31,6 +31,12 @@ and [plan](evidence/2026-10-30-required-check-plan-seven-owners.json), remain un
 historical receipts. They lack one or both newly designated owners' verified
 identities and cannot qualify the eight-owner baseline. This planner layer does
 not change reviewer membership.
+
+The earlier [prelanding eight-permission snapshot](evidence/2026-10-30-required-check-before-eight-owners.json)
+and [plan](evidence/2026-10-30-required-check-plan-eight-owners.json) also remain
+unchanged historical evidence. That snapshot truthfully retains the six-owner
+CODEOWNERS observed before #470 landed. A regression keeps that prelanding
+ownership state from satisfying the landed eight-owner activation prerequisite.
 
 ALL-450's earlier bypass/review proposal is historical and must not be applied
 to current settings. ALL-450 remains a completed foundation milestone; ALL-506
@@ -96,12 +102,12 @@ activation receipts. Refresh them before qualification. A real fixture receipt
 must bind both the exact proposed payload digest and full settings identity.
 Never fill its fields with local model output or copy an old successful receipt.
 
-Planner tests preserve the actual captured CODEOWNERS in the observed fixture.
-Their positive activation helper explicitly derives **prospective local test
-data** with canonical eight-owner CODEOWNERS and a synthetic successful check.
-A negative proves that actual prelanding six-owner CODEOWNERS still cannot
-activate, even with a synthetic complete receipt and passing check. These local
-models do not certify that the roster, platform qualification or protections landed.
+Planner tests preserve the actual landed eight-owner CODEOWNERS in the observed
+fixture and positive helper. Successful checks and qualification receipts remain
+explicitly synthetic local model data. A negative uses the unchanged prelanding
+snapshot to prove six-owner CODEOWNERS cannot activate, even with a synthetic
+complete receipt and passing check. These local models do not certify platform
+qualification or required-check activation; the roster's landing is separately observed.
 
 ## Real safe-repository and actor matrix — unperformed
 
