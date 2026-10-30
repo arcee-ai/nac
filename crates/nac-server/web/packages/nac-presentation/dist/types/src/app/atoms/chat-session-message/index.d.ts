@@ -10,6 +10,8 @@ interface ChatSessionMessageProps extends Omit<React.HTMLAttributes<HTMLDivEleme
     variant?: ChatSessionMessageVariant;
     /** Optional second line explaining the title. */
     children?: React.ReactNode;
+    /** Raw detail behind the message, folded under a "Diagnostic" toggle. */
+    diagnostic?: React.ReactNode;
     /** Optional way out of whatever the message reports. */
     action?: {
         label: string;
@@ -18,8 +20,11 @@ interface ChatSessionMessageProps extends Omit<React.HTMLAttributes<HTMLDivEleme
 }
 /**
  * What the transcript says when something happened to the run rather than in
- * it. Unlike `MessageBox` it carries no surface of its own — a coloured rule
- * down the left is the whole frame, so it reads as part of the conversation.
+ * it: a rounded card tinted with its variant's colour, so it stands apart from
+ * the conversation without the weight of a bordered `MessageBox`.
+ *
+ * A folded diagnostic stays mounted while hidden, so the alert's text content
+ * still carries it.
  */
 declare const ChatSessionMessage: React.FC<ChatSessionMessageProps> & {
     Variant: typeof ChatSessionMessageVariant;
