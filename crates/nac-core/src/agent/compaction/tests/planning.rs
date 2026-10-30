@@ -8,6 +8,10 @@ use crate::store::orchestrator_compaction::{
 };
 use crate::types::{FunctionCall, FunctionDef, Message, ToolCall, ToolDefinition};
 
+fn as_transcript(messages: &[Message]) -> crate::agent::TranscriptMessages {
+    messages.to_vec().into()
+}
+
 #[test]
 fn boundary_projection_preserves_systems_and_exact_weighted_suffix() {
     let messages = vec![
@@ -32,7 +36,7 @@ fn boundary_projection_preserves_systems_and_exact_weighted_suffix() {
         user("current user"),
     ];
     let preferred = candidate(state(PathBuf::from("unused"), Some(1)).plan(
-        &messages,
+        &as_transcript(&messages),
         &[],
         CompactionReason::Auto,
     ));
@@ -60,7 +64,7 @@ fn boundary_projection_preserves_systems_and_exact_weighted_suffix() {
         ])
     );
     let one_user = candidate(state(PathBuf::from("unused"), Some(1)).plan(
-        &[user("only")],
+        &as_transcript(&[user("only")]),
         &[],
         CompactionReason::Auto,
     ));
@@ -70,26 +74,26 @@ fn boundary_projection_preserves_systems_and_exact_weighted_suffix() {
 fn manual_and_automatic_planning_share_the_threshold_gate() {
     let messages = vec![user("old"), assistant("answer"), user("current")];
     let estimate = state(PathBuf::from("unused"), None)
-        .prepare(&messages, &[])
+        .prepare(&as_transcript(&messages), &[])
         .context_estimate;
 
     for threshold in [None, Some(estimate.saturating_add(1))] {
         assert!(matches!(
             state(PathBuf::from("unused"), threshold)
-                .plan(&messages, &[], CompactionReason::Auto)
+                .plan(&as_transcript(&messages), &[], CompactionReason::Auto)
                 .decision,
             CompactionDecision::NotTriggered
         ));
         assert!(matches!(
             state(PathBuf::from("unused"), threshold)
-                .plan(&messages, &[], CompactionReason::Manual)
+                .plan(&as_transcript(&messages), &[], CompactionReason::Manual)
                 .decision,
             CompactionDecision::Candidate(_)
         ));
     }
     assert!(matches!(
         state(PathBuf::from("unused"), Some(estimate))
-            .plan(&messages, &[], CompactionReason::Auto)
+            .plan(&as_transcript(&messages), &[], CompactionReason::Auto)
             .decision,
         CompactionDecision::Candidate(_)
     ));
@@ -153,12 +157,12 @@ fn separately_supplied_tool_definitions_do_not_affect_boundary_weight() {
         },
     }];
     let without_tools = candidate(state(PathBuf::from("unused"), Some(1)).plan(
-        &messages,
+        &as_transcript(&messages),
         &[],
         CompactionReason::Auto,
     ));
     let with_tools = candidate(state(PathBuf::from("unused"), Some(1)).plan(
-        &messages,
+        &as_transcript(&messages),
         &tools,
         CompactionReason::Auto,
     ));
@@ -315,7 +319,7 @@ fn active_end_checkpoint_without_new_messages_is_already_compacted() {
 
     assert!(matches!(
         state
-            .plan(&messages, &[], CompactionReason::Manual)
+            .plan(&as_transcript(&messages), &[], CompactionReason::Manual)
             .decision,
         CompactionDecision::Skip(CompactionSkipReason::AlreadyCompacted)
     ));

@@ -15,7 +15,7 @@ async fn finish_run_persists_snapshot_before_completion_event() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -326,7 +326,7 @@ async fn real_run_diffs_token_timing_from_the_run_start_store_count() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -437,7 +437,7 @@ async fn recovered_session_continues_without_model_bookkeeping_and_clears_warnin
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -539,7 +539,7 @@ async fn finish_run_persists_token_usage() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -656,7 +656,7 @@ async fn failed_run_without_visible_response_round_trips_token_usage() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -926,7 +926,7 @@ async fn failed_run_normalizes_the_dangling_tool_turn_for_the_next_run() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );

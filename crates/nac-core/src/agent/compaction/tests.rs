@@ -54,3 +54,4 @@ mod accounting;
 mod checkpoints;
 mod planning;
 mod policy;
+mod verified_prefix;

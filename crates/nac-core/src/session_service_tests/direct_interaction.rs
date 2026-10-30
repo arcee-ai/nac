@@ -1719,7 +1719,7 @@ fn from_orchestrator_run_config_exposes_metadata_and_init_snapshot() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
