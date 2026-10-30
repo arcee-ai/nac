@@ -20,6 +20,15 @@ export async function reviewTerminalEvidence(
 
   // Accessibility row positions can lag a resize. Use the rows users see.
   const lines = pane.locator(".xterm-rows > div");
+  // Reconnect marks the transport connected before replay is painted. Wait for
+  // the real cells before measuring them or starting a pointer selection.
+  await expect
+    .poll(
+      async () =>
+        (await lines.allTextContents()).filter((text) => text.trimEnd() === evidence).length,
+      { message: "Expected one live painted evidence row after terminal replay" },
+    )
+    .toBe(1);
   const rows = await lines.allTextContents();
   const matches = rows.flatMap((text, index) => (text.trimEnd() === evidence ? [index] : []));
   const grid = await screen.boundingBox();
