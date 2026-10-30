@@ -21,7 +21,9 @@ pub struct TraditionalChildStartRequest {
     pub parent_session_id: String,
     pub child_session_id: Option<String>,
     pub profile: String,
-    pub description: String,
+    /// Required to create a child. Continuation may omit the immutable label;
+    /// when present it must equal the owned relationship's label exactly.
+    pub description: Option<String>,
     pub prompt: String,
     /// Set by the trusted caller, never decoded from model or HTTP arguments.
     pub origin: crate::store::InputOrigin,
@@ -117,6 +119,67 @@ pub fn validate_general_profile(profile: &str) -> Result<()> {
         Ok(())
     } else {
         Err(anyhow!("unknown traditional child profile '{profile}'"))
+    }
+}
+
+/// Why a caller's child label was rejected before any relationship mutation
+/// or child turn. Delivery maps it as invalid input rather than matching text,
+/// because the expected label is caller-authored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TraditionalChildDescriptionError {
+    MissingForNewChild,
+    Immutable {
+        child_session_id: String,
+        expected: String,
+    },
+}
+
+impl std::fmt::Display for TraditionalChildDescriptionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingForNewChild => formatter.write_str(
+                "traditional child description is required to launch a new child; \
+                 omit it (or pass null) only when continuing an existing child_session_id",
+            ),
+            Self::Immutable {
+                child_session_id,
+                expected,
+            } => write!(
+                formatter,
+                "traditional child description is immutable (expected '{expected}'). \
+                 To continue or steer child '{child_session_id}', omit description \
+                 (or pass null) or pass '{expected}' exactly; launch a new child with \
+                 child_session_id null for a different task label"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TraditionalChildDescriptionError {}
+
+/// The label a new child is created with. Creation has no relationship to
+/// resolve it from, so its absence fails before any durable mutation.
+pub fn description_for_new_child(
+    description: Option<&str>,
+) -> Result<&str, TraditionalChildDescriptionError> {
+    description.ok_or(TraditionalChildDescriptionError::MissingForNewChild)
+}
+
+/// Check an optional caller label against the immutable label of a child the
+/// caller already owns. Omission continues with the stored label. Callers must
+/// establish ownership first: a mismatch names that owner-visible label.
+pub fn check_continuation_description(
+    child: &TraditionalChildRecord,
+    description: Option<&str>,
+) -> Result<(), TraditionalChildDescriptionError> {
+    match description {
+        Some(description) if description.trim() != child.description => {
+            Err(TraditionalChildDescriptionError::Immutable {
+                child_session_id: child.child_session_id.clone(),
+                expected: child.description.clone(),
+            })
+        }
+        _ => Ok(()),
     }
 }
 
