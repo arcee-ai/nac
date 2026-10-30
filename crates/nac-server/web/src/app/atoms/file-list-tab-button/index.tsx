@@ -100,7 +100,7 @@ const FileListTabButton: React.FC<FileListTabButtonProps> = ({
       aria-pressed={folder ? undefined : active}
       aria-expanded={folder ? active : undefined}
       className={cn(
-        "group/file-list-tab-button flex w-full min-w-0 items-center rounded-[4px]",
+        "group/file-list-tab-button flex w-full min-w-0 items-center rounded-interaction",
         "transition-colors duration-150 ease-out disabled:cursor-not-allowed",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]",
         style.box,

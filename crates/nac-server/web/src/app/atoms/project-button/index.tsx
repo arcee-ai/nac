@@ -49,7 +49,7 @@ const ProjectButton: React.FC<ProjectButtonProps> & {
 }) => (
   <div
     className={cn(
-      "group flex items-center min-w-0 rounded-[4px] hover:bg-btn-ghost-hovered",
+      "group flex items-center min-w-0 rounded-interaction hover:bg-btn-ghost-hovered",
       isMobile ? "h-12 gap-3 px-3 py-2" : "h-9 gap-1.5 px-2 py-1",
       active && "bg-btn-ghost-highlighted",
       className,

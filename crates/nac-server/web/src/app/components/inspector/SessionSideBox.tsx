@@ -7,9 +7,6 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
-  HorizontalTabsItem,
-  HorizontalTabsItemContent,
-  HorizontalTabsItemSize,
   Icon,
   IconName,
   ProgressLoader,
@@ -226,7 +223,8 @@ export function SessionSideBox({
         expanded ? null : "border-l border-tertiary",
       )}
     >
-      <div className="relative flex items-center gap-2 px-2 py-2 shrink-0 border-b border-muted bg-elevation-ground">
+      {/* The design's 52px bar draws its border inside the bottom padding. */}
+      <div className="relative flex items-center gap-2 px-2 pt-2 pb-[7px] shrink-0 border-b border-muted bg-elevation-ground">
         <SideBoxProgress sessionId={sessionId} />
         {/* Hide/expand live here in the split. Once fullscreen the Modal owns
             Close at the trailing corner, and equal blanks keep the tabs centred
@@ -265,18 +263,18 @@ export function SessionSideBox({
               };
               const iconsOnly = isTablet || !tabLabelsFit;
               const tab = (
-                <HorizontalTabsItem
-                  size={HorizontalTabsItemSize.Medium}
-                  content={iconsOnly ? HorizontalTabsItemContent.IconOnly : undefined}
-                  active={selected}
-                  iconName={PANEL_ICON[name]}
+                <Button
+                  size={ButtonSize.Medium}
+                  variant={selected ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
+                  content={iconsOnly ? ButtonContent.Icon : ButtonContent.IconLeft}
                   role="tab"
                   aria-selected={selected}
                   aria-label={SESSION_PANEL_LABEL[name]}
                   onClick={open}
                 >
-                  {SESSION_PANEL_LABEL[name]}
-                </HorizontalTabsItem>
+                  <Icon iconName={PANEL_ICON[name]} />
+                  {iconsOnly ? null : SESSION_PANEL_LABEL[name]}
+                </Button>
               );
               return (
                 <span key={name} className="relative shrink-0">
@@ -292,7 +290,7 @@ export function SessionSideBox({
                   ) : (
                     tab
                   )}
-                  {badge > 0 ? <PanelCountBadge count={badge} className="top-0" /> : null}
+                  {badge > 0 ? <PanelCountBadge count={badge} /> : null}
                 </span>
               );
             })}

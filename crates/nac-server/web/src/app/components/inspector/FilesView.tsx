@@ -15,7 +15,11 @@ import {
   LoaderSize,
 } from "@/app/atoms";
 import { FilesBranchRow, FilesListToolbar } from "@/app/components/inspector/FilesListControls";
-import { PanelFailure, PanelListNote } from "@/app/components/inspector/PanelMessages";
+import {
+  PanelEmptyState,
+  PanelFailure,
+  PanelListNote,
+} from "@/app/components/inspector/PanelMessages";
 import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useLiveWorkspace } from "@/app/hooks/useLiveWorkspace";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -595,6 +599,14 @@ export function FilesView({
   }
 
   const branch = workspace?.branch;
+  // A phone's only branch switcher, so an empty checkout keeps it as well.
+  const branchRow =
+    isMobile && branch ? (
+      <FilesBranchRow sessionId={sessionId} branch={branch} readOnly={readOnly} />
+    ) : null;
+  if (nodes.length === 0) {
+    return <PanelEmptyState listTitle="Files" title="No Files" phoneLead={branchRow} />;
+  }
 
   return (
     <PanelSplit
@@ -620,12 +632,8 @@ export function FilesView({
       }
       list={
         <>
-          {isMobile && branch ? (
-            <FilesBranchRow sessionId={sessionId} branch={branch} readOnly={readOnly} />
-          ) : null}
-          {nodes.length === 0 ? (
-            <PanelListNote>No files in the workspace.</PanelListNote>
-          ) : fileListing === "changed" ? (
+          {branchRow}
+          {fileListing === "changed" ? (
             <ChangedList files={changedNodes} selected={marked} onSelect={selectFile} />
           ) : (
             <>
@@ -644,9 +652,7 @@ export function FilesView({
       }
     >
       {!current ? (
-        <PanelEmpty>
-          {nodes.length === 0 ? "No files in the workspace." : "Select a file to see it."}
-        </PanelEmpty>
+        <PanelEmpty>Select a file to see it.</PanelEmpty>
       ) : currentChange ? (
         <DiffPane
           key={current}

@@ -57,7 +57,7 @@ const STATUS_NAME: Record<SubagentCardStatus, string | null> = {
 };
 
 const LINK_CLASS = cn(
-  "pointer-events-auto relative z-10 flex h-7 min-w-0 items-center gap-1 rounded-[4px] p-1 label-micro",
+  "pointer-events-auto relative z-10 flex h-7 min-w-0 items-center gap-1 rounded-interaction p-1 label-micro",
   "text-btn-secondary hover:text-btn-secondary-hovered active:text-btn-secondary-pressed",
   "[&_path]:fill-btn-secondary hover:[&_path]:fill-btn-secondary-hovered active:[&_path]:fill-btn-secondary-pressed",
   "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",

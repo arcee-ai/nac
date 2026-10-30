@@ -334,6 +334,9 @@ const config = {
           950: "var(--brand-950)",
         },
       },
+      borderRadius: {
+        interaction: "var(--interaction-rounded)",
+      },
       boxShadow: {
         none: "none",
         md: "var(--shadow-md)",

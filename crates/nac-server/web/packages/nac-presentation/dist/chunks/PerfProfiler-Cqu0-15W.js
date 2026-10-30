@@ -5170,12 +5170,15 @@ var Mo = (e, t) => {
 }, sc = (e, t, n) => {
 	let r = t[n];
 	r !== void 0 && (e[n] = e[n] ? e[n].concat(r) : r);
-}, cc = ((e, ...t) => typeof e == "function" ? ls(nc, e, ...t) : ls(() => rc(nc(), e), ...t))({ extend: { classGroups: { "font-size": [{ text: [
-	"big",
-	"medium",
-	"small",
-	"micro"
-] }] } } });
+}, cc = ((e, ...t) => typeof e == "function" ? ls(nc, e, ...t) : ls(() => rc(nc(), e), ...t))({ extend: {
+	theme: { radius: ["interaction"] },
+	classGroups: { "font-size": [{ text: [
+		"big",
+		"medium",
+		"small",
+		"micro"
+	] }] }
+} });
 function N(...e) {
 	return cc(jo(e));
 }
@@ -6151,7 +6154,7 @@ var Jc = [
 };
 nl.Placement = vc, nl.Size = el;
 // src/app/atoms/tooltip/index.tsx
-var rl = "tooltip-box text-left w-max h-fit max-w-[240px] flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-[4px] fade", il = ({ boxRef: e, title: t, description: n, keyboardShortcuts: r = [], className: i, style: a, inverted: o = !0, isMobile: s = !1 }) => /* @__PURE__ */ S("div", {
+var rl = "tooltip-box text-left w-max h-fit max-w-[240px] flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-interaction fade", il = ({ boxRef: e, title: t, description: n, keyboardShortcuts: r = [], className: i, style: a, inverted: o = !0, isMobile: s = !1 }) => /* @__PURE__ */ S("div", {
 	ref: e,
 	className: i,
 	style: a,
