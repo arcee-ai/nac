@@ -1,4 +1,4 @@
-import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Bt as f, C as p, Ci as m, Cn as h, Cr as g, Ct as _, D as v, Di as y, Dn as b, Dr as x, Dt as S, E as C, Ei as w, En as T, Er as E, Et as D, F as O, Fi as k, Fn as ee, Fr as A, Ft as te, G as j, Gi as ne, Gn as re, Gr as ie, Gt as ae, H as oe, Hi as se, Hn as ce, Hr as M, Ht as le, I as ue, Ii as de, In as fe, Ir as N, It as pe, J as P, Ji as me, Jn as F, Jr as I, Jt as he, K as ge, Ki as _e, Kn as L, Kr as R, Kt as ve, L as ye, Li as be, Ln as xe, Lr as Se, Lt as Ce, M as we, Mi as Te, Mn as Ee, Mr as De, Mt as Oe, N as ke, Ni as Ae, Nn as je, Nr as Me, Nt as Ne, O as Pe, Oi as Fe, On as Ie, Or as Le, Ot as Re, P as ze, Pi as Be, Pn as Ve, Pr as He, Pt as Ue, Q as We, Qn as Ge, Qr as Ke, Qt as qe, R as Je, Ri as Ye, Rn as Xe, Rr as Ze, Rt as Qe, S as $e, Si as et, Sn as tt, Sr as z, St as nt, T as rt, Ti as it, Tn as at, Tr as B, Tt as ot, U as st, Ui as ct, Un as lt, Ur as ut, Ut as dt, V as ft, Vi as pt, Vn as mt, Vr as ht, Vt as gt, W as _t, Wi as vt, Wn as yt, Wr as bt, Wt as xt, X as St, Xi as Ct, Xn as wt, Xr as Tt, Xt as Et, Y as Dt, Yi as Ot, Yn as kt, Yr as At, Yt as jt, Z as Mt, Zn as Nt, Zr as Pt, Zt as Ft, _ as It, _i as Lt, _n as Rt, _r as zt, _t as Bt, a as Vt, ai as Ht, an as Ut, ar as Wt, at as Gt, b as Kt, bi as qt, bn as Jt, br as Yt, bt as Xt, c as Zt, ci as Qt, cn as $t, cr as en, ct as tn, d as nn, di as rn, dn as an, dr as on, dt as sn, ei as cn, en as ln, er as un, et as dn, f as fn, fi as pn, fn as mn, fr as hn, ft as gn, g as _n, gi as vn, gn as yn, gr as bn, gt as xn, h as Sn, hi as Cn, hn as wn, hr as Tn, ht as En, i as Dn, ii as On, in as kn, ir as An, it as jn, j as Mn, ji as Nn, jn as Pn, jr as Fn, jt as In, k as Ln, ki as Rn, kn as zn, kr as Bn, kt as Vn, l as Hn, li as Un, ln as Wn, lr as Gn, lt as Kn, m as qn, mi as Jn, mn as Yn, mr as Xn, mt as Zn, n as Qn, ni as V, nn as $n, nr as er, nt as tr, o as nr, oi as rr, on as ir, or as ar, ot as or, p as sr, pi as cr, pn as lr, pt as ur, q as dr, qi as fr, qn as pr, qr as H, qt as mr, ri as hr, rn as gr, rr as _r, rt as vr, s as yr, si as br, sn as xr, sr as Sr, st as Cr, t as wr, ti as Tr, tn as Er, tr as Dr, tt as Or, u as kr, ui as Ar, un as jr, ur as Mr, ut as Nr, v as Pr, vi as Fr, vn as Ir, vr as Lr, vt as Rr, w as zr, wi as Br, wn as Vr, wr as U, wt as Hr, x as Ur, xi as Wr, xn as Gr, xr as Kr, xt as qr, y as Jr, yi as Yr, yn as Xr, yr as Zr, yt as Qr, z as $r, zi as ei, zn as ti, zr as ni, zt as ri } from "./chunks/PerfProfiler-Dnuq0tgB.js";
+import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Bt as f, C as p, Ci as m, Cn as h, Cr as g, Ct as _, D as v, Di as y, Dn as b, Dr as x, Dt as S, E as C, Ei as w, En as T, Er as E, Et as D, F as O, Fi as k, Fn as ee, Fr as A, Ft as te, G as j, Gi as ne, Gn as re, Gr as ie, Gt as ae, H as oe, Hi as se, Hn as ce, Hr as M, Ht as le, I as ue, Ii as de, In as fe, Ir as N, It as pe, J as P, Ji as me, Jn as F, Jr as I, Jt as he, K as ge, Ki as _e, Kn as L, Kr as R, Kt as ve, L as ye, Li as be, Ln as xe, Lr as Se, Lt as Ce, M as we, Mi as Te, Mn as Ee, Mr as De, Mt as Oe, N as ke, Ni as Ae, Nn as je, Nr as Me, Nt as Ne, O as Pe, Oi as Fe, On as Ie, Or as Le, Ot as Re, P as ze, Pi as Be, Pn as Ve, Pr as He, Pt as Ue, Q as We, Qn as Ge, Qr as Ke, Qt as qe, R as Je, Ri as Ye, Rn as Xe, Rr as Ze, Rt as Qe, S as $e, Si as et, Sn as tt, Sr as z, St as nt, T as rt, Ti as it, Tn as at, Tr as B, Tt as ot, U as st, Ui as ct, Un as lt, Ur as ut, Ut as dt, V as ft, Vi as pt, Vn as mt, Vr as ht, Vt as gt, W as _t, Wi as vt, Wn as yt, Wr as bt, Wt as xt, X as St, Xi as Ct, Xn as wt, Xr as Tt, Xt as Et, Y as Dt, Yi as Ot, Yn as kt, Yr as At, Yt as jt, Z as Mt, Zn as Nt, Zr as Pt, Zt as Ft, _ as It, _i as Lt, _n as Rt, _r as zt, _t as Bt, a as Vt, ai as Ht, an as Ut, ar as Wt, at as Gt, b as Kt, bi as qt, bn as Jt, br as Yt, bt as Xt, c as Zt, ci as Qt, cn as $t, cr as en, ct as tn, d as nn, di as rn, dn as an, dr as on, dt as sn, ei as cn, en as ln, er as un, et as dn, f as fn, fi as pn, fn as mn, fr as hn, ft as gn, g as _n, gi as vn, gn as yn, gr as bn, gt as xn, h as Sn, hi as Cn, hn as wn, hr as Tn, ht as En, i as Dn, ii as On, in as kn, ir as An, it as jn, j as Mn, ji as Nn, jn as Pn, jr as Fn, jt as In, k as Ln, ki as Rn, kn as zn, kr as Bn, kt as Vn, l as Hn, li as Un, ln as Wn, lr as Gn, lt as Kn, m as qn, mi as Jn, mn as Yn, mr as Xn, mt as Zn, n as Qn, ni as V, nn as $n, nr as er, nt as tr, o as nr, oi as rr, on as ir, or as ar, ot as or, p as sr, pi as cr, pn as lr, pt as ur, q as dr, qi as fr, qn as pr, qr as H, qt as mr, ri as hr, rn as gr, rr as _r, rt as vr, s as yr, si as br, sn as xr, sr as Sr, st as Cr, t as wr, ti as Tr, tn as Er, tr as Dr, tt as Or, u as kr, ui as Ar, un as jr, ur as Mr, ut as Nr, v as Pr, vi as Fr, vn as Ir, vr as Lr, vt as Rr, w as zr, wi as Br, wn as Vr, wr as U, wt as Hr, x as Ur, xi as Wr, xn as Gr, xr as Kr, xt as qr, y as Jr, yi as Yr, yn as Xr, yr as Zr, yt as Qr, z as $r, zi as ei, zn as ti, zr as ni, zt as ri } from "./chunks/PerfProfiler-CS2rjEo0.js";
 import ii, { Fragment as ai, Suspense as oi, createContext as si, lazy as ci, memo as li, use as ui, useCallback as W, useContext as di, useEffect as G, useId as fi, useLayoutEffect as pi, useMemo as K, useRef as q, useState as J, useSyncExternalStore as mi } from "react";
 import { QueryClientProvider as hi, QueryObserver as gi, replaceEqualDeep as _i, useIsFetching as vi, useMutation as yi, useQueries as bi, useQuery as xi, useQueryClient as Si } from "@tanstack/react-query";
 import { Link as Ci, Navigate as wi, Outlet as Ti, Route as Ei, Routes as Di, useHref as Oi, useLinkClickHandler as ki, useLocation as Ai, useNavigate as ji, useParams as Mi } from "react-router-dom";
@@ -20216,7 +20216,7 @@ function Rx({ list: e, listToolbar: t, listClassName: n, listTitle: r, title: i,
 	}) : h ? /* @__PURE__ */ Z("div", {
 		className: "flex flex-col flex-1 min-h-0 w-full",
 		children: [_ ? null : /* @__PURE__ */ Z("div", {
-			className: "flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted bg-elevation-ground",
+			className: "flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted",
 			children: [
 				/* @__PURE__ */ X("span", {
 					className: "min-w-0 truncate header-sm text-basic-primary",
@@ -20236,9 +20236,9 @@ function Rx({ list: e, listToolbar: t, listClassName: n, listTitle: r, title: i,
 				})
 			]
 		}), _ ? /* @__PURE__ */ Z("div", {
-			className: "flex flex-col flex-1 min-h-0 bg-elevation-ground",
+			className: "flex flex-col flex-1 min-h-0",
 			children: [/* @__PURE__ */ Z("div", {
-				className: "flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground",
+				className: "flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted",
 				children: [/* @__PURE__ */ X(z, {
 					className: "shrink-0",
 					size: U.Medium,
@@ -20259,17 +20259,17 @@ function Rx({ list: e, listToolbar: t, listClassName: n, listTitle: r, title: i,
 				children: e
 			})]
 		}) : /* @__PURE__ */ X("div", {
-			className: "flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground",
+			className: "flex flex-col flex-1 min-w-0 min-h-0",
 			children: s
 		})]
 	}) : /* @__PURE__ */ Z("div", {
 		ref: v,
 		className: "flex flex-1 min-h-0 w-full",
 		children: [/* @__PURE__ */ X("div", {
-			className: "flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground",
+			className: "flex flex-col flex-1 min-w-0 min-h-0",
 			children: s
 		}), /* @__PURE__ */ Z("div", {
-			className: "relative flex flex-col shrink-0 min-h-0 border-l border-muted bg-elevation-ground",
+			className: "relative flex flex-col shrink-0 min-h-0 border-l border-muted",
 			style: { width: w },
 			children: [
 				t,
@@ -20375,7 +20375,7 @@ function Vx({ title: e, children: t }) {
 // src/app/lib/markdownChunk.ts
 var Hx = null, Ux = !1;
 function Wx() {
-	return Hx ??= import("./chunks/markdown-renderer-DFRW9VKM.js").then((e) => e.t).then((e) => (Ux = !0, e)), Hx;
+	return Hx ??= import("./chunks/markdown-renderer-CdDZBiZ9.js").then((e) => e.t).then((e) => (Ux = !0, e)), Hx;
 }
 function Gx() {
 	return Ux;
@@ -22873,7 +22873,7 @@ var JT = li(function({ options: e, value: t, onChange: n }) {
 		className: I("flex min-w-0 items-center gap-3", i ? "flex-1" : "h-14 shrink-0 border-b border-muted pl-3 pr-2"),
 		children: [/* @__PURE__ */ X("span", {
 			id: a,
-			className: "flex-1 label-micro text-basic-primary",
+			className: "flex-1 label-micro text-basic-tertiary",
 			children: "Show:"
 		}), /* @__PURE__ */ X(Xu, {
 			items: o,
@@ -25175,7 +25175,7 @@ function NO({ sessionId: e, title: t, fallbackText: n, icon: r, header: i = !0, 
 	return /* @__PURE__ */ Z("div", {
 		className: "flex min-h-0 flex-1 flex-col",
 		children: [i ? /* @__PURE__ */ Z("div", {
-			className: "flex h-14 shrink-0 items-center gap-2 border-b border-muted bg-elevation-ground px-4",
+			className: "flex h-14 shrink-0 items-center gap-2 border-b border-muted px-4",
 			children: [
 				s ? /* @__PURE__ */ X(R, {
 					iconName: r,
@@ -25183,7 +25183,7 @@ function NO({ sessionId: e, title: t, fallbackText: n, icon: r, header: i = !0, 
 					className: "shrink-0 text-basic-secondary"
 				}) : null,
 				/* @__PURE__ */ X("p", {
-					className: I("label-small min-w-0 flex-1 truncate", b ? "text-shimmer-basic" : "text-basic-primary"),
+					className: I("header-sm min-w-0 flex-1 truncate", b ? "text-shimmer-basic" : "text-basic-primary"),
 					children: t
 				}),
 				/* @__PURE__ */ Z(z, {
@@ -25752,62 +25752,87 @@ function ik(e, t, n) {
 	]), r;
 }
 function ak({ sessionId: e, snapshot: t, behavior: n, panel: r, onPanelChange: i }) {
-	let { useSidePanelExpanded: a, useSelectedWorkset: o, useSelectedRevision: s, toggleSidePanelExpanded: c, toggleSidePanelCollapsed: l, showSidePanelList: u, selectWorkset: d, selectRevision: f } = V().stores.sessionLayoutStore, p = a(), m = N(), h = Se(), _ = o(), v = s(), y = n === void 0 ? t?.metadata.behavior ?? "orchestrator" : n, b = y === "direct" || y === "direct-with-orchestrator", x = y == null ? null : Ra(y, t?.lineage?.kind), S = x?.readOnly ?? !1, C = x?.widePanels ?? [], w = Tt(), T = C.includes("delegated"), D = qe(e, T), O = xt(e, T && y === "direct-with-orchestrator"), k = (D.data?.length ?? 0) + (w.orchestrationEnabled ? O.data?.length ?? 0 : 0), ee = q(null), A = q(null), te = ik(ee, A, `${C.join()}|${h}`), j = x == null ? null : C.includes(r) || m && x.mobilePanels.includes(r) ? r : x.defaultPanel, ne = /* @__PURE__ */ Z(Y, { children: [
-		j === "insights" ? /* @__PURE__ */ X(wE, {
+	let { useSidePanelExpanded: a, useSelectedWorkset: o, useSelectedRevision: s, toggleSidePanelExpanded: c, toggleSidePanelCollapsed: l, showSidePanelList: u, selectWorkset: d, selectRevision: f } = V().stores.sessionLayoutStore, p = a(), m = N(), h = Se(), _ = o(), v = s(), y = n === void 0 ? t?.metadata.behavior ?? "orchestrator" : n, b = y === "direct" || y === "direct-with-orchestrator", x = y == null ? null : Ra(y, t?.lineage?.kind), S = x?.readOnly ?? !1, C = x?.widePanels ?? [], w = Tt(), T = C.includes("delegated"), D = qe(e, T), O = xt(e, T && y === "direct-with-orchestrator"), k = (D.data?.length ?? 0) + (w.orchestrationEnabled ? O.data?.length ?? 0 : 0), ee = q(null), A = q(null), te = ik(ee, A, `${C.join()}|${h}|${p}`), j = q(null), ne = q(p);
+	G(() => {
+		m || ne.current === p || (ne.current = p, j.current?.querySelector(`[data-panel-focus="${p ? "back" : "focus"}"]`)?.focus({ preventScroll: !0 }));
+	}, [p, m]);
+	let re = x == null ? null : C.includes(r) || m && x.mobilePanels.includes(r) ? r : x.defaultPanel, ie = /* @__PURE__ */ Z(Y, { children: [
+		re === "insights" ? /* @__PURE__ */ X(wE, {
 			sessionId: e,
 			snapshot: t,
 			topology: b ? "direct" : "orchestrator",
 			canSteerWorkers: y === "orchestrator" && !S
 		}) : null,
-		j === "files" ? /* @__PURE__ */ X(uD, {
+		re === "files" ? /* @__PURE__ */ X(uD, {
 			sessionId: e,
 			snapshot: t,
 			revision: v,
 			readOnly: S
 		}) : null,
-		j === "delegated" && b && !S ? /* @__PURE__ */ X(zO, {
+		re === "delegated" && b && !S ? /* @__PURE__ */ X(zO, {
 			sessionId: e,
 			behavior: y
 		}) : null,
-		j === "terminal" && b && !S ? /* @__PURE__ */ X(jx, { sessionId: e }) : null,
-		j === "worksets" ? /* @__PURE__ */ X($O, {
+		re === "terminal" && b && !S ? /* @__PURE__ */ X(jx, { sessionId: e }) : null,
+		re === "worksets" ? /* @__PURE__ */ X($O, {
 			snapshot: t,
 			selected: _,
 			onSelect: d
 		}) : null,
-		j === "history" ? /* @__PURE__ */ X(WO, {
+		re === "history" ? /* @__PURE__ */ X(WO, {
 			sessionId: e,
 			selected: v,
 			onSelect: f
 		}) : null
 	] });
-	return m ? /* @__PURE__ */ X("div", {
+	if (m) return /* @__PURE__ */ X("div", {
 		className: "flex flex-col flex-1 min-h-0 bg-elevation-ground",
-		children: j === null ? /* @__PURE__ */ X(Lx, {
+		children: re === null ? /* @__PURE__ */ X(Lx, {
 			title: Hn[r],
 			bar: !0,
 			children: /* @__PURE__ */ X("div", {
 				className: "pt-14",
 				children: /* @__PURE__ */ X(FE, { children: "The panels show once the session has loaded." })
 			})
-		}) : j === "terminal" || j === "history" ? /* @__PURE__ */ X(Lx, {
-			title: Hn[j],
+		}) : re === "terminal" || re === "history" ? /* @__PURE__ */ X(Lx, {
+			title: Hn[re],
 			bar: !0,
-			children: j === "terminal" ? /* @__PURE__ */ X("div", {
+			children: re === "terminal" ? /* @__PURE__ */ X("div", {
 				className: "flex flex-col flex-1 min-h-0 pt-14",
-				children: ne
-			}) : ne
-		}) : ne
-	}) : /* @__PURE__ */ Z("div", {
+				children: ie
+			}) : ie
+		}) : ie
+	});
+	let ae = re === null ? Hn[r] : Hn[re];
+	return /* @__PURE__ */ Z("div", {
 		className: I("flex flex-col min-h-0 h-full overflow-hidden bg-elevation-ground", p ? null : "border-l border-tertiary"),
 		children: [/* @__PURE__ */ Z("div", {
-			className: "relative flex items-center gap-2 px-2 py-2 shrink-0 border-b border-muted bg-elevation-ground",
+			ref: j,
+			className: "relative flex items-center gap-2 px-2 py-2 shrink-0 border-b border-muted",
 			children: [
 				/* @__PURE__ */ X(rk, { sessionId: e }),
-				p ? /* @__PURE__ */ X("span", {
-					"aria-hidden": !0,
-					className: "size-9 shrink-0"
-				}) : /* @__PURE__ */ X(E, {
+				p ? /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ Z(z, {
+					size: U.Medium,
+					variant: B.Ghost,
+					content: g.IconLeft,
+					className: "shrink-0",
+					"data-panel-focus": "back",
+					onClick: c,
+					children: [/* @__PURE__ */ X(R, { iconName: H.Left }), "Back to chat"]
+				}), /* @__PURE__ */ Z("h2", {
+					className: "min-w-0 shrink truncate border-l border-muted pl-3",
+					children: [
+						/* @__PURE__ */ X("span", {
+							className: "header-sm text-basic-primary",
+							children: ae
+						}),
+						" ",
+						/* @__PURE__ */ X("span", {
+							className: "label-small text-basic-tertiary",
+							children: "— focused"
+						})
+					]
+				})] }) : /* @__PURE__ */ X(E, {
 					title: "Hide panel",
 					position: M.BottomRight,
 					className: "shrink-0",
@@ -25828,9 +25853,9 @@ function ak({ sessionId: e, snapshot: t, behavior: n, panel: r, onPanelChange: i
 						className: "flex min-w-0 items-center gap-2 mx-auto",
 						role: "tablist",
 						children: C.map((e) => {
-							let n = j === e, r = Ab(e, k, t?.worksets?.items.length ?? 0), a = () => {
+							let n = re === e, r = Ab(e, k, t?.worksets?.items.length ?? 0), a = () => {
 								u(!1), i(e);
-							}, o = h || !te, s = /* @__PURE__ */ X(Bl, {
+							}, o = h && !p || !te, s = /* @__PURE__ */ X(Bl, {
 								size: Rl.Medium,
 								content: o ? zl.IconOnly : void 0,
 								active: n,
@@ -25855,18 +25880,16 @@ function ak({ sessionId: e, snapshot: t, behavior: n, panel: r, onPanelChange: i
 						})
 					})
 				}),
-				p ? /* @__PURE__ */ X("span", {
-					"aria-hidden": !0,
-					className: "size-9 shrink-0"
-				}) : /* @__PURE__ */ X(E, {
-					title: "Expand panel",
+				p ? null : /* @__PURE__ */ X(E, {
+					title: "Focus panel",
 					position: M.BottomLeft,
 					className: "shrink-0",
 					children: /* @__PURE__ */ X(z, {
 						size: U.Medium,
 						variant: B.Ghost,
 						content: g.Icon,
-						"aria-label": "Expand panel",
+						"aria-label": "Focus panel",
+						"data-panel-focus": "focus",
 						onClick: c,
 						children: /* @__PURE__ */ X(R, { iconName: H.FullScreen })
 					})
@@ -25874,7 +25897,7 @@ function ak({ sessionId: e, snapshot: t, behavior: n, panel: r, onPanelChange: i
 			]
 		}), /* @__PURE__ */ X("div", {
 			className: "flex-1 min-h-0 flex flex-col",
-			children: ne
+			children: ie
 		})]
 	});
 }
@@ -26771,7 +26794,7 @@ function Lk({ sessionId: t, snapshot: n, entry: r, onShowPanel: i }) {
 								className: I("header-sm min-w-0 truncate", b ? "text-shimmer-basic" : "text-basic-primary"),
 								children: me
 							}), P ? /* @__PURE__ */ X("span", {
-								className: "tag-label min-w-0 truncate rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-2 py-[3px] text-basic-tertiary",
+								className: "tag-label min-w-0 truncate rounded-full border border-tertiary px-2 py-[3px] text-basic-tertiary",
 								title: P,
 								children: P
 							}) : null]
@@ -26870,52 +26893,58 @@ function zk(e, t) {
 	]);
 }
 function Bk() {
-	let { useSidePanelExpanded: e, useSidePanelCollapsed: t, useSidePanelAnimate: r, useSelectedThread: i, selectInsight: a, toggleSidePanelExpanded: o, toggleSidePanelCollapsed: s, showSidePanelList: c, revealSidePanel: l, setSidePanelAnimate: d, resetSessionSelection: f, unbindSidePanelProject: p, bindSidePanelProject: m } = V().stores.sessionLayoutStore, { clearAttention: h } = V().stores.attentionStore, { sessionId: g, panel: _ } = Mi(), v = ji(), y = g ?? null, b = Tt(), x = Em();
+	let { useSidePanelExpanded: e, useSidePanelCollapsed: t, useSidePanelAnimate: r, useSelectedThread: i, selectInsight: a, toggleSidePanelExpanded: o, leaveFocusedSidePanel: s, toggleSidePanelCollapsed: c, showSidePanelList: l, revealSidePanel: d, setSidePanelAnimate: f, resetSessionSelection: p, unbindSidePanelProject: m, bindSidePanelProject: h } = V().stores.sessionLayoutStore, { clearAttention: g } = V().stores.attentionStore, { sessionId: _, panel: v } = Mi(), y = ji(), b = _ ?? null, x = Tt(), S = Em();
 	u("SessionPage");
-	let { data: S = null, error: C, refetch: w } = gn(y), { data: T = null } = ur(y), E = yk(y, T?.summary.backend), D = t(), O = r(), k = e(), ee = i(), A = N(), te = T != null || S != null, j = te ? T?.summary.behavior ?? S?.metadata.behavior ?? "orchestrator" : null, ne = !te || n(b, j, T?.lineage ?? S?.lineage);
-	Ay(ne ? y : null), My(ne ? S?.active_run : null), zk(ne ? y : null, ne ? T?.summary : null);
-	let re = j == null ? null : Ra(j, S?.lineage?.kind), ie = re?.mobilePanels ?? [], ae = kr(_) ? _ : yr, oe = ae === "threads" ? "insights" : ae, se = re == null || re.mobilePanels.includes(oe) ? oe : re.defaultPanel;
+	let { data: C = null, error: w, refetch: T } = gn(b), { data: E = null } = ur(b), D = yk(b, E?.summary.backend), O = t(), k = r(), ee = e(), A = i(), te = N(), j = E != null || C != null, ne = j ? E?.summary.behavior ?? C?.metadata.behavior ?? "orchestrator" : null, re = !j || n(x, ne, E?.lineage ?? C?.lineage);
+	Ay(re ? b : null), My(re ? C?.active_run : null), zk(re ? b : null, re ? E?.summary : null);
+	let ie = ne == null ? null : Ra(ne, C?.lineage?.kind), ae = ie?.mobilePanels ?? [], oe = kr(v) ? v : yr, se = oe === "threads" ? "insights" : oe, ce = ie == null || ie.mobilePanels.includes(se) ? se : ie.defaultPanel;
 	G(() => {
-		if (!y || !kr(_)) return;
-		let e = S ? se : _ === "threads" ? oe : _;
-		e !== _ && (_ === "threads" && ee && a({ kind: "thread" }), v(fn.session(y, e), { replace: !0 }));
+		if (!b || !kr(v)) return;
+		let e = C ? ce : v === "threads" ? se : v;
+		e !== v && (v === "threads" && A && a({ kind: "thread" }), y(fn.session(b, e), { replace: !0 }));
 	}, [
-		se,
+		ce,
+		b,
 		y,
 		v,
-		_,
-		oe,
+		se,
 		a,
-		ee,
-		S
+		A,
+		C
 	]), G(() => {
-		y && h(y), f();
+		b && g(b), p();
+	}, [
+		g,
+		b,
+		p
+	]);
+	let M = q(te);
+	G(() => {
+		M.current = te;
+	}, [te]), G(() => () => {
+		M.current || s();
+	}, [b, s]);
+	let le = E ? E.summary.project_id ?? "" : null;
+	pi(() => {
+		m(), le != null && h(le);
 	}, [
 		h,
-		y,
-		f
-	]);
-	let ce = T ? T.summary.project_id ?? "" : null;
-	pi(() => {
-		p(), ce != null && m(ce);
-	}, [
-		m,
-		y,
-		ce,
-		p
+		b,
+		le,
+		m
 	]), G(() => {
-		if (O) return;
-		let e = requestAnimationFrame(() => d(!0));
+		if (k) return;
+		let e = requestAnimationFrame(() => f(!0));
 		return () => cancelAnimationFrame(e);
-	}, [O, d]);
-	let [M, le] = J(null), [ue, de] = J(null);
+	}, [k, f]);
+	let [ue, de] = J(null), [fe, pe] = J(null);
 	if (G(() => {
-		if (!M || !ue || typeof ResizeObserver > "u") return;
+		if (!ue || !fe || typeof ResizeObserver > "u") return;
 		let e = new ResizeObserver(() => {
-			M.style.setProperty("--composer-height", `${ue.offsetHeight}px`);
+			ue.style.setProperty("--composer-height", `${fe.offsetHeight}px`);
 		});
-		return e.observe(ue), () => e.disconnect();
-	}, [M, ue]), te && !ne) return /* @__PURE__ */ Z("div", {
+		return e.observe(fe), () => e.disconnect();
+	}, [ue, fe]), j && !re) return /* @__PURE__ */ Z("div", {
 		className: "flex flex-1 flex-col items-center justify-center gap-4 p-8",
 		children: [
 			/* @__PURE__ */ X("h1", {
@@ -26925,130 +26954,128 @@ function Bk() {
 			/* @__PURE__ */ X("p", { children: "Its saved behavior and history are preserved. An operator can enable orchestration to open it." }),
 			/* @__PURE__ */ X(z, {
 				onClick: () => {
-					let e = T?.summary.project_id ?? S?.metadata.project_id;
-					e ? x.newChat(e) : x.create();
+					let e = E?.summary.project_id ?? C?.metadata.project_id;
+					e ? S.newChat(e) : S.create();
 				},
 				children: "New direct chat"
 			})
 		]
 	});
-	if (!y) return /* @__PURE__ */ X(wi, {
+	if (!b) return /* @__PURE__ */ X(wi, {
 		to: fn.list(),
 		replace: !0
 	});
-	if (!kr(_)) return /* @__PURE__ */ X(wi, {
-		to: fn.session(y, yr),
+	if (!kr(v)) return /* @__PURE__ */ X(wi, {
+		to: fn.session(b, yr),
 		replace: !0
 	});
-	let fe = T?.summary.model_config_error ?? (!S && C ? C : null), pe = fe ? E(fe, () => void w()) : null, P = (e) => v(fn.session(y, e)), me = (e) => {
-		l(A), P(e);
-	}, F = k || !A && !D, he = /* @__PURE__ */ X(ak, {
-		sessionId: y,
-		snapshot: S,
-		behavior: j,
-		panel: se,
-		onPanelChange: P
-	}), ge = /* @__PURE__ */ Z("section", {
+	let P = E?.summary.model_config_error ?? (!C && w ? w : null), me = P ? D(P, () => void T()) : null, F = (e) => y(fn.session(b, e)), he = (e) => {
+		d(te), F(e);
+	}, ge = ee || !te && !O, _e = ee && !te, L = O && !_e, R = (e) => {
+		if (!_e || e.key !== "Escape" || e.defaultPrevented) return;
+		let t = e.target;
+		t instanceof Element && e.currentTarget.contains(t) && (t.closest(".xterm, [aria-expanded=\"true\"]") || (e.preventDefault(), s()));
+	}, ve = /* @__PURE__ */ X(ak, {
+		sessionId: b,
+		snapshot: C,
+		behavior: ne,
+		panel: ce,
+		onPanelChange: F
+	}), ye = /* @__PURE__ */ Z("section", {
 		className: "relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground",
 		children: [/* @__PURE__ */ Z("div", {
 			className: "relative flex flex-1 min-w-0 h-full min-h-0",
 			children: [/* @__PURE__ */ X("div", {
-				className: "flex flex-col items-center flex-1 min-w-0 h-full",
+				className: I("flex flex-col items-center flex-1 min-w-0 h-full", _e && "invisible"),
+				inert: _e,
 				children: /* @__PURE__ */ Z("div", {
-					ref: le,
+					ref: de,
 					className: "flex flex-col flex-1 min-h-0 w-full relative",
 					children: [
-						A ? null : /* @__PURE__ */ X(Lk, {
-							sessionId: y,
-							snapshot: S,
-							entry: T
+						te ? null : /* @__PURE__ */ X(Lk, {
+							sessionId: b,
+							snapshot: C,
+							entry: E
 						}),
 						/* @__PURE__ */ X(Tk, {
-							sessionId: y,
-							snapshot: S,
-							panel: F ? se : null,
-							onFocusPanel: me,
-							errorNotice: pe
+							sessionId: b,
+							snapshot: C,
+							panel: ge ? ce : null,
+							onFocusPanel: he,
+							errorNotice: me
 						}),
 						/* @__PURE__ */ X("div", {
-							ref: de,
+							ref: pe,
 							className: "pointer-events-none absolute inset-x-0 bottom-0",
 							children: /* @__PURE__ */ X(Ob, {
-								sessionId: y,
-								snapshot: S,
-								entry: T
+								sessionId: b,
+								snapshot: C,
+								entry: E
 							})
 						})
 					]
 				})
-			}), A ? null : /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X("div", {
-				className: I("relative h-full shrink-0", O && "transition-[width] duration-300 ease-out", D ? "w-[52px]" : Rk),
-				style: O ? void 0 : { transition: "none" },
-				children: D ? /* @__PURE__ */ X("div", {
+			}), te ? null : /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X("div", {
+				className: I("relative h-full shrink-0", k && "transition-[width] duration-300 ease-out", O ? "w-[52px]" : Rk),
+				style: k ? void 0 : { transition: "none" },
+				children: O ? /* @__PURE__ */ X("div", {
 					className: "absolute inset-y-0 right-0 w-[52px]",
+					inert: _e,
 					children: /* @__PURE__ */ X(Nb, {
-						sessionId: y,
-						snapshot: S,
-						behavior: j,
-						panels: re?.widePanels ?? [],
-						onOpen: s,
-						onSelect: me
+						sessionId: b,
+						snapshot: C,
+						behavior: ne,
+						panels: ie?.widePanels ?? [],
+						onOpen: c,
+						onSelect: he
 					})
 				}) : null
 			}), /* @__PURE__ */ X("div", {
-				className: I("absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0", Rk, O && "transition-transform duration-300 ease-out", D && "translate-x-full"),
-				style: O ? void 0 : { transition: "none" },
-				"aria-hidden": D,
-				inert: D,
+				className: I("absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0 outline-none", _e ? "left-0" : Rk, k && "transition-transform duration-300 ease-out", L && "translate-x-full"),
+				style: k ? void 0 : { transition: "none" },
+				"aria-hidden": L,
+				inert: L,
+				tabIndex: _e ? -1 : void 0,
+				onKeyDown: R,
 				children: /* @__PURE__ */ X("div", {
 					className: "flex flex-col flex-1 min-h-0",
 					children: /* @__PURE__ */ X("div", {
 						className: "flex-1 min-h-0",
-						children: k ? null : he
+						children: ve
 					})
 				})
 			})] })]
-		}), A ? /* @__PURE__ */ X(Xn, {
-			open: k,
+		}), te ? /* @__PURE__ */ X(Xn, {
+			open: ee,
 			onClose: o,
 			keepOnNavigate: !0,
 			chromeless: !0,
 			hideClose: !0,
-			title: Hn[se],
+			title: Hn[ce],
 			bodyClassName: "relative overflow-hidden",
 			children: /* @__PURE__ */ X(Fx, {
 				value: {
 					close: o,
-					bar: ie.length > 0 ? /* @__PURE__ */ X(jb, {
-						panel: se,
-						panels: ie,
+					bar: ae.length > 0 ? /* @__PURE__ */ X(jb, {
+						panel: ce,
+						panels: ae,
 						onPanelChange: (e) => {
-							c(!0), P(e);
+							l(!0), F(e);
 						}
 					}) : null
 				},
-				children: he
+				children: ve
 			})
-		}) : /* @__PURE__ */ X(Xn, {
-			open: k,
-			onClose: o,
-			fullScreen: !0,
-			chromeless: !0,
-			keepOnNavigate: !0,
-			children: /* @__PURE__ */ X("div", {
-				className: "flex flex-col flex-1 min-h-0",
-				children: he
-			})
-		})]
+		}) : null]
 	});
 	return /* @__PURE__ */ X(Mk, {
-		sessionId: y,
-		snapshot: S,
+		sessionId: b,
+		snapshot: C,
 		children: /* @__PURE__ */ X(oy, {
-			sessionId: y,
-			panels: ie,
-			focusPanel: me,
-			children: ge
+			sessionId: b,
+			panels: ae,
+			focusPanel: he,
+			children: ye
 		})
 	});
 }

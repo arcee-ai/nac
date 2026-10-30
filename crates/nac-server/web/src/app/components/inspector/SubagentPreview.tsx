@@ -157,13 +157,13 @@ export function SubagentPreview({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {header ? (
-        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-muted bg-elevation-ground px-4">
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-muted px-4">
           {showBehaviorIcon ? (
             <Icon iconName={icon} size={20} className="shrink-0 text-basic-secondary" />
           ) : null}
           <p
             className={cn(
-              "label-small min-w-0 flex-1 truncate",
+              "header-sm min-w-0 flex-1 truncate",
               running ? "text-shimmer-basic" : "text-basic-primary",
             )}
           >

@@ -3,7 +3,14 @@ import { InsightsNavigationProvider } from "@/app/features/insights/InsightsNavi
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { sessionAvailable } from "@/app/features/ui-policy/policy";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { Button, Modal } from "@/app/atoms";
@@ -95,6 +102,7 @@ export default function SessionPage() {
     useSelectedThread,
     selectInsight,
     toggleSidePanelExpanded,
+    leaveFocusedSidePanel,
     toggleSidePanelCollapsed,
     showSidePanelList,
     revealSidePanel,
@@ -166,6 +174,20 @@ export default function SessionPage() {
     resetSessionSelection();
   }, [clearAttention, id, resetSessionSelection]);
 
+  // A focused panel belongs to the session it was focused on: another session,
+  // or leaving the page, finds the split again. A phone's dialog is left to its
+  // own way out.
+  const mobileRef = useRef(isMobile);
+  useEffect(() => {
+    mobileRef.current = isMobile;
+  }, [isMobile]);
+  useEffect(
+    () => () => {
+      if (!mobileRef.current) leaveFocusedSidePanel();
+    },
+    [id, leaveFocusedSidePanel],
+  );
+
   const projectKey = entry ? (entry.summary.project_id ?? "") : null;
   useLayoutEffect(() => {
     unbindSidePanelProject();
@@ -234,6 +256,25 @@ export default function SessionPage() {
   // The chat marks the rows the side box shows, so none while it is hidden:
   // slid off to its rail, or on a phone, with the dialog closed.
   const sideBoxShown = expanded || (!isMobile && !collapsed);
+  // Wider than a phone, focusing keeps the box where it is and widens it over
+  // the chat, so neither remounts: going back finds the same split, rows,
+  // drafts and scroll positions. The chat stays laid out at its own width
+  // underneath, only hidden. A phone's dialog left open as the window widens
+  // is focused too, even over the rail, and Back to chat finds the rail.
+  const focused = expanded && !isMobile;
+  const railed = collapsed && !focused;
+
+  const onFocusedKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!focused || event.key !== "Escape" || event.defaultPrevented) return;
+    // Only from inside the box itself: a dialog or menu portalled out of it
+    // closes on its own Escape. A terminal takes Escape as input, and a menu
+    // still open on its trigger closes first.
+    const target = event.target;
+    if (!(target instanceof Element) || !event.currentTarget.contains(target)) return;
+    if (target.closest('.xterm, [aria-expanded="true"]')) return;
+    event.preventDefault();
+    leaveFocusedSidePanel();
+  };
 
   const sideBox = (
     <SessionSideBox
@@ -248,7 +289,10 @@ export default function SessionPage() {
   const page = (
     <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground">
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
-        <div className="flex flex-col items-center flex-1 min-w-0 h-full">
+        <div
+          className={cn("flex flex-col items-center flex-1 min-w-0 h-full", focused && "invisible")}
+          inert={focused}
+        >
           <div ref={setChatColumn} className="flex flex-col flex-1 min-h-0 w-full relative">
             {isMobile ? null : (
               <TopSingleSessionHeader sessionId={id} snapshot={snapshot} entry={entry} />
@@ -282,7 +326,7 @@ export default function SessionPage() {
               style={animateSidePanel ? undefined : { transition: "none" }}
             >
               {collapsed ? (
-                <div className="absolute inset-y-0 right-0 w-[52px]">
+                <div className="absolute inset-y-0 right-0 w-[52px]" inert={focused}>
                   <RightSidebarRail
                     sessionId={id}
                     snapshot={snapshot}
@@ -302,19 +346,21 @@ export default function SessionPage() {
           */}
             <div
               className={cn(
-                "absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0",
-                SIDE_PANEL_WIDTH,
+                "absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0 outline-none",
+                focused ? "left-0" : SIDE_PANEL_WIDTH,
                 animateSidePanel && "transition-transform duration-300 ease-out",
-                collapsed && "translate-x-full",
+                railed && "translate-x-full",
               )}
               style={animateSidePanel ? undefined : { transition: "none" }}
-              aria-hidden={collapsed}
-              inert={collapsed}
+              aria-hidden={railed}
+              inert={railed}
+              // Focusable while focused, so a click anywhere in the box keeps
+              // the keyboard, and its Escape, inside it.
+              tabIndex={focused ? -1 : undefined}
+              onKeyDown={onFocusedKeyDown}
             >
               <div className="flex flex-col flex-1 min-h-0">
-                {/* While the dialog is up it owns the panels, so this column stays
-                  empty behind the scrim instead of running them twice. */}
-                <div className="flex-1 min-h-0">{expanded ? null : sideBox}</div>
+                <div className="flex-1 min-h-0">{sideBox}</div>
               </div>
             </div>
           </>
@@ -354,17 +400,7 @@ export default function SessionPage() {
             {sideBox}
           </PanelPhoneChromeProvider>
         </Modal>
-      ) : (
-        <Modal
-          open={expanded}
-          onClose={toggleSidePanelExpanded}
-          fullScreen
-          chromeless
-          keepOnNavigate
-        >
-          <div className="flex flex-col flex-1 min-h-0">{sideBox}</div>
-        </Modal>
-      )}
+      ) : null}
     </section>
   );
 

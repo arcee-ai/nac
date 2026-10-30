@@ -175,7 +175,7 @@ export function PanelSplit({
         {/* The list is a screen of its own here, so the row above the detail is
             what leads to it, and the one above the list leads back. */}
         {!showList ? (
-          <div className="flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted bg-elevation-ground">
+          <div className="flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted">
             <span className="min-w-0 truncate header-sm text-basic-primary">{title}</span>
             {titleAction}
             <span className="flex-1" />
@@ -193,8 +193,8 @@ export function PanelSplit({
           </div>
         ) : null}
         {showList ? (
-          <div className="flex flex-col flex-1 min-h-0 bg-elevation-ground">
-            <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground">
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted">
               <Button
                 className="shrink-0"
                 size={ButtonSize.Medium}
@@ -216,17 +216,18 @@ export function PanelSplit({
             </div>
           </div>
         ) : (
-          <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
+          <div className="flex flex-col flex-1 min-w-0 min-h-0">{children}</div>
         )}
       </div>
     );
   }
 
+  // The side box paints the one surface; the columns are divided, not layered.
   return (
     <div ref={containerRef} className="flex flex-1 min-h-0 w-full">
-      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
+      <div className="flex flex-col flex-1 min-w-0 min-h-0">{children}</div>
       <div
-        className="relative flex flex-col shrink-0 min-h-0 border-l border-muted bg-elevation-ground"
+        className="relative flex flex-col shrink-0 min-h-0 border-l border-muted"
         style={{ width: listWidth }}
       >
         {listToolbar}

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
@@ -146,7 +146,22 @@ export function SessionSideBox({
     (policy.orchestrationEnabled ? (orchestrators.data?.length ?? 0) : 0);
   const tabRoom = useRef<HTMLDivElement>(null);
   const tabStrip = useRef<HTMLDivElement>(null);
-  const tabLabelsFit = useTabLabelsFit(tabRoom, tabStrip, `${widePanels.join()}|${isTablet}`);
+  const tabLabelsFit = useTabLabelsFit(
+    tabRoom,
+    tabStrip,
+    `${widePanels.join()}|${isTablet}|${expanded}`,
+  );
+  const headerRef = useRef<HTMLDivElement>(null);
+  const wasFocused = useRef(expanded);
+  // Keyboard focus follows the switch: onto the way back once the panel is
+  // focused, and back onto Focus panel once the chat returns.
+  useEffect(() => {
+    if (isMobile || wasFocused.current === expanded) return;
+    wasFocused.current = expanded;
+    headerRef.current
+      ?.querySelector<HTMLElement>(`[data-panel-focus="${expanded ? "back" : "focus"}"]`)
+      ?.focus({ preventScroll: true });
+  }, [expanded, isMobile]);
 
   // History belongs to the phone's bottom bar. On a wide screen the header
   // chip switches revisions, so a link to that panel lands on the default one.
@@ -219,6 +234,10 @@ export function SessionSideBox({
     );
   }
 
+  // Focused, the box covers the chat beside it: its header names the panel it
+  // shows and leads back, and Hide gives way to that. The chat is only covered,
+  // so going back finds it, and this box, exactly as they were.
+  const label = active === null ? SESSION_PANEL_LABEL[panel] : SESSION_PANEL_LABEL[active];
   return (
     <div
       className={cn(
@@ -226,13 +245,29 @@ export function SessionSideBox({
         expanded ? null : "border-l border-tertiary",
       )}
     >
-      <div className="relative flex items-center gap-2 px-2 py-2 shrink-0 border-b border-muted bg-elevation-ground">
+      <div
+        ref={headerRef}
+        className="relative flex items-center gap-2 px-2 py-2 shrink-0 border-b border-muted"
+      >
         <SideBoxProgress sessionId={sessionId} />
-        {/* Hide/expand live here in the split. Once fullscreen the Modal owns
-            Close at the trailing corner, and equal blanks keep the tabs centred
-            clear of it. */}
         {expanded ? (
-          <span aria-hidden className="size-9 shrink-0" />
+          <>
+            <Button
+              size={ButtonSize.Medium}
+              variant={ButtonVariant.Ghost}
+              content={ButtonContent.IconLeft}
+              className="shrink-0"
+              data-panel-focus="back"
+              onClick={toggleSidePanelExpanded}
+            >
+              <Icon iconName={IconName.Left} />
+              Back to chat
+            </Button>
+            <h2 className="min-w-0 shrink truncate border-l border-muted pl-3">
+              <span className="header-sm text-basic-primary">{label}</span>{" "}
+              <span className="label-small text-basic-tertiary">— focused</span>
+            </h2>
+          </>
         ) : (
           <Tooltip title="Hide panel" position={TooltipPosition.BottomRight} className="shrink-0">
             <Button
@@ -263,7 +298,8 @@ export function SessionSideBox({
                 showSidePanelList(false);
                 onPanelChange(name);
               };
-              const iconsOnly = isTablet || !tabLabelsFit;
+              // Focused, a tablet's box has the room for the labels again.
+              const iconsOnly = (isTablet && !expanded) || !tabLabelsFit;
               const tab = (
                 <HorizontalTabsItem
                   size={HorizontalTabsItemSize.Medium}
@@ -298,15 +334,14 @@ export function SessionSideBox({
             })}
           </div>
         </div>
-        {expanded ? (
-          <span aria-hidden className="size-9 shrink-0" />
-        ) : (
-          <Tooltip title="Expand panel" position={TooltipPosition.BottomLeft} className="shrink-0">
+        {expanded ? null : (
+          <Tooltip title="Focus panel" position={TooltipPosition.BottomLeft} className="shrink-0">
             <Button
               size={ButtonSize.Medium}
               variant={ButtonVariant.Ghost}
               content={ButtonContent.Icon}
-              aria-label="Expand panel"
+              aria-label="Focus panel"
+              data-panel-focus="focus"
               onClick={toggleSidePanelExpanded}
             >
               <Icon iconName={IconName.FullScreen} />

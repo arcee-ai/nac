@@ -63,7 +63,7 @@ export const InsightsFilter = memo(function InsightsFilter({
         isTablet ? "flex-1" : "h-14 shrink-0 border-b border-muted pl-3 pr-2",
       )}
     >
-      <span id={labelId} className="flex-1 label-micro text-basic-primary">
+      <span id={labelId} className="flex-1 label-micro text-basic-tertiary">
         Show:
       </span>
       <Select

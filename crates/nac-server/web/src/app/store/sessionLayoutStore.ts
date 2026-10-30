@@ -20,7 +20,10 @@ interface SessionLayoutState {
    * project is known. Switching projects restores that project's stored rail.
    */
   sidePanelProjectId: string | null;
-  /** Side box lifted out of the row into a full-screen dialog. */
+  /**
+   * Side box focused: on a phone, the dialog over the session; wider, the box
+   * covering the chat beside it until Back to chat. Never browser fullscreen.
+   */
   expanded: boolean;
   /**
    * Whether a narrow panel is showing its list of rows. There is no room for
@@ -169,6 +172,11 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   function toggleSidePanelExpanded(): void {
     const expanded = !getState().expanded;
     setState(expanded ? { expanded, panelList: false } : { expanded });
+  }
+
+  /** Put a focused side box back beside the chat; nothing when it is not focused. */
+  function leaveFocusedSidePanel(): void {
+    if (getState().expanded) setState({ expanded: false });
   }
 
   /** Bring the side box up as a phone's dialog, on the list of its panel's rows. */
@@ -345,6 +353,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     bindSidePanelProject,
     unbindSidePanelProject,
     toggleSidePanelExpanded,
+    leaveFocusedSidePanel,
     openSidePanelList,
     toggleSidePanelCollapsed,
     showSidePanelList,
@@ -387,6 +396,7 @@ export const {
   bindSidePanelProject,
   unbindSidePanelProject,
   toggleSidePanelExpanded,
+  leaveFocusedSidePanel,
   openSidePanelList,
   toggleSidePanelCollapsed,
   showSidePanelList,

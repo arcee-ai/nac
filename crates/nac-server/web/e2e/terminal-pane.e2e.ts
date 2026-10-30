@@ -57,9 +57,12 @@ for (const mobile of [false, true]) {
     await page.keyboard.press("Enter");
     await expect(accessible).toContainText("CTRL-OK");
     if (!mobile) {
-      await page.getByRole("button", { name: "Expand panel" }).click();
-      await expect(page.getByRole("dialog")).toBeVisible();
-      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+      // Focusing widens the same panel over the chat; the terminal stays attached.
+      await page.getByRole("button", { name: "Focus panel" }).click();
+      await expect(page.getByRole("heading", { name: "Terminal — focused" })).toBeVisible();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(accessible).toContainText("CTRL-OK");
+      await page.getByRole("button", { name: "Back to chat", exact: true }).click();
       expect((await api.getUserTerminal(session, shell.terminal_id)).alive).toBe(true);
     }
     await page.reload();

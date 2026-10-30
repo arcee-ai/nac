@@ -159,7 +159,7 @@ export function TopSingleSessionHeader({
                   rather than run under Usage. */}
               {badge ? (
                 <span
-                  className="tag-label min-w-0 truncate rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-2 py-[3px] text-basic-tertiary"
+                  className="tag-label min-w-0 truncate rounded-full border border-tertiary px-2 py-[3px] text-basic-tertiary"
                   title={badge}
                 >
                   {badge}
