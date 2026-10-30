@@ -75,6 +75,7 @@
       "katex": "0.18.2"
     },
     "@xmldom/xmldom": "^0.9.12",
-    "tinypool": "~2.1.2"
+    "tinypool": "~2.1.2",
+    "minimatch": "11.0.1"
   }
 }
