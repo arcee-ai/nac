@@ -18,9 +18,42 @@ function shortSessionId(sessionId: string): string {
   return sessionId.replace(/-/g, "").slice(0, 12);
 }
 
+// A truncated title is nowrap, so the card's fit-content width would follow the
+// whole title; the 100% bound keeps a long one inside narrow transcripts.
+const CARD_CLASS =
+  "flex w-fit max-w-[min(540px,100%)] min-w-0 items-start gap-4 rounded-interaction p-4 text-left";
+
+const FOCUS_CLASS =
+  "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2";
+
+function ForkCardContent({
+  label,
+  idLabel,
+  deleted,
+}: {
+  label: string;
+  idLabel: string;
+  deleted: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-2">
+      <Icon iconName={IconName.Scheme} size={20} aria-hidden className="shrink-0" />
+      <div className="flex min-w-0 flex-col items-start gap-3 pr-1.5">
+        <span
+          title={deleted ? undefined : label}
+          className={cn("max-w-full truncate", deleted ? "header-sm" : "label-small")}
+        >
+          {label}
+        </span>
+        <span className="text-2xs whitespace-nowrap opacity-50">{idLabel}</span>
+      </div>
+    </div>
+  );
+}
+
 /**
- * Marker under a model turn on the chat that was forked from. Live rows open
- * the fork; a deleted row stays until the user dismisses it.
+ * Marker under a model turn on the chat that was forked from. Live cards open
+ * the fork; a deleted card stays until the user dismisses it.
  */
 const ForkSessionItem: React.FC<ForkSessionItemProps> = ({
   sessionId,
@@ -34,32 +67,22 @@ const ForkSessionItem: React.FC<ForkSessionItemProps> = ({
 
   if (deleted) {
     return (
-      <div
-        className={cn(
-          "flex items-start gap-4 w-full min-w-0 pl-4 pr-2 py-4 rounded-r-interaction max-w-[540px]",
-          "border-l-2 border-tertiary bg-elevation-sublevel-variant-A text-basic-tertiary",
-        )}
-      >
-        <div className="flex flex-col gap-2 items-start min-w-0">
-          <div className="flex gap-1.5 items-start min-w-0">
-            <Icon iconName={IconName.Scheme} size={20} className="shrink-0" />
-            <span className="header-micro">{label}</span>
-            {onDismiss ? (
-              <button
-                type="button"
-                title="Dismiss"
-                aria-label="Dismiss deleted fork"
-                onClick={onDismiss}
-                className="shrink-0 inline-flex"
-              >
-                <Icon iconName={IconName.Close} size={20} />
-              </button>
-            ) : (
-              <Icon iconName={IconName.Close} size={20} className="shrink-0" />
+      <div className={cn(CARD_CLASS, "bg-elevation-sublevel-variant-A text-basic-muted")}>
+        <ForkCardContent label={label} idLabel={idLabel} deleted />
+        {onDismiss ? (
+          <button
+            type="button"
+            title="Dismiss"
+            aria-label="Dismiss deleted fork"
+            onClick={onDismiss}
+            className={cn(
+              "-m-0.5 inline-flex shrink-0 rounded-interaction p-0.5 hover:text-basic-primary",
+              FOCUS_CLASS,
             )}
-          </div>
-          <span className="code-micro opacity-75 whitespace-nowrap">{idLabel}</span>
-        </div>
+          >
+            <Icon iconName={IconName.Close} size={20} aria-hidden />
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -69,20 +92,14 @@ const ForkSessionItem: React.FC<ForkSessionItemProps> = ({
       type="button"
       onClick={onOpen}
       className={cn(
-        "flex items-start gap-4 w-full min-w-0 pl-4 pr-2 py-4 rounded-r-interaction text-left max-w-[540px]",
-        "border-l-2 border-accent-primary bg-btn-ghost-accent-highlighted text-btn-accent",
+        CARD_CLASS,
+        "bg-btn-ghost-accent-highlighted text-btn-accent",
         "hover:bg-btn-ghost-accent-highlighted-hovered",
         "active:bg-btn-ghost-accent-highlighted-pressed",
+        FOCUS_CLASS,
       )}
     >
-      <div className="flex flex-col gap-2 items-start min-w-0">
-        <div className="flex gap-1.5 items-start min-w-0">
-          <Icon iconName={IconName.Scheme} size={20} className="shrink-0" />
-          <span className="header-micro">{label}</span>
-          <Icon iconName={IconName.Right} size={20} className="shrink-0" />
-        </div>
-        <span className="code code-micro opacity-75 whitespace-nowrap">{idLabel}</span>
-      </div>
+      <ForkCardContent label={label} idLabel={idLabel} deleted={false} />
     </button>
   );
 };

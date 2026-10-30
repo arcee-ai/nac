@@ -133,6 +133,12 @@
   font-size: 0.75rem;
   line-height: 1rem;
 }
+/* Figma "Text/Text-2xs": regular 11/14, the id under a fork card. */
+.text-2xs {
+  font-family: Inter;
+  font-size: 0.6875rem;
+  line-height: 0.875rem;
+}
 
 .paragraph-big {
   font-family: Inter;
