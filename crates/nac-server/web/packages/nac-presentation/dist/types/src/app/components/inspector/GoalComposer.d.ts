@@ -5,7 +5,7 @@ interface GoalFlagProps {
     onOpen: () => void;
 }
 /** Flag at the end of the message pill. Opens the inline goal editor. */
-export declare function GoalFlag({ sessionId, compact, className, onOpen }: GoalFlagProps): import("react").JSX.Element;
+export declare function GoalFlag({ sessionId, compact, className, onOpen, }: GoalFlagProps): import("react").JSX.Element;
 interface GoalEditorProps {
     sessionId: string;
     compact: boolean;

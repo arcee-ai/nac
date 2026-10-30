@@ -26,7 +26,12 @@ import {
 import { cn } from "@/app/lib/cn";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useClearGoal, useCreateGoal, useSessionGoal, useUpdateGoal } from "@/app/services/queries";
+import {
+  useClearGoal,
+  useCreateGoal,
+  useSessionGoal,
+  useUpdateGoal,
+} from "@/app/services/queries";
 import type { GoalStatus, SessionGoalRecord } from "@/app/types/api";
 
 const GOAL_HINT =
@@ -49,6 +54,9 @@ function sliderPosition(value: number): number {
   return Math.min(BUDGET_MAX, Math.max(BUDGET_MIN, value));
 }
 
+/** What the amount field accepts: larger values cannot be sent exactly. */
+const BUDGET_INPUT_RULE = `a whole number of tokens up to ${Number.MAX_SAFE_INTEGER.toLocaleString("en-US")}`;
+
 /**
  * A typed amount as a whole number of tokens, or null when it is not one. The
  * server owns which amounts are allowed and says so when it refuses one.
@@ -61,7 +69,10 @@ function parseBudget(text: string): number | null {
 }
 
 /** Whether a stored goal still holds the fields an edit was started from. */
-function sameEditableFields(left: SessionGoalRecord, right: SessionGoalRecord): boolean {
+function sameEditableFields(
+  left: SessionGoalRecord,
+  right: SessionGoalRecord,
+): boolean {
   return (
     left.goal_id === right.goal_id &&
     left.objective === right.objective &&
@@ -77,7 +88,12 @@ interface GoalFlagProps {
 }
 
 /** Flag at the end of the message pill. Opens the inline goal editor. */
-export function GoalFlag({ sessionId, compact, className, onOpen }: GoalFlagProps) {
+export function GoalFlag({
+  sessionId,
+  compact,
+  className,
+  onOpen,
+}: GoalFlagProps) {
   const goalQuery = useSessionGoal(sessionId, true);
   const goal = goalQuery.data ?? null;
   const active = goal?.status === "active";
@@ -87,15 +103,21 @@ export function GoalFlag({ sessionId, compact, className, onOpen }: GoalFlagProp
       className={className}
       position={TooltipPosition.TopCenter}
       title={
-        goal ? `Current Goal: ${statusLabel(goal.status)} - Click To Edit` : "Set Durable Goal"
+        goal
+          ? `Current Goal: ${statusLabel(goal.status)} - Click To Edit`
+          : "Set Durable Goal"
       }
       description={goal ? goal.objective : GOAL_HINT}
     >
       <ComposerIconButton
         compact={compact}
         type="button"
-        variant={active ? ButtonVariant.GhostHighlightedAccent : ButtonVariant.Ghost}
-        aria-label={goal ? `Edit goal: ${statusLabel(goal.status)}` : "Set durable goal"}
+        variant={
+          active ? ButtonVariant.GhostHighlightedAccent : ButtonVariant.Ghost
+        }
+        aria-label={
+          goal ? `Edit goal: ${statusLabel(goal.status)}` : "Set durable goal"
+        }
         onClick={onOpen}
       >
         <Icon iconName={IconName.Flag} size={24} />
@@ -129,7 +151,9 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
   const goal = goalQuery.data ?? null;
   const [objective, setObjective] = useState(goal?.objective ?? "");
   const [budgetOn, setBudgetOn] = useState(goal?.token_budget != null);
-  const [budgetText, setBudgetText] = useState(String(goal?.token_budget ?? BUDGET_DEFAULT));
+  const [budgetText, setBudgetText] = useState(
+    String(goal?.token_budget ?? BUDGET_DEFAULT),
+  );
   const budgetEdited = useRef(false);
   const objectiveEdited = useRef(false);
   /** The goal this edit started from, null when the editor opened empty. */
@@ -159,7 +183,8 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
     element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT_PX)}px`;
   }, [objective]);
 
-  const busy = createGoal.isPending || updateGoal.isPending || clearGoal.isPending;
+  const busy =
+    createGoal.isPending || updateGoal.isPending || clearGoal.isPending;
   const editingExisting = goal != null && goal.status !== "complete";
   const fail = (prefix: string, error: unknown) => {
     toast.error(`${prefix}: ${errorMessage(toRunError(error))}`);
@@ -171,7 +196,7 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
       return;
     }
     if (budgetInvalid) {
-      toast.error("Enter the token budget as a whole number of tokens.");
+      toast.error(`Enter the token budget as ${BUDGET_INPUT_RULE}.`);
       return;
     }
     const tokenBudget = budgetOn ? budgetAmount : null;
@@ -181,7 +206,11 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
     // server's version check refuse the stale overwrite.
     const base = loaded.current;
     const target =
-      base == null ? null : goal != null && sameEditableFields(goal, base) ? goal : base;
+      base == null
+        ? null
+        : goal != null && sameEditableFields(goal, base)
+          ? goal
+          : base;
     try {
       let saved: SessionGoalRecord;
       if (target != null && editingExisting) {
@@ -208,7 +237,10 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
       objectiveEdited.current = false;
       if (closeAfter) onClose();
     } catch (error) {
-      fail(editingExisting ? "Unable to update goal" : "Unable to create goal", error);
+      fail(
+        editingExisting ? "Unable to update goal" : "Unable to create goal",
+        error,
+      );
     }
   };
 
@@ -260,9 +292,13 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
             <span className="shrink-0 text-micro font-semibold text-basic-primary">
               Current Goal
             </span>
-            <Badge text={statusLabel(goal.status)} color={badgeColor(goal.status)} />
+            <Badge
+              text={statusLabel(goal.status)}
+              color={badgeColor(goal.status)}
+            />
             <span className="min-w-0 flex-1 truncate text-micro text-basic-secondary">
-              {goal.tokens_used.toLocaleString()} Tokens, {Math.floor(goal.time_used_ms / 1000)}s
+              {goal.tokens_used.toLocaleString()} Tokens,{" "}
+              {Math.floor(goal.time_used_ms / 1000)}s
             </span>
             <Button
               type="button"
@@ -296,14 +332,20 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
                 setBudgetOn(checked);
               }}
             />
-            <span className="label-micro shrink-0 text-basic-primary">Token Budget</span>
+            <span className="label-micro shrink-0 text-basic-primary">
+              Token Budget
+            </span>
             {budgetOn ? null : (
-              <span className="label-micro shrink-0 text-basic-muted">No token limit</span>
+              <span className="label-micro shrink-0 text-basic-muted">
+                No token limit
+              </span>
             )}
           </div>
           {budgetOn ? (
             <>
-              <p className="text-micro text-basic-secondary">{BUDGET_EXPLANATION}</p>
+              <p className="text-micro text-basic-secondary">
+                {BUDGET_EXPLANATION}
+              </p>
               <div className="flex items-center gap-3">
                 <Input
                   className="w-[132px] shrink-0"
@@ -342,7 +384,7 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
                 )}
               >
                 {budgetInvalid
-                  ? "Enter a whole number of tokens."
+                  ? `Enter ${BUDGET_INPUT_RULE}.`
                   : budgetAmount !== null && budgetAmount > BUDGET_MAX
                     ? `${budgetAmount.toLocaleString()} tokens, above the slider's range and kept as entered.`
                     : `${(budgetAmount ?? 0).toLocaleString()} tokens.`}
@@ -412,12 +454,27 @@ export function GoalEditor({ sessionId, compact, onClose }: GoalEditorProps) {
 function cornerAction(
   goal: SessionGoalRecord | null,
   saveDisabled: boolean,
-): { kind: "save" | "pause" | "resume"; label: string; icon: IconName; disabled: boolean } {
+): {
+  kind: "save" | "pause" | "resume";
+  label: string;
+  icon: IconName;
+  disabled: boolean;
+} {
   if (goal?.status === "active") {
-    return { kind: "pause", label: "Pause goal", icon: IconName.Pause, disabled: false };
+    return {
+      kind: "pause",
+      label: "Pause goal",
+      icon: IconName.Pause,
+      disabled: false,
+    };
   }
   if (goal && goal.status !== "complete") {
-    return { kind: "resume", label: "Resume goal", icon: IconName.Play, disabled: false };
+    return {
+      kind: "resume",
+      label: "Resume goal",
+      icon: IconName.Play,
+      disabled: false,
+    };
   }
   return {
     kind: "save",

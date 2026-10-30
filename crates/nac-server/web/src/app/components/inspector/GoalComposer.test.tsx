@@ -1,7 +1,13 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,10 +26,18 @@ const fakes = {
   clearGoal: vi.fn(),
 };
 
-vi.spyOn(api, "getGoal").mockImplementation((...args) => fakes.getGoal(...args));
-vi.spyOn(api, "createGoal").mockImplementation((...args) => fakes.createGoal(...args));
-vi.spyOn(api, "updateGoal").mockImplementation((...args) => fakes.updateGoal(...args));
-vi.spyOn(api, "clearGoal").mockImplementation((...args) => fakes.clearGoal(...args));
+vi.spyOn(api, "getGoal").mockImplementation((...args) =>
+  fakes.getGoal(...args),
+);
+vi.spyOn(api, "createGoal").mockImplementation((...args) =>
+  fakes.createGoal(...args),
+);
+vi.spyOn(api, "updateGoal").mockImplementation((...args) =>
+  fakes.updateGoal(...args),
+);
+vi.spyOn(api, "clearGoal").mockImplementation((...args) =>
+  fakes.clearGoal(...args),
+);
 
 function goal(overrides: Partial<SessionGoalRecord> = {}): SessionGoalRecord {
   return {
@@ -60,7 +74,11 @@ function mount(value: SessionGoalRecord | null) {
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ToastProvider>
-          <GoalEditor sessionId={SESSION_ID} compact={false} onClose={() => {}} />
+          <GoalEditor
+            sessionId={SESSION_ID}
+            compact={false}
+            onClose={() => {}}
+          />
         </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -68,17 +86,24 @@ function mount(value: SessionGoalRecord | null) {
   return client;
 }
 
-const objectiveField = () => screen.getByRole("textbox", { name: "Goal objective" });
-const amountField = () => screen.getByRole("textbox", { name: "Token budget amount" });
+const objectiveField = () =>
+  screen.getByRole("textbox", { name: "Goal objective" });
+const amountField = () =>
+  screen.getByRole("textbox", { name: "Token budget amount" });
 
 beforeEach(() => {
   fakes.getGoal.mockReset().mockResolvedValue(null);
   fakes.createGoal
     .mockReset()
     .mockImplementation(async (_session, payload) =>
-      goal({ objective: payload.objective, token_budget: payload.token_budget ?? null }),
+      goal({
+        objective: payload.objective,
+        token_budget: payload.token_budget ?? null,
+      }),
     );
-  fakes.updateGoal.mockReset().mockImplementation(async () => goal({ version: 5 }));
+  fakes.updateGoal
+    .mockReset()
+    .mockImplementation(async () => goal({ version: 5 }));
   fakes.clearGoal.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
@@ -100,29 +125,39 @@ afterEach(() => {
 describe("goal editor token budget", () => {
   it("starts with no token limit, hides the amount, and omits the budget", async () => {
     mount(null);
-    expect(screen.getByRole("switch", { name: "Token budget" }).getAttribute("aria-checked")).toBe(
-      "false",
-    );
+    expect(
+      screen
+        .getByRole("switch", { name: "Token budget" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
     expect(screen.getByText("No token limit")).toBeTruthy();
-    expect(screen.queryByRole("textbox", { name: "Token budget amount" })).toBeNull();
+    expect(
+      screen.queryByRole("textbox", { name: "Token budget amount" }),
+    ).toBeNull();
     expect(screen.queryByRole("slider")).toBeNull();
 
     fireEvent.change(objectiveField(), { target: { value: "Finish MVP" } });
     fireEvent.click(screen.getByRole("button", { name: "Create goal" }));
 
     await waitFor(() => expect(fakes.createGoal).toHaveBeenCalledTimes(1));
-    expect(fakes.createGoal.mock.calls[0]?.[1]).toStrictEqual({ objective: "Finish MVP" });
+    expect(fakes.createGoal.mock.calls[0]?.[1]).toStrictEqual({
+      objective: "Finish MVP",
+    });
   });
 
   it("explains an enabled budget as billable usage across the goal's runs", () => {
     mount(null);
     fireEvent.click(screen.getByRole("switch", { name: "Token budget" }));
 
-    const explanation = screen.getByText(/total billable tokens all of this goal's runs/);
+    const explanation = screen.getByText(
+      /total billable tokens all of this goal's runs/,
+    );
     expect(explanation.textContent).toContain("not the model's context size");
     expect(explanation.textContent).toContain("not a cost guarantee");
     expect(amountField()).toBeTruthy();
-    expect(screen.getByRole("slider", { name: "Token budget slider" })).toBeTruthy();
+    expect(
+      screen.getByRole("slider", { name: "Token budget slider" }),
+    ).toBeTruthy();
     expect(screen.queryByText("No token limit")).toBeNull();
   });
 
@@ -134,7 +169,9 @@ describe("goal editor token budget", () => {
 
     const slider = screen.getByRole("slider", { name: "Token budget slider" });
     expect(slider.getAttribute("aria-valuenow")).toBe("1000000");
-    expect(screen.getByText(/above the slider's range and kept as entered/)).toBeTruthy();
+    expect(
+      screen.getByText(/above the slider's range and kept as entered/),
+    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Create goal" }));
     await waitFor(() =>
@@ -146,9 +183,11 @@ describe("goal editor token budget", () => {
 
     cleanup();
     mount(goal({ objective: "Finish MVP", token_budget: 2_500_000 }));
-    expect(screen.getByRole("switch", { name: "Token budget" }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
+    expect(
+      screen
+        .getByRole("switch", { name: "Token budget" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
     expect(amountField()).toHaveProperty("value", "2500000");
   });
 
@@ -158,15 +197,30 @@ describe("goal editor token budget", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Token budget" }));
     fireEvent.change(amountField(), { target: { value: "lots" } });
 
-    expect(screen.getByRole("alert").textContent).toBe("Enter a whole number of tokens.");
-    expect(screen.getByRole("button", { name: "Create goal" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Enter a whole number of tokens up to 9,007,199,254,740,991.",
+    );
+    expect(screen.getByRole("button", { name: "Create goal" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+
+    // A whole number too large to send exactly says why, not "not a number".
+    fireEvent.change(amountField(), {
+      target: { value: "9223372036854775808" },
+    });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Enter a whole number of tokens up to 9,007,199,254,740,991.",
+    );
   });
 
   it("leaves a budget outside the slider range alone on an objective-only edit", async () => {
     mount(goal({ token_budget: 5_000_000 }));
     expect(amountField()).toHaveProperty("value", "5000000");
 
-    fireEvent.change(objectiveField(), { target: { value: "Ship safely, then document" } });
+    fireEvent.change(objectiveField(), {
+      target: { value: "Ship safely, then document" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(fakes.updateGoal).toHaveBeenCalledTimes(1));
@@ -181,9 +235,14 @@ describe("goal editor token budget", () => {
 describe("goal editor versioning", () => {
   it("uses the current version when only run accounting moved", async () => {
     const client = mount(goal());
-    client.setQueryData(queryKeys.sessionGoal(SESSION_ID), goal({ version: 6, tokens_used: 900 }));
+    client.setQueryData(
+      queryKeys.sessionGoal(SESSION_ID),
+      goal({ version: 6, tokens_used: 900 }),
+    );
 
-    fireEvent.change(objectiveField(), { target: { value: "Ship safely, then document" } });
+    fireEvent.change(objectiveField(), {
+      target: { value: "Ship safely, then document" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
@@ -219,6 +278,8 @@ describe("goal editor versioning", () => {
         objective: "My stale edit",
       }),
     );
-    expect(await screen.findByText(/goal version conflict: expected 4, current 6/)).toBeTruthy();
+    expect(
+      await screen.findByText(/goal version conflict: expected 4, current 6/),
+    ).toBeTruthy();
   });
 });
