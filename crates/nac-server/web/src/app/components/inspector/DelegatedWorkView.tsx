@@ -1,7 +1,7 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -140,6 +140,19 @@ export function DelegatedWorkView({
   useEffect(() => {
     if (selectedKey == null && newestKey != null) selectSubagent(sessionId, newestKey);
   }, [newestKey, selectSubagent, selectedKey, sessionId]);
+
+  // The composer floats over the preview, whose run-out under the last
+  // message has to clear it however tall it grows.
+  const [detailColumn, setDetailColumn] = useState<HTMLDivElement | null>(null);
+  const [composerLayer, setComposerLayer] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!detailColumn || !composerLayer || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      detailColumn.style.setProperty("--composer-height", `${composerLayer.offsetHeight}px`);
+    });
+    observer.observe(composerLayer);
+    return () => observer.disconnect();
+  }, [detailColumn, composerLayer]);
 
   // A delegated session is in the session list too, with the name and pin given
   // to it there.
@@ -298,7 +311,7 @@ export function DelegatedWorkView({
         )
       }
     >
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={setDetailColumn} className="relative flex min-h-0 flex-1 flex-col">
         {selected ? (
           <>
             <SubagentPreview
@@ -309,7 +322,7 @@ export function DelegatedWorkView({
               header={!narrow}
               onOpen={() => openDetail(selected.id)}
             />
-            <div className="shrink-0 px-4 pt-4 pb-8">
+            <div ref={setComposerLayer} className="pointer-events-none absolute inset-x-0 bottom-0">
               <SubagentComposer
                 key={`${selected.mode}:${selected.id}`}
                 parentSessionId={sessionId}
@@ -317,6 +330,7 @@ export function DelegatedWorkView({
                 permissionSessionId={selected.id}
                 permissionBehavior={selected.mode === "orchestrator" ? "orchestrator" : "direct"}
                 showPermissions={false}
+                floating
               />
             </div>
           </>

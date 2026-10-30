@@ -1171,6 +1171,10 @@
     height: calc(var(--spacing) * 16);
   }
 
+[data-nac-runtime]:is(.h-60), [data-nac-runtime] .h-60 {
+    height: calc(var(--spacing) * 60);
+  }
+
 [data-nac-runtime]:is(.h-\[1px\]), [data-nac-runtime] .h-\[1px\] {
     height: 1px;
   }
@@ -1379,6 +1383,10 @@
     min-height: calc(var(--spacing) * 14);
   }
 
+[data-nac-runtime]:is(.min-h-16), [data-nac-runtime] .min-h-16 {
+    min-height: calc(var(--spacing) * 16);
+  }
+
 [data-nac-runtime]:is(.min-h-32), [data-nac-runtime] .min-h-32 {
     min-height: calc(var(--spacing) * 32);
   }
@@ -1485,10 +1493,6 @@
 
 [data-nac-runtime]:is(.w-\[52px\]), [data-nac-runtime] .w-\[52px\] {
     width: 52px;
-  }
-
-[data-nac-runtime]:is(.w-\[60px\]), [data-nac-runtime] .w-\[60px\] {
-    width: 60px;
   }
 
 [data-nac-runtime]:is(.w-\[180px\]), [data-nac-runtime] .w-\[180px\] {
@@ -1741,10 +1745,6 @@
 
 [data-nac-runtime]:is(.min-w-\[220px\]), [data-nac-runtime] .min-w-\[220px\] {
     min-width: 220px;
-  }
-
-[data-nac-runtime]:is(.min-w-fit), [data-nac-runtime] .min-w-fit {
-    min-width: fit-content;
   }
 
 [data-nac-runtime]:is(.min-w-full), [data-nac-runtime] .min-w-full {
@@ -2344,6 +2344,10 @@
     border-radius: .25rem !important;
   }
 
+[data-nac-runtime]:is(.\!rounded-\[4px\]), [data-nac-runtime] .\!rounded-\[4px\] {
+    border-radius: 4px !important;
+  }
+
 [data-nac-runtime]:is(.\!rounded-\[8px\]), [data-nac-runtime] .\!rounded-\[8px\] {
     border-radius: 8px !important;
   }
@@ -2388,12 +2392,16 @@
     border-radius: 12px;
   }
 
-[data-nac-runtime]:is(.rounded-\[20px\]), [data-nac-runtime] .rounded-\[20px\] {
-    border-radius: 20px;
+[data-nac-runtime]:is(.rounded-\[16px\]), [data-nac-runtime] .rounded-\[16px\] {
+    border-radius: 16px;
   }
 
 [data-nac-runtime]:is(.rounded-\[24px\]), [data-nac-runtime] .rounded-\[24px\] {
     border-radius: 24px;
+  }
+
+[data-nac-runtime]:is(.rounded-\[32px\]), [data-nac-runtime] .rounded-\[32px\] {
+    border-radius: 32px;
   }
 
 [data-nac-runtime]:is(.rounded-\[inherit\]), [data-nac-runtime] .rounded-\[inherit\] {
@@ -3266,6 +3274,10 @@
     padding-bottom: 184px;
   }
 
+[data-nac-runtime]:is(.pb-\[calc\(var\(--composer-height\,0px\)_\+_40px\)\]),[data-nac-runtime] .pb-\[calc\(var\(--composer-height\,0px\)_\+_40px\)\] {
+    padding-bottom: calc(var(--composer-height, 0px) + 40px);
+  }
+
 [data-nac-runtime]:is(.pb-\[max\(180px\,calc\(var\(--composer-height\,0px\)_\+_40px\)\)\]),[data-nac-runtime] .pb-\[max\(180px\,calc\(var\(--composer-height\,0px\)_\+_40px\)\)\] {
     padding-bottom: max(180px, calc(var(--composer-height, 0px) + 40px));
   }
@@ -3561,6 +3573,10 @@
     color: var(--color-text-accent-primary);
   }
 
+[data-nac-runtime]:is(.text-accent-tertiary), [data-nac-runtime] .text-accent-tertiary {
+    color: var(--color-text-accent-tertiary);
+  }
+
 [data-nac-runtime]:is(.text-basic-muted), [data-nac-runtime] .text-basic-muted {
     color: var(--color-text-basic-muted);
   }
@@ -3852,11 +3868,6 @@
     box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow) !important;
   }
 
-[data-nac-runtime]:is(.\!shadow-composer-send), [data-nac-runtime] .\!shadow-composer-send {
-    --nac-presentation-tw-shadow: var(--shadow-composer-send) !important;
-    box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow) !important;
-  }
-
 [data-nac-runtime]:is(.shadow), [data-nac-runtime] .shadow {
     --nac-presentation-tw-shadow: 0 1px 3px 0 var(--nac-presentation-tw-shadow-color, #0000001a), 0 1px 2px -1px var(--nac-presentation-tw-shadow-color, #0000001a);
     box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
@@ -3879,11 +3890,6 @@
 
 [data-nac-runtime]:is(.shadow-lg), [data-nac-runtime] .shadow-lg {
     --nac-presentation-tw-shadow: var(--shadow-lg);
-    box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
-  }
-
-[data-nac-runtime]:is(.shadow-md), [data-nac-runtime] .shadow-md {
-    --nac-presentation-tw-shadow: var(--shadow-md);
     box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
   }
 
@@ -5036,8 +5042,8 @@
     width: 100%;
   }
 
-[data-nac-runtime]:is(.\[\&\>\*\]\:max-w-\[640px\] > *), [data-nac-runtime] .\[\&\>\*\]\:max-w-\[640px\] > * {
-    max-width: 640px;
+[data-nac-runtime]:is(.\[\&\>\*\]\:max-w-\[656px\] > *), [data-nac-runtime] .\[\&\>\*\]\:max-w-\[656px\] > * {
+    max-width: 656px;
   }
 
 [data-nac-runtime]:is(.\[\&\>\*\]\:flex-1 > *), [data-nac-runtime] .\[\&\>\*\]\:flex-1 > * {
@@ -5456,7 +5462,6 @@
   --shadow-3xl: 0 1px 0 0 #3036360a, 0 2px 12px 0 #3036360a,
     0 1px 8px 0 #3036361a, 0 10px 36px 0 #3036363d,
     0 0 0 1px #3036360a;
-  --shadow-composer-send: var(--shadow-xl);
   --shadow-convex: 0 -1px 0 0 #3036360f inset, 0 0 0 1px #3036361a inset;
   --shadow-concave: 0 1px 0 0 #3036360f inset, 0 0 0 1px #3036361a inset;
   --shadow-range-knob: 0 1px 2px 0 #12243433, 0 0 1px 1px #0000001a;
@@ -5693,8 +5698,6 @@
     0 12px 42px 0 #00000073, 0 1px 0 0 #ffffff08 inset;
   --shadow-3xl: 0 0 0 1px #ffffff1f inset, 0 4px 16px 0 #00000080,
     0 14px 46px 0 #00000080, 0 1px 0 0 #ffffff08 inset;
-  --shadow-composer-send: 0 3px 10px 0 #00000073, 0 9px 36px 0 #00000073,
-    0 1px 0 0 #ffffff08 inset;
   --shadow-convex: 0 0 0 1px #ffffff1a inset, 0 1px 0 0 #ffffff08 inset;
   --shadow-concave: 0 0 0 1px #ffffff1a inset, 0 -1px 0 0 #ffffff08 inset;
   --shadow-range-knob: 0 1px 2px 0 #12243433, 0 0 1px 1px #0000001a;
