@@ -211,6 +211,13 @@ impl SessionService {
     pub async fn user_input_at(&self, message_idx: usize) -> Result<String> {
         let messages = self.store_backed_transcript().await?;
         match messages.get(message_idx) {
+            // A goal continuation is NAC's own control message. Sending its
+            // label again would turn it into ordinary human input.
+            Some(Message::User { content }) if commands::is_goal_continuation_envelope(content) => {
+                Err(anyhow::anyhow!(
+                    "message {message_idx} is a durable goal continuation, not user input, and cannot be sent again"
+                ))
+            }
             Some(Message::User { content }) => Ok(commands::display_prompt_from_message(content)),
             Some(_) => Err(anyhow::anyhow!(
                 "message {message_idx} is not a user message, and only a user message can be sent again"

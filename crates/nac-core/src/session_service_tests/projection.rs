@@ -900,3 +900,89 @@ async fn shutdown_stops_run_admission_without_erasing_durable_queued_input() {
     assert_eq!(retained[0].status, crate::store::InboxStatus::Pending);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+#[tokio::test]
+async fn goal_continuation_projects_its_objective_without_control_instructions() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        serde_json::json!({
+            "status": "completed",
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": "step"}]}],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+        })
+        .to_string(),
+    )]);
+    let client = ModelClient::new_for_test_server(server.base_url.clone());
+    let session_id = "session-goal-objective-display";
+    let (parts, store_path) =
+        test_direct_active_service("goal_objective_display", session_id, client);
+    let service = parts.service;
+    let mut events = service.event_bus.subscribe();
+
+    // The budget is reached by the single scripted run, which stops the loop
+    // after exactly one continuation.
+    let created = service
+        .create_direct_goal("ship the embedded MVP", Some(15))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let goal = service.direct_goal().unwrap().unwrap();
+            if !service.has_active_operation()
+                && goal.status == crate::store::GoalStatus::BudgetLimited
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the continuation should settle against its budget");
+
+    let mut previews = Vec::new();
+    while let Ok(envelope) = events.try_recv() {
+        if let SessionEvent::RunStarted {
+            prompt_preview,
+            submitted_user_message,
+            ..
+        } = envelope.event
+        {
+            // A continuation is not human input and carries no submitted bubble.
+            assert!(submitted_user_message.is_none());
+            previews.push(prompt_preview);
+        }
+    }
+    assert_eq!(previews, vec!["[goal: ship the embedded MVP]".to_string()]);
+
+    // The model still reads the full control message...
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    let body = String::from_utf8(requests[0].body.clone()).unwrap();
+    assert!(body.contains("ship the embedded MVP"));
+    assert!(body.contains("Use get_goal when you need current accounting"));
+
+    // ...and the durable transcript keeps it verbatim with the goal identity,
+    // while every display read recovers only the objective.
+    let transcript = service.store_backed_transcript().await.unwrap();
+    let message_idx = transcript
+        .iter()
+        .position(|message| matches!(message, Message::User { .. }))
+        .expect("the continuation committed its control message");
+    let Message::User { content } = &transcript[message_idx] else {
+        unreachable!();
+    };
+    let continuation = commands::parse_goal_continuation(content).unwrap();
+    assert_eq!(continuation.goal_id, created.goal_id);
+    assert_eq!(continuation.objective, "ship the embedded MVP");
+    let display = commands::display_prompt_from_message(content);
+    assert_eq!(display, "[goal: ship the embedded MVP]");
+    assert!(!display.contains("get_goal") && !display.contains("nac_goal_continuation"));
+
+    // Resending would manufacture human input from NAC's control message.
+    let error = service.user_input_at(message_idx).await.unwrap_err();
+    assert!(error.to_string().contains("durable goal continuation"));
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}

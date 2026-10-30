@@ -613,12 +613,12 @@ impl SessionService {
             // Preview what the user typed, not the expanded prompt: this
             // text feeds the events feed, history subtitles, and revision
             // labels, where `<invoked_skills>`/skill-body fragments would
-            // leak.
-            prompt_preview: if goal_continuation {
-                "Durable goal continuation".to_string()
-            } else {
-                prompt_preview(&commands::display_prompt_from_message(expanded_prompt), 160)
-            },
+            // leak. A goal continuation previews its objective without the
+            // control instructions around it.
+            prompt_preview: prompt_preview(
+                &commands::display_prompt_from_message(expanded_prompt),
+                160,
+            ),
             submitted_user_message,
             started_at_epoch_ms: submitted_at_epoch_ms,
         };

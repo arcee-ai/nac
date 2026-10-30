@@ -9,6 +9,10 @@ import type {
   TokenUsage,
 } from "@/app/types/api";
 import { parseDelegatedCompletion } from "@/app/features/delegation/completion";
+import {
+  isGoalContinuationEnvelope,
+  parseGoalContinuation,
+} from "@/app/features/goals/continuation";
 
 export function shortId(id: string | null | undefined): string {
   if (!id) return "--";
@@ -136,12 +140,9 @@ export function displayPromptFromMessageText(content: string | null | undefined)
   const mcpPrompt = invokedMcpPromptDisplayPrompt(text);
   if (mcpPrompt != null) return mcpPrompt;
   const normalized = text.replaceAll("\r\n", "\n");
-  if (
-    normalized.startsWith('<nac_goal_continuation goal_id="') &&
-    normalized.endsWith("\n</nac_goal_continuation>")
-  ) {
-    return "[durable goal continuation]";
-  }
+  const continuation = parseGoalContinuation(normalized);
+  if (continuation) return `[goal: ${continuation.objective}]`;
+  if (isGoalContinuationEnvelope(normalized)) return "[durable goal continuation]";
   const completion = parseDelegatedCompletion(normalized);
   if (completion) {
     const type = completion.kind === "coding-agent" ? "traditional child" : "managed orchestrator";

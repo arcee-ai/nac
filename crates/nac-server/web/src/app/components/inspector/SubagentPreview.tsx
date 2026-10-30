@@ -12,6 +12,7 @@ import {
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
+import { GoalContinuationCard } from "@/app/features/goals/presentation/GoalContinuationCard";
 import { ChildTranscriptScope } from "@/app/features/insights/transcript/ChildTranscriptScope";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useDelegatedPreviewStream } from "@/app/hooks/useDelegatedPreviewStream";
@@ -34,7 +35,7 @@ function ignoreThread(): void {}
 function lastUserText(turns: TranscriptTurn[]): string | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
-    if (turn.kind === "delegated-completion") return null;
+    if (turn.kind === "delegated-completion" || turn.kind === "goal-continuation") return null;
     if (turn.kind === "user") return turn.text;
   }
   return null;
@@ -220,6 +221,9 @@ export function SubagentPreview({
               {turns.map((turn, index) => {
                 if (turn.kind === "delegated-completion") {
                   return <DelegatedCompletionCard key={turn.key} turn={turn} interactive={false} />;
+                }
+                if (turn.kind === "goal-continuation") {
+                  return <GoalContinuationCard key={turn.key} sessionId={sessionId} turn={turn} />;
                 }
                 if (turn.kind === "user") {
                   return (

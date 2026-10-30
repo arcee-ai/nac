@@ -19,6 +19,7 @@ import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useTranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
 import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
+import { GoalContinuationCard } from "@/app/features/goals/presentation/GoalContinuationCard";
 import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -90,7 +91,7 @@ export const TranscriptRecoveryNotice = memo(function TranscriptRecoveryNotice({
 function resendTargetIndex(turns: TranscriptTurn[]): number | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
-    if (turn?.kind === "delegated-completion") return null;
+    if (turn?.kind === "delegated-completion" || turn?.kind === "goal-continuation") return null;
     if (turn?.kind === "user" && !turn.pending) return index;
   }
   return null;
@@ -510,6 +511,9 @@ export function Transcript({
               if (turn.kind === "delegated-completion") {
                 return <DelegatedCompletionCard key={turn.key} turn={turn} />;
               }
+              if (turn.kind === "goal-continuation") {
+                return <GoalContinuationCard key={turn.key} sessionId={sessionId} turn={turn} />;
+              }
               if (turn.kind === "user") {
                 const command = (snapshot?.shell_commands ?? []).find(
                   (candidate) =>
@@ -556,7 +560,12 @@ export function Transcript({
               let precedingUser: Extract<TranscriptTurn, { kind: "user" }> | null = null;
               for (let prior = index - 1; prior >= 0; prior -= 1) {
                 const candidate = rows[prior];
-                if (candidate?.kind === "delegated-completion") break;
+                // NAC admitted a goal run, so there is no typed prompt to repeat.
+                if (
+                  candidate?.kind === "delegated-completion" ||
+                  candidate?.kind === "goal-continuation"
+                )
+                  break;
                 if (candidate?.kind === "user") {
                   precedingUserIndex = prior;
                   precedingUser = candidate;

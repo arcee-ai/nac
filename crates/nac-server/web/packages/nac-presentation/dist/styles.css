@@ -897,6 +897,13 @@
     overflow: hidden;
   }
 
+[data-nac-runtime]:is(.line-clamp-4), [data-nac-runtime] .line-clamp-4 {
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    display: -webkit-box;
+    overflow: hidden;
+  }
+
 [data-nac-runtime]:is(.block), [data-nac-runtime] .block {
     display: block;
   }
@@ -1467,8 +1474,8 @@
     width: 52px;
   }
 
-[data-nac-runtime]:is(.w-\[60px\]), [data-nac-runtime] .w-\[60px\] {
-    width: 60px;
+[data-nac-runtime]:is(.w-\[132px\]), [data-nac-runtime] .w-\[132px\] {
+    width: 132px;
   }
 
 [data-nac-runtime]:is(.w-\[180px\]), [data-nac-runtime] .w-\[180px\] {
@@ -1721,10 +1728,6 @@
 
 [data-nac-runtime]:is(.min-w-\[220px\]), [data-nac-runtime] .min-w-\[220px\] {
     min-width: 220px;
-  }
-
-[data-nac-runtime]:is(.min-w-fit), [data-nac-runtime] .min-w-fit {
-    min-width: fit-content;
   }
 
 [data-nac-runtime]:is(.min-w-full), [data-nac-runtime] .min-w-full {
@@ -3646,6 +3649,10 @@
 
 [data-nac-runtime]:is(.underline), [data-nac-runtime] .underline {
     text-decoration-line: underline;
+  }
+
+[data-nac-runtime]:is(.underline-offset-2), [data-nac-runtime] .underline-offset-2 {
+    text-underline-offset: 2px;
   }
 
 [data-nac-runtime]:is(.antialiased), [data-nac-runtime] .antialiased {

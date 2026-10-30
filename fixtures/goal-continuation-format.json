@@ -1,0 +1,89 @@
+{
+  "description": "Wire format of the durable goal continuation control message, shared by nac-core (crates/nac-core/src/commands/goal_continuation.rs) and the web client (crates/nac-server/web/src/app/features/goals/continuation.ts). The message is {open}{goal_id}{header}{objective}\\n{budget line}{instructions}. Display surfaces show only the goal identity and objective; a message shaped like the envelope that does not parse collapses to the generic label, and anything else is ordinary text. Vectors with a prompt are what the Rust builder writes for those inputs.",
+  "vectors": [
+    {
+      "name": "unlimited",
+      "prompt": {
+        "goal_id": "0b7c1f3e-4f0a-4d5e-9a51-6f1f8f0c2a10",
+        "objective": "ship the embedded MVP",
+        "token_budget": null,
+        "tokens_used": 0
+      },
+      "message": "<nac_goal_continuation goal_id=\"0b7c1f3e-4f0a-4d5e-9a51-6f1f8f0c2a10\">\nContinue autonomously pursuing this durable goal:\nship the embedded MVP\nNo token budget was set.\nUse get_goal when you need current accounting. Mark it complete only when the objective is genuinely achieved with no required work remaining. Mark it blocked only at a genuine impasse; otherwise finish this turn with a concise progress update and NAC will continue it.\n</nac_goal_continuation>",
+      "goal_id": "0b7c1f3e-4f0a-4d5e-9a51-6f1f8f0c2a10",
+      "objective": "ship the embedded MVP",
+      "display": "[goal: ship the embedded MVP]"
+    },
+    {
+      "name": "budget-above-slider",
+      "prompt": {
+        "goal_id": "goal-2",
+        "objective": "finish the migration",
+        "token_budget": 5000000,
+        "tokens_used": 1250
+      },
+      "message": "<nac_goal_continuation goal_id=\"goal-2\">\nContinue autonomously pursuing this durable goal:\nfinish the migration\nToken budget: 5000000; used: 1250; remaining: 4998750.\nUse get_goal when you need current accounting. Mark it complete only when the objective is genuinely achieved with no required work remaining. Mark it blocked only at a genuine impasse; otherwise finish this turn with a concise progress update and NAC will continue it.\n</nac_goal_continuation>",
+      "goal_id": "goal-2",
+      "objective": "finish the migration",
+      "display": "[goal: finish the migration]"
+    },
+    {
+      "name": "multiline-objective-mentions-budget",
+      "prompt": {
+        "goal_id": "goal-3",
+        "objective": "line one\nNo token budget was set.\nline three",
+        "token_budget": null,
+        "tokens_used": 0
+      },
+      "message": "<nac_goal_continuation goal_id=\"goal-3\">\nContinue autonomously pursuing this durable goal:\nline one\nNo token budget was set.\nline three\nNo token budget was set.\nUse get_goal when you need current accounting. Mark it complete only when the objective is genuinely achieved with no required work remaining. Mark it blocked only at a genuine impasse; otherwise finish this turn with a concise progress update and NAC will continue it.\n</nac_goal_continuation>",
+      "goal_id": "goal-3",
+      "objective": "line one\nNo token budget was set.\nline three",
+      "display": "[goal: line one\nNo token budget was set.\nline three]"
+    },
+    {
+      "name": "exhausted-budget",
+      "prompt": {
+        "goal_id": "goal-4",
+        "objective": "keep going",
+        "token_budget": 100,
+        "tokens_used": 250
+      },
+      "message": "<nac_goal_continuation goal_id=\"goal-4\">\nContinue autonomously pursuing this durable goal:\nkeep going\nToken budget: 100; used: 250; remaining: 0.\nUse get_goal when you need current accounting. Mark it complete only when the objective is genuinely achieved with no required work remaining. Mark it blocked only at a genuine impasse; otherwise finish this turn with a concise progress update and NAC will continue it.\n</nac_goal_continuation>",
+      "goal_id": "goal-4",
+      "objective": "keep going",
+      "display": "[goal: keep going]"
+    },
+    {
+      "name": "legacy-envelope",
+      "prompt": null,
+      "message": "<nac_goal_continuation goal_id=\"goal-1\">\nContinue work\n</nac_goal_continuation>",
+      "goal_id": null,
+      "objective": null,
+      "display": "[durable goal continuation]"
+    },
+    {
+      "name": "mention-is-plain-text",
+      "prompt": null,
+      "message": "mention <nac_goal_continuation goal_id=\"x\">",
+      "goal_id": null,
+      "objective": null,
+      "display": "mention <nac_goal_continuation goal_id=\"x\">"
+    },
+    {
+      "name": "trailing-text-is-plain-text",
+      "prompt": null,
+      "message": "<nac_goal_continuation goal_id=\"goal-5\">\nContinue autonomously pursuing this durable goal:\nship it\nNo token budget was set.\nUse get_goal when you need current accounting. Mark it complete only when the objective is genuinely achieved with no required work remaining. Mark it blocked only at a genuine impasse; otherwise finish this turn with a concise progress update and NAC will continue it.\n</nac_goal_continuation>\nmore",
+      "goal_id": null,
+      "objective": null,
+      "display": "<nac_goal_continuation goal_id=\"goal-5\">\nContinue autonomously pursuing this durable goal:\nship it\nNo token budget was set.\nUse get_goal when you need current accounting. Mark it complete only when the objective is genuinely achieved with no required work remaining. Mark it blocked only at a genuine impasse; otherwise finish this turn with a concise progress update and NAC will continue it.\n</nac_goal_continuation>\nmore"
+    },
+    {
+      "name": "unknown-budget-line",
+      "prompt": null,
+      "message": "<nac_goal_continuation goal_id=\"goal-6\">\nContinue autonomously pursuing this durable goal:\nship it\nBudget: lots.\nUse get_goal when you need current accounting. Mark it complete only when the objective is genuinely achieved with no required work remaining. Mark it blocked only at a genuine impasse; otherwise finish this turn with a concise progress update and NAC will continue it.\n</nac_goal_continuation>",
+      "goal_id": null,
+      "objective": null,
+      "display": "[durable goal continuation]"
+    }
+  ]
+}

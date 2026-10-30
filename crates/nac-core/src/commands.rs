@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 use crate::mcp::{McpPromptCommand, McpPromptInvocation, McpRegistry};
 use crate::skills::SkillRegistry;
 
+mod goal_continuation;
+
+pub use goal_continuation::{
+    goal_continuation_prompt, is_goal_continuation_envelope, parse_goal_continuation,
+    GoalContinuation,
+};
+
 /// Sentinel element wrapping the skill blocks that `$skillname` prompt
 /// expansion appends to the agent-facing prompt. The expanded form is
 /// `{raw}\n\n<invoked_skills>\n{blocks}\n</invoked_skills>` where each block
@@ -264,9 +271,10 @@ pub fn display_prompt_from_message(content: &str) -> String {
     if let Some(collapsed) = invoked_mcp_prompt_display_prompt(content) {
         return collapsed;
     }
-    if content.starts_with("<nac_goal_continuation goal_id=\"")
-        && content.ends_with("\n</nac_goal_continuation>")
-    {
+    if let Some(continuation) = parse_goal_continuation(content) {
+        return format!("[goal: {}]", continuation.objective);
+    }
+    if is_goal_continuation_envelope(content) {
         return "[durable goal continuation]".to_string();
     }
     if let Some(payload) = content.strip_prefix(TRADITIONAL_CHILD_COMPLETION_PREFIX) {
@@ -506,6 +514,12 @@ mod tests {
             display_prompt_from_message(internal),
             "[durable goal continuation]"
         );
+        let continuation =
+            goal_continuation_prompt("goal-1", "ship the embedded MVP", Some(5_000_000), 10);
+        let display = display_prompt_from_message(&continuation);
+        assert_eq!(display, "[goal: ship the embedded MVP]");
+        assert!(!display.contains("get_goal"));
+        assert!(!display.contains("Token budget"));
         assert_eq!(
             display_prompt_from_message("mention <nac_goal_continuation goal_id=\"x\">"),
             "mention <nac_goal_continuation goal_id=\"x\">"

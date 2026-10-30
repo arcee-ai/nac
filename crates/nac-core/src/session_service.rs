@@ -1293,19 +1293,11 @@ fn extract_report_section(report: &str, heading: &str) -> Option<String> {
 }
 
 fn goal_continuation_prompt(goal: &crate::store::SessionGoalRecord) -> String {
-    let budget = goal.token_budget.map_or_else(
-        || "No token budget was set.".to_string(),
-        |budget| {
-            format!(
-                "Token budget: {budget}; used: {}; remaining: {}.",
-                goal.tokens_used,
-                budget.saturating_sub(goal.tokens_used)
-            )
-        },
-    );
-    format!(
-        "<nac_goal_continuation goal_id=\"{}\">\nContinue autonomously pursuing this durable goal:\n{}\n{}\nUse get_goal when you need current accounting. Mark it complete only when the objective is genuinely achieved with no required work remaining. Mark it blocked only at a genuine impasse; otherwise finish this turn with a concise progress update and NAC will continue it.\n</nac_goal_continuation>",
-        goal.goal_id, goal.objective, budget
+    commands::goal_continuation_prompt(
+        &goal.goal_id,
+        &goal.objective,
+        goal.token_budget,
+        goal.tokens_used,
     )
 }
 
