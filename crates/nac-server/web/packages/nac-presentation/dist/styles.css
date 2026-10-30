@@ -535,6 +535,10 @@
     position: sticky;
   }
 
+[data-nac-runtime]:is(.-inset-1), [data-nac-runtime] .-inset-1 {
+    inset: calc(var(--spacing) * -1);
+  }
+
 [data-nac-runtime]:is(.inset-0), [data-nac-runtime] .inset-0 {
     inset: 0;
   }
@@ -623,10 +627,6 @@
     right: calc(100% + 8px);
   }
 
-[data-nac-runtime]:is(.-bottom-1), [data-nac-runtime] .-bottom-1 {
-    bottom: calc(var(--spacing) * -1);
-  }
-
 [data-nac-runtime]:is(.-bottom-\[8px\]), [data-nac-runtime] .-bottom-\[8px\] {
     bottom: -8px;
   }
@@ -653,10 +653,6 @@
 
 [data-nac-runtime]:is(.-left-1), [data-nac-runtime] .-left-1 {
     left: calc(var(--spacing) * -1);
-  }
-
-[data-nac-runtime]:is(.-left-1\.5), [data-nac-runtime] .-left-1\.5 {
-    left: calc(var(--spacing) * -1.5);
   }
 
 [data-nac-runtime]:is(.left-0), [data-nac-runtime] .left-0 {
@@ -4211,6 +4207,10 @@
     color: inherit;
   }
 
+[data-nac-runtime]:is(.group-active\:opacity-100:is(:where(.group):active *)), [data-nac-runtime] .group-active\:opacity-100:is(:where(.group):active *) {
+    opacity: 1;
+  }
+
 [data-nac-runtime]:is(.group-active\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):active *)), [data-nac-runtime] .group-active\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):active *) {
     -webkit-text-fill-color: currentColor;
   }
@@ -4237,10 +4237,6 @@
 
 [data-nac-runtime]:is(.group-disabled\:text-inherit:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:text-inherit:is(:where(.group):disabled *) {
     color: inherit;
-  }
-
-[data-nac-runtime]:is(.group-disabled\:opacity-50:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:opacity-50:is(:where(.group):disabled *) {
-    opacity: .5;
   }
 
 [data-nac-runtime]:is(.group-disabled\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):disabled *)), [data-nac-runtime] .group-disabled\:\[-webkit-text-fill-color\:currentColor\]:is(:where(.group):disabled *) {
@@ -4491,12 +4487,12 @@
     background-color: var(--color-bg-btn-ghost-pressed);
   }
 
-[data-nac-runtime]:is(.active\:text-accent-tertiary:active), [data-nac-runtime] .active\:text-accent-tertiary:active {
-    color: var(--color-text-accent-tertiary);
-  }
-
 [data-nac-runtime]:is(.active\:text-basic-primary:active), [data-nac-runtime] .active\:text-basic-primary:active {
     color: var(--color-text-basic-primary);
+  }
+
+[data-nac-runtime]:is(.active\:text-btn-accent-pressed:active), [data-nac-runtime] .active\:text-btn-accent-pressed:active {
+    color: var(--color-text-btn-accent-pressed);
   }
 
 [data-nac-runtime]:is(.active\:text-btn-secondary-pressed:active), [data-nac-runtime] .active\:text-btn-secondary-pressed:active {
@@ -4557,12 +4553,12 @@
     background-color: var(--color-bg-btn-ghost-highlighted-disabled);
   }
 
-[data-nac-runtime]:is(.disabled\:text-accent-muted:disabled), [data-nac-runtime] .disabled\:text-accent-muted:disabled {
-    color: var(--color-text-accent-muted);
-  }
-
 [data-nac-runtime]:is(.disabled\:text-basic-muted:disabled), [data-nac-runtime] .disabled\:text-basic-muted:disabled {
     color: var(--color-text-basic-muted);
+  }
+
+[data-nac-runtime]:is(.disabled\:text-btn-accent-disabled:disabled), [data-nac-runtime] .disabled\:text-btn-accent-disabled:disabled {
+    color: var(--color-text-btn-accent-disabled);
   }
 
 [data-nac-runtime]:is(.disabled\:text-btn-secondary-disabled:disabled), [data-nac-runtime] .disabled\:text-btn-secondary-disabled:disabled {
