@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "template-not-qualification",
   "fixture_repository": "",
-  "baseline_sha256": "54072e8aa50b2622340ac0bec1939a3ae96a946f321147640ea43fc844ae204f",
+  "baseline_sha256": "3206e328d0ad703ae4cad96e8b968cb52a1531866af811447979909c1bdd456c",
   "payload_sha256": "dbdf31959bf6cead69d0d44e66c4100e8d49486faffda100207aa72dcbd660fa",
   "completed_at": null,
   "cases": [
@@ -176,6 +176,13 @@
     },
     {
       "name": "adalundhe-approval",
+      "result": "unperformed",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null
+    },
+    {
+      "name": "ScottZembsch-approval",
       "result": "unperformed",
       "actor_id": null,
       "head_sha": null,

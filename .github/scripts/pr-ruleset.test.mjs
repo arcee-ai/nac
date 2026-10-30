@@ -9,10 +9,10 @@ import {
 
 // An observed server response, not a reconstruction of the old ALL-450 proposal.
 const observed = JSON.parse(fs.readFileSync(new URL(
-  "../../docs/ci/evidence/2026-10-30-required-check-before-seven-owners.json", import.meta.url), "utf8"));
+  "../../docs/ci/evidence/2026-10-30-required-check-before-eight-owners.json", import.meta.url), "utf8"));
 const now = Date.parse(observed.captured_at);
 // Prospective local activation model only: the observed server snapshot retains
-// six-owner CODEOWNERS until the separate Ada roster PR lands on dev. Synthetic
+// six-owner CODEOWNERS until the separate Ada/Scott roster PR lands on dev. Synthetic
 // positives model that future prerequisite plus a successful exact-head check.
 const snapshot = () => {
   const result = structuredClone(observed);
@@ -67,8 +67,9 @@ test("plan adds only strict exact Actions checks to the observed current ruleset
   assert.equal(plan.proposed_sha256, digest(payload));
 });
 
-test("actual prelanding six-owner CODEOWNERS cannot activate the seven-owner plan", () => {
+test("actual prelanding six-owner CODEOWNERS cannot activate the eight-owner plan", () => {
   assert.equal(observed.codeowners.includes("@adalundhe"), false);
+  assert.equal(observed.codeowners.includes("@ScottZembsch"), false);
   assert.notEqual(observed.codeowners, codeowners);
   const current = snapshot();
   current.codeowners = observed.codeowners;
@@ -183,7 +184,7 @@ test("model tests, stale/foreign/incomplete receipts and old override payload ca
 
 test("current handoff template matches the plan/matrix but cannot certify unperformed platform work", () => {
   const plan = JSON.parse(fs.readFileSync(new URL(
-    "../../docs/ci/evidence/2026-10-30-required-check-plan-seven-owners.json", import.meta.url), "utf8"));
+    "../../docs/ci/evidence/2026-10-30-required-check-plan-eight-owners.json", import.meta.url), "utf8"));
   assert.deepEqual(plan, dryRunPlan(observed));
   const template = JSON.parse(fs.readFileSync(new URL(
     "../../docs/ci/evidence/qualification-template.json", import.meta.url), "utf8"));
@@ -197,23 +198,26 @@ test("current handoff template matches the plan/matrix but cannot certify unperf
   assert.match(guide, /retarget the upper PR to `dev`/);
 });
 
-test("seven-owner baseline cannot reuse historical three- or six-owner evidence", () => {
-  for (const name of ["2026-10-27-required-check-before.json", "2026-10-27-required-check-before-six-owners.json"]) {
+test("eight-owner baseline cannot reuse historical three-, six- or seven-owner evidence", () => {
+  for (const name of ["2026-10-27-required-check-before.json", "2026-10-27-required-check-before-six-owners.json",
+    "2026-10-30-required-check-before-seven-owners.json"]) {
     const historical = JSON.parse(fs.readFileSync(new URL(
       `../../docs/ci/evidence/${name}`, import.meta.url), "utf8"));
     assert.throws(() => dryRunPlan(historical), /lacks verified write access/);
   }
 });
 
-test("Ada must retain her verified identity and write access in the seven-owner baseline", () => {
-  assert.deepEqual(observed.owners.find(({ login }) => login === "adalundhe"),
-    { login: "adalundhe", id: 23642200, permission: "write" });
-  for (const mutate of [
-    (s) => { s.owners = s.owners.filter(({ login }) => login !== "adalundhe"); },
-    (s) => { s.owners.find(({ login }) => login === "adalundhe").permission = "read"; },
-    (s) => { s.owners.find(({ login }) => login === "adalundhe").id = 1; },
-  ]) {
-    const current = snapshot(); mutate(current);
-    assert.throws(() => validateSnapshot(current), /owner adalundhe lacks verified write access/);
-  }
-});
+for (const owner of [{ login: "adalundhe", id: 23642200 }, { login: "ScottZembsch", id: 109129358 }]) {
+  test(`${owner.login} must retain verified identity and write access in the eight-owner baseline`, () => {
+    assert.deepEqual(observed.owners.find(({ login }) => login === owner.login),
+      { ...owner, permission: "write" });
+    for (const mutate of [
+      (s) => { s.owners = s.owners.filter(({ login }) => login !== owner.login); },
+      (s) => { s.owners.find(({ login }) => login === owner.login).permission = "read"; },
+      (s) => { s.owners.find(({ login }) => login === owner.login).id = 1; },
+    ]) {
+      const current = snapshot(); mutate(current);
+      assert.throws(() => validateSnapshot(current), new RegExp(`owner ${owner.login} lacks verified write access`));
+    }
+  });
+}
