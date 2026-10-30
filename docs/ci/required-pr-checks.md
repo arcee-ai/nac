@@ -83,6 +83,10 @@ reviewer list in the metadata-only workflow. `make lint-workflows` and the PR
 contract tests reject stale generated ownership files with the regeneration command.
 Sam (`samantha662`), Gerred (`gerred`) and Travis (`tmcarcee`) were verified with
 write/admin/write access on October 27, 2026.
+Ada (`adalundhe`, immutable account ID `23642200`) was verified with repository
+write access on October 30, 2026.
+Scott (`ScottZembsch`, immutable account ID `109129358`) was also verified with
+repository write access on October 30, 2026.
 
 GitHub uses CODEOWNERS from **each PR's base**;
 the base's existing owners remain effective until an ownership change lands. The
@@ -135,7 +139,7 @@ classic-protection/CODEOWNERS 404 stop capture. No credential is saved.
 ## Safe fixture qualification and activation handoff
 
 Use a separately approved disposable repository with Actions and rulesets support,
-an Allison account, ordinary non-bypass maintainer/App identities, the three
+an Allison account, ordinary non-bypass maintainer/App identities, the current
 eligible reviewers and an outside reviewer. That repository/access was **not
 provided or created** during this implementation. Platform evidence is pending.
 Do not test red merges, bypass, or direct pushes against production NAC.
