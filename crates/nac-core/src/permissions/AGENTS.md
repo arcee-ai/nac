@@ -42,6 +42,9 @@ separate owners.
 - `shell_parser.rs` / `command_classification.rs` — token/command semantics.
 - `resource_projection.rs` / `resource_binding.rs` — prepared resource identity
   before and after approval.
+- `human_operations.rs` — hard/configured Deny for authenticated human product
+  mutations outside a session (picker folder creation in
+  `../project_folders.rs`); Ask is the invocation itself, never a request or grant.
 - `broker.rs` — interactive request/reply lifecycle. It stays one module
   (about 900 lines) because pending prompts, answer-mode transitions, captured
   run capabilities, waiter delivery and human grant settlement share admission

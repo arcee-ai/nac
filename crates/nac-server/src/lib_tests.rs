@@ -1046,6 +1046,8 @@ mod mcp_oauth;
 mod persistence_load;
 #[path = "tests/presentation.rs"]
 mod presentation;
+#[path = "tests/project_folders.rs"]
+mod project_folder_routes;
 #[path = "tests/projects.rs"]
 mod project_routes;
 #[path = "tests/recovery.rs"]

@@ -286,6 +286,9 @@ export type BrowseEntry = ApiSchema<"BrowseEntry">;
 
 export type BrowseListing = ApiSchema<"BrowseListing">;
 
+/** A folder created by `POST /fs/folders` or `POST /ssh/folders`. */
+export type CreatedFolder = ApiSchema<"CreatedFolder">;
+
 /**
  * How to reach an SSH host, as the launch form has it before a session exists.
  *

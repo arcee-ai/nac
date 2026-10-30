@@ -51,6 +51,7 @@ export const clientApiSurface = {
   "PUT /credentials/{name}": "api.storeCredential",
   "DELETE /credentials/{name}": "api.deleteCredential",
   "GET /fs/browse": "api.browsePath",
+  "POST /fs/folders": "api.createFolder",
   "GET /health": "api.health",
   "GET /healthz": "private:liveness probe for infrastructure",
   "GET /managed/github": "api.getManagedGitHub",
@@ -167,6 +168,7 @@ export const clientApiSurface = {
   "DELETE /ssh-configs/{config_id}": "api.deleteSshConfig",
   "PATCH /ssh-configs/{config_id}": "api.updateSshConfig",
   "POST /ssh/browse": "api.browseSshPath",
+  "POST /ssh/folders": "api.createSshFolder",
   "GET /store": "api.getStore",
   "GET /ui-config": "client.getUiConfiguration",
 };

@@ -13,6 +13,9 @@ import type {
   AssignSessionRequest,
   BranchList,
   BrowseListing,
+  CreateFolderRequest,
+  CreateSshFolderRequest,
+  CreatedFolder,
   CommitOutcome,
   CommitWorkspaceRequest,
   CompactSessionResponse,
@@ -331,6 +334,22 @@ export function createNacApi(nacClient: NacClient) {
       request<BrowseListing>("POST", "/ssh/browse", {
         body: { ...target, path, hidden } satisfies SshBrowseRequest,
         signal,
+      }),
+
+    /**
+     * Creates one named folder inside a listed local directory. Never retried
+     * here: a lost answer leaves the outcome unknown, so the caller looks
+     * before it offers to try again.
+     */
+    createFolder: (parent: string, name: string) =>
+      request<CreatedFolder>("POST", "/fs/folders", {
+        body: { parent, name } satisfies CreateFolderRequest,
+      }),
+
+    /** The same, on the SSH host the picker is browsing — never locally. */
+    createSshFolder: (target: SshTarget, parent: string, name: string) =>
+      request<CreatedFolder>("POST", "/ssh/folders", {
+        body: { ...target, parent, name } satisfies CreateSshFolderRequest,
       }),
 
     /** Validates the key as a side effect: a bad key cannot list models. */

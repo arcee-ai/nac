@@ -39,6 +39,17 @@ export declare function useResolveBrowsePath(): (source: BrowseSource, path: str
     truncated: boolean;
 }>;
 /**
+ * Creates one named folder inside a listed directory, on the server's own
+ * filesystem or on the SSH host `source` names — never anywhere else.
+ *
+ * Sent once and never retried: a lost answer leaves the outcome unknown, so
+ * the caller looks for the folder before it offers to try again. Listings of
+ * that source are refreshed whatever the answer, since one may now be stale.
+ */
+export declare function useCreateFolder(): (source: BrowseSource, parent: string, name: string) => Promise<{
+    path: string;
+}>;
+/**
  * Opens the connection the launch form needs before it can offer anything
  * remote, and reports the login home so the form can start there.
  *

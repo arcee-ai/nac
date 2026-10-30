@@ -164,6 +164,8 @@ export function usePathPicker({
   };
 
   return {
+    /** Identifies this opening and source; answers made under another are stale. */
+    binding,
     pickingFile,
     directory,
     draft,
