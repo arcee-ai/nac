@@ -10,6 +10,7 @@ const EXIT_MS = 300;
 interface BottomSheetProps {
   open: boolean;
   onClose: () => void;
+  closeOnEscape?: boolean;
   zIndex?: number;
   className?: string;
   children?: React.ReactNode;
@@ -22,6 +23,7 @@ interface BottomSheetProps {
 const BottomSheet: React.FC<BottomSheetProps> = ({
   open,
   onClose,
+  closeOnEscape = true,
   zIndex = 120,
   className = "",
   children,
@@ -78,6 +80,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
   return (
     <Sheet
       open={open}
+      closeOnEscape={closeOnEscape}
       onOpenChange={(next) => {
         if (!next) onClose();
       }}

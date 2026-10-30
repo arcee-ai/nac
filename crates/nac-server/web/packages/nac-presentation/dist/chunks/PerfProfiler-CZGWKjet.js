@@ -11438,27 +11438,27 @@ function Ib(e) {
 	if (!n) throw Error(`${e} must be rendered inside Dialog`);
 	return n;
 }
-function Lb({ open: e, defaultOpen: n = !1, onOpenChange: r, layer: i = "modal", inertBackground: a = i === "modal", children: o }) {
-	let [s, c] = t.useState(n), l = e ?? s, u = (t) => {
-		e === void 0 && c(t), r?.(t);
-	}, d = () => u(!1), f = t.useRef(null), p = fb({
-		open: l,
+function Lb({ open: e, defaultOpen: n = !1, onOpenChange: r, layer: i = "modal", inertBackground: a = i === "modal", closeOnEscape: o = !0, children: s }) {
+	let [c, l] = t.useState(n), u = e ?? c, d = (t) => {
+		e === void 0 && l(t), r?.(t);
+	}, f = () => d(!1), p = t.useRef(null), m = fb({
+		open: u,
 		kind: i,
-		content: f,
+		content: p,
 		inertBackground: a,
-		onEscape: d
+		onEscape: o ? f : void 0
 	});
 	return /* @__PURE__ */ T(Fb.Provider, {
 		value: {
-			layer: p,
-			content: f,
-			close: d
+			layer: m,
+			content: p,
+			close: f
 		},
 		children: /* @__PURE__ */ T(ig, {
-			open: l,
-			onOpenChange: u,
+			open: u,
+			onOpenChange: d,
 			modal: !1,
-			children: o
+			children: s
 		})
 	});
 }
@@ -11572,28 +11572,29 @@ var Jb = ({ open: e = !1, zIndex: t = 40, opacity: n = .25, blur: r = 2, classNa
 		...a
 	},
 	...o
-}), Yb = 300, Xb = ({ open: e, onClose: t, zIndex: n = 120, className: r = "", children: i }) => {
-	let [a, o] = p(e), [s, l] = p(!0), [u, d] = p(e), m = f(""), h = C();
-	return u !== e && (d(e), l(!0), e && o(!0)), c(() => {
-		if (!e || !a) return;
+}), Yb = 300, Xb = ({ open: e, onClose: t, closeOnEscape: n = !0, zIndex: r = 120, className: i = "", children: a }) => {
+	let [o, s] = p(e), [l, u] = p(!0), [d, m] = p(e), h = f(""), g = C();
+	return d !== e && (m(e), u(!0), e && s(!0)), c(() => {
+		if (!e || !o) return;
 		let t = 0, n = requestAnimationFrame(() => {
-			t = requestAnimationFrame(() => l(!1));
+			t = requestAnimationFrame(() => u(!1));
 		});
 		return () => {
 			cancelAnimationFrame(n), cancelAnimationFrame(t);
 		};
-	}, [e, a]), c(() => {
-		if (e || !a) return;
-		let t = setTimeout(() => o(!1), Yb);
+	}, [e, o]), c(() => {
+		if (e || !o) return;
+		let t = setTimeout(() => s(!1), Yb);
 		return () => clearTimeout(t);
-	}, [e, a]), c(() => {
-		m.current && m.current !== h.pathname && a && t(), m.current = h.pathname;
+	}, [e, o]), c(() => {
+		h.current && h.current !== g.pathname && o && t(), h.current = g.pathname;
 	}, [
-		h.pathname,
-		a,
+		g.pathname,
+		o,
 		t
-	]), a ? /* @__PURE__ */ T(Kb, {
+	]), o ? /* @__PURE__ */ T(Kb, {
 		open: e,
+		closeOnEscape: n,
 		onOpenChange: (e) => {
 			e || t();
 		},
@@ -11602,8 +11603,8 @@ var Jb = ({ open: e = !1, zIndex: t = 40, opacity: n = .25, blur: r = 2, classNa
 			children: [/* @__PURE__ */ T(Bb, {
 				asChild: !0,
 				children: /* @__PURE__ */ T(Jb, {
-					open: !s,
-					zIndex: n,
+					open: !l,
+					zIndex: r,
 					className: "!duration-300"
 				})
 			}), /* @__PURE__ */ T(qb, {
@@ -11611,49 +11612,36 @@ var Jb = ({ open: e = !1, zIndex: t = 40, opacity: n = .25, blur: r = 2, classNa
 				forceMount: !0,
 				role: void 0,
 				onOpenAutoFocus: (e) => e.preventDefault(),
-				style: { zIndex: n },
-				className: F("fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[75dvh] overflow-y-auto overscroll-contain", "rounded-t-3xl py-4 bg-elevation-level-2 shadow-2xl", "transition-transform duration-300 ease-in-out motion-reduce:transition-none [&>*]:shrink-0", s ? "translate-y-full" : "translate-y-0", r),
+				style: { zIndex: r },
+				className: F("fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[75dvh] overflow-y-auto overscroll-contain", "rounded-t-3xl py-4 bg-elevation-level-2 shadow-2xl", "transition-transform duration-300 ease-in-out motion-reduce:transition-none [&>*]:shrink-0", l ? "translate-y-full" : "translate-y-0", i),
 				onMouseDown: (e) => e.stopPropagation(),
 				onClick: (e) => e.stopPropagation(),
-				children: i
+				children: a
 			})]
 		})
 	}) : null;
 }, Zb = "button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex=\"-1\"])", Qb = (e) => Array.from(e.querySelectorAll(Zb)).filter((e) => e.tabIndex >= 0 && !e.matches(":disabled") && !e.closest("[inert], [hidden]"));
-function $b({ open: e, label: t, onClose: n, children: r }) {
-	let i = f(null), a = f(n), o = f(null);
+function $b({ open: e, label: t, children: n }) {
+	let r = f(null);
 	return u(() => {
-		a.current = n;
-	}, [n]), u(() => {
-		let t = i.current;
+		let t = r.current;
 		if (!e || !t) return;
-		let n = document.activeElement;
-		o.current = {
-			scope: t,
-			opener: n
-		}, (Qb(t)[0] ?? t).focus({ preventScroll: !0 });
-		let r = (e) => {
-			if (e.key === "Escape") e.preventDefault(), e.stopPropagation(), a.current?.();
-			else if (e.key === "Tab") {
+		(Qb(t)[0] ?? t).focus({ preventScroll: !0 });
+		let n = (e) => {
+			if (e.key === "Tab") {
 				e.preventDefault(), e.stopPropagation();
 				let n = Qb(t), r = n.indexOf(document.activeElement);
 				(n[e.shiftKey ? (r <= 0 ? n.length : r) - 1 : (r + 1) % n.length] ?? t).focus({ preventScroll: !0 });
 			}
 		};
-		return t.addEventListener("keydown", r), () => {
-			t.removeEventListener("keydown", r);
+		return t.addEventListener("keydown", n), () => {
+			t.removeEventListener("keydown", n);
 		};
 	}, [e]), u(() => {
-		let t = i.current;
+		let t = r.current;
 		e && t && (document.activeElement === document.body || t.contains(document.activeElement) && document.activeElement?.matches(":disabled")) && (Qb(t)[0] ?? t).focus({ preventScroll: !0 });
-	}), c(() => {
-		if (!e || !o.current) return;
-		let { scope: t, opener: n } = o.current;
-		return () => {
-			n instanceof HTMLElement && n.isConnected && (t.contains(document.activeElement) || document.activeElement === document.body) && n.focus({ preventScroll: !0 });
-		};
-	}, [e]), /* @__PURE__ */ T("div", {
-		ref: i,
+	}), /* @__PURE__ */ T("div", {
+		ref: r,
 		role: "dialog",
 		"aria-modal": "true",
 		"aria-label": t,
@@ -11661,7 +11649,7 @@ function $b({ open: e, label: t, onClose: n, children: r }) {
 		inert: !e,
 		"aria-hidden": !e,
 		className: "outline-none",
-		children: r
+		children: n
 	});
 }
 // src/app/atoms/popover/index.tsx
@@ -11671,7 +11659,6 @@ var ex = /* @__PURE__ */ function(e) {
 	let g = Pp() && l, _ = e && !g, v = h ? /* @__PURE__ */ T($b, {
 		open: e,
 		label: h,
-		onClose: c ? t : void 0,
 		children: n
 	}) : n, [y, b] = p(null), x = d(() => _ && o && y ? jp(y) : [], [
 		_,
@@ -11693,6 +11680,7 @@ var ex = /* @__PURE__ */ function(e) {
 				g ? /* @__PURE__ */ T(Xb, {
 					open: e,
 					onClose: t,
+					closeOnEscape: c,
 					className: m,
 					children: v
 				}) : null,

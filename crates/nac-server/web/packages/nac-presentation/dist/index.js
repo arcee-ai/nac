@@ -1,4 +1,4 @@
-import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Br as f, Bt as p, C as m, Ci as h, Cn as g, Cr as _, Ct as v, D as y, Di as b, Dn as x, Dr as S, Dt as C, E as w, Ei as T, En as E, Er as D, Et as O, F as k, Fi as A, Fn as ee, Fr as j, Ft as te, G as M, Gi as ne, Gn as re, Gr as N, Gt as ie, H as ae, Hi as oe, Hn as se, Hr as P, Ht as ce, I as le, Ii as ue, In as de, Ir as fe, It as pe, J as me, Ji as he, Jn as F, Jr as I, Jt as ge, K as _e, Ki as ve, Kn as L, Kr as ye, Kt as be, L as xe, Li as Se, Ln as Ce, Lr as we, Lt as Te, M as Ee, Mi as De, Mn as Oe, Mr as ke, Mt as Ae, N as je, Ni as Me, Nn as Ne, Nr as Pe, Nt as Fe, O as Ie, Oi as Le, On as Re, Or as ze, Ot as Be, P as Ve, Pi as He, Pn as Ue, Pr as We, Pt as Ge, Q as Ke, Qi as qe, Qn as Je, Qr as Ye, Qt as Xe, R as Ze, Ri as Qe, Rn as $e, Rr as et, Rt as tt, S as nt, Si as rt, Sn as it, Sr as at, St as ot, T as st, Ti as ct, Tn as lt, Tr as R, Tt as ut, U as dt, Ui as ft, Un as pt, Ur as mt, Ut as ht, V as gt, Vi as _t, Vn as vt, Vr as yt, Vt as bt, W as xt, Wi as St, Wn as Ct, Wr as wt, Wt as Tt, X as Et, Xi as Dt, Xn as Ot, Xr as z, Xt as kt, Y as At, Yi as jt, Yn as Mt, Yr as B, Yt as Nt, Z as Pt, Zi as Ft, Zn as It, Zr as Lt, Zt as Rt, _ as zt, _i as Bt, _n as Vt, _r as Ht, _t as Ut, a as Wt, ai as Gt, an as Kt, ar as qt, at as Jt, b as Yt, bi as Xt, bn as Zt, br as Qt, bt as $t, c as en, ci as tn, cn as nn, cr as rn, ct as an, d as on, di as sn, dn as cn, dr as ln, dt as un, ei as dn, en as fn, er as pn, et as mn, f as hn, fi as gn, fn as _n, fr as vn, ft as yn, g as bn, gi as xn, gn as Sn, gr as Cn, gt as wn, h as Tn, hi as En, hn as Dn, hr as On, ht as kn, i as An, ii as V, in as jn, ir as Mn, it as Nn, j as Pn, ji as Fn, jn as In, jr as Ln, jt as Rn, k as zn, ki as Bn, kn as Vn, kr as Hn, kt as Un, l as Wn, li as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mi as Xn, mn as Zn, mr as Qn, mt as $n, n as er, ni as tr, nn as nr, nr as rr, nt as ir, o as ar, oi as or, on as sr, or as cr, ot as lr, p as ur, pi as dr, pn as fr, pt as pr, q as mr, qi as hr, qn as gr, qr as _r, qt as vr, ri as yr, rn as br, rr as xr, rt as Sr, s as Cr, si as wr, sn as Tr, sr as Er, st as Dr, t as Or, ti as kr, tn as Ar, tr as jr, tt as Mr, u as Nr, ui as Pr, un as Fr, ur as Ir, ut as Lr, v as Rr, vi as zr, vn as Br, vr as Vr, vt as Hr, w as Ur, wi as Wr, wn as Gr, wr as H, wt as Kr, x as qr, xi as Jr, xn as Yr, xr as Xr, xt as Zr, y as Qr, yi as $r, yn as ei, yr as ti, yt as ni, z as ri, zi as ii, zn as ai, zt as oi } from "./chunks/PerfProfiler-7JtzYk2u.js";
+import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Br as f, Bt as p, C as m, Ci as h, Cn as g, Cr as _, Ct as v, D as y, Di as b, Dn as x, Dr as S, Dt as C, E as w, Ei as T, En as E, Er as D, Et as O, F as k, Fi as A, Fn as ee, Fr as j, Ft as te, G as M, Gi as ne, Gn as re, Gr as N, Gt as ie, H as ae, Hi as oe, Hn as se, Hr as P, Ht as ce, I as le, Ii as ue, In as de, Ir as fe, It as pe, J as me, Ji as he, Jn as F, Jr as I, Jt as ge, K as _e, Ki as ve, Kn as L, Kr as ye, Kt as be, L as xe, Li as Se, Ln as Ce, Lr as we, Lt as Te, M as Ee, Mi as De, Mn as Oe, Mr as ke, Mt as Ae, N as je, Ni as Me, Nn as Ne, Nr as Pe, Nt as Fe, O as Ie, Oi as Le, On as Re, Or as ze, Ot as Be, P as Ve, Pi as He, Pn as Ue, Pr as We, Pt as Ge, Q as Ke, Qi as qe, Qn as Je, Qr as Ye, Qt as Xe, R as Ze, Ri as Qe, Rn as $e, Rr as et, Rt as tt, S as nt, Si as rt, Sn as it, Sr as at, St as ot, T as st, Ti as ct, Tn as lt, Tr as R, Tt as ut, U as dt, Ui as ft, Un as pt, Ur as mt, Ut as ht, V as gt, Vi as _t, Vn as vt, Vr as yt, Vt as bt, W as xt, Wi as St, Wn as Ct, Wr as wt, Wt as Tt, X as Et, Xi as Dt, Xn as Ot, Xr as z, Xt as kt, Y as At, Yi as jt, Yn as Mt, Yr as B, Yt as Nt, Z as Pt, Zi as Ft, Zn as It, Zr as Lt, Zt as Rt, _ as zt, _i as Bt, _n as Vt, _r as Ht, _t as Ut, a as Wt, ai as Gt, an as Kt, ar as qt, at as Jt, b as Yt, bi as Xt, bn as Zt, br as Qt, bt as $t, c as en, ci as tn, cn as nn, cr as rn, ct as an, d as on, di as sn, dn as cn, dr as ln, dt as un, ei as dn, en as fn, er as pn, et as mn, f as hn, fi as gn, fn as _n, fr as vn, ft as yn, g as bn, gi as xn, gn as Sn, gr as Cn, gt as wn, h as Tn, hi as En, hn as Dn, hr as On, ht as kn, i as An, ii as V, in as jn, ir as Mn, it as Nn, j as Pn, ji as Fn, jn as In, jr as Ln, jt as Rn, k as zn, ki as Bn, kn as Vn, kr as Hn, kt as Un, l as Wn, li as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mi as Xn, mn as Zn, mr as Qn, mt as $n, n as er, ni as tr, nn as nr, nr as rr, nt as ir, o as ar, oi as or, on as sr, or as cr, ot as lr, p as ur, pi as dr, pn as fr, pt as pr, q as mr, qi as hr, qn as gr, qr as _r, qt as vr, ri as yr, rn as br, rr as xr, rt as Sr, s as Cr, si as wr, sn as Tr, sr as Er, st as Dr, t as Or, ti as kr, tn as Ar, tr as jr, tt as Mr, u as Nr, ui as Pr, un as Fr, ur as Ir, ut as Lr, v as Rr, vi as zr, vn as Br, vr as Vr, vt as Hr, w as Ur, wi as Wr, wn as Gr, wr as H, wt as Kr, x as qr, xi as Jr, xn as Yr, xr as Xr, xt as Zr, y as Qr, yi as $r, yn as ei, yr as ti, yt as ni, z as ri, zi as ii, zn as ai, zt as oi } from "./chunks/PerfProfiler-CZGWKjet.js";
 import * as si from "react";
 import ci, { Fragment as li, Suspense as ui, createContext as di, lazy as fi, memo as pi, use as mi, useCallback as U, useContext as hi, useEffect as W, useId as gi, useLayoutEffect as _i, useMemo as G, useRef as K, useState as q, useSyncExternalStore as vi } from "react";
 import { QueryClientProvider as yi, QueryObserver as bi, replaceEqualDeep as xi, useIsFetching as Si, useMutation as Ci, useQueries as wi, useQuery as Ti, useQueryClient as Ei } from "@tanstack/react-query";
@@ -8283,78 +8283,102 @@ function zm(e, t) {
 	});
 }
 function Bm({ open: e, onClose: t, summary: n }) {
-	let r = vp(e), [i, a] = q(() => /* @__PURE__ */ new Map()), o = n ? zm(i, n) : i;
-	o !== i && a(o);
-	let s = n ? {
-		...n,
-		...o.get(n.session_id)
-	} : null;
-	return !r || !s ? null : /* @__PURE__ */ Y(Vm, {
+	let r = vp(e), i = ar(), a = ot(), o = K(/* @__PURE__ */ new Map()), [s, c] = q(() => /* @__PURE__ */ new Map()), [l, u] = q(() => /* @__PURE__ */ new Map()), d = K(null);
+	_i(() => (d.current = {
 		open: e,
-		summary: s,
+		sessionId: n?.session_id,
+		onClose: t
+	}, () => {
+		d.current = null;
+	}), [
+		e,
+		n?.session_id,
+		t
+	]);
+	let f = n ? zm(l, n) : l;
+	f !== l && u(f);
+	let p = n ? {
+		...n,
+		...f.get(n.session_id)
+	} : null;
+	return !r || !p ? null : /* @__PURE__ */ Y(Vm, {
+		open: e,
+		summary: p,
+		pending: s.get(p.session_id),
 		onClose: t,
-		onSaved: (e) => a((t) => zm(t, e))
-	}, s.session_id);
-}
-function Vm({ open: e, summary: t, onClose: n, onSaved: r }) {
-	let i = ar(), a = Md(), o = ot(), s = gi(), c = K(!1), [l, u] = q(!1), [d, f] = q(t.title ?? ""), [p, m] = q(!!t.pinned), [h, g] = q(e);
-	h !== e && (g(e), e && !l && (f(t.title ?? ""), m(!!t.pinned)));
-	let v = !!t.project_id, y = async () => {
-		if (!c.current) {
-			c.current = !0, u(!0);
+		onSubmit: async (t) => {
+			if (!e || !p || !d.current?.open || d.current.sessionId !== p.session_id || o.current.has(p.session_id)) return;
+			let n = {
+				...t,
+				sessionId: p.session_id,
+				expectedVersion: p.presentation_version ?? 0
+			};
+			o.current.set(n.sessionId, n), c(new Map(o.current));
 			try {
-				r(await o.mutateAsync({
-					id: t.session_id,
-					title: d.trim(),
-					pinned: v ? p : !1,
-					expectedVersion: t.presentation_version ?? 0
-				})), i.success("Session presentation saved"), n();
+				let e = await a.mutateAsync({
+					id: n.sessionId,
+					title: n.title.trim(),
+					pinned: n.pinned,
+					expectedVersion: n.expectedVersion
+				});
+				if (!d.current || o.current.get(n.sessionId) !== n) return;
+				u((t) => zm(t, e)), i.success("Session presentation saved"), d.current.open && d.current.sessionId === n.sessionId && d.current.onClose();
 			} catch (e) {
+				if (!d.current || o.current.get(n.sessionId) !== n) return;
 				let t = e instanceof Ft && e.status === 409;
 				i.error(t ? "Version conflict — the session changed in the meantime" : `Error: ${Wt($(e))}`);
 			} finally {
-				c.current = !1, u(!1);
+				o.current.get(n.sessionId) === n && (o.current.delete(n.sessionId), d.current && c(new Map(o.current)));
 			}
 		}
-	};
+	}, p.session_id);
+}
+function Vm({ open: e, summary: t, pending: n, onClose: r, onSubmit: i }) {
+	let a = Md(), o = gi(), [s, c] = q(n?.title ?? t.title ?? ""), [l, u] = q(n?.pinned ?? !!t.pinned), [d, f] = q(e);
+	d !== e && (f(e), e && (c(n?.title ?? t.title ?? ""), u(n?.pinned ?? !!t.pinned)));
+	let p = !!n, m = !!t.project_id, h = () => i({
+		title: s,
+		pinned: m ? l : !1
+	});
 	return /* @__PURE__ */ Y(Qn, {
 		open: e,
-		onClose: n,
+		onClose: r,
 		title: "Rename session",
 		size: Cn.Small,
 		footer: /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y(_, {
 			variant: D.Tertiary,
 			content: H.Text,
-			onClick: n,
-			disabled: o.isPending,
+			onClick: r,
+			disabled: p,
 			children: "Cancel"
 		}), /* @__PURE__ */ Y(_, {
 			type: "submit",
-			form: s,
+			form: o,
 			variant: D.Primary,
 			content: H.Text,
-			loading: o.isPending,
+			loading: p,
 			children: "Save"
 		})] }),
 		children: /* @__PURE__ */ X("form", {
-			id: s,
+			id: o,
 			className: "flex flex-col gap-4",
 			onSubmit: (e) => {
-				e.preventDefault(), y();
+				e.preventDefault(), h();
 			},
 			children: [/* @__PURE__ */ Y(Q, {
 				label: "Title",
 				placeholder: a(t) || "Session name",
 				hintText: "Leave empty to restore the automatic title (last prompt).",
-				value: d,
-				loading: o.isPending,
-				onChange: (e) => f(e.target.value)
-			}), v ? /* @__PURE__ */ X("label", {
+				value: s,
+				loading: p,
+				onChange: (e) => c(e.target.value)
+			}), m ? /* @__PURE__ */ X("label", {
 				className: "flex items-center gap-2 label-small text-basic-secondary select-none",
 				children: [/* @__PURE__ */ Y("input", {
 					type: "checkbox",
-					checked: p,
-					onChange: (e) => m(e.target.checked),
+					checked: l,
+					disabled: p,
+					onChange: (e) => u(e.target.checked),
 					className: "accent-[var(--color-fill-accent-primary)]"
 				}), "Pin to top of the list"]
 			}) : null]
@@ -20944,7 +20968,7 @@ function MS({ state: e, controller: t, availability: n }) {
 // src/app/lib/markdownChunk.ts
 var NS = null, PS = !1;
 function FS() {
-	return NS ??= import("./chunks/markdown-renderer-BFtEPhyx.js").then((e) => e.t).then((e) => (PS = !0, e)), NS;
+	return NS ??= import("./chunks/markdown-renderer-UPw8lXKf.js").then((e) => e.t).then((e) => (PS = !0, e)), NS;
 }
 function IS() {
 	return PS;

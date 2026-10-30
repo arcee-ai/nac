@@ -261,3 +261,76 @@ test("rename and delete preserve the responsive pilot journey and accessibility"
     }),
   });
 });
+
+for (const mobile of [false, true]) {
+  test(`pending rename survives exit and keyboard reopen ${mobile ? "on phone" : "on desktop"}`, async ({
+    harness,
+    page,
+    request,
+  }) => {
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+    const project = await createProject(request, harness, { name: "Pending rename pilot" });
+    const id = await createSession(request, harness, "direct", project);
+    const title = "Before pending rename";
+    const seeded = await request.put(`${harness.baseUrl}/sessions/${id}/presentation`, {
+      data: { title, pinned: false, expected_version: 0 },
+    });
+    expect(seeded.ok()).toBe(true);
+    const baseline = await seeded.json();
+    await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
+    if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+    const opener = page.getByRole("button", { name: `Rename ${title}`, exact: true });
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
+    const field = dialog.getByRole("textbox", { name: "Title", exact: true });
+    await field.fill("  Pending title  ");
+    await dialog.getByRole("checkbox").check();
+    const writes: unknown[] = [];
+    let releaseSave!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    await page.route(`${harness.baseUrl}/sessions/${id}/presentation`, async (route) => {
+      if (route.request().method() === "PUT") {
+        writes.push(route.request().postDataJSON());
+        await gate;
+      }
+      await route.continue();
+    });
+    try {
+      await field.focus();
+      await page.keyboard.press("Enter");
+      await expect.poll(() => writes.length).toBe(1);
+      await page.keyboard.press("Escape");
+      await expect(opener).toBeFocused();
+      // Deliberately cross the form's 300ms exit lifetime with the write held.
+      await page.waitForTimeout(350);
+      await opener.focus();
+      await page.keyboard.press("Enter");
+      await expect(field).toHaveValue("  Pending title  ");
+      await expect(field).toHaveAttribute("readonly", "");
+      await expect(dialog.getByRole("checkbox")).toBeChecked();
+      await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+      await field.focus();
+      await page.keyboard.press("Enter");
+      expect(writes).toEqual([
+        { title: "Pending title", pinned: true, expected_version: baseline.presentation_version },
+      ]);
+      const accepted = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/sessions/${id}/presentation`) &&
+          response.request().method() === "PUT",
+      );
+      releaseSave();
+      expect((await accepted).ok()).toBe(true);
+      await expect(dialog).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: "Rename Pending title", exact: true }),
+      ).toBeVisible();
+      expect(writes).toHaveLength(1);
+    } finally {
+      releaseSave();
+    }
+  });
+}

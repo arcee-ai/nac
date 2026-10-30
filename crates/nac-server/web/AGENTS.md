@@ -40,8 +40,7 @@ server remains the source of business truth and wire schemas.
   instance's overlay layer stack. Product code keeps importing atoms. Overlays
   register with `useLayer` instead of adding their own Escape, outside-press,
   inertness or focus-return handling, and Radix stays non-modal. The Popover
-  atom's `focusScope`, ported from `dev`, is the one exception until it moves
-  onto the stack; see
+  atom's opt-in `focusScope` owns only initial focus and Tab navigation; see
   [ADR 0007](../../../docs/architecture/0007-scoped-ui-primitives.md).
 - Generic providers are for genuinely cross-feature browser state. Do not use
   them as a home for one feature's workflow.

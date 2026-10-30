@@ -26,6 +26,8 @@ type DialogProps = Omit<React.ComponentProps<typeof DialogPrimitive.Root>, "moda
   layer?: "modal" | "sheet";
   /** Takes the presentation content out of the tab order while the dialog is open. */
   inertBackground?: boolean;
+  /** False keeps this layer open on Escape, without dismissing a layer below it. */
+  closeOnEscape?: boolean;
 };
 
 /**
@@ -40,6 +42,7 @@ function Dialog({
   onOpenChange,
   layer = "modal",
   inertBackground = layer === "modal",
+  closeOnEscape = true,
   children,
 }: DialogProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
@@ -50,7 +53,13 @@ function Dialog({
   };
   const close = () => setOpen(false);
   const content = React.useRef<HTMLDivElement>(null);
-  const handle = useLayer({ open, kind: layer, content, inertBackground, onEscape: close });
+  const handle = useLayer({
+    open,
+    kind: layer,
+    content,
+    inertBackground,
+    onEscape: closeOnEscape ? close : undefined,
+  });
   return (
     <DialogLayerContext.Provider value={{ layer: handle, content, close }}>
       <DialogPrimitive.Root open={open} onOpenChange={setOpen} modal={false}>

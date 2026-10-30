@@ -4,6 +4,6 @@ interface RenameModalProps {
     onClose: () => void;
     summary: SessionSummarySnapshot | null;
 }
-/** Retain accepted presentation authority beyond the form's temporary exit lifetime. */
+/** Presentation authority and in-flight writes outlive the form's exit animation. */
 export declare function RenameModal({ open, onClose, summary }: RenameModalProps): import("react").JSX.Element | null;
 export {};

@@ -1,9 +1,10 @@
 /** @vitest-environment jsdom */
 import { useState } from "react";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Modal from "../modal";
+import Tooltip from "../tooltip";
 import Popover from "./index";
 
 let mobile = false;
@@ -27,7 +28,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function fixture(scoped = true, closeOnEscape = true) {
+function fixture(scoped = true, closeOnEscape = true, hint = false) {
   const panelClose = vi.fn();
   const action = vi.fn();
   let removeReconnect = () => {};
@@ -72,6 +73,11 @@ function fixture(scoped = true, closeOnEscape = true) {
             <button onClick={() => setOpen(!open)}>Terminal options</button>
           </Popover>
           <button>Other panel action</button>
+          {hint ? (
+            <Tooltip title="Shell details">
+              <span>Terminal details</span>
+            </Tooltip>
+          ) : null}
         </Modal>
         <Modal open={review} title="Review terminal selection" onClose={() => setReview(false)}>
           <button>Send selection</button>
@@ -106,11 +112,11 @@ describe.each([false, true])("portaled options at mobile=%s", (phone) => {
     expect(document.activeElement).toBe(last);
   });
 
-  it("consumes Escape and returns focus without dismissing the enclosing panel", () => {
+  it("consumes Escape and returns focus without dismissing the enclosing panel", async () => {
     const f = fixture();
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Terminal actions" })).toBeNull();
-    expect(document.activeElement).toBe(f.trigger);
+    await waitFor(() => expect(document.activeElement).toBe(f.trigger));
     expect(f.panelClose).not.toHaveBeenCalled();
     if (phone) expect(screen.getByText("Reconnect").closest("[inert]")).not.toBeNull();
   });
@@ -124,11 +130,11 @@ describe.each([false, true])("portaled options at mobile=%s", (phone) => {
     expect(f.panelClose).not.toHaveBeenCalled();
   });
 
-  it("restores focus on an action and lets a newly opened review dialog own focus", () => {
+  it("restores focus on an action and lets a newly opened review dialog own focus", async () => {
     const f = fixture();
     fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
     expect(f.action).toHaveBeenCalledOnce();
-    expect(document.activeElement).toBe(f.trigger);
+    await waitFor(() => expect(document.activeElement).toBe(f.trigger));
     fireEvent.click(f.trigger);
     fireEvent.click(screen.getByRole("button", { name: "Review selection" }));
     expect(document.activeElement).toBe(
@@ -142,4 +148,28 @@ it("leaves existing unscoped popover focus behavior unchanged", () => {
   mobile = false;
   const f = fixture(false);
   expect(document.activeElement).toBe(f.trigger);
+});
+
+describe.each([true, false])("topmost dismissal with closeOnEscape=%s", (closeOnEscape) => {
+  it("takes the hint before the focused terminal menu", async () => {
+    mobile = false;
+    const f = fixture(true, closeOnEscape, true);
+    const action = screen.getByRole("button", { name: "Reconnect" });
+    expect(document.activeElement).toBe(action);
+    fireEvent.mouseEnter(screen.getByText("Terminal details"));
+    expect(screen.getByRole("tooltip").textContent).toBe("Shell details");
+    fireEvent.keyDown(action, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Terminal actions" })).toBeTruthy();
+    expect(document.activeElement).toBe(action);
+    expect(f.panelClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(action, { key: "Escape" });
+    if (closeOnEscape) {
+      expect(screen.queryByRole("dialog", { name: "Terminal actions" })).toBeNull();
+      await waitFor(() => expect(document.activeElement).toBe(f.trigger));
+    } else {
+      expect(screen.getByRole("dialog", { name: "Terminal actions" })).toBeTruthy();
+    }
+    expect(f.panelClose).not.toHaveBeenCalled();
+  });
 });

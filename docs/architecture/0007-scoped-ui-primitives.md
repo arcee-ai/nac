@@ -12,8 +12,7 @@ ESLint's `no-restricted-imports` rejects any other import of it.
 Each presentation instance owns one overlay layer stack (`ui/layer-stack.ts`),
 created by `PresentationBoundary`. It is the single owner of Escape,
 outside-press dismissal, background inertness and focus return for every
-primitive, with one exception from `dev`, described under Layer stack.
-Radix runs non-modal: it portals into the instance's overlay root,
+primitive. Radix runs non-modal: it portals into the instance's overlay root,
 positions and wires ARIA; the instance's dialog surface owns its Tab boundaries.
 Radix's own Escape,
 outside-interaction and close auto-focus handling is cancelled. Radix's modal
@@ -100,16 +99,20 @@ reviewed like any imported code. Builds and CI never fetch from the registry.
   outside it. A layer opened while another closes, such as a menu row opening
   a dialog, inherits that pending return target.
 
-One exception came from `dev` with #449. The Popover atom's opt-in
-`focusScope`, which only the terminal actions menu sets, wraps the panel and
-the phone sheet in `atoms/popover/FocusScope.tsx`. Listening on its own
-element, it focuses the first action, loops Tab, closes on Escape and stops
-that event there, and returns focus to the opener. The stack never sees an
-Escape pressed inside the menu. One layer still closes per Escape, and both
-focus returns aim at the same opener, but a hint left open above the menu, such
-as the terminal header's hover hint, does not take Escape first. Moving the
-scope's Escape and focus return onto the stack, with a test for a hint above
-the menu, is a follow-up.
+The Popover atom's opt-in `focusScope`, originally ported from `dev` with
+#449 for terminal actions, owns initial focus and Tab navigation in the panel
+and phone sheet. Escape and focus return now belong to the same layer stack as
+other overlays: a hint above the menu takes Escape first, and
+`closeOnEscape={false}` holds the panel or sheet without dismissing its parent.
+The earlier independent Escape/focus-return exception is retired.
+
+Rename's stable modal controller retains each session's pending operation and
+submitted title/pin beyond the temporary form's exit lifetime. Reopening resumes
+that operation without a second write. Completion records only that session's
+accepted revision and closes only its currently open rename; it cannot dismiss a
+newer session's form or another kind of modal. A failure releases only its own
+guard so the visible draft can be retried. Query mutation and invalidation remain
+with the existing service/query owner.
 
 ## Host footprint
 
@@ -152,6 +155,15 @@ both revisions on the same host. Gzip byte counts can vary with the runtime's
 compression implementation; compare both revisions together. The table includes
 keyboard hints surviving container scrolling and accepted rename revisions
 surviving the exit form's lifetime.
+
+The Escape/pending-operation repair atop stacked head `4644af1b` was measured
+with Node 26.12.0 against the committed immediate predecessor, #453 at
+`a22a153a923cf2bedc3cac9d7ecf0932df1fd855`, using the same script and gzip
+implementation for both graphs. The repaired pilot adds 24,161 B startup JS /
+228 B CSS to the app and 28,053 B startup JS / 265 B CSS to the presentation
+package, within the pilot budgets. The repair itself adds 160 B and 151 B JS,
+respectively, over `4644af1b`, with no CSS growth. The table above retains the
+earlier `dev` comparison; unrelated predecessor changes are not migration budget.
 
 The pilot was first measured against `dev` at
 `cd7d3730bd47cc3c7b9de5204fd08496b19b155d`. Merging `dev` after the side-panel

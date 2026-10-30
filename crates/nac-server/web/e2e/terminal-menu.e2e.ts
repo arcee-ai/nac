@@ -49,6 +49,20 @@ for (const mobile of [false, true]) {
     await expect(reconnect).toBeFocused();
     await expect(review).toBeInViewport({ ratio: 1 });
     await page.screenshot({ path: testInfo.outputPath("keyboard-actions.png") });
+    if (!mobile) {
+      // The real header hint can sit above the focused actions menu. Only the
+      // stack handles Escape, so the hint leaves before the menu underneath it.
+      await pane.locator(".cursor-help").hover();
+      const hint = page.getByRole("tooltip", { name: /Human shell/ });
+      await expect(hint).toBeVisible();
+      await expect(reconnect).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(hint).toHaveCount(0);
+      await expect(actions).toBeVisible();
+      await expect(reconnect).toBeFocused();
+    }
+    // Phone hints are sheets opened by tap; the actions sheet itself is the
+    // top layer in this sequence and uses the same stack-owned focus return.
     await page.keyboard.press("Escape");
     await expect(actions).toHaveCount(0);
     await expect(trigger).toBeFocused();

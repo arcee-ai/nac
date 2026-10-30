@@ -72,7 +72,7 @@ const Popover: React.FC<PopoverProps> & {
   const asSheet = useIsMobile() && sheetOnMobile;
   const panelOpen = open && !asSheet;
   const body = focusScope ? (
-    <PopoverFocusScope open={open} label={focusScope} onClose={closeOnEscape ? onClose : undefined}>
+    <PopoverFocusScope open={open} label={focusScope}>
       {content}
     </PopoverFocusScope>
   ) : (
@@ -99,7 +99,12 @@ const Popover: React.FC<PopoverProps> & {
       <PopoverAnchor ref={setAnchor} className={cn("relative w-fit h-fit leading-[0]", className)}>
         {children}
         {asSheet ? (
-          <BottomSheet open={open} onClose={onClose} className={sheetClassName}>
+          <BottomSheet
+            open={open}
+            onClose={onClose}
+            closeOnEscape={closeOnEscape}
+            className={sheetClassName}
+          >
             {body}
           </BottomSheet>
         ) : null}

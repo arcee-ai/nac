@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 
 import { Button, ButtonContent, ButtonVariant, Input, Modal, ModalSize } from "@/app/atoms";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
@@ -29,73 +29,69 @@ function rememberPresentation(
   return new Map(known).set(incoming.session_id, { title, pinned, presentation_version });
 }
 
-/** Retain accepted presentation authority beyond the form's temporary exit lifetime. */
+interface RenameDraft {
+  title: string;
+  pinned: boolean;
+}
+
+/** One submitted operation owns its draft until that request settles. */
+interface PendingRename extends RenameDraft {
+  sessionId: string;
+  expectedVersion: number;
+}
+
+/** Presentation authority and in-flight writes outlive the form's exit animation. */
 export function RenameModal({ open, onClose, summary }: RenameModalProps) {
   const mounted = useExitTransition(open);
+  const toast = useToast();
+  const update = useUpdatePresentation();
+  const inFlight = useRef(new Map<string, PendingRename>());
+  const [pending, setPending] = useState<ReadonlyMap<string, PendingRename>>(() => new Map());
   const [baselines, setBaselines] = useState<ReadonlyMap<string, Presentation>>(() => new Map());
+  const visible = useRef<{ open: boolean; sessionId?: string; onClose: () => void } | null>(null);
+  useLayoutEffect(() => {
+    visible.current = { open, sessionId: summary?.session_id, onClose };
+    return () => {
+      visible.current = null;
+    };
+  }, [open, summary?.session_id, onClose]);
+
   const observed = summary ? rememberPresentation(baselines, summary) : baselines;
   if (observed !== baselines) setBaselines(observed);
   const current = summary ? { ...summary, ...observed.get(summary.session_id) } : null;
-  if (!mounted || !current) return null;
-  return (
-    <RenameForm
-      key={current.session_id}
-      open={open}
-      summary={current}
-      onClose={onClose}
-      onSaved={(accepted) => setBaselines((known) => rememberPresentation(known, accepted))}
-    />
-  );
-}
 
-function RenameForm({
-  open,
-  summary,
-  onClose,
-  onSaved,
-}: {
-  open: boolean;
-  summary: SessionSummarySnapshot;
-  onClose: () => void;
-  onSaved: (accepted: SessionSummarySnapshot) => void;
-}) {
-  const toast = useToast();
-  const sessionTitle = useSessionTitle();
-  const update = useUpdatePresentation();
-  const formId = useId();
-  // `isPending` only shows up on the next render, so a second Enter in the
-  // same frame would otherwise send the write twice.
-  const submitting = useRef(false);
-  const [saving, setSaving] = useState(false);
-  const [title, setTitle] = useState(summary.title ?? "");
-  const [pinned, setPinned] = useState(Boolean(summary.pinned));
-  const [wasOpen, setWasOpen] = useState(open);
-  if (wasOpen !== open) {
-    setWasOpen(open);
-    // A canceled form can reopen before the exit timer unmounts it. Reset
-    // that abandoned draft, but retain any accepted save and its ref guard.
-    if (open && !saving) {
-      setTitle(summary.title ?? "");
-      setPinned(Boolean(summary.pinned));
-    }
-  }
-  const canPin = Boolean(summary.project_id);
-
-  const submit = async () => {
-    if (submitting.current) return;
-    submitting.current = true;
-    setSaving(true);
+  const submit = async (draft: RenameDraft) => {
+    if (
+      !open ||
+      !current ||
+      !visible.current?.open ||
+      visible.current.sessionId !== current.session_id ||
+      inFlight.current.has(current.session_id)
+    )
+      return;
+    const operation: PendingRename = {
+      ...draft,
+      sessionId: current.session_id,
+      expectedVersion: current.presentation_version ?? 0,
+    };
+    // This synchronous guard also covers two submits before React rerenders.
+    inFlight.current.set(operation.sessionId, operation);
+    setPending(new Map(inFlight.current));
     try {
       const accepted = await update.mutateAsync({
-        id: summary.session_id,
-        title: title.trim(),
-        pinned: canPin ? pinned : false,
-        expectedVersion: summary.presentation_version ?? 0,
+        id: operation.sessionId,
+        title: operation.title.trim(),
+        pinned: operation.pinned,
+        expectedVersion: operation.expectedVersion,
       });
-      onSaved(accepted);
+      if (!visible.current || inFlight.current.get(operation.sessionId) !== operation) return;
+      setBaselines((known) => rememberPresentation(known, accepted));
       toast.success("Session presentation saved");
-      onClose();
+      // A dismissed request may finish while a different session or modal is open.
+      if (visible.current.open && visible.current.sessionId === operation.sessionId)
+        visible.current.onClose();
     } catch (error) {
+      if (!visible.current || inFlight.current.get(operation.sessionId) !== operation) return;
       const conflict = error instanceof ApiError && error.status === 409;
       toast.error(
         conflict
@@ -103,10 +99,56 @@ function RenameForm({
           : `Error: ${errorMessage(toRunError(error))}`,
       );
     } finally {
-      submitting.current = false;
-      setSaving(false);
+      if (inFlight.current.get(operation.sessionId) === operation) {
+        inFlight.current.delete(operation.sessionId);
+        if (visible.current) setPending(new Map(inFlight.current));
+      }
     }
   };
+
+  if (!mounted || !current) return null;
+  return (
+    <RenameForm
+      key={current.session_id}
+      open={open}
+      summary={current}
+      pending={pending.get(current.session_id)}
+      onClose={onClose}
+      onSubmit={submit}
+    />
+  );
+}
+
+function RenameForm({
+  open,
+  summary,
+  pending,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  summary: SessionSummarySnapshot;
+  pending?: PendingRename;
+  onClose: () => void;
+  onSubmit: (draft: RenameDraft) => Promise<void>;
+}) {
+  const sessionTitle = useSessionTitle();
+  const formId = useId();
+  const [title, setTitle] = useState(pending?.title ?? summary.title ?? "");
+  const [pinned, setPinned] = useState(pending?.pinned ?? Boolean(summary.pinned));
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    if (open) {
+      // A reopen either resumes this session's accepted pending submission or
+      // discards an abandoned draft using the latest presentation authority.
+      setTitle(pending?.title ?? summary.title ?? "");
+      setPinned(pending?.pinned ?? Boolean(summary.pinned));
+    }
+  }
+  const saving = !!pending;
+  const canPin = Boolean(summary.project_id);
+  const submit = () => onSubmit({ title, pinned: canPin ? pinned : false });
 
   return (
     <Modal
@@ -120,7 +162,7 @@ function RenameForm({
             variant={ButtonVariant.Tertiary}
             content={ButtonContent.Text}
             onClick={onClose}
-            disabled={update.isPending}
+            disabled={saving}
           >
             Cancel
           </Button>
@@ -129,7 +171,7 @@ function RenameForm({
             form={formId}
             variant={ButtonVariant.Primary}
             content={ButtonContent.Text}
-            loading={update.isPending}
+            loading={saving}
           >
             Save
           </Button>
@@ -151,7 +193,7 @@ function RenameForm({
           placeholder={sessionTitle(summary) || "Session name"}
           hintText="Leave empty to restore the automatic title (last prompt)."
           value={title}
-          loading={update.isPending}
+          loading={saving}
           onChange={(e) => setTitle(e.target.value)}
         />
         {canPin ? (
@@ -159,6 +201,7 @@ function RenameForm({
             <input
               type="checkbox"
               checked={pinned}
+              disabled={saving}
               onChange={(e) => setPinned(e.target.checked)}
               className="accent-[var(--color-fill-accent-primary)]"
             />

@@ -55,10 +55,12 @@ const summary = {
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 /** How the server refuses to delete a delegated session. */
@@ -257,13 +259,15 @@ describe("session actions", () => {
   });
 
   it("hold the field and the dialog's controls while a save is in flight", () => {
-    fakes.pending = true;
+    fakes.update.mockReturnValue(deferred<SessionSummarySnapshot>().promise);
     mount();
     openFrom("Rename Draft plan");
     const dialog = screen.getByRole("dialog", { name: "Rename session" });
+    fireEvent.submit(within(dialog).getByLabelText<HTMLInputElement>("Title").form!);
 
     const field = within(dialog).getByLabelText<HTMLInputElement>("Title");
     expect(field.readOnly).toBe(true);
+    expect(within(dialog).getByRole<HTMLInputElement>("checkbox").disabled).toBe(true);
     expect(field.getAttribute("aria-busy")).toBe("true");
     expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Cancel" }).disabled).toBe(
       true,
@@ -337,6 +341,131 @@ describe("session actions", () => {
       save.resolve({ ...summary, title: "Pending title", presentation_version: 4 }),
     );
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("retains a pending rename draft and single write after the form exits", async () => {
+    vi.useFakeTimers();
+    const save = deferred<SessionSummarySnapshot>();
+    fakes.update.mockReturnValue(save.promise);
+    mount();
+    openFrom("Rename Draft plan");
+    let dialog = screen.getByRole("dialog", { name: "Rename session" });
+    let field = within(dialog).getByLabelText<HTMLInputElement>("Title");
+    fireEvent.change(field, { target: { value: "  Pending title  " } });
+    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.submit(field.form!);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    act(() => vi.advanceTimersByTime(301));
+    openFrom("Rename Draft plan");
+    dialog = screen.getByRole("dialog", { name: "Rename session" });
+    field = within(dialog).getByLabelText<HTMLInputElement>("Title");
+    expect(field.value).toBe("  Pending title  ");
+    expect(within(dialog).getByRole<HTMLInputElement>("checkbox").checked).toBe(true);
+    fireEvent.submit(field.form!);
+    expect(fakes.update).toHaveBeenCalledExactlyOnceWith({
+      id: "chat-1",
+      title: "Pending title",
+      pinned: true,
+      expectedVersion: 3,
+    });
+    await act(async () =>
+      save.resolve({ ...summary, title: "Pending title", pinned: true, presentation_version: 4 }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => vi.advanceTimersByTime(301));
+    openFrom("Rename Draft plan");
+    expect(screen.getByLabelText<HTMLInputElement>("Title").value).toBe("Pending title");
+  });
+
+  it("retains the reopened pending draft after failure and permits one retry", async () => {
+    vi.useFakeTimers();
+    const save = deferred<SessionSummarySnapshot>();
+    fakes.update.mockReturnValueOnce(save.promise).mockImplementationOnce(acceptPresentation);
+    mount();
+    openFrom("Rename Draft plan");
+    let field = screen.getByLabelText<HTMLInputElement>("Title");
+    fireEvent.change(field, { target: { value: "Pending title" } });
+    fireEvent.submit(field.form!);
+    fireEvent.keyDown(field, { key: "Escape" });
+    act(() => vi.advanceTimersByTime(301));
+    openFrom("Rename Draft plan");
+    await act(async () => save.reject(new Error("Network unavailable")));
+    field = screen.getByLabelText<HTMLInputElement>("Title");
+    expect(field.value).toBe("Pending title");
+    expect(field.readOnly).toBe(false);
+    fireEvent.change(field, { target: { value: "Retry title" } });
+    await act(async () => {
+      fireEvent.submit(field.form!);
+      fireEvent.submit(field.form!);
+    });
+    expect(fakes.update).toHaveBeenCalledTimes(2);
+    expect(fakes.update).toHaveBeenLastCalledWith({
+      id: "chat-1",
+      title: "Retry title",
+      pinned: false,
+      expectedVersion: 3,
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it.each(["success", "failure"])(
+    "settles an older session's %s without changing the newer pending form",
+    async (outcome) => {
+      vi.useFakeTimers();
+      const first = deferred<SessionSummarySnapshot>();
+      const second = deferred<SessionSummarySnapshot>();
+      fakes.update.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      const view = mount();
+      openFrom("Rename Draft plan");
+      let field = screen.getByLabelText<HTMLInputElement>("Title");
+      fireEvent.change(field, { target: { value: "Accepted A" } });
+      fireEvent.submit(field.form!);
+      fireEvent.keyDown(field, { key: "Escape" });
+      act(() => vi.advanceTimersByTime(301));
+      const other = {
+        ...summary,
+        session_id: "chat-b",
+        title: "Other chat",
+        presentation_version: 8,
+      };
+      view.rerender(fixture("/session/chat-2", other));
+      openFrom("Rename Other chat");
+      field = screen.getByLabelText<HTMLInputElement>("Title");
+      fireEvent.change(field, { target: { value: "Pending B" } });
+      fireEvent.submit(field.form!);
+      await act(async () => {
+        if (outcome === "success")
+          first.resolve({ ...summary, title: "Accepted A", presentation_version: 4 });
+        else first.reject(new Error("A failed"));
+      });
+      expect(screen.getByRole("dialog", { name: "Rename session" })).toBeTruthy();
+      expect(screen.getByLabelText<HTMLInputElement>("Title").value).toBe("Pending B");
+      fireEvent.submit(field.form!);
+      expect(fakes.update).toHaveBeenCalledTimes(2);
+      await act(async () =>
+        second.resolve({ ...other, title: "Accepted B", presentation_version: 9 }),
+      );
+      expect(screen.queryByRole("dialog")).toBeNull();
+      view.rerender(fixture("/session/chat-2", summary));
+      openFrom("Rename Draft plan");
+      expect(screen.getByLabelText<HTMLInputElement>("Title").value).toBe(
+        outcome === "success" ? "Accepted A" : "Draft plan",
+      );
+    },
+  );
+
+  it("does not let an old rename success dismiss a newer delete for that session", async () => {
+    const save = deferred<SessionSummarySnapshot>();
+    fakes.update.mockReturnValue(save.promise);
+    mount();
+    openFrom("Rename Draft plan");
+    const field = screen.getByLabelText<HTMLInputElement>("Title");
+    fireEvent.submit(field.form!);
+    fireEvent.keyDown(field, { key: "Escape" });
+    openFrom("Delete Draft plan");
+    await act(async () => save.resolve({ ...summary, title: "Accepted", presentation_version: 4 }));
+    expect(screen.getByRole("alertdialog", { name: "Delete session" })).toBeTruthy();
+    expect(fakes.remove).not.toHaveBeenCalled();
   });
 
   it("reopens from the accepted title, pin and version before the row summary refreshes", async () => {
