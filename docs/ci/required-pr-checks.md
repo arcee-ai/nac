@@ -137,7 +137,7 @@ classic-protection/CODEOWNERS 404 stop capture. No credential is saved.
 ## Safe fixture qualification and activation handoff
 
 Use a separately approved disposable repository with Actions and rulesets support,
-an Allison account, ordinary non-bypass maintainer/App identities, the three
+an Allison account, ordinary non-bypass maintainer/App identities, the current
 eligible reviewers and an outside reviewer. That repository/access was **not
 provided or created** during this implementation. Platform evidence is pending.
 Do not test red merges, bypass, or direct pushes against production NAC.
