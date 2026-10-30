@@ -20,6 +20,7 @@ mod broker_review;
 mod command_classification;
 mod evaluation;
 mod hard_policy;
+mod human_operations;
 mod opaque_policy;
 mod resource_binding;
 mod resource_projection;
@@ -30,9 +31,11 @@ mod shell_parser;
 use command_classification::*;
 pub use evaluation::wildcard_match;
 use hard_policy::*;
+pub use human_operations::authorize_human_directory_creation;
 use opaque_policy::*;
 pub(crate) use resource_binding::bind_authorized_shell_command;
 use resource_binding::*;
+use resource_projection::human_directory_resources;
 pub(crate) use resource_projection::{
     canonicalize_authorization_resources, file_resources, shell_resources,
     unbounded_interactive_input,

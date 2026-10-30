@@ -113,6 +113,34 @@ export function useResolveBrowsePath() {
 }
 
 /**
+ * Creates one named folder inside a listed directory, on the server's own
+ * filesystem or on the SSH host `source` names — never anywhere else.
+ *
+ * Sent once and never retried: a lost answer leaves the outcome unknown, so
+ * the caller looks for the folder before it offers to try again. Listings of
+ * that source are refreshed whatever the answer, since one may now be stale.
+ */
+export function useCreateFolder() {
+  const { api } = useNativeRuntime();
+  const client = useQueryClient();
+
+  return useCallback(
+    async (source: BrowseSource, parent: string, name: string) => {
+      try {
+        return await (source
+          ? api.createSshFolder(source, parent, name)
+          : api.createFolder(parent, name));
+      } finally {
+        void client.invalidateQueries({
+          queryKey: [source ? "ssh-browse" : "fs-browse"],
+        });
+      }
+    },
+    [api, client],
+  );
+}
+
+/**
  * Opens the connection the launch form needs before it can offer anything
  * remote, and reports the login home so the form can start there.
  *

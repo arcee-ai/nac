@@ -32,6 +32,8 @@ interface BoundFailure extends SelectFailure {
  * File pickers keep choosing a listed file, as before.
  */
 export declare function usePathPicker({ open, kind, initialPath, ssh, showHidden, onSelect, }: PathPickerOptions): {
+    /** Identifies this opening and source; answers made under another are stale. */
+    binding: string;
     pickingFile: boolean;
     directory: string;
     draft: string;

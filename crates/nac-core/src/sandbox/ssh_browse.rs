@@ -324,7 +324,7 @@ fn join_remote(directory: &str, name: &str) -> String {
     }
 }
 
-fn first_stderr_line(stderr: &[u8]) -> String {
+pub(super) fn first_stderr_line(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
     let line = text
         .lines()
