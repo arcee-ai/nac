@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
@@ -26,6 +26,31 @@ import type {
   UpdateSshConfigurationRequest,
 } from "@/app/types/api";
 
+type BrowseApi = ReturnType<typeof useNativeRuntime>["api"];
+
+/** Where a listing comes from: the server's own filesystem or one SSH host. */
+export type BrowseSource = SshTarget | null;
+
+function browseQuery(
+  api: BrowseApi,
+  source: BrowseSource,
+  path: string | null,
+  kind: BrowseKind,
+  hidden: boolean,
+) {
+  return source
+    ? {
+        queryKey: queryKeys.sshBrowse(source, path ?? "", hidden),
+        queryFn: ({ signal }: { signal: AbortSignal }) =>
+          api.browseSshPath(source, path, hidden, signal),
+      }
+    : {
+        queryKey: queryKeys.browse(path ?? "", kind, hidden),
+        queryFn: ({ signal }: { signal: AbortSignal }) =>
+          api.browsePath(path, kind, hidden, signal),
+      };
+}
+
 /**
  * Directory listing from the machine running the server. Only fetched while
  * the picker is open, and never cached long: the filesystem moves under us.
@@ -39,8 +64,7 @@ export function useBrowsePath(
   const { api } = useNativeRuntime();
 
   return useQuery<BrowseListing>({
-    queryKey: queryKeys.browse(path ?? "", kind, hidden),
-    queryFn: ({ signal }) => api.browsePath(path, kind, hidden, signal),
+    ...browseQuery(api, null, path, kind, hidden),
     enabled,
     staleTime: 2000,
     retry: false,
@@ -60,12 +84,32 @@ export function useSshBrowsePath(
   const { api } = useNativeRuntime();
 
   return useQuery<BrowseListing>({
-    queryKey: queryKeys.sshBrowse(target ?? { ssh_host: "" }, path ?? "", hidden),
-    queryFn: ({ signal }) => api.browseSshPath(target!, path, hidden, signal),
+    ...browseQuery(api, target ?? { ssh_host: "" }, path, "directory", hidden),
     enabled: enabled && Boolean(target?.ssh_host),
     staleTime: 2000,
     retry: false,
   });
+}
+
+/**
+ * Asks the server afresh for the listing a typed path names, through the same
+ * query the picker browses with. The server expands `~` and canonicalizes, so
+ * whatever resolves here is the path the listing would show after Enter;
+ * a missing, non-directory or unreadable path rejects with the server's error.
+ */
+export function useResolveBrowsePath() {
+  const { api } = useNativeRuntime();
+  const client = useQueryClient();
+
+  return useCallback(
+    (source: BrowseSource, path: string | null, kind: BrowseKind, hidden: boolean) =>
+      client.fetchQuery<BrowseListing>({
+        ...browseQuery(api, source, path, kind, hidden),
+        staleTime: 0,
+        retry: false,
+      }),
+    [api, client],
+  );
 }
 
 /**
