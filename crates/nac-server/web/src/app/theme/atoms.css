@@ -7,8 +7,21 @@
 .icon {
   display: block;
 }
-.icon path {
-  transition: fill 0.15s ease-out;
+/* On the shapes, so a `transition-*` utility on the icon itself doesn't drop it. */
+.icon > * {
+  transition: color 0.15s ease-out;
+}
+/* The Icon's `color` prop. In a layer below the utilities, it yields to any
+   class or rule in this file that colors the icon. */
+@layer components {
+  .icon {
+    color: var(--icon-color, currentColor);
+  }
+}
+/* Custom properties inherit, so a host page's own `--icon-color` would otherwise
+   reach the packaged presentation's icons. */
+:root {
+  --icon-color: initial;
 }
 
 /* ============================ BUTTON ============================ */
@@ -20,7 +33,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--interaction-rounded);
   box-shadow: none;
   transition:
     color 0.15s ease-out,
@@ -120,7 +133,7 @@
 .btn.btn-tertiary-accent {
   height: auto;
   padding: 0;
-  border-radius: 8px;
+  border-radius: var(--interaction-rounded);
 }
 /* Boxless icon controls still keep a 24px pointer target. Deliberately compact
    transcript actions can override both minimums at their desktop breakpoint. */
@@ -454,96 +467,96 @@
   min-height: 24px;
 }
 
-/* icon fill per variant/state */
-.btn-primary .icon path {
-  fill: var(--color-fill-btn-primary);
+/* icon color per variant/state */
+.btn-primary .icon {
+  color: var(--color-fill-btn-primary);
 }
-.btn-primary.btn-disabled .icon path {
-  fill: var(--color-fill-btn-primary-disabled);
+.btn-primary.btn-disabled .icon {
+  color: var(--color-fill-btn-primary-disabled);
 }
-.btn-secondary .icon path,
-.btn-ghost .icon path,
-.btn-tertiary .icon path {
-  fill: var(--color-fill-btn-secondary);
+.btn-secondary .icon,
+.btn-ghost .icon,
+.btn-tertiary .icon {
+  color: var(--color-fill-btn-secondary);
 }
-.btn-secondary:hover .icon path,
-.btn-ghost:hover .icon path,
-.btn-tertiary:hover .icon path {
-  fill: var(--color-fill-btn-secondary-hovered);
+.btn-secondary:hover .icon,
+.btn-ghost:hover .icon,
+.btn-tertiary:hover .icon {
+  color: var(--color-fill-btn-secondary-hovered);
 }
-.btn-secondary:active .icon path,
-.btn-ghost:active .icon path,
-.btn-tertiary:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed);
+.btn-secondary:active .icon,
+.btn-ghost:active .icon,
+.btn-tertiary:active .icon {
+  color: var(--color-fill-btn-secondary-pressed);
 }
-.btn-secondary.btn-disabled .icon path,
-.btn-ghost.btn-disabled .icon path,
-.btn-tertiary.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled);
+.btn-secondary.btn-disabled .icon,
+.btn-ghost.btn-disabled .icon,
+.btn-tertiary.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled);
 }
-.btn-secondary-highlighted .icon path,
-.btn-ghost-highlighted .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted);
+.btn-secondary-highlighted .icon,
+.btn-ghost-highlighted .icon {
+  color: var(--color-fill-btn-secondary-highlighted);
 }
-.btn-secondary-highlighted:hover .icon path,
-.btn-ghost-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-secondary-hovered-highlighted);
+.btn-secondary-highlighted:hover .icon,
+.btn-ghost-highlighted:hover .icon {
+  color: var(--color-fill-btn-secondary-hovered-highlighted);
 }
-.btn-secondary-highlighted:active .icon path,
-.btn-ghost-highlighted:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed-highlighted);
+.btn-secondary-highlighted:active .icon,
+.btn-ghost-highlighted:active .icon {
+  color: var(--color-fill-btn-secondary-pressed-highlighted);
 }
-.btn-secondary-highlighted.btn-disabled .icon path,
-.btn-ghost-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled-highlighted);
+.btn-secondary-highlighted.btn-disabled .icon,
+.btn-ghost-highlighted.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled-highlighted);
 }
-.btn-secondary-accent .icon path,
-.btn-secondary-accent-highlighted .icon path,
-.btn-ghost-accent .icon path,
-.btn-tertiary-accent .icon path,
-.btn-ghost-highlighted-accent .icon path {
-  fill: var(--color-fill-btn-accent);
+.btn-secondary-accent .icon,
+.btn-secondary-accent-highlighted .icon,
+.btn-ghost-accent .icon,
+.btn-tertiary-accent .icon,
+.btn-ghost-highlighted-accent .icon {
+  color: var(--color-fill-btn-accent);
 }
-.btn-secondary-accent:hover .icon path,
-.btn-secondary-accent-highlighted:hover .icon path,
-.btn-ghost-accent:hover .icon path,
-.btn-tertiary-accent:hover .icon path,
-.btn-ghost-highlighted-accent:hover .icon path {
-  fill: var(--color-fill-btn-accent-hovered);
+.btn-secondary-accent:hover .icon,
+.btn-secondary-accent-highlighted:hover .icon,
+.btn-ghost-accent:hover .icon,
+.btn-tertiary-accent:hover .icon,
+.btn-ghost-highlighted-accent:hover .icon {
+  color: var(--color-fill-btn-accent-hovered);
 }
-.btn-secondary-accent:active .icon path,
-.btn-secondary-accent-highlighted:active .icon path,
-.btn-ghost-accent:active .icon path,
-.btn-tertiary-accent:active .icon path,
-.btn-ghost-highlighted-accent:active .icon path {
-  fill: var(--color-fill-btn-accent-pressed);
+.btn-secondary-accent:active .icon,
+.btn-secondary-accent-highlighted:active .icon,
+.btn-ghost-accent:active .icon,
+.btn-tertiary-accent:active .icon,
+.btn-ghost-highlighted-accent:active .icon {
+  color: var(--color-fill-btn-accent-pressed);
 }
-.btn-secondary-accent.btn-disabled .icon path,
-.btn-secondary-accent-highlighted.btn-disabled .icon path,
-.btn-ghost-accent.btn-disabled .icon path,
-.btn-tertiary-accent.btn-disabled .icon path,
-.btn-ghost-highlighted-accent.btn-disabled .icon path {
-  fill: var(--color-fill-btn-accent-muted);
+.btn-secondary-accent.btn-disabled .icon,
+.btn-secondary-accent-highlighted.btn-disabled .icon,
+.btn-ghost-accent.btn-disabled .icon,
+.btn-tertiary-accent.btn-disabled .icon,
+.btn-ghost-highlighted-accent.btn-disabled .icon {
+  color: var(--color-fill-btn-accent-muted);
 }
-.btn-secondary-destructive .icon path,
-.btn-ghost-destructive .icon path,
-.btn-tertiary-destructive .icon path {
-  fill: var(--color-fill-btn-destructive);
+.btn-secondary-destructive .icon,
+.btn-ghost-destructive .icon,
+.btn-tertiary-destructive .icon {
+  color: var(--color-fill-btn-destructive);
 }
-.btn-secondary-destructive:hover .icon path,
-.btn-ghost-destructive:hover .icon path,
-.btn-tertiary-destructive:hover .icon path {
-  fill: var(--color-fill-btn-destructive-hovered);
+.btn-secondary-destructive:hover .icon,
+.btn-ghost-destructive:hover .icon,
+.btn-tertiary-destructive:hover .icon {
+  color: var(--color-fill-btn-destructive-hovered);
 }
-.btn-secondary-destructive:active .icon path,
-.btn-ghost-destructive:active .icon path,
-.btn-tertiary-destructive:active .icon path {
-  fill: var(--color-fill-btn-destructive-pressed);
+.btn-secondary-destructive:active .icon,
+.btn-ghost-destructive:active .icon,
+.btn-tertiary-destructive:active .icon {
+  color: var(--color-fill-btn-destructive-pressed);
 }
-.btn-secondary-destructive.btn-disabled .icon path,
-.btn-ghost-destructive.btn-disabled .icon path,
-.btn-tertiary-destructive.btn-disabled .icon path {
-  fill: var(--color-fill-btn-destructive-disabled);
+.btn-secondary-destructive.btn-disabled .icon,
+.btn-ghost-destructive.btn-disabled .icon,
+.btn-tertiary-destructive.btn-disabled .icon {
+  color: var(--color-fill-btn-destructive-disabled);
 }
 
 /* ============================ INPUT ============================ */
@@ -655,7 +668,7 @@
 .btn-sticky.btn-large.btn-tertiary-accent.btn-icon-right,
 .btn-sticky.btn-large.btn-tertiary-accent.btn-text {
   height: 24px;
-  border-radius: 8px;
+  border-radius: var(--interaction-rounded);
   padding: 0;
 }
 
@@ -803,44 +816,44 @@
   color: var(--color-text-btn-destructive-disabled);
 }
 
-.tab-btn-regular .icon path {
-  fill: var(--color-fill-btn-secondary);
+.tab-btn-regular .icon {
+  color: var(--color-fill-btn-secondary);
 }
-.tab-btn-regular:hover .icon path {
-  fill: var(--color-fill-btn-secondary-hovered);
+.tab-btn-regular:hover .icon {
+  color: var(--color-fill-btn-secondary-hovered);
 }
-.tab-btn-regular:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed);
+.tab-btn-regular:active .icon {
+  color: var(--color-fill-btn-secondary-pressed);
 }
-.tab-btn-regular.tab-btn-active .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted);
+.tab-btn-regular.tab-btn-active .icon {
+  color: var(--color-fill-btn-secondary-highlighted);
 }
-.tab-btn-regular.tab-btn-active:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed-highlighted);
+.tab-btn-regular.tab-btn-active:active .icon {
+  color: var(--color-fill-btn-secondary-pressed-highlighted);
 }
-.tab-btn-accent .icon path {
-  fill: var(--color-fill-btn-accent);
+.tab-btn-accent .icon {
+  color: var(--color-fill-btn-accent);
 }
-.tab-btn-destructive .icon path {
-  fill: var(--color-fill-btn-destructive);
+.tab-btn-destructive .icon {
+  color: var(--color-fill-btn-destructive);
 }
-.tab-btn-regular.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled);
+.tab-btn-regular.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled);
 }
-.tab-btn-regular.tab-btn-active.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled-highlighted);
+.tab-btn-regular.tab-btn-active.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled-highlighted);
 }
-.tab-btn-accent.btn-disabled .icon path {
-  fill: var(--color-fill-btn-accent-muted);
+.tab-btn-accent.btn-disabled .icon {
+  color: var(--color-fill-btn-accent-muted);
 }
-.tab-btn-destructive.btn-disabled .icon path {
-  fill: var(--color-fill-btn-destructive-disabled);
+.tab-btn-destructive.btn-disabled .icon {
+  color: var(--color-fill-btn-destructive-disabled);
 }
 
 /* The 2px underline sits inside the box, so an inset shadow keeps the label
    centered. A real border would shrink the content box and shift it up. */
 .horizontal-tab-item {
-  border-radius: 4px;
+  border-radius: var(--interaction-rounded);
   box-shadow: inset 0 -2px 0 0 transparent;
 }
 .horizontal-tab-item-active {

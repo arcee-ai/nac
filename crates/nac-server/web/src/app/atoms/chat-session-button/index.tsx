@@ -32,13 +32,15 @@ interface ChatSessionButtonProps extends Omit<
   unread?: boolean;
   /** Taller touch target and always-visible actions for the mobile modal. */
   isMobile?: boolean;
+  /** Label-xs title for a side panel's narrower list; the mobile row keeps Label-md. */
+  smallTitle?: boolean;
   /** Pin, rename and delete controls, revealed on hover and on keyboard focus. */
   actions?: React.ReactNode;
 }
 
 /** Unlike the title, Figma leaves the glyph at rest on the selected row. */
 const GLYPH_TONE =
-  "[&_path]:fill-btn-secondary group-hover:[&_path]:fill-btn-secondary-hovered group-has-[>button:active]:[&_path]:fill-btn-secondary-pressed group-has-[>button:disabled]:[&_path]:fill-btn-secondary-disabled";
+  "text-fill-btn-secondary group-hover:text-fill-btn-secondary-hovered group-has-[>button:active]:text-fill-btn-secondary-pressed group-has-[>button:disabled]:text-fill-btn-secondary-disabled";
 
 /**
  * One session as a list row.
@@ -55,6 +57,10 @@ const GLYPH_TONE =
  * the title keeps the full row until then. They are visually hidden rather
  * than removed: focus leaves the row before it reaches the first action, and
  * a removed action could not take it.
+ *
+ * The button's `::after` spans the whole row beneath the content, so the
+ * padding and gaps press the button too. `isolate` keeps that layer above the
+ * row's background and under the fork tooltip and the actions.
  */
 const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   title,
@@ -69,6 +75,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   badgeLabel,
   unread = false,
   isMobile = false,
+  smallTitle = false,
   actions,
   className = "",
   type = "button",
@@ -80,7 +87,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   return (
     <div
       className={cn(
-        "group flex items-center min-w-0 rounded-[4px]",
+        "group relative isolate flex items-center min-w-0 rounded-interaction",
         "-outline-offset-2 outline-[var(--color-border-focus-outline)] has-[>button:focus-visible]:outline-2",
         isMobile ? "h-12 gap-3 py-2 pl-2.5 pr-3" : "h-9 gap-1.5 px-2 py-1",
         active
@@ -96,6 +103,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         aria-current={active ? "page" : undefined}
         className={cn(
           "flex flex-1 items-center min-w-0 text-left outline-none",
+          "after:absolute after:inset-0 after:-z-10 after:rounded-interaction",
           active
             ? "text-btn-secondary-pressed"
             : "text-btn-secondary group-hover:text-btn-secondary-hovered active:text-btn-secondary-pressed",
@@ -117,15 +125,15 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         <span
           className={cn(
             "min-w-0 flex-1 truncate",
-            isMobile ? "label-medium" : "label-small",
-            running && "text-shimmer-basic",
+            isMobile ? "label-medium" : smallTitle ? "label-micro" : "label-small",
+            running && "text-shimmer-primary",
           )}
         >
           {title}
         </span>
         <ChatSessionLeadingMark
           forkedFromTitle={forkedFromTitle}
-          className="[&_path]:fill-btn-secondary-disabled"
+          className="text-fill-btn-secondary-disabled"
         />
         {badge ? (
           <span

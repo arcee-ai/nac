@@ -59,7 +59,7 @@ const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) 
           <Icon
             iconName={VARIANT_ICONS[variant]}
             size={20}
-            className="flex-shrink-0 mt-[2px] min-w-[20px] min-h-[20px] max-w-[20px] max-h-[20px] [&>path]:fill-[var(--white)]"
+            className="flex-shrink-0 mt-[2px] min-w-[20px] min-h-[20px] max-w-[20px] max-h-[20px] text-[var(--white)]"
           />
           <span className="notification-title label-small flex-grow min-w-0 break-words whitespace-pre-line">
             {content}
@@ -70,8 +70,8 @@ const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) 
             className="absolute top-1 right-1 btn-icon-rotate flex-shrink-0"
             onClick={onClose}
           >
-            {/* Beat `.btn-ghost .icon path { fill: … }` from atoms.css. */}
-            <Icon iconName={IconName.Close} className="[&>path]:!fill-[var(--white)]" />
+            {/* Beat `.btn-ghost .icon { color: … }` from atoms.css. */}
+            <Icon iconName={IconName.Close} className="!text-[var(--white)]" />
           </Button>
         </div>
       </div>

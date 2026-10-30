@@ -24,6 +24,8 @@ interface ActionListButtonProps {
     size?: ActionListButtonSize;
     /** Leave unset on rows that navigate away instead of selecting themselves. */
     selected?: boolean;
+    /** The row the panel shows, marked or not, so that its list can reveal it. */
+    shown?: boolean;
     /** Only for group rows, which expand and collapse their children. */
     expanded?: boolean;
     /** Null for a row with nowhere to go, which then takes no focus. */

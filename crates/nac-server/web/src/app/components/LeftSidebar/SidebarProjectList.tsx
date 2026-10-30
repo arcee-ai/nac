@@ -141,9 +141,9 @@ export function SidebarProjectList({
         );
         return (
           <Fragment key={projectId}>
-            {mobile && index > 0 ? <Separator /> : null}
-            <section className={mobile ? "flex flex-col" : "border-b border-muted py-4"}>
-              {mobile ? button : <div className="px-2 py-1">{button}</div>}
+            {index > 0 ? <Separator /> : null}
+            <section className={cn("flex flex-col", !mobile && "p-2")}>
+              {button}
               <DropdownContent
                 isOpen={open}
                 inert={!open}
@@ -172,8 +172,8 @@ export function SidebarProjectList({
       })}
       {visibleOrphans.length > 0 ? (
         <>
-          {mobile && visibleEntries.length > 0 ? <Separator /> : null}
-          <section className={cn("flex flex-col", mobile ? "gap-1" : "px-2 py-1")}>
+          {visibleEntries.length > 0 ? <Separator /> : null}
+          <section className={cn("flex flex-col gap-1", !mobile && "p-2")}>
             {visibleOrphans.map((entry) => (
               <ProjectButton
                 key={entry.summary.session_id}
@@ -281,18 +281,11 @@ function ProjectSessions({
   const hidden = Math.max(0, sessions.length - shownCount);
 
   return (
-    <div className={cn("flex flex-col", mobile ? "gap-0.5 pt-1 pb-4" : "gap-1 px-2 pb-2")}>
+    <div className={cn("flex flex-col pt-1 pb-4", mobile ? "gap-0.5" : "gap-1")}>
       {shown.map((group) => (
-        <div key={group.label} className={cn("flex flex-col", mobile && "gap-2 pt-4")}>
-          <p
-            className={cn(
-              "tag-label text-basic-tertiary uppercase px-2",
-              mobile ? null : "pt-4 pb-4",
-            )}
-          >
-            {group.label}
-          </p>
-          <div className={cn("flex flex-col", mobile ? "gap-1" : "gap-0.5")}>
+        <div key={group.label} className="flex flex-col gap-2 pt-4">
+          <p className="tag-label text-basic-muted uppercase px-2">{group.label}</p>
+          <div className="flex flex-col gap-1">
             {group.items.map((entry) => {
               const title = sessionTitle(entry.summary);
               const behavior = sessionBehaviorPresentation(entry.summary.behavior);

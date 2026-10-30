@@ -11,7 +11,6 @@ import {
   ForkSessionItem,
   Icon,
   IconName,
-  ModelPill,
   ToolsAndReasoningBadge,
   Tooltip,
   TooltipPosition,
@@ -43,6 +42,9 @@ function modelCopyText(turn: ModelTurn): string {
 
 /** Must match the activity the runtime store sets when orchestrator compaction starts. */
 const COMPACTION_ACTIVITY = "Compacting context…";
+
+/** Dimmed at rest; keyboard focus lifts it so the focus ring keeps its contrast. */
+const ACTION_CLASS = "opacity-75 focus-visible:opacity-100";
 
 /**
  * What the run is busy with when nothing in the turn shows it. The badge only
@@ -128,7 +130,6 @@ const ModelMessageBody = memo(function ModelMessageBody({
   turn,
   previous,
   date,
-  model,
   active,
   activity,
   isLast = false,
@@ -178,15 +179,6 @@ const ModelMessageBody = memo(function ModelMessageBody({
   }
   return (
     <div className={frame}>
-      {model || date ? (
-        <div className="flex items-center gap-3 w-full min-w-0">
-          <ModelPill className="flex-1">{model}</ModelPill>
-          {date ? (
-            <span className="shrink-0 label-2xs text-basic-muted whitespace-nowrap">{date}</span>
-          ) : null}
-        </div>
-      ) : null}
-
       {/* Nothing in here clips: a badge's focus ring reaches 4px past it, which
           the inset keeps inside the chat's scroll area. */}
       <div className="flex flex-col items-start gap-6 w-full min-w-0 md:pl-2">
@@ -262,7 +254,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
       {/* Same resend / revert endpoints as the user bubble above — they always
           address that prompt. Hidden while this turn is still streaming. */}
       {!active ? (
-        <div className="flex items-center w-full min-w-0">
+        <div className="flex items-center gap-6 w-full min-w-0">
           <div className="flex items-center gap-3 shrink-0">
             {canRefresh ? (
               <Tooltip
@@ -276,6 +268,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
                   aria-label="Regenerate from original prompt"
                   disabled={actionsDisabled}
                   onClick={() => onRefresh(userMessageIndex)}
+                  className={ACTION_CLASS}
                 >
                   <Icon iconName={IconName.Refresh} size={16} />
                 </Button>
@@ -291,6 +284,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
                   aria-label="Revert to this snapshot"
                   disabled={actionsDisabled}
                   onClick={() => onRevert(userMessageIndex, userText)}
+                  className={ACTION_CLASS}
                 >
                   <Icon iconName={IconName.TurnLeft} size={16} />
                 </Button>
@@ -307,6 +301,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
                     content={ButtonContent.Icon}
                     aria-label="Revert to this snapshot"
                     disabled
+                    className={ACTION_CLASS}
                   >
                     <Icon iconName={IconName.TurnLeft} size={16} />
                   </Button>
@@ -323,6 +318,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
                   aria-label="Create fork"
                   disabled={actionsDisabled}
                   onClick={() => onFork(forkIndex)}
+                  className={ACTION_CLASS}
                 >
                   <Icon iconName={IconName.Scheme} size={16} />
                 </Button>
@@ -335,8 +331,15 @@ const ModelMessageBody = memo(function ModelMessageBody({
               variant={ButtonVariant.Ghost}
               title="Copy message"
               position={TooltipPosition.BottomRight}
+              iconSize={16}
+              className={ACTION_CLASS}
             />
           </div>
+          {date ? (
+            <span className="min-w-0 truncate label-2xs text-basic-muted whitespace-nowrap">
+              {date}
+            </span>
+          ) : null}
         </div>
       ) : null}
     </div>

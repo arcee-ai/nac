@@ -95,6 +95,7 @@ export { default as SubagentTranscriptCard, SubagentCardStatus } from "./subagen
 export { default as Switch, SwitchSize } from "./switch";
 export { default as TabButton, TabButtonSize, TabButtonVariant } from "./tab-button";
 export { default as TagsSelector } from "./tags-selector";
+export { default as TerminalTabButton, TerminalTabButtonSize } from "./terminal-tab-button";
 export { default as Toast, ToastVariant } from "./toast/Toast";
 export { default as ToolsAndReasoningBadge } from "./tools-and-reasoning-badge";
 export { default as Tooltip, TooltipPosition } from "./tooltip";
