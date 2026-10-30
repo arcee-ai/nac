@@ -158,6 +158,8 @@ container infrastructure as an explicit coverage gap, not a passing result.
 
 ## Change discipline
 
+- PR descriptions and UI before/after evidence follow
+  [pull request guidance](docs/contributing/pull-requests.md).
 - Preserve unrelated dirty worktree state. Stage exact paths, inspect staged
   and unstaged diffs, and avoid destructive Git operations.
 - Keep production modules around 500 lines where ownership permits. A cohesive

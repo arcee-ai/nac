@@ -24,3 +24,4 @@ Detailed documentation for nac. The [root README](../README.md) has install, aut
   - [Operational telemetry](managed/telemetry.md)
 - [Model request security](security/model-requests.md)
 - [Architecture decisions](architecture/README.md)
+- [Pull requests](contributing/pull-requests.md)
