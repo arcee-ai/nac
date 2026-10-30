@@ -1,0 +1,267 @@
+{
+  "base": {
+    "revision": "2c61af1a7d5af86f9b094f4140838ee7676c7b9f",
+    "bundle": "committed crates/nac-server/assets/dist via NAC_PILOT_BASELINE_DIST"
+  },
+  "head": {
+    "revision": "1847a5b980179101f230f5700921e6dddd256142",
+    "bundle": "embedded in target/debug/nac-web built by make test-e2e at af4aa77542c504cc6f98fb964215f9dce0f36805 (same web build)"
+  },
+  "harness": "e2e/pilot-overlays.e2e.ts, one isolated nac-web per run with the same fixture data; animations disabled, caret hidden",
+  "threshold": "per-pixel max channel difference > 8",
+  "interpretation": "Every changed region is per-run data: the project identicon generated from the project ID (left sidebar, x 15-38) and the short session ID in the Delete message. No layout, radius, inset, typography or colour difference.",
+  "pairs": [
+    {
+      "viewport": 1440,
+      "theme": "dark",
+      "action": "rename",
+      "size": [
+        1440,
+        900
+      ],
+      "changedPixels": 265,
+      "changedPercent": 0.02,
+      "changedBox": [
+        15,
+        311,
+        38,
+        332
+      ]
+    },
+    {
+      "viewport": 1440,
+      "theme": "dark",
+      "action": "delete",
+      "size": [
+        1440,
+        900
+      ],
+      "changedPixels": 993,
+      "changedPercent": 0.077,
+      "changedBox": [
+        15,
+        311,
+        733,
+        444
+      ]
+    },
+    {
+      "viewport": 1440,
+      "theme": "light",
+      "action": "rename",
+      "size": [
+        1440,
+        900
+      ],
+      "changedPixels": 211,
+      "changedPercent": 0.016,
+      "changedBox": [
+        15,
+        311,
+        37,
+        332
+      ]
+    },
+    {
+      "viewport": 1440,
+      "theme": "light",
+      "action": "delete",
+      "size": [
+        1440,
+        900
+      ],
+      "changedPixels": 955,
+      "changedPercent": 0.074,
+      "changedBox": [
+        15,
+        311,
+        733,
+        444
+      ]
+    },
+    {
+      "viewport": 768,
+      "theme": "dark",
+      "action": "rename",
+      "size": [
+        768,
+        1024
+      ],
+      "changedPixels": 265,
+      "changedPercent": 0.034,
+      "changedBox": [
+        15,
+        311,
+        38,
+        332
+      ]
+    },
+    {
+      "viewport": 768,
+      "theme": "dark",
+      "action": "delete",
+      "size": [
+        768,
+        1024
+      ],
+      "changedPixels": 993,
+      "changedPercent": 0.126,
+      "changedBox": [
+        15,
+        311,
+        397,
+        506
+      ]
+    },
+    {
+      "viewport": 768,
+      "theme": "light",
+      "action": "rename",
+      "size": [
+        768,
+        1024
+      ],
+      "changedPixels": 211,
+      "changedPercent": 0.027,
+      "changedBox": [
+        15,
+        311,
+        37,
+        332
+      ]
+    },
+    {
+      "viewport": 768,
+      "theme": "light",
+      "action": "delete",
+      "size": [
+        768,
+        1024
+      ],
+      "changedPixels": 955,
+      "changedPercent": 0.121,
+      "changedBox": [
+        15,
+        311,
+        397,
+        506
+      ]
+    },
+    {
+      "viewport": 390,
+      "theme": "dark",
+      "action": "rename",
+      "size": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "changedPercent": 0.0,
+      "changedBox": null
+    },
+    {
+      "viewport": 390,
+      "theme": "dark",
+      "action": "delete",
+      "size": [
+        390,
+        844
+      ],
+      "changedPixels": 748,
+      "changedPercent": 0.227,
+      "changedBox": [
+        89,
+        107,
+        213,
+        121
+      ]
+    },
+    {
+      "viewport": 390,
+      "theme": "light",
+      "action": "rename",
+      "size": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "changedPercent": 0.0,
+      "changedBox": null
+    },
+    {
+      "viewport": 390,
+      "theme": "light",
+      "action": "delete",
+      "size": [
+        390,
+        844
+      ],
+      "changedPixels": 744,
+      "changedPercent": 0.226,
+      "changedBox": [
+        89,
+        107,
+        213,
+        121
+      ]
+    },
+    {
+      "viewport": 720,
+      "theme": "dark",
+      "action": "rename",
+      "size": [
+        720,
+        450
+      ],
+      "changedPixels": 0,
+      "changedPercent": 0.0,
+      "changedBox": null
+    },
+    {
+      "viewport": 720,
+      "theme": "dark",
+      "action": "delete",
+      "size": [
+        720,
+        450
+      ],
+      "changedPixels": 750,
+      "changedPercent": 0.231,
+      "changedBox": [
+        450,
+        79,
+        574,
+        93
+      ]
+    },
+    {
+      "viewport": 720,
+      "theme": "light",
+      "action": "rename",
+      "size": [
+        720,
+        450
+      ],
+      "changedPixels": 0,
+      "changedPercent": 0.0,
+      "changedBox": null
+    },
+    {
+      "viewport": 720,
+      "theme": "light",
+      "action": "delete",
+      "size": [
+        720,
+        450
+      ],
+      "changedPixels": 747,
+      "changedPercent": 0.231,
+      "changedBox": [
+        450,
+        79,
+        574,
+        93
+      ]
+    }
+  ]
+}
