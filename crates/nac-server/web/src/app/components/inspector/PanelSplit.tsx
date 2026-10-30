@@ -169,99 +169,97 @@ export function PanelSplit({
     );
   }
 
-  if (isTablet) {
-    return (
-      <div className="flex flex-col flex-1 min-h-0 w-full">
-        {/* The list is a screen of its own here, so the row above the detail is
-            what leads to it, and the one above the list leads back. */}
-        {!showList ? (
-          <div className="flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted bg-elevation-ground">
-            <span className="min-w-0 truncate header-sm text-basic-primary">{title}</span>
-            {titleAction}
-            <span className="flex-1" />
-            {actions}
+  // A tablet's list is a screen of its own, so the row above the detail is what
+  // leads to it, and the one above the list leads back. The detail holds the
+  // same place in both layouts: crossing the breakpoint keeps it mounted, so a
+  // live terminal in it is neither reattached nor unfocused.
+  const listScreen = isTablet && showList;
+  return (
+    <div ref={containerRef} className={cn("flex flex-1 min-h-0 w-full", isTablet && "flex-col")}>
+      {isTablet && !showList ? (
+        <div className="flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted bg-elevation-ground">
+          <span className="min-w-0 truncate header-sm text-basic-primary">{title}</span>
+          {titleAction}
+          <span className="flex-1" />
+          {actions}
+          <Button
+            size={ButtonSize.Medium}
+            variant={ButtonVariant.Ghost}
+            content={ButtonContent.Icon}
+            aria-label="Open list"
+            aria-expanded={false}
+            onClick={toggleSidePanelList}
+          >
+            <Icon iconName={IconName.List} />
+          </Button>
+        </div>
+      ) : null}
+      {listScreen ? (
+        <div className="flex flex-col flex-1 min-h-0 bg-elevation-ground">
+          <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground">
             <Button
+              className="shrink-0"
               size={ButtonSize.Medium}
               variant={ButtonVariant.Ghost}
               content={ButtonContent.Icon}
-              aria-label="Open list"
-              aria-expanded={false}
-              onClick={toggleSidePanelList}
+              aria-label="Close list"
+              onClick={() => showSidePanelList(false)}
             >
-              <Icon iconName={IconName.List} />
+              <Icon iconName={IconName.Left} />
             </Button>
+            {listToolbar ? (
+              <div className="flex min-w-0 flex-1 items-center">{listToolbar}</div>
+            ) : (
+              <span className="min-w-0 truncate header-sm text-basic-primary">{listTitle}</span>
+            )}
           </div>
-        ) : null}
-        {showList ? (
-          <div className="flex flex-col flex-1 min-h-0 bg-elevation-ground">
-            <div className="flex items-center gap-[10px] h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground">
-              <Button
-                className="shrink-0"
-                size={ButtonSize.Medium}
-                variant={ButtonVariant.Ghost}
-                content={ButtonContent.Icon}
-                aria-label="Close list"
-                onClick={() => showSidePanelList(false)}
-              >
-                <Icon iconName={IconName.Left} />
-              </Button>
-              {listToolbar ? (
-                <div className="flex min-w-0 flex-1 items-center">{listToolbar}</div>
-              ) : (
-                <span className="min-w-0 truncate header-sm text-basic-primary">{listTitle}</span>
-              )}
-            </div>
-            <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-2 [&>*]:shrink-0">
-              {list}
-            </div>
+          <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-2 [&>*]:shrink-0">
+            {list}
           </div>
-        ) : (
-          <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div ref={containerRef} className="flex flex-1 min-h-0 w-full">
-      <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
-      <div
-        className="relative flex flex-col shrink-0 min-h-0 border-l border-muted bg-elevation-ground"
-        style={{ width: listWidth }}
-      >
-        {listToolbar}
-        <div
-          className={cn(
-            "flex flex-col flex-1 min-h-0 overflow-auto px-1 py-4 [&>*]:shrink-0",
-            listClassName,
-          )}
-        >
-          {list}
         </div>
-        {/* The handle sits on the list's leading edge, so dragging or arrowing
-            left widens the list. */}
+      ) : null}
+      {listScreen ? null : (
+        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
+      )}
+      {isTablet ? null : (
         <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize list panel"
-          aria-valuemin={PANEL_LIST_MIN_WIDTH}
-          aria-valuemax={Math.round(maxWidth)}
-          aria-valuenow={listWidth}
-          tabIndex={0}
-          className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none"
-          onPointerDown={onPointerDown}
-          onKeyDown={(event) => {
-            const step = event.shiftKey ? 24 : 8;
-            if (event.key === "ArrowLeft") {
-              event.preventDefault();
-              setPanelListWidth(clampPanelListWidth(listWidth + step, maxWidth));
-            } else if (event.key === "ArrowRight") {
-              event.preventDefault();
-              setPanelListWidth(clampPanelListWidth(listWidth - step, maxWidth));
-            }
-          }}
-        />
-      </div>
+          className="relative flex flex-col shrink-0 min-h-0 border-l border-muted bg-elevation-ground"
+          style={{ width: listWidth }}
+        >
+          {listToolbar}
+          <div
+            className={cn(
+              "flex flex-col flex-1 min-h-0 overflow-auto px-1 py-4 [&>*]:shrink-0",
+              listClassName,
+            )}
+          >
+            {list}
+          </div>
+          {/* The handle sits on the list's leading edge, so dragging or arrowing
+              left widens the list. */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize list panel"
+            aria-valuemin={PANEL_LIST_MIN_WIDTH}
+            aria-valuemax={Math.round(maxWidth)}
+            aria-valuenow={listWidth}
+            tabIndex={0}
+            className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none"
+            onPointerDown={onPointerDown}
+            onKeyDown={(event) => {
+              const step = event.shiftKey ? 24 : 8;
+              if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                setPanelListWidth(clampPanelListWidth(listWidth + step, maxWidth));
+              } else if (event.key === "ArrowRight") {
+                event.preventDefault();
+                setPanelListWidth(clampPanelListWidth(listWidth - step, maxWidth));
+              }
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

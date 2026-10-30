@@ -200,14 +200,10 @@ export function SessionSideBox({
               <PanelListNote>The panels show once the session has loaded.</PanelListNote>
             </div>
           </PanelPhoneScreen>
-        ) : active === "terminal" || active === "history" ? (
+        ) : active === "history" ? (
           <PanelPhoneScreen title={SESSION_PANEL_LABEL[active]} bar>
-            {/* History scrolls under the header; the terminal keeps its own frame. */}
-            {active === "terminal" ? (
-              <div className="flex flex-col flex-1 min-h-0 pt-14">{body}</div>
-            ) : (
-              body
-            )}
+            {/* History scrolls under the header. */}
+            {body}
           </PanelPhoneScreen>
         ) : (
           body
