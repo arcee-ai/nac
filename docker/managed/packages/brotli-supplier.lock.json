@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "supplier": "Wolfi through https://apk.cgr.dev/chainguard",
+  "source_commit": "db24a98aed38a16de78cc05ca15cdd8dc2a0d92d",
+  "upstream_version": "1.2.1",
+  "license": "MIT",
+  "advisories": [
+    "CVE-2026-111497",
+    "GHSA-9v8h-qqgm-4m35"
+  ],
+  "packages": {
+    "libbrotlicommon1": {
+      "version": "1.2.1-r2",
+      "archive_sha256": "fcc021ab88501ff5fcc1d74783df7f062bb7c260050565a9ca556db2537aedc5",
+      "installed_payload": {
+        "/usr/lib/libbrotlicommon.so.1": {
+          "symlink": "libbrotlicommon.so.1.2.1"
+        },
+        "/usr/lib/libbrotlicommon.so.1.2.1": {
+          "sha256": "b26be0a5b4a1801776e7e10fa1e8c2fb2c7108dff003969f6206342a5f66fc05"
+        }
+      }
+    },
+    "libbrotlidec1": {
+      "version": "1.2.1-r2",
+      "archive_sha256": "bf2619bf5ab853dc8617c5f42fbba87f1cf1bf32e580322e22d49564554c31f6",
+      "installed_payload": {
+        "/usr/lib/libbrotlidec.so.1": {
+          "symlink": "libbrotlidec.so.1.2.1"
+        },
+        "/usr/lib/libbrotlidec.so.1.2.1": {
+          "sha256": "ffc18215fdb1fce45b4a8ceea88d156fd2855bd73c5ce8f5f52c263d1bca6b33"
+        }
+      }
+    },
+    "libbrotlienc1": {
+      "version": "1.2.1-r2",
+      "archive_sha256": "e916a6a52270b1bf7ae14ca61f5b9a9dda068149c352ae8bf1cf10489dfe2959",
+      "installed_payload": {
+        "/usr/lib/libbrotlienc.so.1": {
+          "symlink": "libbrotlienc.so.1.2.1"
+        },
+        "/usr/lib/libbrotlienc.so.1.2.1": {
+          "sha256": "e4036dda837b071bace576525fdcab2d88b7eede95a89ba24a776d7a455a4617"
+        }
+      }
+    }
+  }
+}
