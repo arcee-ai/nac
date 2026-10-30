@@ -811,6 +811,23 @@ export interface components {
     ModelOrigin: { backend: components["schemas"]["BackendKind"]; model: string };
     ModelSource: "baseline" | "overlay" | "user_override" | "provider_default" | "fallback";
     OpenLocalPathResult: { fell_back_to_parent: boolean; opened: string };
+    OpenSshAliasList: {
+      aliases: string[];
+      undiscoverable_patterns: number;
+      warnings: components["schemas"]["OpenSshAliasWarning"][];
+    };
+    OpenSshAliasWarning:
+      | "home_unavailable"
+      | "unreadable_file"
+      | "oversized_file"
+      | "missing_include"
+      | "include_cycle"
+      | "include_depth_exceeded"
+      | "file_limit_reached"
+      | "alias_limit_reached"
+      | "unsupported_include"
+      | "conditional_include_skipped"
+      | "malformed_line";
     OpenUserTerminalRequest: {
       cols: number;
       launch_id: string;

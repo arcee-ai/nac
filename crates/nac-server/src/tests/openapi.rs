@@ -156,6 +156,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
         "/sessions/{session_id}/workspace/revisions/{revision_id}/changes",
     ),
     ("GET", "/ssh-configs"),
+    ("GET", "/ssh/aliases"),
     ("GET", "/store"),
     ("PATCH", "/mcp_library/servers/{server_name}"),
     ("PATCH", "/model-configs/{config_id}"),

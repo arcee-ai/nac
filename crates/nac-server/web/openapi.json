@@ -9610,6 +9610,37 @@
         }
       }
     },
+    "/ssh/aliases": {
+      "get": {
+        "tags": [
+          "ssh-configs"
+        ],
+        "summary": "OpenSSH aliases the NAC server's own user has configured. This reads the\nserver machine's `~/.ssh/config`, never the browser's. Discovery problems\ndegrade to a partial list with warnings rather than an error.",
+        "operationId": "get_ssh_aliases",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenSshAliasList"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ssh/browse": {
       "post": {
         "tags": [
@@ -14560,6 +14591,53 @@
             "description": "Absolute path handed to the OS opener."
           }
         }
+      },
+      "OpenSshAliasList": {
+        "type": "object",
+        "description": "Literal `Host` aliases from the NAC server user's `~/.ssh/config` and the\nInclude files it names statically. Only alias names are returned; host\nnames, users, keys and file contents never are.",
+        "required": [
+          "aliases",
+          "undiscoverable_patterns",
+          "warnings"
+        ],
+        "properties": {
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Aliases in first-seen order, without duplicates."
+          },
+          "undiscoverable_patterns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Host patterns present but not listed: wildcards, negations and names\nssh cannot take as a destination. They still work through manual entry.",
+            "minimum": 0
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenSshAliasWarning"
+            },
+            "description": "Why the list may be incomplete. Never names a path or file contents."
+          }
+        }
+      },
+      "OpenSshAliasWarning": {
+        "type": "string",
+        "enum": [
+          "home_unavailable",
+          "unreadable_file",
+          "oversized_file",
+          "missing_include",
+          "include_cycle",
+          "include_depth_exceeded",
+          "file_limit_reached",
+          "alias_limit_reached",
+          "unsupported_include",
+          "conditional_include_skipped",
+          "malformed_line"
+        ]
       },
       "OpenUserTerminalRequest": {
         "type": "object",

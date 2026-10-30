@@ -15,12 +15,10 @@ import {
   LoaderSize,
   Popover,
   PopoverPlacement,
-  TabButton,
-  TabButtonSize,
-  TabButtonVariant,
 } from "@/app/atoms";
 import { FieldLabel } from "@/app/components/modals/ConfigRow";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
+import { SshConnectionMenu } from "@/app/components/modals/SshConnectionMenu";
 import { cn } from "@/app/lib/cn";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useCreateSshConfig, useSshConfigs, useSshConnect } from "@/app/services/queries";
@@ -159,6 +157,9 @@ export function SshConnectionBox({
   // Null means "follow the seed match"; a concrete id is the user's pick.
   const [userSelectedId, setUserSelectedId] = useState<string | null>(null);
   const selectedId = userSelectedId ?? matchedSeedId ?? CREATE_NEW;
+  // The OpenSSH alias a new draft started from. It only labels the draft: the
+  // alias is an ordinary host value, resolved by OpenSSH on Connect.
+  const [selectedAlias, setSelectedAlias] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [draftName, setDraftName] = useState(() => nextDefaultName(configurations));
   const [draftHost, setDraftHost] = useState(seedTarget?.ssh_host ?? "");
@@ -215,11 +216,19 @@ export function SshConnectionBox({
     else setDraftKey(value);
   };
 
+  // Editing the host away from the alias turns the draft back into a plain one.
+  const draftAlias =
+    selectedId === CREATE_NEW && selectedAlias !== null && draftHost.trim() === selectedAlias
+      ? selectedAlias
+      : null;
   const selectorLabel =
-    selectedId === CREATE_NEW ? "Create New" : (selectedConfig?.name ?? "SSH config");
+    selectedId === CREATE_NEW
+      ? (draftAlias ?? "Create New")
+      : (selectedConfig?.name ?? "SSH config");
 
   const pickConfig = (id: string) => {
     setUserSelectedId(id);
+    setSelectedAlias(null);
     setMenuOpen(false);
     setError(null);
     if (id === CREATE_NEW) {
@@ -235,6 +244,22 @@ export function SshConnectionBox({
     setDraftHost(entry.ssh_host);
     setDraftPort(entry.ssh_port ? String(entry.ssh_port) : "");
     setDraftKey(entry.ssh_identity_file ?? "");
+  };
+
+  /**
+   * Start a new connection from an OpenSSH alias on the NAC server. Only the
+   * host is filled; port and key stay blank so OpenSSH resolves them from the
+   * same config, and nothing connects until the user presses Connect.
+   */
+  const pickAlias = (alias: string) => {
+    setUserSelectedId(CREATE_NEW);
+    setSelectedAlias(alias);
+    setMenuOpen(false);
+    setError(null);
+    setDraftName(nextDefaultName(configurations));
+    setDraftHost(alias);
+    setDraftPort("");
+    setDraftKey("");
   };
 
   const runConnect = async () => {
@@ -309,52 +334,18 @@ export function SshConnectionBox({
             placement={PopoverPlacement.BottomLeft}
             size="w-auto"
             className="shrink-0"
-            panelClassName="max-h-72 overflow-hidden"
+            panelClassName="max-h-96 overflow-hidden"
             sheetClassName="overflow-hidden [&>*]:min-h-0 [&>*]:flex-1 [&>*]:flex [&>*]:flex-col"
             content={
-              <div
-                className={cn(
-                  "flex flex-col min-h-0",
-                  isMobile ? "w-full flex-1 px-2" : "w-[280px] max-h-72",
-                )}
-              >
-                <div className="flex flex-col shrink-0 [&>*]:shrink-0">
-                  <TabButton
-                    size={isMobile ? TabButtonSize.Large : TabButtonSize.Medium}
-                    variant={
-                      selectedId === CREATE_NEW ? TabButtonVariant.Accent : TabButtonVariant.Regular
-                    }
-                    active={selectedId === CREATE_NEW}
-                    onClick={() => pickConfig(CREATE_NEW)}
-                  >
-                    <Icon iconName={IconName.Add} />
-                    <span className="text-left flex-grow">Create New</span>
-                  </TabButton>
-                </div>
-                {configurations.length > 0 ? (
-                  <div className="flex flex-col flex-1 min-h-0 min-w-0">
-                    <div className="h-px w-full bg-divider-muted my-1 shrink-0" />
-                    <div className="flex flex-col flex-1 min-h-0 overflow-auto [&>*]:shrink-0">
-                      {configurations.map((entry) => (
-                        <TabButton
-                          key={entry.config_id}
-                          size={isMobile ? TabButtonSize.Large : TabButtonSize.Medium}
-                          variant={
-                            selectedId === entry.config_id
-                              ? TabButtonVariant.Accent
-                              : TabButtonVariant.Regular
-                          }
-                          active={selectedId === entry.config_id}
-                          onClick={() => pickConfig(entry.config_id)}
-                        >
-                          <Icon iconName={IconName.Globe} />
-                          <span className="text-left flex-grow truncate">{entry.name}</span>
-                        </TabButton>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
+              <SshConnectionMenu
+                configurations={configurations}
+                selectedConfigId={selectedId === CREATE_NEW ? null : selectedId}
+                selectedAlias={draftAlias}
+                isMobile={isMobile}
+                onCreateNew={() => pickConfig(CREATE_NEW)}
+                onPickConfig={pickConfig}
+                onPickAlias={pickAlias}
+              />
             }
           >
             <Button
@@ -396,7 +387,7 @@ export function SshConnectionBox({
             <FieldLabel
               label="SSH Host"
               required
-              hint="user@host, a host alias from ~/.ssh/config, or an IP."
+              hint="user@host, a host alias from the NAC server's ~/.ssh/config, or an IP."
             />
             <Input
               inputSize={isMobile ? InputSize.Large : InputSize.Medium}

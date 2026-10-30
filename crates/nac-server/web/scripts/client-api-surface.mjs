@@ -167,6 +167,7 @@ export const clientApiSurface = {
   "DELETE /ssh-configs/{config_id}": "api.deleteSshConfig",
   "PATCH /ssh-configs/{config_id}": "api.updateSshConfig",
   "POST /ssh/browse": "api.browseSshPath",
+  "GET /ssh/aliases": "api.listSshAliases",
   "GET /store": "api.getStore",
   "GET /ui-config": "client.getUiConfiguration",
 };

@@ -151,6 +151,7 @@ export declare const NAC_API_SURFACE: {
     readonly "DELETE /ssh-configs/{config_id}": "api.deleteSshConfig";
     readonly "PATCH /ssh-configs/{config_id}": "api.updateSshConfig";
     readonly "POST /ssh/browse": "api.browseSshPath";
+    readonly "GET /ssh/aliases": "api.listSshAliases";
     readonly "GET /store": "api.getStore";
     readonly "GET /ui-config": "client.getUiConfiguration";
 };
