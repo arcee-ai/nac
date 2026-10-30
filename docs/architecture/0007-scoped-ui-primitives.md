@@ -124,20 +124,26 @@ imported chunks and linked stylesheets. Lazy `import()` chunks are excluded and
 stay lazy.
 
 Budgets are fixed against one baseline, `dev` at
-`cd7d3730bd47cc3c7b9de5204fd08496b19b155d`, not against the previous slice. The
+`2c61af1a7d5af86f9b094f4140838ee7676c7b9f`, not against the previous slice. The
 pilot may add at most 30 KiB of startup JavaScript and 10 KiB of CSS to each
 graph, and the complete migration at most 50 KiB and 15 KiB.
 
 | Graph | Baseline JS | Baseline CSS | Pilot adds | Left for later slices |
 | --- | --- | --- | --- | --- |
-| App | 470,380 B | 23,184 B | 23.1 KiB JS, 0.2 KiB CSS | 26.9 KiB JS, 14.8 KiB CSS |
-| Presentation | 435,096 B | 1,180,676 B | 27.2 KiB JS, 0.3 KiB CSS | 22.8 KiB JS, 14.7 KiB CSS |
+| App | 421,418 B | 23,493 B | 23.0 KiB JS, 0.2 KiB CSS | 27.0 KiB JS, 14.8 KiB CSS |
+| Presentation | 386,795 B | 1,174,581 B | 27.3 KiB JS, 0.3 KiB CSS | 22.7 KiB JS, 14.7 KiB CSS |
 
-These measurements use Node 26.12.0, gzip level 9, and the committed baseline
-bundles on the same host as the repaired pilot build. Gzip byte counts can vary
-with the runtime's compression implementation; compare both revisions together.
-The table includes keyboard hints surviving container scrolling and accepted
-rename revisions surviving the exit form's lifetime.
+These measurements use Node 24.16.0, gzip level 9, and the committed bundles of
+both revisions on the same host. Gzip byte counts can vary with the runtime's
+compression implementation; compare both revisions together. The table includes
+keyboard hints surviving container scrolling and accepted rename revisions
+surviving the exit form's lifetime.
+
+The baseline was first `dev` at `cd7d3730bd47cc3c7b9de5204fd08496b19b155d`. It
+moved when the pilot merged `dev` after the side-panel stack, whose own changes
+removed about 49 KiB of startup JavaScript from the app graph and 47 KiB from
+the presentation graph. That reduction is not budget for later slices. Measured
+the same way against the first baseline, the pilot added the same amounts.
 
 Every later slice measures against this baseline. Exceeding a budget calls for
 optimization or an explicit scope review; it is never waived silently.
