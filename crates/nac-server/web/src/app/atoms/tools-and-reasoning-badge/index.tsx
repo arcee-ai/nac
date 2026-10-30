@@ -32,12 +32,12 @@ const LABEL_TONE = {
     "text-accent-primary hover:text-accent-secondary active:text-accent-tertiary disabled:text-accent-muted",
 };
 
-/** Glyph paths carry `fill="currentColor"`, so the fill tokens go on the paths. */
+/** The glyph draws with `currentColor`, so the fill tokens go on it as text colors. */
 const ICON_TONE = {
   basic:
-    "[&>path]:fill-basic-tertiary group-hover:[&>path]:fill-basic-secondary group-active:[&>path]:fill-basic-primary group-disabled:[&>path]:fill-basic-muted",
+    "text-fill-basic-tertiary group-hover:text-fill-basic-secondary group-active:text-fill-basic-primary group-disabled:text-fill-basic-muted",
   selected:
-    "[&>path]:fill-accent-primary group-hover:[&>path]:fill-accent-secondary group-active:[&>path]:fill-accent-tertiary group-disabled:[&>path]:fill-accent-muted",
+    "text-fill-accent-primary group-hover:text-fill-accent-secondary group-active:text-fill-accent-tertiary group-disabled:text-fill-accent-muted",
 };
 
 /** Hover, press, disabled and reduced motion stop the shimmer on the plain tone. */

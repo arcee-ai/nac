@@ -1,4 +1,4 @@
-import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Bt as f, C as p, Ci as m, Cn as h, Cr as g, Ct as _, D as v, Di as y, Dn as b, Dr as x, Dt as S, E as C, Ei as w, En as T, Er as E, Et as D, F as O, Fi as k, Fn as ee, Fr as A, Ft as te, G as j, Gi as ne, Gn as re, Gr as ie, Gt as ae, H as oe, Hi as se, Hn as ce, Hr as M, Ht as le, I as ue, Ii as de, In as fe, Ir as N, It as pe, J as me, Ji as he, Jn as P, Jr as F, Jt as ge, K as _e, Ki as ve, Kn as I, Kr as L, Kt as ye, L as be, Li as xe, Ln as Se, Lr as Ce, Lt as we, M as Te, Mi as Ee, Mn as De, Mr as Oe, Mt as ke, N as Ae, Ni as je, Nn as Me, Nr as Ne, Nt as Pe, O as Fe, Oi as Ie, On as Le, Or as Re, Ot as ze, P as Be, Pi as Ve, Pn as He, Pr as Ue, Pt as We, Q as Ge, Qn as Ke, Qr as qe, Qt as Je, R as Ye, Ri as Xe, Rn as Ze, Rr as Qe, Rt as $e, S as et, Si as tt, Sn as nt, Sr as R, St as rt, T as it, Ti as at, Tn as ot, Tr as z, Tt as st, U as ct, Ui as lt, Un as ut, Ur as dt, Ut as ft, V as pt, Vi as mt, Vn as ht, Vr as gt, Vt as _t, W as vt, Wi as yt, Wn as bt, Wr as xt, Wt as St, X as Ct, Xi as wt, Xn as Tt, Xr as Et, Xt as Dt, Y as Ot, Yi as kt, Yn as At, Yr as jt, Yt as Mt, Z as Nt, Zn as Pt, Zr as Ft, Zt as It, _ as Lt, _i as Rt, _n as zt, _r as Bt, _t as Vt, a as Ht, ai as Ut, an as Wt, ar as Gt, at as Kt, b as qt, bi as Jt, bn as Yt, br as Xt, bt as Zt, c as Qt, ci as $t, cn as en, cr as tn, ct as nn, d as rn, di as an, dn as on, dr as sn, dt as cn, ei as ln, en as un, er as dn, et as fn, f as pn, fi as mn, fn as hn, fr as gn, ft as _n, g as vn, gi as yn, gn as bn, gr as xn, gt as Sn, h as Cn, hi as wn, hn as Tn, hr as En, ht as Dn, i as On, ii as kn, in as An, ir as jn, it as Mn, j as Nn, ji as Pn, jn as Fn, jr as In, jt as Ln, k as Rn, ki as zn, kn as Bn, kr as Vn, kt as Hn, l as Un, li as Wn, ln as Gn, lr as Kn, lt as qn, m as Jn, mi as Yn, mn as Xn, mr as Zn, mt as Qn, n as $n, ni as B, nn as er, nr as tr, nt as nr, o as rr, oi as ir, on as ar, or, ot as sr, p as cr, pi as lr, pn as ur, pt as dr, q as fr, qi as pr, qn as mr, qr as V, qt as hr, ri as gr, rn as _r, rr as vr, rt as yr, s as br, si as xr, sn as Sr, sr as Cr, st as wr, t as Tr, ti as Er, tn as Dr, tr as Or, tt as kr, u as Ar, ui as jr, un as Mr, ur as Nr, ut as Pr, v as Fr, vi as Ir, vn as Lr, vr as Rr, vt as zr, w as Br, wi as Vr, wn as Hr, wr as H, wt as Ur, x as Wr, xi as Gr, xn as Kr, xr as qr, xt as Jr, y as Yr, yi as Xr, yn as Zr, yr as Qr, yt as $r, z as ei, zi as ti, zn as ni, zr as ri, zt as ii } from "./chunks/PerfProfiler-VCkJrC_0.js";
+import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Bt as f, C as p, Ci as m, Cn as h, Cr as g, Ct as _, D as v, Di as y, Dn as b, Dr as x, Dt as S, E as C, Ei as w, En as T, Er as E, Et as D, F as O, Fi as k, Fn as ee, Fr as A, Ft as te, G as j, Gi as ne, Gn as re, Gr as ie, Gt as ae, H as oe, Hi as se, Hn as ce, Hr as M, Ht as le, I as ue, Ii as de, In as fe, Ir as N, It as pe, J as me, Ji as he, Jn as P, Jr as F, Jt as ge, K as _e, Ki as ve, Kn as I, Kr as L, Kt as ye, L as be, Li as xe, Ln as Se, Lr as Ce, Lt as we, M as Te, Mi as Ee, Mn as De, Mr as Oe, Mt as ke, N as Ae, Ni as je, Nn as Me, Nr as Ne, Nt as Pe, O as Fe, Oi as Ie, On as Le, Or as Re, Ot as ze, P as Be, Pi as Ve, Pn as He, Pr as Ue, Pt as We, Q as Ge, Qn as Ke, Qr as qe, Qt as Je, R as Ye, Ri as Xe, Rn as Ze, Rr as Qe, Rt as $e, S as et, Si as tt, Sn as nt, Sr as R, St as rt, T as it, Ti as at, Tn as ot, Tr as z, Tt as st, U as ct, Ui as lt, Un as ut, Ur as dt, Ut as ft, V as pt, Vi as mt, Vn as ht, Vr as gt, Vt as _t, W as vt, Wi as yt, Wn as bt, Wr as xt, Wt as St, X as Ct, Xi as wt, Xn as Tt, Xr as Et, Xt as Dt, Y as Ot, Yi as kt, Yn as At, Yr as jt, Yt as Mt, Z as Nt, Zn as Pt, Zr as Ft, Zt as It, _ as Lt, _i as Rt, _n as zt, _r as Bt, _t as Vt, a as Ht, ai as Ut, an as Wt, ar as Gt, at as Kt, b as qt, bi as Jt, bn as Yt, br as Xt, bt as Zt, c as Qt, ci as $t, cn as en, cr as tn, ct as nn, d as rn, di as an, dn as on, dr as sn, dt as cn, ei as ln, en as un, er as dn, et as fn, f as pn, fi as mn, fn as hn, fr as gn, ft as _n, g as vn, gi as yn, gn as bn, gr as xn, gt as Sn, h as Cn, hi as wn, hn as Tn, hr as En, ht as Dn, i as On, ii as kn, in as An, ir as jn, it as Mn, j as Nn, ji as Pn, jn as Fn, jr as In, jt as Ln, k as Rn, ki as zn, kn as Bn, kr as Vn, kt as Hn, l as Un, li as Wn, ln as Gn, lr as Kn, lt as qn, m as Jn, mi as Yn, mn as Xn, mr as Zn, mt as Qn, n as $n, ni as B, nn as er, nr as tr, nt as nr, o as rr, oi as ir, on as ar, or, ot as sr, p as cr, pi as lr, pn as ur, pt as dr, q as fr, qi as pr, qn as mr, qr as V, qt as hr, ri as gr, rn as _r, rr as vr, rt as yr, s as br, si as xr, sn as Sr, sr as Cr, st as wr, t as Tr, ti as Er, tn as Dr, tr as Or, tt as kr, u as Ar, ui as jr, un as Mr, ur as Nr, ut as Pr, v as Fr, vi as Ir, vn as Lr, vr as Rr, vt as zr, w as Br, wi as Vr, wn as Hr, wr as H, wt as Ur, x as Wr, xi as Gr, xn as Kr, xr as qr, xt as Jr, y as Yr, yi as Xr, yn as Zr, yr as Qr, yt as $r, z as ei, zi as ti, zn as ni, zr as ri, zt as ii } from "./chunks/PerfProfiler-D6Iet-Dq.js";
 import ai, { Fragment as oi, Suspense as si, createContext as ci, lazy as li, memo as ui, use as di, useCallback as U, useContext as fi, useEffect as W, useId as pi, useLayoutEffect as mi, useMemo as G, useRef as K, useState as q, useSyncExternalStore as hi } from "react";
 import { QueryClientProvider as gi, QueryObserver as _i, replaceEqualDeep as vi, useIsFetching as yi, useMutation as bi, useQueries as xi, useQuery as Si, useQueryClient as Ci } from "@tanstack/react-query";
 import { Link as wi, Navigate as Ti, Outlet as Ei, Route as Di, Routes as Oi, useHref as ki, useLinkClickHandler as Ai, useLocation as ji, useNavigate as Mi, useParams as Ni } from "react-router-dom";
@@ -62,7 +62,7 @@ var Bi = /* @__PURE__ */ function(e) {
 	children: /* @__PURE__ */ Y(L, {
 		iconName: V.Info,
 		size: n,
-		className: F("cursor-help shrink-0", a && "[&>path]:!fill-basic-muted"),
+		className: F("cursor-help shrink-0", a && "!text-fill-basic-muted"),
 		color: a ? void 0 : "var(--color-fill-basic-tertiary)"
 	})
 });
@@ -150,12 +150,12 @@ function Qi({ icon: e, status: t, expanded: n, size: r }) {
 		case "failed": return /* @__PURE__ */ Y(L, {
 			iconName: V.Close,
 			size: i,
-			className: "shrink-0 [&>path]:!fill-btn-destructive"
+			className: "shrink-0 !text-fill-btn-destructive"
 		});
 		case "pending": return /* @__PURE__ */ Y(L, {
 			iconName: V.Clock,
 			size: i,
-			className: "shrink-0 [&>path]:!fill-btn-secondary-disabled"
+			className: "shrink-0 !text-fill-btn-secondary-disabled"
 		});
 		default: return /* @__PURE__ */ Y(L, {
 			iconName: e,
@@ -562,7 +562,7 @@ var Va = /* @__PURE__ */ function(e) {
 		"data-session-behavior-icon": i,
 		className: F("shrink-0", r)
 	});
-}, Wa = "[&_path]:fill-btn-secondary group-hover:[&_path]:fill-btn-secondary-hovered group-has-[>button:active]:[&_path]:fill-btn-secondary-pressed group-has-[>button:disabled]:[&_path]:fill-btn-secondary-disabled", Ga = ({ title: e, active: t = !1, running: n = !1, behavior: r, lineage: i, showBehaviorIcon: a = !1, behaviorLabel: o, forkedFromTitle: s, badge: c, badgeLabel: l, unread: u = !1, isMobile: d = !1, actions: f, className: p = "", type: m = "button", "aria-label": h, ...g }) => {
+}, Wa = "text-fill-btn-secondary group-hover:text-fill-btn-secondary-hovered group-has-[>button:active]:text-fill-btn-secondary-pressed group-has-[>button:disabled]:text-fill-btn-secondary-disabled", Ga = ({ title: e, active: t = !1, running: n = !1, behavior: r, lineage: i, showBehaviorIcon: a = !1, behaviorLabel: o, forkedFromTitle: s, badge: c, badgeLabel: l, unread: u = !1, isMobile: d = !1, actions: f, className: p = "", type: m = "button", "aria-label": h, ...g }) => {
 	let _ = [
 		e,
 		o,
@@ -590,7 +590,7 @@ var Va = /* @__PURE__ */ function(e) {
 				}),
 				/* @__PURE__ */ Y(ua, {
 					forkedFromTitle: s,
-					className: "[&_path]:fill-btn-secondary-disabled"
+					className: "text-fill-btn-secondary-disabled"
 				}),
 				c ? /* @__PURE__ */ Y("span", {
 					title: l,
@@ -686,7 +686,7 @@ var Za = (e) => Math.round(e * .7 / 4) * 4, Qa = (e) => Math.round(e / 10), $a =
 		})
 	}, t))
 })), to = ({ title: e, active: t = !1, running: n = !1, forkedFromTitle: r, behavior: i, showBehaviorIcon: a = !1, behaviorLabel: o, onDismiss: s, className: c = "", type: l = "button", "aria-label": u, ...d }) => {
-	let f = n ? "text-shimmer-basic" : r ? "text-btn-secondary group-hover:text-btn-secondary-hovered" : t ? "text-btn-secondary-pressed" : "text-btn-secondary group-hover:text-btn-secondary-hovered", p = t && !r ? "[&_path]:fill-btn-secondary-pressed" : "[&_path]:fill-btn-secondary group-hover:[&_path]:fill-btn-secondary-hovered", m = /* @__PURE__ */ X("button", {
+	let f = n ? "text-shimmer-basic" : r ? "text-btn-secondary group-hover:text-btn-secondary-hovered" : t ? "text-btn-secondary-pressed" : "text-btn-secondary group-hover:text-btn-secondary-hovered", p = t && !r ? "text-fill-btn-secondary-pressed" : "text-fill-btn-secondary group-hover:text-fill-btn-secondary-hovered", m = /* @__PURE__ */ X("button", {
 		type: l,
 		title: e,
 		"aria-label": u ?? (o ? `${e}, ${o}` : e),
@@ -2967,55 +2967,55 @@ var gl = ({ additions: e, deletions: t, size: n = "small", className: r }) => {
 	M: {
 		title: "Modified",
 		name: "text-danger-primary",
-		fill: "[&_path]:fill-danger-primary",
+		fill: "text-fill-danger-primary",
 		letter: "text-danger-primary"
 	},
 	A: {
 		title: "Added",
 		name: "text-info-primary",
-		fill: "[&_path]:fill-info-primary",
+		fill: "text-fill-info-primary",
 		letter: "text-info-primary"
 	},
 	D: {
 		title: "Deleted",
 		name: "text-error-primary",
-		fill: "[&_path]:fill-error-primary",
+		fill: "text-fill-error-primary",
 		letter: "text-error-primary"
 	},
 	R: {
 		title: "Renamed",
 		name: "text-accent-primary",
-		fill: "[&_path]:fill-accent-primary",
+		fill: "text-fill-accent-primary",
 		letter: "text-accent-primary"
 	},
 	C: {
 		title: "Copied",
 		name: "text-info-secondary",
-		fill: "[&_path]:fill-info-secondary",
+		fill: "text-fill-info-secondary",
 		letter: "text-info-secondary"
 	},
 	T: {
 		title: "Type changed",
 		name: "text-danger-secondary",
-		fill: "[&_path]:fill-danger-secondary",
+		fill: "text-fill-danger-secondary",
 		letter: "text-danger-secondary"
 	},
 	U: {
 		title: "Conflict",
 		name: "text-error-secondary",
-		fill: "[&_path]:fill-error-secondary",
+		fill: "text-fill-error-secondary",
 		letter: "text-error-secondary"
 	},
 	"?": {
 		title: "Untracked",
 		name: "text-basic-tertiary",
-		fill: "[&_path]:fill-basic-tertiary",
+		fill: "text-fill-basic-tertiary",
 		letter: "text-basic-muted"
 	},
 	"!": {
 		title: "Ignored",
 		name: "text-basic-tertiary",
-		fill: "[&_path]:fill-basic-tertiary",
+		fill: "text-fill-basic-tertiary",
 		letter: "text-basic-muted"
 	}
 }, Ol = new Map(Object.values(El).map((e) => [e, e]));
@@ -3051,7 +3051,7 @@ var jl = /* @__PURE__ */ function(e) {
 }, Pl = {
 	regular: F("bg-btn-ghost text-btn-secondary", "enabled:hover:bg-btn-ghost-hovered enabled:hover:text-btn-secondary-hovered", "enabled:active:bg-btn-ghost-pressed enabled:active:text-btn-secondary-pressed", "disabled:bg-btn-ghost-disabled disabled:text-btn-secondary-disabled"),
 	highlighted: F("bg-btn-ghost-highlighted text-btn-secondary-highlighted", "enabled:hover:bg-btn-ghost-highlighted-hovered", "enabled:active:bg-btn-ghost-highlighted-pressed enabled:active:text-btn-secondary-pressed-highlighted", "disabled:bg-btn-ghost-highlighted-disabled disabled:text-btn-secondary-disabled-highlighted")
-}, Fl = F("[&_path]:fill-btn-secondary", "group-hover/file-list-tab-button:[&_path]:fill-btn-secondary-hovered", "group-active/file-list-tab-button:[&_path]:fill-btn-secondary-pressed", "group-disabled/file-list-tab-button:[&_path]:fill-btn-secondary-disabled"), Il = "group-disabled/file-list-tab-button:opacity-50", Ll = ({ ref: e, name: t, path: n, variant: r = "file", size: i = "small", status: a = null, active: o = !1, disabled: s = !1, className: c, ...l }) => {
+}, Fl = F("text-fill-btn-secondary", "group-hover/file-list-tab-button:text-fill-btn-secondary-hovered", "group-active/file-list-tab-button:text-fill-btn-secondary-pressed", "group-disabled/file-list-tab-button:text-fill-btn-secondary-disabled"), Il = "group-disabled/file-list-tab-button:opacity-50", Ll = ({ ref: e, name: t, path: n, variant: r = "file", size: i = "small", status: a = null, active: o = !1, disabled: s = !1, className: c, ...l }) => {
 	let u = Nl[i], d = a ? Dl[a] : null, f = r === "folder";
 	return /* @__PURE__ */ X("button", {
 		ref: e,
@@ -3195,7 +3195,7 @@ var Ul = ({ icon: e, title: t, description: n, onClick: r, className: i = "" }) 
 			children: [/* @__PURE__ */ Y(L, {
 				iconName: e,
 				size: 20,
-				className: "shrink-0 [&>path]:fill-basic-tertiary"
+				className: "shrink-0 text-fill-basic-tertiary"
 			}), /* @__PURE__ */ Y("span", {
 				className: "flex-1 min-w-0 truncate label-small text-basic-primary",
 				children: t
@@ -3493,7 +3493,7 @@ var iu = ({ expanded: e, loading: t = !1, controls: n, onClick: r }) => /* @__PU
 						iconName: f ? V.Close : t,
 						size: 20,
 						"aria-hidden": !0,
-						className: F("shrink-0", f ? "[&>path]:fill-error-primary" : "[&>path]:fill-basic-primary")
+						className: F("shrink-0", f ? "text-fill-error-primary" : "text-fill-basic-primary")
 					}),
 					/* @__PURE__ */ Y("span", {
 						id: u,
@@ -4116,7 +4116,7 @@ var ad = /* @__PURE__ */ function(e) {
 	running: "running",
 	failed: "failed",
 	"not-found": null
-}, cd = F("pointer-events-auto relative z-10 flex h-7 min-w-0 items-center gap-1 rounded-interaction p-1 label-micro", "text-btn-secondary hover:text-btn-secondary-hovered active:text-btn-secondary-pressed", "[&_path]:fill-btn-secondary hover:[&_path]:fill-btn-secondary-hovered active:[&_path]:fill-btn-secondary-pressed", "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2");
+}, cd = F("pointer-events-auto relative z-10 flex h-7 min-w-0 items-center gap-1 rounded-interaction p-1 label-micro", "text-btn-secondary hover:text-btn-secondary-hovered active:text-btn-secondary-pressed", "[&_.icon]:text-fill-btn-secondary hover:[&_.icon]:text-fill-btn-secondary-hovered active:[&_.icon]:text-fill-btn-secondary-pressed", "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2");
 function ld({ status: e, behavior: t, lineage: n, showBehaviorIcon: r }) {
 	switch (e) {
 		case "running": return /* @__PURE__ */ Y(ja, { size: pa.Medium });
@@ -4130,13 +4130,13 @@ function ld({ status: e, behavior: t, lineage: n, showBehaviorIcon: r }) {
 			iconName: V.Close,
 			size: 20,
 			"aria-hidden": !0,
-			className: "shrink-0 [&_path]:fill-btn-secondary-disabled"
+			className: "shrink-0 text-fill-btn-secondary-disabled"
 		});
 		default: return r ? /* @__PURE__ */ Y(Ua, {
 			behavior: t,
 			lineage: n,
 			size: Va.Medium,
-			className: "[&_path]:fill-btn-secondary"
+			className: "text-fill-btn-secondary"
 		}) : null;
 	}
 }
@@ -4271,7 +4271,7 @@ var ud = ({ title: e, status: t, statusLabel: n, error: r, behavior: i, lineage:
 	highlighted: F("bg-btn-ghost-highlighted text-btn-secondary-highlighted", "hover:bg-btn-ghost-highlighted-hovered", "active:bg-btn-ghost-highlighted-pressed active:text-btn-secondary-pressed-highlighted"),
 	disabled: "bg-btn-ghost-disabled text-btn-secondary-disabled",
 	disabledHighlighted: "bg-btn-ghost-highlighted-disabled text-btn-secondary-disabled-highlighted"
-}, bd = F("[&_path]:fill-btn-destructive", "hover:[&_path]:fill-btn-destructive-hovered", "active:[&_path]:fill-btn-destructive-pressed", "disabled:[&_path]:fill-btn-destructive-disabled"), xd = ({ label: e, agent: t = !1, description: n, size: r = "small", active: i = !1, disabled: a = !1, title: o, onClick: s, remove: c, className: l }) => {
+}, bd = F("text-fill-btn-destructive", "hover:text-fill-btn-destructive-hovered", "active:text-fill-btn-destructive-pressed", "disabled:text-fill-btn-destructive-disabled"), xd = ({ label: e, agent: t = !1, description: n, size: r = "small", active: i = !1, disabled: a = !1, title: o, onClick: s, remove: c, className: l }) => {
 	let u = vd[r], d = r === "small";
 	return /* @__PURE__ */ X("div", {
 		className: F("group/terminal-tab-button relative flex w-full min-w-0 items-center rounded-interaction", "transition-colors duration-150 ease-out", u.box, a ? F(i ? yd.disabledHighlighted : yd.disabled, "cursor-not-allowed") : i ? yd.highlighted : yd.regular, l),
@@ -4315,8 +4315,8 @@ var ud = ({ title: e, status: t, statusLabel: n, error: r, behavior: i, lineage:
 	live: "text-basic-primary hover:text-basic-secondary active:text-basic-primary disabled:text-basic-muted",
 	selected: "text-accent-primary hover:text-accent-secondary active:text-accent-tertiary disabled:text-accent-muted"
 }, Cd = {
-	basic: "[&>path]:fill-basic-tertiary group-hover:[&>path]:fill-basic-secondary group-active:[&>path]:fill-basic-primary group-disabled:[&>path]:fill-basic-muted",
-	selected: "[&>path]:fill-accent-primary group-hover:[&>path]:fill-accent-secondary group-active:[&>path]:fill-accent-tertiary group-disabled:[&>path]:fill-accent-muted"
+	basic: "text-fill-basic-tertiary group-hover:text-fill-basic-secondary group-active:text-fill-basic-primary group-disabled:text-fill-basic-muted",
+	selected: "text-fill-accent-primary group-hover:text-fill-accent-secondary group-active:text-fill-accent-tertiary group-disabled:text-fill-accent-muted"
 }, wd = "text-shimmer-basic group-hover:animate-none group-hover:bg-none group-hover:text-inherit group-hover:[-webkit-text-fill-color:currentColor] group-active:animate-none group-active:bg-none group-active:text-inherit group-active:[-webkit-text-fill-color:currentColor] group-disabled:animate-none group-disabled:bg-none group-disabled:text-inherit group-disabled:[-webkit-text-fill-color:currentColor] motion-reduce:animate-none motion-reduce:bg-none motion-reduce:text-inherit motion-reduce:[-webkit-text-fill-color:currentColor]", Td = ({ label: e, inProgress: t, selected: n = !1, avatarUrl: r, leadingIcon: i, disabled: a = !1, onClick: o, controls: s, className: c = "" }) => {
 	let l = n ? Sd.selected : t ? Sd.live : Sd.done, u = n ? Cd.selected : Cd.basic, d = t && !n, f = K(null);
 	return fa(f, d), /* @__PURE__ */ X("button", {
@@ -12051,7 +12051,7 @@ function vg() {
 				className: "shrink-0",
 				"aria-label": "Open panel",
 				onClick: () => e(),
-				children: /* @__PURE__ */ Y(L, { iconName: V.OpenMobileModal })
+				children: /* @__PURE__ */ Y(L, { iconName: V.ShowSidePanel })
 			}) : null,
 			/* @__PURE__ */ Y(Qr, {
 				content: g.Icon,
@@ -12202,7 +12202,7 @@ function Tg({ isOpen: e, onToggle: t, toggleKeys: n, commands: r, variant: i }) 
 						content: g.Icon,
 						"aria-label": "Hide sidebar",
 						onClick: t,
-						children: /* @__PURE__ */ Y(L, { iconName: V.SidebarChevronLeft })
+						children: /* @__PURE__ */ Y(L, { iconName: V.LeftSidebar })
 					})
 				})]
 			}),
@@ -12380,7 +12380,7 @@ function Eg({ commands: e, onToggle: t, toggleKeys: n, variant: r }) {
 					label: "Show sidebar",
 					keys: n,
 					onClick: t,
-					children: /* @__PURE__ */ Y(L, { iconName: V.SidebarChevronRight })
+					children: /* @__PURE__ */ Y(L, { iconName: V.LeftSidebar })
 				}),
 				i ? null : /* @__PURE__ */ Y(Dg, {
 					label: "All projects",
@@ -14036,7 +14036,7 @@ var Q_ = [
 	},
 	{
 		type: "Read goal",
-		icon: V.Important,
+		icon: V.Goal,
 		label: "Get goal",
 		meta: "Read",
 		runningLabel: "Get goal…"
@@ -14691,19 +14691,19 @@ var Sv = [
 ], Cv = [
 	{
 		label: "Default",
-		className: "[&_path]:fill-btn-secondary"
+		className: "text-fill-btn-secondary"
 	},
 	{
 		label: "Hovered",
-		className: "[&_path]:fill-btn-secondary-hovered"
+		className: "text-fill-btn-secondary-hovered"
 	},
 	{
 		label: "Pressed",
-		className: "[&_path]:fill-btn-secondary-pressed"
+		className: "text-fill-btn-secondary-pressed"
 	},
 	{
 		label: "Disabled",
-		className: "[&_path]:fill-btn-secondary-disabled"
+		className: "text-fill-btn-secondary-disabled"
 	}
 ], wv = [
 	{
@@ -18608,7 +18608,7 @@ function zb({ sessionId: e, snapshot: t, behavior: n, panels: r, onOpen: i, onSe
 			children: [/* @__PURE__ */ Y(Bb, {
 				label: "Show panel",
 				onClick: i,
-				children: /* @__PURE__ */ Y(L, { iconName: V.SidebarChevronLeft })
+				children: /* @__PURE__ */ Y(L, { iconName: V.ShowSidePanel })
 			}), /* @__PURE__ */ Y("div", {
 				className: "flex flex-col items-center gap-4",
 				children: r.map((e) => {
@@ -20654,7 +20654,7 @@ function yS({ state: e, controller: t, availability: n }) {
 // src/app/lib/markdownChunk.ts
 var bS = null, xS = !1;
 function SS() {
-	return bS ??= import("./chunks/markdown-renderer-BvGpCbdz.js").then((e) => e.t).then((e) => (xS = !0, e)), bS;
+	return bS ??= import("./chunks/markdown-renderer-CnFRIt9V.js").then((e) => e.t).then((e) => (xS = !0, e)), bS;
 }
 function CS() {
 	return xS;
@@ -22263,7 +22263,7 @@ var aT = {
 	"web-search": V.Search,
 	"web-fetch": V.Globe,
 	"create-goal": V.Flag,
-	"get-goal": V.Important,
+	"get-goal": V.Goal,
 	"update-goal": V.Checklist,
 	"spawn-agent": V.Plane,
 	"spawn-orchestrator": V.Orchestrator,
@@ -24508,16 +24508,16 @@ function oO({ state: e }) {
 		className: "shrink-0 [&_svg]:size-4 xl:[&_svg]:size-5"
 	}) : e === "pending" ? /* @__PURE__ */ Y(L, {
 		iconName: V.Timelaps,
-		className: F(rO, "shrink-0 [&>path]:!fill-basic-muted")
+		className: F(rO, "shrink-0 !text-fill-basic-muted")
 	}) : e === "error" ? /* @__PURE__ */ Y(L, {
 		iconName: V.Danger,
-		className: F(rO, "shrink-0 [&>path]:!fill-error-primary")
+		className: F(rO, "shrink-0 !text-fill-error-primary")
 	}) : e === "cancelled" ? /* @__PURE__ */ Y(L, {
 		iconName: V.Close,
-		className: F(rO, "shrink-0 [&>path]:!fill-basic-muted")
+		className: F(rO, "shrink-0 !text-fill-basic-muted")
 	}) : /* @__PURE__ */ Y(L, {
 		iconName: V.CheckCircle,
-		className: F(rO, "shrink-0 [&>path]:!fill-basic-primary")
+		className: F(rO, "shrink-0 !text-fill-basic-primary")
 	});
 }
 function sO(e) {
@@ -26079,7 +26079,7 @@ function Pk({ sessionId: e, snapshot: t, behavior: n, panel: r, onPanelChange: i
 						content: g.Icon,
 						"aria-label": "Hide panel",
 						onClick: l,
-						children: /* @__PURE__ */ Y(L, { iconName: V.SidebarChevronRight })
+						children: /* @__PURE__ */ Y(L, { iconName: V.HideSidePanel })
 					})
 				}),
 				/* @__PURE__ */ Y("div", {
@@ -27055,7 +27055,7 @@ function fA({ sessionId: t, snapshot: n, entry: r, onShowPanel: i }) {
 							content: g.Icon,
 							"aria-label": "Show panel",
 							onClick: i,
-							children: /* @__PURE__ */ Y(L, { iconName: V.SidebarChevronLeft })
+							children: /* @__PURE__ */ Y(L, { iconName: V.ShowSidePanel })
 						})
 					}) : null
 				]

@@ -74,7 +74,7 @@ export function LeftSidebarPanel({
             aria-label="Hide sidebar"
             onClick={onToggle}
           >
-            <Icon iconName={IconName.SidebarChevronLeft} />
+            <Icon iconName={IconName.LeftSidebar} />
           </Button>
         </Tooltip>
       </div>

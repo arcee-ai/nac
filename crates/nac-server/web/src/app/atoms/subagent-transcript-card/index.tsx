@@ -59,7 +59,7 @@ const STATUS_NAME: Record<SubagentCardStatus, string | null> = {
 const LINK_CLASS = cn(
   "pointer-events-auto relative z-10 flex h-7 min-w-0 items-center gap-1 rounded-interaction p-1 label-micro",
   "text-btn-secondary hover:text-btn-secondary-hovered active:text-btn-secondary-pressed",
-  "[&_path]:fill-btn-secondary hover:[&_path]:fill-btn-secondary-hovered active:[&_path]:fill-btn-secondary-pressed",
+  "[&_.icon]:text-fill-btn-secondary hover:[&_.icon]:text-fill-btn-secondary-hovered active:[&_.icon]:text-fill-btn-secondary-pressed",
   "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
 );
 
@@ -87,7 +87,7 @@ function CardLeading({
           iconName={IconName.Close}
           size={20}
           aria-hidden
-          className="shrink-0 [&_path]:fill-btn-secondary-disabled"
+          className="shrink-0 text-fill-btn-secondary-disabled"
         />
       );
     default:
@@ -96,7 +96,7 @@ function CardLeading({
           behavior={behavior}
           lineage={lineage}
           size={SessionBehaviorIconSize.Medium}
-          className="[&_path]:fill-btn-secondary"
+          className="text-fill-btn-secondary"
         />
       ) : null;
   }

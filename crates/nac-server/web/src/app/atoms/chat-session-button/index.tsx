@@ -38,7 +38,7 @@ interface ChatSessionButtonProps extends Omit<
 
 /** Unlike the title, Figma leaves the glyph at rest on the selected row. */
 const GLYPH_TONE =
-  "[&_path]:fill-btn-secondary group-hover:[&_path]:fill-btn-secondary-hovered group-has-[>button:active]:[&_path]:fill-btn-secondary-pressed group-has-[>button:disabled]:[&_path]:fill-btn-secondary-disabled";
+  "text-fill-btn-secondary group-hover:text-fill-btn-secondary-hovered group-has-[>button:active]:text-fill-btn-secondary-pressed group-has-[>button:disabled]:text-fill-btn-secondary-disabled";
 
 /**
  * One session as a list row.
@@ -125,7 +125,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         </span>
         <ChatSessionLeadingMark
           forkedFromTitle={forkedFromTitle}
-          className="[&_path]:fill-btn-secondary-disabled"
+          className="text-fill-btn-secondary-disabled"
         />
         {badge ? (
           <span
