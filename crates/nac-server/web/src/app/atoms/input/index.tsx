@@ -128,7 +128,7 @@ const Input: React.FC<InputProps> & {
     "w-full input font-normal",
     inputSize,
     inputClassName,
-    rounded ? "rounded-full" : "rounded-[4px]",
+    rounded ? "rounded-full" : "rounded-interaction",
     !hasLeading ? padLeft[inputSize] : largeSearch ? "input-pad-search" : padLeftIcon[inputSize],
     !hasTrailing ? padRight[inputSize] : padRightIcon[inputSize],
     isDisabled && "input-disabled",

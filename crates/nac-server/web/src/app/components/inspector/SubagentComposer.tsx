@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useCopyToClipboard } from "@/app/hooks/useCopyToClipboard";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { SubagentChatInputBox } from "@/app/components/inspector/SubagentChatInputBox";
 import { toRunError } from "@/app/lib/providerError";
@@ -109,6 +110,7 @@ export function SubagentComposer({
   floating?: boolean;
 }) {
   const toast = useToast();
+  const isMobile = useIsMobile();
   const startChild = useStartTraditionalChild();
   const startOrchestrator = useStartManagedOrchestrator();
   const cancelChild = useCancelTraditionalChild();
@@ -217,6 +219,7 @@ export function SubagentComposer({
               retryParentSessionId={target.mode === "child" ? parentSessionId : undefined}
               poll={running}
               requesterLabel={requesterLabel}
+              compact={isMobile}
             />
           ) : null
         }

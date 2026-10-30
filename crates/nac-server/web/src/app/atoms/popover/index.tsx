@@ -4,6 +4,7 @@ import { ANCHOR_GAP, AnchorPlacement, anchorSides, clippingAncestors } from "../
 import { cn } from "../../lib/cn";
 import { PopoverAnchor, PopoverContent, Popover as UIPopover } from "../../ui/popover";
 import BottomSheet from "./BottomSheet";
+import { PopoverFocusScope } from "./FocusScope";
 
 export { AnchorPlacement as PopoverPlacement };
 
@@ -18,7 +19,7 @@ export enum PopoverSize {
 }
 
 const PANEL_BASE =
-  "flex flex-col gap-1 p-2 rounded-[8px] bg-elevation-level-3 shadow-2xl fade motion-reduce:!animate-none [&>*]:shrink-0";
+  "flex flex-col gap-1 p-2 rounded-[12px] bg-elevation-level-3 shadow-2xl fade motion-reduce:!animate-none [&>*]:shrink-0";
 
 interface PopoverProps {
   open: boolean;
@@ -41,6 +42,8 @@ interface PopoverProps {
   className?: string;
   panelClassName?: string;
   sheetClassName?: string;
+  /** Opt into a labelled dialog that focuses actions, traps Tab and restores focus. */
+  focusScope?: string;
 }
 
 /**
@@ -64,9 +67,17 @@ const Popover: React.FC<PopoverProps> & {
   className = "",
   panelClassName = "",
   sheetClassName = "",
+  focusScope,
 }) => {
   const asSheet = useIsMobile() && sheetOnMobile;
   const panelOpen = open && !asSheet;
+  const body = focusScope ? (
+    <PopoverFocusScope open={open} label={focusScope} onClose={closeOnEscape ? onClose : undefined}>
+      {content}
+    </PopoverFocusScope>
+  ) : (
+    content
+  );
   const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
   // Read once per opening: walking the cascade is the expensive part, and the
   // positioning reads the live rects of these elements on every update.
@@ -89,7 +100,7 @@ const Popover: React.FC<PopoverProps> & {
         {children}
         {asSheet ? (
           <BottomSheet open={open} onClose={onClose} className={sheetClassName}>
-            {content}
+            {body}
           </BottomSheet>
         ) : null}
         {/* Mounted in the same commit as `open`, so an owner's effect on `open`
@@ -118,7 +129,7 @@ const Popover: React.FC<PopoverProps> & {
               panelClassName,
             )}
           >
-            {content}
+            {body}
           </PopoverContent>
         ) : null}
       </PopoverAnchor>

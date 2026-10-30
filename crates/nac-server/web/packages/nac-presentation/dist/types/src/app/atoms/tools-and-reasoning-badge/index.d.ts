@@ -20,7 +20,8 @@ interface ToolsAndReasoningBadgeProps {
 /**
  * Stands in the transcript for one group of reasoning and tool calls. While
  * the group runs it shows the live step after a ModelLoader; once done it
- * shows how long the work took and a chevron into Insights.
+ * shows how long the work took, and a chevron into Insights fades in on hover
+ * or keyboard focus. The chevron keeps its place at rest, so nothing shifts.
  *
  * The live label changes on every step, so the badge is deliberately not a
  * live region.

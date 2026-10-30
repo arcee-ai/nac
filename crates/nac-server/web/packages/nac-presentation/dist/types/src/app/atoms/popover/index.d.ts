@@ -31,6 +31,8 @@ interface PopoverProps {
     className?: string;
     panelClassName?: string;
     sheetClassName?: string;
+    /** Opt into a labelled dialog that focuses actions, traps Tab and restores focus. */
+    focusScope?: string;
 }
 /**
  * Anchored panel with a trigger. Open state is owned by the caller, because

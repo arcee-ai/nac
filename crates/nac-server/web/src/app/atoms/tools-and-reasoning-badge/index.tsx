@@ -29,20 +29,20 @@ const LABEL_TONE = {
   done: "text-basic-tertiary hover:text-basic-secondary active:text-basic-primary disabled:text-basic-muted",
   live: "text-basic-primary hover:text-basic-secondary active:text-basic-primary disabled:text-basic-muted",
   selected:
-    "text-accent-primary hover:text-accent-secondary active:text-accent-tertiary disabled:text-accent-muted",
+    "text-accent-primary hover:text-accent-secondary active:text-btn-accent-pressed disabled:text-btn-accent-disabled",
 };
 
-/** Glyph paths carry `fill="currentColor"`, so the fill tokens go on the paths. */
+/** The glyph draws with `currentColor`, so the fill tokens go on it as text colors. */
 const ICON_TONE = {
   basic:
-    "[&>path]:fill-basic-tertiary group-hover:[&>path]:fill-basic-secondary group-active:[&>path]:fill-basic-primary group-disabled:[&>path]:fill-basic-muted",
+    "text-fill-basic-tertiary group-hover:text-fill-basic-secondary group-active:text-fill-basic-primary group-disabled:text-fill-basic-muted",
   selected:
-    "[&>path]:fill-accent-primary group-hover:[&>path]:fill-accent-secondary group-active:[&>path]:fill-accent-tertiary group-disabled:[&>path]:fill-accent-muted",
+    "text-fill-accent-primary group-hover:text-fill-accent-secondary group-active:text-fill-accent-tertiary group-disabled:text-fill-accent-muted",
 };
 
 /** Hover, press, disabled and reduced motion stop the shimmer on the plain tone. */
 const SHIMMER = [
-  "text-shimmer-basic",
+  "text-shimmer-primary",
   "group-hover:animate-none group-hover:bg-none group-hover:text-inherit group-hover:[-webkit-text-fill-color:currentColor]",
   "group-active:animate-none group-active:bg-none group-active:text-inherit group-active:[-webkit-text-fill-color:currentColor]",
   "group-disabled:animate-none group-disabled:bg-none group-disabled:text-inherit group-disabled:[-webkit-text-fill-color:currentColor]",
@@ -52,7 +52,8 @@ const SHIMMER = [
 /**
  * Stands in the transcript for one group of reasoning and tool calls. While
  * the group runs it shows the live step after a ModelLoader; once done it
- * shows how long the work took and a chevron into Insights.
+ * shows how long the work took, and a chevron into Insights fades in on hover
+ * or keyboard focus. The chevron keeps its place at rest, so nothing shifts.
  *
  * The live label changes on every step, so the badge is deliberately not a
  * live region.
@@ -82,23 +83,20 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "group relative inline-flex max-w-full items-center gap-2 border-l-2 pl-4 transition-colors",
+        "group relative inline-flex max-w-full items-center gap-2 transition-colors",
         "focus-visible:outline-none disabled:cursor-not-allowed",
-        selected ? "border-primary" : "border-muted",
         labelTone,
         className,
       )}
     >
-      {/* Offsets start inside the 2px left border, hence the longer left one. */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute -top-1 -right-1 -bottom-1 -left-1.5 hidden rounded-[4px] border-2 border-[var(--color-border-focus-outline)] group-focus-visible:block"
+        className="pointer-events-none absolute -inset-1 hidden rounded-[4px] border-2 border-[var(--color-border-focus-outline)] group-focus-visible:block"
       />
       {inProgress ? (
         <ModelLoader
           size={ModelLoaderSize.Medium}
           variant={selected ? ModelLoaderVariant.Accent : ModelLoaderVariant.Default}
-          className="group-disabled:opacity-50"
         />
       ) : null}
       <span ref={labelRef} className={cn("label-small min-w-0 truncate", shimmering && SHIMMER)}>
@@ -121,7 +119,10 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
           iconName={IconName.Right}
           size={20}
           aria-hidden
-          className={cn("shrink-0", iconTone)}
+          className={cn(
+            "shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100",
+            iconTone,
+          )}
         />
       )}
     </button>
