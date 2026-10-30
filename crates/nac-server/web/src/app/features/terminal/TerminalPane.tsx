@@ -17,6 +17,7 @@ import {
 import { PanelListNote } from "@/app/components/inspector/PanelMessages";
 import { PanelEmpty, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
+import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { cn } from "@/app/lib/cn";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type {
@@ -60,6 +61,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
   const { showSidePanelList } = useNativeRuntime().stores.sessionLayoutStore;
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
+  const marksOpen = usePanelListMarksOpen();
   const list = useExecutions(sessionId);
   const history = useExecutionHistory(sessionId);
   const open = useOpenUserTerminal(sessionId);
@@ -179,7 +181,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
             sessionId={sessionId}
             source={item}
             label={terminalTitle(item, index)}
-            active={open}
+            active={marksOpen && open}
             // Narrower layouts draw the list in place of the open terminal.
             beside={open && !isMobile && !isTablet}
             size={rowSize}
@@ -191,7 +193,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
         history={history.data?.history}
         pending={history.isPending}
         failed={history.isError}
-        openId={recent}
+        openId={marksOpen ? recent : null}
         size={rowSize}
         onOpen={openRecent}
         onRefresh={() => void history.refetch()}

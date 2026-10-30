@@ -23,6 +23,7 @@ import {
 import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useLiveWorkspace } from "@/app/hooks/useLiveWorkspace";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
+import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { cn } from "@/app/lib/cn";
 import {
   buildFileTree,
@@ -522,6 +523,7 @@ export function FilesView({
 
   const client = useQueryClient();
   const isMobile = useIsMobile();
+  const marksOpen = usePanelListMarksOpen();
   // Shared rather than local: the same panel also renders inside the
   // full-screen dialog, and it has to open on the file you were reading.
   const selected = useSelectedFile();
@@ -580,9 +582,7 @@ export function FilesView({
   const current = selected ?? changedNodes[0]?.path ?? null;
   const currentChange = current ? changedByPath.get(current) : undefined;
   const counts = useChangeCounts(sessionId, currentChange, revision);
-  // A phone opens on the list, before any file is open, so only a file you
-  // opened is marked there; the first change is merely where the detail lands.
-  const marked = isMobile ? selected : current;
+  const marked = marksOpen ? current : null;
 
   const failure = error ?? (revision != null ? revisionChanges.error : null);
   if (revision == null && workspace?.error) {
