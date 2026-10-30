@@ -10,8 +10,6 @@ interface UserMessageProps {
      * bubble so the injection is visible; null for an ordinary prompt.
      */
     invokedSkills?: string[] | null;
-    /** Shown on hover when the message has a known time. */
-    timestamp?: string | null;
     /**
      * Raw snapshot index the actions address. Absent while the message is still
      * only in flight, which is what disables the revert affordance.
@@ -32,9 +30,9 @@ interface UserMessageProps {
     onRevert?: ((messageIndex: number, text: string) => void) | null;
     /** Disable destructive / network actions while a run is in flight. */
     actionsDisabled?: boolean;
-    /** Parent-owned delegated transcripts expose copy/time but no mutation affordances. */
+    /** Parent-owned delegated transcripts expose copy but no mutation affordances. */
     readOnly?: boolean;
 }
 /** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
-export declare const UserMessage: import("react").MemoExoticComponent<({ text, terminalSelection, sessionId, pending, invokedSkills, timestamp, messageIndex, onRefresh, onRevert, actionsDisabled, readOnly, }: UserMessageProps) => import("react").JSX.Element>;
+export declare const UserMessage: import("react").MemoExoticComponent<({ text, terminalSelection, sessionId, pending, invokedSkills, messageIndex, onRefresh, onRevert, actionsDisabled, readOnly, }: UserMessageProps) => import("react").JSX.Element>;
 export {};

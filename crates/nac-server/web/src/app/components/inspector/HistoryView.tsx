@@ -71,7 +71,8 @@ export function HistoryView({
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-auto p-2 gap-1 bg-elevation-level-1 [&>*]:shrink-0">
+    // A phone's panel: clear of the floating header and of the tab bar.
+    <div className="flex flex-col flex-1 min-h-0 overflow-auto px-2 pt-16 pb-32 gap-1 bg-elevation-ground [&>*]:shrink-0">
       <Row
         title="Working tree"
         subtitle="The files as they are right now"

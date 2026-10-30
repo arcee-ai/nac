@@ -758,7 +758,9 @@ impl ModelClient {
             body["stream"] = Value::Bool(true);
             body["stream_options"] = json!({"include_usage": true});
         }
-        let token = arcee::fresh_access_token(&self.client, &self.base_url).await?;
+        let token = arcee::fresh_access_token(&self.client, &self.base_url)
+            .await
+            .map_err(arcee::auth_run_failure)?;
         match self
             .try_post_arcee_auth(url, &body, &token, reasoning_field, on_delta)
             .await
@@ -766,10 +768,15 @@ impl ModelClient {
             Ok(value) => Ok(value),
             Err(error) if error.status == Some(401) => {
                 let refreshed =
-                    arcee::force_refresh_access_token(&self.client, &self.base_url, &token).await?;
+                    arcee::force_refresh_access_token(&self.client, &self.base_url, &token)
+                        .await
+                        .map_err(arcee::auth_run_failure)?;
                 self.try_post_arcee_auth(url, &body, &refreshed, reasoning_field, on_delta)
                     .await
-                    .map_err(|error| anyhow!(error.message))
+                    .map_err(|error| match error.status {
+                        Some(401) => arcee::rejected_login_run_failure(&error.message),
+                        _ => anyhow!(error.message),
+                    })
             }
             Err(error) => Err(anyhow!(error.message)),
         }

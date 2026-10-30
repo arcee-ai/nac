@@ -1,0 +1,42 @@
+name: Request designated reviewers
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  request:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      # Privileged metadata-only operation. Never check out or execute PR code.
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            // Generated from pr-ruleset.mjs; run make generate-codeowners.
+            const owners = [
+              { login: "allisoneer", id: 20910163 },
+              { login: "Cecocho", id: 105443339 },
+              { login: "ericlau98", id: 17348362 },
+              { login: "samantha662", id: 250395928 },
+              { login: "gerred", id: 365659 },
+              { login: "tmcarcee", id: 338224923 },
+            ];
+            const pr = context.payload.pull_request;
+            const reviewers = [];
+            for (const owner of owners) {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                ...context.repo, username: owner.login,
+              });
+              if (data.user.id !== owner.id || !['admin', 'maintain', 'write'].includes(data.permission)) {
+                throw new Error(`Designated owner ${owner.login} lacks verified write access`);
+              }
+              if (owner.id !== pr.user.id) reviewers.push(owner.login);
+            }
+            await github.rest.pulls.requestReviewers({
+              ...context.repo, pull_number: pr.number, reviewers,
+            });

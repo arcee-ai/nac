@@ -1,6 +1,11 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "POST /task-launches": "private:standalone Local retained task launch",
+  "GET /task-launches/{request_id}": "private:standalone passive launch status",
+  "POST /task-launches/{request_id}/cancel": "private:standalone launch cancellation",
+  "GET /projects/{project_id}/task-launches": "private:standalone retained workspace inventory",
+  "GET /projects/{project_id}/task-launch-source": "private:standalone Local launch eligibility",
   "GET /sessions/{session_id}/executions/{execution_id}/input-control":
     "api.getTerminalInputControl",
   "POST /sessions/{session_id}/executions/{execution_id}/input-control":
@@ -34,6 +39,7 @@ export const clientApiSurface = {
   "POST /sessions/{session_id}/user-terminals/{terminal_id}/resize": "api.resizeUserTerminal",
   "GET /sessions/{session_id}/messages": "api.getMessages",
   "GET /sessions/{session_id}/threads/{thread_name}/events": "api.getThreadEvents",
+  "GET /sessions/{session_id}/tool-calls/{call_id}": "api.getToolCallContent",
   "GET /auth": "api.listManagedAuth",
   "DELETE /auth/{provider}": "api.managedLogout",
   "POST /auth/{provider}/login": "api.startManagedLogin",
@@ -132,6 +138,10 @@ export const clientApiSurface = {
   "GET /sessions/{session_id}/permissions": "api.getPermissions",
   "DELETE /sessions/{session_id}/permissions/grants/{grant_id}": "api.deletePermissionGrant",
   "PUT /sessions/{session_id}/permissions/mode": "api.setPermissionApprovalMode",
+  "POST /sessions/{session_id}/permissions/reviews/{review_id}/authorize-retry":
+    "api.authorizePermissionReviewRetry",
+  "POST /sessions/{session_id}/children/{child_session_id}/permissions/reviews/{review_id}/authorize-retry":
+    "api.authorizeChildPermissionReviewRetry",
   "POST /sessions/{session_id}/permissions/{request_id}": "api.replyPermission",
   "PUT /sessions/{session_id}/presentation": "api.updatePresentation",
   "POST /sessions/{session_id}/regenerate": "api.regenerateRun",

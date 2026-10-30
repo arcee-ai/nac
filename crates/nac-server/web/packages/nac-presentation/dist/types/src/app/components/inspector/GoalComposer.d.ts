@@ -1,17 +1,16 @@
-interface GoalFlagProps {
+interface GoalComposerProps {
     sessionId: string;
-    className?: string;
-    onOpen: () => void;
-}
-/** Flag inside the message field. Opens the inline goal editor. */
-export declare function GoalFlag({ sessionId, className, onOpen }: GoalFlagProps): import("react").JSX.Element;
-interface GoalEditorProps {
-    sessionId: string;
+    open: boolean;
+    mobile: boolean;
     onClose: () => void;
 }
-/**
- * Inline durable-goal editor that replaces the message field. The token budget
- * switch off means no limit; on means the slider value.
- */
-export declare function GoalEditor({ sessionId, onClose }: GoalEditorProps): import("react").JSX.Element;
+/** One edit lifetime across the inline and phone presentations. */
+export declare function GoalComposer({ sessionId, open, mobile, onClose }: GoalComposerProps): import("react").JSX.Element;
+interface GoalFlagProps {
+    sessionId: string;
+    compact: boolean;
+    onOpen: () => void;
+}
+/** Flag beside Send while the field rests. Opens the goal editor. */
+export declare function GoalFlag({ sessionId, compact, onOpen }: GoalFlagProps): import("react").JSX.Element;
 export {};

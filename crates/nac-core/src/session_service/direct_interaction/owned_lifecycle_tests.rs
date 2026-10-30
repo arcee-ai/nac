@@ -103,6 +103,7 @@ async fn queued_inbox_and_cancellation_do_not_block_runtime_timers() {
                 crate::store::InboxDelivery::Steer,
                 "retain input",
                 None,
+                None,
             )
             .await
     });

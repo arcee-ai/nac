@@ -132,6 +132,21 @@
   }
 }
 
+/* The Figma Loader turns counterclockwise. */
+@keyframes loader-spin {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+.loader {
+  animation: loader-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .loader {
+    animation: none;
+  }
+}
+
 /* ---- chat loader (three bouncing dots) ---- */
 @keyframes chat-loader-bounce {
   0%,

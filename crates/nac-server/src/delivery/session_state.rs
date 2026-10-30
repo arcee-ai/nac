@@ -14,8 +14,8 @@ use crate::{
     ApiError, ApiErrorBody, CancelInboxItemRequest, ClearGoalRequest, CreateGoalRequest,
     CreateInboxItemRequest, InboxItemResponse, MessagesPageResponse, MessagesQuery,
     PermissionStateResponse, ReplyPermissionRequest, SessionManager, SessionSnapshotQuery,
-    SessionSnapshotResponse, ThreadEventsQuery, UpdateGoalRequest, UpdateInboxItemRequest,
-    UpdatePermissionApprovalModeRequest, DEFAULT_MESSAGE_PAGE_LIMIT,
+    SessionSnapshotResponse, ThreadEventsQuery, ToolCallContentResponse, UpdateGoalRequest,
+    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest, DEFAULT_MESSAGE_PAGE_LIMIT,
     DEFAULT_THREAD_EVENT_PAGE_LIMIT, MAX_MESSAGE_PAGE_LIMIT, MAX_THREAD_EVENT_PAGE_LIMIT,
 };
 
@@ -91,6 +91,25 @@ pub(crate) async fn session_messages(
 
 #[utoipa::path(
     get,
+    path = "/sessions/{session_id}/tool-calls/{call_id}",
+    operation_id = "get_sessions_session_id_tool_calls_call_id",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("call_id" = String, Path)),
+    responses((status = 200, description = "Success", body = ToolCallContentResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Session or tool call not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn session_tool_call(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, call_id)): AxumPath<(String, String)>,
+) -> std::result::Result<Json<ToolCallContentResponse>, ApiError> {
+    let content = manager
+        .tool_call_content(&session_id, &call_id)
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "tool call not found".into()))?;
+    Ok(Json(content.into()))
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions/{session_id}/inbox",
     operation_id = "get_sessions_session_id_inbox",
     tag = "conversation",
@@ -126,15 +145,10 @@ pub(crate) async fn create_direct_inbox_item(
     payload: std::result::Result<Json<CreateInboxItemRequest>, JsonRejection>,
 ) -> std::result::Result<(StatusCode, Json<InboxItemResponse>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(
-            manager
-                .create_direct_inbox_item(&session_id, request)
-                .await?
-                .into(),
-        ),
-    ))
+    let created = manager
+        .create_direct_inbox_item(&session_id, request, nac_core::store::InputOrigin::Person)
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(created.into())))
 }
 
 #[utoipa::path(
@@ -317,6 +331,25 @@ pub(crate) async fn reply_permission_request(
         .reply_permission_request(&session_id, &request_id, request.reply)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/permissions/reviews/{review_id}/authorize-retry",
+    operation_id = "post_sessions_session_id_permissions_reviews_review_id_authorize_retry",
+    tag = "permissions",
+    params(("session_id" = String, Path), ("review_id" = String, Path)),
+    responses((status = 200, description = "Retry authorized; the model is asked to retry and the retry is reviewed again", body = nac_core::permissions::PermissionReview, content_type = "application/json"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Blocked review not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn authorize_permission_review_retry(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, review_id)): AxumPath<(String, String)>,
+) -> std::result::Result<Json<nac_core::permissions::PermissionReview>, ApiError> {
+    Ok(Json(
+        manager
+            .authorize_permission_review_retry(&session_id, &review_id)
+            .await?,
+    ))
 }
 
 #[utoipa::path(

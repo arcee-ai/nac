@@ -34,6 +34,7 @@ use crate::sandbox::SandboxSession;
 use crate::tools::ToolResult;
 use crate::types::{FunctionDef, ToolDefinition};
 
+mod admission;
 pub(crate) mod capabilities;
 mod catalog_sync;
 mod config;
@@ -804,13 +805,52 @@ pub(crate) mod test_support {
         (url, handle)
     }
 
-    struct FakeHttpRequest {
-        method: String,
-        headers: std::collections::BTreeMap<String, String>,
-        body: Option<Value>,
+    pub(crate) struct FakeHttpRequest {
+        pub(crate) method: String,
+        pub(crate) headers: std::collections::BTreeMap<String, String>,
+        pub(crate) body: Option<Value>,
     }
 
-    fn read_fake_http_request(stream: &mut TcpStream) -> Option<FakeHttpRequest> {
+    #[cfg(unix)]
+    #[test]
+    fn fake_http_reader_clears_accepted_socket_nonblocking_mode() {
+        use std::os::fd::AsRawFd;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut stream, _) = listener.accept().unwrap();
+        // Force Darwin's inherited accepted-socket state on every Unix platform.
+        stream.set_nonblocking(true).unwrap();
+        let empty_read = stream.read(&mut [0; 1]).unwrap_err();
+        assert_eq!(empty_read.kind(), std::io::ErrorKind::WouldBlock);
+
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let writer_gate = Arc::clone(&gate);
+        let writer = thread::spawn(move || {
+            writer_gate.wait();
+            peer.write_all(b"POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")
+                .unwrap();
+        });
+        gate.wait();
+        let received = read_fake_http_request(&mut stream);
+        // SAFETY: the stream owns a live descriptor; F_GETFL only reads its flags.
+        let flags = unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_GETFL) };
+        writer.join().unwrap();
+        assert_ne!(flags, -1);
+        // This fails on the old helper even if the writer wins the scheduling race.
+        assert_eq!(
+            flags & libc::O_NONBLOCK,
+            0,
+            "fixture reader must use blocking I/O"
+        );
+        let received = received.expect("parse peer request after accepted-socket barrier");
+        assert_eq!(received.method, "POST");
+        assert_eq!(received.body, Some(json!({})));
+    }
+
+    pub(crate) fn read_fake_http_request(stream: &mut TcpStream) -> Option<FakeHttpRequest> {
+        // Darwin accepts inherit listener O_NONBLOCK; a timeout does not clear it.
+        stream.set_nonblocking(false).ok()?;
         stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
         let mut buf = Vec::new();
         let mut chunk = [0u8; 1024];
@@ -951,7 +991,7 @@ pub(crate) mod test_support {
         }
     }
 
-    fn write_fake_http_response(
+    pub(crate) fn write_fake_http_response(
         stream: &mut TcpStream,
         status: &str,
         content_type: Option<&str>,
@@ -960,7 +1000,7 @@ pub(crate) mod test_support {
         write_fake_http_response_with_headers(stream, status, &[], content_type, body);
     }
 
-    fn write_fake_http_response_with_headers(
+    pub(crate) fn write_fake_http_response_with_headers(
         stream: &mut TcpStream,
         status: &str,
         headers: &[&str],
@@ -985,6 +1025,12 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod policy_tests;
+
+#[cfg(test)]
+pub(crate) mod recording_server;
+
+#[cfg(test)]
+mod session_admission_tests;
 
 #[cfg(test)]
 mod tests;

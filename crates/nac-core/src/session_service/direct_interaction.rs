@@ -1,5 +1,13 @@
 use super::*;
 
+/// Shared into the durable caller so dropping the request future cannot
+/// release deletion fences while its queued write is still in flight.
+struct ChildRetryScope {
+    parent_session_id: String,
+    _parent_lease: sessions::SessionRelationshipLease,
+    _child_lease: sessions::SessionRelationshipLease,
+}
+
 impl SessionService {
     /// Stop this serving lifetime's run admission before persistence drains.
     /// The operation lock linearizes with admissions already establishing
@@ -16,6 +24,11 @@ impl SessionService {
         self.cancel_goal_retry_wake();
         self.coordinate_local(|service| {
             let operation = service.lock_active_operation();
+            if let Some(ActiveSessionOperation::Run(run)) = operation.as_ref() {
+                // Wake finishing-input observers so they revalidate the closed
+                // admission gate even when cleanup cannot finish during shutdown.
+                run.settlement.send_replace(false);
+            }
             if let Some(ActiveSessionOperation::HumanShell(command)) = operation.as_ref() {
                 command.cancel_for_shutdown();
             }
@@ -117,6 +130,184 @@ impl SessionService {
             .await
     }
 
+    /// Recent automatic reviews in every state, newest first.
+    pub fn list_permission_reviews(&self) -> Result<Vec<crate::permissions::PermissionReview>> {
+        Ok(self.direct_permission_broker()?.recent_reviews())
+    }
+
+    /// Blocked reviews the user may still authorize for one retry.
+    pub fn list_blocked_permission_reviews(
+        &self,
+    ) -> Result<Vec<crate::permissions::PermissionReview>> {
+        Ok(self.direct_permission_broker()?.blocked_reviews())
+    }
+
+    /// Makes the next retry authorization fail to record its request.
+    #[cfg(feature = "test-support")]
+    pub fn fail_next_retry_enqueue_for_test() {
+        FAIL_NEXT_RETRY_ENQUEUE.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Makes the next retry authorization fail to start a run after its
+    /// request was recorded.
+    #[cfg(feature = "test-support")]
+    pub fn fail_next_retry_wake_for_test() {
+        FAIL_NEXT_RETRY_WAKE.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(feature = "test-support")]
+    pub fn permission_broker_for_test(&self) -> Result<Arc<crate::permissions::PermissionBroker>> {
+        self.direct_permission_broker().map(Arc::clone)
+    }
+
+    /// Records the user's explicit authorization to retry one blocked action
+    /// and asks the model, through the steering inbox, to retry it. The retry
+    /// is a new invocation: policy runs again and it is reviewed afresh.
+    pub async fn authorize_permission_review_retry(
+        &self,
+        review_id: &str,
+    ) -> Result<crate::permissions::PermissionReview> {
+        self.require_direct_primary_behavior_async().await?;
+        self.authorize_permission_review_retry_unchecked(review_id, None)
+            .await
+    }
+
+    /// Parent-mediated recourse for one traditional child's blocked action.
+    /// The primary entry point stays primary-only; callers must name the
+    /// child's actual parent and the child's own broker supplies authority.
+    pub async fn authorize_child_permission_review_retry(
+        &self,
+        parent_session_id: &str,
+        review_id: &str,
+    ) -> Result<crate::permissions::PermissionReview> {
+        self.require_direct_behavior()?;
+        let service = self.clone();
+        let parent = parent_session_id.to_owned();
+        // Deletion takes these same leases, parent first. Keep them through
+        // enqueue and wake so neither a local nor peer deletion can orphan
+        // a successfully authorized retry.
+        let relationships =
+            crate::store::call_legacy_store(&self.metadata.store_path, move || -> Result<_> {
+                let child = service
+                    .metadata
+                    .session_id
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+                let parent_lease = sessions::SessionRelationshipLease::try_acquire(
+                    &service.metadata.store_path,
+                    &parent,
+                )?;
+                let child_lease = sessions::SessionRelationshipLease::try_acquire(
+                    &service.metadata.store_path,
+                    child,
+                )?;
+                let parent_snapshot =
+                    sessions::load_session(&service.metadata.store_path, &parent)?;
+                if parent_snapshot.behavior == sessions::SessionBehavior::Orchestrator
+                    || crate::store::load_traditional_child(&service.metadata.store_path, &parent)?
+                        .is_some()
+                    || crate::store::load_managed_orchestrator(
+                        &service.metadata.store_path,
+                        &parent,
+                    )?
+                    .is_some()
+                {
+                    return Err(anyhow::anyhow!("retry requires a primary direct parent"));
+                }
+                service.require_retry_child(&parent)?;
+                Ok(Arc::new(ChildRetryScope {
+                    parent_session_id: parent,
+                    _parent_lease: parent_lease,
+                    _child_lease: child_lease,
+                }))
+            })
+            .await??;
+        self.authorize_permission_review_retry_unchecked(review_id, Some(relationships))
+            .await
+    }
+
+    fn require_retry_child(&self, parent: &str) -> Result<crate::store::TraditionalChildRecord> {
+        let child = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let record = crate::store::load_traditional_child_for_parent(
+            &self.metadata.store_path,
+            parent,
+            child,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("traditional child was not found"))?;
+        if self
+            .stopping_admission
+            .load(std::sync::atomic::Ordering::Acquire)
+            || crate::store::list_suppressed_traditional_child_generations(
+                &self.metadata.store_path,
+                parent,
+            )?
+            .iter()
+            .any(|(id, _)| id == child)
+        {
+            return Err(anyhow::anyhow!(
+                "traditional child is stopping or completion delivery is suppressed"
+            ));
+        }
+        Ok(record)
+    }
+
+    async fn authorize_permission_review_retry_unchecked(
+        &self,
+        review_id: &str,
+        retry_child: Option<Arc<ChildRetryScope>>,
+    ) -> Result<crate::permissions::PermissionReview> {
+        let broker = std::sync::Arc::clone(self.direct_permission_broker()?);
+        let review = broker.authorize_review_retry(review_id)?;
+        #[cfg(feature = "test-support")]
+        let injected = FAIL_NEXT_RETRY_ENQUEUE.swap(false, std::sync::atomic::Ordering::SeqCst);
+        #[cfg(not(feature = "test-support"))]
+        let injected = false;
+        let inserted = if injected {
+            Err(anyhow::anyhow!("injected retry enqueue failure"))
+        } else {
+            self.insert_direct_input_unchecked(
+                crate::store::InboxDelivery::Steer,
+                &crate::permissions::retry_authorization_message(&review),
+                None,
+                None,
+                retry_child.clone(),
+            )
+            .await
+        };
+        let target_run_id = match inserted {
+            Ok((_, target_run_id)) => target_run_id,
+            Err(error) => {
+                // The retry request was not recorded, so the authorization
+                // must not linger and the blocked action stays authorizable.
+                broker.revoke_review_retry(review_id);
+                return Err(error);
+            }
+        };
+        // From here the request is durable and the authorization stays with
+        // it. A failed wake leaves the item pending for normal inbox
+        // admission; it is not rolled back or duplicated.
+        if target_run_id.is_none() {
+            #[cfg(feature = "test-support")]
+            let wake = if FAIL_NEXT_RETRY_WAKE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                Err(anyhow::anyhow!("injected retry wake failure"))
+            } else {
+                self.start_next_direct_inbox_item().await.map(|_| ())
+            };
+            #[cfg(not(feature = "test-support"))]
+            let wake = self.start_next_direct_inbox_item().await.map(|_| ());
+            if let Err(error) = wake {
+                eprintln!(
+                    "nac: authorized retry for review {review_id} is queued but could not start a run yet: {error:#}"
+                );
+            }
+        }
+        Ok(review)
+    }
+
     pub fn delete_permission_grant(&self, grant_id: &str) -> Result<()> {
         self.direct_permission_broker()?.delete_grant(grant_id)
     }
@@ -131,14 +322,19 @@ impl SessionService {
         crate::store::list_session_inbox(&self.metadata.store_path, session_id)
     }
 
+    /// Queues direct input. `review_intent` is set only for input a person
+    /// typed on a human-facing route: their text as typed, before
+    /// expansion, which becomes review intent when the item reaches the
+    /// model.
     pub async fn enqueue_direct_input(
         &self,
         delivery: crate::store::InboxDelivery,
         content: &str,
         client_id: Option<&SessionClientId>,
+        review_intent: Option<&str>,
     ) -> Result<crate::store::SessionInboxRecord> {
         self.require_direct_primary_behavior_async().await?;
-        self.enqueue_direct_input_unchecked(delivery, content, client_id)
+        self.enqueue_direct_input_unchecked(delivery, content, client_id, review_intent)
             .await
     }
 
@@ -148,6 +344,7 @@ impl SessionService {
         &self,
         delivery: crate::store::InboxDelivery,
         content: &str,
+        origin: crate::store::InputOrigin,
     ) -> Result<crate::store::SessionInboxRecord> {
         self.require_direct_behavior()?;
         let session_id = self
@@ -162,7 +359,8 @@ impl SessionService {
         if child.is_none() {
             return Err(anyhow::anyhow!("traditional child was not found"));
         }
-        self.enqueue_direct_input_unchecked(delivery, content, None)
+        let review_intent = (origin == crate::store::InputOrigin::Person).then_some(content);
+        self.enqueue_direct_input_unchecked(delivery, content, None, review_intent)
             .await
     }
 
@@ -171,10 +369,32 @@ impl SessionService {
         delivery: crate::store::InboxDelivery,
         content: &str,
         client_id: Option<&SessionClientId>,
+        review_intent: Option<&str>,
     ) -> Result<crate::store::SessionInboxRecord> {
+        let (record, target_run_id) = self
+            .insert_direct_input_unchecked(delivery, content, client_id, review_intent, None)
+            .await?;
+        if target_run_id.is_none() {
+            self.start_next_direct_inbox_item().await?;
+        }
+        Ok(record)
+    }
+
+    /// Durably records one inbox item without waking the session. Returns the
+    /// run a steer was targeted at, if any; an untargeted item still needs
+    /// [`Self::start_next_direct_inbox_item`].
+    async fn insert_direct_input_unchecked(
+        &self,
+        delivery: crate::store::InboxDelivery,
+        content: &str,
+        client_id: Option<&SessionClientId>,
+        review_intent: Option<&str>,
+        retry_child: Option<Arc<ChildRetryScope>>,
+    ) -> Result<(crate::store::SessionInboxRecord, Option<String>)> {
         let service = self.clone();
         let content = content.to_owned();
         let client_id = client_id.cloned();
+        let review_intent = review_intent.map(str::to_owned);
         let (record, target_run_id) =
             crate::store::call_legacy_store(&self.metadata.store_path, move || -> Result<_> {
                 let session_id = service
@@ -183,29 +403,47 @@ impl SessionService {
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
 
+                let child = retry_child
+                    .as_ref()
+                    .map(|scope| service.require_retry_child(&scope.parent_session_id))
+                    .transpose()?;
                 let active = service.lock_active_operation();
                 let target_run_id = match (delivery, active.as_ref()) {
                     (
                         crate::store::InboxDelivery::Steer,
                         Some(ActiveSessionOperation::Run(run)),
                     ) if !run.finishing => Some(run.snapshot.run_id.to_string()),
-                    _ => None,
+                    // A peer may own the current child operation. Preserve
+                    // its durable run binding rather than wake a successor.
+                    _ => child
+                        .filter(|child| {
+                            child.status == crate::store::TraditionalChildStatus::Running
+                        })
+                        .and_then(|child| child.run_id),
                 };
-                let record = crate::store::create_session_inbox_item(
-                    &service.metadata.store_path,
-                    session_id,
-                    delivery,
-                    &content,
-                    target_run_id.as_deref(),
-                    client_id.as_ref().map(SessionClientId::as_str),
-                )?;
+                let record = match review_intent.as_deref() {
+                    Some(review_intent) => crate::store::create_person_session_inbox_item(
+                        &service.metadata.store_path,
+                        session_id,
+                        delivery,
+                        &content,
+                        target_run_id.as_deref(),
+                        client_id.as_ref().map(SessionClientId::as_str),
+                        review_intent,
+                    )?,
+                    None => crate::store::create_session_inbox_item(
+                        &service.metadata.store_path,
+                        session_id,
+                        delivery,
+                        &content,
+                        target_run_id.as_deref(),
+                        client_id.as_ref().map(SessionClientId::as_str),
+                    )?,
+                };
                 Ok((record, target_run_id))
             })
             .await??;
-        if target_run_id.is_none() {
-            self.start_next_direct_inbox_item().await?;
-        }
-        Ok(record)
+        Ok((record, target_run_id))
     }
 
     pub async fn update_direct_inbox_item(
@@ -455,6 +693,29 @@ impl SessionService {
         &self,
         lease: sessions::SessionOperationLease,
     ) -> Result<Option<SessionRunHandle>> {
+        if self.has_active_operation() {
+            return Ok(None);
+        }
+        let service = self.clone();
+        let abandoned_child =
+            crate::store::call_legacy_store(&self.metadata.store_path, move || {
+                let Some(session_id) = service.metadata.session_id.as_deref() else {
+                    return Ok::<_, anyhow::Error>(false);
+                };
+                Ok(
+                    crate::store::load_traditional_child(&service.metadata.store_path, session_id)?
+                        .is_some_and(|child| {
+                            child.status == crate::store::TraditionalChildStatus::Running
+                        }),
+                )
+            })
+            .await??;
+        if abandoned_child {
+            // A peer can exit after attachment or input queueing. Keep this
+            // lease through run/relationship recovery and successor admission;
+            // the existing inbox item remains the sole delivery authority.
+            self.recover_child_input_for_admission(&lease).await?;
+        }
         let service = self.clone();
         crate::store::spawn_blocking_store_caller(move || {
             service.start_next_direct_inbox_item_with_lease(lease)
@@ -478,6 +739,26 @@ impl SessionService {
         if let Some(item) =
             crate::store::next_pending_session_inbox_item(&self.metadata.store_path, session_id)?
         {
+            // Select mode at the successor-admission boundary, under its
+            // operation lease and without an intervening async yield. A lost
+            // waiter leaves the same durable input eligible for background
+            // delivery. Once admitted, the generation's mode is immutable.
+            let child_execution_mode = match item.child_execution_mode {
+                Some(crate::store::TraditionalChildExecutionMode::Foreground) => {
+                    match item.child_wait_id.as_deref().map(|id| {
+                        sessions::ChildInputWaitLease::try_acquire(&self.metadata.store_path, id)
+                    }) {
+                        Some(Err(sessions::SessionOperationLeaseError::Busy(_))) => {
+                            item.child_execution_mode
+                        }
+                        Some(Err(error)) => return Err(error.into()),
+                        Some(Ok(_)) | None => {
+                            Some(crate::store::TraditionalChildExecutionMode::Background)
+                        }
+                    }
+                }
+                mode => mode,
+            };
             return self
                 .try_submit_prompt_inner(
                     None,
@@ -485,6 +766,7 @@ impl SessionService {
                     Some(lease),
                     RunAdmissionKind {
                         inbox_item_id: Some(item.id),
+                        child_execution_mode,
                         terminal_selection: item.terminal_selection,
                         ..RunAdmissionKind::default()
                     },
@@ -613,3 +895,11 @@ impl SessionService {
 
 #[cfg(test)]
 mod owned_lifecycle_tests;
+
+#[cfg(feature = "test-support")]
+static FAIL_NEXT_RETRY_ENQUEUE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "test-support")]
+static FAIL_NEXT_RETRY_WAKE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);

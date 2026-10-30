@@ -12,7 +12,7 @@ export { AnchorPlacement as TooltipPosition };
 type TooltipPosition = AnchorPlacement;
 
 const BOX_BASE =
-  "tooltip-box text-left w-max h-fit max-w-[240px] flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-[4px] fade";
+  "tooltip-box text-left w-max h-fit max-w-[240px] flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-interaction fade";
 
 interface TooltipBoxProps {
   boxRef?: React.Ref<HTMLDivElement>;
@@ -42,7 +42,7 @@ const TooltipBox: React.FC<TooltipBoxProps> = ({
         className={cn(
           isMobile ? "label-medium" : "label-micro",
           "flex-grow",
-          inverted ? "text-basic-primary-inverse" : "text-basic-primary",
+          inverted ? "text-primary-inverse" : "text-basic-primary",
         )}
       >
         {title}
@@ -57,7 +57,7 @@ const TooltipBox: React.FC<TooltipBoxProps> = ({
       <div
         className={cn(
           "w-fit h-fit",
-          inverted ? "text-micro text-basic-secondary-inverse" : "text-medium text-basic-secondary",
+          inverted ? "text-micro text-secondary-inverse" : "text-medium text-basic-secondary",
         )}
       >
         {description}

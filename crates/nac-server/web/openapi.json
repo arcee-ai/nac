@@ -669,7 +669,7 @@
         "operationId": "get_managed_github",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -679,7 +679,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -689,7 +689,7 @@
             }
           },
           "500": {
-            "description": "",
+            "description": "Internal Server Error",
             "content": {
               "application/json": {
                 "schema": {
@@ -707,7 +707,7 @@
         "operationId": "delete_managed_github",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -717,7 +717,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -747,7 +747,7 @@
         },
         "responses": {
           "202": {
-            "description": "",
+            "description": "Accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -757,7 +757,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Bad Request",
             "content": {
               "application/json": {
                 "schema": {
@@ -767,7 +767,7 @@
             }
           },
           "401": {
-            "description": "",
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -777,7 +777,7 @@
             }
           },
           "403": {
-            "description": "",
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -787,7 +787,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -797,7 +797,7 @@
             }
           },
           "409": {
-            "description": "",
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -807,7 +807,7 @@
             }
           },
           "502": {
-            "description": "",
+            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
@@ -837,7 +837,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -847,7 +847,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Bad Request",
             "content": {
               "application/json": {
                 "schema": {
@@ -857,7 +857,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -885,7 +885,7 @@
         ],
         "responses": {
           "202": {
-            "description": "",
+            "description": "Accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -895,7 +895,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Bad Request",
             "content": {
               "application/json": {
                 "schema": {
@@ -905,7 +905,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -915,7 +915,7 @@
             }
           },
           "409": {
-            "description": "",
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -935,7 +935,7 @@
         "operationId": "get_managed_github_git_identity",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -945,7 +945,7 @@
             }
           },
           "401": {
-            "description": "",
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -955,7 +955,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -983,7 +983,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -993,7 +993,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Bad Request",
             "content": {
               "application/json": {
                 "schema": {
@@ -1003,7 +1003,7 @@
             }
           },
           "401": {
-            "description": "",
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -1013,7 +1013,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1033,7 +1033,7 @@
         "operationId": "post_managed_github_login",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -1043,7 +1043,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1053,7 +1053,7 @@
             }
           },
           "502": {
-            "description": "",
+            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
@@ -1083,7 +1083,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -1093,7 +1093,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1121,10 +1121,10 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "No Content"
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1144,7 +1144,7 @@
         "operationId": "get_managed_github_repositories",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -1154,7 +1154,7 @@
             }
           },
           "401": {
-            "description": "",
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -1164,7 +1164,7 @@
             }
           },
           "403": {
-            "description": "",
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -1174,7 +1174,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1184,7 +1184,7 @@
             }
           },
           "409": {
-            "description": "",
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -1194,7 +1194,7 @@
             }
           },
           "502": {
-            "description": "",
+            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
@@ -1232,7 +1232,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
@@ -1242,7 +1242,7 @@
             }
           },
           "400": {
-            "description": "",
+            "description": "Bad Request",
             "content": {
               "application/json": {
                 "schema": {
@@ -1252,7 +1252,7 @@
             }
           },
           "401": {
-            "description": "",
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -1262,7 +1262,7 @@
             }
           },
           "403": {
-            "description": "",
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -1272,7 +1272,7 @@
             }
           },
           "404": {
-            "description": "",
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1282,7 +1282,7 @@
             }
           },
           "502": {
-            "description": "",
+            "description": "Bad Gateway",
             "content": {
               "application/json": {
                 "schema": {
@@ -3011,6 +3011,89 @@
         }
       }
     },
+    "/projects/{project_id}/task-launch-source": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "source_info",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskLaunchSourceInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/task-launches": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "inventory",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskLaunchRecord"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/providers/models": {
       "post": {
         "tags": [
@@ -3128,10 +3211,10 @@
                 "schema": {
                   "oneOf": [
                     {
-                      "type": "null"
+                      "$ref": "#/components/schemas/SandboxActivity"
                     },
                     {
-                      "$ref": "#/components/schemas/SandboxActivity"
+                      "type": "null"
                     }
                   ]
                 }
@@ -3900,6 +3983,82 @@
           },
           "409": {
             "description": "Child run is remote or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/children/{child_session_id}/permissions/reviews/{review_id}/authorize-retry": {
+      "post": {
+        "tags": [
+          "permissions"
+        ],
+        "operationId": "post_sessions_session_id_children_child_session_id_permissions_reviews_review_id_authorize_retry",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "child_session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Parent authorized a fresh review of the child's blocked action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionReview"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Child or blocked review not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Primary direct parent required",
             "content": {
               "application/json": {
                 "schema": {
@@ -5175,10 +5334,10 @@
                 "schema": {
                   "oneOf": [
                     {
-                      "type": "null"
+                      "$ref": "#/components/schemas/SessionGoalRecord"
                     },
                     {
-                      "$ref": "#/components/schemas/SessionGoalRecord"
+                      "type": "null"
                     }
                   ]
                 }
@@ -6332,6 +6491,74 @@
         }
       }
     },
+    "/sessions/{session_id}/permissions/reviews/{review_id}/authorize-retry": {
+      "post": {
+        "tags": [
+          "permissions"
+        ],
+        "operationId": "post_sessions_session_id_permissions_reviews_review_id_authorize_retry",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retry authorized; the model is asked to retry and the retry is reviewed again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionReview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Blocked review not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/permissions/{request_id}": {
       "post": {
         "tags": [
@@ -7306,6 +7533,79 @@
           },
           "409": {
             "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/tool-calls/{call_id}": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_tool_calls_call_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCallContentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or rejected path/query/body extraction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or tool call not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -9411,6 +9711,136 @@
         }
       }
     },
+    "/task-launches": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskLaunchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskLaunchRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task-launches/{request_id}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "status",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskLaunchRecord"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task-launches/{request_id}/cancel": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "cancel",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskLaunchRecord"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ui-config": {
       "get": {
         "operationId": "get_ui_configuration",
@@ -9441,10 +9871,10 @@
           "client_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionClientId"
               },
               {
-                "$ref": "#/components/schemas/SessionClientId"
+                "type": "null"
               }
             ]
           },
@@ -9470,10 +9900,10 @@
           "client_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionClientId"
               },
               {
-                "$ref": "#/components/schemas/SessionClientId"
+                "type": "null"
               }
             ]
           },
@@ -9491,10 +9921,10 @@
           "submitted_user_message": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SubmittedUserMessageSnapshot"
               },
               {
-                "$ref": "#/components/schemas/SubmittedUserMessageSnapshot"
+                "type": "null"
               }
             ]
           }
@@ -9643,20 +10073,20 @@
               "command_status": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/CommandStatus"
                   },
                   {
-                    "$ref": "#/components/schemas/CommandStatus"
+                    "type": "null"
                   }
                 ]
               },
               "completion_status": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/ToolCompletionStatus"
                   },
                   {
-                    "$ref": "#/components/schemas/ToolCompletionStatus"
+                    "type": "null"
                   }
                 ]
               },
@@ -10044,10 +10474,10 @@
               "usage": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/TokenUsage"
                   },
                   {
-                    "$ref": "#/components/schemas/TokenUsage"
+                    "type": "null"
                   }
                 ]
               }
@@ -10078,10 +10508,10 @@
               "usage": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/TokenUsage"
                   },
                   {
-                    "$ref": "#/components/schemas/TokenUsage"
+                    "type": "null"
                   }
                 ]
               }
@@ -10634,10 +11064,10 @@
           "authorization_metadata": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpOAuthAuthorizationMetadataRequest"
               },
               {
-                "$ref": "#/components/schemas/McpOAuthAuthorizationMetadataRequest"
+                "type": "null"
               }
             ]
           },
@@ -10660,10 +11090,10 @@
           "registration": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpOAuthRegistrationRequest"
               },
               {
-                "$ref": "#/components/schemas/McpOAuthRegistrationRequest"
+                "type": "null"
               }
             ]
           },
@@ -10870,10 +11300,10 @@
           "header_helper": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpHeaderHelperConfig"
               },
               {
-                "$ref": "#/components/schemas/McpHeaderHelperConfig"
+                "type": "null"
               }
             ]
           },
@@ -10986,10 +11416,10 @@
           "light_model": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LightModelSettings"
               },
               {
-                "$ref": "#/components/schemas/LightModelSettings"
+                "type": "null"
               }
             ]
           },
@@ -11010,10 +11440,10 @@
           "reasoning_effort": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ReasoningEffort"
               },
               {
-                "$ref": "#/components/schemas/ReasoningEffort"
+                "type": "null"
               }
             ]
           }
@@ -11481,21 +11911,21 @@
           "command": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ShellCommandSnapshot",
                 "description": "Canonical durable result/preview; private output artifact ids are omitted."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "execution": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ExecutionStatus"
               },
               {
-                "$ref": "#/components/schemas/ExecutionStatus"
+                "type": "null"
               }
             ]
           },
@@ -11506,11 +11936,11 @@
           "outcome": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/CommandStatus",
                 "description": "Pipe process result, independent of collector completion/error. PTY\nexit codes remain in the existing execution status; absent is unknown."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -12108,10 +12538,10 @@
           "terminal_selection": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TerminalSelectionEvidence"
               },
               {
-                "$ref": "#/components/schemas/TerminalSelectionEvidence"
+                "type": "null"
               }
             ]
           },
@@ -12214,11 +12644,11 @@
           "configured_reasoning_effort": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ReasoningEffort",
                 "description": "Configured reasoning effort, if any."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -12272,10 +12702,10 @@
           "backend": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/BackendKind"
               },
               {
-                "$ref": "#/components/schemas/BackendKind"
+                "type": "null"
               }
             ]
           },
@@ -12291,10 +12721,10 @@
           "reasoning_effort": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ReasoningEffort"
               },
               {
-                "$ref": "#/components/schemas/ReasoningEffort"
+                "type": "null"
               }
             ]
           }
@@ -12459,10 +12889,10 @@
           "project": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ProjectRecord"
               },
               {
-                "$ref": "#/components/schemas/ProjectRecord"
+                "type": "null"
               }
             ]
           },
@@ -12559,10 +12989,10 @@
           "maintenance": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ManagedMaintenanceSnapshot"
               },
               {
-                "$ref": "#/components/schemas/ManagedMaintenanceSnapshot"
+                "type": "null"
               }
             ]
           },
@@ -12655,10 +13085,10 @@
           "accepted_identity": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ManagedAcceptedIdentity"
               },
               {
-                "$ref": "#/components/schemas/ManagedAcceptedIdentity"
+                "type": "null"
               }
             ]
           },
@@ -12686,10 +13116,10 @@
           "target": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ManagedUpgradeTarget"
               },
               {
-                "$ref": "#/components/schemas/ManagedUpgradeTarget"
+                "type": "null"
               }
             ]
           },
@@ -12760,10 +13190,10 @@
           "execution_mode": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TraditionalChildExecutionMode"
               },
               {
-                "$ref": "#/components/schemas/TraditionalChildExecutionMode"
+                "type": "null"
               }
             ]
           },
@@ -12859,21 +13289,21 @@
           "active_run": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ActiveRunSnapshot"
               },
               {
-                "$ref": "#/components/schemas/ActiveRunSnapshot"
+                "type": "null"
               }
             ]
           },
           "lineage": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/SessionLineageSnapshot",
                 "description": "Delegated sessions remain addressable by id, but clients use lineage\nto keep them out of primary chat navigation and enforce ownership UI."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -12883,10 +13313,10 @@
           "workspace_diff": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/WorkspaceDiffTotals"
               },
               {
-                "$ref": "#/components/schemas/WorkspaceDiffTotals"
+                "type": "null"
               }
             ]
           }
@@ -13402,7 +13832,8 @@
           "state",
           "required",
           "auth_required",
-          "tool_count"
+          "tool_count",
+          "sessions_blocked"
         ],
         "properties": {
           "auth_required": {
@@ -13437,6 +13868,10 @@
               "string",
               "null"
             ]
+          },
+          "sessions_blocked": {
+            "type": "boolean",
+            "description": "The user disconnected this server; sessions refuse to use it until it is connected."
           },
           "state": {
             "$ref": "#/components/schemas/McpRuntimeState"
@@ -13582,10 +14017,10 @@
           "header_helper": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpHeaderHelperConfig"
               },
               {
-                "$ref": "#/components/schemas/McpHeaderHelperConfig"
+                "type": "null"
               }
             ]
           },
@@ -13718,11 +14153,11 @@
               "model_origin": {
                 "oneOf": [
                   {
-                    "type": "null"
-                  },
-                  {
                     "$ref": "#/components/schemas/ModelOrigin",
                     "description": "The model that produced this message (S5). Stamped at the\ntranscript push site; `None` on pre-S5 (legacy) messages, which\nthe wire normalization treats as same-model. Drives the\nsame-model reasoning-replay gate in `model::normalize_history`."
+                  },
+                  {
+                    "type": "null"
                   }
                 ]
               },
@@ -13939,11 +14374,11 @@
           "light_model": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LightModelSettings",
                 "description": "Light worker model; `None` keeps single-model behavior."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -14220,7 +14655,8 @@
         "description": "User-selected approval behavior for one durable direct ownership tree.\n\nThis is deliberately an answer policy at the broker boundary, not an\nexecution backend or a reusable resource grant.",
         "enum": [
           "manual",
-          "auto_approve"
+          "auto_approve",
+          "review"
         ]
       },
       "PermissionGrantRecord": {
@@ -14330,6 +14766,141 @@
           }
         }
       },
+      "PermissionReview": {
+        "type": "object",
+        "description": "Redacted record of one automatic review, emitted to clients. It carries\nno arguments beyond the redacted display already shown to the reviewer.",
+        "required": [
+          "id",
+          "session_id",
+          "tool",
+          "backend",
+          "resources",
+          "user_authorized_retry",
+          "reviewer",
+          "created_at_epoch_ms"
+        ],
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "call_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReviewCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PermissionReviewCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at_epoch_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "failure_reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PermissionReviewFailureReason",
+                "description": "A fixed, safe explanation for an unavailable review. No provider text."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PermissionReviewOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewResource"
+            }
+          },
+          "reviewer": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "user_authorized_retry": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PermissionReviewCode": {
+        "type": "string",
+        "description": "Stable machine-readable codes returned to the model with an unexecuted\noperation.",
+        "enum": [
+          "review_rejected",
+          "review_uncertain",
+          "review_unavailable",
+          "review_stopped"
+        ]
+      },
+      "PermissionReviewFailureReason": {
+        "type": "string",
+        "description": "Safe failure categories that clients can explain without provider details.",
+        "enum": [
+          "authentication",
+          "access_denied",
+          "model_unavailable",
+          "insufficient_credits",
+          "rate_limited",
+          "timeout",
+          "invalid_response",
+          "service_unavailable",
+          "cancelled"
+        ]
+      },
+      "PermissionReviewOutcome": {
+        "type": "string",
+        "description": "The outcome reported to clients and recorded for audit.",
+        "enum": [
+          "approved",
+          "rejected",
+          "uncertain",
+          "unavailable"
+        ]
+      },
       "PermissionStateResponse": {
         "type": "object",
         "required": [
@@ -14342,6 +14913,13 @@
             "$ref": "#/components/schemas/PermissionApprovalMode",
             "description": "Effective for this session's durable traditional-child ownership tree.\n`manual` is the compatibility default."
           },
+          "authorizable_review_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Blocked reviews the user may still authorize for one retry."
+          },
           "grants": {
             "type": "array",
             "items": {
@@ -14353,6 +14931,13 @@
             "items": {
               "$ref": "#/components/schemas/PermissionRequest"
             }
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PermissionReview"
+            },
+            "description": "Recent automatic reviews in every state, newest first: in progress\n(no outcome), approved, blocked or unavailable. Empty outside Approve\nfor me."
           }
         }
       },
@@ -14504,11 +15089,11 @@
           "connection": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ProviderConnection",
                 "description": "The currently selected server-owned account route, if usable. This is\nthe sole routing source for unified selectors; it contains no secret."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -14713,11 +15298,11 @@
           "light_model": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LightModelSettings",
                 "description": "Light worker model; `None` keeps single-model dispatch."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -15150,10 +15735,10 @@
               "backend": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/BackendKind"
                   },
                   {
-                    "$ref": "#/components/schemas/BackendKind"
+                    "type": "null"
                   }
                 ]
               },
@@ -15169,10 +15754,10 @@
               "reasoning_effort": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/ReasoningEffort"
                   },
                   {
-                    "$ref": "#/components/schemas/ReasoningEffort"
+                    "type": "null"
                   }
                 ]
               }
@@ -15419,10 +16004,10 @@
           "reasoning_effort": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ReasoningEffort"
               },
               {
-                "$ref": "#/components/schemas/ReasoningEffort"
+                "type": "null"
               }
             ]
           }
@@ -15434,10 +16019,10 @@
           "cumulative_token_usage": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TokenUsage"
               },
               {
-                "$ref": "#/components/schemas/TokenUsage"
+                "type": "null"
               }
             ]
           },
@@ -15452,10 +16037,10 @@
           "last_token_usage": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TokenUsage"
               },
               {
-                "$ref": "#/components/schemas/TokenUsage"
+                "type": "null"
               }
             ]
           },
@@ -15489,10 +16074,10 @@
             "items": {
               "oneOf": [
                 {
-                  "type": "null"
+                  "$ref": "#/components/schemas/TokenUsage"
                 },
                 {
-                  "$ref": "#/components/schemas/TokenUsage"
+                  "type": "null"
                 }
               ]
             }
@@ -15500,11 +16085,11 @@
           "unattributed_token_usage": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TokenUsage",
                 "description": "Cumulative usage from runs that produced no visible response."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -15551,6 +16136,38 @@
           },
           "workspace_restored": {
             "type": "boolean"
+          }
+        }
+      },
+      "ReviewCategory": {
+        "type": "string",
+        "description": "Risk category reported by a reviewer.",
+        "enum": [
+          "routine",
+          "destructive",
+          "exfiltration",
+          "credential",
+          "out_of_scope",
+          "unclear"
+        ]
+      },
+      "ReviewResource": {
+        "type": "object",
+        "description": "One resource as the reviewer sees it.",
+        "required": [
+          "action",
+          "resource",
+          "display"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "display": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
           }
         }
       },
@@ -15822,10 +16439,10 @@
               "submitted_user_message": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/SubmittedUserMessageSnapshot"
                   },
                   {
-                    "$ref": "#/components/schemas/SubmittedUserMessageSnapshot"
+                    "type": "null"
                   }
                 ]
               },
@@ -15873,10 +16490,10 @@
               "failure": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/RunFailure"
                   },
                   {
-                    "$ref": "#/components/schemas/RunFailure"
+                    "type": "null"
                   }
                 ]
               },
@@ -15991,6 +16608,44 @@
           },
           {
             "type": "object",
+            "description": "An eligible Ask request was sent to the automatic reviewer. Carries\nonly the redacted projection the reviewer sees.",
+            "required": [
+              "review",
+              "type"
+            ],
+            "properties": {
+              "review": {
+                "$ref": "#/components/schemas/PermissionReview"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "permission_review_started"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The automatic reviewer finished. Rejected and uncertain reviews are\nreturned to the model unexecuted; the user may authorize one retry.",
+            "required": [
+              "review",
+              "type"
+            ],
+            "properties": {
+              "review": {
+                "$ref": "#/components/schemas/PermissionReview"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "permission_reviewed"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "required": [
               "session_id",
               "type"
@@ -16079,10 +16734,10 @@
           "client_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionClientId"
               },
               {
-                "$ref": "#/components/schemas/SessionClientId"
+                "type": "null"
               }
             ]
           },
@@ -16095,10 +16750,10 @@
           "run_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionRunId"
               },
               {
-                "$ref": "#/components/schemas/SessionRunId"
+                "type": "null"
               }
             ]
           },
@@ -16180,20 +16835,20 @@
           "active_compaction": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ActiveCompactionSnapshot"
               },
               {
-                "$ref": "#/components/schemas/ActiveCompactionSnapshot"
+                "type": "null"
               }
             ]
           },
           "active_run": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ActiveRunSnapshot"
               },
               {
-                "$ref": "#/components/schemas/ActiveRunSnapshot"
+                "type": "null"
               }
             ]
           },
@@ -16250,10 +16905,10 @@
           "run_failure": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/RunFailure"
               },
               {
-                "$ref": "#/components/schemas/RunFailure"
+                "type": "null"
               }
             ]
           },
@@ -16392,10 +17047,10 @@
           "last_failure": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/RunFailure"
               },
               {
-                "$ref": "#/components/schemas/RunFailure"
+                "type": "null"
               }
             ]
           },
@@ -16582,30 +17237,30 @@
               "lineage": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/SessionLineageSnapshot"
                   },
                   {
-                    "$ref": "#/components/schemas/SessionLineageSnapshot"
+                    "type": "null"
                   }
                 ]
               },
               "message_cycle": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/MessageCycleMetadata"
                   },
                   {
-                    "$ref": "#/components/schemas/MessageCycleMetadata"
+                    "type": "null"
                   }
                 ]
               },
               "message_page": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/MessagePageMetadata"
                   },
                   {
-                    "$ref": "#/components/schemas/MessagePageMetadata"
+                    "type": "null"
                   }
                 ]
               },
@@ -16650,11 +17305,11 @@
           "forked_from": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/SessionForkOrigin",
                 "description": "Present when this chat was forked from another session."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -17249,10 +17904,10 @@
           "client_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionClientId"
               },
               {
-                "$ref": "#/components/schemas/SessionClientId"
+                "type": "null"
               }
             ]
           },
@@ -17270,11 +17925,11 @@
           "terminal_selection": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TerminalSelectionEvidence",
                 "description": "Read-only projection carried by the identified inbox admission, before\ncanonical transcript hydration catches up. Legacy/ordinary input omits it."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -17292,6 +17947,178 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "TaskLaunchPhase": {
+        "type": "string",
+        "enum": [
+          "pinned",
+          "preparing_workspace",
+          "preparing_runtime",
+          "ready",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "TaskLaunchRecord": {
+        "type": "object",
+        "required": [
+          "request",
+          "source",
+          "session_id",
+          "workspace_path",
+          "phase",
+          "session_present",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_input_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/TaskLaunchPhase"
+          },
+          "request": {
+            "$ref": "#/components/schemas/TaskLaunchRequest"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "session_present": {
+            "type": "boolean",
+            "description": "Passive projection; inventory survives deletion of its published session."
+          },
+          "source": {
+            "$ref": "#/components/schemas/TaskLaunchSource"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "workspace_path": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskLaunchRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "project_id",
+          "title",
+          "prompt"
+        ],
+        "properties": {
+          "default_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required when initially binding a project without an invoking task.\nThe binding persists independently of the ref selected for this launch."
+          },
+          "git_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "invoking_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskLaunchSource": {
+        "type": "object",
+        "required": [
+          "project_cwd",
+          "source_cwd",
+          "repo_root",
+          "common_git_dir",
+          "repository_identity",
+          "subdirectory",
+          "default_ref",
+          "selected_ref",
+          "commit",
+          "excluded_source_edits"
+        ],
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "common_git_dir": {
+            "type": "string"
+          },
+          "default_ref": {
+            "type": "string"
+          },
+          "excluded_source_edits": {
+            "type": "boolean",
+            "description": "Source-selection policy, not the result of scanning dirty contents."
+          },
+          "project_cwd": {
+            "type": "string"
+          },
+          "repo_root": {
+            "type": "string"
+          },
+          "repository_identity": {
+            "type": "string"
+          },
+          "selected_ref": {
+            "type": "string"
+          },
+          "source_cwd": {
+            "type": "string"
+          },
+          "subdirectory": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskLaunchSourceInfo": {
+        "type": "object",
+        "required": [
+          "eligible"
+        ],
+        "properties": {
+          "default_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "eligible": {
+            "type": "boolean"
           }
         }
       },
@@ -17451,10 +18278,10 @@
           "evidence": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TerminalSelectionEvidence"
               },
               {
-                "$ref": "#/components/schemas/TerminalSelectionEvidence"
+                "type": "null"
               }
             ]
           },
@@ -17824,10 +18651,10 @@
           "header_helper": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/UpdateMcpHeaderHelperRequest"
               },
               {
-                "$ref": "#/components/schemas/UpdateMcpHeaderHelperRequest"
+                "type": "null"
               }
             ]
           },
@@ -17860,10 +18687,10 @@
           "protocol": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpProtocolSelection"
               },
               {
-                "$ref": "#/components/schemas/McpProtocolSelection"
+                "type": "null"
               }
             ]
           },
@@ -17918,10 +18745,10 @@
           "probe": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/McpProbeResult"
               },
               {
-                "$ref": "#/components/schemas/McpProbeResult"
+                "type": "null"
               }
             ]
           },
@@ -17989,10 +18816,10 @@
           "thread_event_boundary": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SessionEventBoundary"
               },
               {
-                "$ref": "#/components/schemas/SessionEventBoundary"
+                "type": "null"
               }
             ]
           }
@@ -18240,6 +19067,38 @@
           }
         }
       },
+      "ToolCallContentResponse": {
+        "type": "object",
+        "description": "Full content of one main-session tool call. Each field is redacted before\nit is bounded; a `*_truncated` flag marks a field that was cut.",
+        "required": [
+          "call_id",
+          "arguments",
+          "arguments_truncated",
+          "output",
+          "output_truncated"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "string"
+          },
+          "arguments_truncated": {
+            "type": "boolean"
+          },
+          "call_id": {
+            "type": "string"
+          },
+          "output": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null while the call has no recorded result."
+          },
+          "output_truncated": {
+            "type": "boolean"
+          }
+        }
+      },
       "ToolCompletionStatus": {
         "type": "string",
         "enum": [
@@ -18372,10 +19231,10 @@
           "execution_mode": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TraditionalChildExecutionMode"
               },
               {
-                "$ref": "#/components/schemas/TraditionalChildExecutionMode"
+                "type": "null"
               }
             ]
           },
@@ -18558,10 +19417,10 @@
           "status": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/GoalStatus"
               },
               {
-                "$ref": "#/components/schemas/GoalStatus"
+                "type": "null"
               }
             ]
           },
@@ -18669,7 +19528,8 @@
             "$ref": "#/components/schemas/RequestField_bool_bool"
           },
           "env": {
-            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_Option_String"
+            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_Option_String",
+            "writeOnly": true
           },
           "env_headers": {
             "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_String"
@@ -18684,7 +19544,8 @@
             "$ref": "#/components/schemas/RequestField_UpdateMcpHeaderHelperRequest_UpdateMcpHeaderHelperRequest"
           },
           "headers": {
-            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_Option_String"
+            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_Option_String",
+            "writeOnly": true
           },
           "library_id": {
             "$ref": "#/components/schemas/RequestField_String_String"
@@ -18719,7 +19580,8 @@
             "$ref": "#/components/schemas/RequestField_bool_bool"
           },
           "api_key": {
-            "$ref": "#/components/schemas/RequestField_String_String"
+            "$ref": "#/components/schemas/RequestField_String_String",
+            "writeOnly": true
           },
           "backend": {
             "$ref": "#/components/schemas/RequestField_BackendKind_BackendKind"
@@ -19486,6 +20348,13 @@
               "string",
               "null"
             ]
+          },
+          "file_path_prefix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Session-directory prefix for repository-relative Files paths. Empty at\nthe repository root; unavailable when the Git location is unknown."
           },
           "host_root": {
             "type": [

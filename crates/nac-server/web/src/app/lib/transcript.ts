@@ -107,6 +107,8 @@ export interface UserTurn {
   messageIndex: number;
   /** When the message entered the transcript log, if the backend knows. */
   createdAt: string | null;
+  /** Submitted but not in the snapshot yet, so its index is only expected. */
+  pending?: true;
 }
 
 export interface ModelTurn {
@@ -144,6 +146,11 @@ export const STREAMING_TURN_KEY = "model-streaming";
 export interface StreamedOutput {
   text: string;
   reasoning: string;
+  /**
+   * No more of it is coming, as its call was committed or its run ended, so
+   * once the snapshot holds its answer it holds all of it.
+   */
+  settled?: boolean;
 }
 
 function parseArguments(call: ToolCall): JsonObject {
@@ -355,7 +362,7 @@ function eventsForEpisode(
  * here: the run ended without them, so a checkmark would claim work that never
  * ran.
  */
-export function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string> {
+function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string> {
   const cancelled = new Set<string>();
   messages.forEach((message, index) => {
     if (message.role !== "assistant") return;
@@ -470,19 +477,22 @@ function describeThread(
 }
 
 /**
- * Newest block of a kind, which is the only one streamed output could belong to.
+ * Whether the newest block of a kind, the only one streamed output could belong
+ * to, already holds it. Whitespace is ignored: a stored reasoning joins its
+ * summary parts with blank lines that the stream never carried.
  */
-function lastBlockText(blocks: TranscriptBlock[], kind: "text" | "thoughts"): string | null {
+function holdsStreamed(blocks: TranscriptBlock[], kind: "text" | "thoughts", streamed: string) {
+  const squash = (value: string) => value.replace(/\s+/g, "");
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const block = blocks[index];
     if (
       block.kind === kind &&
       !(kind === "text" && block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER)
     ) {
-      return block.text;
+      return squash(block.text).includes(squash(streamed));
     }
   }
-  return null;
+  return false;
 }
 
 /**
@@ -519,6 +529,12 @@ export function withStreamedOutput(
    * the snapshot its run captured, would then describe this output too.
    */
   promptUncommitted = false,
+  /**
+   * Key of a turn the output has to open, since its first message is not
+   * persisted yet. The default stays out of the committed namespace; a caller
+   * passes a committed key only when it is the one this turn will be given.
+   */
+  key = STREAMING_TURN_KEY,
 ): TranscriptTurn[] {
   const reasoning = stripNativeToolMarkup(stream.reasoning).trim();
   const text = stripNativeToolMarkup(stream.text).trim();
@@ -526,24 +542,15 @@ export function withStreamedOutput(
 
   const last = turns[turns.length - 1];
   const live = last?.kind === "model" && !promptUncommitted;
-  // The run answers with output before its first message is persisted, so the
-  // turn it belongs to may not exist yet. Its key stays out of the namespace a
-  // committed turn draws from — the index of its message — because a key that
-  // lands on one of those indexes hands this turn the other one's identity: the
-  // same React row, and whatever that turn is addressed by elsewhere, down to
-  // the snapshot its finished run captured.
   const turn: ModelTurn = live
     ? { ...last, blocks: last.blocks.slice() }
-    : {
-        kind: "model",
-        key: STREAMING_TURN_KEY,
-        blocks: [],
-        durationMs: null,
-        messageIndex: null,
-      };
+    : { kind: "model", key, blocks: [], durationMs: null, messageIndex: null };
 
+  // Some providers store no reasoning text, so settled reasoning would
+  // otherwise trail the answer that the snapshot already shows.
+  const landed = stream.settled === true && text !== "" && holdsStreamed(turn.blocks, "text", text);
   let appended = false;
-  if (reasoning && !lastBlockText(turn.blocks, "thoughts")?.includes(reasoning)) {
+  if (reasoning && !landed && !holdsStreamed(turn.blocks, "thoughts", reasoning)) {
     turn.blocks.push({
       kind: "thoughts",
       key: `thoughts-${nextOrdinal(turn.blocks, "thoughts")}`,
@@ -551,11 +558,11 @@ export function withStreamedOutput(
       durationMs: null,
       // Prose arriving means the model has stopped thinking and started
       // answering, even though this reasoning is not committed yet.
-      streaming: !text,
+      streaming: !text && !stream.settled,
     });
     appended = true;
   }
-  if (text && !lastBlockText(turn.blocks, "text")?.includes(text)) {
+  if (text && !holdsStreamed(turn.blocks, "text", text)) {
     turn.blocks.push({
       kind: "text",
       key: `text-${nextOrdinal(turn.blocks, "text")}`,
@@ -716,7 +723,7 @@ export function buildTranscript(
         if (direct) {
           blocks.push({
             kind: "tool-detail",
-            key: `tool-${call.id}`,
+            key: `tool-${absoluteIndex}-${call.id}`,
             presentation: presentToolCall({
               call,
               events: toolEvents.get(call.id),

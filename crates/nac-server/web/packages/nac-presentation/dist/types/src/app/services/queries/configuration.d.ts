@@ -88,7 +88,7 @@ export declare function useCreateMcpServer(): import("@tanstack/react-query").Us
     env_headers: Record<string, string>;
     env_vars: string[];
     execution_timeout_ms?: number | null;
-    header_helper?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpHeaderHelperConfig"];
+    header_helper?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpHeaderHelperConfig"] | null;
     headers: Record<string, string>;
     library_id?: string | null;
     name: string;
@@ -112,7 +112,7 @@ export declare function useCreateMcpServer(): import("@tanstack/react-query").Us
     env_headers?: Record<string, string>;
     env_vars?: string[];
     execution_timeout_ms?: number | null;
-    header_helper?: null | import("../../types/openapi.generated").components["schemas"]["McpHeaderHelperConfig"];
+    header_helper?: import("../../types/openapi.generated").components["schemas"]["McpHeaderHelperConfig"] | null;
     headers?: Record<string, string>;
     library_id?: string | null;
     name: string;
@@ -137,7 +137,7 @@ export declare function useUpdateMcpServer(): import("@tanstack/react-query").Us
     env_headers: Record<string, string>;
     env_vars: string[];
     execution_timeout_ms?: number | null;
-    header_helper?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpHeaderHelperConfig"];
+    header_helper?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpHeaderHelperConfig"] | null;
     headers: Record<string, string>;
     library_id?: string | null;
     name: string;
@@ -156,7 +156,7 @@ export declare function useTestMcpServer(): import("@tanstack/react-query").UseM
     auth_required: boolean;
     connected: boolean;
     error?: string | null;
-    probe?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpProbeResult"];
+    probe?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpProbeResult"] | null;
     tools: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpProbedTool"][];
 }, Error, {
     args?: string[] | null;
@@ -168,10 +168,10 @@ export declare function useTestMcpServer(): import("@tanstack/react-query").UseM
     env_headers?: Record<string, string> | null;
     env_vars?: string[] | null;
     execution_timeout_ms?: number | null;
-    header_helper?: null | import("../../types/openapi.generated").components["schemas"]["UpdateMcpHeaderHelperRequest"];
+    header_helper?: import("../../types/openapi.generated").components["schemas"]["UpdateMcpHeaderHelperRequest"] | null;
     headers?: Record<string, string | null> | null;
     name?: string | null;
-    protocol?: null | import("../../types/openapi.generated").components["schemas"]["McpProtocolSelection"];
+    protocol?: import("../../types/openapi.generated").components["schemas"]["McpProtocolSelection"] | null;
     startup_timeout_ms?: number | null;
     stored_name?: string | null;
     transport?: string | null;
@@ -188,6 +188,7 @@ export declare function useMcpRuntimeAction(): import("@tanstack/react-query").U
     required: boolean;
     server_name?: string | null;
     server_version?: string | null;
+    sessions_blocked: boolean;
     state: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["McpRuntimeState"];
     tool_count: number;
 }, Error, {
@@ -256,7 +257,7 @@ export declare function useResolvedModelConfig(configId: string | null, filePath
     model: string | null;
     models: import("../../types/openapi.generated").components["schemas"]["ProviderModel"][];
     models_error: string | null;
-    reasoning_effort: null | import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"];
+    reasoning_effort: import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"] | null;
 }>, Error>;
 export declare function useCreateModelConfig(): import("@tanstack/react-query").UseMutationResult<{
     allow_insecure_http: boolean;
@@ -267,7 +268,7 @@ export declare function useCreateModelConfig(): import("@tanstack/react-query").
     created_at: string;
     extra_headers: Record<string, string>;
     initial_prompt?: string | null;
-    light_model?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["LightModelSettings"];
+    light_model?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["LightModelSettings"] | null;
     model: string;
     name: string;
     orchestrator_compaction_threshold?: number | null;
@@ -280,11 +281,11 @@ export declare function useCreateModelConfig(): import("@tanstack/react-query").
     base_url?: string | null;
     extra_headers?: Record<string, string> | null;
     initial_prompt?: string | null;
-    light_model?: null | import("../../types/openapi.generated").components["schemas"]["LightModelSettings"];
+    light_model?: import("../../types/openapi.generated").components["schemas"]["LightModelSettings"] | null;
     model: string;
     name: string;
     orchestrator_compaction_threshold?: number | null;
-    reasoning_effort?: null | import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"];
+    reasoning_effort?: import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"] | null;
 }, unknown>;
 export declare function useUpdateModelConfig(): import("@tanstack/react-query").UseMutationResult<{
     allow_insecure_http: boolean;
@@ -295,7 +296,7 @@ export declare function useUpdateModelConfig(): import("@tanstack/react-query").
     created_at: string;
     extra_headers: Record<string, string>;
     initial_prompt?: string | null;
-    light_model?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["LightModelSettings"];
+    light_model?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["LightModelSettings"] | null;
     model: string;
     name: string;
     orchestrator_compaction_threshold?: number | null;

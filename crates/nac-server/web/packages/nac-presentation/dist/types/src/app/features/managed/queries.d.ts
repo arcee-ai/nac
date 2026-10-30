@@ -15,7 +15,7 @@ export declare function useManagedHostStatus(): import("@tanstack/react-query").
     checks: import("../../types/openapi.generated").components["schemas"]["ReadinessCheck"][];
     github_status: string;
     logical_host_id: string;
-    maintenance?: null | import("../../types/openapi.generated").components["schemas"]["ManagedMaintenanceSnapshot"];
+    maintenance?: import("../../types/openapi.generated").components["schemas"]["ManagedMaintenanceSnapshot"] | null;
     maintenance_state: string;
     managed: boolean;
     migration_failure?: string | null;
@@ -63,8 +63,13 @@ export declare function usePutManagedSecret(): import("@tanstack/react-query").U
     value: string;
 }, unknown>;
 export declare function useDeleteManagedSecret(): import("@tanstack/react-query").UseMutationResult<void, Error, string, unknown>;
-export declare function useManagedAuth(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
+export declare function useManagedAuth(enabled?: boolean, refetchInterval?: number | false): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     providers: import("../../types/openapi.generated").components["schemas"]["ManagedAuthStatusResponse"][];
+}>, Error>;
+/** Whether `credential` reaches the provider, probed afresh for each refused run. */
+export declare function useProviderReachAfterRefusal(backend: BackendKind | null, refusal: string | null, credential: string | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
+    base_url: string;
+    models: import("../../types/openapi.generated").components["schemas"]["ProviderModel"][];
 }>, Error>;
 export declare function useManagedProviderModels(backend: BackendKind | null, enabled: boolean, baseUrl?: string | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     base_url: string;

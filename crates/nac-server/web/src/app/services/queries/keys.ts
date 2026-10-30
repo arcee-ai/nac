@@ -55,6 +55,8 @@ export const queryKeys = {
   threadEventsRoot: (id: string) => ["session", id, "thread-events"] as const,
   threadEvents: (id: string, threadName: string) =>
     ["session", id, "thread-events", threadName] as const,
+  toolCallContent: (id: string, callId: string, blockKey: string) =>
+    ["session", id, "tool-call", callId, blockKey] as const,
   sessionConfig: (id: string) => ["session", id, "config"] as const,
   sessionPermissions: (id: string) => ["session", id, "permissions"] as const,
   sessionGoal: (id: string) => ["session", id, "goal"] as const,

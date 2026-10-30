@@ -10,63 +10,65 @@ import type { SidebarCommands } from "./useSidebarCommands.tsx";
 export function LeftSidebarRail({
   commands,
   onToggle,
+  onSearch,
   toggleKeys,
   variant,
 }: {
   commands: SidebarCommands;
   onToggle: () => void;
+  onSearch: () => void;
   toggleKeys: string[];
   /** All Projects drops the projects shortcut and the new-session menu. */
   variant: "session" | "projects";
 }) {
   const projectsPage = variant === "projects";
+  // The border takes a pixel of the right inset, so the buttons keep a 36px column.
   return (
-    <div className="flex h-full flex-col justify-between p-2">
-      <div className="flex flex-col items-center gap-4 [&>*]:shrink-0">
-        <button
-          type="button"
-          className="text-basic-primary"
-          aria-label="All projects"
-          onClick={commands.openProjects}
-        >
-          <Logo markOnly height={25} />
-        </button>
-        <RailButton label="Show sidebar" keys={toggleKeys} onClick={onToggle}>
-          <Icon iconName={IconName.SidebarChevronRight} />
+    <div className="flex h-full flex-col items-center gap-4 border-r border-tertiary py-2 pr-[7px] pl-2 [&>*]:shrink-0">
+      <button
+        type="button"
+        className="text-basic-primary"
+        aria-label="All projects"
+        onClick={commands.openProjects}
+      >
+        <Logo markOnly height={25} />
+      </button>
+      <RailButton label="Show sidebar" keys={toggleKeys} onClick={onToggle}>
+        <Icon iconName={IconName.LeftSidebar} />
+      </RailButton>
+      {projectsPage ? (
+        <RailButton label={commands.createLabel} onClick={commands.newProject}>
+          <Icon iconName={IconName.Add} />
         </RailButton>
-        {projectsPage ? null : (
-          <RailButton label="All projects" onClick={commands.openProjects}>
-            <Icon iconName={IconName.Folders} />
-          </RailButton>
-        )}
-        {projectsPage ? (
-          <RailButton label={commands.createLabel} onClick={commands.newProject}>
-            <Icon iconName={IconName.Add} />
-          </RailButton>
-        ) : (
-          <NewSessionPopover projectId={commands.projectId} onUnavailable={commands.newSession}>
-            {(openMenu) => (
-              <RailButton label="New session" onClick={openMenu}>
-                <Icon iconName={IconName.Add} />
-              </RailButton>
-            )}
-          </NewSessionPopover>
-        )}
-        <RailButton label={commands.mcpLabel} onClick={commands.openMcp}>
-          <Icon iconName={IconName.Toolbox} />
+      ) : (
+        <NewSessionPopover projectId={commands.projectId} onUnavailable={commands.newSession}>
+          {(openMenu) => (
+            <RailButton label="New session" onClick={openMenu}>
+              <Icon iconName={IconName.Add} />
+            </RailButton>
+          )}
+        </NewSessionPopover>
+      )}
+      <RailButton label={projectsPage ? "Search projects" : "Search chats"} onClick={onSearch}>
+        <Icon iconName={IconName.Search} />
+      </RailButton>
+      {projectsPage ? null : (
+        <RailButton label="All projects" onClick={commands.openProjects}>
+          <Icon iconName={IconName.Folders} />
         </RailButton>
-        <RailButton label="SSH" onClick={commands.openSsh}>
-          <Icon iconName={IconName.Globe} />
-        </RailButton>
-      </div>
-      <div className="flex flex-col items-center gap-1 [&>*]:shrink-0">
-        <RailButton label="Configurations" onClick={commands.openConfigurations}>
-          <Icon iconName={IconName.Gear} />
-        </RailButton>
-        <RailButton label="Managed host" onClick={commands.openManaged}>
-          <Icon iconName={IconName.Server} />
-        </RailButton>
-      </div>
+      )}
+      <RailButton label={commands.mcpLabel} onClick={commands.openMcp}>
+        <Icon iconName={IconName.Toolbox} />
+      </RailButton>
+      <RailButton label="SSH" onClick={commands.openSsh}>
+        <Icon iconName={IconName.Globe} />
+      </RailButton>
+      <RailButton label="Managed host" onClick={commands.openManaged}>
+        <Icon iconName={IconName.Controls} />
+      </RailButton>
+      <RailButton label="Configurations" onClick={commands.openConfigurations}>
+        <Icon iconName={IconName.Gear} />
+      </RailButton>
     </div>
   );
 }

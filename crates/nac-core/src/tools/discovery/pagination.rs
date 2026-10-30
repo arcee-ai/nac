@@ -285,6 +285,8 @@ pub(super) fn error_result(code: &str, message: &str, path: Option<&str>) -> Too
         .to_string())
         .into(),
         is_error: true,
+        execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     }
 }
 

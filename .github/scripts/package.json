@@ -5,6 +5,7 @@
     "node": ">=22"
   },
   "devDependencies": {
+    "@modelcontextprotocol/conformance": "0.2.0-alpha.11",
     "release-please": "17.11.2"
   }
 }

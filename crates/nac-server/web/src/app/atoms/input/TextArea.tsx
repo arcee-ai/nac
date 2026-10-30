@@ -2,10 +2,11 @@ import type React from "react";
 import { cn } from "../../lib/cn";
 import InputWrapper from "./InputWrapper";
 
+/** Utilities rather than `.input-*` rules, so callers can still override height and type. */
 export enum TextAreaSize {
-  Small = "p-2 text-micro",
-  Medium = "p-3 text-small",
-  Large = "p-4 text-medium",
+  Small = "h-[93px] p-1 text-micro",
+  Medium = "h-[86px] p-2 text-small",
+  Large = "h-[120px] p-3 text-medium",
 }
 
 interface TextAreaProps extends Omit<React.ComponentPropsWithRef<"textarea">, "size"> {
@@ -39,12 +40,13 @@ const TextArea: React.FC<TextAreaProps> & { Size: typeof TextAreaSize } = ({
     validation={validation}
     validationText={validationText}
     hintText={hintText}
+    caption={textAreaSize === TextAreaSize.Large ? "large" : "compact"}
     className={className}
   >
     <textarea
       ref={ref}
       className={cn(
-        "w-full input font-normal rounded-[4px]",
+        "w-full input font-normal rounded-interaction",
         textAreaSize,
         isDisabled && "input-disabled",
         validation && "input-validation",

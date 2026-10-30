@@ -16,12 +16,15 @@ use crate::sandbox::ExecutionBackend;
 use crate::tools::kernel::PermissionResource;
 
 mod broker;
+mod broker_review;
 mod command_classification;
 mod evaluation;
 mod hard_policy;
 mod opaque_policy;
 mod resource_binding;
 mod resource_projection;
+mod review;
+mod review_failure;
 mod shell_parser;
 
 use command_classification::*;
@@ -35,6 +38,16 @@ pub(crate) use resource_projection::{
     unbounded_interactive_input,
 };
 use resource_projection::{lexical_normalize, path_contains_component};
+use review::{blocked_message, invocation_fingerprint, BlockedReview, ReviewMemory};
+pub(crate) use review::{
+    is_secret_name, review_eligibility, review_request, ExactSecrets, ReviewBackendSource,
+};
+pub use review::{
+    retry_authorization_message, PermissionReview, PermissionReviewCode, PermissionReviewOutcome,
+    PermissionReviewer, ReviewCategory, ReviewRequest, ReviewResource, ReviewVerdict,
+    REVIEW_DEADLINE,
+};
+pub use review_failure::{PermissionReviewFailureReason, ReviewUnavailable};
 use shell_parser::{canonical_command, command_grant_candidate, parse_shell, ParsedShell};
 
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -144,11 +157,18 @@ pub enum PermissionApprovalMode {
     #[default]
     Manual,
     AutoApprove,
+    /// Eligible Ask requests are answered by an automatic reviewer. Rejected,
+    /// uncertain and failed reviews return unexecuted errors; ineligible
+    /// requests keep the manual path.
+    Review,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PermissionApprovalModeUpdateError {
     ConcurrentChange,
+    /// Review mode was requested but the reviewer cannot run, for example
+    /// because no Arcee credential is available. The previous mode remains.
+    ReviewerUnavailable(String),
 }
 
 impl std::fmt::Display for PermissionApprovalModeUpdateError {
@@ -156,6 +176,7 @@ impl std::fmt::Display for PermissionApprovalModeUpdateError {
         match self {
             Self::ConcurrentChange => formatter
                 .write_str("permission approval mode changed concurrently; refresh and try again"),
+            Self::ReviewerUnavailable(message) => formatter.write_str(message),
         }
     }
 }
@@ -190,15 +211,12 @@ struct PendingPermissionGuard {
 }
 
 struct PermissionWaiterLiveness {
-    live: Arc<StdMutex<bool>>,
+    live: Arc<crate::store::PermissionGrantWaiter>,
 }
 
 impl Drop for PermissionWaiterLiveness {
     fn drop(&mut self) {
-        *self
-            .live
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
+        self.live.abort();
     }
 }
 
@@ -227,6 +245,13 @@ pub struct PermissionBroker {
     event_bus: StdMutex<Option<crate::events::SessionEventBus>>,
     state: StdMutex<PermissionBrokerState>,
     approval_observer: tokio::sync::Mutex<PermissionApprovalObserver>,
+    reviewer: StdMutex<Option<Arc<dyn PermissionReviewer>>>,
+    review: StdMutex<ReviewMemory>,
+    review_deadline: StdMutex<Duration>,
+    command_environment: StdMutex<Option<Arc<dyn nac_contracts::CommandEnvironmentProvider>>>,
+    review_backend: StdMutex<review::ReviewBackendSource>,
+    /// The session's saved project; membership is immutable once set.
+    caller_project: std::sync::OnceLock<String>,
 }
 
 /// Project one validated backend path into the action being performed plus an
@@ -243,6 +268,10 @@ mod grant_tests;
 #[cfg(test)]
 #[path = "permission_mode_tests.rs"]
 mod mode_tests;
+
+#[cfg(test)]
+#[path = "permission_review_tests.rs"]
+mod review_tests;
 
 #[cfg(test)]
 #[path = "permission_persistence_tests.rs"]

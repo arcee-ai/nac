@@ -2,7 +2,7 @@ use super::*;
 #[path = "schema/http_policy_tests.rs"]
 mod http_policy_tests;
 
-fn temp_store_path(label: &str) -> PathBuf {
+pub(super) fn temp_store_path(label: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -54,7 +54,7 @@ fn create_legacy_base(conn: &Connection) {
     .unwrap();
 }
 
-fn insert_legacy_session(conn: &Connection, session_id: &str) {
+pub(super) fn insert_legacy_session(conn: &Connection, session_id: &str) {
     conn.execute(
         "INSERT INTO sessions
              (session_id, cwd, store_path, model, base_url, messages_json,
@@ -170,6 +170,7 @@ fn assert_current_schema(conn: &Connection) {
         "permission_approval_mode",
         "permission_auto_approve_generation",
         "permission_approval_revision",
+        "permission_reviewer",
         "allow_insecure_http",
         "orchestrator_compaction_threshold",
         "visible_message_count",
@@ -191,7 +192,8 @@ fn assert_current_schema(conn: &Connection) {
             "created_at",
             "claimed_at",
             "delivered_at",
-            "expired_at"
+            "expired_at",
+            "review_intent"
         ]
     );
     assert_eq!(
@@ -222,6 +224,9 @@ fn assert_current_schema(conn: &Connection) {
             "version",
             "admission_id",
             "admission_digest",
+            "child_execution_mode",
+            "child_wait_id",
+            "review_intent",
         ]
     );
     assert_eq!(
@@ -244,6 +249,7 @@ fn assert_current_schema(conn: &Connection) {
             "created_at",
             "updated_at",
             "version",
+            "last_run_id",
         ]
     );
     assert_eq!(
@@ -290,6 +296,18 @@ fn assert_current_schema(conn: &Connection) {
             "version",
         ]
     );
+    for (table, session_id) in [
+        ("traditional_child_terminal_receipts", "child_session_id"),
+        (
+            "managed_orchestrator_terminal_receipts",
+            "orchestrator_session_id",
+        ),
+    ] {
+        assert_eq!(
+            table_columns(conn, table),
+            [session_id, "generation", "run_id", "record_json"]
+        );
+    }
     assert_eq!(
         table_columns(conn, "managed_host_maintenance"),
         [
@@ -333,6 +351,8 @@ fn assert_current_schema(conn: &Connection) {
         "thread_events",
         "session_inbox",
         "session_goals",
+        "session_goal_outcomes",
+        "session_run_outcomes",
         "traditional_children",
         "managed_orchestrators",
     ] {
@@ -511,7 +531,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 34);
+    assert_eq!(STORE_SCHEMA_VERSION, 40);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -559,101 +579,6 @@ fn v27_store_adds_typed_run_failure_and_goal_retry_metadata() {
 }
 
 #[test]
-fn v24_store_adds_manual_session_permission_approval_mode() {
-    let path = temp_store_path("v24_permission_approval_mode");
-    initialize(&path).unwrap();
-    let legacy = Connection::open(&path).unwrap();
-    insert_legacy_session(&legacy, "legacy-session");
-    legacy
-        .execute_batch(
-            "ALTER TABLE sessions DROP COLUMN permission_approval_mode;
-             ALTER TABLE sessions DROP COLUMN permission_auto_approve_generation;
-             ALTER TABLE sessions DROP COLUMN permission_approval_revision;
-             PRAGMA user_version = 24;",
-        )
-        .unwrap();
-    drop(legacy);
-
-    initialize(&path).unwrap();
-    let migrated = Connection::open(&path).unwrap();
-    let mode: String = migrated
-        .query_row(
-            "SELECT permission_approval_mode FROM sessions WHERE session_id = 'legacy-session'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(mode, "manual");
-    let generation: i64 = migrated
-        .query_row(
-            "SELECT permission_auto_approve_generation FROM sessions WHERE session_id = 'legacy-session'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(generation, 0);
-    let revision: i64 = migrated
-        .query_row(
-            "SELECT permission_approval_revision FROM sessions WHERE session_id = 'legacy-session'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(revision, 0);
-    assert_eq!(
-        migrated
-            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-            .unwrap(),
-        STORE_SCHEMA_VERSION
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn v25_store_adds_permission_approval_transition_revision() {
-    let path = temp_store_path("v25_permission_approval_revision");
-    initialize(&path).unwrap();
-    let legacy = Connection::open(&path).unwrap();
-    insert_legacy_session(&legacy, "legacy-session");
-    legacy
-        .execute(
-            "UPDATE sessions
-             SET permission_approval_mode = 'auto_approve',
-                 permission_auto_approve_generation = 7
-             WHERE session_id = 'legacy-session'",
-            [],
-        )
-        .unwrap();
-    legacy
-        .execute_batch(
-            "ALTER TABLE sessions DROP COLUMN permission_approval_revision;
-             PRAGMA user_version = 25;",
-        )
-        .unwrap();
-    drop(legacy);
-
-    initialize(&path).unwrap();
-    let migrated = Connection::open(&path).unwrap();
-    let state: (String, i64, i64) = migrated
-        .query_row(
-            "SELECT permission_approval_mode, permission_auto_approve_generation,
-                    permission_approval_revision
-             FROM sessions WHERE session_id = 'legacy-session'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap();
-    assert_eq!(state, ("auto_approve".to_string(), 7, 0));
-    assert_eq!(
-        migrated
-            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-            .unwrap(),
-        STORE_SCHEMA_VERSION
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
 fn v25_managed_store_adds_the_complete_permission_mode_schema() {
     let path = temp_store_path("v25_managed_permission_composition");
     initialize(&path).unwrap();
@@ -661,7 +586,8 @@ fn v25_managed_store_adds_the_complete_permission_mode_schema() {
     insert_legacy_session(&predecessor, "managed-v25-session");
     predecessor
         .execute_batch(
-            "ALTER TABLE sessions DROP COLUMN permission_approval_mode;
+            "ALTER TABLE sessions DROP COLUMN permission_reviewer;
+             ALTER TABLE sessions DROP COLUMN permission_approval_mode;
              ALTER TABLE sessions DROP COLUMN permission_auto_approve_generation;
              ALTER TABLE sessions DROP COLUMN permission_approval_revision;
              PRAGMA user_version = 25;",
@@ -761,6 +687,9 @@ fn v17_store_adds_the_durable_session_inbox() {
             "version",
             "admission_id",
             "admission_digest",
+            "child_execution_mode",
+            "child_wait_id",
+            "review_intent",
         ]
     );
     assert_eq!(
@@ -837,6 +766,7 @@ fn v19_store_adds_durable_session_goals() {
             "created_at",
             "updated_at",
             "version",
+            "last_run_id",
         ]
     );
     assert_eq!(

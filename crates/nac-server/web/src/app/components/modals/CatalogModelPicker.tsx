@@ -216,6 +216,7 @@ export function CatalogModelPicker({
     }
   };
 
+  const triggerDisabled = !catalog || disabled;
   const label = value
     ? selected
       ? modelName(selected.model)
@@ -321,31 +322,35 @@ export function CatalogModelPicker({
       <Button
         variant={compact ? ButtonVariant.Ghost : ButtonVariant.Secondary}
         size={compact ? ButtonSize.Small : isMobile ? ButtonSize.Large : ButtonSize.Medium}
-        content={compact ? ButtonContent.IconLeft : ButtonContent.IconRight}
-        disabled={!catalog || disabled}
+        content={compact ? ButtonContent.Text : ButtonContent.IconRight}
+        disabled={triggerDisabled}
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-label={compact ? "Model" : undefined}
-        className={compact ? "min-w-0 max-w-full !gap-1.5 !pr-3" : "w-full md:w-[280px]"}
+        className={
+          compact ? "min-w-0 max-w-full !gap-1 !rounded-[4px] !px-2" : "w-full md:w-[280px]"
+        }
       >
-        {compact ? <Icon iconName={IconName.Brain} /> : null}
         <span
           className={cn(
             "min-w-0 text-left truncate",
-            compact ? "label-micro max-w-[96px]" : "flex-1",
+            compact ? cn("label-micro", isMobile ? "max-w-[64px]" : "max-w-[96px]") : "flex-1",
           )}
         >
           {label}
         </span>
         {/* Some providers name their flagship after themselves; saying it twice
-            on one line reads like a mistake. The composer draws the account
-            name quieter and shorter than the model name. */}
+            on one line reads like a mistake. */}
         {value && providerLabel(value.backend) !== label ? (
           <span
             className={cn(
               "truncate",
               compact
-                ? "label-micro max-w-[72px] text-basic-tertiary"
+                ? cn(
+                    "text-micro font-normal",
+                    isMobile ? "max-w-[64px]" : "max-w-[96px]",
+                    triggerDisabled ? "text-basic-muted" : "text-basic-tertiary",
+                  )
                 : "text-micro text-basic-muted max-w-[110px]",
             )}
           >

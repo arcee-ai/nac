@@ -1,0 +1,135 @@
+[
+  {
+    "package": "nac-core",
+    "name": "tools::discovery::tests::ssh_and_local_backends_return_identical_discovery_pages",
+    "disposition": "included",
+    "capabilities": [
+      "unix",
+      "process-PATH mutation",
+      "single test thread",
+      "local sftp-server"
+    ],
+    "reason": "Local SFTP fixture; fake ssh executes the system sftp-server, no network or SSH credentials."
+  },
+  {
+    "package": "nac-core",
+    "name": "tools::discovery::tests::tools_work_without_external_search_binaries_on_path",
+    "disposition": "included",
+    "capabilities": [
+      "unix",
+      "process-PATH mutation",
+      "single test thread"
+    ],
+    "reason": "Failing local search shims prove native discovery independence."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::persistence_load::owned_persistence_load_scenario",
+    "disposition": "included",
+    "capabilities": [
+      "built nac-web worker",
+      "scripted provider",
+      "local SQLite",
+      "single test thread"
+    ],
+    "reason": "Genuinely omitted owned-store multi-thread/current-thread variant; existing managed-load exercises the legacy SqliteLoadStore adapter instead."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::persistence_load::owned_persistence_current_thread_load_scenario",
+    "disposition": "included",
+    "capabilities": [
+      "built nac-web worker",
+      "scripted provider",
+      "local SQLite",
+      "single test thread"
+    ],
+    "reason": "Genuinely omitted owned-store multi-thread/current-thread variant; existing managed-load exercises the legacy SqliteLoadStore adapter instead."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::managed_load::managed_load_scenario",
+    "disposition": "already-covered",
+    "capabilities": [
+      "make test-managed-load"
+    ],
+    "reason": "Required PR test-workspace and managed quality already execute this exact scenario; no duplicate nightly ignored invocation."
+  },
+  {
+    "package": "nac-core",
+    "name": "agent::live_tests::test_simple_prompt",
+    "disposition": "excluded",
+    "capabilities": [
+      "OPENAI_API_KEY",
+      "paid live provider"
+    ],
+    "reason": "Paid live provider calls excluded from unattended coverage."
+  },
+  {
+    "package": "nac-core",
+    "name": "agent::live_tests::test_tool_usage",
+    "disposition": "excluded",
+    "capabilities": [
+      "OPENAI_API_KEY",
+      "paid live provider"
+    ],
+    "reason": "Paid live provider calls excluded from unattended coverage."
+  },
+  {
+    "package": "nac-process",
+    "name": "native_pty::tests::latency::native_admission_latency_and_independent_root_cleanup",
+    "disposition": "excluded",
+    "capabilities": [
+      "manual quiet host latency benchmark"
+    ],
+    "reason": "Manual timing qualification; not a deterministic unattended gate."
+  },
+  {
+    "package": "nac-core",
+    "name": "session_service::tests::projection::benchmark_frontend_snapshot_latency",
+    "disposition": "excluded",
+    "capabilities": [
+      "manual quiet host latency benchmark"
+    ],
+    "reason": "Manual timing qualification; not a deterministic unattended gate."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::sse::tests::benchmark_responses_terminal_event_latency",
+    "disposition": "excluded",
+    "capabilities": [
+      "manual quiet host latency benchmark"
+    ],
+    "reason": "Manual timing qualification; not a deterministic unattended gate."
+  },
+  {
+    "package": "nac-core",
+    "name": "tools::discovery::tests::podman_and_local_backends_return_identical_discovery_pages",
+    "disposition": "coverage-gap",
+    "capabilities": [
+      "Podman machine",
+      "configured sandbox image"
+    ],
+    "reason": "Native hosted macOS lane does not provision Podman; not executed or counted as passing. Managed image Docker smoke does not prove these backend cases."
+  },
+  {
+    "package": "nac-core",
+    "name": "terminal::manager::tests::podman_backend_preserves_output_contract",
+    "disposition": "coverage-gap",
+    "capabilities": [
+      "Podman machine",
+      "configured sandbox image"
+    ],
+    "reason": "Native hosted macOS lane does not provision Podman; not executed or counted as passing. Managed image Docker smoke does not prove these backend cases."
+  },
+  {
+    "package": "nac-core",
+    "name": "terminal::manager::tests::openssh_backend_preserves_output_contract",
+    "disposition": "excluded",
+    "capabilities": [
+      "external SSH host",
+      "NAC_TEST_SSH_KEY"
+    ],
+    "reason": "External SSH credentials and host excluded; local fake-SSH discovery selection is distinct."
+  }
+]

@@ -32,8 +32,8 @@ pub use delivery::contracts::{
     ReplayBoundaryEvent, ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest,
     SessionLineageKind, SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse,
     SshBrowseRequest, StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
-    ThreadSteeringRequest, ThreadSteeringResponse, UpdateConfigRequest, UpdateGoalRequest,
-    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
+    ThreadSteeringRequest, ThreadSteeringResponse, ToolCallContentResponse, UpdateConfigRequest,
+    UpdateGoalRequest, UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
 };
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
@@ -130,6 +130,7 @@ use nac_core::{
         ActiveSessionOperationSnapshot, FrontendSnapshotLoadOptions, MessagePageRequest,
         MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
         SessionFrontendSnapshotLoad, SessionRunHandle, SessionService, ThreadEventPage,
+        ToolCallContent,
     },
     sessions,
     store::{
@@ -318,6 +319,7 @@ struct SessionManagerInner {
     managed_clones: Option<nac_managed::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     terminal_observations: application::terminal_observation::TerminalObservationHub,
+    task_preparations: application::task_preparations::TaskPreparations,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
     git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
@@ -332,6 +334,9 @@ struct SessionManagerInner {
     managed_monitor_peer_observed: tokio::sync::Notify,
     #[cfg(test)]
     session_creation_before_projection:
+        StdMutex<Option<Arc<application::session_creation::CreationProjectionGate>>>,
+    #[cfg(test)]
+    session_creation_after_persistence:
         StdMutex<Option<Arc<application::session_creation::CreationProjectionGate>>>,
 }
 
@@ -573,6 +578,7 @@ impl SessionManager {
                 managed_model,
                 managed_clones,
                 active_sessions: RwLock::new(HashMap::new()),
+                task_preparations: application::task_preparations::TaskPreparations::default(),
                 terminal_observations:
                     application::terminal_observation::TerminalObservationHub::default(),
 
@@ -590,8 +596,13 @@ impl SessionManager {
                 managed_monitor_peer_observed: tokio::sync::Notify::new(),
                 #[cfg(test)]
                 session_creation_before_projection: StdMutex::new(None),
+                #[cfg(test)]
+                session_creation_after_persistence: StdMutex::new(None),
             }),
         };
+        if manager.managed_host().is_none() {
+            application::task_launches::reconcile_startup(&store_path)?;
+        }
         if let Err(error) = mcp_api::synchronize_mcp_oauth_redirect_uris(&manager) {
             eprintln!("MCP OAuth redirect synchronization failed: {error}");
         }
@@ -1178,12 +1189,15 @@ impl SessionManager {
             .await
     }
 
-    fn persisted_operation_session_exists(&self, session_id: &str) -> Result<bool> {
+    fn operation_session_id_is_bounded(session_id: &str) -> bool {
         // Lease filenames hex-encode IDs; 120 bytes plus the suffix fits within
         // the common 255-byte component limit.
         const MAX_SESSION_ID_BYTES: usize = 120;
+        !session_id.is_empty() && session_id.len() <= MAX_SESSION_ID_BYTES
+    }
 
-        if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_BYTES {
+    fn persisted_operation_session_exists(&self, session_id: &str) -> Result<bool> {
+        if !Self::operation_session_id_is_bounded(session_id) {
             return Ok(false);
         }
         sessions::session_exists(&self.inner.store_path, session_id)
@@ -1249,14 +1263,28 @@ impl SessionManager {
             .await
     }
 
+    pub async fn tool_call_content(
+        &self,
+        session_id: &str,
+        call_id: &str,
+    ) -> Result<Option<ToolCallContent>> {
+        self.session_state()
+            .tool_call_content(session_id, call_id)
+            .await
+    }
+
     pub async fn list_direct_inbox(&self, session_id: &str) -> Result<Vec<SessionInboxRecord>> {
         self.session_state().direct_inbox(session_id).await
     }
 
+    /// Creates a direct inbox item. Only human-facing routes pass
+    /// `InputOrigin::Person`, which makes the item review intent when it
+    /// reaches the model.
     pub async fn create_direct_inbox_item(
         &self,
         session_id: &str,
         request: CreateInboxItemRequest,
+        origin: nac_core::store::InputOrigin,
     ) -> Result<SessionInboxRecord> {
         self.session_intents()
             .create_inbox_item(
@@ -1264,6 +1292,7 @@ impl SessionManager {
                 application::sessions::CreateInboxItem {
                     delivery: request.delivery,
                     prompt: request.prompt,
+                    origin,
                 },
             )
             .await
@@ -1304,6 +1333,8 @@ impl SessionManager {
             approval_mode: state.approval_mode,
             requests: state.requests,
             grants: state.grants,
+            reviews: state.reviews,
+            authorizable_review_ids: state.authorizable_review_ids,
         })
     }
 
@@ -1379,6 +1410,16 @@ impl SessionManager {
             .await
     }
 
+    pub async fn authorize_permission_review_retry(
+        &self,
+        session_id: &str,
+        review_id: &str,
+    ) -> Result<nac_core::permissions::PermissionReview> {
+        self.session_intents()
+            .authorize_permission_review_retry(session_id, review_id)
+            .await
+    }
+
     pub async fn delete_permission_grant(&self, session_id: &str, grant_id: &str) -> Result<()> {
         self.session_intents()
             .delete_permission_grant(session_id, grant_id)
@@ -1404,14 +1445,18 @@ impl SessionManager {
         self.session_state().skills(session_id).await
     }
 
+    /// Submits a prompt. Only human-facing routes pass
+    /// `InputOrigin::Person`, which makes the prompt review intent when it
+    /// reaches the model.
     pub async fn submit_prompt(
         &self,
         session_id: &str,
         request: SubmitPromptRequest,
+        origin: nac_core::store::InputOrigin,
     ) -> Result<SubmitPromptResponse> {
         let submitted = self
             .session_runs()
-            .submit(session_id, request.prompt)
+            .submit(session_id, request.prompt, origin)
             .await?;
         Ok(SubmitPromptResponse {
             run_id: submitted.run_id,
@@ -1442,10 +1487,11 @@ impl SessionManager {
         session_id: &str,
         thread_name: &str,
         request: ThreadSteeringRequest,
+        origin: nac_core::store::InputOrigin,
     ) -> Result<ThreadSteeringResponse> {
         let steering = self
             .session_runs()
-            .queue_thread_steering(session_id, thread_name, request.instruction)
+            .queue_thread_steering(session_id, thread_name, request.instruction, origin)
             .await?;
         Ok(ThreadSteeringResponse {
             steering_id: steering.steering_id,
@@ -1469,6 +1515,7 @@ impl SessionManager {
                 thread_name,
                 request.instruction,
                 expected_run_id,
+                nac_core::store::InputOrigin::Automation,
             )
             .await?;
         Ok(ThreadSteeringResponse {
@@ -1483,10 +1530,11 @@ impl SessionManager {
         &self,
         session_id: &str,
         request: OrchestratorSteeringRequest,
+        origin: nac_core::store::InputOrigin,
     ) -> Result<OrchestratorSteeringResponse> {
         let steering = self
             .session_runs()
-            .queue_orchestrator_steering(session_id, request.instruction)
+            .queue_orchestrator_steering(session_id, request.instruction, origin)
             .await?;
         Ok(OrchestratorSteeringResponse {
             steering_id: steering.steering_id,

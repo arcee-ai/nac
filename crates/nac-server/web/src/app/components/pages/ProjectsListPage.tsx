@@ -4,18 +4,7 @@ import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  Icon,
-  IconName,
-  Modal,
-  StickyButton,
-  StickyInput,
-  StickyInputVariant,
-} from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { LeftSidebar } from "@/app/components/LeftSidebar";
 import { GroupLabel } from "@/app/components/projects/GroupLabel";
 import {
@@ -24,7 +13,6 @@ import {
   type ProjectReorderStart,
 } from "@/app/components/projects/ProjectCard";
 import { ProjectsEmptyState } from "@/app/components/projects/ProjectsEmptyState";
-import { SessionFilters } from "@/app/components/sessions/SessionFilters";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { toRunError } from "@/app/lib/providerError";
@@ -78,7 +66,7 @@ function DropSlot() {
   return (
     <div
       aria-hidden
-      className="min-h-[112px] rounded-[8px] border-2"
+      className="min-h-[112px] rounded-[16px] border-2"
       style={{ borderColor: "var(--blue-500)" }}
     />
   );
@@ -217,7 +205,7 @@ function pinnedGroup(projects: ProjectRecord[], pinned: boolean): ProjectRecord[
 }
 
 export default function ProjectsListPage() {
-  const { useVisibleProjectItems, useIsDefaultSort, useFilterQuery, setQuery } =
+  const { useVisibleProjectItems, useIsDefaultSort } =
     useNativeRuntime().stores.sessionFiltersStore;
 
   const { trackAttention, clearAttentionAll } = useNativeRuntime().stores.attentionStore;
@@ -227,11 +215,9 @@ export default function ProjectsListPage() {
   const projectActions = useProjectActions();
   const managed = useManagedHost();
   const toast = useToast();
-  const query = useFilterQuery();
   const isDefaultSort = useIsDefaultSort();
   const moveOrder = useMoveProjectOrder();
   const moveSessionOrder = useMoveSessionOrder();
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [pinZoneActive, setPinZoneActive] = useState(false);
@@ -541,49 +527,6 @@ export default function ProjectsListPage() {
     );
   };
 
-  // Pinned under the bar rather than scrolling with the cards, so search and
-  // filters stay in reach. The 144px of head room below clears it.
-  const searchBar = (
-    <div className="fixed inset-x-0 top-16 z-10 flex items-start gap-3 px-2 py-4">
-      <StickyInput
-        className="flex-1 min-w-0"
-        variant={StickyInputVariant.Search}
-        placeholder="Search projects…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onClear={() => setQuery("")}
-        aria-label="Search projects"
-      />
-      <StickyButton
-        variant={ButtonVariant.Secondary}
-        content={ButtonContent.Icon}
-        aria-label="Filters"
-        aria-expanded={filtersOpen}
-        onClick={() => setFiltersOpen(true)}
-      >
-        <Icon iconName={IconName.Controls} />
-      </StickyButton>
-    </div>
-  );
-
-  // The phone puts the filters behind the full-screen dialog and dismisses it
-  // as soon as one moves, so the results are visible without a second tap.
-  const filtersDialog = (
-    <Modal
-      open={filtersOpen}
-      onClose={() => setFiltersOpen(false)}
-      title="Filters"
-      bodyClassName="p-0"
-    >
-      <SessionFilters
-        sessions={allSessions}
-        showSearch={false}
-        mobile
-        onChange={() => setFiltersOpen(false)}
-      />
-    </Modal>
-  );
-
   if (!isLoading && !error && all.length === 0) {
     return (
       <div className="flex h-full min-h-0">
@@ -612,8 +555,6 @@ export default function ProjectsListPage() {
   return (
     <div className="flex h-full min-h-0">
       {isMobile ? null : <LeftSidebar variant="projects" />}
-      {isMobile ? searchBar : null}
-      {isMobile ? filtersDialog : null}
 
       <div
         className={cn(
@@ -622,7 +563,7 @@ export default function ProjectsListPage() {
           drag && "select-none cursor-grabbing",
         )}
       >
-        <div className={cn("flex flex-col gap-6 [&>*]:shrink-0", isMobile ? "pt-36 pb-8" : "py-4")}>
+        <div className={cn("flex flex-col gap-6 [&>*]:shrink-0", isMobile ? "pt-18 pb-8" : "py-4")}>
           {error ? (
             <div className="flex items-center gap-2 label-small text-error-primary">
               <span>{errorMessage(error)}</span>
@@ -652,7 +593,7 @@ export default function ProjectsListPage() {
                 <div
                   data-pin-drop-zone="true"
                   className={cn(
-                    "min-h-[112px] rounded-[8px] border-2 border-dashed",
+                    "min-h-[112px] rounded-[16px] border-2 border-dashed",
                     pinZoneActive && "bg-info-primary/10",
                   )}
                   style={{ borderColor: "var(--blue-500)" }}

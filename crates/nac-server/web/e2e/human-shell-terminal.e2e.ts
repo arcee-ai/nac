@@ -16,15 +16,16 @@ test("user commands, live terminal and explicit queued selection share one sessi
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const shell = (await api.listUserTerminals(session)).terminals[0];
-  const evidence = "terminal evidence during user command";
+  // One painted row of the default desktop terminal, which shares its panel with the list.
+  const evidence = "evidence during command";
   const octal = Array.from(
     new TextEncoder().encode(evidence + "\n"),
     (byte) => `\\${byte.toString(8).padStart(3, "0")}`,
   ).join("");
-  await pane.getByRole("button", { name: "Focus terminal" }).click();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
   await page.keyboard.type(`printf '${octal}'; printf 'same-workspace' > shell-shared.txt`);
   await page.keyboard.press("Enter");
   await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);
@@ -120,10 +121,10 @@ test("trusted pointer reports retain the public renderer's literal PTY encoding"
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const shell = (await api.listUserTerminals(session)).terminals[0];
-  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
   await page.keyboard.type("python3 capture_pointer.py");
   await page.keyboard.press("Enter");
   await expect(pane.locator(".xterm-accessibility")).toContainText("POINTER-RAW-READY");
@@ -154,7 +155,7 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const shell = (await api.listUserTerminals(session)).terminals[0];
   const legacyInputUrl = `${harness.baseUrl}/sessions/${session}/user-terminals/${shell.terminal_id}/input`;
@@ -167,7 +168,7 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
       inputs.push(sent.postDataJSON().bytes);
     if (sent.url() === executionInputUrl && sent.method() === "POST") controlledInputUsed = true;
   });
-  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
   const command = "printf accepted >> uncertain-effects.txt";
   await page.keyboard.type(command);
   await expect(pane.locator(".xterm-accessibility")).toContainText(command);
@@ -208,13 +209,14 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
   }, `/session/${session}/terminal`);
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await expect(acknowledge).toBeVisible();
-  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
   await page.keyboard.type("source-switch-must-stay-frozen");
   expect(inputs).toHaveLength(count);
-  await pane.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
+  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await expect(acknowledge).toBeVisible();
-  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
   await page.keyboard.type("still-frozen");
   expect(inputs).toHaveLength(count);
   expect(await fs.readFile(file, "utf8")).toBe("accepted");
@@ -252,7 +254,7 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
   expect(permissions.grants).toHaveLength(0);
   expect(harness.provider.requests).toHaveLength(0);
   await expect(page.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(0);
-  await pane.getByRole("button", { name: "Close shell", exact: true }).click();
+  await pane.getByRole("button", { name: "Close Shell 1", exact: true }).click();
   await expect
     .poll(async () => (await api.getUserTerminal(session, shell.terminal_id)).alive)
     .toBe(false);
@@ -299,18 +301,19 @@ test("reattach observation sends no retained terminal-query replies before focus
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await expect(pane.locator(".xterm-accessibility")).toContainText("REPLAY-QUERY-END");
   expect(inputs).toHaveLength(0);
-  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
   await api.inputUserTerminal(session, shell.terminal_id, {
     protocol_version: 1,
     bytes: Array.from(new TextEncoder().encode("printf '\\033[6nFOCUSED-QUERY-END'\r")),
   });
   await expect(pane.locator(".xterm-accessibility")).toContainText("FOCUSED-QUERY-END");
   expect(inputs).toHaveLength(0);
-  await pane.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
+  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await expect(pane.locator(".xterm-accessibility")).toContainText("REPLAY-QUERY-END");
   expect(inputs).toHaveLength(0);
-  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
   await page.keyboard.type("printf fresh > query-fresh");
   await page.keyboard.press("Enter");
   await expect

@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use serde_json::Value;
 
 use crate::events::AgentEvent;
@@ -174,6 +176,8 @@ pub fn parse_dispatch_args(
                 .map_err(|error| ToolResult {
                     content: (format!("Error: {error}")).into(),
                     is_error: true,
+                    execution_duration_ms: None,
+                    execution_duration_excludes_authorization: false,
                 })?,
         )
     } else {
@@ -241,6 +245,8 @@ pub async fn execute_parsed_dispatch(
         ))
             .into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         };
     };
 
@@ -274,7 +280,7 @@ pub async fn execute_parsed_dispatch(
         Err(error) => {
             close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
             if cancellation.is_cancelled() {
-                return ToolResult { content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before host admission.").into(), is_error: true };
+                return ToolResult { content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before host admission.").into(), is_error: true, execution_duration_ms: None, execution_duration_excludes_authorization: false };
             }
             let message = format!("Failed to admit worker dispatch: {error}");
             runtime
@@ -297,9 +303,12 @@ pub async fn execute_parsed_dispatch(
             return ToolResult {
                 content: message.into(),
                 is_error: true,
+                execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             };
         }
     };
+    let started = Instant::now();
 
     if let Err(error) = runtime
         .event_sink
@@ -322,7 +331,10 @@ pub async fn execute_parsed_dispatch(
         return ToolResult {
             content: format!("Required thread start publication failed: {error:#}").into(),
             is_error: true,
-        };
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
+        }
+        .executed_since(started);
     }
 
     let require_history = store::coordinator::owner_for(&runtime.store_path)
@@ -347,7 +359,10 @@ pub async fn execute_parsed_dispatch(
         return ToolResult {
             content: message.into(),
             is_error: true,
-        };
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
+        }
+        .executed_since(started);
     }
 
     let result = run_worker(
@@ -400,7 +415,10 @@ pub async fn execute_parsed_dispatch(
             return ToolResult {
                 content: (message).into(),
                 is_error: true,
-            };
+                execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
+            }
+            .executed_since(started);
         }
     };
 
@@ -474,7 +492,10 @@ pub async fn execute_parsed_dispatch(
             }
             .into(),
             is_error: finish.is_err(),
-        };
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
+        }
+        .executed_since(started);
     };
 
     if failure.status == store::EpisodeStatus::Cancelled {
@@ -484,7 +505,10 @@ pub async fn execute_parsed_dispatch(
         return ToolResult {
             content: (format!("{TOOL_CALL_CANCELLED_MARKER} {}", failure.message)).into(),
             is_error: true,
-        };
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
+        }
+        .executed_since(started);
     }
 
     let timed_out = failure.status == store::EpisodeStatus::TimedOut;
@@ -501,7 +525,10 @@ pub async fn execute_parsed_dispatch(
     ToolResult {
         content: (failure.message).into(),
         is_error: true,
+        execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     }
+    .executed_since(started)
 }
 
 /// Exit code standing for a dispatch whose worker never ran, so the card can
@@ -635,6 +662,8 @@ pub async fn execute_dispatch(
             ))
             .into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         };
     }
     let result = execute_parsed_dispatch(params, runtime, &client).await;
@@ -649,6 +678,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
         Ok(s) => s.to_string(),
         Err(e) => return e,
     };
+    let started = Instant::now();
 
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
@@ -662,13 +692,19 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             return ToolResult {
                 content: (format!("Error listing threads: {error}")).into(),
                 is_error: true,
+                execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             }
+            .executed_since(started)
         }
         Err(join_error) => {
             return ToolResult {
                 content: (format!("Internal error listing threads: {join_error}")).into(),
                 is_error: true,
+                execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             }
+            .executed_since(started)
         }
     };
 
@@ -676,7 +712,10 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
         return ToolResult {
             content: ("No active threads in this session.".to_string()).into(),
             is_error: false,
-        };
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
+        }
+        .executed_since(started);
     }
 
     let mut output = String::from("Active threads:");
@@ -693,7 +732,10 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
     ToolResult {
         content: (output).into(),
         is_error: false,
+        execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     }
+    .executed_since(started)
 }
 
 pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
@@ -705,11 +747,12 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
         Ok(s) => s.to_string(),
         Err(e) => return e,
     };
+    let started = Instant::now();
 
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let tname = thread_name.clone();
-    match crate::store::spawn_blocking_store_caller(move || {
+    let result = match crate::store::spawn_blocking_store_caller(move || {
         store::thread_read(&store_path, &sid, &tname)
     })
     .await
@@ -717,17 +760,24 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
         Ok(Ok(episodes)) => ToolResult {
             content: (store::render_thread_document(&thread_name, &episodes)).into(),
             is_error: false,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error reading thread '{thread_name}': {error}")).into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error reading thread '{thread_name}': {join_error}"))
                 .into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
-    }
+    };
+    result.executed_since(started)
 }
 
 pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolResult {
@@ -747,13 +797,16 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             ))
             .into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         };
     }
+    let started = Instant::now();
 
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let tname = thread_name.clone();
-    match crate::store::spawn_blocking_store_caller(move || {
+    let result = match crate::store::spawn_blocking_store_caller(move || {
         store::delete_thread(&store_path, &sid, &tname)
     })
     .await
@@ -761,21 +814,30 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
         Ok(Ok(true)) => ToolResult {
             content: (format!("Deleted thread '{thread_name}' and its retained episodes.")).into(),
             is_error: false,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Ok(Ok(false)) => ToolResult {
             content: (format!("Thread '{thread_name}' does not exist in this session.")).into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error deleting thread '{thread_name}': {error}")).into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error deleting thread '{thread_name}': {join_error}"))
                 .into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         },
-    }
+    };
+    result.executed_since(started)
 }
 
 fn def(name: &str, description: &str, parameters: serde_json::Value) -> ToolDefinition {
@@ -793,6 +855,8 @@ fn require_session(runtime: &ToolRuntime) -> Result<&str, ToolResult> {
     runtime.session_id.as_deref().ok_or_else(|| ToolResult {
         content: ("Error: thread tools require an active session".to_string()).into(),
         is_error: true,
+        execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
     })
 }
 
@@ -814,6 +878,8 @@ fn resolve_scheduled_skills(
         return Err(ToolResult {
             content: ("Error: no skills are available for thread dispatch".to_string()).into(),
             is_error: true,
+            execution_duration_ms: None,
+            execution_duration_excludes_authorization: false,
         });
     };
 
@@ -822,6 +888,8 @@ fn resolve_scheduled_skills(
             return Err(ToolResult {
                 content: (format!("Error: unknown skill '{skill}'")).into(),
                 is_error: true,
+                execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             });
         }
     }
@@ -1338,7 +1406,14 @@ mod tests {
         assert!(mark_thread_active(&runtime, "worker", "dispatch-a"));
         runtime
             .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "for A", None)
+            .queue(
+                &runtime.store_path,
+                "test-session",
+                "worker",
+                "for A",
+                None,
+                crate::store::InputOrigin::Automation,
+            )
             .unwrap()
             .unwrap();
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
@@ -1354,7 +1429,14 @@ mod tests {
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
         let reused = runtime
             .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "for B", None)
+            .queue(
+                &runtime.store_path,
+                "test-session",
+                "worker",
+                "for B",
+                None,
+                crate::store::InputOrigin::Automation,
+            )
             .unwrap()
             .unwrap();
         assert_eq!(reused.dispatch_id, "dispatch-b");
@@ -1368,6 +1450,7 @@ mod tests {
                 "worker",
                 "too late",
                 None,
+                crate::store::InputOrigin::Automation,
             )
             .unwrap()
             .is_none());

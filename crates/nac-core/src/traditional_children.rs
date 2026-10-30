@@ -23,6 +23,8 @@ pub struct TraditionalChildStartRequest {
     pub profile: String,
     pub description: String,
     pub prompt: String,
+    /// Set by the trusted caller, never decoded from model or HTTP arguments.
+    pub origin: crate::store::InputOrigin,
     pub execution_mode: TraditionalChildExecutionMode,
 }
 

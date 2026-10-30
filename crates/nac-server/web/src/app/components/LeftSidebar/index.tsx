@@ -8,18 +8,19 @@ import { MOD } from "@/app/lib/shortcuts";
 
 import { LeftSidebarPanel } from "./LeftSidebarPanel";
 import { LeftSidebarRail } from "./LeftSidebarRail";
+import { MobileSearchModal } from "./MobileSearchModal";
 import { useSidebarCommands } from "./useSidebarCommands.tsx";
 
 /** Collapsed icon column, matching the Figma rail. */
 export const SIDEBAR_RAIL_WIDTH = 52;
 /** Expanded panel, matching the Figma sidebar. */
-export const SIDEBAR_PANEL_WIDTH = 320;
+export const SIDEBAR_PANEL_WIDTH = 280;
 
 const TOGGLE_KEYS = [MOD, "h"];
 
 /**
  * Collapsible session navigation, in the ArceeFM arrangement: a 52px rail stays
- * put, and the 320px panel slides over it. The rail's width is what the rest of
+ * put, and the 280px panel slides over it. The rail's width is what the rest of
  * the row lays out against, so opening the panel pushes the chat aside.
  */
 export function LeftSidebar({ variant = "session" }: { variant?: "session" | "projects" }) {
@@ -40,6 +41,7 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
     });
   }, [isDesktop, storedOpen, storeOpen]);
   const commands = useSidebarCommands();
+  const [searching, setSearching] = useState(false);
 
   useLayoutEffect(() => {
     setSidebarOffset(isMobile ? 0 : isOpen ? SIDEBAR_PANEL_WIDTH : SIDEBAR_RAIL_WIDTH);
@@ -58,8 +60,8 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
     <div
       data-sidebar="true"
       className={cn(
-        "relative h-full shrink-0 transition-[width] duration-500 ease-in-out",
-        isOpen ? "w-[320px]" : "w-[52px]",
+        "relative h-full shrink-0 transition-[width] duration-300 ease-out",
+        isOpen ? "w-[280px]" : "w-[52px]",
       )}
     >
       {isOpen ? null : (
@@ -67,6 +69,7 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
           <LeftSidebarRail
             commands={commands}
             onToggle={toggle}
+            onSearch={() => setSearching(true)}
             toggleKeys={TOGGLE_KEYS}
             variant={variant}
           />
@@ -74,8 +77,8 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
       )}
       <div
         className={cn(
-          "absolute inset-y-0 z-[1] h-full w-[320px] transition-[left] duration-500 ease-in-out",
-          isOpen ? "left-0" : "left-[-320px]",
+          "absolute inset-y-0 z-[1] h-full w-[280px] transition-[left] duration-300 ease-out",
+          isOpen ? "left-0" : "left-[-280px]",
         )}
         aria-hidden={!isOpen}
         inert={!isOpen}
@@ -84,11 +87,19 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
           isOpen={isOpen}
           commands={commands}
           onToggle={toggle}
+          onSearch={() => setSearching(true)}
           toggleKeys={TOGGLE_KEYS}
           variant={variant}
         />
       </div>
       {commands.modals}
+      <MobileSearchModal
+        open={searching}
+        onClose={() => setSearching(false)}
+        kind={variant === "projects" ? "projects" : "chats"}
+        activeSessionId={commands.sessionId}
+        activeProjectId={commands.projectId}
+      />
     </div>
   );
 }

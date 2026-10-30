@@ -49,7 +49,8 @@ for (const mobile of [false, true]) {
             };
           };
           const style = browser.getComputedStyle(node),
-            body = browser.getComputedStyle(browser.document.body);
+            body = browser.getComputedStyle(browser.document.body),
+            root = browser.getComputedStyle(browser.document.documentElement);
           return {
             padding: style.padding,
             radius: style.borderRadius,
@@ -57,9 +58,8 @@ for (const mobile of [false, true]) {
             color: style.color,
             margin: body.margin,
             background: body.backgroundColor,
-            brand: browser
-              .getComputedStyle(browser.document.documentElement)
-              .getPropertyValue("--brand-500"),
+            brand: root.getPropertyValue("--brand-500"),
+            iconColor: root.getPropertyValue("--icon-color"),
           };
         });
       const expected = {
@@ -70,6 +70,7 @@ for (const mobile of [false, true]) {
         margin: "17px",
         background: "rgb(111, 22, 33)",
         brand: "caller-brand",
+        iconColor: "#fa0102",
       };
       await expect.poll(callerStyles).toEqual(expected);
       const composer = page.getByRole("combobox", { name: "Message" });
@@ -90,8 +91,29 @@ for (const mobile of [false, true]) {
         };
       });
       expect(nativeStyles.font).toContain("NACPresentationInter");
-      expect(nativeStyles.background).toBe("rgb(15, 16, 16)");
+      expect(nativeStyles.background).toBe("rgb(5, 5, 5)");
       expect(nativeStyles.brand).toBe("#008c8c");
+      const nativeIcons = await page.locator("[data-nac-runtime]").evaluate((node) => {
+        const runtime = node as unknown as {
+          querySelectorAll: (selector: string) => ArrayLike<unknown>;
+        };
+        const browser = globalThis as unknown as {
+          getComputedStyle: (element: unknown) => {
+            color: string;
+            getPropertyValue: (name: string) => string;
+          };
+        };
+        return Array.from(runtime.querySelectorAll(".icon"), (icon) => {
+          const style = browser.getComputedStyle(icon);
+          return { color: style.color, iconColor: style.getPropertyValue("--icon-color") };
+        });
+      });
+      expect(nativeIcons.length).toBeGreaterThan(0);
+      expect(
+        nativeIcons.filter(
+          (icon) => icon.color === "rgb(250, 1, 2)" || icon.iconColor === "#fa0102",
+        ),
+      ).toEqual([]);
       harness.provider.enqueue(
         "packed-math",
         { token: "PACKED_NATIVE_MATH" },

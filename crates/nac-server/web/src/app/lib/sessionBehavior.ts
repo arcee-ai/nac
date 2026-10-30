@@ -22,7 +22,7 @@ export const SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = [
     editsDirectly: false,
     editing: "The planner does not edit directly.",
     delegation: "It delegates coding to retained NAC worker threads.",
-    inspection: "Threads and Worksets show the plan and worker progress.",
+    inspection: "Insights and Worksets show the plan and worker progress.",
   },
   {
     id: "direct",
@@ -56,8 +56,17 @@ export function sessionBehaviorLabel(behavior: SessionBehavior): string {
   return sessionBehaviorPresentation(behavior).label;
 }
 
-/** Leading glyph on a chat row. Matches the new-session choices. */
-export function sessionBehaviorIcon(behavior: SessionBehavior | null | undefined): IconName {
+/**
+ * The session-type glyph, matching the new-session choices. A delegated
+ * session's durable relationship decides over its behavior, because the
+ * Subagents rows know only which topology they launched.
+ */
+export function sessionBehaviorIcon(
+  behavior: SessionBehavior | null | undefined,
+  lineage?: SessionLineage["kind"] | null,
+): IconName {
+  if (lineage === "managed-orchestrator") return IconName.Orchestrator;
+  if (lineage === "traditional-child") return IconName.Plane;
   switch (behavior) {
     case "direct":
       return IconName.Plane;
@@ -68,6 +77,16 @@ export function sessionBehaviorIcon(behavior: SessionBehavior | null | undefined
   }
 }
 
+/** What `sessionBehaviorIcon` draws, for the accessible name beside the glyph. */
+export function sessionBehaviorName(
+  behavior: SessionBehavior | null | undefined,
+  lineage?: SessionLineage["kind"] | null,
+): string {
+  if (lineage === "managed-orchestrator") return "NAC orchestrator";
+  if (lineage === "traditional-child") return "Coding agent";
+  return sessionBehaviorPresentation(behavior).label;
+}
+
 export interface SessionPanelPolicy {
   widePanels: readonly SessionPanel[];
   mobilePanels: readonly SessionPanel[];
@@ -76,23 +95,23 @@ export interface SessionPanelPolicy {
 }
 
 const ORCHESTRATOR_PANELS: SessionPanelPolicy = {
-  widePanels: ["threads", "files", "worksets"],
-  mobilePanels: ["threads", "files", "worksets", "history"],
-  defaultPanel: "files",
+  widePanels: ["insights", "files", "worksets"],
+  mobilePanels: ["insights", "files", "worksets", "history"],
+  defaultPanel: "insights",
   readOnly: false,
 };
 
 const DIRECT_PANELS: SessionPanelPolicy = {
-  widePanels: ["delegated", "files", "terminal"],
-  mobilePanels: ["delegated", "files", "terminal", "history"],
-  defaultPanel: "files",
+  widePanels: ["insights", "delegated", "files", "terminal"],
+  mobilePanels: ["insights", "delegated", "files", "terminal", "history"],
+  defaultPanel: "insights",
   readOnly: false,
 };
 
 const TRADITIONAL_CHILD_PANELS: SessionPanelPolicy = {
-  widePanels: ["files"],
-  mobilePanels: ["files", "history"],
-  defaultPanel: "files",
+  widePanels: ["insights", "files"],
+  mobilePanels: ["insights", "files", "history"],
+  defaultPanel: "insights",
   readOnly: true,
 };
 
@@ -104,8 +123,8 @@ const MANAGED_ORCHESTRATOR_PANELS: SessionPanelPolicy = {
 /**
  * Session ownership and panel topology are related but distinct. Every
  * delegated transcript is read-only, while the durable relationship kind says
- * whether that transcript owns an orchestrator's Threads and Worksets or is a
- * traditional child with Files/History only.
+ * whether that transcript owns an orchestrator's Worksets or is a traditional
+ * child with Insights, Files and History only.
  */
 export function sessionPanelPolicy(
   behavior: SessionBehavior | null | undefined,

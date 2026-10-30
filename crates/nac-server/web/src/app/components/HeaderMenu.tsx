@@ -100,7 +100,7 @@ export function HeaderMenu({
           </TabButton>
           {onManagedHost ? (
             <TabButton size={itemSize} onClick={act(onManagedHost)}>
-              <Icon iconName={IconName.Server} />
+              <Icon iconName={IconName.Controls} />
               <span className="text-left flex-grow">Managed host</span>
             </TabButton>
           ) : null}

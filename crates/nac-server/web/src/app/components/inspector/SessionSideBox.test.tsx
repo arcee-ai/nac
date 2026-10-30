@@ -30,10 +30,10 @@ vi.mock("@/app/components/inspector/HistoryView", () => ({
 vi.mock("@/app/components/inspector/RevisionPicker", () => ({
   RevisionPicker: () => <div>revision</div>,
 }));
-vi.mock("@/app/components/inspector/ThreadsView", () => ({
-  ThreadsView: ({ canSteerWorkers }: { canSteerWorkers: boolean }) => (
-    <div data-testid="threads" data-can-steer={String(canSteerWorkers)}>
-      threads
+vi.mock("@/app/features/insights/presentation/InsightsView", () => ({
+  InsightsView: ({ canSteerWorkers }: { canSteerWorkers: boolean }) => (
+    <div data-testid="insights" data-can-steer={String(canSteerWorkers)}>
+      insights
     </div>
   ),
 }));
@@ -103,16 +103,16 @@ describe("session side box tabs", () => {
     } as unknown as SessionSnapshotResponse;
     const props = {
       sessionId: "session-a",
-      panel: "threads" as const,
+      panel: "insights" as const,
       onPanelChange: vi.fn(),
       sessions: [],
       projects: [],
     };
 
     const { rerender } = render(<SessionSideBox {...props} snapshot={classic} />);
-    expect(screen.getByTestId("threads").getAttribute("data-can-steer")).toBe("true");
+    expect(screen.getByTestId("insights").getAttribute("data-can-steer")).toBe("true");
 
     rerender(<SessionSideBox {...props} snapshot={managed} />);
-    expect(screen.getByTestId("threads").getAttribute("data-can-steer")).toBe("false");
+    expect(screen.getByTestId("insights").getAttribute("data-can-steer")).toBe("false");
   });
 });

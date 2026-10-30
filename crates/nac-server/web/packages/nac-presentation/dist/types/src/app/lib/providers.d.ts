@@ -6,6 +6,7 @@ export declare function providerOrder(backend: string): number;
 export declare function providerUsesApiKey(backend: BackendKind): boolean;
 export declare function managedAuthProvider(backend: string): ManagedAuthProvider | null;
 export declare function managedAuthLabel(provider: ManagedAuthProvider): string;
+export declare function isBackendKind(backend: string): backend is BackendKind;
 /**
  * Legacy rows persist an empty backend, and a row written by a newer build can
  * carry a kind this bundle does not know yet; both fall back to the raw value.

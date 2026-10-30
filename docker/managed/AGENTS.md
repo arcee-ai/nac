@@ -17,6 +17,11 @@ does not define managed domain behavior or server API semantics.
 - Managed deployment remains opt-in and must not alter ordinary local `nac-web`
   startup.
 - Do not weaken health/readiness checks merely to make image startup pass.
+- Owned OS package corrections preserve truthful upstream versions separately
+  from NAC APK revisions. Keep source/patch hashes, installed-file identity,
+  notices and supplier metadata; replace superseded payloads with actual package
+  installation. Provenance is not scanner applicability clearance. See
+  `packages/README.md` for the bounded package-build ownership and retirement rules.
 
 ## Starting points
 

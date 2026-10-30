@@ -1,6 +1,7 @@
 import type React from "react";
 
 import { AnchorPlacement } from "../../lib/anchor";
+import { cn } from "../../lib/cn";
 import HoverHint from "../hover-hint";
 import type { HoverHintConfig } from "../label";
 
@@ -16,7 +17,14 @@ export enum TabButtonVariant {
   Destructive = "btn-ghost-destructive",
 }
 
+const VARIANT_CLASS: Record<TabButtonVariant, string> = {
+  [TabButtonVariant.Regular]: "tab-btn-regular",
+  [TabButtonVariant.Accent]: "tab-btn-accent",
+  [TabButtonVariant.Destructive]: "tab-btn-destructive",
+};
+
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  ref?: React.Ref<HTMLButtonElement>;
   size?: TabButtonSize;
   variant?: TabButtonVariant;
   children: React.ReactNode;
@@ -41,25 +49,14 @@ const TabButton: React.FC<ButtonProps> & {
   trailing,
   ...props
 }) => {
-  const computedVariant =
-    active && variant === TabButtonVariant.Regular
-      ? "btn-ghost-highlighted"
-      : active && variant === TabButtonVariant.Accent
-        ? "btn-ghost-highlighted-accent"
-        : variant;
-
-  const classes = [
-    "btn btn-icon tab-btn",
-    "w-full",
-    "justify-start",
+  const classes = cn(
+    "btn btn-icon tab-btn w-full",
     size,
-    computedVariant,
-    disabled ? "btn-disabled" : "",
+    VARIANT_CLASS[variant],
+    active && "tab-btn-active",
+    disabled && "btn-disabled",
     className,
-    "rounded-[4px]",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  );
 
   return (
     <button onClick={() => {}} className={classes} disabled={disabled} {...props}>

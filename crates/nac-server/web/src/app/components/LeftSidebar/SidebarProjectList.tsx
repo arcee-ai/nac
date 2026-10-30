@@ -1,5 +1,6 @@
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { useMemo, useState } from "react";
+import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
+import { Fragment, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -9,15 +10,19 @@ import {
   IconName,
   ProjectButton,
   ProjectButtonVariant,
+  Separator,
   TabButton,
+  TabButtonSize,
 } from "@/app/atoms";
 import { ChatSessionActions } from "@/app/components/projects/ChatSessionActions";
+import { ProjectRowActions } from "@/app/components/projects/ProjectRowActions";
 import { useNow } from "@/app/hooks/useNow";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { cn } from "@/app/lib/cn";
 import { isActiveRun } from "@/app/lib/format";
 import { groupByRecency, projectEntries } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
-import { sessionBehaviorIcon, sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
+import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
@@ -36,14 +41,24 @@ export function SidebarProjectList({
   query,
   activeSessionId,
   activeProjectId,
+  mobile = false,
+  onNavigate,
 }: {
   projects: ProjectRecord[];
   sessions: ManagedSessionSummary[];
   query: string;
   activeSessionId: string | null;
   activeProjectId: string | null;
+  /** The phone menu's tree: 48px rows, project controls, rules between projects. */
+  mobile?: boolean;
+  /** Runs as a row opens its chat, also the chat on screen, whose route does not change. */
+  onNavigate?: () => void;
 }) {
   const navigate = useNavigate();
+  const openSession = (sessionId: string) => {
+    onNavigate?.();
+    navigate(routes.session(sessionId));
+  };
   const sessionTitle = useSessionTitle();
   const now = useNow(RECENCY_TICK_MS);
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
@@ -102,8 +117,8 @@ export function SidebarProjectList({
   }
 
   return (
-    <div className="flex flex-col [&>*]:shrink-0">
-      {visibleEntries.map((entry) => {
+    <div className={cn("flex flex-col [&>*]:shrink-0", mobile && "gap-2 px-2 py-4")}>
+      {visibleEntries.map((entry, index) => {
         const projectId = entry.project.project_id;
         const open = isExpanded(projectId);
         const projectMatches = entry.project.name.toLowerCase().includes(needle);
@@ -113,55 +128,66 @@ export function SidebarProjectList({
                 sessionTitle(session.summary).toLowerCase().includes(needle),
               )
             : entry.sessions;
+        const button = (
+          <ProjectButton
+            entityId={projectId}
+            name={entry.project.name}
+            running={entry.running > 0}
+            isMobile={mobile}
+            actions={mobile ? <ProjectRowActions project={entry.project} /> : undefined}
+            aria-expanded={open}
+            onClick={() => toggle(projectId)}
+          />
+        );
         return (
-          <section key={projectId} className="border-b border-muted py-4">
-            <div className="px-2 py-1">
-              <ProjectButton
-                entityId={projectId}
-                name={entry.project.name}
-                running={entry.running > 0}
-                aria-expanded={open}
-                onClick={() => toggle(projectId)}
-              />
-            </div>
-            <DropdownContent
-              isOpen={open}
-              inert={!open}
-              aria-hidden={!open}
-              className="w-full duration-500 ease-in-out"
-            >
-              <ProjectSessions
-                sessions={sessionsForProject}
-                activeSessionId={activeSessionId}
-                revealed={needle.length > 0 || revealed.has(projectId)}
-                onReveal={() =>
-                  setRevealed((current) => {
-                    const next = new Set(current);
-                    next.add(projectId);
-                    return next;
-                  })
-                }
-                now={now}
-                onOpen={(sessionId) => navigate(routes.session(sessionId))}
-              />
-            </DropdownContent>
-          </section>
+          <Fragment key={projectId}>
+            {index > 0 ? <Separator /> : null}
+            <section className={cn("flex flex-col", !mobile && "p-2")}>
+              {button}
+              <DropdownContent
+                isOpen={open}
+                inert={!open}
+                aria-hidden={!open}
+                className="w-full duration-500 ease-in-out"
+              >
+                <ProjectSessions
+                  sessions={sessionsForProject}
+                  activeSessionId={activeSessionId}
+                  revealed={needle.length > 0 || revealed.has(projectId)}
+                  onReveal={() =>
+                    setRevealed((current) => {
+                      const next = new Set(current);
+                      next.add(projectId);
+                      return next;
+                    })
+                  }
+                  now={now}
+                  mobile={mobile}
+                  onOpen={openSession}
+                />
+              </DropdownContent>
+            </section>
+          </Fragment>
         );
       })}
       {visibleOrphans.length > 0 ? (
-        <section className="flex flex-col px-2 py-1">
-          {visibleOrphans.map((entry) => (
-            <ProjectButton
-              key={entry.summary.session_id}
-              entityId={entry.summary.session_id}
-              name={sessionTitle(entry.summary)}
-              variant={ProjectButtonVariant.Orphan}
-              active={entry.summary.session_id === activeSessionId}
-              running={isActiveRun(entry.active_run)}
-              onClick={() => navigate(routes.session(entry.summary.session_id))}
-            />
-          ))}
-        </section>
+        <>
+          {visibleEntries.length > 0 ? <Separator /> : null}
+          <section className={cn("flex flex-col gap-1", !mobile && "p-2")}>
+            {visibleOrphans.map((entry) => (
+              <ProjectButton
+                key={entry.summary.session_id}
+                entityId={entry.summary.session_id}
+                name={sessionTitle(entry.summary)}
+                variant={ProjectButtonVariant.Orphan}
+                active={entry.summary.session_id === activeSessionId}
+                running={isActiveRun(entry.active_run)}
+                isMobile={mobile}
+                onClick={() => openSession(entry.summary.session_id)}
+              />
+            ))}
+          </section>
+        </>
       ) : null}
     </div>
   );
@@ -218,6 +244,7 @@ function ProjectSessions({
   revealed,
   onReveal,
   now,
+  mobile,
   onOpen,
 }: {
   sessions: ManagedSessionSummary[];
@@ -225,10 +252,12 @@ function ProjectSessions({
   revealed: boolean;
   onReveal: () => void;
   now: number;
+  mobile: boolean;
   onOpen: (sessionId: string) => void;
 }) {
   const sessionTitle = useSessionTitle();
   const policy = useUiPolicy();
+  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const sessionActions = useSessionActions();
   const groups = useMemo(
     () =>
@@ -252,11 +281,11 @@ function ProjectSessions({
   const hidden = Math.max(0, sessions.length - shownCount);
 
   return (
-    <div className="flex flex-col gap-1 px-2 pb-2">
+    <div className={cn("flex flex-col pt-1 pb-4", mobile ? "gap-0.5" : "gap-1")}>
       {shown.map((group) => (
-        <div key={group.label} className="flex flex-col">
-          <p className="tag-label text-basic-tertiary uppercase px-2 pt-4 pb-4">{group.label}</p>
-          <div className="flex flex-col gap-0.5">
+        <div key={group.label} className="flex flex-col gap-2 pt-4">
+          <p className="tag-label text-basic-muted uppercase px-2">{group.label}</p>
+          <div className="flex flex-col gap-1">
             {group.items.map((entry) => {
               const title = sessionTitle(entry.summary);
               const behavior = sessionBehaviorPresentation(entry.summary.behavior);
@@ -264,18 +293,21 @@ function ProjectSessions({
                 <ChatSessionButton
                   key={entry.summary.session_id}
                   title={title}
-                  icon={sessionBehaviorIcon(entry.summary.behavior)}
+                  behavior={entry.summary.behavior}
+                  showBehaviorIcon={showBehaviorIcon}
                   aria-label={
                     policy.orchestrationEnabled ? `${title}, ${behavior.navigationLabel}` : title
                   }
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}
+                  isMobile={mobile}
                   onClick={() => onOpen(entry.summary.session_id)}
                   actions={
                     <ChatSessionActions
                       title={title}
                       pinned={entry.summary.pinned}
+                      isMobile={mobile}
                       onPin={() => void sessionActions.togglePin(entry.summary)}
                       onRename={() => sessionActions.rename(entry.summary)}
                       onDelete={() => sessionActions.remove(entry.summary)}
@@ -288,7 +320,7 @@ function ProjectSessions({
         </div>
       ))}
       {hidden > 0 ? (
-        <TabButton onClick={onReveal}>
+        <TabButton size={mobile ? TabButtonSize.Large : undefined} onClick={onReveal}>
           <Icon iconName={IconName.MenuHorizontal} />
           <span className="text-left flex-grow">See {hidden} more</span>
         </TabButton>

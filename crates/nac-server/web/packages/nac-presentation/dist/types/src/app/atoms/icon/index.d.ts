@@ -88,6 +88,7 @@ export declare enum IconName {
     Danger = "danger",
     Download = "download",
     Stop = "stop",
+    Pause = "pause",
     JSON = "code",
     File = "attachment",
     Remove = "remove",
@@ -109,8 +110,9 @@ export declare enum IconName {
     Google = "google",
     Timelaps = "timelaps",
     Token = "token",
-    SidebarChevronLeft = "sidebarChevronLeft",
-    SidebarChevronRight = "sidebarChevronRight",
+    LeftSidebar = "leftSidebar",
+    ShowSidePanel = "showSidePanel",
+    HideSidePanel = "hideSidePanel",
     Money = "money",
     AddCreditCard = "addCreditCard",
     External = "external",
@@ -136,14 +138,20 @@ export declare enum IconName {
     SearchPage = "searchPage",
     Pin = "pin",
     Unpin = "unpin",
-    OpenMobileModal = "openMobileModal",
     ChatGpt = "chatGpt",
     Orchestrator = "orchestrator",
-    Robot = "robot"
+    Robot = "robot",
+    ReadFile = "readFile",
+    SearchFile = "searchFile",
+    SearchFiles = "searchFiles",
+    WriteCommand = "writeCommand",
+    Clock = "clock",
+    AddChat = "addChat",
+    Goal = "goal"
 }
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
     iconName: IconName;
-    /** CSS color for the glyph. Stylesheets can still override it via `fill`. */
+    /** CSS color for the glyph. A class or stylesheet rule that colors the icon overrides it. */
     color?: string;
     size?: number;
 }

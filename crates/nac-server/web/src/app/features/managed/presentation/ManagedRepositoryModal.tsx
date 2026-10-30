@@ -154,6 +154,7 @@ export function ManagedRepositoryModal({
       size={ModalSize.Large}
       flush
       className="h-[min(760px,calc(100vh-32px))]"
+      bodyClassName="min-h-0"
       footer={
         operation?.status === "running" ? (
           <Button

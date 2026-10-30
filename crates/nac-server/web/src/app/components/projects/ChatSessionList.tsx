@@ -1,4 +1,5 @@
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useMemo } from "react";
 
 import { ChatSessionButton } from "@/app/atoms";
@@ -8,7 +9,7 @@ import { useNow } from "@/app/hooks/useNow";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun } from "@/app/lib/format";
 import { groupByRecency } from "@/app/lib/projects";
-import { sessionBehaviorIcon, sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
+import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
 /** Date buckets only shift once a day, so a minute of resolution is plenty. */
@@ -42,6 +43,7 @@ export function ChatSessionList({
   emptyLabel = "No chats",
 }: ChatSessionListProps) {
   const policy = useUiPolicy();
+  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const now = useNow(RECENCY_TICK_MS);
   const sessionTitle = useSessionTitle();
   const groups = useMemo(
@@ -74,9 +76,9 @@ export function ChatSessionList({
                 <ChatSessionButton
                   key={entry.summary.session_id}
                   title={title}
-                  icon={sessionBehaviorIcon(entry.summary.behavior)}
-                  badge={policy.orchestrationEnabled ? behavior.navigationLabel : undefined}
-                  badgeLabel={policy.orchestrationEnabled ? behavior.label : undefined}
+                  behavior={entry.summary.behavior}
+                  showBehaviorIcon={showBehaviorIcon}
+                  behaviorLabel={policy.orchestrationEnabled ? behavior.label : undefined}
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}
@@ -87,6 +89,7 @@ export function ChatSessionList({
                       <ChatSessionActions
                         title={title}
                         pinned={entry.summary.pinned}
+                        isMobile={isMobile}
                         onPin={onPin ? () => onPin(entry) : undefined}
                         onRename={onRename ? () => onRename(entry) : undefined}
                         onDelete={onDelete ? () => onDelete(entry) : undefined}

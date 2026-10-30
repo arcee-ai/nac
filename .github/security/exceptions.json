@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "exceptions": [
+    {
+      "advisory": "GHSA-qwgh-2vcv-g2f7",
+      "package": "crates.io:block-buffer",
+      "context": "Cargo.lock",
+      "reason": "Temporary acceptance for locked block-buffer 0.10.4 (checksum 3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71). The advisory concerns an inline cursor; this version stores pos separately and has no ReadBuffer. Source inspection and a 256-value caught-panic reproduction support an overbroad affected range; no Miri or general memory-safety proof is claimed. Reassess any version change and remove through ALL-496; evidence: docs/security/block-buffer-advisory.md.",
+      "owner": "@allisoneer",
+      "linked_issue": "https://linear.app/arcee/issue/ALL-496/resolve-block-buffer-advisory-applicability-and-remove-the-temporary",
+      "expires": "2026-11-03T14:00:00Z"
+    }
+  ]
+}

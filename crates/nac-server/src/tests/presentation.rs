@@ -503,6 +503,58 @@ async fn paged_routes_preserve_raw_indexes_timestamps_and_projection_caps() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[tokio::test]
+async fn tool_call_route_serves_content_and_maps_unknown_ids_to_not_found() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("tool_call_route_contract");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("server-route-test-key"));
+    let mut transcript = test_transcript();
+    transcript.insert(
+        6,
+        Message::Tool {
+            tool_call_id: "call-thread".to_string(),
+            content: "thread result".into(),
+        },
+    );
+    seed_session_with_messages(&root, "target", "2026-01-02 00:00:00.000000000", transcript);
+    let app = router(test_manager(&root));
+
+    let response = get_response(app.clone(), "/sessions/target/tool-calls/call-thread", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let content: serde_json::Value =
+        serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(
+        content,
+        serde_json::json!({
+            "call_id": "call-thread",
+            "arguments": r#"{"name":"current/research"}"#,
+            "arguments_truncated": false,
+            "output": "thread result",
+            "output_truncated": false,
+        })
+    );
+
+    let response = get_response(
+        app.clone(),
+        "/sessions/target/tool-calls/call-missing",
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let error: serde_json::Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(error, serde_json::json!({ "error": "tool call not found" }));
+
+    let sibling = get_response(app.clone(), "/sessions/missing/messages", None).await;
+    let response = get_response(app, "/sessions/missing/tool-calls/call-thread", None).await;
+    assert_eq!(sibling.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), sibling.status());
+    assert_eq!(response_body(response).await, response_body(sibling).await);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn paged_message_queries_exclude_system_prompts_by_default() {
     let Query(snapshot_query) = Query::<SessionSnapshotQuery>::try_from_uri(

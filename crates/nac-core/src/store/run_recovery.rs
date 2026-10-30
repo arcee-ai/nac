@@ -375,6 +375,13 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
             },
         )?;
         retain_or_clear_terminal_obligation(&transaction, session_id, &record.run_id, disposition)?;
+        record_reconciled_outcome(
+            &transaction,
+            session_id,
+            &record.run_id,
+            disposition.into(),
+            None,
+        )?;
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::CanonicalTerminal);
     }
@@ -438,12 +445,26 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
                     &record.run_id,
                     durable,
                 )?;
+                record_reconciled_outcome(
+                    &transaction,
+                    session_id,
+                    &record.run_id,
+                    durable.into(),
+                    None,
+                )?;
                 transaction.commit()?;
                 return Ok(ActiveRunReconciliation::CanonicalTerminal);
             }
             RecoveredRunTerminal::Failed => {
                 let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
                 mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
+                record_reconciled_outcome(
+                    &transaction,
+                    session_id,
+                    &record.run_id,
+                    RunOutcomeDisposition::Failed,
+                    failure.as_ref(),
+                )?;
                 transaction.commit()?;
                 return Ok(ActiveRunReconciliation::Failed {
                     run_id: record.run_id,
@@ -460,6 +481,13 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
     if record.failure.is_some() {
         let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
         mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
+        record_reconciled_outcome(
+            &transaction,
+            session_id,
+            &record.run_id,
+            RunOutcomeDisposition::Failed,
+            failure.as_ref(),
+        )?;
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::Failed {
             run_id: record.run_id,
@@ -482,10 +510,37 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
             "active run recovery transition expected one row, updated {changed}"
         ));
     }
+    // A replacement run always takes a new run ID, so interruption is this run's final outcome.
+    record_reconciled_outcome(
+        &transaction,
+        session_id,
+        &record.run_id,
+        RunOutcomeDisposition::Failed,
+        Some(&crate::run_failure::RunFailure::interrupted(
+            "the process stopped before the run settled",
+        )),
+    )?;
     transaction.commit()?;
     Ok(ActiveRunReconciliation::Interrupted {
         run_id: record.run_id,
     })
+}
+
+fn record_reconciled_outcome(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+    run_id: &str,
+    disposition: RunOutcomeDisposition,
+    failure: Option<&crate::run_failure::RunFailure>,
+) -> Result<()> {
+    super::task_evidence::record_run_outcome_with_connection(
+        transaction,
+        session_id,
+        run_id,
+        disposition,
+        None,
+        failure,
+    )
 }
 
 fn reconcile_failed_goal(
@@ -611,6 +666,29 @@ mod tests {
             .collect()
     }
 
+    fn outcomes(
+        path: &Path,
+    ) -> Vec<(
+        String,
+        RunOutcomeDisposition,
+        Option<crate::run_failure::RunFailureKind>,
+    )> {
+        super::super::task_evidence::load_run_outcomes_with_connection(
+            &open_runtime_connection(path).unwrap(),
+            "session-a",
+        )
+        .unwrap()
+        .into_iter()
+        .map(|outcome| {
+            (
+                outcome.run_id,
+                outcome.disposition,
+                outcome.failure.map(|failure| failure.kind),
+            )
+        })
+        .collect()
+    }
+
     fn run_state_update(session_id: &str) -> crate::sessions::SessionRunStateUpdate {
         crate::sessions::SessionRunStateUpdate {
             session_id: session_id.to_string(),
@@ -622,6 +700,7 @@ mod tests {
             failed_run_id: None,
             failed_run_failure: None,
             goal_settlement: None,
+            finished_run_result: None,
             updated_at: now_utc(),
         }
     }
@@ -854,6 +933,14 @@ mod tests {
         assert_eq!(replacement.run_id, "run-2");
         assert_eq!(replacement.status, RunRecoveryStatus::Active);
         assert_eq!(
+            outcomes(&path),
+            vec![(
+                "run-1".to_string(),
+                RunOutcomeDisposition::Failed,
+                Some(crate::run_failure::RunFailureKind::Interrupted)
+            )]
+        );
+        assert_eq!(
             transcript(&writer),
             vec![
                 (0, serde_json::to_value(user("first")).unwrap()),
@@ -909,6 +996,10 @@ mod tests {
             ActiveRunReconciliation::CanonicalTerminal
         );
         assert!(load_run_recovery(&path, "session-a").unwrap().is_none());
+        assert_eq!(
+            outcomes(&path),
+            vec![("run-1".to_string(), RunOutcomeDisposition::Completed, None)]
+        );
         assert_eq!(
             reconcile_active_run(&path, "session-a").unwrap(),
             ActiveRunReconciliation::None
@@ -1256,6 +1347,14 @@ mod tests {
                 ..
             }
         ));
+        assert_eq!(
+            outcomes(&path),
+            vec![(
+                "run-1".to_string(),
+                RunOutcomeDisposition::Failed,
+                Some(crate::run_failure::RunFailureKind::Interrupted)
+            )]
+        );
         let goal = load_session_goal(&path, "session-a").unwrap().unwrap();
         assert_eq!(goal.status, GoalStatus::Active);
         assert_eq!(goal.consecutive_transient_failures, 1);

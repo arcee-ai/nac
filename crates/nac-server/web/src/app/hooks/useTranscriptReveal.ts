@@ -35,16 +35,21 @@ export function useTranscriptReveal(
   hasContent: boolean,
 ): boolean {
   const markdownReady = useMarkdownReady();
-  // Everything a session reads is keyed under its root, the per-turn snapshot
-  // changes included, so this covers the reads that only start once the
-  // messages are in the tree without having to name them one by one.
-  const fetching = useIsFetching({ queryKey: queryKeys.sessionRoot(sessionId) });
   // Held as the session it belongs to, so switching sessions closes the gate in
   // the same render as the switch rather than a paint later.
   const [shown, setShown] = useState<string | null>(null);
   const opened = useRef<string | null>(null);
   const cached = useRef(false);
   const revealed = shown === sessionId;
+  // Everything a session reads is keyed under its root, the per-turn snapshot
+  // changes included, so this covers the reads that only start once the
+  // messages are in the tree without having to name them one by one. An open
+  // gate counts nothing: the session polls several of those every second, and
+  // each start and end would re-render the whole transcript for no change.
+  const fetching = useIsFetching({
+    queryKey: queryKeys.sessionRoot(sessionId),
+    predicate: () => !revealed,
+  });
 
   useEffect(() => {
     // Whether the chat was already in hand the moment it was opened, which is

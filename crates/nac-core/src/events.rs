@@ -414,7 +414,11 @@ impl AgentEvent {
             exit_code,
             completion_status,
             effective_timeout_ms: metric("timeout_ms"),
-            execution_duration_ms: metric("execution_duration_ms"),
+            execution_duration_ms: if result.execution_duration_excludes_authorization {
+                result.execution_duration_ms
+            } else {
+                metric("execution_duration_ms").or(result.execution_duration_ms)
+            },
             cleanup_duration_ms: metric("cleanup_duration_ms"),
             remote_outcome_uncertain: metadata
                 .as_ref()
@@ -570,6 +574,16 @@ pub enum SessionEvent {
     /// resources or credential-bearing payloads are included.
     PermissionApprovalModeChanged {
         mode: crate::permissions::PermissionApprovalMode,
+    },
+    /// An eligible Ask request was sent to the automatic reviewer. Carries
+    /// only the redacted projection the reviewer sees.
+    PermissionReviewStarted {
+        review: Box<crate::permissions::PermissionReview>,
+    },
+    /// The automatic reviewer finished. Rejected and uncertain reviews are
+    /// returned to the model unexecuted; the user may authorize one retry.
+    PermissionReviewed {
+        review: Box<crate::permissions::PermissionReview>,
     },
     SnapshotSaved {
         session_id: String,

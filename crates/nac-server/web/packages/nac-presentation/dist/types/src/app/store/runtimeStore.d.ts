@@ -61,6 +61,11 @@ export interface RuntimeState {
      */
     streamSettled: boolean;
     /**
+     * The buffers hold output from before the prompt sent last, and its run has
+     * neither started nor streamed since, so none of that output answers it.
+     */
+    streamPredatesPrompt: boolean;
+    /**
      * Prompt shown in the chat from the moment Send is pressed until the
      * snapshot (or active_run) catches up. Without this the model pill appears
      * first and jumps down when the user bubble finally lands.
@@ -109,7 +114,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     resetRuntime: (sessionId: string | null) => void;
     clearRuntimeThreads: () => void;
     liftSessionSpend: (persisted: TokenUsage | null | undefined) => void;
-    setOptimisticUserPrompt: (prompt: string | null) => void;
+    setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void;
     applyAssistantDelta: (delta: AssistantStreamDelta) => void;
     setStreamStatus: (streamStatus: StreamStatus) => void;
     syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void;
@@ -162,8 +167,8 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     } | {
         call_id: string;
         cleanup_duration_ms?: number | null;
-        command_status?: null | import("../types/openapi.generated").components["schemas"]["CommandStatus"];
-        completion_status?: null | import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"];
+        command_status?: import("../types/openapi.generated").components["schemas"]["CommandStatus"] | null;
+        completion_status?: import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"] | null;
         content_preview: string;
         effective_timeout_ms?: number | null;
         execution_duration_ms?: number | null;
@@ -233,12 +238,12 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         timed_out: boolean;
         timeout_reason?: string | null;
         type: "thread_finished";
-        usage?: null | import("../types/openapi.generated").components["schemas"]["TokenUsage"];
+        usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
     } | {
         content: string;
         thread_name?: string | null;
         type: "assistant_message";
-        usage?: null | import("../types/openapi.generated").components["schemas"]["TokenUsage"];
+        usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
     } | {
         message: string;
         thread_name?: string | null;
@@ -288,7 +293,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useOptimisticUserPrompt: () => string | null;
     getRuntimeState: () => RuntimeState;
 };
-export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, clearRuntimeThreads: () => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null) => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
+export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, clearRuntimeThreads: () => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
     attempt_count: number;
     diagnostic: string;
     http_status?: number | null;
@@ -322,8 +327,8 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
 } | {
     call_id: string;
     cleanup_duration_ms?: number | null;
-    command_status?: null | import("../types/openapi.generated").components["schemas"]["CommandStatus"];
-    completion_status?: null | import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"];
+    command_status?: import("../types/openapi.generated").components["schemas"]["CommandStatus"] | null;
+    completion_status?: import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"] | null;
     content_preview: string;
     effective_timeout_ms?: number | null;
     execution_duration_ms?: number | null;
@@ -393,12 +398,12 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     timed_out: boolean;
     timeout_reason?: string | null;
     type: "thread_finished";
-    usage?: null | import("../types/openapi.generated").components["schemas"]["TokenUsage"];
+    usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
 } | {
     content: string;
     thread_name?: string | null;
     type: "assistant_message";
-    usage?: null | import("../types/openapi.generated").components["schemas"]["TokenUsage"];
+    usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
 } | {
     message: string;
     thread_name?: string | null;

@@ -1,7 +1,7 @@
 import type { ChangedFileStat } from "../../types/api";
 /**
- * The files a snapshot touched, each opening in the files panel. Sits above the
- * snapshot badge so the turn says what it changed before it says how much.
+ * The files a snapshot touched, each opening in the files panel. Listed under
+ * the snapshot's header, which carries their totals.
  */
 export declare function SnapshotFiles({ files, selected, onOpen, onOpenAll, }: {
     files: ChangedFileStat[];

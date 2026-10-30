@@ -60,6 +60,7 @@ import type {
   OrchestratorSteeringResponse,
   PermissionApprovalMode,
   PermissionReply,
+  PermissionReview,
   PermissionStateResponse,
   SessionGoalRecord,
   StartTraditionalChildRequest,
@@ -97,6 +98,7 @@ import type {
   SwitchBranchRequest,
   ThreadEventPage,
   ThreadSteeringResponse,
+  ToolCallContentResponse,
   UpdateConfigRequest,
   UpdateGoalRequest,
   UpdateModelConfigurationRequest,
@@ -537,6 +539,18 @@ export function createNacApi(nacClient: NacClient) {
         body: { reply },
       }),
 
+    authorizePermissionReviewRetry: (id: string, reviewId: string) =>
+      request<PermissionReview>(
+        "POST",
+        `${sessionPath(id)}/permissions/reviews/${encodeURIComponent(reviewId)}/authorize-retry`,
+      ),
+
+    authorizeChildPermissionReviewRetry: (parentId: string, childId: string, reviewId: string) =>
+      request<PermissionReview>(
+        "POST",
+        `${sessionPath(parentId)}/children/${encodeURIComponent(childId)}/permissions/reviews/${encodeURIComponent(reviewId)}/authorize-retry`,
+      ),
+
     setPermissionApprovalMode: (id: string, mode: PermissionApprovalMode) =>
       request<void>("PUT", `${sessionPath(id)}/permissions/mode`, {
         body: { mode },
@@ -658,6 +672,13 @@ export function createNacApi(nacClient: NacClient) {
         { signal: options.signal },
       );
     },
+
+    getToolCallContent: (id: string, callId: string, signal?: AbortSignal) =>
+      request<ToolCallContentResponse>(
+        "GET",
+        `${sessionPath(id)}/tool-calls/${encodeURIComponent(callId)}`,
+        { signal },
+      ),
 
     getWorkspaceDiff: (
       id: string,

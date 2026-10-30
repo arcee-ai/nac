@@ -1,4 +1,26 @@
+import type { Page } from "@playwright/test";
+
 import { test, expect, createProject, createSession, waitForRunIdle } from "./harness";
+
+/** Behavior icons are decorative, so they carry no role or name to query by. */
+const BEHAVIOR_ICONS = "[data-session-behavior-icon]";
+
+/** The side panel starts collapsed: a rail on a pointer, a dialog on a phone. */
+async function openSidePanel(page: Page, mobile: boolean) {
+  if (mobile) {
+    await page.getByRole("button", { name: "Open panel", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    return;
+  }
+  const show = page.getByRole("button", { name: "Show panel", exact: true });
+  const open = page.getByRole("tab", { name: "Files", exact: true });
+  await expect(show.or(open).first()).toBeVisible();
+  await expect(async () => {
+    if (await open.isVisible()) return;
+    if (await show.isVisible()) await show.click();
+    await expect(open).toBeVisible();
+  }).toPass();
+}
 
 for (const orchestration of [null, "0"] as const) {
   test.describe(`direct presentation (${orchestration ?? "unset"})`, () => {
@@ -45,7 +67,7 @@ for (const orchestration of [null, "0"] as const) {
           first_chat: false,
         });
         const directId = (await response.json()).metadata.session_id;
-        await expect(page).toHaveURL(new RegExp(`/session/${directId}/files`));
+        await expect(page).toHaveURL(new RegExp(`/session/${directId}/insights`));
         harness.provider.enqueue(
           "policy-direct",
           { token: "POLICY_DIRECT_TOKEN" },
@@ -91,18 +113,23 @@ for (const orchestration of [null, "0"] as const) {
           .toBe("accepted");
         await waitForRunIdle(request, harness, directId);
         await expect(page.getByText("direct policy response")).toBeVisible();
+        await expect(page.locator(BEHAVIOR_ICONS)).toHaveCount(0);
         await page.goto(`${harness.baseUrl}/#/session/${directId}/worksets`);
-        await expect(page).toHaveURL(new RegExp(`/session/${directId}/files`));
+        await expect(page).toHaveURL(new RegExp(`/session/${directId}/insights`));
+        await openSidePanel(page, mobile);
+        await expect(page.getByRole("tab", { name: "Insights", exact: true })).toHaveAttribute(
+          "aria-selected",
+          "true",
+        );
         await expect(page.getByRole("tab", { name: "Threads", exact: true })).toHaveCount(0);
         await expect(page.getByRole("tab", { name: "Worksets", exact: true })).toHaveCount(0);
-        if (!mobile) await page.getByRole("button", { name: "Spawn", exact: true }).click();
-        if (!mobile)
-          await expect(
-            page.getByRole("button", { name: "Create Subagent", exact: true }),
-          ).toBeVisible();
-        await expect(
-          page.getByRole("button", { name: "Create Orchestrator", exact: true }),
-        ).toHaveCount(0);
+        if (mobile) {
+          const panel = page.getByRole("dialog");
+          await panel.getByRole("button", { name: "Close" }).click();
+          await expect(panel).toBeHidden();
+        }
+        await expect(page.getByRole("button", { name: "Spawn", exact: true })).toHaveCount(0);
+        await expect(page.locator(BEHAVIOR_ICONS)).toHaveCount(0);
         await page.reload();
         await expect(page.getByText("direct policy response")).toBeVisible();
         harness.provider.enqueue(
@@ -124,14 +151,22 @@ for (const orchestration of [null, "0"] as const) {
         expect(childResponse.ok()).toBe(true);
         const childId = (await childResponse.json()).child_session_id;
         await page.goto(`${harness.baseUrl}/#/session/${childId}/threads`);
-        await expect(page).toHaveURL(new RegExp(`/session/${childId}/files`));
-        if (!mobile)
-          await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
+        await expect(page).toHaveURL(new RegExp(`/session/${childId}/insights`));
         await expect(page.getByRole("button", { name: "Parent chat" })).toBeVisible();
+        await expect(page.getByText("Traditional coding agent", { exact: true })).toHaveCount(0);
         await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
         await expect(page.getByRole("button", { name: "Create fork", exact: true })).toHaveCount(0);
         await page.getByRole("button", { name: "Parent chat" }).click();
         await expect(page).toHaveURL(new RegExp(`/session/${directId}/delegated`));
+        await openSidePanel(page, mobile);
+        await expect(page.getByRole("tab", { name: "Subagents", exact: true })).toHaveAttribute(
+          "aria-selected",
+          "true",
+        );
+        await expect(
+          page.getByRole("button", { name: "Direct child policy", exact: true }),
+        ).toBeVisible();
+        await expect(page.locator(BEHAVIOR_ICONS)).toHaveCount(0);
         for (const [id, behavior] of [
           [legacy, "orchestrator"],
           [hybrid, "direct-with-orchestrator"],
@@ -187,6 +222,8 @@ test.describe("runtime opt-in with the same production binary", () => {
     const legacy = await createSession(request, harness, "orchestrator", projectId);
     await page.goto(`${harness.baseUrl}/#/session/${legacy}/threads`);
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
+    // Keeps the zero counts above honest: opting in shows the same icons.
+    await expect(page.locator(BEHAVIOR_ICONS).first()).toBeVisible();
     await page.keyboard.press(
       await page.evaluate(() =>
         /Mac|iPhone|iPad/.test(navigator.userAgent) ? "Meta+Shift+O" : "Control+Shift+O",

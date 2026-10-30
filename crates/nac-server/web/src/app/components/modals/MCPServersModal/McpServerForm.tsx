@@ -14,12 +14,14 @@ import {
   TextArea,
 } from "@/app/atoms";
 import { FieldLabel } from "@/app/components/modals/ConfigRow";
+import { ArgsEditor } from "@/app/components/modals/MCPServersModal/McpArgsEditor";
 import { EntryDetails } from "@/app/components/modals/MCPServersModal/McpEntryDetails";
 import { KvEditor } from "@/app/components/modals/MCPServersModal/McpKvEditor";
 import { McpOAuthPanel } from "@/app/components/modals/MCPServersModal/McpOAuthPanel";
 import { FooterButton } from "@/app/components/modals/ModalFooterButton";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
+import { argRows, argsFromRows, type ArgRow } from "@/app/lib/mcpArgRows";
 import { literalsOnly, mapFromRows, rowsFromRecord, type KvRow } from "@/app/lib/mcpKvRows";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { toRunError } from "@/app/lib/providerError";
@@ -111,7 +113,7 @@ export function McpServerForm({
   );
   const [url, setUrl] = useState(record?.url ?? template?.url ?? "");
   const [command, setCommand] = useState(record?.command ?? "");
-  const [argsText, setArgsText] = useState(record?.args.join("\n") ?? "");
+  const [args, setArgs] = useState<ArgRow[]>(() => argRows(record?.args));
   const [cwd, setCwd] = useState(record?.cwd ?? "");
   const [envVarsText, setEnvVarsText] = useState(record?.env_vars.join("\n") ?? "");
   const [startupTimeout, setStartupTimeout] = useState(
@@ -142,8 +144,8 @@ export function McpServerForm({
   );
   const [bearerTokenEnvVar, setBearerTokenEnvVar] = useState(record?.bearer_token_env_var ?? "");
   const [helperCommand, setHelperCommand] = useState(record?.header_helper?.command ?? "");
-  const [helperArgsText, setHelperArgsText] = useState(
-    record?.header_helper?.args?.join("\n") ?? "",
+  const [helperArgs, setHelperArgs] = useState<ArgRow[]>(() =>
+    argRows(record?.header_helper?.args),
   );
   const [helperCwd, setHelperCwd] = useState(record?.header_helper?.cwd ?? "");
   const [helperEnv, setHelperEnv] = useState<KvRow[]>(() =>
@@ -184,7 +186,7 @@ export function McpServerForm({
     const helper = helperCommand.trim()
       ? {
           command: helperCommand.trim(),
-          args: splitArgs(helperArgsText),
+          args: argsFromRows(helperArgs),
           cwd: helperCwd.trim() || null,
           env: mapFromRows(helperEnv),
           env_vars: splitArgs(helperEnvVarsText),
@@ -203,7 +205,7 @@ export function McpServerForm({
           protocol,
           transport,
           command: transport === "stdio" ? command.trim() : null,
-          args: transport === "stdio" ? splitArgs(argsText) : [],
+          args: transport === "stdio" ? argsFromRows(args) : [],
           env: transport === "stdio" ? literalsOnly(envMap) : {},
           env_vars: transport === "stdio" ? splitArgs(envVarsText) : [],
           cwd: transport === "stdio" ? cwd.trim() || null : null,
@@ -233,7 +235,7 @@ export function McpServerForm({
             protocol,
             transport,
             command: transport === "stdio" ? command.trim() : null,
-            args: transport === "stdio" ? splitArgs(argsText) : [],
+            args: transport === "stdio" ? argsFromRows(args) : [],
             env: transport === "stdio" ? envMap : {},
             env_vars: transport === "stdio" ? splitArgs(envVarsText) : [],
             cwd: transport === "stdio" ? cwd.trim() || null : null,
@@ -297,7 +299,7 @@ export function McpServerForm({
         name: name.trim() || null,
         transport,
         command: transport === "stdio" ? command.trim() : null,
-        args: transport === "stdio" ? splitArgs(argsText) : [],
+        args: transport === "stdio" ? argsFromRows(args) : [],
         env: transport === "stdio" ? mapFromRows(env) : {},
         env_vars: transport === "stdio" ? splitArgs(envVarsText) : [],
         cwd: transport === "stdio" ? cwd.trim() || null : null,
@@ -310,7 +312,7 @@ export function McpServerForm({
           transport === "streamable_http" && helperCommand.trim()
             ? {
                 command: helperCommand.trim(),
-                args: splitArgs(helperArgsText),
+                args: argsFromRows(helperArgs),
                 cwd: helperCwd.trim() || null,
                 env: mapFromRows(helperEnv),
                 env_vars: splitArgs(helperEnvVarsText),
@@ -369,7 +371,7 @@ export function McpServerForm({
         ) : null}
         <FooterButton
           isMobile={isMobile}
-          variant={ButtonVariant.Secondary}
+          variant={ButtonVariant.Tertiary}
           onClick={() => closeRef.current()}
         >
           Cancel
@@ -541,14 +543,12 @@ export function McpServerForm({
               </div>
               {helperCommand.trim() ? (
                 <>
-                  <div className="flex flex-col gap-1">
-                    <FieldLabel label="Header helper arguments" hint="One argument per line." />
-                    <TextArea
-                      textAreaClassName="min-h-[64px] font-mono"
-                      value={helperArgsText}
-                      onChange={(event) => setHelperArgsText(event.target.value)}
-                    />
-                  </div>
+                  <ArgsEditor
+                    label="Header helper arguments"
+                    itemLabel="Header helper argument"
+                    rows={helperArgs}
+                    onChange={setHelperArgs}
+                  />
                   <div className="flex flex-col gap-1">
                     <FieldLabel label="Header helper working directory" />
                     <Input
@@ -600,18 +600,7 @@ export function McpServerForm({
                   onChange={(event) => setCommand(event.target.value)}
                 />
               </div>
-              <div className="flex flex-col gap-1">
-                <FieldLabel label="Arguments" hint="One argument per line." />
-                <TextArea
-                  textAreaClassName={cn(
-                    "min-h-[72px] font-mono",
-                    isMobile ? "text-medium" : "text-small",
-                  )}
-                  placeholder={"-y\nsome-mcp-server"}
-                  value={argsText}
-                  onChange={(event) => setArgsText(event.target.value)}
-                />
-              </div>
+              <ArgsEditor label="Arguments" itemLabel="Argument" rows={args} onChange={setArgs} />
               <KvEditor
                 label="Environment"
                 hint="Set for the server process. Values may reference an environment variable as ${VAR_NAME}; stored literals never display again."
@@ -668,7 +657,9 @@ export function McpServerForm({
           {record ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-small text-basic-muted">
-                Runtime: {runtime?.state ?? "disconnected"}
+                {runtime?.sessions_blocked
+                  ? "Disconnected. Sessions won't use this server until you connect it."
+                  : `Runtime: ${runtime?.state ?? "disconnected"}`}
                 {runtime?.error ? ` — ${runtime.error}` : ""}
               </span>
               {(["connect", "disconnect", "reload"] as const).map((action) => (
@@ -704,7 +695,7 @@ export function McpServerForm({
           </div>
         </div>
         {record && transport === "streamable_http" ? (
-          <McpOAuthPanel serverName={record.name} />
+          <McpOAuthPanel serverName={record.name} endpoint={record.url ?? undefined} />
         ) : null}
         {tools && tools.length ? (
           <div className="flex flex-col gap-1">

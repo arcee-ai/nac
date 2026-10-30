@@ -236,9 +236,10 @@ for (const mobile of [false, true]) {
       expect((await state(children[0])).grants).toHaveLength(0);
       expect((await state(parent)).grants).toHaveLength(0);
       expect((await state(children[1])).grants).toHaveLength(0);
-      await expect(manager.getByRole("switch", { name: "Approve all automatically" })).toHaveCount(
-        1,
-      );
+      await expect(manager.getByRole("radiogroup", { name: "Approval mode" })).toHaveCount(1);
+      for (const mode of ["Manual", "Approve all", "Approve for me"]) {
+        await expect(manager.getByRole("radio", { name: mode, exact: true })).toHaveCount(1);
+      }
       harness.provider.assertConsumed();
     } finally {
       observer.abort();
@@ -293,7 +294,10 @@ test("last-client disconnect dismisses queued access without executing it", asyn
   await expect(page.getByRole("dialog", { name: "Permission required", exact: true })).toHaveCount(
     0,
   );
-  await expect(page.locator('[data-tool-call-id="disconnected-write"]')).toContainText("Failed");
+  await page.getByRole("button", { name: "Create File", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Create File, failed", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByText(/interactive session client disconnected while approval was pending/).first(),
   ).toBeVisible();

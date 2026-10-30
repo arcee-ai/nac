@@ -365,6 +365,7 @@ async fn active_run_conflicts_with_compact_route() {
             SubmitPromptRequest {
                 prompt: "hold the run open".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();
@@ -430,6 +431,7 @@ async fn active_compaction_blocks_route_patch_delete_and_independent_manager() {
                 SubmitPromptRequest {
                     prompt: "must not start".to_string(),
                 },
+                nac_core::store::InputOrigin::Automation,
             )
             .await
             .unwrap_err(),
@@ -661,6 +663,7 @@ async fn manager_attached_during_external_compaction_refreshes_before_next_run()
             SubmitPromptRequest {
                 prompt: "continue after external compaction".to_string(),
             },
+            nac_core::store::InputOrigin::Automation,
         )
         .await
         .unwrap();

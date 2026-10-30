@@ -1,30 +1,93 @@
-# ALL-131 covers NAC's outbound MCP protocol client. OAuth is owned by
-# ALL-124/ALL-126, and interactive elicitation is intentionally not added just
-# to satisfy a nominal test. Any passing entry is treated by the official
-# runner as a stale baseline and fails the command.
-client:
-  - elicitation-sep1034-client-defaults
-  - auth/metadata-default
-  - auth/metadata-var1
-  - auth/metadata-var2
-  - auth/metadata-var3
-  - auth/basic-cimd
-  - auth/scope-from-www-authenticate
-  - auth/scope-from-scopes-supported
-  - auth/scope-omitted-when-undefined
-  - auth/scope-step-up
-  - auth/scope-retry-limit
-  - auth/token-endpoint-auth-basic
-  - auth/token-endpoint-auth-post
-  - auth/token-endpoint-auth-none
-  - auth/pre-registration
-  - auth/offline-access-scope
-  - auth/offline-access-not-supported
-  - auth/authorization-server-migration
-  - auth/iss-supported
-  - auth/iss-not-advertised
-  - auth/iss-supported-missing
-  - auth/iss-wrong-issuer
-  - auth/iss-unexpected
-  - auth/iss-normalized
-  - auth/metadata-issuer-mismatch
+# Individual missing OAuth checks remain owned by ALL-124/ALL-126.
+# Interactive elicitation is not advertised and is intentionally deferred.
+# Revision-specific exact check lists also reject stale or absent failures.
+"2025-11-25":
+  client:
+    - auth/basic-cimd:cimd-client-id-used
+    - auth/metadata-default:authorization-request
+    - auth/metadata-default:authorization-server-metadata
+    - auth/metadata-default:client-registration
+    - auth/metadata-default:prm-pathbased-requested
+    - auth/metadata-default:token-request
+    - auth/metadata-var1:authorization-request
+    - auth/metadata-var1:authorization-server-metadata
+    - auth/metadata-var1:client-registration
+    - auth/metadata-var1:prm-pathbased-requested
+    - auth/metadata-var1:token-request
+    - auth/metadata-var2:authorization-request
+    - auth/metadata-var2:authorization-server-metadata
+    - auth/metadata-var2:client-registration
+    - auth/metadata-var2:token-request
+    - auth/metadata-var3:authorization-request
+    - auth/metadata-var3:authorization-server-metadata
+    - auth/metadata-var3:client-registration
+    - auth/metadata-var3:token-request
+    - auth/pre-registration:pre-registration-auth
+    - auth/scope-from-scopes-supported:scope-from-scopes-supported
+    - auth/scope-from-www-authenticate:scope-from-www-authenticate
+    - auth/scope-omitted-when-undefined:scope-omitted-when-undefined
+    - auth/scope-retry-limit:scope-retry-limit
+    - auth/scope-step-up:scope-step-up-escalation
+    - auth/scope-step-up:scope-step-up-initial
+    - auth/token-endpoint-auth-basic:resource-parameter-in-authorization
+    - auth/token-endpoint-auth-basic:resource-parameter-in-token
+    - auth/token-endpoint-auth-basic:token-endpoint-auth-method
+    - auth/token-endpoint-auth-none:resource-parameter-in-authorization
+    - auth/token-endpoint-auth-none:resource-parameter-in-token
+    - auth/token-endpoint-auth-none:token-endpoint-auth-method
+    - auth/token-endpoint-auth-post:resource-parameter-in-authorization
+    - auth/token-endpoint-auth-post:resource-parameter-in-token
+    - auth/token-endpoint-auth-post:token-endpoint-auth-method
+    - elicitation-sep1034-client-defaults:client-elicitation-sep1034-boolean-default
+    - elicitation-sep1034-client-defaults:client-elicitation-sep1034-enum-default
+    - elicitation-sep1034-client-defaults:client-elicitation-sep1034-integer-default
+    - elicitation-sep1034-client-defaults:client-elicitation-sep1034-number-default
+    - elicitation-sep1034-client-defaults:client-elicitation-sep1034-string-default
+"2026-07-28":
+  client:
+    - auth/authorization-server-migration:sep-2352-reregister-on-as-change
+    - auth/basic-cimd:cimd-client-id-used
+    - auth/iss-normalized:sep-2468-client-no-normalization
+    - auth/iss-not-advertised:sep-2468-client-proceed-no-iss
+    - auth/iss-supported-missing:sep-2468-client-reject-missing-iss
+    - auth/iss-supported:sep-2468-client-compare-iss-supported
+    - auth/iss-unexpected:sep-2468-client-compare-iss-unadvertised
+    - auth/iss-wrong-issuer:sep-2468-client-compare-iss-supported
+    - auth/metadata-default:authorization-request
+    - auth/metadata-default:authorization-server-metadata
+    - auth/metadata-default:client-registration
+    - auth/metadata-default:prm-pathbased-requested
+    - auth/metadata-default:token-request
+    - auth/metadata-issuer-mismatch:sep-2468-client-validate-metadata-issuer
+    - auth/metadata-var1:authorization-request
+    - auth/metadata-var1:authorization-server-metadata
+    - auth/metadata-var1:client-registration
+    - auth/metadata-var1:prm-pathbased-requested
+    - auth/metadata-var1:token-request
+    - auth/metadata-var2:authorization-request
+    - auth/metadata-var2:authorization-server-metadata
+    - auth/metadata-var2:client-registration
+    - auth/metadata-var2:token-request
+    - auth/metadata-var3:authorization-request
+    - auth/metadata-var3:authorization-server-metadata
+    - auth/metadata-var3:client-registration
+    - auth/metadata-var3:token-request
+    - auth/offline-access-not-supported:sep-2207-offline-access-not-requested
+    - auth/offline-access-scope:sep-2207-offline-access-requested
+    - auth/pre-registration:pre-registration-auth
+    - auth/scope-from-scopes-supported:scope-from-scopes-supported
+    - auth/scope-from-www-authenticate:scope-from-www-authenticate
+    - auth/scope-omitted-when-undefined:scope-omitted-when-undefined
+    - auth/scope-retry-limit:scope-retry-limit
+    - auth/scope-step-up:scope-step-up-escalation
+    - auth/scope-step-up:scope-step-up-initial
+    - auth/scope-step-up:sep-2350-scope-union-on-reauth
+    - auth/token-endpoint-auth-basic:resource-parameter-in-authorization
+    - auth/token-endpoint-auth-basic:resource-parameter-in-token
+    - auth/token-endpoint-auth-basic:token-endpoint-auth-method
+    - auth/token-endpoint-auth-none:resource-parameter-in-authorization
+    - auth/token-endpoint-auth-none:resource-parameter-in-token
+    - auth/token-endpoint-auth-none:token-endpoint-auth-method
+    - auth/token-endpoint-auth-post:resource-parameter-in-authorization
+    - auth/token-endpoint-auth-post:resource-parameter-in-token
+    - auth/token-endpoint-auth-post:token-endpoint-auth-method

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { constants } from "node:fs";
 import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
@@ -33,7 +34,11 @@ declare class MutationObserver {
   observe(target: unknown, options: Record<string, boolean>): void;
   disconnect(): void;
 }
-declare const navigator: { clipboard: { writeText: (text: string) => Promise<void> } };
+declare const navigator: {
+  platform: string;
+  userAgent: string;
+  clipboard: { writeText: (text: string) => Promise<void> };
+};
 declare function requestAnimationFrame(callback: (timestamp: number) => void): number;
 declare function cancelAnimationFrame(handle: number): void;
 
@@ -58,7 +63,7 @@ async function show(page: Page, base: string, session: string) {
   return pane;
 }
 async function focus(pane: Locator) {
-  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
 }
 /**
  * Arm the actual visual DOM renderer before input. The screen-reader mirror is
@@ -146,13 +151,27 @@ async function copyRow(
   });
 }
 
-test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste return to the same shell", async ({
+test("connected native shell, less resize, and trusted browser bracketed UTF-8 paste return to the same shell", async ({
   harness,
   request,
   page,
 }, info) => {
-  test.skip(process.platform !== "darwin", "This episode qualifies installed Mac Zsh/less only");
-  await Promise.all([fs.access("/bin/zsh"), fs.access("/usr/bin/less")]);
+  const shell = process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+  expect(["darwin", "linux"], "supported native terminal browser platform").toContain(
+    process.platform,
+  );
+  await Promise.all([shell, "/usr/bin/less"].map((file) => fs.access(file, constants.X_OK)));
+  const browser = await page.evaluate(() => ({
+    platform: navigator.platform,
+    userAgent: navigator.userAgent,
+  }));
+  expect(browser.platform, "browser keyboard platform must be recognized").toMatch(/Mac|Linux|Win/);
+  // xterm consumes Ctrl+V as terminal SYN on Linux; Shift leaves native paste to Chromium.
+  const shortcut = browser.platform.includes("Mac") ? "Meta+V" : "Control+Shift+V";
+  await info.attach("native-browser-profile", {
+    body: JSON.stringify({ host: process.platform, shell, ...browser, shortcut }, null, 2),
+    contentType: "application/json",
+  });
   const session = await createDirectSession(request, harness);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
@@ -178,16 +197,16 @@ test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste retu
   const pane = await show(page, harness.baseUrl, session);
   let terminal: string | undefined;
   try {
-    await pane.getByRole("button", { name: "New shell", exact: true }).click();
+    await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
     const accessible = pane.locator(".xterm-accessibility");
     await focus(pane);
-    await command(page, "exec /bin/zsh -f");
     await command(
       page,
-      "printf '" + octal("ZSH-REAL-READY\n") + "'; /usr/bin/less -R -- pager.txt",
+      `exec ${shell} ${process.platform === "darwin" ? "-f" : "--noprofile --norc"}`,
     );
+    await command(page, "printf '%s\\n' \"$$\" > shell-before.pid; /usr/bin/less -R -- pager.txt");
     await expect(accessible).toContainText("LESS-REAL-CONTENT");
     const before = await api.getUserTerminal(session, terminal);
     await page.setViewportSize({ width: 970, height: 600 });
@@ -199,8 +218,22 @@ test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste retu
       .toBe(true);
     await expect(accessible).toContainText("LESS-REAL-CONTENT");
     await page.keyboard.press("q");
-    await command(page, "printf '" + octal("LESS-SHELL-BACK\n") + "'; python3 capture_paste.py");
+    await command(
+      page,
+      "printf '%s\\n' \"$$\" > shell-after-pager.pid; stty size > resized.txt; python3 capture_paste.py",
+    );
     await expect(accessible).toContainText("PASTE-RAW-READY");
+    const shellPid = (await fs.readFile(path.join(workspace, "shell-before.pid"), "utf8")).trim();
+    expect(shellPid).toMatch(/^[1-9][0-9]*$/);
+    expect((await fs.readFile(path.join(workspace, "shell-after-pager.pid"), "utf8")).trim()).toBe(
+      shellPid,
+    );
+    expect(
+      (await fs.readFile(path.join(workspace, "resized.txt"), "utf8"))
+        .trim()
+        .split(/\s+/)
+        .map(Number),
+    ).not.toEqual([before.rows, before.cols]);
     const pasteInputs: number[][] = [];
     page.on("request", (sent) => {
       if (
@@ -229,7 +262,7 @@ test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste retu
       ).clipboard.writeText("Ω中\nliteral paste"),
     );
     expect(pasteInputs).toHaveLength(0);
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+    await page.keyboard.press(shortcut);
     await expect
       .poll(async () =>
         JSON.parse(
@@ -237,13 +270,22 @@ test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste retu
         ),
       )
       .toEqual(Array.from(new TextEncoder().encode("\x1b[200~Ω中\rliteral paste\x1b[201~")));
-    await command(page, "printf '" + octal("PASTE-SHELL-BACK\n") + "'");
+    expect(pasteInputs.flat(), "trusted paste product input bytes").toEqual(
+      Array.from(new TextEncoder().encode("\x1b[200~Ω中\rliteral paste\x1b[201~")),
+    );
+    await command(
+      page,
+      "printf '%s\\n' \"$$\" > shell-after-paste.pid; printf '" + octal("PASTE-SHELL-BACK\n") + "'",
+    );
     await expect(accessible).toContainText("PASTE-SHELL-BACK");
+    expect((await fs.readFile(path.join(workspace, "shell-after-paste.pid"), "utf8")).trim()).toBe(
+      shellPid,
+    );
     expect((await api.listUserTerminals(session)).terminals.map((row) => row.terminal_id)).toEqual([
       terminal,
     ]);
     await page.screenshot({
-      path: info.outputPath("connected-zsh-less-paste.png"),
+      path: info.outputPath("connected-native-shell-less-paste.png"),
       fullPage: true,
     });
   } finally {
@@ -274,7 +316,7 @@ test("pane disposal releases observer seats and connected OSC52/OSC8 stays withi
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
   let pane = await show(page, harness.baseUrl, session);
-  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
   let cycles = 0;
@@ -396,7 +438,7 @@ test("actual Python build and unittest consume active agent edits in the shell w
     completion,
   );
   const pane = await show(page, harness.baseUrl, session);
-  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
   try {
@@ -430,6 +472,92 @@ test("actual Python build and unittest consume active agent edits in the shell w
   }
   await waitForRunIdle(request, harness, session);
   harness.provider.assertConsumed();
+});
+
+test("passive history growth, omission, errors and eviction preserve live copy selection and grid", async ({
+  harness,
+  request,
+  page,
+}) => {
+  const session = await createDirectSession(request, harness);
+  const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
+  const shell = await api.openUserTerminal(session, {
+    protocol_version: 1,
+    launch_id: crypto.randomUUID(),
+    cols: 80,
+    rows: 24,
+  });
+  const original = await api.listExecutionHistory(session);
+  const entry = original.history.entries.find((item) => item.execution?.id === shell.terminal_id)!;
+  expect(entry).toBeTruthy();
+  let stage = 0;
+  await page.route(`**/sessions/${session}/executions/history`, async (route) => {
+    if (stage === 3) {
+      await route.fulfill({ status: 503, json: { error: "History refresh fixture unavailable" } });
+      return;
+    }
+    await route.fulfill({
+      json: {
+        ...original,
+        history: {
+          ...original.history,
+          entries:
+            stage === 0 || stage === 4
+              ? []
+              : Array.from({ length: 32 }, (_, i) => ({
+                  ...entry,
+                  id: `bounded-history-${i}`,
+                })),
+          older_entries_omitted: stage === 2,
+        },
+      },
+    });
+  });
+  const pane = await show(page, harness.baseUrl, session);
+  const recent = pane.getByRole("region", { name: "Recent terminal activity" });
+  await expect(recent.getByText("No recent activity is available.")).toBeVisible();
+  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+  await focus(pane);
+  await command(page, "printf '" + octal("\x1b[2J\x1b[HKEEP-HISTORY-SELECTION\n") + "'");
+  await expect(pane.locator(".xterm-accessibility")).toContainText("KEEP-HISTORY-SELECTION");
+  const before = await api.getUserTerminal(session, shell.terminal_id);
+  const grid = pane.locator(".xterm-screen");
+  const bounds = await grid.boundingBox();
+  try {
+    for (const next of [1, 2, 3, 4]) {
+      expect(
+        await copyRow(page, pane, "KEEP-HISTORY-SELECTION", before.cols, before.rows, async () => {
+          const refreshed = page.waitForResponse((response) =>
+            response.url().endsWith(`/sessions/${session}/executions/history`),
+          );
+          stage = next;
+          await refreshed;
+          if (next === 1) await expect(recent.getByRole("button")).toHaveCount(32);
+          if (next === 2)
+            await expect(
+              recent.getByText("Older entries are omitted from this recent view."),
+            ).toBeVisible();
+          if (next === 3)
+            await expect(recent.getByText("Recent activity unavailable.")).toBeVisible();
+          if (next === 4) {
+            await expect(recent.getByText("No recent activity is available.")).toBeVisible();
+            await expect(recent.getByRole("button")).toHaveCount(0);
+          }
+          await page.evaluate(
+            () =>
+              new Promise<void>((resolve) =>
+                requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+              ),
+          );
+          expect(await grid.boundingBox()).toEqual(bounds);
+          const after = await api.getUserTerminal(session, shell.terminal_id);
+          expect([after.cols, after.rows]).toEqual([before.cols, before.rows]);
+        }),
+      ).toBe("KEEP-HISTORY-SELECTION");
+    }
+  } finally {
+    await api.terminateTerminal(session, shell.terminal_id);
+  }
 });
 
 test("connected renderer keeps copy selection, input, resize and Ctrl-C responsive under finite noisy output", async ({
@@ -466,14 +594,16 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       "import os,time",
       "os.write(1,b'\\x1b[2J\\x1b[HSELECT-WHILE-OUTPUT\\r\\n')",
       "for i in range(240):",
-      " width=max(1,os.get_terminal_size(1).columns-6)",
+      // Rows stay as wide as the half-row panel the 1500ms budget below was set
+      // against; the wider panel would otherwise grow the noise by 1.6x.
+      " width=min(48,max(1,os.get_terminal_size(1).columns-6))",
       " block=b'\\x1b[2;1H'+str(i).encode()+b':'+b'n'*width+b'\\x1b[K'",
       " os.write(1,block*300); time.sleep(0.02)",
     ].join("\n") + "\n",
   );
   const pane = await show(page, harness.baseUrl, session);
   await expect(pane.getByText("No recent activity is available.")).toBeVisible();
-  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
   const pages: Array<{ bytes: number; gap: boolean; retained: number }> = [];
@@ -526,7 +656,9 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
         releaseHistory();
         await expect(pane.getByText("No recent activity is available.")).toHaveCount(0);
         await expect(
-          pane.getByLabel("Recent activity").locator("option").filter({ hasText: "Human shell" }),
+          pane
+            .getByRole("region", { name: "Recent terminal activity" })
+            .getByRole("button", { name: /^Shell/ }),
         ).toHaveCount(1);
         await page.evaluate(
           () =>
@@ -548,7 +680,9 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       })
       .toBe(true);
     measurements.resizeMs = performance.now() - resizedAt;
-    await focus(pane);
+    // Copy and viewport resize preserve native input focus. Re-clicking the
+    // moving toolbar adds automation backoff while noisy output accumulates.
+    await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
     await armRenderedMarker(pane, "NOISE-INTERRUPTED");
     await page.keyboard.press("Control+c");
     await command(page, "printf '" + octal("NOISE-INTERRUPTED\n") + "'");
@@ -564,8 +698,10 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     await expect(accessible).toContainText("NOISE-INTERRUPTED");
     expect(measurements.interruptToRenderedMarkerMs).toBeLessThan(1500);
     expect(measurements.resizeMs).toBeLessThan(1500);
+    // The resize reached the tablet layout, whose list is a screen of its own.
+    await pane.getByRole("button", { name: "Open list", exact: true }).click();
     const closeAt = performance.now();
-    await pane.getByRole("button", { name: "Close shell", exact: true }).click();
+    await pane.getByRole("button", { name: "Close Shell 1", exact: true }).click();
     await expect
       .poll(async () => {
         const status = await api.getUserTerminal(session, terminal);

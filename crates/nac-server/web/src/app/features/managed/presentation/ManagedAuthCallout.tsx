@@ -34,9 +34,11 @@ const PROVIDER_ICONS = {
 export function ManagedAuthCallout({
   backend,
   className = "",
+  rejected = false,
 }: {
   backend: BackendKind;
   className?: string;
+  rejected?: boolean;
 }) {
   const { provider, signedIn } = useManagedSignIn(backend);
   const { state, start, cancel } = useDeviceLogin(undefined, provider);
@@ -51,13 +53,15 @@ export function ManagedAuthCallout({
   const label = managedAuthLabel(provider);
   const failed = state.status === "failed";
   const expired = signedIn && reach.isError;
-  const invalid = failed || expired;
+  const invalid = failed || expired || rejected;
   const waiting = state.status === "waiting";
   const settled = signedIn && !invalid;
+  // Managed repair never overwrites a credential, so a refused one is signed out first.
+  const replacing = rejected && signedIn;
 
   const control = waiting ? (
     <div className="flex items-center gap-2">
-      <Loader size={LoaderSize.Micro} />
+      <Loader size={LoaderSize.XSmall} />
       {state.prompt.user_code ? (
         <>
           <span className="text-micro text-basic-muted">Code</span>
@@ -68,6 +72,15 @@ export function ManagedAuthCallout({
       ) : (
         <span className="text-micro text-basic-muted">Waiting for the browser</span>
       )}
+      <Button
+        variant={ButtonVariant.Ghost}
+        size={ButtonSize.Medium}
+        content={ButtonContent.IconRight}
+        onClick={() => window.open(state.prompt.verification_uri, "_blank", "noopener,noreferrer")}
+      >
+        <span>Open {label}</span>
+        <Icon iconName={IconName.External} />
+      </Button>
       <Button
         variant={ButtonVariant.Ghost}
         size={ButtonSize.Medium}
@@ -98,16 +111,20 @@ export function ManagedAuthCallout({
       variant={ButtonVariant.Primary}
       size={ButtonSize.Medium}
       content={ButtonContent.IconRight}
-      loading={state.status === "starting"}
-      onClick={() => void start(provider)}
+      loading={state.status === "starting" || logout.isPending}
+      onClick={() =>
+        void (replacing ? logout.mutateAsync(provider) : Promise.resolve())
+          .then(() => start(provider))
+          .catch(() => {})
+      }
     >
-      <span>Sign in with {label}</span>
+      <span>{replacing ? `Sign in to ${label} again` : `Sign in with ${label}`}</span>
       <Icon iconName={IconName.External} />
     </Button>
   );
 
   const description = waiting
-    ? `Approve the request in the ${label} tab NAC opened.`
+    ? `Approve the request on ${label}, then return here.`
     : settled
       ? `NAC holds this login and every session on this provider uses it.`
       : `This provider authenticates with ${label} in your browser instead of with an API key.`;
@@ -136,9 +153,12 @@ export function ManagedAuthCallout({
       </div>
       <div className="flex flex-col items-stretch md:items-end gap-1 shrink-0">
         {control}
-        {invalid ? (
+        {failed || expired || logout.isError ? (
           <p className="label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] md:text-right pt-1 opacity-70">
-            {humanErrorText(failed ? state.message : reach.error, backend)}
+            {humanErrorText(
+              failed ? state.message : logout.isError ? logout.error : reach.error,
+              backend,
+            )}
           </p>
         ) : null}
       </div>

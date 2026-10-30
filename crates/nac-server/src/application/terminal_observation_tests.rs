@@ -646,3 +646,113 @@ async fn execution_pending_frame_is_rejected_when_cached_owner_is_replaced() {
         .detach("session", &terminal.id, observer);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn cached_terminal_views_validate_unknown_ids_without_allocating_or_attaching() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!("nac-cached-view-home-{}", Uuid::new_v4()));
+    let _env = ScopedModelEnv::isolated(&home, Some("server-test-key"));
+    let (manager, service, terminal, root) = fixture().await;
+    let oversized = "x".repeat(121);
+    // Even a corrupt cached key cannot bypass the existing identity bound.
+    manager
+        .inner
+        .active_sessions
+        .write()
+        .await
+        .insert(oversized.clone(), Arc::clone(&service));
+    let gates = manager.inner.lifecycle_gates.lock().unwrap().len();
+    for id in ["", "missing", oversized.as_str()] {
+        assert!(manager
+            .session_terminals()
+            .cached_user_service(id)
+            .await
+            .is_err());
+    }
+    assert_eq!(manager.inner.lifecycle_gates.lock().unwrap().len(), gates);
+    manager
+        .inner
+        .active_sessions
+        .write()
+        .await
+        .remove(&oversized);
+
+    seed_direct_session(&root, "detached");
+    assert!(manager
+        .session_terminals()
+        .cached_user_service("detached")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(!manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("detached"));
+    service.terminate_user_terminal(&terminal).await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn cached_terminal_view_rechecks_persisted_existence() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!("nac-deleted-view-home-{}", Uuid::new_v4()));
+    let _env = ScopedModelEnv::isolated(&home, Some("server-test-key"));
+    let (manager, service, terminal, root) = fixture().await;
+    service.terminate_user_terminal(&terminal).await.unwrap();
+    assert!(manager
+        .session_terminals()
+        .cached_user_service("session")
+        .await
+        .unwrap()
+        .is_some());
+    // Leave the process-local owner cached while deleting its durable row.
+    nac_core::sessions::delete_session(&root.join("store.db"), "session").unwrap();
+    assert!(manager
+        .session_terminals()
+        .cached_user_service("session")
+        .await
+        .is_err());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn cached_terminal_view_rechecks_configuration_before_replaying_a_receipt() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!("nac-config-view-home-{}", Uuid::new_v4()));
+    let _env = ScopedModelEnv::isolated(&home, Some("server-test-key"));
+    let (manager, service, terminal, root) = fixture().await;
+    service
+        .write_user_terminal_input(&terminal, b"printf receipt\\n\r")
+        .await
+        .unwrap();
+    let (observer, _) = manager
+        .session_terminals()
+        .attach_execution("session", &terminal, 2)
+        .await
+        .unwrap();
+    let frame = manager
+        .session_terminals()
+        .pull_execution("session", &terminal, observer, None, 1000)
+        .await
+        .unwrap();
+    assert!(frame.requires_ack);
+    service.terminate_user_terminal(&terminal).await.unwrap();
+    // An external configuration revision must fence an otherwise cached owner.
+    let config =
+        nac_core::sessions::load_session_config(&root.join("store.db"), "session").unwrap();
+    nac_core::sessions::update_raw_session_config(&root.join("store.db"), &config).unwrap();
+    assert!(matches!(
+        manager
+            .session_terminals()
+            .pull_execution("session", &terminal, observer, None, 0)
+            .await,
+        Err(TerminalApplicationError::Unavailable)
+    ));
+    manager
+        .inner
+        .terminal_observations
+        .detach("session", &terminal, observer);
+    std::fs::remove_dir_all(root).unwrap();
+}

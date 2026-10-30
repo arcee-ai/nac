@@ -14,6 +14,8 @@ import type { PermissionStateResponse } from "@/app/types/api";
 const SESSION_ID = "direct-session";
 
 const fakes = {
+  authorizeChildPermissionReviewRetry: vi.fn(),
+  authorizePermissionReviewRetry: vi.fn(),
   getPermissions: vi.fn(),
   replyPermission: vi.fn(),
   setPermissionApprovalMode: vi.fn(),
@@ -27,6 +29,13 @@ vi.spyOn(api, "setPermissionApprovalMode").mockImplementation((...args) =>
 );
 vi.spyOn(api, "deletePermissionGrant").mockImplementation((...args) =>
   fakes.deletePermissionGrant(...args),
+);
+vi.spyOn(api, "authorizePermissionReviewRetry").mockImplementation((...args) =>
+  fakes.authorizePermissionReviewRetry(...args),
+);
+
+vi.spyOn(api, "authorizeChildPermissionReviewRetry").mockImplementation((...args) =>
+  fakes.authorizeChildPermissionReviewRetry(...args),
 );
 
 function pendingState(): PermissionStateResponse {
@@ -53,7 +62,7 @@ function pendingState(): PermissionStateResponse {
   };
 }
 
-function mount(state: PermissionStateResponse, requesterLabel?: string) {
+function mount(state: PermissionStateResponse, requesterLabel?: string, compact = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -66,6 +75,7 @@ function mount(state: PermissionStateResponse, requesterLabel?: string) {
             sessionId={SESSION_ID}
             behavior="direct"
             requesterLabel={requesterLabel}
+            compact={compact}
           />
         </ToastProvider>
       </MemoryRouter>
@@ -76,10 +86,12 @@ function mount(state: PermissionStateResponse, requesterLabel?: string) {
 vi.spyOn(api, "listTraditionalChildren").mockResolvedValue([]);
 
 beforeEach(() => {
+  fakes.authorizeChildPermissionReviewRetry.mockReset().mockResolvedValue(undefined);
   fakes.getPermissions.mockReset().mockResolvedValue({ requests: [], grants: [] });
   fakes.replyPermission.mockReset().mockResolvedValue(undefined);
   fakes.setPermissionApprovalMode.mockReset().mockResolvedValue(undefined);
   fakes.deletePermissionGrant.mockReset().mockResolvedValue(undefined);
+  fakes.authorizePermissionReviewRetry.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
     media: "",
@@ -98,6 +110,27 @@ afterEach(() => {
 });
 
 describe("direct permission controls", () => {
+  it.each([
+    ["manual", "Manual", "Permissions"],
+    ["auto_approve", "Approve all", "Auto-approve on — open permissions"],
+    ["review", "Approve for me", "Approve for me enabled — open permissions"],
+  ] as const)("keeps all three modes accessible from a compact %s trigger", (mode, name, label) => {
+    const state = { ...pendingState(), approval_mode: mode, requests: [] };
+    mount(state, undefined, true);
+    const trigger = screen.getByRole("button", { name: label });
+    expect(trigger.textContent).not.toContain(name);
+    fireEvent.click(trigger);
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    expect((screen.getByRole("radio", { name }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("retains a pending count in the compact permission trigger", () => {
+    mount(pendingState(), undefined, true);
+    expect(screen.getByRole("button", { name: "Permissions (1)" }).textContent).toContain(
+      "(1 pending)",
+    );
+  });
+
   it("keeps a large remembered-grant list in the bounded scrolling modal body", () => {
     const state = pendingState();
     state.grants = Array.from({ length: 20 }, (_, index) => ({
@@ -140,10 +173,11 @@ describe("direct permission controls", () => {
   it("makes session-wide automatic approval discoverable and drains the pending request", async () => {
     mount(pendingState());
 
-    const toggle = screen.getByRole("switch", { name: "Approve all automatically" });
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    const toggle = screen.getByRole("radio", { name: "Approve all" });
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("radio", { name: "Manual" }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getByRole("dialog").textContent).toContain(
-      "This setting governs this session and all existing or future owned child agents",
+      "The mode governs this session and all existing or future owned child agents",
     );
     expect(screen.getByRole("dialog").textContent).toContain(
       "Separately managed orchestrators are not included",
@@ -155,7 +189,9 @@ describe("direct permission controls", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Auto-approve on — open permissions" }),
+        screen.getByRole("button", {
+          name: "Auto-approve on — open permissions",
+        }),
       ).toBeTruthy(),
     );
     expect(screen.getByRole("dialog").textContent).toContain(
@@ -187,10 +223,15 @@ describe("direct permission controls", () => {
     state.requests = [];
     mount(state);
 
-    fireEvent.click(screen.getByRole("button", { name: "Auto-approve on — open permissions" }));
-    const toggle = screen.getByRole("switch", { name: "Approve all automatically" });
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(toggle);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Auto-approve on — open permissions",
+      }),
+    );
+    expect((screen.getByRole("radio", { name: "Approve all" }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "Manual" }));
 
     await waitFor(() =>
       expect(fakes.setPermissionApprovalMode).toHaveBeenCalledWith(SESSION_ID, "manual"),
@@ -200,9 +241,16 @@ describe("direct permission controls", () => {
 
   it("identifies each child control and explains inherited automatic approval", () => {
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
     });
-    const automatic = { ...pendingState(), approval_mode: "auto_approve" as const, requests: [] };
+    const automatic = {
+      ...pendingState(),
+      approval_mode: "auto_approve" as const,
+      requests: [],
+    };
     client.setQueryData(queryKeys.sessionPermissions("child-review"), automatic);
     client.setQueryData(queryKeys.sessionPermissions("child-tests"), automatic);
 
@@ -246,8 +294,229 @@ describe("direct permission controls", () => {
     expect(dialog.textContent).toContain(
       "Ordinary requests from this child agent inherit automatic approval from the parent session.",
     );
-    expect(screen.queryByRole("switch", { name: "Approve all automatically" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Approve all" })).toBeNull();
   });
+
+  it("offers exactly three modes and selects Approve for me in the same control", async () => {
+    const state = pendingState();
+    state.requests = [];
+    mount(state);
+    fireEvent.click(screen.getByRole("button", { name: "Permissions" }));
+
+    const radios = screen.getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((radio) => radio.getAttribute("aria-label"))).toEqual([
+      "Manual",
+      "Approve all",
+      "Approve for me",
+    ]);
+    expect(
+      radios.filter((radio) => radio.checked).map((radio) => radio.getAttribute("aria-label")),
+    ).toEqual(["Manual"]);
+    fireEvent.click(screen.getByRole("radio", { name: "Approve for me" }));
+
+    await waitFor(() =>
+      expect(fakes.setPermissionApprovalMode).toHaveBeenCalledWith(SESSION_ID, "review"),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: "Approve for me enabled — open permissions",
+        }),
+      ).toBeTruthy(),
+    );
+  });
+
+  it("keeps the previous mode and shows the credential guidance when review cannot be enabled", async () => {
+    const message =
+      "Sign in to Arcee or configure an Arcee API key in NAC before enabling Approve for me.";
+    fakes.setPermissionApprovalMode.mockRejectedValue(new Error(message));
+    const state = pendingState();
+    state.requests = [];
+    mount(state);
+    fireEvent.click(screen.getByRole("button", { name: "Permissions" }));
+
+    fireEvent.click(screen.getByRole("radio", { name: "Approve for me" }));
+
+    await waitFor(() => expect(document.body.textContent).toContain(message));
+    expect((screen.getByRole("radio", { name: "Manual" }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy();
+  });
+
+  it("explains eligibility, availability and temporary history before the first review", () => {
+    const state: PermissionStateResponse = {
+      approval_mode: "review",
+      requests: [],
+      grants: [],
+      reviews: [],
+      authorizable_review_ids: [],
+    };
+    fakes.getPermissions.mockResolvedValue(state);
+    mount(state);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Approve for me enabled — open permissions" }),
+    );
+    expect(screen.getByRole("status", { name: "Review service status" }).textContent).toContain(
+      "Service availability not checked",
+    );
+    expect(document.body.textContent).toContain("Ineligible requests still ask you");
+    expect(document.body.textContent).toContain("it does not open a manual prompt");
+    const history = screen.getByRole("region", { name: "Automatic reviews" });
+    expect(history.textContent).toContain("No reviews are retained");
+    expect(history.textContent).toContain("idle session is unloaded");
+    expect(history.textContent).toContain("mode and recorded human intent remain saved");
+    expect(screen.getByRole("button", { name: "Switch to Manual" })).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/jev/i);
+  });
+
+  it("lists blocked reviews and authorizes one retry or switches to Manual", async () => {
+    const state: PermissionStateResponse = {
+      approval_mode: "review",
+      requests: [],
+      grants: [],
+      reviews: [
+        {
+          id: "review-1",
+          session_id: SESSION_ID,
+          call_id: "call-9",
+          tool: "exec_command",
+          backend: "local",
+          resources: [
+            {
+              action: "execute",
+              resource: "command:[git][push]",
+              display: "git push",
+            },
+          ],
+          user_authorized_retry: false,
+          outcome: "rejected",
+          code: "review_rejected",
+          category: "out_of_scope",
+          duration_ms: 812,
+          reviewer: "jev:typesafe/jev-1.13",
+          created_at_epoch_ms: 1,
+        },
+        {
+          id: "review-2",
+          session_id: SESSION_ID,
+          call_id: "call-10",
+          tool: "exec_command",
+          backend: "podman_with_host_mounts",
+          resources: [{ action: "execute", resource: "command:[ls]", display: "ls" }],
+          user_authorized_retry: false,
+          reviewer: "jev:typesafe/jev-1.13",
+          created_at_epoch_ms: 2,
+        },
+        {
+          id: "review-3",
+          session_id: SESSION_ID,
+          call_id: "call-11",
+          tool: "exec_command",
+          backend: "local",
+          resources: [{ action: "execute", resource: "command:[pwd]", display: "pwd" }],
+          user_authorized_retry: false,
+          outcome: "unavailable",
+          code: "review_unavailable",
+          reviewer: "jev:typesafe/jev-1.13",
+          created_at_epoch_ms: 3,
+        },
+      ],
+      authorizable_review_ids: ["review-1"],
+    };
+    fakes.getPermissions.mockResolvedValue(state);
+    mount(state);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Approve for me enabled (1) — open permissions",
+      }),
+    );
+
+    const blocked = screen.getByRole("region", { name: "Automatic reviews" });
+    expect(blocked.textContent).toContain("git push");
+    expect(blocked.textContent).toContain("Blocked: out of scope");
+    expect(blocked.textContent).toContain("unsandboxed host");
+    expect(blocked.textContent).toContain("container with writable host mounts");
+    expect(blocked.textContent?.match(/unsandboxed host/g)).toHaveLength(2);
+    expect(blocked.textContent).toContain("Reviewing");
+    expect(blocked.textContent).toContain("Review service unavailable");
+    expect(screen.getAllByRole("button", { name: "Authorize retry" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Authorize retry" }));
+    await waitFor(() =>
+      expect(fakes.authorizePermissionReviewRetry).toHaveBeenCalledWith(SESSION_ID, "review-1"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to Manual" }));
+    await waitFor(() =>
+      expect(fakes.setPermissionApprovalMode).toHaveBeenCalledWith(SESSION_ID, "manual"),
+    );
+  });
+
+  it.each([undefined, "parent-session"])(
+    "routes child retries through its parent when available (%s)",
+    async (parentSessionId) => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      client.setQueryData(queryKeys.sessionPermissions("child-review"), {
+        approval_mode: "review",
+        requests: [],
+        grants: [],
+        reviews: [
+          {
+            id: "child-block",
+            session_id: "child-review",
+            tool: "exec_command",
+            backend: "local",
+            resources: [
+              { action: "execute", resource: "command:[git][push]", display: "git push" },
+            ],
+            user_authorized_retry: false,
+            outcome: "rejected",
+            code: "review_rejected",
+            reviewer: "jev:typesafe/jev-1.13",
+            created_at_epoch_ms: 1,
+          },
+        ],
+        authorizable_review_ids: ["child-block"],
+      } satisfies PermissionStateResponse);
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <ToastProvider>
+              <PermissionControls
+                sessionId="child-review"
+                retryParentSessionId={parentSessionId}
+                behavior="direct"
+                label="Permissions for Review persistence"
+                autoApprovalAvailable={false}
+              />
+            </ToastProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Permissions for Review persistence — Approve for me inherited; open permissions",
+        }),
+      );
+      const retry = screen.getByRole("button", { name: "Authorize retry" }) as HTMLButtonElement;
+      expect(retry.disabled).toBe(!parentSessionId);
+      if (parentSessionId) {
+        fireEvent.click(retry);
+        await waitFor(() =>
+          expect(fakes.authorizeChildPermissionReviewRetry).toHaveBeenCalledWith(
+            parentSessionId,
+            "child-review",
+            "child-block",
+          ),
+        );
+        expect(fakes.authorizePermissionReviewRetry).not.toHaveBeenCalled();
+      } else {
+        expect(document.body.textContent).toContain("Open the child's parent to authorize a retry");
+      }
+      expect(screen.queryByRole("button", { name: "Switch to Manual" })).toBeNull();
+      expect(fakes.setPermissionApprovalMode).not.toHaveBeenCalled();
+    },
+  );
 
   it("reconciles a mode change made through another server process", async () => {
     const manual = pendingState();
@@ -260,7 +529,9 @@ describe("direct permission controls", () => {
     await waitFor(
       () =>
         expect(
-          screen.getByRole("button", { name: "Auto-approve on — open permissions" }),
+          screen.getByRole("button", {
+            name: "Auto-approve on — open permissions",
+          }),
         ).toBeTruthy(),
       { timeout: 2_500 },
     );

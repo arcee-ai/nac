@@ -206,6 +206,10 @@ pub struct WorkspaceRevisionChanges {
 pub struct WorkspaceSnapshot {
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub host_root: Option<PathBuf>,
+    /// Session-directory prefix for repository-relative Files paths. Empty at
+    /// the repository root; unavailable when the Git location is unknown.
+    #[serde(default)]
+    pub file_path_prefix: Option<String>,
     pub workspace_display: String,
     pub repo_label: Option<String>,
     pub branch: Option<String>,
@@ -542,6 +546,7 @@ pub fn workspace_snapshot(
     let Some(target) = target else {
         return WorkspaceSnapshot {
             host_root: None,
+            file_path_prefix: None,
             workspace_display: workspace_display.to_string(),
             repo_label: None,
             branch: None,
@@ -560,6 +565,7 @@ pub fn workspace_snapshot(
         }
     });
 
+    let file_path_prefix = run_git(target, &["rev-parse", "--show-prefix"]);
     let branch = run_git(target, &["branch", "--show-current"]).filter(|value| !value.is_empty());
     let remote = run_git(target, &["config", "--get", "remote.origin.url"]);
     let repo_label = remote.as_deref().and_then(parse_remote_label).or_else(|| {
@@ -574,6 +580,7 @@ pub fn workspace_snapshot(
         None => {
             return WorkspaceSnapshot {
                 host_root: Some(target.root().to_path_buf()),
+                file_path_prefix,
                 workspace_display: workspace_display.to_string(),
                 repo_label,
                 branch,
@@ -626,6 +633,7 @@ pub fn workspace_snapshot(
 
     WorkspaceSnapshot {
         host_root: Some(target.root().to_path_buf()),
+        file_path_prefix,
         workspace_display: workspace_display.to_string(),
         repo_label,
         branch,
@@ -717,7 +725,9 @@ fn parse_name_status(raw: &str) -> HashMap<String, ChangedFileStat> {
         let status = match code.chars().next() {
             Some('A') => "A",
             Some('D') => "D",
-            Some('R') | Some('C') => "R",
+            Some('R') => "R",
+            Some('C') => "C",
+            Some('T') => "T",
             _ => "M",
         };
         file_map.insert(
@@ -833,9 +843,8 @@ pub fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, Ch
             continue;
         }
 
-        let normalized_status = if status == "??" {
+        if status == "??" {
             counts.untracked += 1;
-            "?".to_string()
         } else {
             let x = status.chars().next().unwrap_or(' ');
             let y = status.chars().nth(1).unwrap_or(' ');
@@ -844,25 +853,19 @@ pub fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, Ch
             }
             if status.contains('R') {
                 counts.renamed += 1;
-                "R".to_string()
             } else if status.contains('A') {
                 counts.added += 1;
-                "A".to_string()
             } else if status.contains('D') {
                 counts.deleted += 1;
-                "D".to_string()
-            } else {
-                if x != ' ' || y != ' ' {
-                    counts.modified += 1;
-                }
-                "M".to_string()
+            } else if x != ' ' || y != ' ' {
+                counts.modified += 1;
             }
-        };
+        }
 
         file_map.insert(
             path.clone(),
             ChangedFileStat {
-                status: normalized_status,
+                status: porcelain_letter(status).to_string(),
                 path,
                 additions: None,
                 deletions: None,
@@ -871,6 +874,24 @@ pub fn parse_status_porcelain(raw: &str) -> (GitStatusCounts, HashMap<String, Ch
     }
 
     (counts, file_map)
+}
+
+/// The one letter a porcelain `XY` pair is shown as. A conflict comes first:
+/// git marks one with `U` on either side, or as `AA` / `DD` when both sides
+/// added or deleted the path. Copies and type changes keep their own letters
+/// rather than reading as plain modifications.
+fn porcelain_letter(xy: &str) -> &'static str {
+    match xy {
+        "??" => "?",
+        "AA" | "DD" => "U",
+        _ if xy.contains('U') => "U",
+        _ if xy.contains('R') => "R",
+        _ if xy.contains('C') => "C",
+        _ if xy.contains('A') => "A",
+        _ if xy.contains('D') => "D",
+        _ if xy.contains('T') => "T",
+        _ => "M",
+    }
 }
 
 pub fn parse_numstat_pairs(raw: &str, cached_raw: &str) -> NumstatSummary {
@@ -917,6 +938,7 @@ pub fn parse_numstat_pairs(raw: &str, cached_raw: &str) -> NumstatSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::worktree::test_harness::TestRepo;
 
     #[test]
     fn session_summary_snapshot_defaults_legacy_presentation_fields() {
@@ -946,6 +968,86 @@ mod tests {
         let snapshot = workspace_snapshot("/workspace/project", None);
         assert!(snapshot.error.is_some());
         assert_eq!(snapshot.host_root, None);
+        assert_eq!(snapshot.file_path_prefix, None);
+    }
+
+    #[test]
+    fn workspace_file_prefix_maps_session_directory_to_repository_files() {
+        let repo = TestRepo::new("view-file-prefix");
+        let cwd = repo.root.as_path().join("crates/foo");
+        std::fs::create_dir_all(cwd.join("src")).unwrap();
+        std::fs::create_dir_all(repo.root.as_path().join("src")).unwrap();
+        std::fs::write(cwd.join("src/lib.rs"), "nested file").unwrap();
+        std::fs::write(repo.root.as_path().join("src/lib.rs"), "root decoy").unwrap();
+
+        let target = GitTarget::local(cwd.clone());
+        let snapshot = workspace_snapshot("/container/work", Some(&target));
+        assert_eq!(snapshot.host_root, Some(cwd));
+        assert_eq!(snapshot.workspace_display, "/container/work");
+        assert_eq!(snapshot.file_path_prefix.as_deref(), Some("crates/foo/"));
+        let file = format!("{}src/lib.rs", snapshot.file_path_prefix.unwrap());
+        assert!(list_files(&target).unwrap().files.contains(&file));
+        assert_eq!(
+            read_file(&target, &file).unwrap().content.as_deref(),
+            Some("nested file")
+        );
+        assert_eq!(
+            read_file(&target, "src/lib.rs").unwrap().content.as_deref(),
+            Some("root decoy")
+        );
+        // The Files service still rejects directory and escaping targets.
+        assert!(read_file(&target, "crates/foo/src/").is_err());
+        assert!(read_file(&target, "../src/lib.rs").is_err());
+
+        let root = workspace_snapshot("/repo", Some(&GitTarget::local(repo.root.as_path())));
+        assert_eq!(root.file_path_prefix.as_deref(), Some(""));
+        let mut legacy = serde_json::to_value(root).unwrap();
+        legacy.as_object_mut().unwrap().remove("file_path_prefix");
+        assert_eq!(
+            serde_json::from_value::<WorkspaceSnapshot>(legacy)
+                .unwrap()
+                .file_path_prefix,
+            None
+        );
+    }
+
+    #[test]
+    fn workspace_file_prefix_preserves_leading_space_directory_identity() {
+        let repo = TestRepo::new("view-file-prefix-space");
+        let cwd = repo.root.join(" app");
+        std::fs::create_dir_all(cwd.join("src")).unwrap();
+        std::fs::create_dir_all(repo.root.join("app/src")).unwrap();
+        std::fs::write(cwd.join("src/lib.rs"), "space directory").unwrap();
+        std::fs::write(repo.root.join("app/src/lib.rs"), "trimmed decoy").unwrap();
+
+        let target = GitTarget::local(cwd.clone());
+        let snapshot = workspace_snapshot("/repo/ app", Some(&target));
+        assert_eq!(snapshot.host_root, Some(cwd));
+        assert_eq!(snapshot.file_path_prefix.as_deref(), Some(" app/"));
+        assert_eq!(
+            read_file(&target, " app/src/lib.rs")
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("space directory")
+        );
+        assert_eq!(
+            read_file(&target, "app/src/lib.rs")
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("trimmed decoy")
+        );
+    }
+
+    #[test]
+    fn workspace_file_prefix_is_unknown_outside_git() {
+        let repo = TestRepo::new("view-file-prefix-unknown");
+        let directory = repo.base.join("outside-git");
+        std::fs::create_dir(&directory).unwrap();
+        let snapshot = workspace_snapshot("/workspace", Some(&GitTarget::local(directory)));
+        assert_eq!(snapshot.file_path_prefix, None);
+        assert!(snapshot.error.is_some());
     }
 
     #[test]
@@ -970,6 +1072,50 @@ mod tests {
             Some("arcee-ai/nac")
         );
         assert_eq!(parse_remote_label("not-a-remote"), None);
+    }
+
+    #[test]
+    fn parse_status_porcelain_preserves_every_unmerged_status() {
+        for xy in ["DD", "AU", "UD", "UA", "DU", "AA", "UU"] {
+            let raw = format!("{xy} conflict.txt\n");
+            let (_, files) = parse_status_porcelain(&raw);
+            assert_eq!(files["conflict.txt"].status, "U", "status {xy}");
+        }
+    }
+
+    #[test]
+    fn parse_status_porcelain_preserves_copy_and_type_changes() {
+        for xy in ["C ", " C", "T ", " T", "MT", "TM"] {
+            let raw = format!("{xy} changed.txt\n");
+            let (_, files) = parse_status_porcelain(&raw);
+            let expected = if xy.contains('C') { "C" } else { "T" };
+            assert_eq!(files["changed.txt"].status, expected, "status {xy}");
+        }
+        // Captured porcelain v1 paths: copy/rename arrows identify the target.
+        let (_, copied) = parse_status_porcelain("C  original.txt -> copied.txt\n");
+        assert_eq!(copied["copied.txt"].status, "C");
+        assert!(!copied.contains_key("original.txt"));
+        let (_, typed) = parse_status_porcelain(" T symlink.txt\n");
+        assert_eq!(typed["symlink.txt"].status, "T");
+    }
+
+    #[test]
+    fn parse_name_status_preserves_copy_type_change_and_rename_destinations() {
+        let files = parse_name_status(
+            "C100\toriginal.txt\tcopied.txt\nT\tsymlink.txt\nR100\told.txt\trenamed.txt\n",
+        );
+
+        assert_eq!(files.len(), 3);
+        for (path, status) in [
+            ("copied.txt", "C"),
+            ("symlink.txt", "T"),
+            ("renamed.txt", "R"),
+        ] {
+            assert_eq!(files[path].status, status);
+            assert_eq!(files[path].path, path);
+        }
+        assert!(!files.contains_key("original.txt"));
+        assert!(!files.contains_key("old.txt"));
     }
 
     #[test]

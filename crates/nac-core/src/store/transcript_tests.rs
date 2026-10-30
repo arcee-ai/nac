@@ -435,6 +435,154 @@ fn inbox_delivery_and_transcript_commit_are_atomic_for_steers_and_prompts() {
 }
 
 #[test]
+fn person_input_becomes_review_intent_only_as_it_reaches_the_model() {
+    use crate::sessions::ReviewIntent::{Accepted, NeverRecorded};
+    let path = temp_store_path("person_intent");
+    initialize(&path).unwrap();
+    crate::store::insert_test_session(&path, "session");
+    let intent = || crate::sessions::load_permission_review_intent(&path, "session").unwrap();
+    let user = |content: &str| Message::User {
+        content: content.to_string(),
+    };
+    let messages =
+        |texts: &[&str]| Accepted(texts.iter().map(|text| (*text).to_string()).collect());
+    let writer = TranscriptLogWriter::new(&path).unwrap();
+    let settle_runs = || {
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "DELETE FROM session_run_recovery WHERE session_id = 'session'",
+                [],
+            )
+            .unwrap();
+    };
+
+    // Automation never becomes intent.
+    writer
+        .append_run_prompt("session", 0, &user("goal continuation"), "run-0")
+        .unwrap();
+    assert_eq!(intent(), NeverRecorded);
+    settle_runs();
+
+    // A person's prompt counts as typed, before expansion.
+    writer
+        .append_person_run_prompt("session", 1, &user("expanded /fix"), "run-a", "/fix tests")
+        .unwrap();
+    assert_eq!(intent(), messages(&["/fix tests"]));
+
+    // A person's steer counts when it is delivered, not before.
+    let steer = create_person_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Steer,
+        "do not push",
+        Some("run-a"),
+        None,
+        "do not push",
+    )
+    .unwrap();
+    create_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Steer,
+        "retry the blocked action",
+        Some("run-a"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(intent(), messages(&["/fix tests"]));
+    let delivered = writer
+        .append_pending_inbox_steers("session", "run-a", 2)
+        .unwrap();
+    assert_eq!(delivered.len(), 2);
+    assert_eq!(delivered[0].id, steer.id);
+    assert_eq!(intent(), messages(&["/fix tests", "do not push"]));
+
+    // So does a person's steering through the orchestrator queue.
+    let steering = queue_person_thread_steering(
+        &path,
+        "session",
+        ORCHESTRATOR_STEERING_TARGET,
+        "run-a",
+        "keep it short",
+    )
+    .unwrap();
+    queue_thread_steering(
+        &path,
+        "session",
+        ORCHESTRATOR_STEERING_TARGET,
+        "run-a",
+        "child report",
+    )
+    .unwrap();
+    let claimed = claim_thread_steering(&path, "session", "run-a").unwrap();
+    assert_eq!(claimed.len(), 2);
+    assert_eq!(claimed[0].id, steering.id);
+    writer
+        .append_claimed_thread_steering(
+            "session",
+            "run-a",
+            &claimed.iter().map(|record| record.id).collect::<Vec<_>>(),
+            4,
+            &[user("keep it short"), user("child report")],
+        )
+        .unwrap();
+    assert_eq!(
+        intent(),
+        messages(&["/fix tests", "do not push", "keep it short"])
+    );
+
+    // A queued item counts once it starts a run; until then, and if it is
+    // cancelled, it changes nothing. A new run does not lift what came
+    // before.
+    let cancelled = create_person_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Queue,
+        "publish the release",
+        None,
+        None,
+        "publish the release",
+    )
+    .unwrap();
+    cancel_pending_session_inbox_item(&path, "session", cancelled.id, cancelled.version).unwrap();
+    let queued = create_person_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Queue,
+        "now update the docs",
+        None,
+        None,
+        "now update the docs",
+    )
+    .unwrap();
+    assert_eq!(
+        intent(),
+        messages(&["/fix tests", "do not push", "keep it short"])
+    );
+    settle_runs();
+    writer
+        .append_inbox_run_prompt(
+            "session",
+            6,
+            &user("now update the docs"),
+            "run-b",
+            queued.id,
+        )
+        .unwrap();
+    assert_eq!(
+        intent(),
+        messages(&[
+            "/fix tests",
+            "do not push",
+            "keep it short",
+            "now update the docs"
+        ])
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn transcript_log_gap_repair_keeps_the_trusted_prefix_and_refreshes_summary() {
     let path = temp_store_path("gap_repair");
     initialize(&path).unwrap();
@@ -1015,4 +1163,236 @@ fn all_106_expected_three_found_four_is_rejected_atomically() {
         "{error:#}"
     );
     assert_eq!(writer.read_from("session-a", 0).unwrap().len(), 3);
+}
+
+#[test]
+fn user_history_truncation_invalidates_root_intent_atomically_and_persistently() {
+    use crate::sessions::ReviewIntent::{Accepted, Unavailable};
+    for snapshot in [false, true] {
+        let path = temp_store_path(if snapshot {
+            "intent_blob_revert"
+        } else {
+            "intent_log_revert"
+        });
+        initialize(&path).unwrap();
+        for id in ["root", "child", "unrelated"] {
+            crate::store::insert_test_session(&path, id);
+        }
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute("UPDATE sessions SET behavior = 'direct'", [])
+            .unwrap();
+        create_traditional_child_relationship(
+            &path,
+            "root",
+            "child",
+            GENERAL_CHILD_PROFILE,
+            "child",
+        )
+        .unwrap();
+        crate::sessions::update_permission_approval_mode(
+            &path,
+            "root",
+            crate::permissions::PermissionApprovalMode::Review,
+        )
+        .unwrap();
+        let connection = open_runtime_connection(&path).unwrap();
+        record_review_intent(&connection, "root", "do not push").unwrap();
+        record_review_intent(&connection, "unrelated", "unrelated scope").unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        let user = Message::User {
+            content: "publish the release".into(),
+        };
+        if snapshot {
+            set_snapshot_messages(&path, "child", std::slice::from_ref(&user));
+        }
+        writer
+            .append_person_run_prompt(
+                "child",
+                u64::from(snapshot),
+                &user,
+                "run-a",
+                "publish the release",
+            )
+            .unwrap();
+        let load = |id| crate::sessions::load_permission_review_intent(&path, id).unwrap();
+        assert_eq!(
+            load("child"),
+            Accepted(vec!["do not push".into(), "publish the release".into()])
+        );
+        assert_eq!(writer.delete_from("child", 99).unwrap(), 0);
+        let before =
+            crate::sessions::load_effective_permission_approval_state(&path, "root").unwrap();
+        if snapshot {
+            writer
+                .replace_snapshot_and_delete_from("child", &[])
+                .unwrap();
+        } else {
+            writer.delete_from("child", 0).unwrap();
+        }
+        let after =
+            crate::sessions::load_effective_permission_approval_state(&path, "child").unwrap();
+        assert_eq!(after.0, before.0);
+        assert_eq!(after.1, before.1);
+        assert!(
+            after.2 > before.2,
+            "a sibling verdict must lose its old intent revision"
+        );
+        assert_eq!(load("root"), Unavailable);
+        assert_eq!(load("child"), Unavailable);
+        assert_eq!(load("unrelated"), Accepted(vec!["unrelated scope".into()]));
+        record_review_intent(&connection, "child", "continue").unwrap();
+        assert_eq!(load("root"), Unavailable);
+        drop(connection);
+        drop(writer);
+        let reopened = TranscriptLogWriter::new(&path).unwrap();
+        assert!(reopened.read_from("child", 0).unwrap().is_empty());
+        assert_eq!(
+            load("child"),
+            Unavailable,
+            "invalidation survives reopening the store"
+        );
+        if snapshot {
+            let blob: String = open_runtime_connection(&path)
+                .unwrap()
+                .query_row(
+                    "SELECT messages_json FROM sessions WHERE session_id = 'child'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(blob, "[]");
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[test]
+fn intent_invalidation_failure_rolls_back_log_and_snapshot_truncation() {
+    use crate::sessions::ReviewIntent::Accepted;
+    for snapshot in [false, true] {
+        let path = temp_store_path("intent_revert_rollback");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        let user = Message::User {
+            content: "publish the release".into(),
+        };
+        if snapshot {
+            set_snapshot_messages(&path, "session", std::slice::from_ref(&user));
+        }
+        writer
+            .append_person_run_prompt(
+                "session",
+                u64::from(snapshot),
+                &user,
+                "run-a",
+                "publish the release",
+            )
+            .unwrap();
+        let connection = open_runtime_connection(&path).unwrap();
+        connection.execute_batch("CREATE TRIGGER reject_intent_invalidation BEFORE UPDATE OF permission_review_intent ON sessions BEGIN SELECT RAISE(ABORT, 'test invalidation rejected'); END;").unwrap();
+        let revision =
+            crate::sessions::load_effective_permission_approval_state(&path, "session").unwrap();
+        let result = if snapshot {
+            writer.replace_snapshot_and_delete_from("session", &[])
+        } else {
+            writer.delete_from("session", 0)
+        };
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("test invalidation rejected"));
+        assert_eq!(writer.read_from("session", 0).unwrap().len(), 1);
+        assert_eq!(
+            crate::sessions::load_permission_review_intent(&path, "session").unwrap(),
+            Accepted(vec!["publish the release".into()])
+        );
+        assert_eq!(
+            crate::sessions::load_effective_permission_approval_state(&path, "session").unwrap(),
+            revision
+        );
+        if snapshot {
+            let blob: String = connection
+                .query_row(
+                    "SELECT messages_json FROM sessions WHERE session_id = 'session'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(blob, serde_json::to_string(&vec![user]).unwrap());
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[test]
+fn tool_only_history_repair_preserves_review_intent() {
+    use crate::sessions::ReviewIntent::Accepted;
+    let path = temp_store_path("intent_tool_repair");
+    initialize(&path).unwrap();
+    crate::store::insert_test_session(&path, "session");
+    let connection = open_runtime_connection(&path).unwrap();
+    record_review_intent(&connection, "session", "fix tests; do not push").unwrap();
+    let writer = TranscriptLogWriter::new(&path).unwrap();
+    writer
+        .append(
+            "session",
+            0,
+            &Message::Tool {
+                tool_call_id: "call-a".into(),
+                content: "orphaned".into(),
+            },
+        )
+        .unwrap();
+    writer.delete_from("session", 0).unwrap();
+    assert_eq!(
+        crate::sessions::load_permission_review_intent(&path, "session").unwrap(),
+        Accepted(vec!["fix tests; do not push".into()])
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn gap_repair_invalidates_intent_only_when_it_discards_user_history() {
+    use crate::sessions::ReviewIntent::{Accepted, Unavailable};
+    for removed_user in [false, true] {
+        let path = temp_store_path("intent_gap_repair");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        let connection = open_runtime_connection(&path).unwrap();
+        record_review_intent(&connection, "session", "publish the release").unwrap();
+        let orphan = if removed_user {
+            Message::User {
+                content: "publish the release".into(),
+            }
+        } else {
+            Message::Tool {
+                tool_call_id: "call-a".into(),
+                content: "orphaned".into(),
+            }
+        };
+        append_thread_event(
+            &path,
+            "session",
+            ORCHESTRATOR_STEERING_TARGET,
+            &encode_transcript_log_entry(1, &orphan).unwrap(),
+        )
+        .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        assert!(writer
+            .read_tail_repairing_gap("session", 0)
+            .unwrap()
+            .1
+            .is_some());
+        assert_eq!(
+            crate::sessions::load_permission_review_intent(&path, "session").unwrap(),
+            if removed_user {
+                Unavailable
+            } else {
+                Accepted(vec!["publish the release".into()])
+            }
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
 }

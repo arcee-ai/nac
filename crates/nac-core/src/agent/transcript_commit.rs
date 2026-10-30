@@ -158,6 +158,7 @@ impl Agent {
         message: Message,
         run_id: &SessionRunId,
         inbox_item_id: Option<i64>,
+        review_intent: Option<String>,
     ) -> Result<()> {
         let idx = self.messages.len() as u64;
         if let Some(sink) = &self.transcript_log {
@@ -168,15 +169,24 @@ impl Agent {
             self.steering_append_pending = true;
             self.pending_log_end = Some(idx + 1);
             let appended = crate::store::spawn_blocking_store_caller(move || {
-                let append = || match inbox_item_id {
-                    Some(inbox_item_id) => writer.append_inbox_run_prompt(
+                let append = || match (inbox_item_id, review_intent.as_deref()) {
+                    (Some(inbox_item_id), _) => writer.append_inbox_run_prompt(
                         &session_id,
                         idx,
                         &stored_message,
                         &run_id,
                         inbox_item_id,
                     ),
-                    None => writer.append_run_prompt(&session_id, idx, &stored_message, &run_id),
+                    (None, Some(review_intent)) => writer.append_person_run_prompt(
+                        &session_id,
+                        idx,
+                        &stored_message,
+                        &run_id,
+                        review_intent,
+                    ),
+                    (None, None) => {
+                        writer.append_run_prompt(&session_id, idx, &stored_message, &run_id)
+                    }
                 };
                 match append() {
                     Err(error)

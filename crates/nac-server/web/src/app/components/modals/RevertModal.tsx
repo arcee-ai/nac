@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { Button, ButtonContent, ButtonSize, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useRevertSession } from "@/app/services/queries";
@@ -18,7 +20,13 @@ interface RevertModalProps {
  * after this prompt and the file changes they made are both discarded, and
  * neither comes back.
  */
-export function RevertModal({ open, onClose, sessionId, messageIdx, prompt }: RevertModalProps) {
+export const RevertModal = memo(function RevertModal({
+  open,
+  onClose,
+  sessionId,
+  messageIdx,
+  prompt,
+}: RevertModalProps) {
   const toast = useToast();
   const revert = useRevertSession();
 
@@ -73,4 +81,4 @@ export function RevertModal({ open, onClose, sessionId, messageIdx, prompt }: Re
       </p>
     </Modal>
   );
-}
+});

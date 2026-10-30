@@ -82,7 +82,7 @@ export function ConfigListNav({
       ))}
       {isLoading ? (
         <div className="flex items-center gap-2 px-2 py-1">
-          <Loader size={LoaderSize.Micro} />
+          <Loader size={LoaderSize.XSmall} />
           <span className="text-micro text-basic-muted">Loading…</span>
         </div>
       ) : null}

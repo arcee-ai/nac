@@ -91,7 +91,21 @@ impl PermissionBroker {
             event_bus: StdMutex::new(None),
             state: StdMutex::new(PermissionBrokerState::default()),
             approval_observer: tokio::sync::Mutex::new(PermissionApprovalObserver::default()),
+            reviewer: StdMutex::new(None),
+            review: StdMutex::new(ReviewMemory::default()),
+            review_deadline: StdMutex::new(REVIEW_DEADLINE),
+            command_environment: StdMutex::new(None),
+            review_backend: StdMutex::new(review::ReviewBackendSource::Fixed(backend.into())),
+            caller_project: std::sync::OnceLock::new(),
         }
+    }
+
+    pub(crate) fn remember_caller_project(&self, project_id: &str) {
+        let _ = self.caller_project.set(project_id.to_owned());
+    }
+
+    pub(crate) fn caller_project(&self) -> Option<&str> {
+        self.caller_project.get().map(String::as_str)
     }
 
     pub(crate) fn attach_event_bus(&self, bus: crate::events::SessionEventBus) {
@@ -152,6 +166,32 @@ impl PermissionBroker {
         AfterCommit: FnOnce() -> AfterCommitFuture,
         AfterCommitFuture: std::future::Future<Output = ()>,
     {
+        if mode == PermissionApprovalMode::Review {
+            let available = match self.reviewer() {
+                Some(reviewer) => tokio::task::spawn_blocking(move || reviewer.check_available())
+                    .await
+                    .unwrap_or_else(|error| {
+                        Err(format!(
+                            "automatic permission review could not be checked: {error}"
+                        ))
+                    }),
+                None => {
+                    Err("automatic permission review is not available in this session".to_string())
+                }
+            };
+            if let Err(message) = available {
+                return Err(PermissionApprovalModeUpdateError::ReviewerUnavailable(message).into());
+            }
+            // Selecting Approve for me again changes nothing. Reserving a
+            // transition would move the revision and discard reviews in
+            // flight, so it is a no-op.
+            if matches!(
+                self.load_approval_state().await,
+                Ok((PermissionApprovalMode::Review, _, _))
+            ) {
+                return Ok(());
+            }
+        }
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
         let revision = crate::store::spawn_blocking_store_caller(move || {
@@ -315,28 +355,11 @@ impl PermissionBroker {
         .await
     }
 
-    async fn authorize_invocation(
-        self: &Arc<Self>,
-        tool: &str,
-        resources: &[PermissionResource],
-        context: &crate::tools::kernel::ToolCallContext,
-        cancellation: &crate::tools::ThreadCancellation,
-        human_submitted: bool,
-    ) -> AuthorizationOutcome {
-        if resources.is_empty() {
-            return AuthorizationOutcome::Denied(format!(
-                "tool '{tool}' did not declare canonical permission resources"
-            ));
-        }
-        let owner = match crate::store::coordinator::owner_for(&self.store_path) {
-            Ok(owner) => owner,
-            Err(error) => {
-                return AuthorizationOutcome::Denied(format!(
-                    "permission grants could not be read: {error}"
-                ))
-            }
-        };
-        let grants = match &owner {
+    async fn remembered_allows(
+        &self,
+        owner: Option<&Arc<crate::store::StoreCoordinator>>,
+    ) -> anyhow::Result<Vec<PermissionRule>> {
+        let grants = match owner {
             Some(owner) => {
                 owner
                     .list_effective_permission_grants(
@@ -352,18 +375,58 @@ impl PermissionBroker {
                 self.backend,
                 self.session_config_version,
             ),
-        };
-        let remembered = match grants {
-            Ok(grants) => grants
-                .into_iter()
-                .map(|grant| {
-                    PermissionRule::new(grant.action, grant.resource, PermissionEffect::Allow)
-                })
-                .collect::<Vec<_>>(),
+        }?;
+        Ok(grants
+            .into_iter()
+            .map(|grant| PermissionRule::new(grant.action, grant.resource, PermissionEffect::Allow))
+            .collect())
+    }
+
+    /// Non-prompting policy snapshot for passive reads; `None` when grants are unreadable.
+    pub(crate) async fn passive_read_filter(&self) -> Option<PassiveReadFilter> {
+        let owner = crate::store::coordinator::owner_for(&self.store_path).ok()?;
+        let remembered = self.remembered_allows(owner.as_ref()).await.ok()?;
+        let auto_approve = matches!(
+            self.load_approval_state().await,
+            Ok((PermissionApprovalMode::AutoApprove, _, _))
+        );
+        Some(PassiveReadFilter {
+            policy: self.policy.clone(),
+            remembered,
+            auto_approve,
+        })
+    }
+
+    async fn authorize_invocation(
+        self: &Arc<Self>,
+        tool: &str,
+        resources: &[PermissionResource],
+        context: &crate::tools::kernel::ToolCallContext,
+        cancellation: &crate::tools::ThreadCancellation,
+        human_submitted: bool,
+    ) -> AuthorizationOutcome {
+        let review_stop = self.review_run_stop();
+        #[cfg(test)]
+        pause_grant_read_for_test(&self.store_path).await;
+        if resources.is_empty() {
+            return AuthorizationOutcome::Denied(format!(
+                "tool '{tool}' did not declare canonical permission resources"
+            ));
+        }
+        let owner = match crate::store::coordinator::owner_for(&self.store_path) {
+            Ok(owner) => owner,
             Err(error) => {
                 return AuthorizationOutcome::Denied(format!(
                     "permission grants could not be read: {error}"
-                ));
+                ))
+            }
+        };
+        let remembered = match self.remembered_allows(owner.as_ref()).await {
+            Ok(remembered) => remembered,
+            Err(error) => {
+                return AuthorizationOutcome::Denied(format!(
+                    "permission grants could not be read: {error}"
+                ))
             }
         };
         let decision = self.policy.evaluate(resources, &remembered);
@@ -397,12 +460,41 @@ impl PermissionBroker {
             return AuthorizationOutcome::Allowed;
         }
 
+        if review_stop.is_closed() {
+            return Self::review_stopped_outcome(&review_stop).await;
+        }
+        let allowed = || async {
+            if review_stop.is_closed() {
+                Self::review_stopped_outcome(&review_stop).await
+            } else {
+                AuthorizationOutcome::Allowed
+            }
+        };
+
         // The durable mode is consulted only after ordered configured and hard
         // policy has produced Ask. It is never cached: independent managers and
         // processes may attach the same durable session.
         let (_, initial_auto_generation, _) = match self.load_approval_state().await {
             Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
-                return AuthorizationOutcome::Allowed;
+                return allowed().await;
+            }
+            Ok((PermissionApprovalMode::Review, generation, revision)) => {
+                // Ineligible requests fall through to the manual path below,
+                // which still fails closed without an interactive client.
+                if let Some(outcome) = self
+                    .review(
+                        tool,
+                        resources,
+                        context,
+                        cancellation,
+                        &review_stop,
+                        revision,
+                    )
+                    .await
+                {
+                    return outcome;
+                }
+                (PermissionApprovalMode::Review, generation, revision)
             }
             Ok(state) => state,
             Err(reason) => return AuthorizationOutcome::Denied(reason),
@@ -444,43 +536,65 @@ impl PermissionBroker {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let approval_generation = match self.load_approval_state().await {
             Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
-                return AuthorizationOutcome::Allowed;
+                return allowed().await;
             }
-            Ok((PermissionApprovalMode::Manual, generation, _))
-                if generation > initial_auto_generation =>
-            {
+            Ok((
+                PermissionApprovalMode::Manual | PermissionApprovalMode::Review,
+                generation,
+                _,
+            )) if generation > initial_auto_generation => {
                 // Auto-approve was enabled and then disabled while this Ask
                 // was already resolving broker ownership. The enable still
                 // owns this invocation even though it never became pending.
-                return AuthorizationOutcome::Allowed;
+                return allowed().await;
             }
-            Ok((PermissionApprovalMode::Manual, generation, _)) => generation,
+            Ok((
+                PermissionApprovalMode::Manual | PermissionApprovalMode::Review,
+                generation,
+                _,
+            )) => generation,
             Err(reason) => return AuthorizationOutcome::Denied(reason),
         };
-        {
-            let mut state = self
-                .state
+        let admitted = {
+            let _review = self
+                .review
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !interactive && !delegated_child {
-                return AuthorizationOutcome::Denied(
+            if review_stop.is_closed() {
+                None
+            } else {
+                Some((|| {
+                    let mut state = self
+                        .state
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if !interactive && !delegated_child {
+                        return Err(
                     "approval is required, but no interactive session client is connected; the operation was not executed"
                         .to_string(),
                 );
+                    }
+                    state.pending.insert(
+                        request.id.clone(),
+                        PendingPermission {
+                            request: request.clone(),
+                            reply: sender,
+                        },
+                    );
+                    Ok(())
+                })())
             }
-            state.pending.insert(
-                request.id.clone(),
-                PendingPermission {
-                    request: request.clone(),
-                    reply: sender,
-                },
-            );
+        };
+        match admitted {
+            None => return Self::review_stopped_outcome(&review_stop).await,
+            Some(Err(reason)) => return AuthorizationOutcome::Denied(reason),
+            Some(Ok(())) => {}
         }
         let _pending_guard = PendingPermissionGuard {
             broker: Arc::downgrade(self),
             request_id: request.id.clone(),
         };
-        let waiter_live = Arc::new(StdMutex::new(true));
+        let waiter_live = Arc::new(crate::store::PermissionGrantWaiter::default());
         let _waiter_liveness = PermissionWaiterLiveness {
             live: Arc::clone(&waiter_live),
         };
@@ -492,13 +606,21 @@ impl PermissionBroker {
         tokio::pin!(receiver);
         let result = tokio::select! {
             biased;
-            reply = &mut receiver => self.reply_outcome(reply, &request, &waiter_live).await,
+            () = review_stop.cancelled() => {
+                let outcome = Self::review_stopped_outcome(&review_stop).await;
+                let _ = self.dismiss_pending_async(
+                    &request.id,
+                    blocked_message(PermissionReviewCode::ReviewStopped, None),
+                ).await;
+                outcome
+            },
+            reply = &mut receiver => self.reply_outcome(reply, &request, &waiter_live, &review_stop).await,
             () = cancellation.cancelled() => {
                 let reason = "run was cancelled while awaiting approval".to_string();
                 if self.dismiss_pending_async(&request.id, reason.clone()).await {
                     AuthorizationOutcome::Denied(reason)
                 } else {
-                    self.reply_outcome(receiver.await, &request, &waiter_live).await
+                    self.reply_outcome(receiver.await, &request, &waiter_live, &review_stop).await
                 }
             },
             () = self.auto_approval_after(approval_generation) => {
@@ -506,13 +628,13 @@ impl PermissionBroker {
                 // request after the durable generation was read. Whichever
                 // removes it first owns the sole reply.
                 let _ = self.reply_async(&request.id, PermissionReply::Once).await;
-                self.reply_outcome(receiver.await, &request, &waiter_live).await
+                self.reply_outcome(receiver.await, &request, &waiter_live, &review_stop).await
             },
             reason = self.interactive_subscriber_unavailable(interactive) => {
                 if self.dismiss_pending_async(&request.id, reason.clone()).await {
                     AuthorizationOutcome::Denied(reason)
                 } else {
-                    self.reply_outcome(receiver.await, &request, &waiter_live).await
+                    self.reply_outcome(receiver.await, &request, &waiter_live, &review_stop).await
                 }
             },
             () = tokio::time::sleep(APPROVAL_TIMEOUT) => {
@@ -520,22 +642,31 @@ impl PermissionBroker {
                 if self.dismiss_pending_async(&request.id, reason.clone()).await {
                     AuthorizationOutcome::Denied(reason)
                 } else {
-                    self.reply_outcome(receiver.await, &request, &waiter_live).await
+                    self.reply_outcome(receiver.await, &request, &waiter_live, &review_stop).await
                 }
             },
         };
         // A reply owns the request by removing it and successfully delivering
-        // to this exact waiter. Durable grants are written only after receipt,
-        // so a dropped receiver can never leave authority behind.
-        result
+        // to this exact waiter. Grants are written only after receipt. At the
+        // final commit boundary, waiter abort and human-grant admission race
+        // once; an abort cannot authorize a writer that has not yet won.
+        if review_stop.is_closed() {
+            Self::review_stopped_outcome(&review_stop).await
+        } else {
+            result
+        }
     }
 
     async fn reply_outcome(
         &self,
         reply: Result<PermissionReply, tokio::sync::oneshot::error::RecvError>,
         request: &PermissionRequest,
-        waiter_live: &Arc<StdMutex<bool>>,
+        waiter_live: &Arc<crate::store::PermissionGrantWaiter>,
+        review_stop: &super::review::ReviewRunPermit,
     ) -> AuthorizationOutcome {
+        if review_stop.is_closed() {
+            return Self::review_stopped_outcome(review_stop).await;
+        }
         match reply {
             Ok(PermissionReply::Once) => AuthorizationOutcome::Allowed,
             Ok(PermissionReply::Always) => {
@@ -557,7 +688,8 @@ impl PermissionBroker {
                     let backend = self.backend;
                     let session_config_version = self.session_config_version;
                     let waiter_live = Arc::clone(waiter_live);
-                    match crate::store::spawn_blocking_store_caller(move || {
+                    let run_fence = review_stop.grant_fence();
+                    let save = crate::store::spawn_blocking_store_caller(move || {
                         crate::store::insert_permission_grant_set_if_waiter_live(
                             &store_path,
                             &session_id,
@@ -565,10 +697,19 @@ impl PermissionBroker {
                             backend,
                             session_config_version,
                             &waiter_live,
+                            &run_fence,
                         )
-                    })
-                    .await
-                    {
+                    });
+                    // Closure fences the store transaction itself. Drain any
+                    // already-admitted commit before reporting a terminal stop.
+                    let saved = tokio::select! {
+                        biased;
+                        () = review_stop.cancelled() => {
+                            return Self::review_stopped_outcome(review_stop).await;
+                        },
+                        saved = save => saved,
+                    };
+                    match saved {
                         Ok(Ok(Some(_))) => AuthorizationOutcome::Allowed,
                         Ok(Ok(None)) => AuthorizationOutcome::Denied(
                             "the permission waiter ended before the approved grant could be saved; the operation was not executed"
@@ -648,7 +789,9 @@ impl PermissionBroker {
         dismissed
     }
 
-    async fn load_approval_state(&self) -> Result<(PermissionApprovalMode, i64, i64), String> {
+    pub(super) async fn load_approval_state(
+        &self,
+    ) -> Result<(PermissionApprovalMode, i64, i64), String> {
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
         crate::store::spawn_blocking_store_caller(move || {
@@ -734,7 +877,7 @@ impl PermissionBroker {
         "the interactive session client disconnected while approval was pending".to_string()
     }
 
-    async fn emit_async(&self, event: crate::events::SessionEvent) {
+    pub(super) async fn emit_async(&self, event: crate::events::SessionEvent) {
         if crate::store::coordinator::owner_for(&self.store_path).is_ok_and(|owner| owner.is_some())
         {
             let bus = self
@@ -764,11 +907,62 @@ impl PermissionBroker {
     }
 }
 
-fn epoch_millis_now() -> u64 {
+pub(super) fn epoch_millis_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+type GrantReadGate = (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
+#[cfg(test)]
+static GRANT_READ_GATES: std::sync::LazyLock<StdMutex<HashMap<PathBuf, GrantReadGate>>> =
+    std::sync::LazyLock::new(|| StdMutex::new(HashMap::new()));
+#[cfg(test)]
+pub(super) fn gate_grant_read_for_test(
+    path: PathBuf,
+) -> (
+    tokio::sync::oneshot::Receiver<()>,
+    tokio::sync::oneshot::Sender<()>,
+) {
+    let (entered, reached) = tokio::sync::oneshot::channel();
+    let (release, resume) = tokio::sync::oneshot::channel();
+    assert!(GRANT_READ_GATES
+        .lock()
+        .unwrap()
+        .insert(path, (entered, resume))
+        .is_none());
+    (reached, release)
+}
+#[cfg(test)]
+async fn pause_grant_read_for_test(path: &Path) {
+    let gate = GRANT_READ_GATES.lock().unwrap().remove(path);
+    if let Some((entered, resume)) = gate {
+        let _ = entered.send(());
+        let _ = resume.await;
+    }
+}
+
+/// Allows only what policy and grants allow, or Ask under auto-approve.
+#[derive(Clone)]
+pub(crate) struct PassiveReadFilter {
+    policy: PermissionPolicy,
+    remembered: Vec<PermissionRule>,
+    auto_approve: bool,
+}
+
+impl PassiveReadFilter {
+    pub(crate) fn allows(&self, resources: &[PermissionResource]) -> bool {
+        match self.policy.evaluate(resources, &self.remembered).effect {
+            PermissionEffect::Allow => true,
+            PermissionEffect::Deny => false,
+            PermissionEffect::Ask => self.auto_approve,
+        }
+    }
 }

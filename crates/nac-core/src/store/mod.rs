@@ -18,6 +18,7 @@ pub(crate) mod orchestrator_compaction;
 mod permission_grants;
 mod projects;
 mod render;
+mod review_intent;
 mod run_recovery;
 mod schema;
 mod session_forks;
@@ -30,6 +31,9 @@ pub(crate) use shell_commands::{
 };
 mod ssh_configurations;
 mod steering;
+mod task_discovery;
+mod task_evidence;
+pub(crate) mod task_launches;
 mod terminal_cleanups;
 mod terminal_selection;
 mod thread_events;
@@ -58,6 +62,8 @@ pub use model_configurations::*;
 pub use permission_grants::*;
 pub use projects::*;
 pub use render::*;
+pub use review_intent::InputOrigin;
+pub(crate) use review_intent::{decode_review_intent, record_review_intent, StoredReviewIntent};
 pub(crate) use run_recovery::{
     clear_active_run, load_run_recovery_with_connection, mark_active_run_failed,
     replace_with_active_run, stage_active_run_failure,
@@ -80,6 +86,17 @@ pub use session_goals::*;
 pub use session_inbox::*;
 pub use ssh_configurations::*;
 pub use steering::*;
+pub use task_discovery::*;
+pub(crate) use task_evidence::record_run_outcome_with_connection;
+pub use task_evidence::{
+    GoalOutcomeRecord, GoalRetirement, RunOutcomeDisposition, RunOutcomeRecord,
+    RETAINED_GOAL_OUTCOMES, RETAINED_RUN_OUTCOMES, RUN_RESULT_EXCERPT_CHARS,
+};
+pub use task_launches::{
+    list_task_launches, load_project_git_source, load_task_launch, reconcile_task_launches,
+    reserve_task_launch, update_task_launch, TaskLaunchPhase, TaskLaunchRecord, TaskLaunchRequest,
+    TaskLaunchSource,
+};
 pub use terminal_cleanups::*;
 pub use terminal_selection::*;
 pub use thread_events::*;
@@ -101,7 +118,7 @@ pub(crate) use thread_events::{
     load_all_thread_events_with_connection, load_thread_events_page_with_connection,
 };
 pub(crate) use threads::{list_threads_with_connection, load_all_dispatches_with_connection};
-use time::now_utc;
+pub(crate) use time::now_utc;
 pub(crate) use worksets::{list_worksets_with_connection, read_workset_with_connection};
 
 #[cfg(test)]

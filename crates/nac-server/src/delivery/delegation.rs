@@ -69,6 +69,7 @@ pub(crate) async fn start_traditional_child(
         profile: request.profile,
         description: request.description,
         prompt: request.prompt,
+        origin: nac_core::store::InputOrigin::Person,
         child_session_id: request.child_session_id,
         background: request.background,
     };
@@ -208,6 +209,26 @@ pub(crate) async fn cancel_managed_orchestrator(
         manager
             .delegation()
             .cancel_managed_orchestrator(&session_id, &orchestrator_session_id)
+            .await?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/children/{child_session_id}/permissions/reviews/{review_id}/authorize-retry",
+    operation_id = "post_sessions_session_id_children_child_session_id_permissions_reviews_review_id_authorize_retry",
+    tag = "permissions",
+    params(("session_id" = String, Path), ("child_session_id" = String, Path), ("review_id" = String, Path)),
+    responses((status = 200, description = "Parent authorized a fresh review of the child's blocked action", body = nac_core::permissions::PermissionReview, content_type = "application/json"), (status = 404, description = "Child or blocked review not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Primary direct parent required", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn authorize_child_permission_review_retry(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, child_session_id, review_id)): AxumPath<(String, String, String)>,
+) -> Result<Json<nac_core::permissions::PermissionReview>, ApiError> {
+    Ok(Json(
+        manager
+            .delegation()
+            .authorize_child_permission_review_retry(&session_id, &child_session_id, &review_id)
             .await?,
     ))
 }

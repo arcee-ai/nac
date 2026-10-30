@@ -53,7 +53,7 @@ async fn build_run_config_inner(
     project_id: Option<String>,
     behavior: sessions::SessionBehavior,
 ) -> Result<OrchestratorRunConfig> {
-    prepare_run_config_inner(options, config, project_id, behavior)
+    prepare_run_config_inner(options, config, project_id, behavior, None)
         .await?
         .persist()
         .await
@@ -67,7 +67,32 @@ pub async fn prepare_run_config_for_project_with_behavior(
     project_id: Option<String>,
     behavior: sessions::SessionBehavior,
 ) -> Result<PreparedSessionRunConfig> {
-    prepare_run_config_inner(options, config, project_id, behavior).await
+    prepare_run_config_inner(options, config, project_id, behavior, None).await
+}
+
+/// Construct only the runtime belonging to a durable retained launch. Resource
+/// and first-input publication still use the existing session creation commit.
+pub async fn prepare_retained_task_run_config(
+    options: RunOptions,
+    config: &NacConfig,
+    launch: &crate::store::TaskLaunchRecord,
+) -> Result<PreparedSessionRunConfig> {
+    anyhow::ensure!(
+        options.ssh.host().is_none()
+            && !options.sandbox.sandbox
+            && !options.sandbox.explicit_sandbox_config_flags_present()
+            && options.sandbox.internal_mounts.is_empty()
+            && options.workspace_cwd == launch.workspace_path.join(&launch.source.subdirectory),
+        "retained launch requires its exact Local workspace"
+    );
+    prepare_run_config_inner(
+        options,
+        config,
+        Some(launch.request.project_id.clone()),
+        sessions::SessionBehavior::Direct,
+        Some(launch.session_id.clone()),
+    )
+    .await
 }
 
 async fn prepare_run_config_inner(
@@ -75,6 +100,7 @@ async fn prepare_run_config_inner(
     config: &NacConfig,
     project_id: Option<String>,
     behavior: sessions::SessionBehavior,
+    retained_session_id: Option<String>,
 ) -> Result<PreparedSessionRunConfig> {
     let agent_mode = match behavior {
         sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
@@ -140,7 +166,9 @@ async fn prepare_run_config_inner(
                 .await?;
         let working_directory = directory_display(&remote_cwd);
         let workspace_git = GitTarget::ssh(connection.clone(), remote_cwd.clone(), &config_cwd);
-        let session_id = Uuid::new_v4().to_string();
+        let session_id = retained_session_id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
         let mcp = if agent_mode == AgentMode::Direct {
             McpRegistry::load_reporting_skips(
@@ -228,7 +256,9 @@ async fn prepare_run_config_inner(
     }
 
     let workspace_cwd = options.workspace_cwd;
-    let session_id = Uuid::new_v4().to_string();
+    let session_id = retained_session_id
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let paths = PathContext::new(&workspace_cwd);
     let worktree_rollback: session_worktree::RollbackGuard;
     let sandbox = build_sandbox_session_inner(

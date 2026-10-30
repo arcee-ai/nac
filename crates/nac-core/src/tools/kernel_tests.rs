@@ -249,7 +249,61 @@ impl NativeTool for CountTool {
             ToolResult {
                 content: ToolContent::text("counted"),
                 is_error: false,
+                execution_duration_ms: None,
+                execution_duration_excludes_authorization: false,
             }
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SleepInput {
+    fail: bool,
+}
+
+struct SleepTool;
+
+impl NativeTool for SleepTool {
+    type Input = SleepInput;
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            def_type: "function".into(),
+            function: FunctionDef {
+                name: "sleep".into(),
+                description: "sleep".into(),
+                parameters: json!({"type":"object","properties":{"fail":{"type":"boolean"}}}),
+            },
+        }
+    }
+
+    fn admission(&self) -> ToolAdmission {
+        ToolAdmission::Parallel
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        serde_json::from_value(input)
+            .map_err(|error| ToolResult::text(format!("invalid input: {error}"), true))
+    }
+
+    fn permission_resources(
+        &self,
+        _input: &Self::Input,
+        _services: ToolServices<'_>,
+    ) -> Result<Vec<PermissionResource>, ToolResult> {
+        Ok(Vec::new())
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        _services: ToolServices<'a>,
+        _context: &'a ToolCallContext,
+    ) -> BoxFuture<'a, ToolResult> {
+        Box::pin(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            ToolResult::text("slept", input.fail)
         })
     }
 }
@@ -772,5 +826,296 @@ async fn direct_broker_authorizes_between_prepare_and_side_effects() {
     let (approved, ()) = tokio::join!(invoke, reply);
     assert!(!approved.is_error, "{}", approved.content);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+struct ReadPathTool {
+    calls: Arc<AtomicUsize>,
+}
+
+impl NativeTool for ReadPathTool {
+    type Input = PathInput;
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            def_type: "function".into(),
+            function: FunctionDef {
+                name: "read_path".into(),
+                description: "read_path".into(),
+                parameters: json!({"type":"object"}),
+            },
+        }
+    }
+
+    fn admission(&self) -> ToolAdmission {
+        ToolAdmission::Exclusive
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        serde_json::from_value(input)
+            .map_err(|error| ToolResult::text(format!("invalid input: {error}"), true))
+    }
+
+    fn permission_resources(
+        &self,
+        input: &Self::Input,
+        services: ToolServices<'_>,
+    ) -> Result<Vec<PermissionResource>, ToolResult> {
+        let path = services
+            .runtime
+            .backend
+            .resolve_path(&input.path)
+            .map_err(|error| ToolResult::text(error.to_string(), true))?;
+        let path = path.display().to_string();
+        Ok(vec![
+            PermissionResource::new("read", path.clone()).with_display(path)
+        ])
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        _services: ToolServices<'a>,
+        _context: &'a ToolCallContext,
+    ) -> BoxFuture<'a, ToolResult> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move { ToolResult::text(input.path, false) })
+    }
+}
+
+/// Approves only when released, so the test can change the filesystem while
+/// a review is pending.
+struct ReleasedReviewer {
+    started: tokio::sync::Notify,
+    release: tokio::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+}
+
+impl crate::permissions::PermissionReviewer for ReleasedReviewer {
+    fn review<'a>(
+        &'a self,
+        _request: &'a crate::permissions::ReviewRequest,
+    ) -> BoxFuture<
+        'a,
+        Result<crate::permissions::ReviewVerdict, crate::permissions::ReviewUnavailable>,
+    > {
+        Box::pin(async move {
+            self.started.notify_one();
+            if let Some(release) = self.release.lock().await.take() {
+                let _ = release.await;
+            }
+            Ok(crate::permissions::ReviewVerdict::ApproveOnce)
+        })
+    }
+
+    fn check_available(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn identity(&self) -> String {
+        "released".to_string()
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_target_changed_during_review_is_not_executed() {
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!("nac-kernel-review-{}", uuid::Uuid::new_v4()));
+    let workspace = root.join("workspace");
+    std::fs::create_dir_all(workspace.join("first")).unwrap();
+    std::fs::create_dir_all(workspace.join("second")).unwrap();
+    symlink(workspace.join("first"), workspace.join("current")).unwrap();
+    let store_path = root.join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session-a");
+
+    let broker = Arc::new(crate::permissions::PermissionBroker::new(
+        store_path.clone(),
+        "session-a".to_string(),
+        crate::permissions::PermissionBackend::Local,
+        0,
+        [crate::permissions::PermissionRule::new(
+            "read",
+            "*",
+            crate::permissions::PermissionEffect::Ask,
+        )],
+    ));
+    let (release, receiver) = tokio::sync::oneshot::channel();
+    let reviewer = Arc::new(ReleasedReviewer {
+        started: tokio::sync::Notify::new(),
+        release: tokio::sync::Mutex::new(Some(receiver)),
+    });
+    broker.set_reviewer(Arc::clone(&reviewer) as Arc<dyn crate::permissions::PermissionReviewer>);
+    broker
+        .set_approval_mode(crate::permissions::PermissionApprovalMode::Review)
+        .await
+        .unwrap();
+    crate::store::record_review_intent(
+        &crate::store::open_runtime_connection(&store_path).unwrap(),
+        "session-a",
+        "count it",
+    )
+    .unwrap();
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let registry = ToolRegistry::builder()
+        .register(ReadPathTool {
+            calls: Arc::clone(&calls),
+        })
+        .finish()
+        .unwrap();
+    let snapshot = registry.snapshot(["read_path"]).unwrap();
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = workspace.clone();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace);
+    runtime.store_path = store_path;
+    runtime.session_id = Some("session-a".to_string());
+    runtime.permission_broker = Some(Arc::clone(&broker));
+    let client = crate::model::ModelClient::new_for_test();
+    let services = ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+    let context = ToolCallContext::default();
+
+    let invoke = snapshot.invoke(
+        "read_path",
+        json!({"path":"current/file"}),
+        services,
+        &context,
+    );
+    let swap = async {
+        reviewer.started.notified().await;
+        std::fs::remove_file(workspace.join("current")).unwrap();
+        symlink(workspace.join("second"), workspace.join("current")).unwrap();
+        release.send(()).unwrap();
+    };
+    let (result, ()) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(invoke, swap)
+    })
+    .await
+    .expect("review must start with fresh human intent and finish after the target swap");
+
+    assert!(result.is_error, "{}", result.content);
+    assert!(
+        result
+            .content
+            .to_string()
+            .contains("changed while read_path awaited authorization"),
+        "{}",
+        result.content
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "the approved target was not executed"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn executed_calls_report_duration_for_success_and_error() {
+    let registry = ToolRegistry::builder()
+        .register(SleepTool)
+        .finish()
+        .unwrap();
+    let snapshot = registry.snapshot(["sleep"]).unwrap();
+    let runtime = crate::tools::test_runtime();
+    let client = crate::model::ModelClient::new_for_test();
+    let services = ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+
+    for fail in [false, true] {
+        let result = snapshot
+            .invoke(
+                "sleep",
+                json!({ "fail": fail }),
+                services,
+                &ToolCallContext::default(),
+            )
+            .await;
+        assert_eq!(result.is_error, fail, "{}", result.content);
+        assert!(
+            result.execution_duration_ms.is_some_and(|ms| ms >= 20),
+            "{:?}",
+            result.execution_duration_ms
+        );
+    }
+}
+
+#[tokio::test]
+async fn calls_rejected_before_execution_report_no_duration() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let registry = ToolRegistry::builder()
+        .register(CountTool {
+            calls: Arc::clone(&calls),
+            name: "count",
+        })
+        .finish()
+        .unwrap();
+    let snapshot = registry.snapshot(["count"]).unwrap();
+    let directory = std::env::temp_dir().join(format!(
+        "nac-kernel-rejected-duration-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let store_path = directory.join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session-a");
+    let broker = Arc::new(crate::permissions::PermissionBroker::new(
+        store_path.clone(),
+        "session-a".to_string(),
+        crate::permissions::PermissionBackend::Local,
+        0,
+        [crate::permissions::PermissionRule::new(
+            "count",
+            "*",
+            crate::permissions::PermissionEffect::Ask,
+        )],
+    ));
+    let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+    let _interactive = bus.subscribe_assistant_deltas();
+    broker.attach_event_bus(bus);
+    let mut runtime = crate::tools::test_runtime();
+    runtime.store_path = store_path;
+    runtime.session_id = Some("session-a".to_string());
+    runtime.permission_broker = Some(Arc::clone(&broker));
+    let client = crate::model::ModelClient::new_for_test();
+    let services = ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+    let context = ToolCallContext {
+        call_id: Some("call-1".to_string()),
+        ..Default::default()
+    };
+
+    let unknown = snapshot
+        .invoke("missing", json!({}), services, &context)
+        .await;
+    let hard_denied = snapshot
+        .invoke("count", json!({"amount": usize::MAX}), services, &context)
+        .await;
+    let invoke = snapshot.invoke("count", json!({"amount": 1}), services, &context);
+    let reject = async {
+        loop {
+            if let Some(request) = broker.pending().pop() {
+                broker
+                    .reply(&request.id, crate::permissions::PermissionReply::Reject)
+                    .unwrap();
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+    let (approval_denied, ()) = tokio::join!(invoke, reject);
+
+    for result in [unknown, hard_denied, approval_denied] {
+        assert!(result.is_error, "{}", result.content);
+        assert_eq!(result.execution_duration_ms, None, "{}", result.content);
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
     let _ = std::fs::remove_dir_all(directory);
 }

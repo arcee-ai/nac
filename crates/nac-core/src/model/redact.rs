@@ -39,6 +39,14 @@ const SENSITIVE_JSON_KEYS: [&str; 13] = [
     "set-cookie",
 ];
 
+/// Whether a JSON object member under this key holds a credential, whatever
+/// its value looks like.
+pub(crate) fn is_sensitive_json_key(key: &str) -> bool {
+    SENSITIVE_JSON_KEYS
+        .iter()
+        .any(|sensitive| key.eq_ignore_ascii_case(sensitive))
+}
+
 /// `Authorization: Bearer <token>` / `Authorization: Basic <b64>`, with or
 /// without the surrounding quotes JSON would add.
 #[expect(
@@ -377,10 +385,7 @@ fn redact_json_value(value: Value, redactor: &CredentialRedactor<'_>) -> Value {
         Value::Object(map) => {
             let mut redacted = serde_json::Map::with_capacity(map.len());
             for (key, value) in map {
-                if SENSITIVE_JSON_KEYS
-                    .iter()
-                    .any(|sensitive| key.eq_ignore_ascii_case(sensitive))
-                {
+                if is_sensitive_json_key(&key) {
                     redacted.insert(key, Value::String(REDACTED.to_string()));
                 } else {
                     redacted.insert(key, redact_json_value(value, redactor));

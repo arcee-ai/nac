@@ -11,7 +11,7 @@
 
 import type { HighlighterCore, LanguageRegistration, ThemedToken } from "shiki/core";
 
-import type { WorkspaceDiffLine, WorkspaceDiffSection } from "@/app/types/api";
+import type { WorkspaceDiffLine } from "@/app/types/api";
 
 import { NAC_THEME_NAME, nacColorReplacements, nacTheme } from "./highlight-theme";
 
@@ -312,14 +312,15 @@ const OLD_SIDE = new Set(["delete", "context"]);
 const NEW_SIDE = new Set(["insert", "context"]);
 
 /**
- * Highlight every hunk of a file diff. Keyed by line object, so a caller can
- * look each rendered row up and fall back to plain text when it is missing.
+ * Highlight every hunk of a file diff: the Files panel's sections, or a diff
+ * parsed from a tool's result. Keyed by line object, so a caller can look each
+ * rendered row up and fall back to plain text when it is missing.
  */
-export async function highlightDiff(
+export async function highlightDiff<Line extends WorkspaceDiffLine>(
   path: string,
-  sections: WorkspaceDiffSection[],
-): Promise<Map<WorkspaceDiffLine, CodeToken[]>> {
-  const highlighted = new Map<WorkspaceDiffLine, CodeToken[]>();
+  sections: readonly { hunks: readonly { lines: readonly Line[] }[] }[],
+): Promise<Map<Line, CodeToken[]>> {
+  const highlighted = new Map<Line, CodeToken[]>();
   const language = languageFromPath(path);
   if (!language) return highlighted;
 

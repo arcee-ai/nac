@@ -45,12 +45,12 @@ export function RightSidebarRail({
 
   return (
     <div
-      className="flex h-full flex-col items-center p-2"
+      className="flex h-full flex-col items-center border-l border-tertiary py-2 pr-2 pl-[7px]"
       style={{ width: RIGHT_SIDEBAR_RAIL_WIDTH }}
     >
       <div className="flex flex-col items-center gap-4 [&>*]:shrink-0">
         <RailButton label="Show panel" onClick={onOpen}>
-          <Icon iconName={IconName.SidebarChevronLeft} />
+          <Icon iconName={IconName.ShowSidePanel} />
         </RailButton>
         <div className="flex flex-col items-center gap-4">
           {panels.map((name) => {

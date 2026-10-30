@@ -38,6 +38,30 @@ const RECORD_COLUMNS: &str =
      claimed_at, delivered_at, expired_at";
 
 coordinated_command! {
+/// Read one input's delivery state without relying on the bounded history view.
+pub fn load_thread_steering(
+    path: &Path,
+    session_id: &str,
+    id: i64,
+) -> Result<Option<ThreadSteeringRecord>> {
+    let connection = open_runtime_connection(path)?;
+    Ok(connection.query_row(
+        &format!("SELECT {RECORD_COLUMNS} FROM thread_steering
+                  WHERE session_id = ?1 AND id = ?2"),
+        params![session_id, id],
+        row_to_record,
+    ).optional()?)
+}
+command LoadThreadSteeringCommand {
+    session_id: String = session_id.to_owned(),
+    id: i64 = id,
+}
+call |command| (&command.session_id, command.id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+coordinated_command! {
 pub fn queue_thread_steering(
     path: &Path,
     session_id: &str,
@@ -46,9 +70,47 @@ pub fn queue_thread_steering(
     instruction: &str,
 ) -> Result<ThreadSteeringRecord> {
     let conn = open_runtime_connection(path)?;
-    queue_thread_steering_with_connection(&conn, session_id, thread_name, dispatch_id, instruction)
+    queue_thread_steering_with_connection(
+        &conn,
+        session_id,
+        thread_name,
+        dispatch_id,
+        instruction,
+        InputOrigin::Automation,
+    )
 }
 command QueueThreadSteeringCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    dispatch_id: String = dispatch_id.to_owned(),
+    instruction: String = instruction.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name, &command.dispatch_id, &command.instruction)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+coordinated_command! {
+/// Queues steering a person typed on a human-facing route. It becomes
+/// review intent when it reaches the model, never before.
+pub fn queue_person_thread_steering(
+    path: &Path,
+    session_id: &str,
+    thread_name: &str,
+    dispatch_id: &str,
+    instruction: &str,
+) -> Result<ThreadSteeringRecord> {
+    let conn = open_runtime_connection(path)?;
+    queue_thread_steering_with_connection(
+        &conn,
+        session_id,
+        thread_name,
+        dispatch_id,
+        instruction,
+        InputOrigin::Person,
+    )
+}
+command QueuePersonThreadSteeringCommand {
     session_id: String = session_id.to_owned(),
     thread_name: String = thread_name.to_owned(),
     dispatch_id: String = dispatch_id.to_owned(),
@@ -65,6 +127,7 @@ pub(super) fn queue_thread_steering_with_connection(
     thread_name: &str,
     dispatch_id: &str,
     instruction: &str,
+    origin: InputOrigin,
 ) -> Result<ThreadSteeringRecord> {
     let instruction = instruction.trim();
     if session_id.trim().is_empty() {
@@ -83,14 +146,15 @@ pub(super) fn queue_thread_steering_with_connection(
     let created_at = now_utc();
     connection.execute(
         "INSERT INTO thread_steering
-         (session_id, thread_name, dispatch_id, instruction, status, created_at)
-         VALUES (?1, ?2, ?3, ?4, 'queued', ?5)",
+         (session_id, thread_name, dispatch_id, instruction, status, created_at, review_intent)
+         VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?6)",
         params![
             session_id,
             thread_name,
             dispatch_id,
             instruction,
-            created_at
+            created_at,
+            (origin == InputOrigin::Person).then_some(instruction)
         ],
     )?;
     Ok(ThreadSteeringRecord {
@@ -212,6 +276,15 @@ pub(super) fn acknowledge_thread_steering_batch_with_connection(
             return Err(anyhow!(
                 "steering {id} is not claimed by dispatch '{dispatch_id}'"
             ));
+        }
+        // A person's steering becomes review intent as it reaches the model.
+        let review_intent: Option<String> = connection.query_row(
+            "SELECT review_intent FROM thread_steering WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if let Some(text) = review_intent {
+            super::record_review_intent(connection, session_id, &text)?;
         }
     }
     Ok(())
@@ -341,6 +414,88 @@ mod tests {
         std::env::temp_dir()
             .join(format!("nac_steering_test_{label}_{unique}"))
             .join("store.db")
+    }
+
+    #[test]
+    fn exact_steering_lookup_is_session_scoped_and_retains_delivery_outcomes() {
+        let path = temp_store_path("exact_lookup");
+        initialize(&path).unwrap();
+        for session in ["session", "other"] {
+            insert_test_session(&path, session);
+        }
+        let queued = queue_thread_steering(&path, "session", "impl", "run", "first").unwrap();
+        assert_eq!(
+            load_thread_steering(&path, "session", queued.id).unwrap(),
+            Some(queued.clone())
+        );
+        assert_eq!(
+            load_thread_steering(&path, "other", queued.id).unwrap(),
+            None
+        );
+        assert_eq!(load_thread_steering(&path, "session", -1).unwrap(), None);
+        let claimed = claim_thread_steering(&path, "session", "run")
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            load_thread_steering(&path, "session", queued.id).unwrap(),
+            Some(claimed)
+        );
+        acknowledge_thread_steering_batch(&path, &[queued.id], "session", "run").unwrap();
+        let delivered = load_thread_steering(&path, "session", queued.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(delivered.status, "delivered");
+        assert!(delivered.delivered_at.is_some());
+        let late = queue_thread_steering(&path, "session", "impl", "run-late", "late").unwrap();
+        let expired = expire_thread_steering(&path, "session", "run-late")
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            load_thread_steering(&path, "session", late.id).unwrap(),
+            Some(expired)
+        );
+        // Read-only lookups do not consume or expire another session's input.
+        let other = queue_thread_steering(&path, "other", "impl", "run", "other").unwrap();
+        assert_eq!(
+            load_thread_steering(&path, "session", other.id).unwrap(),
+            None
+        );
+        assert_eq!(
+            load_thread_steering(&path, "other", other.id).unwrap(),
+            Some(other)
+        );
+        crate::sessions::delete_session(&path, "session").unwrap();
+        assert_eq!(
+            load_thread_steering(&path, "session", queued.id).unwrap(),
+            None
+        );
+        assert_eq!(
+            load_thread_steering(&path, "session", late.id).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn exact_steering_lookup_is_not_limited_to_recent_history() {
+        let path = temp_store_path("lookup_history");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "session");
+        let first = queue_thread_steering(&path, "session", "impl", "run", "first").unwrap();
+        let connection = open_runtime_connection(&path).unwrap();
+        connection.execute(
+            "WITH RECURSIVE newer(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM newer WHERE n < 512)
+             INSERT INTO thread_steering(session_id,thread_name,dispatch_id,instruction,status,created_at)
+             SELECT 'session','impl','run','newer','queued',?1 FROM newer",
+            params![now_utc()],
+        ).unwrap();
+        assert!(!list_thread_steering(&path, "session")
+            .unwrap()
+            .iter()
+            .any(|record| record.id == first.id));
+        assert_eq!(
+            load_thread_steering(&path, "session", first.id).unwrap(),
+            Some(first)
+        );
     }
 
     #[test]

@@ -378,7 +378,7 @@ impl McpRegistry {
                     server_name,
                     "resources",
                 )?;
-                let service = server.current_service().await;
+                let service = server.admitted_service().await?;
                 let result = service.read().await.list_resources(page()).await?;
                 json!({"server": server_name, "trust": "untrusted_remote_data", "resources": sanitized_value(serde_json::to_value(result.resources)?), "nextCursor": result.next_cursor})
             }
@@ -388,7 +388,7 @@ impl McpRegistry {
                     server_name,
                     "resource templates",
                 )?;
-                let service = server.current_service().await;
+                let service = server.admitted_service().await?;
                 let result = service.read().await.list_resource_templates(page()).await?;
                 json!({"server": server_name, "trust": "untrusted_remote_data", "resourceTemplates": sanitized_value(serde_json::to_value(result.resource_templates)?), "nextCursor": result.next_cursor})
             }
@@ -399,7 +399,7 @@ impl McpRegistry {
                     "resources",
                 )?;
                 let uri = required_string(input, "uri")?;
-                let service = server.current_service().await;
+                let service = server.admitted_service().await?;
                 let result = service
                     .read()
                     .await
@@ -413,7 +413,7 @@ impl McpRegistry {
                     server_name,
                     "prompts",
                 )?;
-                let service = server.current_service().await;
+                let service = server.admitted_service().await?;
                 let result = service.read().await.list_prompts(page()).await?;
                 json!({"server": server_name, "trust": "untrusted_remote_data", "prompts": sanitized_value(serde_json::to_value(result.prompts)?), "nextCursor": result.next_cursor})
             }
@@ -449,7 +449,7 @@ impl McpRegistry {
                     .map(string_map)
                     .transpose()?
                     .map(CompletionContext::with_arguments);
-                let service = server.current_service().await;
+                let service = server.admitted_service().await?;
                 let completion = service
                     .read()
                     .await
@@ -479,7 +479,7 @@ impl McpRegistry {
         } else {
             GetPromptRequestParams::new(prompt_name).with_arguments(arguments)
         };
-        let service = server.current_service().await;
+        let service = server.admitted_service().await?;
         let result = service
             .read()
             .await

@@ -219,13 +219,17 @@ impl SessionService {
         &self,
         expanded_prompt: String,
         execution_mode: crate::store::TraditionalChildExecutionMode,
+        origin: crate::store::InputOrigin,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
+        let review_intent =
+            (origin == crate::store::InputOrigin::Person).then(|| expanded_prompt.clone());
         self.try_submit_prompt_inner(
             None,
             expanded_prompt,
             None,
             RunAdmissionKind {
                 child_execution_mode: Some(execution_mode),
+                review_intent,
                 ..RunAdmissionKind::default()
             },
         )
@@ -235,10 +239,6 @@ impl SessionService {
         clippy::result_large_err,
         reason = "admission errors carry the complete active-operation conflict snapshot"
     )]
-    #[expect(
-        clippy::expect_used,
-        reason = "successful run admission installs the prompt-commit channel before returning"
-    )]
     pub(super) fn try_submit_prompt_inner(
         &self,
         client_id: Option<SessionClientId>,
@@ -246,8 +246,39 @@ impl SessionService {
         operation_lease: Option<sessions::SessionOperationLease>,
         admission: RunAdmissionKind,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        let active_run =
-            self.try_begin_run_with_lease(client_id, &expanded_prompt, operation_lease, admission)?;
+        self.try_submit_prompt_with_guard(
+            client_id,
+            expanded_prompt,
+            operation_lease,
+            admission,
+            None,
+        )
+    }
+
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission carries the active conflict snapshot"
+    )]
+    #[expect(
+        clippy::expect_used,
+        reason = "admission installs the prompt commit channel"
+    )]
+    pub(super) fn try_submit_prompt_with_guard<'a>(
+        &'a self,
+        client_id: Option<SessionClientId>,
+        expanded_prompt: String,
+        operation_lease: Option<sessions::SessionOperationLease>,
+        admission: RunAdmissionKind,
+        guard: Option<super::operation_state::ActiveOperationGuard<'a>>,
+    ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
+        let active_run = self.try_begin_run_inner_with_guard(
+            client_id,
+            &expanded_prompt,
+            operation_lease,
+            true,
+            admission,
+            guard,
+        )?;
         let run_id = active_run.run_id.clone();
         let task_run_id = run_id.clone();
         let run_client_id = active_run.client_id.clone();
@@ -255,6 +286,7 @@ impl SessionService {
             .run_prompt_commit(&run_id)
             .expect("newly admitted run must own its prompt commit channel");
         let inbox_item_id = self.run_inbox_item_id(&run_id);
+        let review_intent = self.run_review_intent(&run_id);
         let event_bus = self.event_bus.clone();
         let service = self.clone();
         let task = tokio::spawn(async move {
@@ -286,7 +318,13 @@ impl SessionService {
                 ));
                 agent.set_steering_dispatch_id(Some(task_run_id.to_string()));
                 let result = agent
-                    .send_session_run(&expanded_prompt, &task_run_id, prompt_commit, inbox_item_id)
+                    .send_session_run(
+                        &expanded_prompt,
+                        &task_run_id,
+                        prompt_commit,
+                        inbox_item_id,
+                        review_intent,
+                    )
                     .await
                     .map_err(|error| {
                         error
@@ -358,6 +396,7 @@ impl SessionService {
         clippy::result_large_err,
         reason = "admission errors carry the complete active-operation conflict snapshot"
     )]
+    #[cfg(test)]
     pub(super) fn try_begin_run_with_lease(
         &self,
         client_id: Option<SessionClientId>,
@@ -372,6 +411,7 @@ impl SessionService {
         clippy::result_large_err,
         reason = "admission errors carry the complete active-operation conflict snapshot"
     )]
+    #[cfg(test)]
     pub(super) fn try_begin_run_inner(
         &self,
         client_id: Option<SessionClientId>,
@@ -379,6 +419,29 @@ impl SessionService {
         supplied_lease: Option<sessions::SessionOperationLease>,
         enforce_coordination: bool,
         admission: RunAdmissionKind,
+    ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
+        self.try_begin_run_inner_with_guard(
+            client_id,
+            expanded_prompt,
+            supplied_lease,
+            enforce_coordination,
+            admission,
+            None,
+        )
+    }
+
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission carries the active conflict snapshot"
+    )]
+    fn try_begin_run_inner_with_guard<'a>(
+        &'a self,
+        client_id: Option<SessionClientId>,
+        expanded_prompt: &str,
+        supplied_lease: Option<sessions::SessionOperationLease>,
+        enforce_coordination: bool,
+        admission: RunAdmissionKind,
+        guard: Option<super::operation_state::ActiveOperationGuard<'a>>,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         let _host_admission = (enforce_coordination && self.managed_admission_enabled)
             .then(|| match self.managed_identity.as_deref() {
@@ -397,11 +460,12 @@ impl SessionService {
         let RunAdmissionKind {
             terminal_selection,
             inbox_item_id,
+            review_intent,
             goal_continuation,
             child_execution_mode,
             managed_orchestrator_execution_mode,
         } = admission;
-        let mut guard = self.lock_active_operation();
+        let mut guard = guard.unwrap_or_else(|| self.lock_active_operation());
         if self
             .stopping_admission
             .load(std::sync::atomic::Ordering::Acquire)
@@ -637,9 +701,11 @@ impl SessionService {
             finishing: false,
             task: None,
             prompt_commit,
+            settlement: watch::channel(false).0,
             transcript_baseline: None,
             command_cancellation,
             inbox_item_id,
+            review_intent,
             _operation_lease: operation_lease,
             _workspace_activity_lease: workspace_activity_lease,
         }));

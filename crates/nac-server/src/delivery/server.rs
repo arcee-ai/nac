@@ -1,3 +1,4 @@
+use super::http_listener::HttpListener;
 use super::presentation_bootstrap::PresentationDocument;
 use super::ui_configuration::{self, UiConfiguration};
 use crate::*;
@@ -670,7 +671,7 @@ fn embedded_frontend_router() -> Router {
 }
 
 fn documented_api() -> OpenApiRouter<SessionManager> {
-    OpenApiRouter::with_openapi(ApiDoc::openapi())
+    let mut documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
         .routes(routes!(ui_configuration::get_ui_configuration))
         .routes(routes!(managed_status::healthz_handler))
@@ -780,9 +781,15 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::sessions::list_handler,
             delivery::session_lifecycle::create_session
         ))
+        .routes(routes!(delivery::task_launches::start))
+        .routes(routes!(delivery::task_launches::status))
+        .routes(routes!(delivery::task_launches::cancel))
+        .routes(routes!(delivery::task_launches::inventory))
+        .routes(routes!(delivery::task_launches::source_info))
         .routes(routes!(delivery::sessions::reorder_handler))
         .routes(routes!(delivery::sessions::update_presentation_handler))
         .routes(routes!(delivery::session_state::session_messages))
+        .routes(routes!(delivery::session_state::session_tool_call))
         .routes(routes!(
             delivery::session_state::list_direct_inbox,
             delivery::session_state::create_direct_inbox_item
@@ -806,6 +813,9 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::delegation::get_traditional_child))
         .routes(routes!(delivery::delegation::cancel_traditional_child))
         .routes(routes!(
+            delivery::delegation::authorize_child_permission_review_retry
+        ))
+        .routes(routes!(
             delivery::delegation::list_managed_orchestrators,
             delivery::delegation::start_managed_orchestrator
         ))
@@ -816,6 +826,9 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::session_state::update_permission_approval_mode
         ))
         .routes(routes!(delivery::session_state::reply_permission_request))
+        .routes(routes!(
+            delivery::session_state::authorize_permission_review_retry
+        ))
         .routes(routes!(delivery::session_state::delete_permission_grant))
         .routes(routes!(delivery::session_state::thread_events))
         .routes(routes!(delivery::workspace::workspace_diff))
@@ -885,7 +898,39 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::user_terminals::pull))
         .routes(routes!(delivery::user_terminals::detach))
         .routes(routes!(delivery::user_terminals::input))
-        .routes(routes!(delivery::user_terminals::resize))
+        .routes(routes!(delivery::user_terminals::resize));
+    // Utoipa 6 omits empty descriptions. OpenAPI 3.1 requires a description
+    // on every Response Object, including annotations that only declare a body.
+    // Normalize the shared live/export document, never the generated JSON.
+    for path in documented.get_openapi_mut().paths.paths.values_mut() {
+        for operation in [
+            &mut path.get,
+            &mut path.put,
+            &mut path.post,
+            &mut path.delete,
+            &mut path.options,
+            &mut path.head,
+            &mut path.patch,
+            &mut path.trace,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for (status, response) in &mut operation.responses.responses {
+                if let utoipa::openapi::RefOr::T(response) = response {
+                    if response.description.is_empty() {
+                        response.description =
+                            axum::http::StatusCode::from_bytes(status.as_bytes())
+                                .ok()
+                                .and_then(|status| status.canonical_reason())
+                                .unwrap_or("Response")
+                                .to_owned();
+                    }
+                }
+            }
+        }
+    }
+    documented
 }
 
 /// Return the exact OpenAPI document assembled for the running HTTP router.
@@ -1059,35 +1104,6 @@ where
     .await
 }
 
-/// Apply the interactive HTTP socket policy once, before serving a connection.
-/// A small streamed gzip response must not wait for a delayed ACK between its
-/// header and body writes on every sequential terminal observation.
-struct HttpListener {
-    listener: TcpListener,
-    policy_failures: tokio::sync::mpsc::UnboundedSender<std::io::Error>,
-}
-
-impl axum::serve::Listener for HttpListener {
-    type Io = tokio::net::TcpStream;
-    type Addr = SocketAddr;
-
-    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        let (socket, address) = axum::serve::Listener::accept(&mut self.listener).await;
-        if let Err(error) = socket.set_nodelay(true) {
-            // Never serve a socket with an unapplied policy. Let the shared
-            // shutdown owner drain both HTTP surfaces and report the failure.
-            drop(socket);
-            let _ = self.policy_failures.send(error);
-            return std::future::pending().await;
-        }
-        (socket, address)
-    }
-
-    fn local_addr(&self) -> std::io::Result<Self::Addr> {
-        self.listener.local_addr()
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "the single forced-shutdown callback is moved only after graceful shutdown starts"
@@ -1109,12 +1125,8 @@ where
     let shutdown_manager = manager.clone();
     let (graceful_tx, graceful_rx) = tokio::sync::oneshot::channel();
     let (control_graceful_tx, control_graceful_rx) = tokio::sync::oneshot::channel();
-    let (policy_failures_tx, mut policy_failures_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut control_server = control.map(|(listener, app)| {
-        let listener = HttpListener {
-            listener,
-            policy_failures: policy_failures_tx.clone(),
-        };
+        let listener = HttpListener(listener);
         tokio::spawn(
             axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
@@ -1123,10 +1135,7 @@ where
                 .into_future(),
         )
     });
-    let listener = HttpListener {
-        listener,
-        policy_failures: policy_failures_tx,
-    };
+    let listener = HttpListener(listener);
     let mut server = tokio::spawn(
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {
@@ -1134,22 +1143,13 @@ where
             })
             .into_future(),
     );
-    // Socket policy failure uses the existing complete-shutdown owner as well.
-    let shutdown = async move {
-        tokio::select! {
-            () = shutdown => Ok(()),
-            Some(error) = policy_failures_rx.recv() => {
-                Err(error).context("failed to set TCP_NODELAY on HTTP connection")
-            }
-        }
-    };
     tokio::pin!(shutdown);
 
     let result = tokio::select! {
         result = &mut server => result
             .context("server task stopped unexpectedly")?
             .context("server stopped unexpectedly"),
-        shutdown_result = &mut shutdown => {
+        () = &mut shutdown => {
             // Stop accepting new work before cancellation. The single outer
             // deadline covers both run cleanup and graceful HTTP/SSE drain.
             // Its watchdog is independent of the async runtime so a wedged
@@ -1190,7 +1190,7 @@ where
             watchdog
                 .join()
                 .map_err(|_| anyhow!("shutdown watchdog panicked"))?;
-            result.and(shutdown_result)
+            result
         }
     };
     if let Some(control_server) = control_server {

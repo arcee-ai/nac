@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "kind": "github-platform-qualification",
+  "fixture_repository": "REPLACE/SAFE-FIXTURE",
+  "payload_sha256": "307fdf0ae7d753847004b652abeb3da12c89e61b94bdc2cf1735a25a27b75a65",
+  "completed_at": null,
+  "cases": [
+    {
+      "name": "rust-pass",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "web-pass",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "workflow-pass",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "docs-pass",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "managed-pass",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "api-drift-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "assets-drift-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "browser-failure-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "image-failure-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "failed-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "pending-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "cancelled-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "missing-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "stale-check-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "unexpected-skip-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "allison-approval",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "aleksiej-approval",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "eric-approval",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "self-approval-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "outside-only-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "author-excluded-requests",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "bot-owner-requests",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "stale-review-dismissed",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "unresolved-conversation-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "two-layer-stack-base-codeowners",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "allison-own-failed-pr-override",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "allison-own-pending-pr-override",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "ordinary-override-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "automation-override-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "direct-push-blocked",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    },
+    {
+      "name": "inherited-protections-preserved",
+      "result": "pending",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null,
+      "observation": null
+    }
+  ]
+}

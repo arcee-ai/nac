@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug, Deserialize)]
 pub(super) struct SkillFrontmatter {
     pub(super) name: String,
@@ -99,11 +102,11 @@ pub(super) fn parse_skill_file(path: &Path) -> Result<Option<ParsedSkillFile>> {
 }
 
 pub(super) fn parse_frontmatter(raw: &str) -> Result<SkillFrontmatter> {
-    match serde_yaml_ng::from_str(raw) {
+    match serde_saphyr::from_str(raw) {
         Ok(frontmatter) => Ok(frontmatter),
         Err(_) => {
             let repaired = repair_frontmatter(raw);
-            serde_yaml_ng::from_str(&repaired).map_err(|error| anyhow!(error))
+            serde_saphyr::from_str(&repaired).map_err(|error| anyhow!(error))
         }
     }
 }

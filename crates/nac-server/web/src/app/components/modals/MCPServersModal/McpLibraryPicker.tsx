@@ -100,7 +100,7 @@ export function LibraryPicker({
   useLayoutEffect(() => {
     if (!onClose || !setFooter) return undefined;
     setFooter(
-      <FooterButton isMobile={isMobile} variant={ButtonVariant.Secondary} onClick={onClose}>
+      <FooterButton isMobile={isMobile} variant={ButtonVariant.Tertiary} onClick={onClose}>
         Close
       </FooterButton>,
     );

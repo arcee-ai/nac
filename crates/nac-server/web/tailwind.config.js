@@ -1,3 +1,59 @@
+const fillColors = {
+  "accent-primary": "var(--color-fill-accent-primary)",
+  "accent-secondary": "var(--color-fill-accent-secondary)",
+  "accent-tertiary": "var(--color-fill-accent-tertiary)",
+  "accent-muted": "var(--color-fill-accent-muted)",
+
+  "basic-primary": "var(--color-fill-basic-primary)",
+  "basic-secondary": "var(--color-fill-basic-secondary)",
+  "basic-tertiary": "var(--color-fill-basic-tertiary)",
+  "basic-muted": "var(--color-fill-basic-muted)",
+
+  "btn-primary": "var(--color-fill-btn-primary)",
+  "btn-primary-disabled": "var(--color-fill-btn-primary-disabled)",
+  "btn-accent": "var(--color-fill-btn-accent)",
+  "btn-accent-hovered": "var(--color-fill-btn-accent-hovered)",
+  "btn-accent-pressed": "var(--color-fill-btn-accent-pressed)",
+  "btn-accent-muted": "var(--color-fill-btn-accent-muted)",
+  "btn-secondary": "var(--color-fill-btn-secondary)",
+  "btn-secondary-hovered": "var(--color-fill-btn-secondary-hovered)",
+  "btn-secondary-pressed": "var(--color-fill-btn-secondary-pressed)",
+  "btn-secondary-disabled": "var(--color-fill-btn-secondary-disabled)",
+  "btn-secondary-highlighted": "var(--color-fill-btn-secondary-highlighted)",
+  "btn-secondary-hovered-highlighted": "var(--color-fill-btn-secondary-hovered-highlighted)",
+  "btn-secondary-pressed-highlighted": "var(--color-fill-btn-secondary-pressed-highlighted)",
+  "btn-secondary-disabled-highlighted": "var(--color-fill-btn-secondary-disabled-highlighted)",
+  "btn-destructive": "var(--color-fill-btn-destructive)",
+  "btn-destructive-hovered": "var(--color-fill-btn-destructive-hovered)",
+  "btn-destructive-pressed": "var(--color-fill-btn-destructive-pressed)",
+  "btn-destructive-disabled": "var(--color-fill-btn-destructive-disabled)",
+
+  "danger-primary": "var(--color-fill-danger-primary)",
+  "danger-secondary": "var(--color-fill-danger-secondary)",
+  "danger-tertiary": "var(--color-fill-danger-tertiary)",
+  "danger-muted": "var(--color-fill-danger-muted)",
+
+  "error-primary": "var(--color-fill-error-primary)",
+  "error-secondary": "var(--color-fill-error-secondary)",
+  "error-tertiary": "var(--color-fill-error-tertiary)",
+  "error-muted": "var(--color-fill-error-muted)",
+
+  "info-primary": "var(--color-fill-info-primary)",
+  "info-secondary": "var(--color-fill-info-secondary)",
+  "info-tertiary": "var(--color-fill-info-tertiary)",
+  "info-muted": "var(--color-fill-info-muted)",
+
+  "primary-inversed": "var(--color-fill-primary-inversed)",
+  "secondary-inversed": "var(--color-fill-secondary-inversed)",
+  "tertiary-inversed": "var(--color-fill-tertiary-inversed)",
+  "muted-inversed": "var(--color-fill-muted-inversed)",
+
+  "success-primary": "var(--color-fill-success-primary)",
+  "success-secondary": "var(--color-fill-success-secondary)",
+  "success-tertiary": "var(--color-fill-success-tertiary)",
+  "success-muted": "var(--color-fill-success-muted)",
+};
+
 /** @type {import('tailwindcss').Config} */
 const config = {
   content: ["./src/**/*.{js,ts,jsx,tsx}"],
@@ -130,11 +186,6 @@ const config = {
         "elevation-sublevel-variant-A": "var(--color-bg-elevation-sublevel-variant-A)",
         "elevation-sublevel-variant-B": "var(--color-bg-elevation-sublevel-variant-B)",
 
-        "code-input-content": "var(--color-bg-code-input-content)",
-        "code-input-content-integration": "var(--color-bg-code-input-content-integration)",
-        "code-input-line-numbers": "var(--color-bg-code-input-line-numbers)",
-        "code-input-header": "var(--color-bg-code-input-header)",
-
         "error-primary": "var(--color-bg-error-primary)",
         "error-secondary": "var(--color-bg-error-secondary)",
         "error-tertiary": "var(--color-bg-error-tertiary)",
@@ -164,8 +215,6 @@ const config = {
         "success-secondary": "var(--color-bg-success-secondary)",
         "success-tertiary": "var(--color-bg-success-tertiary)",
         "success-inverse": "var(--color-bg-success-inverse)",
-
-        scrollbar: "var(--color-bg-scrollbar)",
       },
       textColor: {
         "accent-primary": "var(--color-text-accent-primary)",
@@ -178,11 +227,6 @@ const config = {
         "basic-tertiary": "var(--color-text-basic-tertiary)",
         "basic-muted": "var(--color-text-basic-muted)",
 
-        "basic-primary-inverse": "var(--color-text-basic-primary-inverse)",
-        "basic-secondary-inverse": "var(--color-text-basic-secondary-inverse)",
-        "basic-tertiary-inverse": "var(--color-text-basic-tertiary-inverse)",
-        "basic-muted-inverse": "var(--color-text-basic-muted-inverse)",
-
         "btn-primary": "var(--color-text-btn-primary)",
         "btn-primary-disabled": "var(--color-text-btn-primary-disabled)",
         "btn-accent": "var(--color-text-btn-accent)",
@@ -193,10 +237,11 @@ const config = {
         "btn-secondary-hovered": "var(--color-text-btn-secondary-hovered)",
         "btn-secondary-pressed": "var(--color-text-btn-secondary-pressed)",
         "btn-secondary-disabled": "var(--color-text-btn-secondary-disabled)",
-        "btn-ghost": "var(--color-text-btn-ghost)",
-        "btn-ghost-hovered": "var(--color-text-btn-ghost-hovered)",
-        "btn-ghost-pressed": "var(--color-text-btn-ghost-pressed)",
-        "btn-ghost-disabled": "var(--color-text-btn-ghost-disabled)",
+        "btn-secondary-highlighted": "var(--color-text-btn-secondary-highlighted)",
+        "btn-secondary-hovered-highlighted": "var(--color-text-btn-secondary-hovered-highlighted)",
+        "btn-secondary-pressed-highlighted": "var(--color-text-btn-secondary-pressed-highlighted)",
+        "btn-secondary-disabled-highlighted":
+          "var(--color-text-btn-secondary-disabled-highlighted)",
         "btn-destructive": "var(--color-text-btn-destructive)",
         "btn-destructive-hovered": "var(--color-text-btn-destructive-hovered)",
         "btn-destructive-pressed": "var(--color-text-btn-destructive-pressed)",
@@ -227,12 +272,15 @@ const config = {
         "tertiary-inverse": "var(--color-text-tertiary-inverse)",
         "muted-inverse": "var(--color-text-muted-inverse)",
 
-        notification: "var(--color-text-notification)",
-
         "success-primary": "var(--color-text-success-primary)",
         "success-secondary": "var(--color-text-success-secondary)",
         "success-tertiary": "var(--color-text-success-tertiary)",
         "success-muted": "var(--color-text-success-muted)",
+
+        // Icons draw with currentColor, so the fill tokens double as `text-fill-*`.
+        ...Object.fromEntries(
+          Object.entries(fillColors).map(([name, value]) => [`fill-${name}`, value]),
+        ),
       },
       borderColor: {
         "accent-primary": "var(--color-border-accent-primary)",
@@ -244,9 +292,7 @@ const config = {
         secondary: "var(--color-border-secondary)",
         tertiary: "var(--color-border-tertiary)",
         muted: "var(--color-border-muted)",
-
-        "code-input": "var(--color-border-code-input)",
-        "code-input-hovered": "var(--color-border-code-input-hovered)",
+        card: "var(--color-border-card)",
 
         "danger-primary": "var(--color-border-danger-primary)",
         "danger-secondary": "var(--color-border-danger-secondary)",
@@ -263,6 +309,8 @@ const config = {
         "info-tertiary": "var(--color-border-info-tertiary)",
         "info-muted": "var(--color-border-info-muted)",
 
+        input: "var(--color-border-input)",
+
         "primary-inversed": "var(--color-border-primary-inversed)",
         "secondary-inversed": "var(--color-border-secondary-inversed)",
         "tertiary-inversed": "var(--color-border-tertiary-inversed)",
@@ -273,59 +321,7 @@ const config = {
         "success-tertiary": "var(--color-border-success-tertiary)",
         "success-muted": "var(--color-border-success-muted)",
       },
-      fill: {
-        "accent-primary": "var(--color-fill-accent-primary)",
-        "accent-secondary": "var(--color-fill-accent-secondary)",
-        "accent-tertiary": "var(--color-fill-accent-tertiary)",
-        "accent-muted": "var(--color-fill-accent-muted)",
-
-        "basic-primary": "var(--color-fill-basic-primary)",
-        "basic-secondary": "var(--color-fill-basic-secondary)",
-        "basic-tertiary": "var(--color-fill-basic-tertiary)",
-        "basic-muted": "var(--color-fill-basic-muted)",
-
-        "btn-primary": "var(--color-fill-btn-primary)",
-        "btn-primary-disabled": "var(--color-fill-btn-primary-disabled)",
-        "btn-accent": "var(--color-fill-btn-accent)",
-        "btn-accent-hovered": "var(--color-fill-btn-accent-hovered)",
-        "btn-accent-pressed": "var(--color-fill-btn-accent-pressed)",
-        "btn-accent-muted": "var(--color-fill-btn-accent-muted)",
-        "btn-secondary": "var(--color-fill-btn-secondary)",
-        "btn-secondary-hovered": "var(--color-fill-btn-secondary-hovered)",
-        "btn-secondary-pressed": "var(--color-fill-btn-secondary-pressed)",
-        "btn-secondary-disabled": "var(--color-fill-btn-secondary-disabled)",
-        "btn-destructive": "var(--color-fill-btn-destructive)",
-        "btn-destructive-hovered": "var(--color-fill-btn-destructive-hovered)",
-        "btn-destructive-pressed": "var(--color-fill-btn-destructive-pressed)",
-        "btn-destructive-disabled": "var(--color-fill-btn-destructive-disabled)",
-
-        "danger-primary": "var(--color-fill-danger-primary)",
-        "danger-secondary": "var(--color-fill-danger-secondary)",
-        "danger-tertiary": "var(--color-fill-danger-tertiary)",
-        "danger-muted": "var(--color-fill-danger-muted)",
-
-        "error-primary": "var(--color-fill-error-primary)",
-        "error-secondary": "var(--color-fill-error-secondary)",
-        "error-tertiary": "var(--color-fill-error-tertiary)",
-        "error-muted": "var(--color-fill-error-muted)",
-
-        "info-primary": "var(--color-fill-info-primary)",
-        "info-secondary": "var(--color-fill-info-secondary)",
-        "info-tertiary": "var(--color-fill-info-tertiary)",
-        "info-muted": "var(--color-fill-info-muted)",
-
-        "primary-inversed": "var(--color-fill-primary-inversed)",
-        "secondary-inversed": "var(--color-fill-secondary-inversed)",
-        "tertiary-inversed": "var(--color-fill-tertiary-inversed)",
-        "muted-inversed": "var(--color-fill-muted-inversed)",
-
-        notification: "var(--color-fill-notification)",
-
-        "success-primary": "var(--color-fill-success-primary)",
-        "success-secondary": "var(--color-fill-success-secondary)",
-        "success-tertiary": "var(--color-fill-success-tertiary)",
-        "success-muted": "var(--color-fill-success-muted)",
-      },
+      fill: fillColors,
       colors: {
         brand: {
           50: "var(--brand-50)",
@@ -344,10 +340,11 @@ const config = {
           950: "var(--brand-950)",
         },
       },
+      borderRadius: {
+        interaction: "var(--interaction-rounded)",
+      },
       boxShadow: {
         none: "none",
-        xs: "var(--shadow-xs)",
-        sm: "var(--shadow-sm)",
         md: "var(--shadow-md)",
         lg: "var(--shadow-lg)",
         xl: "var(--shadow-xl)",
@@ -355,7 +352,6 @@ const config = {
         "3xl": "var(--shadow-3xl)",
         convex: "var(--shadow-convex)",
         concave: "var(--shadow-concave)",
-        "left-sidebar-closed": "var(--left-sidebar-closed)",
         "left-sidebar-open": "var(--left-sidebar-open)",
       },
       screens: {
@@ -376,6 +372,9 @@ const config = {
           "background-clip": "text",
           "-webkit-text-fill-color": "transparent",
           color: "transparent",
+          "@media (prefers-reduced-motion: reduce)": {
+            animation: "none",
+          },
         },
         ".text-shimmer-basic": {
           "background-image":
@@ -387,6 +386,24 @@ const config = {
           "background-clip": "text",
           "-webkit-text-fill-color": "transparent",
           color: "transparent",
+          "@media (prefers-reduced-motion: reduce)": {
+            animation: "none",
+          },
+        },
+        // Figma "Shimmer Text": primary through the disabled button text and back.
+        ".text-shimmer-primary": {
+          "background-image":
+            "linear-gradient(90deg, var(--color-text-basic-primary), var(--color-text-btn-secondary-disabled), var(--color-text-basic-primary))",
+          "background-size": "200% 100%",
+          "background-position": "200% 0",
+          animation: "shimmer 2s linear infinite",
+          "-webkit-background-clip": "text",
+          "background-clip": "text",
+          "-webkit-text-fill-color": "transparent",
+          color: "transparent",
+          "@media (prefers-reduced-motion: reduce)": {
+            animation: "none",
+          },
         },
       });
     },

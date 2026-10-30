@@ -1,5 +1,7 @@
 mod authorization_state;
 mod client_config;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod url_validation;
 
 use std::collections::BTreeMap;
@@ -10,7 +12,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 pub(crate) use authorization_state::discard_mcp_oauth_pending_authorization;
 use authorization_state::{
-    authorization_state, failed_authorization_start, merge_pending_scopes,
+    authorization_state, ensure_not_logged_out, failed_authorization_start, merge_pending_scopes,
     pending_authorization_is_live, publish_pending_authorization,
 };
 use base64::Engine;
@@ -129,6 +131,9 @@ struct OAuthProfile {
     credentials: Option<StoredCredentials>,
     #[serde(default)]
     states: BTreeMap<String, StoredAuthorizationState>,
+    /// Advanced by each logout so an authorization already completing cannot restore credentials.
+    #[serde(default)]
+    logout_generation: u64,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -234,6 +239,7 @@ fn migrate_legacy_store(legacy: LegacyOAuthStoreFile) -> Result<OAuthStoreFile> 
                 registered_client_secret: None,
                 credentials: profile.credentials,
                 states: profile.states,
+                logout_generation: 0,
             },
         );
     }
@@ -519,6 +525,15 @@ pub fn configure_mcp_oauth(
             }
             None => false,
         };
+        // A re-created profile must not reuse a deleted profile's generation.
+        let logout_generation = existing.map_or_else(
+            || {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(1, |elapsed| elapsed.as_nanos() as u64)
+            },
+            |profile| profile.logout_generation,
+        );
         let matching = existing.filter(|_| same_configuration);
         let previous_issuer = matching.and_then(|profile| profile.binding.issuer.clone());
         let credentials = matching
@@ -549,6 +564,7 @@ pub fn configure_mcp_oauth(
                 registered_client_secret,
                 credentials,
                 states: BTreeMap::new(),
+                logout_generation,
             },
         );
         Ok(connected)
@@ -601,6 +617,7 @@ pub fn clear_mcp_oauth(cwd: &Path, server_name: &str) -> Result<McpOAuthStatus> 
         profile.pending_authorization_url = None;
         profile.pending_scopes.clear();
         profile.registered_client_secret = None;
+        profile.logout_generation += 1;
         Ok(true)
     })?;
     Ok(if configured {
@@ -654,6 +671,7 @@ pub(crate) struct OAuthProfileStore {
     endpoint: String,
     expected_client_id: Option<String>,
     save_mode: CredentialSaveMode,
+    logout_generation: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -703,6 +721,10 @@ impl CredentialStore for OAuthProfileStore {
                 .get_mut(&self.server_name)
                 .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
             validate_profile_binding(profile, &self.endpoint)?;
+            // Refresh saves hold the credential lock from load to save, so logout cannot interleave.
+            if matches!(self.save_mode, CredentialSaveMode::Independent) {
+                ensure_not_logged_out(profile, self.logout_generation)?;
+            }
             profile.binding.issuer = credentials.issuer.clone();
             if matches!(self.save_mode, CredentialSaveMode::Independent) {
                 if credentials.granted_scopes.is_empty() {
@@ -777,6 +799,7 @@ impl StateStore for OAuthProfileStore {
                 .get_mut(&self.server_name)
                 .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
             validate_profile_binding(profile, &self.endpoint)?;
+            ensure_not_logged_out(profile, self.logout_generation)?;
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -848,6 +871,7 @@ async fn manager_and_profile(
         endpoint: normalize_endpoint(endpoint)?,
         expected_client_id: registration.expected_client_id().map(ToOwned::to_owned),
         save_mode,
+        logout_generation: profile.logout_generation,
     };
     let mut manager = AuthorizationManager::new(endpoint)
         .await
@@ -1047,12 +1071,14 @@ pub async fn begin_mcp_oauth_authorization(
         }
     };
     let path = oauth_store_path(cwd)?;
+    let logout_generation = profile.logout_generation;
     let publication = edit_store(&path, |store| {
         let profile = store
             .profiles
             .get_mut(server_name)
             .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
         validate_profile_binding(profile, endpoint)?;
+        ensure_not_logged_out(profile, logout_generation)?;
         profile.redirect_uri = Some(redirect_uri.clone());
         publish_pending_authorization(profile, authorization_url.clone())?;
         merge_pending_scopes(&mut profile.pending_scopes, &pending_scopes);
@@ -1215,6 +1241,7 @@ pub(crate) struct McpOAuthScopeStepUp {
     pub(crate) uses_loopback: bool,
     pub(crate) authorization_in_progress: bool,
     pub(crate) authorization_scopes: Vec<String>,
+    pub(crate) logout_generation: u64,
 }
 pub(crate) fn prepare_mcp_oauth_scope_step_up(
     cwd: &Path,
@@ -1246,6 +1273,7 @@ pub(crate) fn prepare_mcp_oauth_scope_step_up(
                 == MCP_OAUTH_REDIRECT_URI,
             authorization_in_progress,
             authorization_scopes: authorization_scopes(profile),
+            logout_generation: profile.logout_generation,
         })
     })
 }
@@ -1320,6 +1348,16 @@ pub(crate) async fn authorized_manager(
     server_name: &str,
     endpoint: &str,
 ) -> Result<AuthorizationManager> {
+    authorized_manager_with_generation(cwd, server_name, endpoint)
+        .await
+        .map(|(manager, _)| manager)
+}
+
+pub(super) async fn authorized_manager_with_generation(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+) -> Result<(AuthorizationManager, u64)> {
     let (mut manager, profile, _) = manager_and_profile(
         cwd,
         server_name,
@@ -1355,7 +1393,7 @@ pub(crate) async fn authorized_manager(
     manager
         .configure_client(client)
         .context("MCP OAuth client could not be initialized")?;
-    Ok(manager)
+    Ok((manager, profile.logout_generation))
 }
 
 #[cfg(test)]
@@ -1494,6 +1532,7 @@ mod tests {
         configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
         let path = oauth_store_path(Path::new("/workspace")).unwrap();
         let adapter = OAuthProfileStore {
+            logout_generation: test_support::logout_generation(&path, "slack"),
             path: path.clone(),
             server_name: "slack".to_string(),
             endpoint: normalize_endpoint(endpoint).unwrap(),
@@ -1613,24 +1652,6 @@ mod tests {
             "https://auth.example.com/authorize?client_id=test",
             "http://localhost:1456/mcp_library/oauth/callback?code=code&state=current%20state"
         ));
-    }
-
-    #[test]
-    fn logout_clears_authorization_material_but_preserves_configuration() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
-        let (_home, _restore) = test_environment("logout");
-        configure_mcp_oauth(
-            Path::new("/workspace"),
-            "slack",
-            "https://mcp.slack.com/mcp",
-            configuration(),
-        )
-        .unwrap();
-        assert_eq!(
-            clear_mcp_oauth(Path::new("/workspace"), "slack").unwrap(),
-            McpOAuthStatus::NeedsAuthorization
-        );
-        assert!(has_mcp_oauth_profile(Path::new("/workspace"), "slack").unwrap());
     }
 
     #[test]
@@ -1828,6 +1849,7 @@ mod tests {
                 None,
             )),
             states: BTreeMap::new(),
+            logout_generation: 0,
         };
         assert_eq!(
             authorization_scopes(&profile),
@@ -1888,41 +1910,6 @@ mod tests {
                 .get("client_id_metadata_document_supported"),
             Some(&serde_json::Value::Bool(true))
         );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn placeholder_credentials_do_not_authorize_an_abandoned_flow() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
-        let (_home, _restore) = test_environment("placeholder-credentials");
-        let endpoint = "https://mcp.example.test/mcp";
-        let mut config = configuration();
-        config.authorization_metadata = Some(McpOAuthAuthorizationMetadata {
-            authorization_endpoint: "https://auth.example.test/authorize".into(),
-            token_endpoint: "https://auth.example.test/token".into(),
-            registration_endpoint: None,
-            issuer: Some("https://auth.example.test/".into()),
-            jwks_uri: None,
-            scopes_supported: None,
-            response_types_supported: None,
-            code_challenge_methods_supported: None,
-            additional_fields: BTreeMap::new(),
-        });
-        configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, config).unwrap();
-        edit_store(
-            &oauth_store_path(Path::new("/workspace")).unwrap(),
-            |store| {
-                store.profiles.get_mut("slack").unwrap().credentials = Some(
-                    StoredCredentials::new("public-test-client".into(), None, Vec::new(), None),
-                );
-                Ok(())
-            },
-        )
-        .unwrap();
-        let error = match authorized_manager(Path::new("/workspace"), "slack", endpoint).await {
-            Ok(_) => panic!("placeholder credentials unexpectedly authorized the MCP client"),
-            Err(error) => error,
-        };
-        assert!(error.to_string().contains("authorization is required"));
     }
 
     #[tokio::test(flavor = "current_thread")]

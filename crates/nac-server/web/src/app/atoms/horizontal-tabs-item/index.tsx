@@ -2,52 +2,92 @@ import type React from "react";
 import { cn } from "../../lib/cn";
 import Icon, { type IconName } from "../icon";
 
-export enum HorizontalTabsItemVariant {
-  Accent = "accent",
-  Neutral = "neutral",
+export enum HorizontalTabsItemSize {
+  Small = "btn-small",
+  Medium = "btn-medium",
+  Large = "btn-large",
+}
+
+export enum HorizontalTabsItemContent {
+  IconLeft = "horizontal-tab-item-icon-left",
+  IconRight = "horizontal-tab-item-icon-right",
+  IconOnly = "horizontal-tab-item-icon",
+  TextOnly = "horizontal-tab-item-text",
+  Full = "horizontal-tab-item-full",
 }
 
 interface HorizontalTabsItemProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   active?: boolean;
+  size?: HorizontalTabsItemSize;
+  /** Layout of the label and icons. Omitted, it follows whichever icons are set. */
+  content?: HorizontalTabsItemContent;
   iconName?: IconName;
-  variant?: HorizontalTabsItemVariant;
+  trailingIcon?: IconName;
 }
 
-const ACTIVE_CLASS = {
-  [HorizontalTabsItemVariant.Accent]: "horizontal-tab-item-active btn-ghost-accent",
-  [HorizontalTabsItemVariant.Neutral]: "horizontal-tab-item-active btn-ghost-highlighted",
-} satisfies Record<HorizontalTabsItemVariant, string>;
-
-/** Horizontal tab item with an underline for the active state. */
 const HorizontalTabsItem: React.FC<HorizontalTabsItemProps> & {
-  Variant: typeof HorizontalTabsItemVariant;
+  Size: typeof HorizontalTabsItemSize;
+  Content: typeof HorizontalTabsItemContent;
 } = ({
   active = false,
+  size = HorizontalTabsItemSize.Large,
+  content,
   iconName,
-  variant = HorizontalTabsItemVariant.Accent,
+  trailingIcon,
   disabled = false,
   className = "",
   children,
   type = "button",
   ...props
-}) => (
-  <button
-    type={type}
-    disabled={disabled}
-    className={cn(
-      "horizontal-tab-item btn btn-medium",
-      iconName ? "btn-icon-left" : "btn-text",
-      active ? ACTIVE_CLASS[variant] : "btn-ghost",
-      disabled ? "btn-disabled" : "cursor-auto",
-      className,
-    )}
-    {...props}
-  >
-    {iconName ? <Icon iconName={iconName} /> : null}
-    {children}
-  </button>
-);
+}) => {
+  const hasLabel = children != null && children !== false && children !== "";
+  const resolved =
+    content ??
+    (iconName && trailingIcon
+      ? HorizontalTabsItemContent.Full
+      : iconName
+        ? hasLabel
+          ? HorizontalTabsItemContent.IconLeft
+          : HorizontalTabsItemContent.IconOnly
+        : trailingIcon
+          ? hasLabel
+            ? HorizontalTabsItemContent.IconRight
+            : HorizontalTabsItemContent.IconOnly
+          : HorizontalTabsItemContent.TextOnly);
+  const showLabel = resolved !== HorizontalTabsItemContent.IconOnly;
+  const showLeading =
+    Boolean(iconName) &&
+    (resolved === HorizontalTabsItemContent.IconLeft ||
+      resolved === HorizontalTabsItemContent.IconOnly ||
+      resolved === HorizontalTabsItemContent.Full);
+  const showTrailing =
+    Boolean(trailingIcon) &&
+    (resolved === HorizontalTabsItemContent.IconRight ||
+      resolved === HorizontalTabsItemContent.Full ||
+      (resolved === HorizontalTabsItemContent.IconOnly && !iconName));
 
-HorizontalTabsItem.Variant = HorizontalTabsItemVariant;
+  return (
+    <button
+      type={type}
+      disabled={disabled}
+      className={cn(
+        "horizontal-tab-item btn",
+        size,
+        resolved,
+        active ? "horizontal-tab-item-active btn-ghost-highlighted" : "btn-ghost",
+        disabled && "btn-disabled",
+        className,
+      )}
+      {...props}
+    >
+      {showLeading ? <Icon iconName={iconName as IconName} /> : null}
+      {showLabel ? <span className="min-w-0 truncate">{children}</span> : null}
+      {showTrailing ? <Icon iconName={trailingIcon as IconName} /> : null}
+    </button>
+  );
+};
+
+HorizontalTabsItem.Size = HorizontalTabsItemSize;
+HorizontalTabsItem.Content = HorizontalTabsItemContent;
 
 export default HorizontalTabsItem;

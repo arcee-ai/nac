@@ -29,9 +29,16 @@ interface SelectProps {
      * of its own belongs in `panelClassName`.
      */
     sticky?: boolean;
+    /**
+     * Draws the trigger as a `StickyButton` of `variant`, for a select floating
+     * over a phone screen. Its rows still follow `size`.
+     */
+    floating?: boolean;
+    /** Trigger text in place of the chosen row's label, for a trigger that words it its own way. */
+    triggerLabel?: React.ReactNode;
     className?: string;
-    /** Glyph after the label. Forms keep the disclosure chevron. */
-    trailingIcon?: IconName;
+    /** Glyph after the label, or `null` for a trigger of text alone. Forms keep the disclosure chevron. */
+    trailingIcon?: IconName | null;
     /**
      * Applied to the trigger button. The wrapper stretching is not enough on its
      * own — the button hugs its label — so a select that has to fill a form

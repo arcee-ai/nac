@@ -92,6 +92,75 @@ fn stored_codex_auth() -> String {
     .to_string()
 }
 
+#[test]
+fn stored_codex_tokens_exclude_invocations_and_person_intent_from_review() {
+    use crate::permissions::{review_request, ExactSecrets, PermissionBackend};
+    use crate::tools::kernel::PermissionResource;
+
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    // Opaque canaries have no recognizable credential prefix or field label.
+    let access = "cobaltwindflower";
+    let refresh = "ambermeadowstone";
+    let auth = json!({
+        "type": "chatgpt-codex", "access": access, "refresh": refresh,
+        "expires_at_ms": 1, "account_id": "synthetic-account"
+    })
+    .to_string();
+    let _env = IsolatedModelEnv::new("codex-review-secrets", Some(&auth), None, None);
+    let secrets = ExactSecrets::current(None).unwrap();
+    for value in [access, refresh] {
+        assert!(review_request(
+            "exec_command",
+            &[PermissionResource::new("execute", "command:[ls]")],
+            PermissionBackend::Local,
+            &[format!("Find occurrences of {value}")],
+            false,
+            &secrets,
+        )
+        .is_err());
+        assert!(review_request(
+            "exec_command",
+            &[PermissionResource::new(
+                "execute",
+                format!("command:[printf][{value}]")
+            )],
+            PermissionBackend::Local,
+            &["Inspect the workspace".to_owned()],
+            false,
+            &secrets,
+        )
+        .is_err());
+    }
+    assert!(review_request(
+        "exec_command",
+        &[PermissionResource::new("execute", "command:[ls]")],
+        PermissionBackend::Local,
+        &["Inspect the workspace".to_owned()],
+        false,
+        &secrets,
+    )
+    .is_ok());
+
+    write_test_credential(&_env.home.join("auth.json"), "{malformed");
+    assert!(
+        ExactSecrets::current(None).is_err(),
+        "unreadable secrets fail closed"
+    );
+}
+
+#[test]
+fn missing_or_foreign_codex_storage_does_not_block_review_redaction() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let foreign = stored_arcee_auth("synthetic-foreign-access", "https://api.arcee.ai");
+    for contents in [None, Some(foreign.as_str())] {
+        let _env = IsolatedModelEnv::new("optional-codex-review", contents, None, None);
+        assert!(chatgpt_codex::stored_credential_values()
+            .unwrap()
+            .is_empty());
+        assert!(crate::permissions::ExactSecrets::current(None).is_ok());
+    }
+}
+
 fn directory_names(path: &std::path::Path) -> Vec<String> {
     let mut names = std::fs::read_dir(path)
         .unwrap()
@@ -516,4 +585,41 @@ fn codex_status_and_logout_ignore_legacy_shaped_arcee_auth_json() {
 
     assert_eq!(std::fs::read(&auth_path).unwrap(), before);
     assert!(!canonical_path.exists());
+}
+
+#[tokio::test]
+async fn arcee_run_without_a_stored_login_fails_as_authentication() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let env = IsolatedModelEnv::new("arcee-logged-out-run", None, None, None);
+    let auth_path = env.home.join("arcee_auth.json");
+    write_test_credential(
+        &auth_path,
+        stored_arcee_auth("token-test", "https://api.arcee.ai"),
+    );
+    let client = ModelClient::from_effective_settings(effective_settings(
+        BackendKind::ArceeAuth,
+        "https://api.arcee.ai/api/v1",
+        None,
+    ))
+    .expect("a stored login builds the client");
+    std::fs::remove_file(&auth_path).unwrap();
+
+    let error = client
+        .send_turn(Vec::new(), Vec::new())
+        .await
+        .expect_err("a run without a stored login must not reach the provider");
+
+    let failure = error
+        .downcast_ref::<crate::run_failure::RunFailure>()
+        .expect("the run failure is structured");
+    assert_eq!(
+        failure.kind,
+        crate::run_failure::RunFailureKind::Authentication
+    );
+    assert!(!failure.transient);
+    assert_eq!(
+        failure.summary,
+        "Not signed in to Arcee. Sign in to continue."
+    );
+    assert!(failure.diagnostic.contains("Arcee auth is not configured"));
 }

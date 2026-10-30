@@ -979,6 +979,83 @@ async fn managed_interactive_repair_completes_into_readiness_create_and_resume()
 }
 
 #[tokio::test]
+async fn managed_refused_credential_is_signed_out_before_repair_signs_in_again() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_refused_credential_repair");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_imported_managed_arcee_state(
+        &nac_home,
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+    );
+    let manager = test_managed_bootstrap_manager_with_auth(
+        &root,
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+        Some(nac_core::model::ARCEE_AUTH_DEV2_ISSUER),
+    );
+    let auth_path = nac_home.join("arcee_auth.json");
+    let refused = std::fs::read(&auth_path).unwrap();
+
+    // A refused credential stays on file, and repair never overwrites it.
+    let error = manager
+        .start_managed_login(
+            nac_core::model::ManagedAuthProvider::Arcee,
+            nac_core::model::LoginStyle::DeviceCode,
+        )
+        .await
+        .expect_err("repair must not replace a retained credential")
+        .message;
+    assert!(error.contains("log out before starting repair"));
+    assert_eq!(std::fs::read(&auth_path).unwrap(), refused);
+
+    // The deliberate sign-out the failure box performs first.
+    let Json(status) = crate::managed_auth::logout_handler(AxumPath("arcee".to_string()))
+        .await
+        .expect("managed sign-out");
+    assert!(!status.signed_in);
+    assert!(nac_home.join("arcee_managed_repair.json").exists());
+
+    let (auth_service, auth_server) =
+        scripted_managed_arcee_login(nac_core::model::ARCEE_AUTH_DEV2_ISSUER);
+    let started = manager
+        .start_managed_arcee_repair_with_auth_service_for_test(&auth_service)
+        .await
+        .expect("repair begins once the refused credential is signed out");
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match manager
+                .poll_managed_login(
+                    nac_core::model::ManagedAuthProvider::Arcee,
+                    &started.login_id,
+                )
+                .unwrap()
+            {
+                crate::DeviceLoginStateResponse::Pending => tokio::task::yield_now().await,
+                outcome => break outcome,
+            }
+        }
+    })
+    .await
+    .expect("managed repair completion timed out");
+    assert!(matches!(
+        completed,
+        crate::DeviceLoginStateResponse::Complete { ref auth } if auth.signed_in
+    ));
+    auth_server.join().unwrap();
+
+    manager
+        .managed_model()
+        .unwrap()
+        .credential_ready(manager.managed_host().unwrap())
+        .expect("the repaired credential keeps the managed binding");
+    assert_ne!(std::fs::read(&auth_path).unwrap(), refused);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn version_two_managed_repair_holds_upgrade_admission_until_completion() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("managed_v2_repair_admission");

@@ -133,6 +133,21 @@ export function resolveCatalogModel(
 }
 
 /**
+ * How much of the catalog's window the context fills, or null while either
+ * figure is unknown. A model the catalog does not know is measured against its
+ * provider's default window, and the reading says so.
+ */
+export function contextShare(used: number | null, resolved: ResolvedCatalogModel): string | null {
+  const window = resolved.contextWindow;
+  if (!window || used == null) return null;
+  const share = `${Math.round((used / window) * 100)}%`;
+  if (resolved.estimated) {
+    return `${share} of ${resolved.provider?.id ?? "the provider"}'s default window. The catalog does not know this model, so the limit is an estimate.`;
+  }
+  return `${share} of the model's context window`;
+}
+
+/**
  * The provider carrying an entry for this model id, mirroring
  * `ModelCatalog::provider_for_model`: an exact match wins, and a collision
  * prefers the first provider that is not a managed login.

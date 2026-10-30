@@ -253,7 +253,27 @@ impl<'a> SessionCreationApplication<'a> {
 
     pub async fn create_session(
         &self,
+        request: SessionCreationCommand,
+    ) -> Result<SessionFrontendSnapshot> {
+        self.create_prepared_session(request, None).await
+    }
+
+    pub(crate) async fn create_retained_task_session(
+        &self,
+        launch: nac_core::store::TaskLaunchRecord,
+    ) -> Result<SessionFrontendSnapshot> {
+        let request = SessionCreationCommand {
+            behavior: SessionBehavior::Direct,
+            project_id: Some(launch.request.project_id.clone()),
+            ..SessionCreationCommand::default()
+        };
+        self.create_prepared_session(request, Some(launch)).await
+    }
+
+    async fn create_prepared_session(
+        &self,
         mut request: SessionCreationCommand,
+        retained: Option<nac_core::store::TaskLaunchRecord>,
     ) -> Result<SessionFrontendSnapshot> {
         let first_chat_project_id = if request.first_chat {
             Some(
@@ -292,7 +312,7 @@ impl<'a> SessionCreationApplication<'a> {
                 projects::load_project_launch_context(&self.manager.inner.store_path, project_id)
             })
             .transpose()?;
-        let (project_id, location) = if let Some(context) = project_context {
+        let (project_id, mut location) = if let Some(context) = project_context {
             if project_location_conflicts(&request) {
                 return Err(anyhow!(
                     "invalid request: project_id cannot be combined with cwd or ssh location fields"
@@ -344,6 +364,13 @@ impl<'a> SessionCreationApplication<'a> {
         }
         apply_managed_model_defaults(&mut request, self.manager.managed_model());
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
+        if let Some(launch) = &retained {
+            anyhow::ensure!(
+                location.ssh.host().is_none() && !sandbox_requested(&request.sandbox),
+                "invalid request: isolated task launch requires Local execution"
+            );
+            location.workspace_cwd = launch.workspace_path.join(&launch.source.subdirectory);
+        }
         let orchestrator_compaction_threshold =
             create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
         let mut model = model_options(
@@ -396,25 +423,32 @@ impl<'a> SessionCreationApplication<'a> {
                 )?)
             }
         };
-        let mut prepared = runtime::prepare_run_config_for_project_with_behavior(
-            RunOptions {
-                workspace_cwd: location.workspace_cwd,
-                config_cwd: Some(location.config_cwd.clone()),
-                worker_executable: Some(self.manager.inner.worker_executable.clone()),
-                store: StoreOptions {
-                    store_path: Some(self.manager.inner.store_path.clone()),
-                },
-                model,
-                orchestrator_compaction_threshold,
-                sandbox: sandbox_options(request.sandbox),
-                ssh: location.ssh,
+        let options = RunOptions {
+            workspace_cwd: location.workspace_cwd,
+            config_cwd: Some(location.config_cwd.clone()),
+            worker_executable: Some(self.manager.inner.worker_executable.clone()),
+            store: StoreOptions {
+                store_path: Some(self.manager.inner.store_path.clone()),
             },
-            &config,
-            project_id,
-            behavior,
-        )
-        .await
-        .map_err(|error| {
+            model,
+            orchestrator_compaction_threshold,
+            sandbox: sandbox_options(request.sandbox),
+            ssh: location.ssh,
+        };
+        if retained.is_some() {
+            self.manager.inner.task_preparations.git.check_running()?;
+        }
+        let preparation = async {
+            if let Some(launch) = &retained {
+                runtime::prepare_retained_task_run_config(options, &config, launch).await
+            } else {
+                runtime::prepare_run_config_for_project_with_behavior(
+                    options, &config, project_id, behavior,
+                )
+                .await
+            }
+        };
+        let mut prepared = preparation.await.map_err(|error| {
             // A broken light model fails here, at launch resolution. Route it
             // through the configuration-error boundary so the response names
             // the actionable cause.
@@ -457,6 +491,9 @@ impl<'a> SessionCreationApplication<'a> {
                     gate.resume.notified().await;
                 }
             }
+            if retained.is_some() {
+                self.manager.inner.task_preparations.git.check_running()?;
+            }
             Ok::<_, anyhow::Error>(service)
         }
         .await;
@@ -471,18 +508,61 @@ impl<'a> SessionCreationApplication<'a> {
                 return Err(error);
             }
         };
-        let snapshot = service.persist_new_session_with_snapshot(resources).await?;
+        let snapshot = match &retained {
+            Some(launch) => {
+                service
+                    .persist_new_task_session_with_snapshot(
+                        resources,
+                        launch.request.request_id.clone(),
+                    )
+                    .await?
+            }
+            None => service.persist_new_session_with_snapshot(resources).await?,
+        };
+        #[cfg(test)]
+        if retained.is_some() {
+            let gate = self
+                .manager
+                .inner
+                .session_creation_after_persistence
+                .lock()
+                .unwrap()
+                .clone();
+            if let Some(gate) = gate {
+                gate.reached.notify_one();
+                gate.resume.notified().await;
+            }
+        }
         let session_id = snapshot
             .metadata
             .session_id
             .clone()
             .ok_or_else(|| anyhow!("new session did not include a session id"))?;
-        self.manager
-            .inner
-            .active_sessions
-            .write()
-            .await
-            .insert(session_id, Arc::new(service));
+        // The durable commit makes this session observable before its creator
+        // reaches cache publication. Attachment may already have published and
+        // started a service; preserve that canonical identity under the same
+        // lifecycle gate used by attachment and configuration changes.
+        let gate = self.manager.lifecycle_gate(&session_id);
+        let _lifecycle = gate.lock().await;
+        let service = {
+            let mut active = self.manager.inner.active_sessions.write().await;
+            Arc::clone(
+                active
+                    .entry(session_id)
+                    .or_insert_with(|| Arc::new(service)),
+            )
+        };
+        if retained.is_some()
+            && self
+                .manager
+                .inner
+                .task_preparations
+                .git
+                .check_running()
+                .is_err()
+        {
+            service.stop_run_admission().await?;
+        }
         Ok(snapshot)
     }
 }

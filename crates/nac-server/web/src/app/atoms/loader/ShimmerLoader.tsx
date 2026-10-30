@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type React from "react";
 import { cn } from "../../lib/cn";
 
@@ -24,7 +25,7 @@ const ShimmerLoader: React.FC<ShimmerLoaderProps> = ({
         )}
       >
         <div
-          className="absolute inset-0 animate-shimmer bg-[length:200%_100%] bg-[position:-200%_0]"
+          className="absolute inset-0 animate-shimmer bg-[length:200%_100%] bg-[position:-200%_0] opacity-50"
           style={{
             backgroundImage:
               "linear-gradient(90deg, transparent 0%, var(--color-bg-btn-secondary-highlighted-hovered) 50%, transparent 100%)",
@@ -35,4 +36,4 @@ const ShimmerLoader: React.FC<ShimmerLoaderProps> = ({
   </div>
 );
 
-export default ShimmerLoader;
+export default memo(ShimmerLoader);

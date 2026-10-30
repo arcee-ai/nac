@@ -38,7 +38,7 @@ describe("runtime presentation policy", () => {
     expect(sessionAvailable(DIRECT_UI_POLICY, undefined, null)).toBe(false);
     expect(sessionPanelPolicy("direct", "traditional-child")).toMatchObject({
       readOnly: true,
-      mobilePanels: ["files", "history"],
+      mobilePanels: ["insights", "files", "history"],
     });
   });
   it("uses normal creation for legacy-only projects, preserving empty admission and mixed redirect", () => {

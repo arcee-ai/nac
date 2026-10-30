@@ -4,16 +4,16 @@
 export interface components {
   schemas: {
     ActiveCompactionSnapshot: {
-      client_id?: null | components["schemas"]["SessionClientId"];
+      client_id?: components["schemas"]["SessionClientId"] | null;
       compaction_id: string;
       started_at_epoch_ms: number;
     };
     ActiveRunSnapshot: {
-      client_id?: null | components["schemas"]["SessionClientId"];
+      client_id?: components["schemas"]["SessionClientId"] | null;
       prompt_preview: string;
       run_id: components["schemas"]["SessionRunId"];
       started_at_epoch_ms: number;
-      submitted_user_message?: null | components["schemas"]["SubmittedUserMessageSnapshot"];
+      submitted_user_message?: components["schemas"]["SubmittedUserMessageSnapshot"] | null;
     };
     AgentEvent:
       | { prompt_preview: string; thread_name?: string | null; type: "run_started" }
@@ -35,8 +35,8 @@ export interface components {
       | {
           call_id: string;
           cleanup_duration_ms?: number | null;
-          command_status?: null | components["schemas"]["CommandStatus"];
-          completion_status?: null | components["schemas"]["ToolCompletionStatus"];
+          command_status?: components["schemas"]["CommandStatus"] | null;
+          completion_status?: components["schemas"]["ToolCompletionStatus"] | null;
           content_preview: string;
           effective_timeout_ms?: number | null;
           execution_duration_ms?: number | null;
@@ -102,13 +102,13 @@ export interface components {
           timed_out: boolean;
           timeout_reason?: string | null;
           type: "thread_finished";
-          usage?: null | components["schemas"]["TokenUsage"];
+          usage?: components["schemas"]["TokenUsage"] | null;
         }
       | {
           content: string;
           thread_name?: string | null;
           type: "assistant_message";
-          usage?: null | components["schemas"]["TokenUsage"];
+          usage?: components["schemas"]["TokenUsage"] | null;
         }
       | { message: string; thread_name?: string | null; type: "error" }
       | {
@@ -199,10 +199,10 @@ export interface components {
           status: "unchanged";
         };
     ConfigureMcpOAuthRequest: {
-      authorization_metadata?: null | components["schemas"]["McpOAuthAuthorizationMetadataRequest"];
+      authorization_metadata?: components["schemas"]["McpOAuthAuthorizationMetadataRequest"] | null;
       client_id_credential?: string | null;
       client_secret_credential?: string | null;
-      registration?: null | components["schemas"]["McpOAuthRegistrationRequest"];
+      registration?: components["schemas"]["McpOAuthRegistrationRequest"] | null;
       scopes?: string[];
     };
     ControlledTerminalInputRequest: {
@@ -233,7 +233,7 @@ export interface components {
       env_headers?: Record<string, string>;
       env_vars?: string[];
       execution_timeout_ms?: number | null;
-      header_helper?: null | components["schemas"]["McpHeaderHelperConfig"];
+      header_helper?: components["schemas"]["McpHeaderHelperConfig"] | null;
       headers?: Record<string, string>;
       library_id?: string | null;
       name: string;
@@ -251,11 +251,11 @@ export interface components {
       base_url?: string | null;
       extra_headers?: Record<string, string> | null;
       initial_prompt?: string | null;
-      light_model?: null | components["schemas"]["LightModelSettings"];
+      light_model?: components["schemas"]["LightModelSettings"] | null;
       model: string;
       name: string;
       orchestrator_compaction_threshold?: number | null;
-      reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
+      reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
     };
     CreateProjectRequest: {
       cwd: string;
@@ -341,10 +341,10 @@ export interface components {
       older_entries_omitted: boolean;
     };
     ExecutionHistoryEntry: {
-      command?: null | components["schemas"]["ShellCommandSnapshot"];
-      execution?: null | components["schemas"]["ExecutionStatus"];
+      command?: components["schemas"]["ShellCommandSnapshot"] | null;
+      execution?: components["schemas"]["ExecutionStatus"] | null;
       id: string;
-      outcome?: null | components["schemas"]["CommandStatus"];
+      outcome?: components["schemas"]["CommandStatus"] | null;
       output: components["schemas"]["ExecutionHistoryOutput"];
       started_at_epoch_ms: string;
     };
@@ -454,7 +454,7 @@ export interface components {
       session_id: string;
       status: components["schemas"]["InboxStatus"];
       target_run_id?: string | null;
-      terminal_selection?: null | components["schemas"]["TerminalSelectionEvidence"];
+      terminal_selection?: components["schemas"]["TerminalSelectionEvidence"] | null;
       updated_at: string;
       version: number;
     };
@@ -474,7 +474,7 @@ export interface components {
     LaggedEvent: { missed: number };
     LaunchModelDefaults: {
       configured_model?: string | null;
-      configured_reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
+      configured_reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
     };
     LaunchModelDefaultsRequest: {
       cwd?: string | null;
@@ -484,10 +484,10 @@ export interface components {
     };
     LightModelSettings: {
       api_key_env?: string | null;
-      backend?: null | components["schemas"]["BackendKind"];
+      backend?: components["schemas"]["BackendKind"] | null;
       base_url?: string | null;
       model: string;
-      reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
+      reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
     };
     ManagedAcceptedIdentity: {
       host_incarnation_id: string;
@@ -525,7 +525,7 @@ export interface components {
       error?: string | null;
       operation_id: string;
       progress: string;
-      project?: null | components["schemas"]["ProjectRecord"];
+      project?: components["schemas"]["ProjectRecord"] | null;
       project_id: string;
       project_name: string;
       repository: string;
@@ -543,7 +543,7 @@ export interface components {
       checks: components["schemas"]["ReadinessCheck"][];
       github_status: string;
       logical_host_id: string;
-      maintenance?: null | components["schemas"]["ManagedMaintenanceSnapshot"];
+      maintenance?: components["schemas"]["ManagedMaintenanceSnapshot"] | null;
       maintenance_state: string;
       managed: boolean;
       migration_failure?: string | null;
@@ -566,12 +566,12 @@ export interface components {
       version: string;
     };
     ManagedMaintenanceSnapshot: {
-      accepted_identity?: null | components["schemas"]["ManagedAcceptedIdentity"];
+      accepted_identity?: components["schemas"]["ManagedAcceptedIdentity"] | null;
       blockers: components["schemas"]["ManagedUpgradeBlocker"][];
       operation_id?: string | null;
       prepared_at?: string | null;
       state: components["schemas"]["ManagedMaintenanceState"];
-      target?: null | components["schemas"]["ManagedUpgradeTarget"];
+      target?: components["schemas"]["ManagedUpgradeTarget"] | null;
       version: number;
     };
     ManagedMaintenanceState: "serving" | "maintenance";
@@ -585,7 +585,7 @@ export interface components {
       completion_inbox_id?: number | null;
       created_at: string;
       description: string;
-      execution_mode?: null | components["schemas"]["TraditionalChildExecutionMode"];
+      execution_mode?: components["schemas"]["TraditionalChildExecutionMode"] | null;
       failure?: string | null;
       generation: number;
       orchestrator_session_id: string;
@@ -604,10 +604,10 @@ export interface components {
     ManagedSecretSummary: { name: string; updated_at_unix_ms: number };
     ManagedSessionSummary: {
       active: boolean;
-      active_run?: null | components["schemas"]["ActiveRunSnapshot"];
-      lineage?: null | components["schemas"]["SessionLineageSnapshot"];
+      active_run?: components["schemas"]["ActiveRunSnapshot"] | null;
+      lineage?: components["schemas"]["SessionLineageSnapshot"] | null;
       summary: components["schemas"]["SessionSummarySnapshot"];
-      workspace_diff?: null | components["schemas"]["WorkspaceDiffTotals"];
+      workspace_diff?: components["schemas"]["WorkspaceDiffTotals"] | null;
     };
     ManagedUpgradeBlocker: {
       detail: string;
@@ -714,6 +714,7 @@ export interface components {
       required: boolean;
       server_name?: string | null;
       server_version?: string | null;
+      sessions_blocked: boolean;
       state: components["schemas"]["McpRuntimeState"];
       tool_count: number;
     };
@@ -733,7 +734,7 @@ export interface components {
       env_headers: Record<string, string>;
       env_vars: string[];
       execution_timeout_ms?: number | null;
-      header_helper?: null | components["schemas"]["McpHeaderHelperConfig"];
+      header_helper?: components["schemas"]["McpHeaderHelperConfig"] | null;
       headers: Record<string, string>;
       library_id?: string | null;
       name: string;
@@ -752,7 +753,7 @@ export interface components {
       | {
           content: string | null;
           duration_ms?: number | null;
-          model_origin?: null | components["schemas"]["ModelOrigin"];
+          model_origin?: components["schemas"]["ModelOrigin"] | null;
           reasoning_details?: unknown;
           reasoning_field?: string | null;
           reasoning_text?: string | null;
@@ -779,7 +780,7 @@ export interface components {
       created_at: string;
       extra_headers: Record<string, string>;
       initial_prompt?: string | null;
-      light_model?: null | components["schemas"]["LightModelSettings"];
+      light_model?: components["schemas"]["LightModelSettings"] | null;
       model: string;
       name: string;
       orchestrator_compaction_threshold?: number | null;
@@ -824,7 +825,7 @@ export interface components {
       steering_id: number;
     };
     PartialModelOutput: { reasoning?: boolean; text?: boolean; tool_call?: boolean };
-    PermissionApprovalMode: "manual" | "auto_approve";
+    PermissionApprovalMode: "manual" | "auto_approve" | "review";
     PermissionGrantRecord: {
       action: string;
       backend: string;
@@ -849,10 +850,44 @@ export interface components {
       resource: string;
       save_resource?: string | null;
     };
+    PermissionReview: {
+      backend: string;
+      call_id?: string | null;
+      category?: components["schemas"]["ReviewCategory"] | null;
+      code?: components["schemas"]["PermissionReviewCode"] | null;
+      created_at_epoch_ms: number;
+      duration_ms?: number | null;
+      failure_reason?: components["schemas"]["PermissionReviewFailureReason"] | null;
+      id: string;
+      outcome?: components["schemas"]["PermissionReviewOutcome"] | null;
+      resources: components["schemas"]["ReviewResource"][];
+      reviewer: string;
+      session_id: string;
+      tool: string;
+      user_authorized_retry: boolean;
+    };
+    PermissionReviewCode:
+      | "review_rejected"
+      | "review_uncertain"
+      | "review_unavailable"
+      | "review_stopped";
+    PermissionReviewFailureReason:
+      | "authentication"
+      | "access_denied"
+      | "model_unavailable"
+      | "insufficient_credits"
+      | "rate_limited"
+      | "timeout"
+      | "invalid_response"
+      | "service_unavailable"
+      | "cancelled";
+    PermissionReviewOutcome: "approved" | "rejected" | "uncertain" | "unavailable";
     PermissionStateResponse: {
       approval_mode: components["schemas"]["PermissionApprovalMode"];
+      authorizable_review_ids?: string[];
       grants: components["schemas"]["PermissionGrantRecord"][];
       requests: components["schemas"]["PermissionRequest"][];
+      reviews?: components["schemas"]["PermissionReview"][];
     };
     ProjectList: { projects: components["schemas"]["ProjectRecord"][] };
     ProjectRecord: {
@@ -876,7 +911,7 @@ export interface components {
       auth: components["schemas"]["ProviderAuth"];
       auth_hint: string | null;
       auth_status: components["schemas"]["AuthStatus"];
-      connection: null | components["schemas"]["ProviderConnection"];
+      connection: components["schemas"]["ProviderConnection"] | null;
       default_base_url: string | null;
       default_limits: components["schemas"]["DefaultLimits"];
       id: components["schemas"]["BackendKind"];
@@ -907,7 +942,7 @@ export interface components {
       config_version: number;
       diagnostics?: string[];
       extra_headers_json: string | null;
-      light_model?: null | components["schemas"]["LightModelSettings"];
+      light_model?: components["schemas"]["LightModelSettings"] | null;
       model: string;
       orchestrator_compaction_threshold: number | null;
       reasoning_effort: string | null;
@@ -984,10 +1019,10 @@ export interface components {
     RequestField_HeadersRequest_HeadersRequest: null | (Record<string, string> | string);
     RequestField_LightModelSettings_LightModelSettings: null | {
       api_key_env?: string | null;
-      backend?: null | components["schemas"]["BackendKind"];
+      backend?: components["schemas"]["BackendKind"] | null;
       base_url?: string | null;
       model: string;
-      reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
+      reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
     };
     RequestField_McpProtocolSelection_McpProtocolSelection: null | ("legacy" | "auto" | "current");
     RequestField_McpToolApproval_McpToolApproval: null | ("allow" | "ask");
@@ -1015,16 +1050,16 @@ export interface components {
       model: string | null;
       models: components["schemas"]["ProviderModel"][];
       models_error: string | null;
-      reasoning_effort: null | components["schemas"]["ReasoningEffort"];
+      reasoning_effort: components["schemas"]["ReasoningEffort"] | null;
     };
     ResponseTimingSnapshot: {
-      cumulative_token_usage?: null | components["schemas"]["TokenUsage"];
+      cumulative_token_usage?: components["schemas"]["TokenUsage"] | null;
       last_response_duration_ms?: number | null;
-      last_token_usage?: null | components["schemas"]["TokenUsage"];
+      last_token_usage?: components["schemas"]["TokenUsage"] | null;
       previous_response_duration_ms?: number | null;
       response_durations_ms?: (number | null)[] | null;
-      token_usages?: (null | components["schemas"]["TokenUsage"])[] | null;
-      unattributed_token_usage?: null | components["schemas"]["TokenUsage"];
+      token_usages?: (components["schemas"]["TokenUsage"] | null)[] | null;
+      unattributed_token_usage?: components["schemas"]["TokenUsage"] | null;
     };
     RevertSessionRequest: { message_idx: number };
     RevertSessionResponse: {
@@ -1034,6 +1069,14 @@ export interface components {
       transcript_len: number;
       workspace_restored: boolean;
     };
+    ReviewCategory:
+      | "routine"
+      | "destructive"
+      | "exfiltration"
+      | "credential"
+      | "out_of_scope"
+      | "unclear";
+    ReviewResource: { action: string; display: string; resource: string };
     RunFailure: {
       attempt_count: number;
       diagnostic: string;
@@ -1085,12 +1128,12 @@ export interface components {
       | {
           prompt_preview: string;
           started_at_epoch_ms: number;
-          submitted_user_message?: null | components["schemas"]["SubmittedUserMessageSnapshot"];
+          submitted_user_message?: components["schemas"]["SubmittedUserMessageSnapshot"] | null;
           type: "run_started";
         }
       | { duration_ms?: number | null; response: string; type: "run_completed" }
       | {
-          failure?: null | components["schemas"]["RunFailure"];
+          failure?: components["schemas"]["RunFailure"] | null;
           message: string;
           type: "run_failed";
         }
@@ -1106,15 +1149,17 @@ export interface components {
           mode: components["schemas"]["PermissionApprovalMode"];
           type: "permission_approval_mode_changed";
         }
+      | { review: components["schemas"]["PermissionReview"]; type: "permission_review_started" }
+      | { review: components["schemas"]["PermissionReview"]; type: "permission_reviewed" }
       | { session_id: string; type: "snapshot_saved" }
       | { transcript_len: number; type: "transcript_appended" }
       | { transcript_len: number; type: "transcript_reverted" };
     SessionEventBoundary: { epoch_id: string; sequence_id: number };
     SessionEventEnvelope: {
-      client_id?: null | components["schemas"]["SessionClientId"];
+      client_id?: components["schemas"]["SessionClientId"] | null;
       epoch_id: string;
       event: components["schemas"]["SessionEvent"];
-      run_id?: null | components["schemas"]["SessionRunId"];
+      run_id?: components["schemas"]["SessionRunId"] | null;
       sequence_id: number;
       session_id?: string | null;
     };
@@ -1126,8 +1171,8 @@ export interface components {
     };
     SessionForkOrigin: { deleted?: boolean; session_id: string; title: string };
     SessionFrontendSnapshot: {
-      active_compaction?: null | components["schemas"]["ActiveCompactionSnapshot"];
-      active_run?: null | components["schemas"]["ActiveRunSnapshot"];
+      active_compaction?: components["schemas"]["ActiveCompactionSnapshot"] | null;
+      active_run?: components["schemas"]["ActiveRunSnapshot"] | null;
       active_threads?: string[];
       covered_orchestrator_steering_ids?: number[];
       forks?: components["schemas"]["SessionForkLink"][];
@@ -1136,7 +1181,7 @@ export interface components {
       metadata: components["schemas"]["SessionMetadata"];
       primary_tool_events?: components["schemas"]["AgentEvent"][];
       response_timing: components["schemas"]["ResponseTimingSnapshot"];
-      run_failure?: null | components["schemas"]["RunFailure"];
+      run_failure?: components["schemas"]["RunFailure"] | null;
       sessions: components["schemas"]["SessionSummarySnapshot"][];
       shell_commands?: components["schemas"]["ShellCommandSnapshot"][];
       thread_episodes: Record<string, components["schemas"]["EpisodeSnapshot"][]>;
@@ -1157,7 +1202,7 @@ export interface components {
       continuation_run_id: string | null;
       created_at: string;
       goal_id: string;
-      last_failure: null | components["schemas"]["RunFailure"];
+      last_failure: components["schemas"]["RunFailure"] | null;
       next_attempt_at_epoch_ms: number | null;
       objective: string;
       session_id: string;
@@ -1194,9 +1239,9 @@ export interface components {
     SessionReplayGap: { missing_from_sequence_id: number; missing_to_sequence_id: number };
     SessionRunId: string;
     SessionSnapshotResponse: components["schemas"]["SessionFrontendSnapshot"] & {
-      lineage?: null | components["schemas"]["SessionLineageSnapshot"];
-      message_cycle?: null | components["schemas"]["MessageCycleMetadata"];
-      message_page?: null | components["schemas"]["MessagePageMetadata"];
+      lineage?: components["schemas"]["SessionLineageSnapshot"] | null;
+      message_cycle?: components["schemas"]["MessageCycleMetadata"] | null;
+      message_page?: components["schemas"]["MessagePageMetadata"] | null;
       terminal_selection_attributions?: components["schemas"]["TerminalSelectionMessageReference"][];
     };
     SessionSummarySnapshot: {
@@ -1204,7 +1249,7 @@ export interface components {
       behavior?: components["schemas"]["SessionBehavior"];
       created_at: string;
       cwd: string;
-      forked_from?: null | components["schemas"]["SessionForkOrigin"];
+      forked_from?: components["schemas"]["SessionForkOrigin"] | null;
       last_user_prompt: string | null;
       model: string;
       model_config_error?: string | null;
@@ -1311,13 +1356,54 @@ export interface components {
     SubmitPromptRequest: { prompt: string };
     SubmitPromptResponse: { client_id?: string | null; display_prompt: string; run_id: string };
     SubmittedUserMessageSnapshot: {
-      client_id?: null | components["schemas"]["SessionClientId"];
+      client_id?: components["schemas"]["SessionClientId"] | null;
       content: string;
       run_id: components["schemas"]["SessionRunId"];
       submitted_at_epoch_ms: number;
-      terminal_selection?: null | components["schemas"]["TerminalSelectionEvidence"];
+      terminal_selection?: components["schemas"]["TerminalSelectionEvidence"] | null;
     };
     SwitchBranchRequest: { create?: boolean; name: string };
+    TaskLaunchPhase:
+      | "pinned"
+      | "preparing_workspace"
+      | "preparing_runtime"
+      | "ready"
+      | "failed"
+      | "cancelled";
+    TaskLaunchRecord: {
+      created_at: string;
+      error?: string | null;
+      first_input_id?: number | null;
+      phase: components["schemas"]["TaskLaunchPhase"];
+      request: components["schemas"]["TaskLaunchRequest"];
+      session_id: string;
+      session_present: boolean;
+      source: components["schemas"]["TaskLaunchSource"];
+      updated_at: string;
+      workspace_path: string;
+    };
+    TaskLaunchRequest: {
+      default_ref?: string | null;
+      git_ref?: string | null;
+      invoking_session_id?: string | null;
+      project_id: string;
+      prompt: string;
+      request_id: string;
+      title: string;
+    };
+    TaskLaunchSource: {
+      commit: string;
+      common_git_dir: string;
+      default_ref: string;
+      excluded_source_edits: boolean;
+      project_cwd: string;
+      repo_root: string;
+      repository_identity: string;
+      selected_ref: string;
+      source_cwd: string;
+      subdirectory: string;
+    };
+    TaskLaunchSourceInfo: { default_ref?: string | null; eligible: boolean };
     TerminalSelectionAttribution: {
       admission_id: string;
       capture_id: string;
@@ -1351,7 +1437,7 @@ export interface components {
     };
     TerminalSelectionMessageReference: {
       attribution: components["schemas"]["TerminalSelectionAttribution"];
-      evidence?: null | components["schemas"]["TerminalSelectionEvidence"];
+      evidence?: components["schemas"]["TerminalSelectionEvidence"] | null;
       message_index: number;
     };
     TerminalSelectionPreviewRequest: {
@@ -1418,10 +1504,10 @@ export interface components {
       env_headers?: Record<string, string> | null;
       env_vars?: string[] | null;
       execution_timeout_ms?: number | null;
-      header_helper?: null | components["schemas"]["UpdateMcpHeaderHelperRequest"];
+      header_helper?: components["schemas"]["UpdateMcpHeaderHelperRequest"] | null;
       headers?: Record<string, string | null> | null;
       name?: string | null;
-      protocol?: null | components["schemas"]["McpProtocolSelection"];
+      protocol?: components["schemas"]["McpProtocolSelection"] | null;
       startup_timeout_ms?: number | null;
       stored_name?: string | null;
       transport?: string | null;
@@ -1431,7 +1517,7 @@ export interface components {
       auth_required: boolean;
       connected: boolean;
       error?: string | null;
-      probe?: null | components["schemas"]["McpProbeResult"];
+      probe?: components["schemas"]["McpProbeResult"] | null;
       tools: components["schemas"]["McpProbedTool"][];
     };
     ThreadEventDecodeDiagnostic: {
@@ -1445,7 +1531,7 @@ export interface components {
       events: components["schemas"]["ThreadEventPageItem"][];
       has_older: boolean;
       next_before_id?: number | null;
-      thread_event_boundary?: null | components["schemas"]["SessionEventBoundary"];
+      thread_event_boundary?: components["schemas"]["SessionEventBoundary"] | null;
     };
     ThreadEventPageItem: {
       created_at: string;
@@ -1496,6 +1582,13 @@ export interface components {
       total_tokens: number;
     };
     ToolCall: { function: components["schemas"]["FunctionCall"]; id: string; type: string };
+    ToolCallContentResponse: {
+      arguments: string;
+      arguments_truncated: boolean;
+      call_id: string;
+      output: string | null;
+      output_truncated: boolean;
+    };
     ToolCompletionStatus: "success" | "error" | "timed_out" | "cancelled";
     ToolContentPartSchema:
       | { text: string; type: "text" }
@@ -1509,7 +1602,7 @@ export interface components {
       completion_inbox_id: number | null;
       created_at: string;
       description: string;
-      execution_mode: null | components["schemas"]["TraditionalChildExecutionMode"];
+      execution_mode: components["schemas"]["TraditionalChildExecutionMode"] | null;
       failure: string | null;
       generation: number;
       nesting_depth: number;
@@ -1552,7 +1645,7 @@ export interface components {
     UpdateGoalRequest: {
       expected_version: number;
       objective?: string | null;
-      status?: null | components["schemas"]["GoalStatus"];
+      status?: components["schemas"]["GoalStatus"] | null;
       token_budget?: components["schemas"]["RequestField_u64_u64"];
     };
     UpdateInboxItemRequest: {
@@ -1745,6 +1838,7 @@ export interface components {
       branch?: string | null;
       changed_files: components["schemas"]["ChangedFileStat"][];
       error?: string | null;
+      file_path_prefix?: string | null;
       host_root?: string | null;
       repo_label?: string | null;
       total_additions: number;

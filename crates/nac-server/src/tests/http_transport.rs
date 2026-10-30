@@ -1,17 +1,20 @@
 //! Exercise the real HTTP listener, not Router::oneshot: small gzip chunks can
 //! otherwise pay one Linux delayed-ACK interval for every sequential frame.
-#![cfg(target_os = "linux")]
 
 use super::*;
 use crate::delivery::server::serve_router_listener_with_shutdown;
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+#[cfg(target_os = "linux")]
 fn frame(sequence: usize) -> Vec<u8> {
     let bytes = (0..32768).map(|i| (i % 97) as u8).collect::<Vec<_>>();
     serde_json::to_vec(&serde_json::json!({"sequence": sequence, "bytes": bytes})).unwrap()
 }
 
+#[cfg(target_os = "linux")]
 async fn read_gzip_frame(reader: &mut BufReader<tokio::net::TcpStream>) -> Vec<u8> {
     let mut line = String::new();
     reader.read_line(&mut line).await.unwrap();
@@ -55,6 +58,7 @@ async fn read_gzip_frame(reader: &mut BufReader<tokio::net::TcpStream>) -> Vec<u
     decoded
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn gzip_backlog_catches_up_without_delayed_ack_per_frame_on_public_and_control() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
@@ -138,4 +142,75 @@ async fn gzip_backlog_catches_up_without_delayed_ack_per_frame_on_public_and_con
             "backlog took {duration:?}"
         );
     }
+}
+
+#[cfg(target_os = "macos")]
+fn reset_before_accept(address: std::net::SocketAddr) {
+    let socket = std::net::TcpStream::connect(address).unwrap();
+    let linger = libc::linger {
+        l_onoff: 1,
+        l_linger: 0,
+    };
+    // SAFETY: a live owned TCP descriptor and the exact SO_LINGER layout.
+    assert_eq!(
+        unsafe {
+            libc::setsockopt(
+                socket.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_LINGER,
+                (&linger as *const libc::linger).cast(),
+                std::mem::size_of_val(&linger) as libc::socklen_t,
+            )
+        },
+        0
+    );
+    drop(socket);
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reset_before_accept_keeps_public_and_control_http_serving_until_shutdown() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("http_reset_before_accept");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), None);
+    let manager = test_manager(&root);
+    let app = Router::new().route("/alive", axum::routing::get(|| async { "still serving" }));
+    let public = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let control = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addresses = [public.local_addr().unwrap(), control.local_addr().unwrap()];
+    for address in addresses {
+        reset_before_accept(address);
+    }
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(serve_router_listener_with_shutdown(
+        public,
+        Some((control, app.clone())),
+        app,
+        manager.clone(),
+        async move {
+            let _ = shutdown_rx.await;
+        },
+        Duration::from_secs(5),
+        || panic!("socket reset must not force server shutdown"),
+    ));
+    let result = tokio::time::timeout(Duration::from_secs(5), async {
+        for address in addresses {
+            let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+            socket
+                .write_all(b"GET /alive HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            let mut response = String::new();
+            socket.read_to_string(&mut response).await.unwrap();
+            assert!(response.starts_with("HTTP/1.1 200 "), "{response}");
+            assert!(response.ends_with("still serving"), "{response}");
+        }
+        assert!(!server.is_finished());
+    })
+    .await;
+    shutdown_tx.send(()).unwrap();
+    server.await.unwrap().unwrap();
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+    result.expect("reset connection stopped an HTTP listener");
 }

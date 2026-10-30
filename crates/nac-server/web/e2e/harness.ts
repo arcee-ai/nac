@@ -1,9 +1,16 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test as base, type APIRequestContext, type TestInfo } from "@playwright/test";
+import { promisify } from "node:util";
+import {
+  expect,
+  test as base,
+  type APIRequestContext,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 
 import { ExaDouble } from "./exa-double";
 import { ScriptedProvider } from "./scripted-provider";
@@ -14,6 +21,37 @@ const webRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(webRoot, "../../../..");
 const cleanupMarkers = new WeakMap<ChildProcess, string>();
 const cleanupMarkerEnvironment = "NAC_E2E_CLEANUP_ID";
+const execute = promisify(execFile);
+
+/** Keep production snapshots inside this fixture, even when Playwright's output
+ * directory is nested in the source checkout. Restarts preserve owned changes.
+ */
+export async function initializeHarnessWorkspace(workspace: string): Promise<void> {
+  await fs.mkdir(workspace, { recursive: true });
+  const git = (...args: string[]) => execute("git", ["-C", workspace, ...args]);
+  await git("init", "--quiet", "--initial-branch=main");
+  const { stdout } = await git("rev-parse", "--show-toplevel");
+  if ((await fs.realpath(stdout.trim())) !== (await fs.realpath(workspace))) {
+    throw new Error("E2E workspace must own its Git repository boundary");
+  }
+  try {
+    await git("rev-parse", "--verify", "HEAD");
+  } catch {
+    await git(
+      "-c",
+      "user.name=Disposable NAC fixture",
+      "-c",
+      "user.email=nac-fixture@example.test",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "fixture baseline",
+    );
+  }
+}
 
 export type EmbeddedHarness = {
   baseUrl: string;
@@ -45,19 +83,27 @@ type Fixtures = {
 type Options = {
   exaCredential: string | undefined;
   orchestration: string | null;
+  /** Extra server environment for fixture-only builds, such as a scripted reviewer. */
+  serverEnvironment: Record<string, string>;
   managedNativeWeb: boolean;
 };
 
 export const test = base.extend<Fixtures & Options>({
   exaCredential: [undefined, { option: true }],
   orchestration: ["1", { option: true }],
+  serverEnvironment: [{}, { option: true }],
   managedNativeWeb: [true, { option: true }],
-  harness: async ({ request, exaCredential, orchestration, managedNativeWeb }, use, testInfo) => {
+  harness: async (
+    { request, exaCredential, orchestration, serverEnvironment, managedNativeWeb },
+    use,
+    testInfo,
+  ) => {
     void request;
     let running = await startHarness(
       testInfo,
       exaCredential,
       orchestration,
+      serverEnvironment,
       undefined,
       managedNativeWeb,
     );
@@ -70,6 +116,7 @@ export const test = base.extend<Fixtures & Options>({
           testInfo,
           nativeCredential === undefined ? exaCredential : (nativeCredential ?? undefined),
           nextGate,
+          serverEnvironment,
           running.provider,
           managedNativeWeb,
           running.exa,
@@ -302,6 +349,7 @@ async function startHarness(
   testInfo: TestInfo,
   exaCredential: string | undefined,
   orchestration: string | null,
+  serverEnvironment: Record<string, string>,
   existingProvider?: ScriptedProvider,
   managedNativeWeb = true,
   existingExa?: ExaDouble,
@@ -319,10 +367,9 @@ async function startHarness(
   const xdg = path.join(runRoot, "xdg");
   const tmp = path.join(runRoot, "tmp");
   await Promise.all(
-    [runRoot, workspace, nacHome, home, xdg, tmp].map((directory) =>
-      fs.mkdir(directory, { recursive: true }),
-    ),
+    [runRoot, nacHome, home, xdg, tmp].map((directory) => fs.mkdir(directory, { recursive: true })),
   );
+  await initializeHarnessWorkspace(workspace);
 
   const binaryPath = path.resolve(
     process.env.NAC_E2E_BINARY ?? path.join(repoRoot, "target/debug/nac-web"),
@@ -348,7 +395,9 @@ async function startHarness(
     resolveAddress = resolve;
     rejectAddress = reject;
   });
-  const cleanupMarker = randomUUID();
+  // A focused runner can also settle detached fixtures after Playwright itself
+  // is interrupted. Each harness retains a distinct suffix for normal teardown.
+  const cleanupMarker = [process.env.NAC_E2E_CLEANUP_ID, randomUUID()].filter(Boolean).join("-");
   const server = spawn(
     binaryPath,
     [
@@ -385,6 +434,7 @@ async function startHarness(
         OPENAI_API_KEY: "nac-e2e-openai-dummy-only",
         DEEPSEEK_API_KEY: "nac-e2e-deepseek-dummy-only",
         MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
+        ...serverEnvironment,
         [cleanupMarkerEnvironment]: cleanupMarker,
         ...(exaCredential == null
           ? {}
@@ -836,4 +886,45 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   } finally {
     if (timeout != null) clearTimeout(timeout);
   }
+}
+
+/**
+ * The right sidebar starts collapsed, so panel tabs and rows sit behind this.
+ * A saved open preference can remove the button after the first paint, which
+ * makes a click that already saw it wait until the test times out.
+ */
+export async function showSidePanel(page: Page) {
+  const show = page.getByRole("button", { name: "Show panel" });
+  const open = page.getByRole("tab", { name: "Files" });
+  await expect(show.or(open).first()).toBeVisible();
+  await expect(async () => {
+    if (await open.isVisible()) return;
+    if (await show.isVisible()) await show.click();
+    await expect(open).toBeVisible();
+  }).toPass();
+}
+
+/** Starts a foreground child the way the parent's subagent tool does; the reply waits for its outcome. */
+export function startForegroundChild(
+  request: APIRequestContext,
+  harness: { baseUrl: string },
+  sessionId: string,
+  description: string,
+  prompt: string,
+) {
+  return request.post(`${harness.baseUrl}/sessions/${sessionId}/children`, {
+    data: { profile: "general", description, prompt, background: false },
+  });
+}
+
+/** Opens the Subagents panel at any width; on a phone it is a dialog over the chat. */
+export async function showSubagents(page: Page, mobile: boolean) {
+  const tab = page.getByRole("tab", { name: "Subagents" });
+  if (mobile) {
+    if (!(await tab.first().isVisible()))
+      await page.getByRole("button", { name: "Open panel", exact: true }).click();
+  } else {
+    await showSidePanel(page);
+  }
+  await tab.last().click();
 }

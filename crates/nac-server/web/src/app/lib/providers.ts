@@ -90,7 +90,7 @@ export function managedAuthLabel(provider: ManagedAuthProvider): string {
   return MANAGED_AUTH_LABELS[provider];
 }
 
-function isBackendKind(backend: string): backend is BackendKind {
+export function isBackendKind(backend: string): backend is BackendKind {
   return backend in PROVIDER_LABELS;
 }
 

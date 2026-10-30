@@ -1,5 +1,68 @@
 use super::*;
 
+/// Process-local authority for grant commits belonging to one agent run.
+/// Closure rejects new commits immediately. Settlement waits only for a
+/// transaction already inside its final commit, never for the DB writer queue.
+#[derive(Debug, Default)]
+pub(crate) struct PermissionGrantCommitFence {
+    closed: std::sync::atomic::AtomicBool,
+    commit: std::sync::Mutex<()>,
+}
+
+impl PermissionGrantCommitFence {
+    pub(crate) fn close(&self) {
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub(crate) fn settle(&self) {
+        drop(
+            self.commit
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+    }
+}
+
+/// One human reply's grant-commit authority. Task teardown and the prepared
+/// writer race exactly once: abort first forbids persistence; commit admission
+/// first lets that human Always finish even if its invocation is then aborted.
+/// Drop must never wait for SQLite on an async runtime worker.
+#[derive(Debug, Default)]
+pub(crate) struct PermissionGrantWaiter {
+    state: std::sync::atomic::AtomicU8,
+}
+
+impl PermissionGrantWaiter {
+    const LIVE: u8 = 0;
+    const ABORTED: u8 = 1;
+    const COMMIT_ADMITTED: u8 = 2;
+
+    pub(crate) fn abort(&self) {
+        let _ = self.state.compare_exchange(
+            Self::LIVE,
+            Self::ABORTED,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        );
+    }
+
+    fn admit_commit(&self) -> bool {
+        self.state
+            .compare_exchange(
+                Self::LIVE,
+                Self::COMMIT_ADMITTED,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_ok()
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PermissionGrantRecord {
@@ -116,6 +179,7 @@ pub(crate) fn insert_permission_grant_set(
         backend,
         session_config_version,
         None,
+        None,
     )?
     .ok_or_else(|| anyhow!("permission grant insertion unexpectedly lost its waiter"))
 }
@@ -137,7 +201,8 @@ pub(crate) fn insert_permission_grant_set_if_waiter_live(
     grants: &[(String, String)],
     backend: &str,
     session_config_version: i64,
-    waiter_live: &std::sync::Arc<std::sync::Mutex<bool>>,
+    waiter_live: &std::sync::Arc<PermissionGrantWaiter>,
+    run_fence: &std::sync::Arc<PermissionGrantCommitFence>,
 ) -> Result<Option<Vec<PermissionGrantRecord>>> {
     insert_permission_grant_set_inner(
         path,
@@ -146,6 +211,7 @@ pub(crate) fn insert_permission_grant_set_if_waiter_live(
         backend,
         session_config_version,
         Some(waiter_live),
+        Some(run_fence),
     )
 }
 command InsertPermissionGrantSetIfWaiterLiveCommand {
@@ -153,9 +219,10 @@ command InsertPermissionGrantSetIfWaiterLiveCommand {
     grants: Vec<(String, String)> = grants.to_vec(),
     backend: String = backend.to_owned(),
     session_config_version: i64 = session_config_version,
-    waiter_live: std::sync::Arc<std::sync::Mutex<bool>> = std::sync::Arc::clone(waiter_live),
+    waiter_live: std::sync::Arc<PermissionGrantWaiter> = std::sync::Arc::clone(waiter_live),
+    run_fence: std::sync::Arc<PermissionGrantCommitFence> = std::sync::Arc::clone(run_fence),
 }
-call |command| (&command.session_id, &command.grants, &command.backend, command.session_config_version, &command.waiter_live)
+call |command| (&command.session_id, &command.grants, &command.backend, command.session_config_version, &command.waiter_live, &command.run_fence)
 correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
 port internal;
 }
@@ -166,7 +233,8 @@ fn insert_permission_grant_set_inner(
     grants: &[(String, String)],
     backend: &str,
     session_config_version: i64,
-    waiter_live: Option<&std::sync::Mutex<bool>>,
+    waiter_live: Option<&PermissionGrantWaiter>,
+    run_fence: Option<&PermissionGrantCommitFence>,
 ) -> Result<Option<Vec<PermissionGrantRecord>>> {
     if session_id.trim().is_empty() || grants.iter().any(|(action, _)| action.trim().is_empty()) {
         return Err(anyhow!(
@@ -188,6 +256,8 @@ fn insert_permission_grant_set_inner(
             "permission grant config version must not be negative"
         ));
     }
+    #[cfg(test)]
+    permission_grant_test_pause(path, PermissionGrantTestPoint::BeforeWriter);
     let mut connection = open_runtime_connection(path)?;
     let transaction =
         connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -208,14 +278,6 @@ fn insert_permission_grant_set_inner(
             ],
         )?;
     }
-    let waiter_guard = waiter_live.map(|waiter| {
-        waiter
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    });
-    if waiter_guard.as_deref().is_some_and(|live| !*live) {
-        return Ok(None);
-    }
     let effective = {
         let mut statement = transaction.prepare(&format!(
             "SELECT {COLUMNS} FROM permission_grants
@@ -228,11 +290,30 @@ fn insert_permission_grant_set_inner(
         )?;
         rows.collect::<std::result::Result<Vec<_>, _>>()?
     };
-    // Holding the waiter lock through commit gives grant persistence one clear
-    // linearization point with authorization-task teardown. If teardown wins,
-    // the transaction rolls back; if commit wins, the reply had a live waiter.
+    #[cfg(test)]
+    permission_grant_test_pause(path, PermissionGrantTestPoint::BeforeCommit);
+    // Acquire this only after writer admission and SQL preparation. If close
+    // wins first, uncommitted inserts roll back; if commit wins first, stop
+    // settlement waits off-runtime for this short final boundary.
+    let run_guard = run_fence.map(|fence| {
+        fence
+            .commit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    });
+    if run_fence.is_some_and(PermissionGrantCommitFence::is_closed) {
+        return Ok(None);
+    }
+    // This CAS is the abort-versus-commit linearization point. It happens
+    // only after run admission, immediately before commit; no runtime Drop
+    // ever waits for a writer or SQLite transaction.
+    if waiter_live.is_some_and(|waiter| !waiter.admit_commit()) {
+        return Ok(None);
+    }
+    #[cfg(test)]
+    permission_grant_test_pause(path, PermissionGrantTestPoint::InsideCommit);
     transaction.commit()?;
-    drop(waiter_guard);
+    drop(run_guard);
     Ok(Some(effective))
 }
 
@@ -369,5 +450,62 @@ mod tests {
         assert_eq!(effective.len(), 1);
         assert_eq!(crate::store::tracked_connection_opens(&path), 1);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PermissionGrantTestPoint {
+    BeforeWriter,
+    BeforeCommit,
+    InsideCommit,
+}
+#[cfg(test)]
+struct PermissionGrantTestGate {
+    point: PermissionGrantTestPoint,
+    entered: tokio::sync::oneshot::Sender<()>,
+    resume: std::sync::mpsc::Receiver<()>,
+}
+#[cfg(test)]
+static PERMISSION_GRANT_TEST_GATES: std::sync::LazyLock<
+    std::sync::Mutex<HashMap<PathBuf, PermissionGrantTestGate>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+#[cfg(test)]
+pub(crate) fn permission_grant_test_gate(
+    path: PathBuf,
+    point: PermissionGrantTestPoint,
+) -> (
+    tokio::sync::oneshot::Receiver<()>,
+    std::sync::mpsc::Sender<()>,
+) {
+    let (entered, reached) = tokio::sync::oneshot::channel();
+    let (release, resume) = std::sync::mpsc::channel();
+    assert!(PERMISSION_GRANT_TEST_GATES
+        .lock()
+        .unwrap()
+        .insert(
+            path,
+            PermissionGrantTestGate {
+                point,
+                entered,
+                resume
+            }
+        )
+        .is_none());
+    (reached, release)
+}
+#[cfg(test)]
+fn permission_grant_test_pause(path: &Path, point: PermissionGrantTestPoint) {
+    let gate = {
+        let mut gates = PERMISSION_GRANT_TEST_GATES.lock().unwrap();
+        if gates.get(path).is_some_and(|gate| gate.point == point) {
+            gates.remove(path)
+        } else {
+            None
+        }
+    };
+    if let Some(gate) = gate {
+        let _ = gate.entered.send(());
+        let _ = gate.resume.recv_timeout(std::time::Duration::from_secs(10));
     }
 }

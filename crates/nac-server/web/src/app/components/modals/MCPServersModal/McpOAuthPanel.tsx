@@ -34,7 +34,18 @@ function statusLabel(status: OAuthStatus | null): string {
   }
 }
 
-export function McpOAuthPanel({ serverName }: { serverName: string }) {
+/** Where a user revokes a Slack grant; NAC cannot revoke it from here. */
+const SLACK_REVOKE_HELP_URL = "https://slack.com/help/articles/360003125231";
+
+function isSlackEndpoint(endpoint: string | undefined): boolean {
+  try {
+    return endpoint !== undefined && new URL(endpoint).hostname === "mcp.slack.com";
+  } catch {
+    return false;
+  }
+}
+
+export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; endpoint?: string }) {
   const { api } = useNativeRuntime();
   const isMobile = useIsMobile();
   const [status, setStatus] = useState<OAuthStatus | null>(null);
@@ -325,6 +336,26 @@ export function McpOAuthPanel({ serverName }: { serverName: string }) {
         >
           Continue OAuth authorization
         </a>
+      ) : null}
+
+      {status === "connected" ? (
+        <div className="text-small text-basic-muted">
+          Log out deletes the tokens NAC saved on this computer, and sessions stop sending requests
+          to this server until you authenticate again. It does not revoke NAC&apos;s access at the
+          provider.{" "}
+          {isSlackEndpoint(endpoint) ? (
+            <a
+              className="text-accent-primary underline"
+              href={SLACK_REVOKE_HELP_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Revoke it in Slack
+            </a>
+          ) : (
+            "To revoke it, remove NAC's access in the provider's connected-app settings."
+          )}
+        </div>
       ) : null}
 
       {status === "connected" || status === "connecting" ? (

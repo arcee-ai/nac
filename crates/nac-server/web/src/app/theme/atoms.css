@@ -1,14 +1,27 @@
 /* Atom styles ported from ArceeFM (button/index.css, input/index.css) with
    @apply resolved to concrete values. Colours use design tokens directly.
    The size matrix is generalized to size+content (variant-agnostic) since the
-   values are identical across variants (plus a secondary large-icon override). */
+   values are identical across variants, except tertiary, which has no visual box. */
 
 /* ============================ ICON ============================ */
 .icon {
   display: block;
 }
-.icon path {
-  transition: fill 0.15s ease-out;
+/* On the shapes, so a `transition-*` utility on the icon itself doesn't drop it. */
+.icon > * {
+  transition: color 0.15s ease-out;
+}
+/* The Icon's `color` prop. In a layer below the utilities, it yields to any
+   class or rule in this file that colors the icon. */
+@layer components {
+  .icon {
+    color: var(--icon-color, currentColor);
+  }
+}
+/* Custom properties inherit, so a host page's own `--icon-color` would otherwise
+   reach the packaged presentation's icons. */
+:root {
+  --icon-color: initial;
 }
 
 /* ============================ BUTTON ============================ */
@@ -20,7 +33,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--interaction-rounded);
   box-shadow: none;
   transition:
     color 0.15s ease-out,
@@ -29,15 +42,15 @@
   transition-property: color, background-color, border-color;
 }
 .btn:focus-visible {
-  outline: 2px solid var(--blue-500);
-  outline-offset: -2px;
+  outline: 2px solid var(--color-border-focus-outline);
+  outline-offset: 2px;
 }
 .btn-disabled {
   cursor: not-allowed;
 }
 
 .btn-small {
-  gap: 0.25rem;
+  gap: 0.375rem;
   font-size: 0.75rem;
   line-height: 1rem;
   font-weight: 500;
@@ -66,16 +79,16 @@
 .btn-small.btn-icon-left {
   height: 24px;
   padding-left: 4px;
-  padding-right: 8px;
+  padding-right: 12px;
 }
 .btn-small.btn-icon-right {
   height: 24px;
-  padding-left: 8px;
+  padding-left: 12px;
   padding-right: 4px;
 }
 .btn-small.btn-text {
   height: 24px;
-  padding: 0 8px;
+  padding: 0 12px;
 }
 .btn-medium.btn-icon {
   height: 36px;
@@ -113,13 +126,22 @@
   height: 48px;
   padding: 0 24px;
 }
-/* secondary-family large icon square override (11px) */
-.btn-secondary.btn-large.btn-icon,
-.btn-secondary-highlighted.btn-large.btn-icon,
-.btn-secondary-accent.btn-large.btn-icon,
-.btn-secondary-accent-highlighted.btn-large.btn-icon,
-.btn-secondary-destructive.btn-large.btn-icon {
-  padding: 0 11px;
+/* Tertiary is only as tall as its line. Same specificity as the matrix above,
+   so it has to come after it. */
+.btn.btn-tertiary,
+.btn.btn-tertiary-destructive,
+.btn.btn-tertiary-accent {
+  height: auto;
+  padding: 0;
+  border-radius: var(--interaction-rounded);
+}
+/* Boxless icon controls still keep a 24px pointer target. Deliberately compact
+   transcript actions can override both minimums at their desktop breakpoint. */
+.btn.btn-icon.btn-tertiary,
+.btn.btn-icon.btn-tertiary-destructive,
+.btn.btn-icon.btn-tertiary-accent {
+  min-width: 24px;
+  min-height: 24px;
 }
 
 /* ---- colour variants ---- */
@@ -134,7 +156,6 @@
 .btn-primary:active {
   background-color: var(--color-bg-btn-primary-pressed);
 }
-/* Unlike the other variants, primary keeps its convex shadow while disabled. */
 .btn-primary.btn-disabled {
   color: var(--color-text-btn-primary-disabled);
   background-color: var(--color-bg-btn-primary-disabled);
@@ -159,7 +180,6 @@
   background-color: var(--color-bg-btn-secondary-pressed);
 }
 .btn-secondary.btn-disabled {
-  box-shadow: none;
   color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-secondary-disabled);
 }
@@ -183,7 +203,6 @@
   background-color: var(--color-bg-btn-secondary-destructive-pressed);
 }
 .btn-secondary-destructive.btn-disabled {
-  box-shadow: none;
   color: var(--color-text-btn-destructive-disabled);
   background-color: var(--color-bg-btn-secondary-destructive-disabled);
 }
@@ -207,7 +226,6 @@
   background-color: var(--color-bg-btn-secondary-accent-pressed);
 }
 .btn-secondary-accent.btn-disabled {
-  box-shadow: none;
   color: var(--color-text-btn-accent-disabled);
   background-color: var(--color-bg-btn-secondary-accent-disabled);
 }
@@ -223,21 +241,20 @@
   box-shadow: var(--shadow-convex);
 }
 .btn-secondary-highlighted:hover {
-  color: var(--color-text-btn-secondary-highlighted-hovered);
+  color: var(--color-text-btn-secondary-hovered-highlighted);
   background-color: var(--color-bg-btn-secondary-highlighted-hovered);
 }
 .btn-secondary-highlighted:active {
-  color: var(--color-text-btn-secondary-highlighted-pressed);
+  color: var(--color-text-btn-secondary-pressed-highlighted);
   background-color: var(--color-bg-btn-secondary-highlighted-pressed);
 }
 .btn-secondary-highlighted.btn-disabled {
-  box-shadow: none;
-  color: var(--color-text-btn-secondary-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled-highlighted);
   background-color: var(--color-bg-btn-secondary-highlighted-disabled);
 }
 .btn-secondary-highlighted.btn-disabled:hover,
 .btn-secondary-highlighted.btn-disabled:active {
-  color: var(--color-text-btn-secondary-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled-highlighted);
   background-color: var(--color-bg-btn-secondary-highlighted-disabled);
 }
 
@@ -255,7 +272,6 @@
   background-color: var(--color-bg-btn-secondary-accent-highlighted-pressed);
 }
 .btn-secondary-accent-highlighted.btn-disabled {
-  box-shadow: none;
   color: var(--color-text-btn-accent-disabled);
   background-color: var(--color-bg-btn-secondary-accent-highlighted-disabled);
 }
@@ -266,24 +282,24 @@
 }
 
 .btn-ghost {
-  color: var(--color-text-btn-ghost);
+  color: var(--color-text-btn-secondary);
   background-color: var(--color-bg-btn-ghost);
 }
 .btn-ghost:hover {
-  color: var(--color-text-btn-ghost-hovered);
+  color: var(--color-text-btn-secondary-hovered);
   background-color: var(--color-bg-btn-ghost-hovered);
 }
 .btn-ghost:active {
-  color: var(--color-text-btn-ghost-pressed);
+  color: var(--color-text-btn-secondary-pressed);
   background-color: var(--color-bg-btn-ghost-pressed);
 }
 .btn-ghost.btn-disabled {
-  color: var(--color-text-btn-ghost-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-disabled);
 }
 .btn-ghost.btn-disabled:hover,
 .btn-ghost.btn-disabled:active {
-  color: var(--color-text-btn-ghost-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-disabled);
 }
 
@@ -315,11 +331,11 @@
 }
 .btn-ghost-accent:hover {
   color: var(--color-text-btn-accent-hovered);
-  background-color: var(--color-bg-btn-ghost-accent-hovered);
+  background-color: var(--color-bg-btn-secondary-accent-hovered);
 }
 .btn-ghost-accent:active {
   color: var(--color-text-btn-accent-pressed);
-  background-color: var(--color-bg-btn-ghost-accent-pressed);
+  background-color: var(--color-bg-btn-secondary-accent-pressed);
 }
 .btn-ghost-accent.btn-disabled {
   color: var(--color-text-btn-accent-disabled);
@@ -332,47 +348,47 @@
 }
 
 .btn-ghost-highlighted {
-  color: var(--color-text-btn-ghost-highlighted);
+  color: var(--color-text-btn-secondary-highlighted);
   background-color: var(--color-bg-btn-ghost-highlighted);
 }
 .btn-ghost-highlighted:hover {
-  color: var(--color-text-btn-ghost-highlighted-hovered);
+  color: var(--color-text-btn-secondary-hovered-highlighted);
   background-color: var(--color-bg-btn-ghost-highlighted-hovered);
 }
 .btn-ghost-highlighted:active {
-  color: var(--color-text-btn-ghost-highlighted-pressed);
+  color: var(--color-text-btn-secondary-pressed-highlighted);
   background-color: var(--color-bg-btn-ghost-highlighted-pressed);
 }
 .btn-ghost-highlighted.btn-disabled {
-  color: var(--color-text-btn-ghost-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-highlighted-disabled);
 }
 .btn-ghost-highlighted.btn-disabled:hover,
 .btn-ghost-highlighted.btn-disabled:active {
-  color: var(--color-text-btn-ghost-highlighted-disabled);
+  color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-ghost-highlighted-disabled);
 }
 
 .btn-ghost-highlighted-accent {
   color: var(--color-text-btn-accent);
-  background-color: var(--color-bg-btn-ghost-accent-highlighted);
+  background-color: var(--color-bg-btn-secondary-accent-highlighted);
 }
 .btn-ghost-highlighted-accent:hover {
   color: var(--color-text-btn-accent-hovered);
-  background-color: var(--color-bg-btn-ghost-accent-highlighted-hovered);
+  background-color: var(--color-bg-btn-secondary-accent-highlighted-hovered);
 }
 .btn-ghost-highlighted-accent:active {
   color: var(--color-text-btn-accent-pressed);
-  background-color: var(--color-bg-btn-ghost-accent-highlighted-pressed);
+  background-color: var(--color-bg-btn-secondary-accent-highlighted-pressed);
 }
 .btn-ghost-highlighted-accent.btn-disabled {
   color: var(--color-text-btn-accent-disabled);
-  background-color: var(--color-bg-btn-ghost-accent-highlighted-disabled);
+  background-color: var(--color-bg-btn-secondary-accent-highlighted-disabled);
 }
 .btn-ghost-highlighted-accent.btn-disabled:hover,
 .btn-ghost-highlighted-accent.btn-disabled:active {
   color: var(--color-text-btn-accent-disabled);
-  background-color: var(--color-bg-btn-ghost-accent-highlighted-disabled);
+  background-color: var(--color-bg-btn-secondary-accent-highlighted-disabled);
 }
 
 .btn-tertiary {
@@ -451,92 +467,96 @@
   min-height: 24px;
 }
 
-/* icon fill per variant/state */
-.btn-primary .icon path {
-  fill: var(--color-fill-btn-primary);
+/* icon color per variant/state */
+.btn-primary .icon {
+  color: var(--color-fill-btn-primary);
 }
-.btn-primary.btn-disabled .icon path {
-  fill: var(--color-fill-btn-primary-disabled);
+.btn-primary.btn-disabled .icon {
+  color: var(--color-fill-btn-primary-disabled);
 }
-.btn-secondary .icon path,
-.btn-ghost .icon path,
-.btn-tertiary .icon path {
-  fill: var(--color-fill-btn-secondary);
+.btn-secondary .icon,
+.btn-ghost .icon,
+.btn-tertiary .icon {
+  color: var(--color-fill-btn-secondary);
 }
-.btn-secondary:hover .icon path,
-.btn-ghost:hover .icon path,
-.btn-tertiary:hover .icon path {
-  fill: var(--color-fill-btn-secondary-hovered);
+.btn-secondary:hover .icon,
+.btn-ghost:hover .icon,
+.btn-tertiary:hover .icon {
+  color: var(--color-fill-btn-secondary-hovered);
 }
-.btn-secondary:active .icon path,
-.btn-ghost:active .icon path,
-.btn-tertiary:active .icon path {
-  fill: var(--color-fill-btn-secondary-pressed);
+.btn-secondary:active .icon,
+.btn-ghost:active .icon,
+.btn-tertiary:active .icon {
+  color: var(--color-fill-btn-secondary-pressed);
 }
-.btn-secondary.btn-disabled .icon path,
-.btn-ghost.btn-disabled .icon path,
-.btn-tertiary.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-disabled);
+.btn-secondary.btn-disabled .icon,
+.btn-ghost.btn-disabled .icon,
+.btn-tertiary.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled);
 }
-.btn-secondary-highlighted .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted);
+.btn-secondary-highlighted .icon,
+.btn-ghost-highlighted .icon {
+  color: var(--color-fill-btn-secondary-highlighted);
 }
-.btn-secondary-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-hovered);
+.btn-secondary-highlighted:hover .icon,
+.btn-ghost-highlighted:hover .icon {
+  color: var(--color-fill-btn-secondary-hovered-highlighted);
 }
-.btn-secondary-highlighted:active .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-pressed);
+.btn-secondary-highlighted:active .icon,
+.btn-ghost-highlighted:active .icon {
+  color: var(--color-fill-btn-secondary-pressed-highlighted);
 }
-.btn-secondary-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-secondary-highlighted-disabled);
+.btn-secondary-highlighted.btn-disabled .icon,
+.btn-ghost-highlighted.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled-highlighted);
 }
-.btn-ghost-highlighted .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted);
+.btn-secondary-accent .icon,
+.btn-secondary-accent-highlighted .icon,
+.btn-ghost-accent .icon,
+.btn-tertiary-accent .icon,
+.btn-ghost-highlighted-accent .icon {
+  color: var(--color-fill-btn-accent);
 }
-.btn-ghost-highlighted:hover .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-hovered);
+.btn-secondary-accent:hover .icon,
+.btn-secondary-accent-highlighted:hover .icon,
+.btn-ghost-accent:hover .icon,
+.btn-tertiary-accent:hover .icon,
+.btn-ghost-highlighted-accent:hover .icon {
+  color: var(--color-fill-btn-accent-hovered);
 }
-.btn-ghost-highlighted:active .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-pressed);
+.btn-secondary-accent:active .icon,
+.btn-secondary-accent-highlighted:active .icon,
+.btn-ghost-accent:active .icon,
+.btn-tertiary-accent:active .icon,
+.btn-ghost-highlighted-accent:active .icon {
+  color: var(--color-fill-btn-accent-pressed);
 }
-.btn-ghost-highlighted.btn-disabled .icon path {
-  fill: var(--color-fill-btn-ghost-highlighted-disabled);
+.btn-secondary-accent.btn-disabled .icon,
+.btn-secondary-accent-highlighted.btn-disabled .icon,
+.btn-ghost-accent.btn-disabled .icon,
+.btn-tertiary-accent.btn-disabled .icon,
+.btn-ghost-highlighted-accent.btn-disabled .icon {
+  color: var(--color-fill-btn-accent-muted);
 }
-.btn-secondary-accent .icon path,
-.btn-secondary-accent-highlighted .icon path,
-.btn-ghost-accent .icon path,
-.btn-tertiary-accent .icon path,
-.btn-ghost-highlighted-accent .icon path {
-  fill: var(--color-fill-btn-accent);
+.btn-secondary-destructive .icon,
+.btn-ghost-destructive .icon,
+.btn-tertiary-destructive .icon {
+  color: var(--color-fill-btn-destructive);
 }
-.btn-secondary-accent:hover .icon path,
-.btn-secondary-accent-highlighted:hover .icon path,
-.btn-ghost-accent:hover .icon path,
-.btn-tertiary-accent:hover .icon path,
-.btn-ghost-highlighted-accent:hover .icon path {
-  fill: var(--color-fill-btn-accent-hovered);
+.btn-secondary-destructive:hover .icon,
+.btn-ghost-destructive:hover .icon,
+.btn-tertiary-destructive:hover .icon {
+  color: var(--color-fill-btn-destructive-hovered);
 }
-.btn-secondary-accent:active .icon path,
-.btn-secondary-accent-highlighted:active .icon path,
-.btn-ghost-accent:active .icon path,
-.btn-tertiary-accent:active .icon path,
-.btn-ghost-highlighted-accent:active .icon path {
-  fill: var(--color-fill-btn-accent-pressed);
+.btn-secondary-destructive:active .icon,
+.btn-ghost-destructive:active .icon,
+.btn-tertiary-destructive:active .icon {
+  color: var(--color-fill-btn-destructive-pressed);
 }
-.btn-secondary-destructive .icon path,
-.btn-ghost-destructive .icon path,
-.btn-tertiary-destructive .icon path {
-  fill: var(--color-fill-btn-destructive);
-}
-.btn-secondary-destructive:hover .icon path,
-.btn-ghost-destructive:hover .icon path,
-.btn-tertiary-destructive:hover .icon path {
-  fill: var(--color-fill-btn-destructive-hovered);
-}
-.btn-secondary-destructive:active .icon path,
-.btn-ghost-destructive:active .icon path,
-.btn-tertiary-destructive:active .icon path {
-  fill: var(--color-fill-btn-destructive-pressed);
+.btn-secondary-destructive.btn-disabled .icon,
+.btn-ghost-destructive.btn-disabled .icon,
+.btn-tertiary-destructive.btn-disabled .icon {
+  color: var(--color-fill-btn-destructive-disabled);
 }
 
 /* ============================ INPUT ============================ */
@@ -558,7 +578,7 @@
 }
 .input:focus,
 .input:focus-visible {
-  outline: 2px solid var(--color-bg-accent-inverse);
+  outline: 2px solid var(--color-border-primary);
   outline-offset: -2px;
 }
 .input:disabled {
@@ -567,25 +587,30 @@
   opacity: 0.75;
 }
 .input-validation,
-.input-validation:hover {
+.input-validation:hover,
+.input-validation:focus,
+.input-validation:focus-visible {
   outline: 2px solid var(--color-border-error-primary);
-  outline-offset: -2px;
-}
-.input-validation:focus {
-  outline: 2px solid var(--color-bg-accent-inverse);
   outline-offset: -2px;
 }
 .input-small {
   height: 24px;
   font-size: 0.75rem;
+  line-height: 1rem;
 }
 .input-medium {
   height: 36px;
   font-size: 0.875rem;
+  line-height: 1.25rem;
 }
 .input-large {
   height: 48px;
   font-size: 1rem;
+  line-height: 1.5rem;
+}
+/* Search at the large size insets its glyph 6px, then leaves 12px before the text. */
+.input-large.input-pad-search {
+  padding-left: 42px;
 }
 .input-wrapper .btn {
   position: absolute;
@@ -599,34 +624,52 @@
 }
 
 /* ============================ STICKY ============================ */
-/* Sticky controls are a 40px pill floating on its own elevated wrapper, which
-   owns the radius and the shadow. The inner control therefore has to give up
-   the height, radius and shadow that `.btn` / `.input` hardcode above — and
-   since this file is unlayered, Tailwind utilities cannot do that (see the
-   note under TABS). Selectors mirror the specificity of the rules they
-   override and rely on coming later in the source. */
+/* Sticky controls are a 40px pill. Non-primary variants float on an elevation
+   level-3 wrapper that owns Shadow-xl. The inner control gives up the height,
+   radius and shadow that `.btn` / `.input` hardcode above — and since this
+   file is unlayered, Tailwind utilities cannot do that (see the note under
+   TABS). Selectors mirror the specificity of the rules they override and rely
+   on coming later in the source. */
 .btn-sticky {
   height: 40px;
+  gap: 4px;
   border-radius: 9999px;
   box-shadow: none;
 }
 .btn-sticky.btn-large.btn-icon {
   height: 40px;
-  padding: 0 8px;
+  padding: 8px;
 }
 .btn-sticky.btn-large.btn-icon-left {
   height: 40px;
-  padding-left: 8px;
-  padding-right: 16px;
+  padding: 8px 16px 8px 8px;
 }
 .btn-sticky.btn-large.btn-icon-right {
   height: 40px;
-  padding-left: 16px;
-  padding-right: 8px;
+  padding: 8px 8px 8px 16px;
 }
 .btn-sticky.btn-large.btn-text {
   height: 40px;
-  padding: 0 16px;
+  padding: 8px 16px;
+}
+.btn-sticky.btn-large.btn-tertiary,
+.btn-sticky.btn-large.btn-tertiary-destructive,
+.btn-sticky.btn-large.btn-tertiary-accent,
+.btn-sticky.btn-large.btn-tertiary.btn-icon,
+.btn-sticky.btn-large.btn-tertiary.btn-icon-left,
+.btn-sticky.btn-large.btn-tertiary.btn-icon-right,
+.btn-sticky.btn-large.btn-tertiary.btn-text,
+.btn-sticky.btn-large.btn-tertiary-destructive.btn-icon,
+.btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-left,
+.btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-right,
+.btn-sticky.btn-large.btn-tertiary-destructive.btn-text,
+.btn-sticky.btn-large.btn-tertiary-accent.btn-icon,
+.btn-sticky.btn-large.btn-tertiary-accent.btn-icon-left,
+.btn-sticky.btn-large.btn-tertiary-accent.btn-icon-right,
+.btn-sticky.btn-large.btn-tertiary-accent.btn-text {
+  height: 24px;
+  border-radius: var(--interaction-rounded);
+  padding: 0;
 }
 
 .input-sticky {
@@ -664,28 +707,212 @@
 }
 
 /* ============================ TABS ============================ */
+/* Tab buttons keep the matrix's fixed height and inline padding, so rows with
+   two lines of content still fit, and take their own colours below: the
+   Figma tab button binds other state tokens than the ghost buttons. */
 .tab-btn {
   justify-content: flex-start;
 }
-/* Only the touch-sized rows are used, and the design spaces their 24px icons
-   further from the label than `.btn-large`'s 8px. */
+.tab-btn.btn-small {
+  height: 28px;
+  gap: 4px;
+}
 .tab-btn.btn-large {
   gap: 12px;
 }
 
-/* The underline, the corners and the active label colour have to be declared
-   here rather than as utility classes on the element. This file is imported
-   outside any cascade layer while Tailwind's utilities sit in `@layer
-   utilities`, and unlayered rules beat layered ones no matter how specific the
-   layered one is — so `.btn`'s `border: none`, its 4px radius and each
-   variant's `color` silently win over `border-primary`, `rounded-t-lg` and
-   `text-basic-primary`. */
+.tab-btn-regular {
+  color: var(--color-text-btn-secondary);
+  background-color: var(--color-bg-btn-ghost);
+}
+.tab-btn-regular:hover {
+  color: var(--color-text-btn-secondary-hovered);
+  background-color: var(--color-bg-btn-secondary-hovered);
+}
+.tab-btn-regular:active {
+  color: var(--color-text-btn-secondary-pressed);
+  background-color: var(--color-bg-btn-secondary-pressed);
+}
+.tab-btn-regular.tab-btn-active {
+  color: var(--color-text-btn-secondary-highlighted);
+  background-color: var(--color-bg-btn-secondary-highlighted);
+}
+.tab-btn-regular.tab-btn-active:hover {
+  background-color: var(--color-bg-btn-ghost-highlighted-hovered);
+}
+.tab-btn-regular.tab-btn-active:active {
+  color: var(--color-text-btn-secondary-pressed-highlighted);
+  background-color: var(--color-bg-btn-ghost-highlighted-pressed);
+}
+
+/* Accent and destructive labels and icons keep their resting colour. */
+.tab-btn-accent {
+  color: var(--color-text-btn-accent);
+  background-color: var(--color-bg-btn-ghost-accent);
+}
+.tab-btn-accent:hover {
+  background-color: var(--color-bg-btn-ghost-accent-hovered);
+}
+.tab-btn-accent:active {
+  background-color: var(--color-bg-btn-secondary-accent-pressed);
+}
+.tab-btn-accent.tab-btn-active {
+  background-color: var(--color-bg-btn-secondary-accent-highlighted);
+}
+.tab-btn-accent.tab-btn-active:hover {
+  background-color: var(--color-bg-btn-secondary-accent-highlighted-hovered);
+}
+.tab-btn-accent.tab-btn-active:active {
+  background-color: var(--color-bg-btn-secondary-accent-pressed);
+}
+
+.tab-btn-destructive {
+  color: var(--color-text-btn-destructive);
+  background-color: var(--color-bg-btn-ghost-destructive);
+}
+.tab-btn-destructive:hover {
+  background-color: var(--color-bg-btn-ghost-destructive-hovered);
+}
+.tab-btn-destructive:active {
+  background-color: var(--color-bg-btn-ghost-destructive-pressed);
+}
+.tab-btn-destructive.tab-btn-active {
+  background-color: var(--color-bg-btn-secondary-destructive);
+}
+.tab-btn-destructive.tab-btn-active:hover {
+  background-color: var(--color-bg-btn-secondary-destructive-hovered);
+}
+.tab-btn-destructive.tab-btn-active:active {
+  background-color: var(--color-bg-btn-secondary-destructive-pressed);
+}
+
+.tab-btn.btn-disabled,
+.tab-btn.btn-disabled:hover,
+.tab-btn.btn-disabled:active {
+  background-color: var(--color-bg-btn-ghost-disabled);
+}
+.tab-btn-regular.btn-disabled,
+.tab-btn-regular.btn-disabled:hover,
+.tab-btn-regular.btn-disabled:active {
+  color: var(--color-text-btn-secondary-disabled);
+}
+.tab-btn-regular.tab-btn-active.btn-disabled,
+.tab-btn-regular.tab-btn-active.btn-disabled:hover,
+.tab-btn-regular.tab-btn-active.btn-disabled:active {
+  color: var(--color-text-btn-secondary-disabled-highlighted);
+  background-color: var(--color-bg-btn-ghost-highlighted-disabled);
+}
+.tab-btn-accent.btn-disabled {
+  color: var(--color-text-btn-accent-disabled);
+}
+.tab-btn-destructive.btn-disabled {
+  color: var(--color-text-btn-destructive-disabled);
+}
+
+.tab-btn-regular .icon {
+  color: var(--color-fill-btn-secondary);
+}
+.tab-btn-regular:hover .icon {
+  color: var(--color-fill-btn-secondary-hovered);
+}
+.tab-btn-regular:active .icon {
+  color: var(--color-fill-btn-secondary-pressed);
+}
+.tab-btn-regular.tab-btn-active .icon {
+  color: var(--color-fill-btn-secondary-highlighted);
+}
+.tab-btn-regular.tab-btn-active:active .icon {
+  color: var(--color-fill-btn-secondary-pressed-highlighted);
+}
+.tab-btn-accent .icon {
+  color: var(--color-fill-btn-accent);
+}
+.tab-btn-destructive .icon {
+  color: var(--color-fill-btn-destructive);
+}
+.tab-btn-regular.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled);
+}
+.tab-btn-regular.tab-btn-active.btn-disabled .icon {
+  color: var(--color-fill-btn-secondary-disabled-highlighted);
+}
+.tab-btn-accent.btn-disabled .icon {
+  color: var(--color-fill-btn-accent-muted);
+}
+.tab-btn-destructive.btn-disabled .icon {
+  color: var(--color-fill-btn-destructive-disabled);
+}
+
+/* The 2px underline sits inside the box, so an inset shadow keeps the label
+   centered. A real border would shrink the content box and shift it up. */
 .horizontal-tab-item {
-  border-bottom: 2px solid transparent;
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--interaction-rounded);
+  box-shadow: inset 0 -2px 0 0 transparent;
 }
 .horizontal-tab-item-active {
-  border-bottom-color: var(--color-border-primary);
+  box-shadow: inset 0 -2px 0 0 var(--color-border-primary);
+}
+.horizontal-tab-item-active.btn-disabled {
+  box-shadow: inset 0 -2px 0 0 var(--color-border-tertiary);
+}
+.horizontal-tab-item.btn-small {
+  gap: 4px;
+}
+.horizontal-tab-item-icon-left.btn-small {
+  height: 24px;
+  padding: 0 12px 0 6px;
+}
+.horizontal-tab-item-icon-right.btn-small {
+  height: 24px;
+  padding: 0 6px 0 12px;
+}
+.horizontal-tab-item-full.btn-small,
+.horizontal-tab-item-icon.btn-small {
+  height: 24px;
+}
+.horizontal-tab-item-full.btn-small {
+  padding: 0 6px;
+}
+.horizontal-tab-item-icon.btn-small {
+  padding: 0 4px;
+}
+.horizontal-tab-item-text.btn-small {
+  height: 24px;
+  padding: 0 12px;
+}
+.horizontal-tab-item-icon-left.btn-medium {
+  height: 36px;
+  padding: 0 16px 0 8px;
+}
+.horizontal-tab-item-icon-right.btn-medium {
+  height: 36px;
+  padding: 0 8px 0 16px;
+}
+.horizontal-tab-item-full.btn-medium,
+.horizontal-tab-item-icon.btn-medium {
+  height: 36px;
+  padding: 0 8px;
+}
+.horizontal-tab-item-text.btn-medium {
+  height: 36px;
+  padding: 0 16px;
+}
+.horizontal-tab-item-icon-left.btn-large {
+  height: 48px;
+  padding: 0 24px 0 12px;
+}
+.horizontal-tab-item-icon-right.btn-large {
+  height: 48px;
+  padding: 0 12px 0 24px;
+}
+.horizontal-tab-item-full.btn-large,
+.horizontal-tab-item-icon.btn-large {
+  height: 48px;
+  padding: 0 12px;
+}
+.horizontal-tab-item-text.btn-large {
+  height: 48px;
+  padding: 0 24px;
 }
 
 /* Same unlayered-wins reasoning as the tabs above: the strip lives next to
@@ -698,6 +925,211 @@
 }
 .chat-session-tab-active {
   border-bottom-color: var(--color-border-primary);
+}
+
+/* File input meta uses the code face at the Figma mono size. The shared
+   `.code` rule sets a different tracking, so this stays separate. */
+.file-input-meta {
+  font-family: "IBMPlexMono", source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  letter-spacing: -0.6px;
+}
+.file-input-hint {
+  font-family: Inter, sans-serif;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 400;
+}
+.file-input {
+  border: none;
+  box-shadow: inset 0 0 0 1px var(--color-border-muted);
+}
+.file-input[data-invalid="true"] {
+  box-shadow: inset 0 0 0 1px var(--color-border-btn-destructive);
+}
+.file-input-row {
+  padding: 4px 6px;
+}
+
+/* Badge type is Tag-label from Figma: Medium 10/12, no tracking. The shared
+   `.tag-label` rule is semibold with wider tracking, so the badge stays separate. */
+.badge {
+  font-family: Inter, sans-serif;
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.badge-filled {
+  padding: 3px 7px;
+}
+
+/* Avatar type follows the Figma size scale. The 1px stroke sits inside the box. */
+.avatar {
+  box-sizing: border-box;
+  border-style: solid;
+  border-width: 1px;
+  padding: 1px;
+  font-family: Inter, sans-serif;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.avatar-xs,
+.avatar-sm {
+  font-size: 10px;
+  line-height: 12px;
+  text-transform: uppercase;
+}
+.avatar-md {
+  font-size: 12px;
+  line-height: 16px;
+}
+.avatar-lg {
+  font-size: 14px;
+  line-height: 20px;
+}
+.avatar-xl {
+  font-size: 16px;
+  line-height: 24px;
+}
+.avatar-2xl {
+  font-size: 18px;
+  line-height: 24px;
+}
+.avatar-3xl {
+  font-size: 20px;
+  line-height: 28px;
+}
+.avatar-4xl {
+  font-size: 24px;
+  line-height: 32px;
+}
+
+/* The radio dot uses fill tokens. Those are not background utilities. */
+.radio-mark {
+  background-color: var(--color-fill-basic-primary);
+}
+.group:hover .radio-mark {
+  background-color: var(--color-fill-basic-secondary);
+}
+.group:active .radio-mark {
+  background-color: var(--color-fill-basic-tertiary);
+}
+.radio-mark-disabled {
+  background-color: var(--color-fill-basic-muted);
+}
+
+/* Range track is 4px. The knob is 12px on desktop and 20px on the phone,
+   unless the slider keeps its small knob. */
+.range-input {
+  height: 12px;
+  outline: none;
+}
+.range-input:focus-visible {
+  outline: 2px solid var(--color-border-focus-outline);
+  outline-offset: 2px;
+}
+.range-knob {
+  width: 12px;
+  height: 12px;
+  box-shadow: var(--shadow-range-knob);
+}
+@media (max-width: 767.98px) {
+  .range-input:not(.range-input-small) {
+    height: 20px;
+  }
+  .range-input:not(.range-input-small) .range-knob {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* ============================ MODAL ============================ */
+/* Figma Fade-from-top / Fade-from-bottom: elevation ground, solid through
+   25% from the top and from 75% at the bottom. */
+.fade-from-top {
+  background-image: linear-gradient(
+    to bottom,
+    var(--color-bg-elevation-ground) 25%,
+    var(--color-bg-elevation-ground-transparent) 100%
+  );
+}
+.fade-from-bottom {
+  background-image: linear-gradient(
+    to bottom,
+    var(--color-bg-elevation-ground-transparent) 0%,
+    var(--color-bg-elevation-ground) 75%
+  );
+}
+/* Desktop footer actions are Figma's large buttons (48px, 16/24, padding 24).
+   Sticky buttons already carry their own size, so they are left alone. */
+.modal-footer .btn.btn-text:not(.btn-sticky),
+.modal-footer .btn.btn-icon-left:not(.btn-sticky),
+.modal-footer .btn.btn-icon-right:not(.btn-sticky) {
+  height: 48px;
+  padding: 0 24px;
+  gap: 8px;
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+.modal-footer .btn.btn-icon:not(.btn-sticky) {
+  height: 48px;
+  padding: 0 12px;
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+/* Phone footer actions are 40px pills. Primary is a flat fill. Everything
+   else sits on elevation level-3 with Shadow-xl, including tertiary. */
+.modal-footer-mobile .btn.btn-text:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-icon:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-icon-left:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-icon-right:not(.btn-sticky) {
+  height: 40px;
+  border-radius: 9999px;
+  padding: 8px 16px;
+  gap: 8px;
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+.modal-footer-mobile .btn.btn-primary:not(.btn-sticky) {
+  box-shadow: none;
+}
+.modal-footer-mobile .btn.btn-secondary:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-secondary-highlighted:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-secondary-destructive:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-secondary-accent:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-secondary-accent-highlighted:not(.btn-sticky) {
+  box-shadow: var(--shadow-xl);
+}
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary.btn-text,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary.btn-icon,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary.btn-icon-left,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary.btn-icon-right,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-destructive.btn-text,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-destructive.btn-icon,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-left,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-destructive.btn-icon-right,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-text,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-icon,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-icon-left,
+.modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-icon-right {
+  height: 40px;
+  border-radius: 9999px;
+  padding: 8px 16px;
+  background-color: var(--color-bg-elevation-level-3);
+  box-shadow: var(--shadow-xl);
+}
+.modal-footer-mobile .btn.btn-ghost:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-ghost-destructive:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-ghost-accent:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-tertiary:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-tertiary-destructive:not(.btn-sticky),
+.modal-footer-mobile .btn.btn-tertiary-accent:not(.btn-sticky) {
+  background-color: var(--color-bg-elevation-level-3);
+  box-shadow: var(--shadow-xl);
 }
 
 /* ============================ TOOLTIP ============================ */

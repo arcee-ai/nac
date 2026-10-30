@@ -6,6 +6,7 @@ import type { Page } from "@playwright/test";
 
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
+import { STDIO_MCP_SERVER, openCustomMcpServer } from "./mcp-library-fixture";
 
 const execute = promisify(execFile);
 test.skip(
@@ -26,28 +27,30 @@ async function showFiles(page: Page, mobile: boolean) {
   await expect(files.last()).toBeVisible();
 }
 
+/** A phone's panel shows one screen at a time: an open file goes back to the list. */
 async function openFileList(page: Page, mobile: boolean) {
-  if (mobile && !(await page.getByRole("dialog", { name: "Files", exact: true }).isVisible()))
-    await page.getByRole("button", { name: "Open list", exact: true }).click();
-}
-async function closeFileList(page: Page, mobile: boolean) {
-  if (!mobile) return;
-  const list = page.getByRole("dialog", { name: "Files", exact: true });
-  await list.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(list).toHaveCount(0);
+  const back = page.getByRole("button", { name: "Open list", exact: true });
+  if (mobile && (await back.isVisible())) await back.click();
 }
 
 async function chooseFile(page: Page, name: string, mobile: boolean) {
-  if (mobile && !(await page.getByRole("button", { name, exact: true }).isVisible())) {
-    await page.getByRole("button", { name: "Open list", exact: true }).click();
-  }
-  const allFiles = page.getByRole("button", { name: "Show every file", exact: true });
+  await openFileList(page, mobile);
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const file = page.getByRole("button", {
+    name: new RegExp(
+      `^${escapedName}(?:\\s*, (?:Modified|Added|Deleted|Renamed|Copied|Type changed|Conflict|Untracked|Ignored))?$`,
+    ),
+  });
+  const allFiles = page.getByRole("button", { name: "All files", exact: true });
   if ((await allFiles.getAttribute("aria-pressed")) !== "true") await allFiles.click();
-  await page.getByRole("button", { name, exact: true }).click();
-  if (mobile) await expect(page.getByRole("dialog", { name: "Files", exact: true })).toHaveCount(0);
+  await file.click();
+  if (mobile)
+    await expect(page.getByRole("button", { name: "Open list", exact: true })).toBeVisible();
 }
 
 async function selectRevision(page: Page, name: RegExp, mobile: boolean) {
+  // The tab bar belongs to a phone's list screens.
+  await openFileList(page, mobile);
   if (mobile) await page.getByRole("tab", { name: "History", exact: true }).last().click();
   else await page.getByRole("button", { name: /^Snapshot:/ }).click();
   await page.getByRole("button", { name }).click();
@@ -116,10 +119,11 @@ for (const mobile of [false, true]) {
       await expect(page.getByText("CAPTURED_BETA", { exact: true })).toHaveCount(0);
       await openFileList(page, mobile);
       await expect(page.getByRole("button", { name: "Commit", exact: true })).toBeDisabled();
-      await closeFileList(page, mobile);
       await selectRevision(page, /^Working tree/, mobile);
       await chooseFile(page, "note.txt", mobile);
       await expect(page.getByText("CAPTURED_BETA", { exact: true })).toBeVisible();
+      // A phone's branch sits atop the file list rather than in the session header.
+      await openFileList(page, mobile);
       await page.getByRole("button", { name: "Branch: main", exact: true }).click();
       await expect(page.getByRole("button", { name: "other", exact: true })).toBeDisabled();
       await page.getByPlaceholder("Find or create a branch").fill("injected-feature");
@@ -132,7 +136,6 @@ for (const mobile of [false, true]) {
       await page.getByPlaceholder("Commit message").fill("injected accepted commit");
       await page.getByPlaceholder("Commit message").press("Control+Enter");
       await expect(page.getByPlaceholder("Commit message")).toHaveCount(0);
-      await closeFileList(page, mobile);
       await expect
         .poll(async () => (await git("log", "-1", "--format=%s")).stdout.trim())
         .toBe("injected accepted commit");
@@ -164,7 +167,11 @@ for (const mobile of [false, true]) {
       expect(fixture.lostResponses).toHaveLength(1);
       expect((await git("log", "-1", "--format=%s")).stdout.trim()).toBe("accepted response lost");
       expect(fixture.lostResponses[0].status).toBe(200);
-      if (mobile) await page.keyboard.press("Escape");
+      // A phone's panel covers the host's own controls until Escape closes it.
+      if (mobile) {
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog", { name: "Files", exact: true })).toHaveCount(0);
+      }
       await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
       await showFiles(page, mobile);
       await chooseFile(page, "note.txt", mobile);
@@ -282,42 +289,59 @@ for (const mobile of [false, true]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     // This local outgoing stdio double has one inert tool; no inbound OAuth or remote service.
     const script = path.join(harness.runRoot, "outgoing-mcp.cjs");
-    await fs.writeFile(
-      script,
-      `const rl=require('node:readline').createInterface({input:process.stdin});
-rl.on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;
-const result=m.method==='initialize'?{protocolVersion:m.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}}:
-m.method==='tools/list'?{tools:[{name:'fixture_echo',description:'Local inert fixture',inputSchema:{type:'object',properties:{}}}]}:{};
-process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});\n`,
-    );
+    await fs.writeFile(script, STDIO_MCP_SERVER);
     const project = await createProject(request, harness, { name: "Injected outgoing MCP" });
     const id = await createSession(request, harness, "direct", project);
     const fixture = await startHostedFixture(harness, id);
     try {
       await page.goto(fixture.baseUrl);
-      await page.getByRole("button", { name: /^MCP servers/ }).click();
-      await page
-        .getByRole("button", { name: mobile ? "Add server" : "Custom server", exact: true })
-        .click();
-      if (mobile) await page.getByRole("button", { name: "Custom", exact: true }).click();
-      const form = page.getByRole("dialog").last();
+      const form = await openCustomMcpServer(page, mobile);
       await form.getByPlaceholder("my_server").fill("injected_fixture");
       await form.getByRole("button", { name: "Stdio", exact: true }).click();
       await form.getByRole("button", { name: "Legacy", exact: true }).click();
       await form.getByPlaceholder("npx").fill(process.execPath);
-      await form.getByPlaceholder("-y\nsome-mcp-server").fill(script);
+      // A long comma list is still one argument; the fixture script ignores it.
+      const allowlist = Array.from({ length: 12 }, (_, at) => `linear_tool_${at}`).join(",");
+      for (const value of [script, allowlist]) {
+        await form.getByRole("button", { name: "Add argument", exact: true }).click();
+        await page.keyboard.insertText(value);
+      }
+      await expect(form.getByRole("textbox", { name: "Argument 2" })).toHaveValue(allowlist);
+      await expect(form.getByRole("button", { name: "Remove argument 2" })).toBeInViewport();
+      expect(
+        await page.locator("html").evaluate((root) => root.scrollWidth <= root.clientWidth),
+      ).toBe(true);
       await form.getByRole("button", { name: "Test connection", exact: true }).click();
       await expect(form.getByText("1 tool found", { exact: true })).toBeVisible();
       await expect(form.getByText("fixture_echo", { exact: true })).toBeVisible();
       await form.getByRole("button", { name: "Save", exact: true }).click();
       if (mobile) await page.getByRole("button", { name: "injected_fixture", exact: true }).click();
       const editing = page.getByRole("dialog").last();
-      await editing.getByRole("button", { name: "Connect", exact: true }).click();
-      await expect(editing.getByText("Runtime: connected", { exact: true })).toBeVisible();
-      await editing.getByRole("button", { name: "Reload", exact: true }).click();
-      await expect(editing.getByText("Runtime: connected", { exact: true })).toBeVisible();
-      await editing.getByRole("button", { name: "Disconnect", exact: true }).click();
-      await expect(editing.getByText("Runtime: disconnected", { exact: true })).toBeVisible();
+      await expect(editing.getByRole("textbox", { name: "Argument 1" })).toHaveValue(script);
+      await expect(editing.getByRole("textbox", { name: "Argument 2" })).toHaveValue(allowlist);
+      for (const action of ["Connect", "Reload", "Disconnect"] as const) {
+        const actionPath = `/mcp_library/servers/injected_fixture/${action.toLowerCase()}`;
+        const button = editing.getByRole("button", { name: action, exact: true });
+        // Reload retains "connected" while pending. Wait for this operation,
+        // rather than reading the old status and clicking a newly disabled button.
+        const [response] = await Promise.all([
+          page.waitForResponse(
+            (response) =>
+              response.request().method() === "POST" && response.url().endsWith(actionPath),
+          ),
+          button.click(),
+        ]);
+        expect(response.ok()).toBe(true);
+        await expect(button).toBeEnabled();
+        const status =
+          action === "Disconnect"
+            ? "Disconnected. Sessions won't use this server until you connect it."
+            : "Runtime: connected";
+        await expect(editing.getByText(status, { exact: true })).toBeVisible();
+        expect(
+          fixture.calls.filter((call) => call.method === "POST" && call.path === actionPath),
+        ).toHaveLength(1);
+      }
       await editing.getByPlaceholder("my_server").fill("renamed_fixture");
       await editing.getByRole("button", { name: "Save", exact: true }).click();
       if (mobile) await page.getByRole("button", { name: "renamed_fixture", exact: true }).click();
@@ -325,6 +349,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});\n
       await page.keyboard.press("Escape");
       if (mobile) await page.keyboard.press("Escape");
       await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
+      if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
       await page.getByRole("button", { name: /^MCP servers/ }).click();
       if (mobile) await page.getByRole("button", { name: "renamed_fixture", exact: true }).click();
       await expect(page.getByPlaceholder("my_server")).toHaveValue("renamed_fixture");
