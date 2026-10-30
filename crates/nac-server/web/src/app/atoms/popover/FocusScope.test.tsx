@@ -136,10 +136,19 @@ describe.each([false, true])("portaled options at mobile=%s", (phone) => {
     expect(f.action).toHaveBeenCalledOnce();
     await waitFor(() => expect(document.activeElement).toBe(f.trigger));
     fireEvent.click(f.trigger);
-    fireEvent.click(screen.getByRole("button", { name: "Review selection" }));
+    const row = screen.getByRole("button", { name: "Review selection" });
+    act(() => row.focus());
+    fireEvent.click(row);
     expect(document.activeElement).toBe(
       screen.getByRole("dialog", { name: "Review terminal selection" }),
     );
+    expect(f.panelClose).not.toHaveBeenCalled();
+    const review = screen.getByRole("dialog", { name: "Review terminal selection" });
+    fireEvent.keyDown(review, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Review terminal selection" })).toBeNull(),
+    );
+    await waitFor(() => expect(document.activeElement).toBe(f.trigger));
     expect(f.panelClose).not.toHaveBeenCalled();
   });
 });

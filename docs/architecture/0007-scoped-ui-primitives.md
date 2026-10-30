@@ -97,7 +97,11 @@ reviewed like any imported code. Builds and CI never fetch from the registry.
 - Focus returns to the element that was focused when the layer opened, unless
   focus has already moved elsewhere or the panel was dismissed by a press
   outside it. A layer opened while another closes, such as a menu row opening
-  a dialog, inherits that pending return target.
+  a dialog, inherits that pending return target. The pending return also keeps
+  the closing content: a still-connected row inside an exiting phone sheet is
+  not a usable opener for the replacement dialog. A deliberate opener outside
+  that content is preserved. Only the latest pending restore may run; a new
+  layer cancels it before taking focus.
 
 The Popover atom's opt-in `focusScope`, originally ported from `dev` with
 #449 for terminal actions, owns initial focus and Tab navigation in the panel
@@ -159,11 +163,13 @@ surviving the exit form's lifetime.
 The Escape/pending-operation repair atop stacked head `4644af1b` was measured
 with Node 26.12.0 against the committed immediate predecessor, #453 at
 `a22a153a923cf2bedc3cac9d7ecf0932df1fd855`, using the same script and gzip
-implementation for both graphs. The repaired pilot adds 24,161 B startup JS /
-228 B CSS to the app and 28,053 B startup JS / 265 B CSS to the presentation
-package, within the pilot budgets. The repair itself adds 160 B and 151 B JS,
+implementation for both graphs. The repaired pilot adds 24,189 B startup JS /
+228 B CSS to the app and 28,077 B startup JS / 265 B CSS to the presentation
+package, within the pilot budgets. The repair itself adds 188 B and 175 B JS,
 respectively, over `4644af1b`, with no CSS growth. The table above retains the
 earlier `dev` comparison; unrelated predecessor changes are not migration budget.
+The nested phone Review handoff accounts for 28 B and 24 B of that JS growth,
+respectively, over repair head `87de29f3`, with no CSS change.
 
 The pilot was first measured against `dev` at
 `cd7d3730bd47cc3c7b9de5204fd08496b19b155d`. Merging `dev` after the side-panel

@@ -1,7 +1,12 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 /** Select known ASCII evidence from the current public DOM renderer, once. */
-export async function reviewTerminalEvidence(page: Page, pane: Locator, evidence: string) {
+export async function reviewTerminalEvidence(
+  page: Page,
+  pane: Locator,
+  evidence: string,
+  keyboard = false,
+) {
   expect(evidence.length).toBeGreaterThan(0);
   expect(
     /^[\x20-\x7e]+$/.test(evidence),
@@ -57,8 +62,23 @@ export async function reviewTerminalEvidence(page: Page, pane: Locator, evidence
   await page.mouse.move(endX, y, { steps: 10 });
   await page.mouse.up();
   // A phone's menu is a sheet outside the pane.
-  await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
-  await page.getByRole("button", { name: "Review Selected text", exact: true }).click();
+  const options = pane.getByRole("button", { name: "Terminal options", exact: true });
+  const review = page.getByRole("button", { name: "Review Selected text", exact: true });
+  if (keyboard) {
+    await options.focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page
+        .getByRole("dialog", { name: "Terminal actions", exact: true })
+        .getByRole("button", { name: "Reconnect", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(review).toBeFocused();
+    await page.keyboard.press("Enter");
+  } else {
+    await options.click();
+    await review.click();
+  }
   const dialog = page.getByRole("dialog", { name: "Review terminal selection" });
   await expect(dialog.getByLabel("Reviewed selected text")).toHaveText(evidence);
   return dialog;

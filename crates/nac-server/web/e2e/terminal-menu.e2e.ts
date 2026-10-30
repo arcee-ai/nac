@@ -1,4 +1,5 @@
 import { createDirectSession, expect, test } from "./harness";
+import { reviewTerminalEvidence } from "./terminal-evidence";
 
 for (const mobile of [false, true]) {
   test(`terminal options keep keyboard focus ${mobile ? "on a phone" : "in an expanded panel"}`, async ({
@@ -20,6 +21,17 @@ for (const mobile of [false, true]) {
     if (!mobile) await page.getByRole("button", { name: "Expand panel", exact: true }).click();
     // Expanding replaces the observer along with its containing panel.
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    // Seed one painted selection with intentional keyboard input before the
+    // menu-only request audit. Octal keeps the echoed command distinct from it.
+    const evidence = "menu focus handoff";
+    const octal = Array.from(
+      new TextEncoder().encode(evidence + "\n"),
+      (byte) => `\\${byte.toString(8).padStart(3, "0")}`,
+    ).join("");
+    await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
+    await page.keyboard.type(`printf '${octal}'`);
+    await page.keyboard.press("Enter");
+    await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);
     const processActions: string[] = [];
     page.on("request", (sent) => {
       if (
@@ -76,6 +88,18 @@ for (const mobile of [false, true]) {
     await expect(actions).toHaveCount(0);
     await expect(trigger).toBeFocused();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    expect(processActions).toEqual([]);
+
+    // Enter from the focused Review row replaces the menu with a real dialog.
+    // Wait past the phone sheet's retained exit DOM before dismissing Review:
+    // its return target must still be Terminal options, not the removed row.
+    const reviewDialog = await reviewTerminalEvidence(page, pane, evidence, true);
+    await page.waitForTimeout(350);
+    await expect(reviewDialog).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(reviewDialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(pane).toBeVisible();
     expect(processActions).toEqual([]);
 
     // A live handle reopened through history still offers only read-only reconnect.

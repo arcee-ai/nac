@@ -11118,7 +11118,7 @@ function tb() {
 			let a = null;
 			if (n.current?.kind !== "hint") {
 				let e = n.current?.content.current;
-				a = i instanceof HTMLElement && !eb(i) && !e?.contains(i) ? i : r?.target ?? null, r && window.clearTimeout(r.timer), r = null;
+				a = i instanceof HTMLElement && !eb(i) && !e?.contains(i) && !r?.content?.contains(i) ? i : r?.target ?? null, r && window.clearTimeout(r.timer), r = null;
 			}
 			e = [...e, {
 				token: t,
@@ -11137,14 +11137,19 @@ function tb() {
 			let s = a.content.current, l = document.activeElement;
 			if (!eb(l) && !s?.contains(l)) return;
 			let u = n.returnFocus?.isConnected ? n.returnFocus : a.anchor?.current?.querySelector("a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex=\"-1\"])") ?? null;
-			u && (r = {
+			if (!u) return;
+			r && window.clearTimeout(r.timer);
+			let d = {
 				target: u,
-				timer: window.setTimeout(() => {
-					r = null;
-					let e = document.activeElement;
-					(eb(e) || s?.contains(e)) && u.focus({ preventScroll: !0 });
-				}, 0)
-			});
+				content: s,
+				timer: 0
+			};
+			d.timer = window.setTimeout(() => {
+				if (r !== d) return;
+				r = null;
+				let e = document.activeElement;
+				(eb(e) || s?.contains(e)) && u.focus({ preventScroll: !0 });
+			}, 0), r = d;
 		},
 		skipFocusRestore: (e) => {
 			let t = m(e);

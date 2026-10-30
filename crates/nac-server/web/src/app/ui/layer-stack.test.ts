@@ -204,6 +204,72 @@ describe("focus return", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it.each([false, true])(
+    "inherits a retained sheet's opener when the successor closes afterExit=%s",
+    (afterExit) => {
+      vi.useFakeTimers();
+      const stack = createLayerStack();
+      const trigger = element("button");
+      trigger.focus();
+      const sheet = layer(stack, "sheet", {}, trigger);
+      const row = document.createElement("button");
+      sheet.content.append(row);
+      row.focus();
+      stack.close(sheet.token);
+      sheet.content.setAttribute("inert", "");
+      const dialog = layer(stack, "modal", {}, row);
+      const field = document.createElement("input");
+      dialog.content.append(field);
+      field.focus();
+      // The canceled sheet restore must not steal focus from its successor.
+      vi.advanceTimersByTime(1);
+      expect(document.activeElement).toBe(field);
+      if (afterExit) {
+        sheet.content.remove();
+        vi.advanceTimersByTime(300);
+      }
+      stack.close(dialog.token);
+      vi.runAllTimers();
+      expect(document.activeElement).toBe(trigger);
+    },
+  );
+
+  it("keeps a deliberate opener outside the closing sheet instead of inheriting its target", () => {
+    vi.useFakeTimers();
+    const stack = createLayerStack();
+    const trigger = element("button");
+    const sheet = layer(stack, "sheet", {}, trigger);
+    const row = document.createElement("button");
+    sheet.content.append(row);
+    row.focus();
+    stack.close(sheet.token);
+    const elsewhere = element("button");
+    elsewhere.focus();
+    const dialog = layer(stack, "modal", {}, elsewhere);
+    dialog.content.tabIndex = -1;
+    dialog.content.focus();
+    stack.close(dialog.token);
+    vi.runAllTimers();
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it("lets only the latest pending close restore focus", () => {
+    vi.useFakeTimers();
+    const stack = createLayerStack();
+    const firstTrigger = element("button");
+    const secondTrigger = element("button");
+    const first = layer(stack, "panel", {}, firstTrigger);
+    const second = layer(stack, "modal", {}, secondTrigger);
+    const field = document.createElement("input");
+    first.content.append(field);
+    field.focus();
+    stack.close(first.token);
+    field.remove();
+    stack.close(second.token);
+    vi.runAllTimers();
+    expect(document.activeElement).toBe(secondTrigger);
+  });
+
   it("stays where an outside press that dismissed a panel left it", () => {
     vi.useFakeTimers();
     const stack = createLayerStack();

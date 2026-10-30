@@ -71,7 +71,8 @@ export function createLayerStack(): LayerStack {
   let layers: Layer[] = [];
   const listeners = new Set<() => void>();
   let inertApplied: HTMLElement | null = null;
-  let pendingRestore: { target: HTMLElement; timer: number } | null = null;
+  let pendingRestore: { target: HTMLElement; content: HTMLElement | null; timer: number } | null =
+    null;
 
   const handlersOf = (layer: Layer) => layer.handlers.current;
   const kindOf = (layer: Layer) => handlersOf(layer)?.kind;
@@ -163,9 +164,14 @@ export function createLayerStack(): LayerStack {
       if (handlers.current?.kind !== "hint") {
         const content = handlers.current?.content.current;
         const usable =
-          opener instanceof HTMLElement && !focusLost(opener) && !content?.contains(opener);
+          opener instanceof HTMLElement &&
+          !focusLost(opener) &&
+          !content?.contains(opener) &&
+          !pendingRestore?.content?.contains(opener);
         // A layer that replaces the one just closed — a menu row opening a
-        // dialog — inherits the focus that layer was about to hand back.
+        // dialog — inherits the focus that layer was about to hand back. A
+        // phone sheet retains its DOM during exit, so its row is still connected
+        // but belongs to the closing content, not a usable return destination.
         returnFocus = usable ? opener : (pendingRestore?.target ?? null);
         if (pendingRestore) window.clearTimeout(pendingRestore.timer);
         pendingRestore = null;
@@ -195,12 +201,15 @@ export function createLayerStack(): LayerStack {
         ? layer.returnFocus
         : (handlers.anchor?.current?.querySelector<HTMLElement>(FOCUSABLE) ?? null);
       if (!target) return;
-      const timer = window.setTimeout(() => {
+      if (pendingRestore) window.clearTimeout(pendingRestore.timer);
+      const restore = { target, content, timer: 0 };
+      restore.timer = window.setTimeout(() => {
+        if (pendingRestore !== restore) return;
         pendingRestore = null;
         const current = document.activeElement;
         if (focusLost(current) || content?.contains(current)) target.focus({ preventScroll: true });
       }, 0);
-      pendingRestore = { target, timer };
+      pendingRestore = restore;
     },
     skipFocusRestore: (token) => {
       const layer = find(token);
