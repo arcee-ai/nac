@@ -8,7 +8,7 @@ import { type ReactNode } from "react";
  * phone opens on the list, the way its tab bar does, and a row pushes the
  * detail over it.
  */
-export declare function PanelSplit({ list, listToolbar, listClassName, listTitle, title, titleAction, actions, children, }: {
+export declare function PanelSplit({ list, listToolbar, listHeader, listClassName, listTitle, title, titleAction, actions, children, }: {
     list: ReactNode;
     /**
      * The list's own controls, staying put while it scrolls: a bar above it on a
@@ -16,6 +16,12 @@ export declare function PanelSplit({ list, listToolbar, listClassName, listTitle
      * trailing pills of a phone's.
      */
     listToolbar?: ReactNode;
+    /**
+     * What the list is showing, kept in view above its rows rather than
+     * scrolling away with them. A phone has no fixed room under its floating
+     * header, so there it leads the rows instead.
+     */
+    listHeader?: ReactNode;
     /** Insets of the desktop list column, for a panel drawn with its own. */
     listClassName?: string;
     /** What the list is of, titling its screen below the desktop width. */
@@ -50,8 +56,10 @@ export declare function PanelRow({ label, active, disabled, icon, trailing, titl
  * — so the columns and the divider are already where the rows will land, and
  * arriving data fills the panel instead of rebuilding it.
  */
-export declare function PanelLoading({ listTitle }: {
+export declare function PanelLoading({ listTitle, listHeader, }: {
     listTitle?: string;
+    /** What is being loaded, when the panel can already say so. */
+    listHeader?: ReactNode;
 }): import("react").JSX.Element;
 /**
  * Placeholder for an empty or not-yet-selected panel. Given a `title` it takes

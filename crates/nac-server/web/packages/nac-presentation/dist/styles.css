@@ -3085,6 +3085,10 @@
     padding-top: calc(var(--spacing) * 2);
   }
 
+[data-nac-runtime]:is(.pt-3), [data-nac-runtime] .pt-3 {
+    padding-top: calc(var(--spacing) * 3);
+  }
+
 [data-nac-runtime]:is(.pt-4), [data-nac-runtime] .pt-4 {
     padding-top: calc(var(--spacing) * 4);
   }
