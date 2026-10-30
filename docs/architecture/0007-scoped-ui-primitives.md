@@ -12,7 +12,8 @@ ESLint's `no-restricted-imports` rejects any other import of it.
 Each presentation instance owns one overlay layer stack (`ui/layer-stack.ts`),
 created by `PresentationBoundary`. It is the single owner of Escape,
 outside-press dismissal, background inertness and focus return for every
-primitive. Radix runs non-modal: it portals into the instance's overlay root,
+primitive, with one exception from `dev`, described under Layer stack.
+Radix runs non-modal: it portals into the instance's overlay root,
 positions and wires ARIA; the instance's dialog surface owns its Tab boundaries.
 Radix's own Escape,
 outside-interaction and close auto-focus handling is cancelled. Radix's modal
@@ -99,6 +100,17 @@ reviewed like any imported code. Builds and CI never fetch from the registry.
   outside it. A layer opened while another closes, such as a menu row opening
   a dialog, inherits that pending return target.
 
+One exception came from `dev` with #449. The Popover atom's opt-in
+`focusScope`, which only the terminal actions menu sets, wraps the panel and
+the phone sheet in `atoms/popover/FocusScope.tsx`. Listening on its own
+element, it focuses the first action, loops Tab, closes on Escape and stops
+that event there, and returns focus to the opener. The stack never sees an
+Escape pressed inside the menu. One layer still closes per Escape, and both
+focus returns aim at the same opener, but a hint left open above the menu, such
+as the terminal header's hover hint, does not take Escape first. Moving the
+scope's Escape and focus return onto the stack, with a test for a hint above
+the menu, is a follow-up.
+
 ## Host footprint
 
 Embedding still observes these document-level Radix behaviors:
@@ -123,10 +135,12 @@ app and of the presentation package in gzip bytes: the entry module, statically
 imported chunks and linked stylesheets. Lazy `import()` chunks are excluded and
 stay lazy.
 
-Budgets are fixed against one baseline, `dev` at
-`2c61af1a7d5af86f9b094f4140838ee7676c7b9f`, not against the previous slice. The
-pilot may add at most 30 KiB of startup JavaScript and 10 KiB of CSS to each
-graph, and the complete migration at most 50 KiB and 15 KiB.
+Budgets count what the migration itself adds. Each slice measures against the
+`dev` revision it builds on, so changes that land on `dev` outside the
+migration neither use up nor free budget, and the amounts of earlier slices
+carry forward. The pilot may add at most 30 KiB of startup JavaScript and
+10 KiB of CSS to each graph, and the complete migration at most 50 KiB and
+15 KiB. The pilot builds on `dev` at `2c61af1a7d5af86f9b094f4140838ee7676c7b9f`.
 
 | Graph | Baseline JS | Baseline CSS | Pilot adds | Left for later slices |
 | --- | --- | --- | --- | --- |
@@ -139,22 +153,25 @@ compression implementation; compare both revisions together. The table includes
 keyboard hints surviving container scrolling and accepted rename revisions
 surviving the exit form's lifetime.
 
-The baseline was first `dev` at `cd7d3730bd47cc3c7b9de5204fd08496b19b155d`. It
-moved when the pilot merged `dev` after the side-panel stack, whose own changes
-removed about 49 KiB of startup JavaScript from the app graph and 47 KiB from
-the presentation graph. That reduction is not budget for later slices. Measured
-the same way against the first baseline, the pilot added the same amounts.
+The pilot was first measured against `dev` at
+`cd7d3730bd47cc3c7b9de5204fd08496b19b155d`. Merging `dev` after the side-panel
+stack moved its baseline to `2c61af1a7`. The stack's own changes removed about
+49 KiB of startup JavaScript from the app graph and 47 KiB from the
+presentation graph; that reduction is not budget for later slices. Measured the
+same way against `cd7d3730`, the pilot adds the same amounts.
 
-Every later slice measures against this baseline. Exceeding a budget calls for
-optimization or an explicit scope review; it is never waived silently.
+Exceeding a budget calls for optimization or an explicit scope review; it is
+never waived silently.
 
 Behavior coverage lives next to its owners: `ui/layer-stack.test.ts` (Escape
 order, outside presses, inertness, focus return), `ui/overlays.test.tsx` (nested
 legacy and migrated layers, the dropdown menu, tooltips, standalone and
 embedded keyboard ownership, two embedded instances), `atoms/modal/index.test.tsx`
-(the phone panel), `atoms/input/index.test.tsx`, tooltip accessible-description
-coverage in `atoms/tooltip/index.test.tsx`, and the rename and delete journey in
-`providers/SessionActionsProvider.test.tsx`. Production-browser qualification in
+(the phone panel), `atoms/popover/FocusScope.test.tsx` (the focus-scoped
+terminal menu on desktop and phone), `atoms/input/index.test.tsx`, tooltip
+accessible-description coverage in `atoms/tooltip/index.test.tsx`, and the
+rename and delete journey in `providers/SessionActionsProvider.test.tsx`.
+Production-browser qualification in
 `e2e/overlay-isolation.e2e.ts` exercises two runtimes' Tab boundaries, nested
 panels, Escape, focus return, inertness, portals, tooltip descriptions and
 shortcuts. Browser emulation does not replace real screen-reader, physical
