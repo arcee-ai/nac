@@ -4,20 +4,29 @@
 NAC's **observed** ruleset 25983949. Live activation requires separate human
 authorization. No settings are changed by the tooling or this PR.
 
-The October 27 [before snapshot](evidence/2026-10-27-required-check-before-six-owners.json)
+The October 30 [before snapshot](evidence/2026-10-30-required-check-before-seven-owners.json)
 shows active `main` on `~DEFAULT_BRANCH` (currently `dev`), no bypass actors,
 one approval, CODEOWNERS, last-push approval, resolved threads, and extra approval
 for unattributed changes. Stale-review dismissal is currently false. Existing
 merge methods, deletion/force-push protections, and inherited enterprise rules
-remain unchanged. [The intended plan](evidence/2026-10-27-required-check-plan-six-owners.json)
+remain unchanged. [The intended plan](evidence/2026-10-30-required-check-plan-seven-owners.json)
 appends exactly one required-status-check rule: `Required PR checks`, GitHub
 Actions integration **15368**, strict current-base checks, enforced on creation.
 It updates that existing ruleset; it does not introduce a second review policy.
 
+This snapshot records all seven designated owners' actual live permissions,
+including Ada (`adalundhe`, ID `23642200`, write), and the **six-owner CODEOWNERS
+actually served by dev** at capture time. The seven-owner source is inherited
+from the separate [Ada roster PR #470](https://github.com/arcee-ai/nac/pull/470).
+Until that roster lands on dev, production activation correctly rejects the
+observed CODEOWNERS. Capturing permission to write is not proof of landed ownership.
+
 The original [three-owner snapshot](evidence/2026-10-27-required-check-before.json)
-and [plan](evidence/2026-10-27-required-check-plan.json) remain historical receipts
-from before the approved owner expansion; they cannot qualify the current
-six-owner baseline. No reviewer membership is changed by this planner update.
+and [plan](evidence/2026-10-27-required-check-plan.json), plus the
+[six-owner snapshot](evidence/2026-10-27-required-check-before-six-owners.json)
+and [plan](evidence/2026-10-27-required-check-plan-six-owners.json), remain unchanged
+historical receipts. They lack Ada's verified identity and cannot qualify the
+seven-owner baseline. This planner layer does not change reviewer membership.
 
 ALL-450's earlier bypass/review proposal is historical and must not be applied
 to current settings. ALL-450 remains a completed foundation milestone; ALL-506
@@ -83,6 +92,13 @@ activation receipts. Refresh them before qualification. A real fixture receipt
 must bind both the exact proposed payload digest and full settings identity.
 Never fill its fields with local model output or copy an old successful receipt.
 
+Planner tests preserve the actual captured CODEOWNERS in the observed fixture.
+Their positive activation helper explicitly derives **prospective local test
+data** with canonical seven-owner CODEOWNERS and a synthetic successful check.
+A negative proves that actual prelanding six-owner CODEOWNERS still cannot
+activate, even with a synthetic complete receipt and passing check. These local
+models do not certify that the roster, platform qualification or protections landed.
+
 ## Real safe-repository and actor matrix — unperformed
 
 No disposable GitHub repository or ordinary-actor credentials were authorized or
@@ -105,7 +121,7 @@ or success, and durable evidence URLs. Do not grant any bypass to run the matrix
 | Failed/pending/cancelled/missing/unexpected skip | Actual state at attempted ordinary merge rejects it; pending attempt time precedes completion |
 | Stale check/base; wrong App | Old-head/base success and same-name foreign-App success cannot authorize merge |
 | ALL-505 strict baseline | Fresh complete combined native amd64 image scan and unchanged-image rescan, fresh DB, zero unresolved/unapproved blockers; link full reports, not advisory historical green |
-| Each of the six designated non-author approvals | Eligible approval works when all other protections pass |
+| Each of the seven designated non-author approvals | Eligible approval works when all other protections pass |
 | Self/outside-only/last-pusher approval | Cannot satisfy the preserved CODEOWNERS and last-push approval requirements |
 | Unattributed changes and threads | Required extra approval remains effective; unresolved conversation blocks |
 | Requests/bot PRs | Author excluded; eligible owner requests preserved |
@@ -152,7 +168,7 @@ verify that a linked claim actually occurred.
 
 ## Administrator application, readback and rollback
 
-Only proceed after ALL-505 qualification, the real matrix, landed CODEOWNERS,
+Only proceed after ALL-505 qualification, the real matrix, landed seven-owner CODEOWNERS,
 current-head/current-base aggregate success, and separate human activation
 authorization. Confirm the current aggregate actually uses strict image logic.
 Generate a fresh read-only activation handoff:

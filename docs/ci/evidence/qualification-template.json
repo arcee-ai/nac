@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "template-not-qualification",
   "fixture_repository": "",
-  "baseline_sha256": "e84d2f6772461b313265d745fba056fc9baf42caaba790fa7a30ff9cf8ee0015",
+  "baseline_sha256": "54072e8aa50b2622340ac0bec1939a3ae96a946f321147640ea43fc844ae204f",
   "payload_sha256": "dbdf31959bf6cead69d0d44e66c4100e8d49486faffda100207aa72dcbd660fa",
   "completed_at": null,
   "cases": [
@@ -169,6 +169,13 @@
     },
     {
       "name": "tmcarcee-approval",
+      "result": "unperformed",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null
+    },
+    {
+      "name": "adalundhe-approval",
       "result": "unperformed",
       "actor_id": null,
       "head_sha": null,

@@ -2,17 +2,21 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import {
-  activationPlan, actionsApp, context, digest, dryRunPlan, proposal,
+  activationPlan, actionsApp, codeowners, context, digest, dryRunPlan, proposal,
   qualificationCases, requiredCheckRule, settingsIdentity, targetRuleset,
   validateQualification, validateSnapshot, verifyReadback,
 } from "./pr-ruleset.mjs";
 
 // An observed server response, not a reconstruction of the old ALL-450 proposal.
 const observed = JSON.parse(fs.readFileSync(new URL(
-  "../../docs/ci/evidence/2026-10-27-required-check-before-six-owners.json", import.meta.url), "utf8"));
+  "../../docs/ci/evidence/2026-10-30-required-check-before-seven-owners.json", import.meta.url), "utf8"));
 const now = Date.parse(observed.captured_at);
+// Prospective local activation model only: the observed server snapshot retains
+// six-owner CODEOWNERS until the separate Ada roster PR lands on dev. Synthetic
+// positives model that future prerequisite plus a successful exact-head check.
 const snapshot = () => {
   const result = structuredClone(observed);
+  result.codeowners = codeowners;
   result.checks = [{ id: 100, name: context, head_sha: result.dev_sha,
     app: { id: actionsApp }, status: "completed", conclusion: "success" }];
   return result;
@@ -36,7 +40,7 @@ const afterSnapshot = () => {
 };
 
 test("plan adds only strict exact Actions checks to the observed current ruleset", () => {
-  const before = snapshot();
+  const before = structuredClone(observed);
   const old = structuredClone(before);
   const payload = proposal(before);
   const current = before.rulesets.find((item) => item.id === targetRuleset);
@@ -61,6 +65,17 @@ test("plan adds only strict exact Actions checks to the observed current ruleset
   assert.equal(plan.ruleset_id, 25983949);
   assert.deepEqual(plan.proposed_ruleset, payload);
   assert.equal(plan.proposed_sha256, digest(payload));
+});
+
+test("actual prelanding six-owner CODEOWNERS cannot activate the seven-owner plan", () => {
+  assert.equal(observed.codeowners.includes("@adalundhe"), false);
+  assert.notEqual(observed.codeowners, codeowners);
+  const current = snapshot();
+  current.codeowners = observed.codeowners;
+  // Even a synthetic passing check and complete receipt cannot replace landed
+  // CODEOWNERS; no observed data is rewritten to manufacture activation.
+  assert.throws(() => activationPlan(observed, current, receipt(), now), /CODEOWNERS has not landed/);
+  assert.equal(snapshot().codeowners, codeowners);
 });
 
 test("readback verifies exactly the addition and returns a guarded original rollback payload", () => {
@@ -167,6 +182,9 @@ test("model tests, stale/foreign/incomplete receipts and old override payload ca
 });
 
 test("current handoff template matches the plan/matrix but cannot certify unperformed platform work", () => {
+  const plan = JSON.parse(fs.readFileSync(new URL(
+    "../../docs/ci/evidence/2026-10-30-required-check-plan-seven-owners.json", import.meta.url), "utf8"));
+  assert.deepEqual(plan, dryRunPlan(observed));
   const template = JSON.parse(fs.readFileSync(new URL(
     "../../docs/ci/evidence/qualification-template.json", import.meta.url), "utf8"));
   assert.equal(template.payload_sha256, digest(proposal(snapshot())));
@@ -179,16 +197,23 @@ test("current handoff template matches the plan/matrix but cannot certify unperf
   assert.match(guide, /retarget the upper PR to `dev`/);
 });
 
-test("six-owner baseline cannot reuse historical three-owner evidence or lose a new owner's access", () => {
-  const historical = JSON.parse(fs.readFileSync(new URL(
-    "../../docs/ci/evidence/2026-10-27-required-check-before.json", import.meta.url), "utf8"));
-  assert.throws(() => dryRunPlan(historical), /lacks verified write access/);
+test("seven-owner baseline cannot reuse historical three- or six-owner evidence", () => {
+  for (const name of ["2026-10-27-required-check-before.json", "2026-10-27-required-check-before-six-owners.json"]) {
+    const historical = JSON.parse(fs.readFileSync(new URL(
+      `../../docs/ci/evidence/${name}`, import.meta.url), "utf8"));
+    assert.throws(() => dryRunPlan(historical), /lacks verified write access/);
+  }
+});
+
+test("Ada must retain her verified identity and write access in the seven-owner baseline", () => {
+  assert.deepEqual(observed.owners.find(({ login }) => login === "adalundhe"),
+    { login: "adalundhe", id: 23642200, permission: "write" });
   for (const mutate of [
-    (s) => { s.owners.pop(); },
-    (s) => { s.owners.at(-1).permission = "read"; },
-    (s) => { s.owners.at(-1).id = 1; },
+    (s) => { s.owners = s.owners.filter(({ login }) => login !== "adalundhe"); },
+    (s) => { s.owners.find(({ login }) => login === "adalundhe").permission = "read"; },
+    (s) => { s.owners.find(({ login }) => login === "adalundhe").id = 1; },
   ]) {
     const current = snapshot(); mutate(current);
-    assert.throws(() => validateSnapshot(current), /lacks verified write access/);
+    assert.throws(() => validateSnapshot(current), /owner adalundhe lacks verified write access/);
   }
 });
