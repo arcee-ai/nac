@@ -42,7 +42,7 @@ def database(status, now):
 
 def runtimes(raw):
     common = {"node", "go", "uv", "gh", "git_lfs", "nac", "os_release"}
-    require(isinstance(raw, dict) and set(raw) in (
+    require(isinstance(raw, dict) and set(raw) - {"rust"} in (
         common | {"dpkg"}, common | {"apk"}, common | {"apk", "owned_packages"}),
             "incomplete runtime probe")
     versions = {}

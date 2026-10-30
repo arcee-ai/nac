@@ -158,6 +158,8 @@ def qualify(output, cache, db):
         raise ValueError("unknown Debian release did not fail closed")
     write_json(unrecognized / "rejection.json", {"gate": "rejected unknown Debian release",
                "scanner_matches": len(unknown_report["matches"])})
+    from image_rust_qualify import qualify_rust
+    rust_summary = qualify_rust(output / "rust-official-controls", download)
     runtime_summary = {}
     for label, versions in [("vulnerable", {"go": "1.27.0", "uv": "0.12.1", "git_lfs": "3.6.0"}),
                             ("safe", {"go": "1.27.3", "uv": "0.13.4", "git_lfs": "3.8.0"})]:
@@ -181,7 +183,7 @@ def qualify(output, cache, db):
     write_json(output / "qualification.json", {"qualified_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                "fixtures": summaries, "wolfi_apk": qualify_wolfi(output, tools, env),
                "owned_upstream_queries": qualify_upstreams(output, tools, env),
-               "runtime_version_queries": runtime_summary,
+               "runtime_version_queries": runtime_summary, "rust_official_controls": rust_summary,
                "db_network_failure": "rejected with a cached young DB",
                "unknown_debian_release": "rejected independently of scanner exit/match count", "scope": "real Node binary detection and live OS/Node advisory matching"})
 

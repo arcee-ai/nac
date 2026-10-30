@@ -7,6 +7,7 @@ import re
 import sys
 
 from image_inventory import require, sha256, write_json
+from image_rust import RUST_FILES
 
 
 def report(directory, scanner_exit, *, image=None, source_revision=None):
@@ -23,8 +24,8 @@ def report(directory, scanner_exit, *, image=None, source_revision=None):
             (source_revision is None or source_revision == identity["source_revision"]),
             "CI report differs from the scanned image/source")
     bundle = json.loads((directory / "bundle.json").read_text())
-    require(bundle.get("schema_version") == 1 and bundle.get("image") == identity["image"] and
-            set(bundle.get("files", {})) == {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json"},
+    require(bundle.get("schema_version") == 2 and bundle.get("image") == identity["image"] and
+            set(bundle.get("files", {})) == {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES},
             "incomplete image inventory bundle")
     require(all(sha256(directory / name) == digest for name, digest in bundle["files"].items()),
             "CI report inventory was altered")
