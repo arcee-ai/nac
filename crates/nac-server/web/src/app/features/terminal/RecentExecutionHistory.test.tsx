@@ -1,12 +1,35 @@
 /** @vitest-environment jsdom */
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeContext } from "@/app/runtime/RuntimeContext";
 import { standaloneRuntime } from "@/app/runtime/nativeRuntime";
 import type { ExecutionHistoryEntry } from "../../../../packages/nac-client/src/types";
-import { RecentExecutionHistory } from "./RecentExecutionHistory";
+import { TerminalPane } from "./TerminalPane";
 import { executionHistoryKey } from "./historyQueries";
+
+vi.mock("./xtermAdapter", () => ({
+  createTerminalRenderer: async (host: HTMLElement) => {
+    const textarea = document.createElement("textarea");
+    host.append(textarea);
+    const disposable = { dispose: () => {} };
+    return {
+      renderer: { write: async () => {}, reset: async () => {} },
+      terminal: {
+        options: { disableStdin: true },
+        textarea,
+        resize: () => {},
+        onKey: () => disposable,
+        onData: () => disposable,
+        onBinary: () => disposable,
+        focus: () => textarea.focus(),
+        getSelection: () => "",
+      },
+      fit: () => null,
+      dispose: () => {},
+    };
+  },
+}));
 
 const entry: ExecutionHistoryEntry = {
   id: "human",
@@ -33,20 +56,70 @@ const entry: ExecutionHistoryEntry = {
   output: { availability: "retained", retained_start: "0", retained_end: "10" },
 };
 const clients: QueryClient[] = [];
+beforeEach(() => {
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: { ready: Promise.resolve() },
+  });
+  // No breakpoint matches, so the pane lays out for a desktop.
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+});
 afterEach(() => {
   cleanup();
   clients.splice(0).forEach((client) => client.clear());
+  vi.unstubAllGlobals();
 });
 
+function pending(signal?: AbortSignal): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    if (signal?.aborted) reject(signal.reason);
+    else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}
+
 function fixture(entries = [entry]) {
-  const response = {
+  const response = (items: ExecutionHistoryEntry[]) => ({
     protocol_version: 1,
-    history: { entries, limit: 32, older_entries_omitted: false },
-  };
+    history: { entries: items, limit: 32, older_entries_omitted: false },
+  });
   const api = {
     ...standaloneRuntime.api,
-    listExecutionHistory: vi.fn(async () => response),
-    attachExecution: vi.fn(),
+    listExecutions: vi.fn(async () => ({ protocol_version: 1, executions: [] })),
+    listExecutionHistory: vi.fn(async () => response(entries)),
+    attachExecution: vi.fn<typeof standaloneRuntime.api.attachExecution>(async (_session, id) => ({
+      protocol_version: 1,
+      observer_id: "observer",
+      idle_expiry_ms: 30_000,
+      terminal: {
+        protocol_version: 1,
+        terminal_id: id,
+        cols: 80,
+        rows: 24,
+        alive: false,
+        output_complete: true,
+      },
+    })),
+    pullExecution: vi.fn<typeof standaloneRuntime.api.pullExecution>(
+      async (_session, _id, _observer, _body, signal) => pending(signal),
+    ),
+    detachExecution: vi.fn(async () => {}),
+    getTerminalInputControl: vi.fn(),
+    transferTerminalInputControl: vi.fn(),
+    inputControlledTerminal: vi.fn(),
     openUserTerminal: vi.fn(),
     inputUserTerminal: vi.fn(),
     resizeUserTerminal: vi.fn(),
@@ -54,66 +127,68 @@ function fixture(entries = [entry]) {
   };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.push(client);
-  const reopen = vi.fn();
   const view = render(
     <RuntimeContext.Provider value={{ ...standaloneRuntime, api }}>
       <QueryClientProvider client={client}>
-        <RecentExecutionHistory sessionId="session" onReopen={reopen} />
+        <TerminalPane sessionId="session" />
       </QueryClientProvider>
     </RuntimeContext.Provider>,
   );
-  return { ...view, api, client, reopen };
+  const open = async () => {
+    const recent = screen.getByRole("region", { name: "Recent terminal activity" });
+    fireEvent.click(await within(recent).findByRole("button"));
+  };
+  return { ...view, api, client, response, open };
+}
+
+function expectNoProcessAction(api: ReturnType<typeof fixture>["api"]) {
+  for (const operation of [
+    api.openUserTerminal,
+    api.inputUserTerminal,
+    api.inputControlledTerminal,
+    api.transferTerminalInputControl,
+    api.resizeUserTerminal,
+    api.stopExecution,
+  ])
+    expect(operation).not.toHaveBeenCalled();
 }
 
 describe("recent terminal activity", () => {
-  it("lists and selects metadata without observing, launching or sending input", async () => {
+  it("lists entries as rows and replays retained output read-only on open", async () => {
     const f = fixture();
-    await screen.findByRole("option", { name: /Human shell/ });
-    fireEvent.change(screen.getByLabelText("Recent activity"), { target: { value: entry.id } });
-    expect(screen.getByText("Retained output available.")).toBeTruthy();
-    expect(f.reopen).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Reopen retained output" }));
-    expect(f.reopen).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "opaque-shell",
-        input: false,
-        resize: false,
-        stop: false,
-        retained: false,
-      }),
-      entry,
-    );
-    for (const operation of [
-      f.api.attachExecution,
-      f.api.openUserTerminal,
-      f.api.inputUserTerminal,
-      f.api.resizeUserTerminal,
-      f.api.stopExecution,
-    ])
-      expect(operation).not.toHaveBeenCalled();
+    const recent = screen.getByRole("region", { name: "Recent terminal activity" });
+    const row = await within(recent).findByRole("button", {
+      name: /^Shell · .*, Settled · exit 0$/,
+    });
+    expect(f.api.attachExecution).not.toHaveBeenCalled();
+    fireEvent.click(row);
+    await waitFor(() => expect(f.api.attachExecution).toHaveBeenCalledOnce());
+    expect(f.api.attachExecution.mock.calls[0][1]).toBe("opaque-shell");
+    expect(row.getAttribute("aria-pressed")).toBe("true");
+    expect(
+      screen.getByText(
+        "Human shell · Settled · exit 0 · local · /workspace · collection complete · Read-only",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("Terminal input ownership")).toBeNull();
+    expectNoProcessAction(f.api);
   });
 
-  it("updates selected output expiry without recreating a handle", async () => {
+  it("falls back to the record when the open entry's output expires, without a new observer", async () => {
     const f = fixture();
-    await screen.findByRole("option", { name: /Human shell/ });
-    fireEvent.change(screen.getByLabelText("Recent activity"), { target: { value: entry.id } });
-    f.api.listExecutionHistory.mockResolvedValue({
-      protocol_version: 1,
-      history: {
-        entries: [{ ...entry, output: { availability: "expired" } }],
-        limit: 32,
-        older_entries_omitted: false,
-      },
-    });
+    await f.open();
+    await waitFor(() => expect(f.api.attachExecution).toHaveBeenCalledOnce());
+    f.api.listExecutionHistory.mockResolvedValue(
+      f.response([{ ...entry, output: { availability: "expired" } }]),
+    );
     await act(async () => {
       await f.client.invalidateQueries({ queryKey: executionHistoryKey("session") });
     });
-    await screen.findByText("Output expired. The recorded outcome remains available.");
-    expect(
-      (screen.getByRole("button", { name: "Reopen retained output" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    expect(f.reopen).not.toHaveBeenCalled();
+    await screen.findByText(/^Output expired\. The recorded outcome remains available\./);
+    expect(screen.getByRole("article", { name: "Recorded terminal activity" })).toBeTruthy();
+    await waitFor(() => expect(f.api.detachExecution).toHaveBeenCalledOnce());
+    expect(f.api.attachExecution).toHaveBeenCalledOnce();
+    expectNoProcessAction(f.api);
   });
 
   it("shows literal canonical previews and loss separately from known results", async () => {
@@ -137,18 +212,19 @@ describe("recent terminal activity", () => {
         output: { availability: "process_local_unavailable" },
       },
     ]);
-    await screen.findByRole("option", { name: /Human command/ });
-    fireEvent.change(screen.getByLabelText("Recent activity"), {
-      target: { value: "command-request" },
-    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "! printf known, completed · exit 7" }),
+    );
     await waitFor(() =>
       expect(screen.getByLabelText("Recorded stdout").textContent).toBe(command.stdout),
     );
+    expect(screen.getByLabelText("Canonical command preview").textContent).toBe("printf known");
     expect(f.container.querySelector("img")).toBeNull();
     expect(
       screen.getByRole("article", { name: "Recorded terminal activity" }).textContent,
     ).toContain("completed · exit 7");
     expect(screen.getByText(/no restored live handle/)).toBeTruthy();
-    expect(f.reopen).not.toHaveBeenCalled();
+    expect(f.api.attachExecution).not.toHaveBeenCalled();
+    expectNoProcessAction(f.api);
   });
 });

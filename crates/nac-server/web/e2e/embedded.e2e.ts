@@ -1510,9 +1510,21 @@ test("replaces a completed durable goal from the production dialog", async ({
     replacement,
   );
 
+  await composer.blur();
   await expect(page.getByRole("button", { name: "Edit goal: Complete" })).toBeVisible();
   await page.getByRole("button", { name: "Edit goal: Complete" }).click();
   await page.getByRole("textbox", { name: "Goal objective" }).fill("replacement objective");
+  const goalViewport = page.viewportSize() ?? { width: 1280, height: 800 };
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("dialog", { name: "Set Durable Goal" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Goal objective" })).toHaveValue(
+    "replacement objective",
+  );
+  await page.setViewportSize(goalViewport);
+  await expect(page.getByRole("dialog", { name: "Set Durable Goal" })).not.toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Goal objective" })).toHaveValue(
+    "replacement objective",
+  );
   await page.getByRole("button", { name: "Replace goal" }).click();
   await replacement.accepted;
   await expect
@@ -1804,7 +1816,8 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await page.getByRole("button", { name: "Inspect the child lifecycle", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await page.getByRole("button", { name: "Open", exact: true }).click();
-  await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Parent chat" })).toBeVisible();
+  await expect(page.getByText("Traditional coding agent", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /goal/i })).toHaveCount(0);

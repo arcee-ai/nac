@@ -60,7 +60,7 @@ export function MobileHeader() {
             aria-label="Open panel"
             onClick={() => openSidePanelList()}
           >
-            <Icon iconName={IconName.OpenMobileModal} />
+            <Icon iconName={IconName.ShowSidePanel} />
           </StickyButton>
         ) : null}
         <StickyButton

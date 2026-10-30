@@ -7,15 +7,8 @@ export async function reviewTerminalEvidence(page: Page, pane: Locator, evidence
     /^[\x20-\x7e]+$/.test(evidence),
     "Evidence fixture must occupy one cell per character",
   ).toBe(true);
-  // History loads independently of the live shell. Its empty-state paragraph
-  // disappears when this source arrives, resizing the terminal and clearing a
-  // selection. Settle that real layout prerequisite before measuring a drag.
-  const source = await pane.getByRole("combobox", { name: "Shell", exact: true }).inputValue();
-  await expect(
-    pane
-      .getByRole("combobox", { name: "Recent activity", exact: true })
-      .locator(`option[value="${source}"]`),
-  ).toHaveCount(1);
+  // History loads into the list beside the terminal, or a screen of its own,
+  // so its arrival cannot resize the grid and clear the selection below.
   const screen = pane.locator(".xterm-screen");
   await expect(screen).toBeVisible();
   await screen.scrollIntoViewIfNeeded();
@@ -63,7 +56,9 @@ export async function reviewTerminalEvidence(page: Page, pane: Locator, evidence
   await page.mouse.down();
   await page.mouse.move(endX, y, { steps: 10 });
   await page.mouse.up();
-  await pane.getByRole("button", { name: "Review selected text", exact: true }).click();
+  // A phone's menu is a sheet outside the pane.
+  await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
+  await page.getByRole("button", { name: "Review Selected text", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Review terminal selection" });
   await expect(dialog.getByLabel("Reviewed selected text")).toHaveText(evidence);
   return dialog;

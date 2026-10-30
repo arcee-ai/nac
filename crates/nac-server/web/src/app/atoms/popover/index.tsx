@@ -11,6 +11,7 @@ import {
 } from "../../lib/anchor";
 import { cn } from "../../lib/cn";
 import BottomSheet from "./BottomSheet";
+import { PopoverFocusScope } from "./FocusScope";
 
 export { AnchorPlacement as PopoverPlacement };
 
@@ -23,7 +24,7 @@ export enum PopoverSize {
 }
 
 const PANEL_BASE =
-  "flex flex-col gap-1 p-2 rounded-[8px] bg-elevation-level-3 shadow-2xl fade [&>*]:shrink-0";
+  "flex flex-col gap-1 p-2 rounded-[12px] bg-elevation-level-3 shadow-2xl fade [&>*]:shrink-0";
 
 interface PopoverProps {
   open: boolean;
@@ -46,6 +47,8 @@ interface PopoverProps {
   className?: string;
   panelClassName?: string;
   sheetClassName?: string;
+  /** Opt into a labelled dialog that focuses actions, traps Tab and restores focus. */
+  focusScope?: string;
 }
 
 /**
@@ -69,6 +72,7 @@ const Popover: React.FC<PopoverProps> & {
   className = "",
   panelClassName = "",
   sheetClassName = "",
+  focusScope,
 }) => {
   const portalTarget = usePresentationPortalTarget();
 
@@ -76,6 +80,17 @@ const Popover: React.FC<PopoverProps> & {
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
+  const body = focusScope ? (
+    <PopoverFocusScope
+      open={open && (asSheet || !sticky || coords !== null)}
+      label={focusScope}
+      onClose={closeOnEscape ? onClose : undefined}
+    >
+      {content}
+    </PopoverFocusScope>
+  ) : (
+    content
+  );
 
   useEffect(() => {
     if (!open || !closeOnOutsideClick || asSheet) return undefined;
@@ -150,7 +165,7 @@ const Popover: React.FC<PopoverProps> & {
       )}
       style={sticky ? { left: coords?.left ?? 0, top: coords?.top ?? 0 } : undefined}
     >
-      {content}
+      {body}
     </div>
   );
 
@@ -159,7 +174,7 @@ const Popover: React.FC<PopoverProps> & {
       {children}
       {asSheet ? (
         <BottomSheet open={open} onClose={onClose} className={sheetClassName}>
-          {content}
+          {body}
         </BottomSheet>
       ) : open ? (
         sticky ? (
