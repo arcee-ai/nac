@@ -1158,7 +1158,9 @@ async fn managed_interactive_repair_preserves_existing_auth_and_requires_matchin
     assert_eq!(std::fs::read(&auth_path).unwrap(), before);
 
     assert!(
-        nac_core::model::managed_auth_logout(nac_core::model::ManagedAuthProvider::Arcee).unwrap()
+        nac_core::model::managed_auth_logout(nac_core::model::ManagedAuthProvider::Arcee)
+            .await
+            .unwrap()
     );
     assert!(nac_home.join("arcee_managed_repair.json").exists());
     std::fs::remove_file(nac_home.join("arcee_managed_bootstrap_receipt.json")).unwrap();
