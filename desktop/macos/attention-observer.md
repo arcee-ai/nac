@@ -77,6 +77,56 @@ pending decisions. Exact goal-backed completion, goal-free `Unknown`, unsupporte
 topologies and every native consumer/OS acceptance gap below remain unchanged.
 The isolated Swift fixture is still not a consumer of this feed.
 
+## Foundation HTTP consumer milestone
+
+The separate `NativeAttentionObserver` consumes the actual metadata wire contract
+through Foundation/URLSession, with bounded incremental framing in
+`AttentionFeedProtocol.swift`. It does not reinterpret the historical reducer's
+raw `runCompleted` input. The producer base `2ea596fa` adds actual successful
+goal-free settlement plus exact read-only canonical proof; ordinary empty wakes,
+unknown ownership and unsupported facets still cannot establish completion.
+
+One serialized profile/engine owner holds one GET and one cancellable retry
+owner. Current source epochs, source revisions and subscription generations fence
+old callbacks. Baselines, source replacements, checkpoints and review restoration
+with `new_attention=false` are silent. A typed completion candidate waits for its
+matching availability update: the writer can publish work before availability.
+Lost weak broker ownership is unknown, never a decision-resolution receipt.
+The HTTP runtime creates a new observation lifetime per GET; generic hub replay
+does not establish cross-HTTP lossless history. Reconnect installs a fresh silent
+baseline and never reconstructs notices from transcripts or separate reads.
+
+The consumer has only generic private notification/navigation sinks. Its console
+fixture uses a mock center, including rejected delivery and late acknowledgments;
+there are no UserNotifications/AppKit imports, system permission/settings calls,
+or approval/command/grant methods. A click carries its binding for revalidation
+and requests current-session navigation only. Actual existing-app activation and
+React navigation still require the separately allocated qualified ALL-344/346
+join; the frozen command bridge has no session-target action.
+
+`attention_feed_contract.py` builds immutable ordinary and existing review-fixture
+Rust binaries under the caller's shared Rust lease, then compiles/runs the
+Foundation fixtures under its shared browser/Mac lease. In a fresh worktree run
+the repository's gated setup first. Use a new owned output directory per run:
+
+```sh
+# Inside the shared Rust lease; copies binaries before releasing that lease:
+python3 desktop/macos/attention_feed_contract.py --build-producers --output /tmp/attention-producers-UNIQUE
+# Inside the shared browser/Mac lease:
+python3 desktop/macos/attention_feed_contract.py --producer-receipt /tmp/attention-producers-UNIQUE/producer-binaries.json --output /tmp/attention-results-UNIQUE
+```
+
+Only the explicit fixture driver mutates disposable REST state. Real Ask coverage
+owns an ordinary interactive test client; the native stream remains passive.
+Fixtures use real queued runs, questions and broker IDs, exact private launch
+receipts, a local scripted provider and dummy credentials in owned profiles.
+They characterize actual HTTP/mock-center behavior, quiet connection retention,
+cache eviction, engine replacement, and bounded cleanup. The runner separately
+labels adversarial loopback transport frames. Compiler target macOS 14 is not
+supported-OS qualification. These fixtures establish no actual app/WKWebView,
+signed OS delivery, trusted input, Focus behavior or measured idle CPU/wakeups.
+Every remaining full ALL-350 native acceptance gate below remains open.
+
 ## Historical fixture evidence
 
 - `crates/nac-core/src/events.rs`: `SessionEventEnvelope` carries session,
