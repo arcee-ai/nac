@@ -16,11 +16,14 @@ func inspect(_ path: String, kind: String) throws -> [String: Any] {
     request.usesLanguageCorrection = false
     try VNImageRequestHandler(url: url).perform([request])
     let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
-    let markers = ["chat": "Hello from the isolated NAC Mac preview", "terminal": "NAC354_TRUSTED_OK",
-                   "workspace": "WK_RICH_COMPLETE", "approval": "Permission required"]
+    let markers = ["chat": ["Hello from the isolated NAC Mac preview"], "terminal": ["NAC354_TRUSTED_OK"],
+                   "workspace": ["WK_RICH_COMPLETE"], "approval": ["Permission required"],
+                   "instance-empty": ["No projects yet", "Get Started"],
+                   "instance-conflict": ["Another NAC process", "Retry", "store-path"],
+                   "instance-drain": ["Native instance", "drain"]]
     let expected = markers[kind]!
     func normalized(_ value: String) -> String { value.lowercased().filter { $0.isLetter || $0.isNumber } }
-    guard normalized(text).contains(normalized(expected)) else {
+    guard expected.allSatisfy({ normalized(text).contains(normalized($0)) }) else {
         throw NSError(domain: "NACCI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Fixture transcript is not readable in WKWebView snapshot"])
     }
     return ["file": url.lastPathComponent, "width": bitmap.pixelsWide,
@@ -31,7 +34,8 @@ func inspect(_ path: String, kind: String) throws -> [String: Any] {
 
 do {
     var paths = Array(CommandLine.arguments.dropFirst())
-    let modes = ["--terminal": "terminal", "--workspace": "workspace", "--approval": "approval"]
+    let modes = ["--terminal": "terminal", "--workspace": "workspace", "--approval": "approval",
+                 "--instance-empty": "instance-empty", "--instance-conflict": "instance-conflict", "--instance-drain": "instance-drain"]
     let kind = paths.first.flatMap { modes[$0] } ?? "chat"
     if kind != "chat" { paths.removeFirst() }
     guard !paths.isEmpty else { throw NSError(domain: "NACCI", code: 3) }
