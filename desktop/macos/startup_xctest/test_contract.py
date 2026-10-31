@@ -299,6 +299,17 @@ let result: [[String: Any]] = rows.map { row in
         return ["accepted": true, "fields": candidate.fields, "bounded": candidate.bounded]
     }
     var census = StartupQueryDiagnostic.Census(start: 0)
+    if row["action"] as? String == "slow_attribute" {
+        var clock = 0.0, calls = 0
+        _ = census.readCandidate()
+        let first = StartupQueryDiagnostic.read(&census, now: clock) { () -> Int in
+            calls += 1; clock = 5; return 1
+        }
+        let second = StartupQueryDiagnostic.read(&census, now: clock) { () -> Int in
+            calls += 1; return 2
+        }
+        return ["first": first != nil, "second": second != nil, "calls": calls, "reads": census.reads]
+    }
     if row["action"] as? String == "read_budget" {
         var attempts = 0
         for _ in 0..<12 {
@@ -409,6 +420,8 @@ FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: resul
         self.assertFalse(record['legacy_exists'])
 
     def test_query_count_candidate_and_projection_caps(self):
+        self.assertEqual(self.run_rows([dict(action='slow_attribute')])[0],
+                         dict(first=True, second=False, calls=1, reads=1))
         self.assertEqual(self.run_rows([dict(action='read_budget')])[0], dict(reads=8, attempts=8))
         bad = [self.sample(rows=[dict(count=-1)]), self.sample(rows=[dict(count=True)]),
                self.sample(rows=[dict(count=1.0)]), self.sample(rows=[dict(count=1.5)]), self.sample(rows=[dict(count=0)] * 13)]

@@ -273,8 +273,10 @@ separate count evaluation. Query indices0..3 are count-only; index4
 `window_static_title` begins candidate reads. At most4 candidates per query,
 8total,4096 reported matches per row and8KiB JSON are allowed. Longer-than256
 UTF8 attribute strings yield unavailable comparison flags and partial evidence.
-The5s budget is checked between operations and once after the last operation:
-complete requires final elapsed strictly below5000ms; exactly5000 is partial.
+The5s budget is checked before each public attribute getter, between query
+materializations and once after the last operation. An unfinished candidate is
+discarded and remains partial; its attempt still consumes the read budget.
+A synthetic slow-first-getter control covers this boundary. Complete requires final elapsed strictly below5000ms; exactly5000 is partial.
 Invalid/backward clocks become sticky `clock_invalid` with elapsed0 and no
 overflow; finite elapsed above600000 is clamped with overflow/time-budget.
 SDK-internal array/RPC work, memory and individual call latency are unqualified;

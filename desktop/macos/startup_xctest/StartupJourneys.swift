@@ -245,6 +245,11 @@ private enum StartupQueryDiagnostic {
                 "queries": rows]) { _, new in new }
         }
     }
+    static func read<T>(_ census: inout Census, now: Double, body: () -> T) -> T? {
+        guard census.available(now: now) else { return nil }
+        return body()
+    }
+
     static func encode(_ record: [String: Any]) -> Data? {
         guard let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
               data.count <= 8192 else { return nil }
@@ -463,13 +468,23 @@ final class StartupJourneys: XCTestCase {
                 for element in elements.prefix(4) {
                     guard census.available(now: ProcessInfo.processInfo.systemUptime),
                           census.readCandidate() else { truncated = true; break }
-                    let frame = element.frame, owned = window.frame
+                    // Each public attribute getter is independently admitted;
+                    // a slow prior getter cannot authorize the next one.
+                    func read<T>(_ body: () -> T) -> T? {
+                        StartupQueryDiagnostic.read(&census, now: ProcessInfo.processInfo.systemUptime, body: body)
+                    }
+                    guard let frame = read({ element.frame }), let owned = read({ window.frame }),
+                          let type = read({ Int(element.elementType.rawValue) }),
+                          let exists = read({ element.exists }), let hittable = read({ element.isHittable }),
+                          let enabled = read({ element.isEnabled }), let label = read({ element.label }),
+                          let value = read({ element.value ?? NSNull() }),
+                          let identifier = read({ element.identifier }) else { truncated = true; break }
                     let finite = [frame.minX, frame.minY, frame.width, frame.height,
                                   owned.minX, owned.minY, owned.width, owned.height].allSatisfy { $0.isFinite }
-                    let input: [String: Any] = ["element_type": Int(element.elementType.rawValue),
-                        "exists": element.exists, "hittable": element.isHittable, "enabled": element.isEnabled,
+                    let input: [String: Any] = ["element_type": type, "exists": exists,
+                        "hittable": hittable, "enabled": enabled,
                         "window_intersection": finite && !frame.isEmpty && frame.intersects(owned),
-                        "label": element.label, "value": element.value ?? NSNull(), "identifier": element.identifier]
+                        "label": label, "value": value, "identifier": identifier]
                     guard let candidate = StartupQueryDiagnostic.candidate(input,
                         target: StartupQueryDiagnostic.targetIndices[index]) else { truncated = true; break }
                     candidates.append(candidate)
