@@ -15,6 +15,7 @@ TEST_URL = 'test://com.apple.xcode/NACNativeUITests/NACNativeUITests/NativeJourn
 MAX_SNAPSHOT = 64 * 1024
 MAX_SNAPSHOTS = 12
 MAX_SNAPSHOT_TOTAL = MAX_SNAPSHOT * MAX_SNAPSHOTS
+MAX_METADATA_ENTRIES = 64
 
 
 def digest(data):
@@ -127,51 +128,125 @@ def require_snapshots(snapshots, binding, operations):
             'partial_scope': 'A dispatching snapshot may include partial input; never replay or infer zero input'}
 
 
-def selected_attachments(export, manifest, test):
+class AttachmentSelectionError(RuntimeError):
+    def __init__(self, reason, selected, ignored):
+        messages = {'order': 'Terminal attachment gap, duplicate or reordering',
+                    'bound': 'Terminal attachment bound before decoding',
+                    'file': 'Attachment export contains an unsafe or nonregular file'}
+        super().__init__(messages.get(reason, 'Terminal attachment manifest rejected'))
+        self.reason, self.selected, self.ignored = reason, selected, ignored
+
+
+def metadata_value(value):
+    """No raw manifest strings, paths, URLs or exception text in diagnostics."""
+    kind = {str: 'string', dict: 'object', list: 'array', int: 'integer',
+            float: 'number', bool: 'boolean', type(None): 'null'}.get(type(value), 'other')
+    result = {'type': kind}
+    if isinstance(value, str):
+        data = value.encode('utf-8', errors='surrogatepass')
+        result.update(bytes=len(data), sha256=digest(data))
+    return result
+
+
+def selected_attachments(export, manifest, test, diagnostics=None):
+    diagnostics = diagnostics if diagnostics is not None else {}
+    diagnostics.update(manifest_type=metadata_value(manifest)['type'], entries=[],
+                       metadata_entries_omitted=0, automatic_entries=0)
     if (not isinstance(manifest, list) or len(manifest) != 1
             or not isinstance(manifest[0], dict) or manifest[0].get('testIdentifier') != test['nodeIdentifier']):
-        raise RuntimeError('Attachment manifest belongs to a foreign or ambiguous test')
+        raise AttachmentSelectionError('test', [], 0)
     group = manifest[0]
     if 'testIdentifierURL' in group and group['testIdentifierURL'] != test['nodeIdentifierURL']:
-        raise RuntimeError('Attachment manifest URL differs from the actual selected test')
+        raise AttachmentSelectionError('test', [], 0)
     entries = group.get('attachments')
+    diagnostics['entry_count'] = len(entries) if isinstance(entries, list) else None
     if not isinstance(entries, list) or len(entries) > 4096:
-        raise RuntimeError('Attachment manifest count is unavailable or unbounded')
-    selected, seen_files, seen_names = [], set(), set()
+        raise AttachmentSelectionError('count', [], 0)
+    selected, seen_files, seen_names = [], {}, {}
+    first_error, prefix_limit, total, ignored = None, MAX_SNAPSHOTS, 0, 0
     uuid = r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}'
     pattern = PROTOCOL + r'-(\d{2})-(before|after)(?:_\d+_' + uuid + r')?(?:\.json)?'
-    for entry in entries:
+
+    def reject(reason, row, limit=None):
+        nonlocal first_error, prefix_limit
+        first_error = first_error or reason
+        row['reason'] = reason
+        prefix_limit = min(prefix_limit, len(selected) if limit is None else limit)
+
+    for ordinal, entry in enumerate(entries):
+        row = {'ordinal': ordinal, 'entry_type': metadata_value(entry)['type']}
+        # The bounded manifest is the input cap. This projection has its own
+        # finite row cap; omitted metadata never relaxes inventory validation.
+        if len(diagnostics['entries']) < MAX_METADATA_ENTRIES:
+            diagnostics['entries'].append(row)
+        else:
+            diagnostics['metadata_entries_omitted'] += 1
         if not isinstance(entry, dict):
-            raise RuntimeError('Attachment manifest entry is malformed')
+            reject('entry', row)
+            continue
         filename = entry.get('exportedFileName', '')
         name = entry.get('suggestedHumanReadableName', '')
-        if (not isinstance(filename, str) or not filename or filename in ('.', '..')
-                or '/' in filename or '\\' in filename or '\0' in filename or filename in seen_files):
-            raise RuntimeError('Attachment filename is duplicate or escaped its private export')
-        seen_files.add(filename)
-        file = export / filename
-        info = file.lstat()
-        if not stat.S_ISREG(info.st_mode):
-            raise RuntimeError('Attachment export contains a symlink or nonregular file')
+        row.update(filename=metadata_value(filename), name=metadata_value(name))
+        canonical = None
         if not isinstance(name, str):
-            raise RuntimeError('Attachment display name is malformed')
+            reject('name', row)
+        elif name.startswith('nac352-dispatch-'):
+            match = re.fullmatch(pattern, name)
+            if not match:
+                reject('protocol', row)
+            else:
+                number, stage = int(match[1]), match[2]
+                if not 1 <= number <= MAX_SNAPSHOTS:
+                    reject('order', row)
+                else:
+                    canonical = f'{PROTOCOL}-{number:02d}-{stage}'
+                    row.update(protocol=PROTOCOL, event_index=number, stage=stage, phase=(number + 1) // 2)
+                    # Even an unsafe later file can make an earlier slot
+                    # ambiguous. Examine owned identity before file admission.
+                    if number in seen_names:
+                        reject('order', row, seen_names[number])
+                    else:
+                        seen_names[number] = len(selected)
+                    if number != len(selected) + 1 or stage != ('before' if number % 2 else 'after'):
+                        reject('order', row)
+        if (not isinstance(filename, str) or not filename or filename in ('.', '..')
+                or '/' in filename or '\\' in filename or '\0' in filename):
+            reject('filename', row)
+            continue
+        if filename in seen_files:
+            reject('duplicate_file', row, seen_files[filename])
+        else:
+            seen_files[filename] = len(selected)
+        file = export / filename
+        try:
+            info = file.lstat()
+            row.update(file_type='regular' if stat.S_ISREG(info.st_mode) else 'nonregular', bytes=info.st_size)
+        except (OSError, UnicodeError):
+            reject('file', row)
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            reject('file', row)
+            continue
+        if not isinstance(name, str):
+            continue
         if not name.startswith('nac352-dispatch-'):
+            ignored += 1
+            diagnostics['automatic_entries'] += 1
+            # Automatic attachment content and identifying strings are absent.
+            row.clear()
+            row.update(ordinal=ordinal, kind='omitted_automatic')
             continue  # Never retain automatic screenshots, video or host data.
-        match = re.fullmatch(pattern, name)
-        if not match:
-            raise RuntimeError('Foreign/malformed terminal attachment protocol')
-        number, stage = int(match[1]), match[2]
-        canonical = f'{PROTOCOL}-{number:02d}-{stage}'
-        if (not 1 <= number <= MAX_SNAPSHOTS or canonical in seen_names
-                or number != len(selected) + 1 or stage != ('before' if number % 2 else 'after')):
-            raise RuntimeError('Terminal attachment gap, duplicate or reordering')
-        seen_names.add(canonical)
-        selected.append((file, canonical))
-    if sum(file.stat().st_size for file, _ in selected) > MAX_SNAPSHOT_TOTAL:
-        raise RuntimeError('Terminal attachments exceed their total bound before decoding')
-    if any(file.stat().st_size > MAX_SNAPSHOT for file, _ in selected):
-        raise RuntimeError('Terminal attachment exceeds its individual bound before decoding')
-    return selected, len(entries) - len(selected)
+        if canonical is None:
+            continue
+        if info.st_size > MAX_SNAPSHOT or total + info.st_size > MAX_SNAPSHOT_TOTAL:
+            reject('bound', row)
+        if first_error is None:
+            selected.append((file, canonical))
+            total += info.st_size
+    if first_error:
+        diagnostics['reason'] = first_error
+        raise AttachmentSelectionError(first_error, selected[:prefix_limit], ignored)
+    return selected, ignored
 
 
 class AttachmentTool:
@@ -247,20 +322,26 @@ class AttachmentTool:
                 self.capture(argv, 'xctest-attachment-export', retain=False)
                 if export.is_symlink() or not export.is_dir():
                     raise RuntimeError('XCTest did not create a private regular export directory')
-                for member in export.rglob('*'):
-                    if member.is_symlink() or not (member.is_file() or member.is_dir()):
-                        raise RuntimeError('Unexpected symlink/nonregular member in private XCTest export')
+                unsafe_inventory = any(member.is_symlink() or not (member.is_file() or member.is_dir())
+                                       for member in export.rglob('*'))
                 manifest_bytes = bounded_file(export / 'manifest.json', MAX_FILE)
                 index['manifest_sha256'] = digest(manifest_bytes)
                 manifest = json_data(manifest_bytes)
-                selected, ignored = selected_attachments(export, manifest, test)
-                index['manifest_test'] = {'identifier': manifest[0]['testIdentifier'],
-                                          'url': manifest[0].get('testIdentifierURL')}
+                selection_error = None
+                index['selection_metadata'] = {}
+                try:
+                    selected, ignored = selected_attachments(export, manifest, test, index['selection_metadata'])
+                except AttachmentSelectionError as error:
+                    selection_error, selected, ignored = error, error.selected, error.ignored
+                    index['selection_metadata']['reason'] = error.reason
                 index['omitted_automatic_attachments'] = ignored
-                snapshots = []
+                snapshots, total = [], 0
                 for file, name in selected:
                     data = bounded_file(file, MAX_SNAPSHOT)
-                    metadata = {'file': name + '.json', 'exported_file': file.name,
+                    total += len(data)
+                    if total > MAX_SNAPSHOT_TOTAL:
+                        raise RuntimeError('Terminal attachment prefix exceeds its total bound before copying')
+                    metadata = {'file': name + '.json', 'exported_file_sha256': metadata_value(file.name)['sha256'],
                                 'bytes': len(data), 'sha256': digest(data)}
                     try:
                         candidate = json_data(data, MAX_SNAPSHOT)
@@ -268,7 +349,7 @@ class AttachmentTool:
                     except BaseException as error:
                         index['rejected_input'] = {**metadata, 'retained': False,
                                                   'error_type': type(error).__name__}
-                        raise
+                        raise RuntimeError('Terminal attachment JSON or producer prefix rejected') from None
                     # Retain only after this complete prefix has passed JSON,
                     # identity, literal, state and earlier-row immutability checks.
                     (folder / (name + '.json')).write_bytes(data)
@@ -276,11 +357,16 @@ class AttachmentTool:
                     snapshots.append(candidate)
                     index.update(prefix)
                 index.update(require_snapshots(snapshots, binding, operations))
+                if selection_error:
+                    raise selection_error
+                if unsafe_inventory:
+                    raise RuntimeError('Unexpected symlink/nonregular member in private XCTest export')
                 if index['complete']:
                     (self.raw / 'xctest-driver.json').write_text(json.dumps(index['rows'], indent=2) + '\n')
             return index
         except BaseException as error:
-            index['collection_error'] = {'type': type(error).__name__, 'message': str(error)[:4096]}
+            index['complete'] = False
+            index['collection_error'] = {'type': type(error).__name__, 'reason': 'attachment_collection_failed'}
             raise
         finally:
             (folder / 'index.json').write_text(json.dumps(index, indent=2) + '\n')
