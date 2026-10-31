@@ -54,6 +54,16 @@ def qualify_toolchain(actual, expected):
     return expected['swift'] is not None
 
 
+def require_terminal_evidence(record):
+    terminal = record.get('trusted_terminal', {})
+    if (record.get('scenario') != 'ci-terminal' or record.get('passed') is not True
+            or any(terminal.get(key) is not True for key in
+                   ('exact_receipt', 'native_terminal_settled', 'unfocused_input_rejected'))
+            or terminal.get('trusted_keydowns', 0) < 1 or terminal.get('synthetic_keydowns') != 0):
+        raise RuntimeError('Required actual trusted terminal journey is missing or incomplete')
+    return terminal
+
+
 def export_evidence(raw, output, replacements):
     """Export only our fixture files, never arbitrary HOME or process listings."""
     output.mkdir(parents=True, exist_ok=True)
