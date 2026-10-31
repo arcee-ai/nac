@@ -158,12 +158,12 @@ final class ExternalAuthSmoke {
                 resolved = true
                 continuation.resume(throwing: PreviewError.message("Auth WK fixture evaluation timed out"))
             }
-            app.webView.callAsyncJavaScript(script, arguments: arguments, in: nil, contentWorld: .page) { result in
+            app.webView.callAsyncJavaScript(script, arguments: arguments, in: nil, in: .page) { result in
                 guard !resolved else { return }
                 resolved = true
                 timeout.cancel()
                 switch result {
-                case .success(let value): continuation.resume(returning: value ?? NSNull())
+                case .success(let value): continuation.resume(returning: value)
                 case .failure: continuation.resume(throwing: PreviewError.message("Auth WK fixture evaluation failed"))
                 }
             }
