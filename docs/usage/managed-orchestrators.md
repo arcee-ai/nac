@@ -2,7 +2,7 @@
 
 `direct-with-orchestrator` is a persistent coding-agent behavior with six extra
 native controls for separate NAC orchestrator sessions: launch, status, steer,
-read, wait, and cancel. Ordinary `direct` sessions keep the same 14-tool
+read, wait, and cancel. Ordinary `direct` sessions keep the same tool
 boundary, and orchestrator sessions never receive these controls. A managed
 orchestrator is always created with immutable `orchestrator` behavior, so it
 cannot recursively launch another orchestrator.
