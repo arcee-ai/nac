@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -101,7 +101,26 @@ function child(id: string, status = "running"): TraditionalChildRecord {
     status,
   } as TraditionalChildRecord;
 }
-function mount(records = [child("first"), child("second")], seed = true, search = "") {
+function ApprovalNavigation() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button onClick={() => navigate("/session/parent/insights?permission_request=B")}>
+        Navigate to B
+      </button>
+      <button onClick={() => navigate("/session/parent/insights?permission_request=expired")}>
+        Navigate to expired
+      </button>
+    </>
+  );
+}
+
+function mount(
+  records = [child("first"), child("second")],
+  seed = true,
+  search = "",
+  navigation = false,
+) {
   childrenApi.mockResolvedValue(records);
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -116,6 +135,7 @@ function mount(records = [child("first"), child("second")], seed = true, search 
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[`/session/parent/insights${search}`]}>
         <ToastProvider>
+          {navigation && <ApprovalNavigation />}
           <PermissionControls sessionId="parent" behavior="direct" />
         </ToastProvider>
       </MemoryRouter>
@@ -395,6 +415,24 @@ it("opens only the exact requested approval and never falls back to another requ
 it("shows a stale exact approval without selecting an unrelated pending request", async () => {
   states.set("parent", state("parent"));
   mount([], true, "?permission_request=expired");
+  expect(screen.getByText(/This permission request is no longer pending/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+});
+
+it("revalidates exact links after manual selection in the same mounted session", async () => {
+  const parent = state("parent");
+  parent.requests = [
+    { ...parent.requests[0]!, id: "A", tool: "tool-A" },
+    { ...parent.requests[0]!, id: "B", tool: "tool-B" },
+  ];
+  states.set("parent", parent);
+  mount([], true, "", true);
+  fireEvent.click(screen.getByRole("button", { name: /tool-A/ }));
+  fireEvent.keyDown(document, { key: "Escape" });
+  fireEvent.click(screen.getByRole("button", { name: "Navigate to B" }));
+  expect(screen.getByText(/tool-B requested by/)).toBeTruthy();
+  fireEvent.keyDown(document, { key: "Escape" });
+  fireEvent.click(screen.getByRole("button", { name: "Navigate to expired" }));
   expect(screen.getByText(/This permission request is no longer pending/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
 });

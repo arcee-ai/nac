@@ -26,6 +26,7 @@ test("native exact wait returns approval and human navigation revalidates it", a
       { token: "EXACT_WAIT_PEER" },
       {
         kind: "function_call",
+        stream: "request",
         name: "read",
         callId: "peer-read",
         arguments: { path: outside },
@@ -36,6 +37,7 @@ test("native exact wait returns approval and human navigation revalidates it", a
       { functionOutputCallId: "peer-read" },
       {
         kind: "text",
+        stream: "request",
         text: "peer finished after exact approval",
       },
     );
@@ -61,6 +63,7 @@ test("native exact wait returns approval and human navigation revalidates it", a
       { token: "EXACT_WAIT_COORDINATOR", requiredTools: ["wait_tasks"] },
       {
         kind: "function_call",
+        stream: "request",
         name: "wait_tasks",
         callId: "exact-wait",
         arguments: {
@@ -74,6 +77,7 @@ test("native exact wait returns approval and human navigation revalidates it", a
       { functionOutputCallId: "exact-wait" },
       {
         kind: "text",
+        stream: "request",
         text: "exact approval is ready for the human",
       },
     );
@@ -151,6 +155,7 @@ test("ordinary coordinator input interrupts native wait and leaves the target ru
     { token: "WAIT_HELD_PEER" },
     {
       kind: "text",
+      stream: "request",
       text: "independent target completed",
     },
     peerGate,
@@ -160,6 +165,7 @@ test("ordinary coordinator input interrupts native wait and leaves the target ru
     { token: "WAIT_LONG_COORDINATOR", requiredTools: ["wait_tasks"] },
     {
       kind: "function_call",
+      stream: "request",
       name: "wait_tasks",
       callId: "long-wait",
       arguments: {
@@ -173,6 +179,7 @@ test("ordinary coordinator input interrupts native wait and leaves the target ru
     { functionOutputCallId: "long-wait" },
     {
       kind: "text",
+      stream: "request",
       text: "guidance preserved after interruption",
     },
     guidanceGate,

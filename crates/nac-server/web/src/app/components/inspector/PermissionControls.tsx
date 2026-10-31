@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import {
   Button,
@@ -127,6 +127,7 @@ export function PermissionControls({
   poll = true,
   compact = false,
 }: PermissionControlsProps) {
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const requestedPermission = searchParams.get("permission_request");
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
@@ -162,13 +163,16 @@ export function PermissionControls({
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [deletingGrant, setDeletingGrant] = useState<string | null>(null);
   const [authorizingReview, setAuthorizingReview] = useState<string | null>(null);
-  const [selectedRequest, setSelectedRequest] = useState<string | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<{ scope: string; key: string } | null>(
+    null,
+  );
+  const selectionScope = `${sessionId}:${location.key}`;
   const identity = JSON.stringify(requests.map((entry) => entry.key));
   // Each newly observed ask gets one automatic presentation. Closing the
   // dialog records that exact request set; a later request changes the
   // identity and opens it again without effect-driven state synchronization.
   const exactRequestKey = requestedPermission
-    ? `request:${sessionId}:${requestedPermission}`
+    ? `request:${selectionScope}:${requestedPermission}`
     : null;
   const open =
     manuallyOpen ||
@@ -183,7 +187,9 @@ export function PermissionControls({
   if (!direct) return null;
 
   const selected =
-    requests.find((entry) => entry.key === selectedRequest) ??
+    requests.find(
+      (entry) => selectedRequest?.scope === selectionScope && entry.key === selectedRequest.key,
+    ) ??
     (requestedPermission
       ? requests.find(
           (entry) =>
@@ -432,7 +438,7 @@ export function PermissionControls({
                   className="!h-auto min-h-9 min-w-0 !py-2"
                   aria-pressed={entry.key === selected?.key}
                   disabled={busy}
-                  onClick={() => setSelectedRequest(entry.key)}
+                  onClick={() => setSelectedRequest({ scope: selectionScope, key: entry.key })}
                 >
                   <span className="min-w-0 flex-1 whitespace-normal text-left [overflow-wrap:anywhere]">
                     {entry.scope.label} ({entry.scope.sessionId}): {entry.request.tool}

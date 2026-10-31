@@ -245,17 +245,19 @@ async fn representative_snapshots_and_bounded_wait_cost() {
         let targets: Vec<_> = (0..count)
             .map(|i| target(&format!("measured-{i}")))
             .collect();
-        let start = std::time::Instant::now();
-        let snapshot = call(&runtime, "wait_tasks", json!({"targets":targets})).await;
-        assert!(!snapshot.is_error, "{}", snapshot.content);
-        let elapsed = start.elapsed();
-        let bytes = snapshot.content.as_text().unwrap().len();
-        println!(
-            "wait_tasks targets={count} snapshot_us={} output_bytes={bytes}",
-            elapsed.as_micros()
-        );
-        assert!(bytes < MAX_OUTPUT_BYTES);
-        assert!(elapsed < Duration::from_secs(2));
+        let mut samples = Vec::new();
+        let mut bytes = 0;
+        for _ in 0..10 {
+            let start = std::time::Instant::now();
+            let snapshot = call(&runtime, "wait_tasks", json!({"targets":targets})).await;
+            assert!(!snapshot.is_error, "{}", snapshot.content);
+            samples.push(start.elapsed().as_micros());
+            bytes = snapshot.content.as_text().unwrap().len();
+            assert!(bytes < MAX_OUTPUT_BYTES);
+        }
+        samples.sort_unstable();
+        println!("wait_tasks targets={count} snapshot_median_us={} snapshot_max_us={} active_output_bytes={bytes}",samples[5],samples[9]);
+        assert!(samples[9] < 2_000_000);
         let start = std::time::Instant::now();
         let wait = value(
             &runtime,
@@ -268,6 +270,32 @@ async fn representative_snapshots_and_bounded_wait_cost() {
             start.elapsed().as_millis()
         );
         assert_eq!(wait["status"], "timeout");
+    }
+    let connection = store::open_runtime_connection(&runtime.store_path).unwrap();
+    for index in 0..8 {
+        store::record_run_outcome_with_connection(
+            &connection,
+            &format!("measured-{index}"),
+            "exact-result",
+            store::RunOutcomeDisposition::Completed,
+            Some(&"🐈".repeat(2_000)),
+            None,
+        )
+        .unwrap();
+    }
+    for count in [1, 2, 4, 8] {
+        let targets: Vec<_> = (0..count)
+            .map(|index| json!({"session_id":format!("measured-{index}"),"run_id":"exact-result"}))
+            .collect();
+        let started = std::time::Instant::now();
+        let snapshot = call(&runtime, "wait_tasks", json!({"targets":targets})).await;
+        assert!(!snapshot.is_error, "{}", snapshot.content);
+        let bytes = snapshot.content.as_text().unwrap().len();
+        println!(
+            "wait_tasks targets={count} terminal_snapshot_us={} terminal_output_bytes={bytes}",
+            started.elapsed().as_micros()
+        );
+        assert!(bytes < MAX_OUTPUT_BYTES);
     }
     cleanup(&runtime);
 }
@@ -603,5 +631,81 @@ async fn ring_gap_and_false_delayed_hints_resync_without_manufacturing_completio
             .unwrap(),
         goal
     );
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn completing_run_provenance_is_stable_before_settlement_and_after_replacement() {
+    let runtime = runtime(Vec::new());
+    let goal =
+        store::create_session_goal(&runtime.store_path, "peer-a", "ship", None, None).unwrap();
+    for (id, finish) in [("R1", true), ("R2", false)] {
+        store::bind_session_goal_run(
+            &runtime.store_path,
+            "peer-a",
+            &store::GoalRunBaseline {
+                run_id: id.into(),
+                billable_tokens: 0,
+                started_at_epoch_ms: 0,
+                continuation: false,
+            },
+        )
+        .unwrap();
+        if finish {
+            store::settle_session_goal_run(
+                &runtime.store_path,
+                "peer-a",
+                id,
+                1,
+                1,
+                store::GoalRunDisposition::Completed,
+            )
+            .unwrap();
+        }
+    }
+    store::update_session_goal_by_model(
+        &runtime.store_path,
+        "peer-a",
+        &goal.goal_id,
+        GoalStatus::Complete,
+    )
+    .unwrap();
+    let first = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[target("peer-a")]}),
+    )
+    .await;
+    assert_eq!(first["targets"][0]["proof"]["last_run_id"], "R2");
+    store::settle_session_goal_run(
+        &runtime.store_path,
+        "peer-a",
+        "R2",
+        1,
+        1,
+        store::GoalRunDisposition::Completed,
+    )
+    .unwrap();
+    let fresh = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[target("peer-a")]}),
+    )
+    .await;
+    assert_eq!(fresh["targets"][0]["proof"]["last_run_id"], "R2");
+    let pinned = json!({"session_id":"peer-a","mode":"goal","after_cursor":first["targets"][0]["after_cursor"]});
+    let after = value(&runtime, "wait_tasks", json!({"targets":[pinned]})).await;
+    assert_eq!(after["targets"][0]["unchanged"], true);
+    store::create_session_goal(&runtime.store_path, "peer-a", "replacement", None, None).unwrap();
+    let after = value(&runtime, "wait_tasks", json!({"targets":[pinned]})).await;
+    assert_eq!(after["targets"][0]["unchanged"], true);
+    let retained = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[{"session_id":"peer-a","mode":"goal","goal_id":goal.goal_id}]}),
+    )
+    .await;
+    assert_eq!(retained["targets"][0]["proof"]["last_run_id"], "R2");
+    assert_eq!(retained["targets"][0]["proof"]["retained"], true);
     cleanup(&runtime);
 }

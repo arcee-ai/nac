@@ -151,7 +151,12 @@ impl Target {
             Mode::Goal => {
                 let current = &durable["goal"];
                 let (goal, retained, last_run) = if current["goal_id"] == id {
-                    (Some(current), false, &durable["goal_last_run_id"])
+                    let last_run = if current["accounting_run_id"].is_string() {
+                        &current["accounting_run_id"]
+                    } else {
+                        &durable["goal_last_run_id"]
+                    };
+                    (Some(current), false, last_run)
                 } else {
                     let old = durable["prior_goals"]
                         .as_array()
