@@ -1,4 +1,5 @@
-# Sourced by the existing app builder, never a second bundle writer.
+#!/bin/bash
+# Read-only metadata helper for the existing builder, never a bundle writer.
 # The caller supplies the engine-identity.json emitted by its exact bundled
 # executable. Ambient NAC_BUILD_TRACK is not a runtime or bundle selection.
 nac_bundle_identity() {
@@ -28,3 +29,11 @@ nac_bundle_identity() {
     fi
     printf '%s\n%s\n' "$identifier" "$name"
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    if [[ "$#" != 2 ]]; then
+        echo 'usage: BundleIdentity.sh engine-identity.json normal|instance-smoke' >&2
+        exit 64
+    fi
+    nac_bundle_identity "$1" "$2"
+fi

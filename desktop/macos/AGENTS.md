@@ -33,7 +33,7 @@ authority; the production React UI and HTTP/SSE client remain shared.
   pinned selected configuration through the ordinary Rust serving lease.
   Preserve PreviewApp's common private `fail(String)` funnel and the engine's
   receipt invalidation before callbacks. Menus/bridge remain the separate346 owner.
-- `BundleIdentity.sh` maps the exact bundled engine identity's track to approved
+- The read-only `BundleIdentity.sh` helper maps the exact bundled engine identity's track to approved
   normal bundle IDs. Preview and instance-smoke identities stay separate. Normal
   source lists and binaries exclude all preview providers and smoke definitions;
   `build-receipt.json` records the selected source list and hashes. The existing
