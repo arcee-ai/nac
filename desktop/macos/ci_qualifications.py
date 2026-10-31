@@ -16,7 +16,7 @@ def select_target(key):
         raise RuntimeError('Unknown/unapproved qualification target')
     target = catalog[key]
     if (not re.fullmatch('[0-9a-f]{40}', target.get('source_sha', ''))
-            or target.get('profile') not in PROFILES or target.get('suite') not in ('preview', 'workspace', 'instances')
+            or target.get('profile') not in PROFILES or target.get('suite') not in ('preview', 'workspace', 'instances', 'terminal')
             or not isinstance(target.get('scenario_count'), int) or target['scenario_count'] < 1):
         raise RuntimeError('Invalid immutable qualification contract')
     runner, envelope = PROFILES[target['profile']]

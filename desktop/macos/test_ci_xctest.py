@@ -1,13 +1,48 @@
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
 from ci_support import export_evidence
-from ci_xctest import authorization_policy, require_generated_runner, require_prerequisites, result_receipt
+from ci_xctest import (authorization_policy, relocation_directory, require_generated_runner,
+                       require_prerequisites, require_settled, result_receipt)
 
 
 class XCTestPolicyTests(unittest.TestCase):
+    def test_relocation_is_retained_until_owned_cleanup_is_observed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            raw = Path(temporary)
+            with relocation_directory(raw) as lease:
+                completed = lease['path']
+            self.assertFalse(completed.exists())
+            with self.assertRaisesRegex(RuntimeError, 'fixture failed'):
+                with relocation_directory(raw) as lease:
+                    retained = lease['path']
+                    lease['safe_to_remove'] = False
+                    raise RuntimeError('fixture failed')
+            self.assertTrue(retained.exists())
+            self.assertTrue(json.loads((raw / 'xctest-relocation.json').read_text())['bundle_retained_for_unresolved_cleanup'])
+            shutil.rmtree(retained)
+
+    def test_process_and_profile_must_settle_before_bundle_removal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = Path(temporary) / 'profile'
+            record = {'app_pid': 1, 'engine_pid': 2, 'profile': str(profile)}
+            require_settled(record, lambda pid: 'Z' if pid == 2 else '')
+            for changed in ({'app_pid': 0}, {'profile': ''}, {'engine_pid': -1}):
+                with self.assertRaises(RuntimeError):
+                    require_settled({**record, **changed}, lambda pid: '')
+            with self.assertRaisesRegex(RuntimeError, 'process survived'):
+                require_settled(record, lambda pid: 'S')
+            profile.symlink_to(Path(temporary) / 'absent-target')
+            with self.assertRaisesRegex(RuntimeError, 'profile removal'):
+                require_settled(record, lambda pid: '')
+            profile.unlink()
+            profile.mkdir()
+            with self.assertRaisesRegex(RuntimeError, 'profile removal'):
+                require_settled(record, lambda pid: '')
+
     def test_missing_existing_permission_never_admits_ui_test(self):
         valid = ('2', 'Developer mode is currently enabled.', 'Automation DOES NOT REQUIRE authentication.')
         self.assertTrue(require_prerequisites(*valid)['declared_no_permission_mutation_commands'])
