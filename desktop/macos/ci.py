@@ -146,7 +146,7 @@ def main():
         run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIGUI.swift',
              '-o', str(gui_helper)], raw / 'gui-reader-build.log', 90)
         report['quartz'] = native_report([str(gui_helper)], raw / 'gui-reader.log')
-        report['console'] = require_console(console, os.getuid())
+        report['console'] = require_console(console, os.getuid(), report['quartz'])
         report['rustc'] = command(['rustc', '-Vv'])
         report['node'] = command(['node', '--version'])
         if args.preflight_only:
