@@ -71,7 +71,17 @@ install:
 ci: lint-workflows test-workflow-lint format-check lint test
 
 ## Run workspace Rust tests, frontend tests, source-size, and web asset checks
-test: test-capture-qualification test-source-size test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract
+test: test-nac-guide test-capture-qualification test-source-size test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract
+
+.PHONY: generate-nac-guide test-nac-guide
+## Rebuild release-local documentation from canonical maintained Markdown
+generate-nac-guide:
+	python3 scripts/nac-guide/generate.py
+
+## Check guide source/heading/link/version/fingerprint drift and generator contracts
+test-nac-guide:
+	python3 scripts/nac-guide/generate.py --check
+	python3 -m unittest discover -s scripts/nac-guide -p 'test_*.py'
 
 test-rust:
 	$(CARGO) test --workspace --locked

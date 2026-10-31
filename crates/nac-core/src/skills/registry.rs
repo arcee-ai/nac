@@ -12,11 +12,8 @@ impl SkillRegistry {
         paths: &PathContext,
     ) -> Result<Option<Arc<Self>>> {
         let sources = discover_skill_sources(workspace_dir, paths)?;
-        if sources.is_empty() {
-            return Ok(None);
-        }
-
         let mut skills = HashMap::new();
+        skills.insert(crate::guide::SKILL_NAME.to_owned(), bundled_help());
         let mut shadowed = std::collections::BTreeSet::new();
 
         for source in sources {
@@ -29,6 +26,14 @@ impl SkillRegistry {
                 let Some(parsed) = parse_skill_file(&skill_md_path)? else {
                     continue;
                 };
+                if parsed
+                    .name
+                    .strip_prefix(crate::guide::SKILL_NAME)
+                    .is_some_and(is_reference_boundary)
+                {
+                    eprintln!("Skill 'nac-help' is reserved for the first-party bundled NAC Guide; filesystem definition skipped");
+                    continue;
+                }
 
                 let relative = skill_dir
                     .strip_prefix(&source.host_root)
@@ -100,13 +105,7 @@ impl SkillRegistry {
             .keys()
             .filter_map(|name| {
                 let remainder = input.strip_prefix(name)?;
-                let is_boundary = match remainder.chars().next() {
-                    Some(character) => {
-                        !character.is_alphanumeric() && character != '_' && character != '-'
-                    }
-                    None => true,
-                };
-                is_boundary.then_some(name.as_str())
+                is_reference_boundary(remainder).then_some(name.as_str())
             })
             .max_by_key(|name| name.len())
     }
@@ -136,35 +135,44 @@ impl SkillRegistry {
     pub(crate) fn render_for_prompt(&self, name: &str) -> Option<String> {
         let skill = self.skills.get(name)?;
 
-        let mut content = format!("<skill_content name=\"{}\">\n", escape_xml(&skill.name));
-        if let Some(compatibility) = &skill.compatibility {
-            content.push_str(&format!(
-                "Compatibility: {}\n\n",
-                neutralize_prompt_markup(compatibility)
-            ));
-        }
-        content.push_str(&neutralize_prompt_markup(&skill.body));
-        if !skill.body.ends_with('\n') {
-            content.push('\n');
-        }
-        content.push('\n');
-
-        content.push_str(&format!(
-            "Skill directory: {}\n",
-            neutralize_prompt_markup(&skill.skill_root_visible.display().to_string())
-        ));
-        content.push_str("Relative paths in this skill are relative to the skill directory.\n");
-        if !skill.resources.is_empty() {
-            content.push_str("<skill_resources>\n");
-            for resource in &skill.resources {
-                content.push_str(&format!("  <file>{}</file>\n", escape_xml(resource)));
-            }
-            content.push_str("</skill_resources>\n");
-        }
-        content.push_str("</skill_content>");
-
-        Some(content)
+        Some(render_skill(skill))
     }
+}
+
+fn render_skill(skill: &SkillRecord) -> String {
+    let mut content = format!("<skill_content name=\"{}\">\n", escape_xml(&skill.name));
+    if let Some(compatibility) = &skill.compatibility {
+        content.push_str(&format!(
+            "Compatibility: {}\n\n",
+            neutralize_prompt_markup(compatibility)
+        ));
+    }
+    content.push_str(&neutralize_prompt_markup(&skill.body));
+    if !skill.body.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push('\n');
+
+    if skill.name == crate::guide::SKILL_NAME {
+        content.push_str("Source: first-party bundled NAC Guide. References use nac_guide, not filesystem paths.\n");
+        content.push_str("</skill_content>");
+        return content;
+    }
+    content.push_str(&format!(
+        "Skill directory: {}\n",
+        neutralize_prompt_markup(&skill.skill_root_visible.display().to_string())
+    ));
+    content.push_str("Relative paths in this skill are relative to the skill directory.\n");
+    if !skill.resources.is_empty() {
+        content.push_str("<skill_resources>\n");
+        for resource in &skill.resources {
+            content.push_str(&format!("  <file>{}</file>\n", escape_xml(resource)));
+        }
+        content.push_str("</skill_resources>\n");
+    }
+    content.push_str("</skill_content>");
+
+    content
 }
 
 /// Env-var-style names — all uppercase letters, digits, and underscores
@@ -203,6 +211,10 @@ fn neutralize_prompt_markup(value: &str) -> String {
 
 #[cfg(test)]
 impl SkillRegistry {
+    pub(crate) fn bundled_for_test() -> Self {
+        Self::load_for_test(vec![bundled_help()])
+    }
+
     pub(crate) fn load_for_test(records: Vec<SkillRecord>) -> Self {
         let skills = records
             .into_iter()
@@ -212,4 +224,29 @@ impl SkillRegistry {
             skills: Arc::new(skills),
         }
     }
+}
+
+fn bundled_help() -> SkillRecord {
+    SkillRecord {
+        name: crate::guide::SKILL_NAME.to_owned(),
+        description: crate::guide::DESCRIPTION.to_owned(),
+        compatibility: Some(
+            "First-party bundled release-local NAC Guide; no filesystem or network required"
+                .to_owned(),
+        ),
+        skill_root_visible: PathBuf::new(),
+        body: crate::guide::ROUTER.to_owned(),
+        resources: Vec::new(),
+    }
+}
+
+pub(crate) fn bundled_help_for_prompt() -> String {
+    render_skill(&bundled_help())
+}
+
+fn is_reference_boundary(remainder: &str) -> bool {
+    remainder
+        .chars()
+        .next()
+        .is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '-')
 }

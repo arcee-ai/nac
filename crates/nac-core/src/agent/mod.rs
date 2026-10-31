@@ -313,6 +313,20 @@ impl Agent {
                 ),
             },
         };
+        let guide_selected = config.mode == AgentMode::Worker && {
+            let preload = format!(
+                "The orchestrator preloaded this skill for this worker dispatch.\n\n{}",
+                crate::skills::bundled_help_for_prompt()
+            );
+            config.initial_messages.iter().any(
+                |message| matches!(message, Message::System { content } if content == &preload),
+            )
+        };
+        if config.mode != AgentMode::Worker && traditional_child.is_none() {
+            system_prompt.push_str(&crate::guide::primary_prompt());
+        } else if guide_selected {
+            tool_defs.push(tools::guide::definition());
+        }
         if config.mode == AgentMode::Orchestrator {
             if let Some(light) = config.light_client.as_deref() {
                 system_prompt.push_str(&light_model_prompt_guidance(light));
@@ -320,6 +334,13 @@ impl Agent {
         }
         let base_tool_defs = tool_defs.clone();
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
+            if config
+                .extra_tool_defs
+                .iter()
+                .any(|definition| definition.function.name == tools::guide::NAME)
+            {
+                anyhow::bail!("nac_guide is a reserved first-party capability name");
+            }
             tool_defs.extend(config.extra_tool_defs);
         }
         let native_web_capabilities =
@@ -1923,3 +1944,6 @@ impl Agent {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod guide_tests;
