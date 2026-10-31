@@ -65,20 +65,21 @@ def run_contract(bundle, destination, observer):
                 journey.command_file('prepare')
                 journey.stage('work-ready')
                 fixture.retire_streams() # The real WK document now owns the interactive observer.
-                fixture.assert_unapproved()
+                fixture.assert_work_running()
                 journey.command_file('close')
                 closed = journey.stage('closed')
                 assert closed['close_retained_owners'] and not engine_settled(moved, ready_pid)
-                fixture.assert_unapproved()
+                fixture.assert_work_running()
                 assert request(ready['base_url'], '/sessions/' + fixture.approval_session + '/permissions')['requests']
                 # LaunchServices sends the app's real reopen event to this same
                 # bundle. It does not create or adopt another engine instance.
                 journey.launch()
                 reopened = journey.stage('reopened')
                 assert reopened['reopen_retained_usable_workspace']
+                fixture.assert_work_running()
                 journey.command_file('quit')
                 journey.stage('confirming')
-                fixture.assert_unapproved()
+                fixture.assert_work_running()
                 journey.command_file('duplicate-quit')
                 # Preserve the original immediate duplicate/Cancel race in the
                 # run case; the other cases prove a duplicate reached the real
@@ -88,7 +89,7 @@ def run_contract(bundle, destination, observer):
                 journey.command_file('cancel')
                 cancelled = journey.stage('cancelled')
                 assert cancelled['cancel_retained_owners']
-                fixture.assert_unapproved()
+                fixture.assert_work_running()
                 journey.command_file('quit-again')
                 journey.stage('reconfirming')
                 started = time.monotonic()

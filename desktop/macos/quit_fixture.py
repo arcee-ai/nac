@@ -245,6 +245,14 @@ class QuitWorkspaceFixture:
         assert self.provider.requests in (['transcript', 'goal', 'approval'],
                                          ['transcript', 'goal', 'approval', 'approval-denied']), self.provider.requests
 
+    def assert_work_running(self):
+        self.assert_unapproved()
+        assert request(self.endpoint, '/sessions/' + self.session).get('active_run') is not None
+        pending = request(self.endpoint, '/sessions/' + self.approval_session + '/permissions')['requests']
+        assert len(pending) == 1, 'Window/Cancel changed the pending approval'
+        assert alive(self.descendant), 'Window/Cancel stopped the live terminal descendant'
+        assert self.provider.requests == ['transcript', 'goal', 'approval'], 'Window/Cancel continued a denied approval'
+
     def verify_store(self, store):
         """Read-only evidence after the engine has actually released its store."""
         assert not self.provider.errors, self.provider.errors
