@@ -11,8 +11,7 @@ import unittest
 class BundleIdentityTests(unittest.TestCase):
     def invoke(self, path, kind='normal'):
         helper = Path(__file__).with_name('BundleIdentity.sh').resolve()
-        return subprocess.run(['/bin/bash', '-c', 'source "$1"; nac_bundle_identity "$2" "$3"',
-                               'bundle-identity-fixture', str(helper), str(path), kind],
+        return subprocess.run(['/bin/bash', str(helper), str(path), kind],
                               env={'PATH': '/usr/bin:/bin', 'NAC_BUILD_TRACK': 'inherited-value-must-not-select'},
                               capture_output=True, text=True, timeout=3)
 

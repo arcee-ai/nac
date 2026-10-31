@@ -33,10 +33,9 @@ fi
 engine_identity=$("$app/Contents/Resources/nac-web" __desktop-identity)
 printf '%s\n' "$engine_identity" > "$app/Contents/Resources/engine-identity.json"
 if [[ "$mode" == app-* || "$mode" == instance-* ]]; then
-    source desktop/macos/BundleIdentity.sh
     identity_kind=normal
     if [[ "$mode" == instance-* ]]; then identity_kind=instance-smoke; fi
-    bundle_identity=$(nac_bundle_identity "$app/Contents/Resources/engine-identity.json" "$identity_kind")
+    bundle_identity=$(bash desktop/macos/BundleIdentity.sh "$app/Contents/Resources/engine-identity.json" "$identity_kind")
     bundle_identifier="${bundle_identity%%$'\n'*}"
     bundle_name="${bundle_identity#*$'\n'}"
     /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier" "$app/Contents/Info.plist"

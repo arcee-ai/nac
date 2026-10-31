@@ -222,7 +222,7 @@ Normal app identities come only from the exact bundled engine's compiled track:
 | beta | `ai.arcee.nac.beta` | NAC Beta |
 | dev | `ai.arcee.nac.dev` | NAC Development |
 
-The sourced `BundleIdentity.sh` helper is the mapping owner. Inherited
+The read-only `BundleIdentity.sh` metadata helper is the mapping owner. Inherited
 `NAC_BUILD_TRACK` cannot select a different bundle identity. The preview retains
 its separate development identity. This partition adds no beta publication policy.
 
