@@ -513,8 +513,10 @@ impl ArceeAuthService {
 
     #[cfg(any(test, feature = "test-support"))]
     pub(super) fn for_test(base_url: &str) -> Self {
-        let parsed = Url::parse(base_url).expect("test auth service URL must be absolute");
-        assert!(matches!(parsed.scheme(), "http" | "https"));
+        assert!(
+            Url::parse(base_url).is_ok_and(|url| matches!(url.scheme(), "http" | "https")),
+            "test auth service URL must be absolute HTTP(S)"
+        );
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
         }

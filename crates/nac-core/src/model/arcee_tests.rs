@@ -83,6 +83,35 @@ fn simulated_product_version_bump_updates_arcee_auth_header_exactly() {
     assert_eq!(user_agent_for_version("9.8.7"), "nac/9.8.7");
 }
 
+#[test]
+fn test_service_preserves_http_https_and_rejects_invalid_urls_without_exposing_them() {
+    for (input, expected) in [
+        ("http://127.0.0.1:43123", "http://127.0.0.1:43123"),
+        ("http://127.0.0.1:43123///", "http://127.0.0.1:43123"),
+        (
+            "https://fixture.example.test/",
+            "https://fixture.example.test",
+        ),
+    ] {
+        assert_eq!(ArceeAuthService::for_test(input).base_url, expected);
+    }
+    for invalid in [
+        "",
+        "private-canary",
+        "ftp://fixture.example.test/private-canary",
+    ] {
+        let failure = std::panic::catch_unwind(|| ArceeAuthService::for_test(invalid))
+            .expect_err("invalid fixture service must still be rejected");
+        let message = failure
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| failure.downcast_ref::<String>().map(String::as_str))
+            .expect("fixture failure has a fixed diagnostic");
+        assert_eq!(message, "test auth service URL must be absolute HTTP(S)");
+        assert!(!message.contains("private-canary"));
+    }
+}
+
 #[tokio::test]
 async fn device_code_request_uses_expected_contract_and_parses_complete_uri() {
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
