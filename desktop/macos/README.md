@@ -259,3 +259,14 @@ fails before app launch on a locked console. Only its own live app incarnation
 and fixture-owned CLI handles can receive cleanup controls; focus restoration
 is conditional on the fixture still being frontmost. These checks require
 actual AppKit/system WKWebView evidence, with screenshots reviewed separately.
+
+The coexist fixture runs each bundled configuration helper with the exact owned
+profile as both process cwd and `--directory`. Before accessing its store, it
+requires selected version 1, the expected dev/stable track, the same canonical
+root and a canonical absolute store path. Fresh track defaults are `dev.db` and
+`stable.db`; legacy stable `store.db` reuse applies only when that file exists.
+On mismatch, `dev/configuration-failure.json` or
+`stable/configuration-failure.json` retains bounded allowlisted protocol facts
+and output byte counts/hashes. Arbitrary helper text and stderr are redacted.
+Run the adjacent fixture contracts with
+`python3 -B -m unittest discover -s desktop/macos -p 'test_instance_*.py'`.

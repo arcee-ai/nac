@@ -342,6 +342,57 @@ def app_crash_case(app, case, root, observer, console_checks):
             journey.cleanup()
 
 
+def coexist_selection(binary, root, env, track, diagnostic):
+    """Check the private configuration variant before accessing selected fields."""
+    command = [str(binary), '__desktop-configuration', '--directory', str(root)]
+    try:
+        response = subprocess.run(command, cwd=root, env=env, capture_output=True, timeout=12)
+        stdout, stderr, code = response.stdout, response.stderr, response.returncode
+        reason = 'configuration helper exited unsuccessfully' if code else None
+    except subprocess.TimeoutExpired as error:
+        stdout, stderr, code = error.stdout or b'', error.stderr or b'', None
+        reason = 'configuration helper timed out'
+    selection = None
+    if len(stdout) > 16 * 1024:
+        reason = reason or 'configuration response exceeded 16 KiB'
+    else:
+        try:
+            selection = json.loads(stdout)
+        except (ValueError, UnicodeDecodeError):
+            reason = reason or 'configuration response was not JSON'
+    selected = isinstance(selection, dict) and selection.get('status') == 'selected'
+    if not selected or type(selection.get('version')) is not int or selection['version'] != 1:
+        reason = reason or 'configuration response was not selected version 1'
+    elif selection.get('track') != track or selection.get('root_cwd') != str(root):
+        reason = reason or 'configuration track or root did not match the owned fixture'
+    else:
+        store = selection.get('store')
+        try:
+            valid_store = isinstance(store, str) and bool(store) and Path(store).is_absolute() and str(Path(store).resolve()) == store
+        except (OSError, ValueError):
+            valid_store = False
+        if not valid_store:
+            reason = reason or 'configuration store was not a canonical absolute path'
+    if reason:
+        # Never retain arbitrary helper text, malformed output or stderr. Keep
+        # bounded, allowlisted protocol facts and byte identities for diagnosis.
+        projected = {}
+        if isinstance(selection, dict):
+            allowed = dict(status=('selected', 'failed'), track=('dev', 'beta', 'stable'),
+                           code=('bootstrap_directory', 'invalid_configuration', 'managed_configuration', 'store_directory'))
+            for key, values in allowed.items():
+                if key in selection:
+                    projected[key] = selection[key] if selection[key] in values else '[redacted]'
+            projected['version'] = selection.get('version') if type(selection.get('version')) is int and 0 <= selection['version'] <= 100 else '[redacted]'
+            projected['root_cwd'] = str(root) if selection.get('root_cwd') == str(root) else '[redacted]'
+            projected['store'] = '[redacted]'
+        diagnostic.write_text(json.dumps(dict(reason=reason, exit_code=code, response=projected,
+            stdout_bytes=len(stdout), stdout_sha256=hashlib.sha256(stdout).hexdigest(),
+            stderr_bytes=len(stderr), stderr_sha256=hashlib.sha256(stderr).hexdigest()), indent=2) + '\n')
+        raise AssertionError(reason + '; diagnostic: ' + str(diagnostic))
+    return Path(selection['store'])
+
+
 def coexist_case(app, stable_app, case, root, observer, console_checks):
     env = environment(root)
     journeys, stores, identities = [], [], []
@@ -351,11 +402,10 @@ def coexist_case(app, stable_app, case, root, observer, console_checks):
                 journeys[-1].guard_focus()
             binary = bundle / 'Contents/Resources/nac-web'
             identities.append(json.loads(subprocess.check_output([str(binary), '__desktop-identity'], env=env)))
-            selection = json.loads(subprocess.check_output([str(binary), '__desktop-configuration', '--directory', str(root)], env=env))
-            stores.append(Path(selection['store']))
-            assert selection['status'] == 'selected'
             output = case / ('dev' if index == 0 else 'stable')
             output.mkdir()
+            stores.append(coexist_selection(binary, root, env, 'dev' if index == 0 else 'stable',
+                                             output / 'configuration-failure.json'))
             journey = AppJourney(bundle, output / 'result.json', root, env, stores[-1], observer, console_checks,
                                  options=['--directory', str(root)])
             journeys.append(journey)
