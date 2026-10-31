@@ -60,6 +60,20 @@ def clean_source(root=ROOT):
     revision = run('git', 'rev-parse', 'HEAD', cwd=root)
     if not re.fullmatch('[0-9a-f]{40}', revision):
         raise ValueError('Expected a full Git source revision')
+    # include_dir! embeds the complete assets directory, including ignored files.
+    # Git status alone cannot establish that this input came from the reviewed tree.
+    embedded = ASSETS.parent
+    folder = root / embedded
+    if folder.is_symlink() or not folder.is_dir():
+        raise ValueError('Embedded assets must be a real source directory')
+    tracked = set(filter(None, run('git', 'ls-files', '-z', '--', embedded, cwd=root).split('\0')))
+    expected = {embedded.as_posix(), *tracked}
+    for name in tracked:
+        expected.update(parent.as_posix() for parent in Path(name).parents
+                        if parent == embedded or embedded in parent.parents)
+    present = {embedded.as_posix(), *(path.relative_to(root).as_posix() for path in folder.rglob('*'))}
+    if present != expected:
+        raise ValueError('Embedded asset inputs must match the tracked source tree, including ignored entries')
     assets = inventory(root / ASSETS)
     schema = (root / 'crates/nac-core/src/store/schema.rs').read_text()
     versions = re.findall(r'^const STORE_SCHEMA_VERSION: i64 = (\d+);$', schema, re.M)

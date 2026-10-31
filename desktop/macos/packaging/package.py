@@ -102,6 +102,30 @@ def verify_signatures(app, engine):
     return results
 
 
+def post_sign_record(identity, info, files, signatures, observed_engine):
+    """Outer preparation receipt; never change the already sealed identity marker."""
+    if observed_engine != identity['engine_identity']:
+        raise ValueError('Post-sign engine identity differs from the compiled source/build')
+    version = identity['source']['product_version']
+    if info.get('CFBundleShortVersionString') != version or info.get('CFBundleVersion') != version:
+        raise ValueError('Post-sign bundle version differs from root product version')
+    native = identity.get('native_build_receipt')
+    if native is not None and (info.get('CFBundleIdentifier') != native['bundle_identifier']
+                               or info.get('CFBundleName') != native['bundle_name']):
+        raise ValueError('Post-sign bundle metadata differs from the track factory receipt')
+    if set(signatures) != {'app', 'engine'} or any(
+            value != {'kind': 'ad-hoc', 'hardened_runtime': True, 'entitlements': {}}
+            for value in signatures.values()):
+        raise ValueError('Post-sign preparation requires verified ad-hoc signatures')
+    return {'schema_version': 1, 'phase': 'ad-hoc-preparation',
+            'source_revision': identity['source']['revision'], 'engine_identity': observed_engine,
+            'bundle_identifier': info['CFBundleIdentifier'], 'bundle_name': info['CFBundleName'],
+            'product_version': version, 'bundle_version': info['CFBundleVersion'],
+            'engine_sha256': files[ENGINE_PATH]['sha256'], 'native_sha256': files[SHELL_PATH]['sha256'],
+            'info_plist_sha256': files['Contents/Info.plist']['sha256'],
+            'signatures': signatures, 'qualified_consumer': False}
+
+
 def build_package(args):
     require_mac()
     source = clean_source()
@@ -160,11 +184,14 @@ def build_package(args):
     container = output / f'NAC-{purpose}-arm64.zip'
     run('/usr/bin/ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', app, container)
     files = inventory(app)
+    post_sign = post_sign_record(identity, plistlib.loads(plist_path.read_bytes()), files, signatures,
+                                json.loads(run(app / ENGINE_PATH, '__desktop-identity')))
     manifest = {'schema_version': 1, 'identity': identity, 'bundle': {
         'name': app.name, 'identifier': info['CFBundleIdentifier'], 'files': files,
         'sha256': object_digest(files), 'executables': executables},
         'container': {'name': container.name, 'sha256': digest(container), 'size': container.stat().st_size},
-        'signatures': signatures, 'qualification': {'developer_id': False, 'notarized': False,
+        'signatures': signatures, 'post_sign_receipt': post_sign,
+        'qualification': {'developer_id': False, 'notarized': False,
         'stapled': False, 'gatekeeper': False, 'quarantined_download': False,
         'applications_install': False, 'app_translocation': False, 'actual_app_runtime': False}}
     if args.normal:
@@ -192,6 +219,15 @@ def verify_files(manifest, directory):
     embedded = json.loads((directory / bundle['name'] / 'Contents/Resources/PackageIdentity.json').read_text())
     if embedded != manifest['identity']:
         raise ValueError('Embedded identity differs from outer manifest')
+    # Older preparation manifests remain readable. New manifests bind their own
+    # post-sign metadata to the exact bytes without asserting runtime qualification.
+    if 'post_sign_receipt' in manifest:
+        app = directory / bundle['name']
+        expected = post_sign_record(embedded, plistlib.loads((app / 'Contents/Info.plist').read_bytes()),
+                                   files, manifest['signatures'],
+                                   json.loads((app / 'Contents/Resources/engine-identity.json').read_text()))
+        if manifest['post_sign_receipt'] != expected:
+            raise ValueError('Post-sign preparation receipt differs from sealed bundle facts')
     if embedded.get('consumer_distribution') is not False or any(manifest['qualification'].values()):
         raise ValueError('Preparation format cannot establish consumer/distribution qualification')
 
