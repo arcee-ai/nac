@@ -14,7 +14,7 @@ final class PreviewEngine {
     var receipt: EngineReceipt? { run?.receipt }
     var onReady: ((URL) -> Void)?
     var onExit: ((Int32) -> Void)?
-    var onFailure: ((String) -> Void)?
+    var onFailure: ((EngineFailure) -> Void)?
 
     #if !LOCAL_APP
     func launch(executable: URL, profile: PreviewProfile, provider: FixtureProvider) throws {
@@ -76,7 +76,7 @@ private final class EngineRun {
     private var failed = false
     var onReady: ((URL) -> Void)?
     var onExit: ((Int32) -> Void)?
-    var onFailure: ((String) -> Void)?
+    var onFailure: ((EngineFailure) -> Void)?
 
     init(identity: EngineIdentity, store: URL) throws {
         protocolState = try EngineProtocol(identity: identity, store: store)
@@ -229,6 +229,7 @@ private final class EngineRun {
             let data = Data(bytes[..<count])
             if protocolInput {
                 do { if let ready = try protocolState.receive(data) { endpoint = ready } }
+                catch let failure as EngineFailure { fail(failure); return }
                 catch { fail(error.localizedDescription); return }
             } else {
                 log += String(decoding: data, as: UTF8.self)
@@ -242,9 +243,13 @@ private final class EngineRun {
     }
 
     private func fail(_ message: String) {
+        fail(EngineFailure.message(message))
+    }
+
+    private func fail(_ failure: EngineFailure) {
         guard !failed, !stopping else { return }
         failed = true
-        onFailure?(message)
+        onFailure?(failure)
         stop {}
     }
 
