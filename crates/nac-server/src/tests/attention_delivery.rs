@@ -21,7 +21,7 @@ where
     .unwrap()
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_attention_real_question_answer_and_goal_completion_are_exact_and_once() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("attention-real-provider");
