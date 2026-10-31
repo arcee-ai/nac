@@ -7,12 +7,14 @@ import WebKit
 @MainActor
 final class InstanceSmoke {
     private let window: NSWindow
-    private let webView: WKWebView
+    private weak var webView: WKWebView?
     private let engine: PreviewEngine
     private let conflicts: StoreConflictRetry
     private let retryButton: () -> NSButton?
     private let baseURL: () -> URL?
     private let failure: () -> String?
+    private let requestQuit: () -> Void
+    private var retiring = false
     private let output: URL
     private let control: URL
     private let scenario: String
@@ -21,7 +23,8 @@ final class InstanceSmoke {
     private var reopenCount = 0
 
     init(window: NSWindow, webView: WKWebView, engine: PreviewEngine, conflicts: StoreConflictRetry,
-         retryButton: @escaping () -> NSButton?, baseURL: @escaping () -> URL?, failure: @escaping () -> String?) {
+         retryButton: @escaping () -> NSButton?, baseURL: @escaping () -> URL?, failure: @escaping () -> String?,
+         requestQuit: @escaping () -> Void) {
         self.window = window
         self.webView = webView
         self.engine = engine
@@ -29,6 +32,7 @@ final class InstanceSmoke {
         self.retryButton = retryButton
         self.baseURL = baseURL
         self.failure = failure
+        self.requestQuit = requestQuit
         let arguments = CommandLine.arguments
         func value(_ name: String) -> String {
             arguments[arguments.firstIndex(of: name)! + 1]
@@ -65,8 +69,10 @@ final class InstanceSmoke {
                 evidence["error"] = error.localizedDescription
                 publish("failed")
             }
-            RunLoop.main.perform(inModes: [.common]) {
-                MainActor.assumeIsolated { NSApp.terminate(nil) }
+            RunLoop.main.perform(inModes: [.common]) { [self] in
+                // ALL-344: close preserves work; this test explicitly chooses
+                // Stop on the actual native Quit sheet after its journey.
+                MainActor.assumeIsolated { requestQuit() }
             }
         }
     }
@@ -82,10 +88,12 @@ final class InstanceSmoke {
         write()
     }
 
+    func prepareForStop() { retiring = true }
+
     private func workspaceJourney() async throws {
         try await readyWorkspace()
         let firstPID = engine.pid
-        let firstReceipt = engine.receipt!
+        guard let firstReceipt = engine.receipt, !retiring else { throw InstanceFixtureError("Workspace retired before reopen") }
         let firstWindow = window.windowNumber
         try await capture("workspace")
         publish("ready")
@@ -112,7 +120,7 @@ final class InstanceSmoke {
 
     private func conflictJourney() async throws {
         try await readyConflict()
-        let first = conflicts.episode!
+        guard let first = conflicts.episode, !retiring else { throw InstanceFixtureError("Conflict retired before retry") }
         try await capture("conflict")
         publish("conflict")
         try await command("retry-live")
@@ -138,7 +146,7 @@ final class InstanceSmoke {
         }
         guard let conflict = conflicts.episode?.conflict,
               conflict.canonicalStore == expectedStore,
-              engine.receipt == nil, baseURL() == nil, webView.isHidden,
+              engine.receipt == nil, baseURL() == nil, webView?.isHidden == true,
               retryButton()?.isEnabled == true else {
             throw InstanceFixtureError("Conflict activated a workspace or lost its canonical store binding")
         }
@@ -165,18 +173,18 @@ final class InstanceSmoke {
 
     private func readyWorkspace() async throws {
         try await wait("identified system WKWebView workspace", timeout: 45) {
-            guard !self.webView.isHidden, let receipt = self.engine.receipt else { return false }
+            guard self.webView?.isHidden == false, let receipt = self.engine.receipt else { return false }
             return receipt.store == self.expectedStore && self.failure() == nil
         }
         try await wait("production workspace painted") {
-            self.webView.isLoading == false && self.window.isVisible
+            self.webView?.isLoading == false && self.window.isVisible
         }
+        guard let webView, !retiring else { throw InstanceFixtureError("Workspace retired before inspection") }
         let text = try await webView.callAsyncJavaScript("return document.body.innerText;",
             arguments: [:], in: nil, contentWorld: .page) as? String ?? ""
-        guard text.count > 80, !text.contains("Internal Server Error") else {
+        guard !retiring, let receipt = engine.receipt, text.count > 80, !text.contains("Internal Server Error") else {
             throw InstanceFixtureError("Production workspace was blank or failed")
         }
-        let receipt = engine.receipt!
         evidence["launch_incarnation"] = receipt.incarnation
         evidence["ready_store"] = receipt.store
         evidence["ready_schema"] = receipt.schema
@@ -197,6 +205,7 @@ final class InstanceSmoke {
     private func wait(_ label: String, timeout: TimeInterval = 35, _ predicate: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            guard !retiring else { throw InstanceFixtureError("Workspace retired while awaiting \(label)") }
             if predicate() { return }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
@@ -222,6 +231,7 @@ final class InstanceSmoke {
     }
 
     private func capture(_ name: String) async throws {
+        guard let webView, !retiring else { throw InstanceFixtureError("Workspace retired before snapshot") }
         let image: NSImage
         if webView.isHidden {
             let view = window.contentView!
@@ -239,7 +249,7 @@ final class InstanceSmoke {
                 }
             }
         }
-        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+        guard !retiring, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
               let png = bitmap.representation(using: .png, properties: [:]) else {
             throw InstanceFixtureError("Snapshot encoding failed")
         }
