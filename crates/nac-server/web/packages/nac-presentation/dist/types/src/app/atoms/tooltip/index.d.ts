@@ -9,8 +9,12 @@ interface TooltipProps {
     position?: TooltipPosition;
     className?: string;
     boxClassName?: string;
+    /** Keep the trigger mounted, but do not draw the tip. */
     disabled?: boolean;
-    /** Portal the box to the body when an ancestor clips overflow. */
+    /**
+     * Lay the trigger out without a positioning context of its own. The box is
+     * portalled either way, so no ancestor that clips overflow can cut it off.
+     */
     sticky?: boolean;
     /**
      * On a phone, tap opens the tip as a bottom sheet (via Popover). Only
@@ -19,6 +23,11 @@ interface TooltipProps {
     showTooltipOnMobile?: boolean;
     children?: React.ReactNode;
 }
+/**
+ * A hint shown while the trigger is hovered or holds keyboard focus. Escape
+ * dismisses it before anything beneath it, and a press on the trigger hides
+ * it until the pointer comes back.
+ */
 declare const Tooltip: React.FC<TooltipProps> & {
     Position: typeof AnchorPlacement;
 };
