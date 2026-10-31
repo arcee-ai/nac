@@ -929,3 +929,93 @@ fn heartbeat_history_churn_cannot_erase_start_spacing_or_exceed_retention() {
         );
     }
 }
+
+#[test]
+fn heartbeat_host_clock_rewind_defers_unused_schedule_after_excess_future_history() {
+    let f = Fixture::new();
+    let running = f.create();
+    let unused = f.create();
+    let initial = materialize_heartbeats(&f.path, 61_000).unwrap();
+    let first = initial
+        .iter()
+        .find(|o| o.schedule_id == running.schedule_id)
+        .unwrap()
+        .clone();
+    let waiting = initial
+        .iter()
+        .find(|o| o.schedule_id == unused.schedule_id)
+        .unwrap()
+        .clone();
+    let mut latest = 61_000;
+    for index in 0..40 {
+        latest = 61_000 + index * 15_000;
+        let pending = if index == 0 {
+            first.clone()
+        } else {
+            f.control(
+                HeartbeatAction::RunNow {
+                    schedule_id: running.schedule_id.clone(),
+                    expected_version: running.version,
+                },
+                latest,
+            )
+            .occurrence
+            .unwrap()
+        };
+        let active = f.admit(&pending, latest);
+        committed(&f, &active);
+        report(&f, &active, HeartbeatOutcome::Unchanged);
+        f.settle(&active, HeartbeatOutcome::Unknown, Some(1));
+    }
+    assert_eq!(
+        heartbeat_history(&f.path, "direct", &running.schedule_id)
+            .unwrap()
+            .len(),
+        HEARTBEAT_HISTORY_LIMIT as usize
+    );
+    assert_eq!(
+        heartbeat_history(&f.path, "direct", &running.schedule_id)
+            .unwrap()
+            .iter()
+            .filter_map(|o| o.started_at_ms)
+            .max(),
+        Some(latest)
+    );
+    let attempt = |now| {
+        admit_heartbeat(
+            &f.path,
+            "direct",
+            &waiting.occurrence_id,
+            waiting.revision,
+            &uuid::Uuid::new_v4().to_string(),
+            &uuid::Uuid::new_v4().to_string(),
+            "same pending check",
+            "/tmp/project",
+            now,
+        )
+        .unwrap()
+    };
+    // Rewinding makes all40 old starts eligible for the wall-time predicate,
+    // although retention holds32. An unused schedule has no own last start.
+    assert!(attempt(61_001).is_none());
+    let deferred = heartbeat_history(&f.path, "direct", &unused.schedule_id)
+        .unwrap()
+        .remove(0);
+    assert_eq!(deferred.state, HeartbeatOccurrenceState::Pending);
+    assert_eq!(deferred.attempt_count, 0);
+    assert_eq!(
+        read_heartbeat(&f.path, "direct", &unused.schedule_id)
+            .unwrap()
+            .state,
+        HeartbeatState::Active
+    );
+    assert_eq!(
+        (&deferred.occurrence_id, &deferred.receipt_id),
+        (&waiting.occurrence_id, &waiting.receipt_id)
+    );
+    let admitted = attempt(latest).unwrap();
+    assert_eq!(
+        (admitted.occurrence_id, admitted.receipt_id),
+        (waiting.occurrence_id, waiting.receipt_id)
+    );
+}

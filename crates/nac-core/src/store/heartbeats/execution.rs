@@ -78,6 +78,10 @@ pub(crate) fn admit_heartbeat(path:&Path,session_id:&str,occurrence_id:&str,expe
     if active>=MAX_HEARTBEAT_CONCURRENCY || active_occurrence(&tx,&schedule.schedule_id)?.is_some() {return Ok(None);}
     // Includes manual Run now. No route can turn an active schedule into a
     // high-frequency executor, and stored clock regression cannot reset rate.
+    // Defer the whole host on a backward clock rather than counting truncated
+    // future history. Pruning retains each schedule's latest admitted start.
+    let host_latest:Option<i64>=tx.query_row("SELECT max(started_at_ms) FROM heartbeat_occurrences",[],|row|row.get(0))?;
+    if host_latest.is_some_and(|last|now_ms<last) {return Ok(None);}
     let recent:i64=tx.query_row("SELECT count(*) FROM heartbeat_occurrences WHERE started_at_ms>?1",[now_ms.saturating_sub(60_000)],|row|row.get(0))?;
     let last:Option<i64>=tx.query_row("SELECT max(started_at_ms) FROM heartbeat_occurrences WHERE schedule_id=?1",[&schedule.schedule_id],|row|row.get(0))?;
     if recent>=60 || last.is_some_and(|last|now_ms.saturating_sub(last)<15_000) {return Ok(None);}

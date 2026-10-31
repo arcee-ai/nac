@@ -51,6 +51,8 @@ The initial finite operating limits are:
 
 Within the same history allowance, recent admitted starts take precedence over
 newer withdrawn requests so trimming cannot erase the start-rate fences.
+If the wall clock falls behind the latest retained host start, heartbeat admission
+waits until it catches up. Pending receipt identity and retry allowance stay intact.
 
 Deleting a schedule retains its tombstone and original command responses so a
 lost acknowledgement can be retried safely. Capacity exhaustion requires human
