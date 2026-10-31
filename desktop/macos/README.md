@@ -307,6 +307,10 @@ its compiled `InstanceObservation` helper. The fixture exercises real model,
 approval and terminal activity; native window close and LaunchServices reopen;
 Cancel, duplicate Quit and Stop; document/bridge release; durable transcript and
 goal retention; descendant cleanup and ordinary same-store reacquisition.
+The terminal case starts Quit through the exact-owned OS application helper and
+observes the real delegate confirmation before issuing a reentrant OS request.
+Repeated OS requests can coalesce before native entry; the fixture records
+observed entry counts. Evidence binds the actual OS and system WebKit versions.
 Sheet completion is programmatic AppKit, with no OS input events. Evidence
 records locked-console provenance and keeps visible paint and trusted input
 acceptance false. This is not a substitute for full native acceptance.

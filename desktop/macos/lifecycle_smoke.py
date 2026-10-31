@@ -7,6 +7,7 @@ Run only through the coordinated Mac/browser lease with an exact lifecycle app.
 """
 import json
 import os
+import plistlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -29,8 +30,11 @@ def run_contract(bundle, destination, observer):
     assert receipt['engine_sha256'] == digest(bundle / 'Contents/Resources/nac-web')
     assert receipt['native_sha256'] == digest(bundle / 'Contents/MacOS/NACPreview')
     evidence = dict(source_head=head, build_receipt=receipt, console_lock=session_lock_state(),
+                    os=subprocess.check_output(['/usr/bin/sw_vers', '-productVersion'], text=True).strip(),
                     visible_paint_acceptance=False, trusted_input_acceptance=False,
                     actual_local_app=True, system_wk=True, sheet_completion='programmatic AppKit; no OS input events', cases=[])
+    with Path('/System/Library/Frameworks/WebKit.framework/Resources/Info.plist').open('rb') as stream:
+        evidence['system_webkit_version'] = plistlib.load(stream)['CFBundleVersion']
     root = Path(tempfile.mkdtemp(prefix='nac-lifecycle-app-', dir=destination)).resolve()
     moved = root / 'Relocated app folder with spaces' / bundle.name
     shutil.copytree(bundle, moved)
@@ -77,9 +81,23 @@ def run_contract(bundle, destination, observer):
                 reopened = journey.stage('reopened')
                 assert reopened['reopen_retained_usable_workspace']
                 fixture.assert_work_running()
-                journey.command_file('quit')
-                journey.stage('confirming')
+                os_requests = []
+
+                def os_quit():
+                    result = json.loads(subprocess.check_output([str(observer), 'terminate', str(moved),
+                                                                json.dumps(journey.identity)], text=True, timeout=4))
+                    assert result.get('termination_requested'), result
+                    os_requests.append(result)
+
+                if scenario == 'terminal':
+                    os_quit() # First Quit originates from the public OS application API.
+                else:
+                    journey.command_file('quit')
+                confirming = journey.stage('confirming')
+                assert confirming['quit_delegate_requests'] == confirming['termination_entries'] == 1, confirming
                 fixture.assert_work_running()
+                if scenario == 'terminal':
+                    os_quit() # Reentrant requests may coalesce before reaching native entry.
                 journey.command_file('duplicate-quit')
                 # Preserve the original immediate duplicate/Cancel race in the
                 # run case; the other cases prove a duplicate reached the real
@@ -112,6 +130,8 @@ def run_contract(bundle, destination, observer):
                 fixture.verify_store(store)
                 replacement.stop()
                 evidence['cases'].append(dict(scenario=scenario, native=stopped, **after,
+                    initial_quit_origin='owned OS application request' if os_requests else 'native app action',
+                    os_termination_requests=os_requests,
                     shutdown_seconds=round(time.monotonic() - started, 3),
                     store_reacquired=True, durable_transcript_preserved=True, assets=assets))
                 journey.restore_prior()

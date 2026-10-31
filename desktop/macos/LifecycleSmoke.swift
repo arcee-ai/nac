@@ -92,7 +92,7 @@ final class LifecycleSmoke {
             RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { NSApp.terminate(nil) } }
         }
         if case .confirming = app.quit.lifecycle.phase, let sheet = app.window.attachedSheet {
-            if stage.hasSuffix("-requested") {
+            if stage.hasSuffix("-requested") || stage == "work-ready" {
                 guard intact() else { fail("Confirmation changed workspace ownership"); return }
                 evidence["confirmation_retained_owners"] = true
                 publish(seen.contains("quit-again") ? "reconfirming" : "confirming")
