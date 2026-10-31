@@ -1,12 +1,37 @@
 """Canonical API fixtures only; no product process, app or UI execution."""
 import threading
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from ci_startup_audit import LiveAudit, PROMPT, RESPONSE, entry_assets, persisted_audit, session_facts, transcript
+from ci_startup_audit import (EntryAssets, LiveAudit, PROMPT, RESPONSE, entry_asset_source, entry_assets,
+                              persisted_audit, session_facts, transcript)
+
+# Exact immutable P d443a2ac index bytes, test data only. Mock asset bodies below
+# do not replace product build inputs or imply native asset/runtime acceptance.
+PRODUCT_INDEX = b'''<!doctype html>
+<html lang="en" class="dark" data-theme="dark" style="color-scheme: dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <!-- Referenced from `src/` rather than a `public/` copy: the embedded server
+         serves only `/assets/*`, so an icon at the dist root would 404. -->
+    <link rel="icon" type="image/svg+xml" href="/assets/dist/assets/favicon-BxL16L46.svg" />
+    <title>NAC</title>
+    <script type="module" crossorigin src="/assets/dist/assets/index-B-oYdGsr.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/dist/assets/rolldown-runtime-XKyaHtl9.js">
+    <link rel="stylesheet" crossorigin href="/assets/dist/assets/index-C-d7co9y.css">
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
+'''
 
 
 class StartupAuditTests(unittest.TestCase):
@@ -110,19 +135,40 @@ class StartupAuditTests(unittest.TestCase):
             root = Path(temporary).resolve()
             dist = root / 'crates/nac-server/assets/dist'
             (dist / 'assets').mkdir(parents=True)
-            index = b'<script type="module" src="/assets/entry.js"></script>'
-            script = b'// synthetic entry asset'
+            index = PRODUCT_INDEX
+            self.assertEqual(hashlib.sha256(index).hexdigest(), '39adfd7b80001221964d37c3cbec7a21b3747dc3f9c42b6894b3d1bf3d0de8ce')
+            parser = EntryAssets()
+            parser.feed(index.decode())
+            self.assertEqual(len(parser.paths), 4)
+            bodies = {path: ('synthetic body for ' + path).encode() for path in parser.paths}
             (dist / 'index.html').write_bytes(index)
-            (dist / 'assets/entry.js').write_bytes(script)
+            for path, data in bodies.items():
+                (dist / path.removeprefix('/assets/dist/')).write_bytes(data)
             opener = MagicMock()
-            opener.open.return_value.__enter__.return_value.read.side_effect = [index, script]
+            opener.open.return_value.__enter__.return_value.read.side_effect = [index, *[bodies[path] for path in sorted(bodies)]]
             with patch('ci_startup_audit.urllib.request.build_opener', return_value=opener):
                 receipt = entry_assets('http://127.0.0.1:4321', root)
-            self.assertEqual([row['path'] for row in receipt['observations']], ['/', '/assets/entry.js'])
-            self.assertNotIn('synthetic entry asset', str(receipt))
+            self.assertEqual([row['path'] for row in receipt['observations']], ['/', *sorted(bodies)])
+            self.assertNotIn('synthetic body', str(receipt))
             opener.open.return_value.__enter__.return_value.read.side_effect = [index, b'foreign bytes']
             with patch('ci_startup_audit.urllib.request.build_opener', return_value=opener), self.assertRaises(RuntimeError):
                 entry_assets('http://127.0.0.1:4321', root)
+
+    def test_entry_mapping_rejects_foreign_absolute_escaped_traversal_and_symlink_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            dist = Path(temporary).resolve() / 'dist'
+            (dist / 'assets').mkdir(parents=True)
+            outside = dist.parent / 'outside.js'
+            outside.write_bytes(b'outside must never be fetched')
+            (dist / 'assets/alias.js').symlink_to(outside)
+            for path in ('/assets/entry.js', '/foreign/file.js', 'https://example.invalid/entry.js',
+                         '//example.invalid/entry.js', '/assets/dist//outside.js', '/assets/dist/../outside.js',
+                         '/assets/dist/assets/../../outside.js', '/assets/dist/assets/./entry.js',
+                         '/assets/dist/assets/%2e%2e/outside.js', '/assets/dist/assets/entry.js?raw=1',
+                         '/assets/dist/assets/entry.js#fragment', '/assets/dist/assets/alias.js',
+                         '/assets/dist/\\outside.js', '/assets/dist/assets/\0.js'):
+                with self.subTest(path=path), self.assertRaises(RuntimeError):
+                    entry_asset_source(dist, path)
 
 
 if __name__ == '__main__':

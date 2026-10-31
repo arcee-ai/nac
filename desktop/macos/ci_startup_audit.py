@@ -98,8 +98,24 @@ class EntryAssets(HTMLParser):
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         value = attrs.get('src') if tag == 'script' else attrs.get('href') if tag == 'link' else None
-        if value and value.startswith('/assets/'):
+        if value:
             self.paths.add(value)
+
+
+def entry_asset_source(dist, url):
+    """The server mounts dist at /assets/dist/; no alternate URL resolution."""
+    require(dist.is_absolute() and dist.resolve() == dist and dist.is_dir(), 'entry_asset_root')
+    if url == '/':
+        parts = ['index.html']
+    else:
+        require(isinstance(url, str) and url.startswith('/assets/dist/'), 'entry_asset_prefix')
+        parts = url[len('/assets/dist/'):].split('/')
+        require(parts and all(re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*', part)
+                              and part not in ('.', '..') for part in parts), 'entry_asset_path')
+    expected = dist.joinpath(*parts)
+    require(expected.is_relative_to(dist) and expected.resolve() == expected
+            and not expected.is_symlink() and expected.is_file(), 'entry_asset_source')
+    return expected
 
 
 def entry_assets(base, source, stop=None):
@@ -108,12 +124,10 @@ def entry_assets(base, source, stop=None):
     parser = EntryAssets()
     parser.feed((source / 'index.html').read_text())
     require(parser.paths and len(parser.paths) <= 32, 'entry_asset_inventory')
+    files = [(path, entry_asset_source(source, path)) for path in ['/', *sorted(parser.paths)]]
     observed = []
-    for path in ['/', *sorted(parser.paths)]:
+    for path, expected in files:
         require(stop is None or not stop.is_set(), 'asset_observation_interrupted')
-        relative = 'index.html' if path == '/' else path[1:]
-        expected = source / relative
-        require(expected.resolve() == expected and expected.is_file(), 'entry_asset_source')
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(endpoint(base) + path, timeout=5) as response:
             data = response.read(8 * 1024 * 1024 + 1)
         require(len(data) <= 8 * 1024 * 1024 and data == expected.read_bytes(), 'served_entry_asset_bytes')

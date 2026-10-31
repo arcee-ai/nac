@@ -182,6 +182,12 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
                 except BaseException as error:
                     errors['cleanup'] = errors['cleanup'] or error
                     safe_to_remove = False
+            try:
+                proof['owner_observation'] = witness.failure_receipt()
+                write(folder / 'owner-observation.json', proof['owner_observation'])
+            except BaseException as error:
+                errors['cleanup'] = errors['cleanup'] or error
+                safe_to_remove = False
         # The persisted read is additional evidence after live settlement;
         # it never restarts an unsettled run or counts as rendered UI reload.
         if safe_to_remove and scenario == 'configuredLocal' and 'live_api' in proof:
