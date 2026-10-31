@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "terminal_source_head": "dd87b0e97f7e5f5bfcbfcbf5b2bee2fe30b88b3a",
+  "terminal_source_head": "a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1",
   "scenario": "terminal-xctest",
   "total_seconds_limit": 240,
   "source_files": {
-    "desktop/macos/TerminalFixture.swift": "ac8d7e3958b183ed2eb331324194e93d8db27b1cae5b5283ac8382d91665fcdb",
-    "desktop/macos/TerminalJourneys.swift": "a553e3885ae6339de396a49d34e4a0efb3faaef4fdbdb880d646f4cf997a12c8",
+    "desktop/macos/TerminalFixture.swift": "63350223b3b2de55b7eee099c12e1a0e787f270edbf921f7e31c06b7f3203454",
+    "desktop/macos/TerminalJourneys.swift": "57a4e4f620f3cec05c83cdccb063ddcb341ed5b1bee1e776aa18aa4d919e0291",
     "desktop/macos/TerminalSmoke.swift": "8a06a3fb6a2c50a3c895f6242c7d07096be9b0cdd77918780d20203191553f52",
-    "desktop/macos/terminal/xctest.md": "2be24b6628abca9d7fa5261c223feae35fffa921b65372d4a2d88ae96ba59403"
+    "desktop/macos/terminal/xctest.md": "513c9c90da45484db03383c385aed99f1b4b4e3167adfcdd3e07ef0256742a2c"
   },
   "phases": [
     {

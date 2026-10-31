@@ -19,7 +19,7 @@ class ExactSourceTests(unittest.TestCase):
         self.assertEqual(instance['suite'], 'instances')
         self.assertEqual(instance['scenario_count'], 8)
         terminal = select_target('all-352-macos26')
-        self.assertEqual(terminal['source_sha'], 'dd87b0e97f7e5f5bfcbfcbf5b2bee2fe30b88b3a')
+        self.assertEqual(terminal['source_sha'], 'a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1')
         startup = select_target('all-342-startup-macos26')
         self.assertEqual(startup['source_sha'], 'd443a2aca506def2817b9afc0c9a20a75f5c4b5d')
         self.assertEqual(startup['test_source_sha'], '1412af562c56edebc63dbf61af849f08e2255b54')
