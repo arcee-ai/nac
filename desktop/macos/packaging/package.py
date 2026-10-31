@@ -12,6 +12,7 @@ import sys
 
 sys.dont_write_bytecode = True
 
+from signing import SignaturePolicy, signature_evidence, signing_commands, verification_commands
 from provenance import (ROOT, clean_source, digest, inventory, new_directory,
                         object_digest, run, validate_receipt, write_json)
 
@@ -77,29 +78,24 @@ def executable_evidence(path):
 
 
 def sign_adhoc(app, engine):
-    # Leaf first, then outer bundle. Never --deep sign or borrow reference entitlements.
-    for target in (app / engine, app):
-        run('/usr/bin/codesign', '--force', '--sign', '-', '--timestamp=none',
-            '--options', 'runtime', target)
+    # This execution path remains ad-hoc only; Developer ID requires its separate gate.
+    for command in signing_commands(app, [engine], SignaturePolicy('ad-hoc')):
+        run(*command)
     return verify_signatures(app, engine)
 
 
 def verify_signatures(app, engine):
+    policy = SignaturePolicy('ad-hoc')
+    for command in verification_commands(app, [engine], policy):
+        run(*command)
     results = {}
     for label, target in [('engine', app / engine), ('app', app)]:
-        run('/usr/bin/codesign', '--verify', '--strict', '--verbose=2', target)
         result = subprocess.run(['/usr/bin/codesign', '-d', '--entitlements', ':-', str(target)],
                                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         entitlements = plistlib.loads(result.stdout) if result.stdout.strip() else {}
-        if entitlements:
-            raise ValueError(f'Unexpected entitlements on {label}: {sorted(entitlements)}')
         details = subprocess.run(['/usr/bin/codesign', '-d', '--verbose=4', str(target)],
                                  check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        fields = details.stderr
-        if 'Signature=adhoc' not in fields or 'runtime' not in fields:
-            raise ValueError('Expected ad-hoc hardened-runtime fixture signature')
-        results[label] = {'kind': 'ad-hoc', 'hardened_runtime': True, 'entitlements': {}}
-    run('/usr/bin/codesign', '--verify', '--deep', '--strict', '--verbose=2', app)
+        results[label] = signature_evidence(details.stderr, entitlements, policy)
     return results
 
 

@@ -118,7 +118,7 @@ class PackageContract(unittest.TestCase):
         with patch('package.run') as command, patch('package.verify_signatures', return_value={}) as verify:
             package.sign_adhoc(self.app, package.FIXTURE_ENGINE)
         calls = [call.args for call in command.call_args_list]
-        self.assertEqual([x[-1] for x in calls], [self.app / package.FIXTURE_ENGINE, self.app])
+        self.assertEqual([x[-1] for x in calls], [str(self.app / package.FIXTURE_ENGINE), str(self.app)])
         for args in calls:
             self.assertNotIn('--deep', args)
             self.assertEqual(args[args.index('--sign') + 1], '-')
@@ -129,7 +129,8 @@ class PackageContract(unittest.TestCase):
     def test_entitlement_expansion_fails_closed(self):
         response = subprocess.CompletedProcess([], 0,
             stdout=plistlib.dumps({'com.apple.security.get-task-allow': True}), stderr=b'')
-        with patch('package.run'), patch('package.subprocess.run', return_value=response):
+        with patch('package.run'), patch('package.subprocess.run', side_effect=[response,
+                subprocess.CompletedProcess([], 0, stdout='', stderr='flags=0x10000(runtime)\nSignature=adhoc')]):
             with self.assertRaisesRegex(ValueError, 'Unexpected entitlements'):
                 package.verify_signatures(self.app, package.FIXTURE_ENGINE)
 

@@ -117,6 +117,24 @@ The concrete future operation order is:
    resources, normal UI/engine identity, lifecycle and descendant cleanup. Never
    overwrite an installed/user app or disable Gatekeeper, SIP, TCC or quarantine.
 
+`signing.py` constructs the exact inside-out command arrays for either ad-hoc
+or Developer ID signing. Developer ID requires an explicit certificate SHA-1
+fingerprint and Team ID; no discovery or default identity is available. The
+verification plan tests Apple's Developer ID Application certificate requirement
+and exact team, while the signature-evidence parser requires the hardened
+runtime flag, secure timestamp and empty entitlements. It records no personal
+certificate subject. The normal package command will integrate this plan only
+after consuming the nominated normal build receipt and approved signing gate.
+The current CLI executes only ad-hoc commands.
+
+The notary planner creates commands for an explicit existing keychain profile,
+with an intervening Accepted/submission-ID check before app stapling and
+Gatekeeper assessment. Plans carry `execution_authorized: false`. Synthetic
+response tests verify this parser contract; they are not Apple receipts. A real
+submission must retain its exact submitted archive digest, command result and
+submission ID/log. The stapled app must be archived again into a new final ZIP,
+and its final digests regenerated before any consumer download test.
+
 Developer ID, notarization, stapling, Gatekeeper, quarantine/download,
 Applications installation, translocation and actual normal-app startup remain
 unavailable until their corresponding real artifacts and environment receipts
@@ -129,6 +147,7 @@ Apple primary references:
 - [Code Signing In Depth](https://developer.apple.com/library/archive/technotes/tn2206/)
 - [Notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 - [Packaging Mac software](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution)
+- [Inside Code Signing: Requirements](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
 - [Hardened Runtime](https://developer.apple.com/documentation/security/hardened-runtime)
 
 Portable boundary tests:
