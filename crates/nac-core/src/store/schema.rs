@@ -5,6 +5,9 @@ use std::time::{Duration, Instant};
 
 mod delegation_receipts;
 #[cfg(test)]
+mod heartbeat_migration_tests;
+pub(super) mod heartbeat_tables;
+#[cfg(test)]
 mod native_task_launch_migration_tests;
 mod native_task_launches;
 #[cfg(test)]
@@ -66,6 +69,7 @@ mod permission_reviewer_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 44 adds same-chat heartbeat schedules, occurrences and control receipts.
 // 42 retains caller-bound native independent task launch receipts.
 // 41 retains retry-safe agent follow-up receipts independently of delivery.
 // 40 composes automatic permission review with the retained-task/child-input schema.
@@ -103,7 +107,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 43;
+const STORE_SCHEMA_VERSION: i64 = 44;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -797,7 +801,7 @@ fn open_connection_with_hooks(
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
         | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-        | 38 | 39 | 40 | 41 | 42 | STORE_SCHEMA_VERSION => {}
+        | 38 | 39 | 40 | 41 | 42 | 43 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -1023,6 +1027,7 @@ fn open_connection_with_hooks(
     task_followups::create_tables(&transaction)?;
     native_task_launches::create_tables(&transaction)?;
     peer_goal_starts::create_tables(&transaction)?;
+    heartbeat_tables::create_heartbeat_tables(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
