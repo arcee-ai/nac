@@ -55,6 +55,81 @@ native episode. H must preserve the original700s driver,150s cleanup,70s control
 existing50s Python stage deadline. The20s drain-owner watchdog is unchanged;
 selected-host latency may make the prototype fail that contract. No cap grows.
 
+## Optional preparation before driver launch
+
+The additive `CaptureRun.prepare_fixture(dev_app, stable_app, destination, observer)`
+API copies **already built** instance-smoke bundles using filesystem operations
+only. The H caller must first verify its exact clean T/H checkouts and matching
+builder outputs. Preparation does not invoke Git, an SDK, console observation,
+an app, an engine (including `--version`), configuration selection or a provider.
+It creates no journey configuration, scenario profile or store. It does not
+establish runtime or screenshot acceptance.
+
+After creating the full manifest above, H can import this exact T module and call:
+
+```python
+from pathlib import Path
+from instance_capture import CaptureRun
+
+run = CaptureRun(Path(CAPTURE_DIRECTORY))
+prepared = run.prepare_fixture(Path(DEV_APP), Path(STABLE_APP),
+                               Path(FRESH_DESTINATION), Path(OBSERVER))
+```
+
+All paths must be absolute and canonical. The destination must be absent, with
+an existing private owned parent; both input bundles and the observer stay
+outside it. The destination contains one private `nac-instance-app-NONCE` root
+and exactly the original two `Moved app with spaces N/NAC Instance Smoke.app`
+layouts. Ordinary builder JSON/plist formats and0644/0755 artifact modes are
+validated separately from private capture records. Symlinks, special files,
+hardlinked files, foreign ownership, writable artifacts, unexpected entries,
+changed inodes/bytes and mismatched source/track/build-support hashes fail closed.
+The original private `Directory` record contract is unchanged.
+
+Preparation exclusively publishes `preparation-admission.json` before creating
+resources, then `preparation-resources.json` with the owned destination/root
+identities. The final `prepared-fixture.json` uses closed schema
+`nac343-prepared-fixture-v1`, exact manifest/run/preparation nonces, T/H revisions,
+fixed source hashes, original and moved app inventories, observer identity/hash,
+and final destination/root identities. Every private record remains canonical,
+duplicate-free, immutable0600 JSON bounded to32KiB. The return value contains
+`receipt` and the SHA256 of its exact bytes under `sha256`. No PID is authority.
+
+H can now finalize and build its own immutable actor resource using those two
+real moved URLs **before** starting T's driver. H owns that resource, actor build,
+registration and public collection. This API does not modify any H implementation
+or qualify selected SDK timing, AX, notification delivery or image collection.
+
+H launches the existing wrapper/driver with its original arguments and limits,
+adding `NAC_INSTANCE_PREPARED_SHA256=prepared['sha256']` alongside
+`NAC_INSTANCE_CAPTURE_DIRECTORY`. The selector requires the capture context and
+exact64 lowercase hexadecimal characters. The driver retains its actual Git
+checks, revalidates the complete receipt against the original arguments and
+current source/artifact identities, then exclusively publishes
+`preparation-consumption.json` and the existing runtime `admission.json` before
+console, SDK or product probes. It runs the original dev then stable engine
+`--version` calls and all eight cases. Without this selector, the original
+inline dev-copy/dev-version/stable-copy/stable-version order is preserved.
+
+Each preparation and consumption is single use. Concurrent losers, failed or
+interrupted preparation, missing registration, mismatched receipts and a gap
+between consumption and runtime admission never permit retry, resume or inline
+fallback. Partial preparation is quarantined; bounded failure records retain
+the primary error and secondary reporting/descriptor errors when available.
+An interruption before durable registration leaves resources **unproved**, even
+if a directory was created. Runtime summaries explicitly retain this uncertainty;
+legacy `fixture_retained=false` with `root=None` proves no cleanup or settlement.
+
+On successful T runtime completion the existing fixture-root deletion still
+runs. A later H collection/acceptance failure can therefore follow legitimate
+deletion of the relocated apps. H must preserve attestations and surviving
+metadata/diagnostics without recreating deleted originals or claiming they were
+retained. Failed runtime keeps its known root; driver exit, absent first request
+or an empty legacy audit establishes no app/CLI settlement. Raw T installs no
+new SIGTERM handler: the existing H wrapper's real unwind boundary and exact
+owner cleanup remain required. Preparation does not extend any deadline or
+reduce the full eight-case/nineteen-pair acceptance obligation.
+
 Each existing app episode creates one private `journey-NAME` directory before
 launch. Its `configuration.json` binds the manifest hash, T/H revisions, run nonce,
 exact frame subset for that existing episode, canonical resource root/store/app
