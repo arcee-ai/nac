@@ -63,6 +63,7 @@ final class InstanceSmoke {
                 publish("finished")
             } catch {
                 evidence["error"] = error.localizedDescription
+                await recordWorkspaceFailure()
                 publish("failed")
             }
             RunLoop.main.perform(inModes: [.common]) {
@@ -164,19 +165,42 @@ final class InstanceSmoke {
     }
 
     private func readyWorkspace() async throws {
+        // Install before the first await/navigation; no page bridge or API mutation.
+        if !webView.configuration.userContentController.userScripts.contains(where: { $0.source == Self.workspaceDiagnosticsScript }) {
+            webView.configuration.userContentController.addUserScript(WKUserScript(
+                source: Self.workspaceDiagnosticsScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+        let deadline = ProcessInfo.processInfo.systemUptime + 45
         try await wait("identified system WKWebView workspace", timeout: 45) {
             guard !self.webView.isHidden, let receipt = self.engine.receipt else { return false }
             return receipt.store == self.expectedStore && self.failure() == nil
         }
-        try await wait("production workspace painted") {
-            self.webView.isLoading == false && self.window.isVisible
+        guard let receipt = engine.receipt, let origin = workspaceOrigin(baseURL()) else {
+            throw InstanceFixtureError("Workspace lost its identified loopback origin")
         }
-        let text = try await webView.callAsyncJavaScript("return document.body.innerText;",
-            arguments: [:], in: nil, contentWorld: .page) as? String ?? ""
-        guard text.count > 80, !text.contains("Internal Server Error") else {
-            throw InstanceFixtureError("Production workspace was blank or failed")
+        var ready = false
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            guard engine.receipt?.incarnation == receipt.incarnation,
+                  engine.receipt?.store == expectedStore, failure() == nil,
+                  workspaceOrigin(baseURL()) == origin else {
+                throw InstanceFixtureError("Workspace changed its serving incarnation or store while loading")
+            }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            let observation = try await observeWorkspace(origin: origin, timeout: min(1, remaining))
+            evidence["workspace_observation"] = observation
+            write()
+            if observation["ready"] as? Bool == true, !webView.isHidden, !webView.isLoading,
+               window.isVisible, workspaceOrigin(webView.url) == origin, webView.url?.path == "/",
+               engine.receipt?.incarnation == receipt.incarnation,
+               engine.receipt?.store == expectedStore, failure() == nil {
+                ready = true
+                break
+            }
+            try await Task.sleep(nanoseconds: 50_000_000) // Poll semantics; elapsed time never grants readiness.
         }
-        let receipt = engine.receipt!
+        guard ready else {
+            throw InstanceFixtureError("Timed out waiting for the identified production workspace semantics")
+        }
         evidence["launch_incarnation"] = receipt.incarnation
         evidence["ready_store"] = receipt.store
         evidence["ready_schema"] = receipt.schema
@@ -185,6 +209,100 @@ final class InstanceSmoke {
         }
         evidence["workspace_activated"] = true
     }
+
+    private func workspaceOrigin(_ url: URL?) -> String? {
+        guard let url, url.scheme == "http", url.host == "127.0.0.1", let port = url.port,
+              url.user == nil, url.password == nil else { return nil }
+        return "http://127.0.0.1:\(port)"
+    }
+
+    private func observeWorkspace(origin: String, timeout: TimeInterval) async throws -> [String: Any] {
+        try await withCheckedThrowingContinuation { continuation in
+            let completion = InstanceWorkspaceCompletion<[String: Any]>(continuation, timeout: timeout,
+                                                                        label: "workspace DOM observation")
+            webView.callAsyncJavaScript(Self.workspaceObservationScript, arguments: ["expectedOrigin": origin],
+                                        in: nil, in: .page) { result in
+                completion.finish(result.flatMap { value in
+                    guard let record = value as? [String: Any] else {
+                        return .failure(InstanceFixtureError("Workspace observation returned no object"))
+                    }
+                    return .success(record)
+                })
+            }
+        }
+    }
+
+    private func recordWorkspaceFailure() async {
+        evidence["workspace_failure_native"] = [
+            "url": webView.url?.absoluteString ?? "", "loading": webView.isLoading,
+            "hidden": webView.isHidden, "window_visible": window.isVisible,
+            "engine_log_tail": String(engine.log.suffix(4000)), "native_failure": String((failure() ?? "").prefix(2000))
+        ]
+        do {
+            evidence["workspace_failure_dom"] = try await observeWorkspace(origin: workspaceOrigin(baseURL()) ?? "", timeout: 1)
+        } catch { evidence["workspace_failure_dom_error"] = error.localizedDescription }
+        do {
+            let image: NSImage = try await withCheckedThrowingContinuation { continuation in
+                let completion = InstanceWorkspaceCompletion<NSImage>(continuation, timeout: 2, label: "failure WK snapshot")
+                webView.takeSnapshot(with: nil) { image, error in
+                    if let image { completion.finish(.success(image)) }
+                    else { completion.finish(.failure(error ?? InstanceFixtureError("Failure WK snapshot unavailable"))) }
+                }
+            }
+            guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+                  let png = bitmap.representation(using: .png, properties: [:]), png.count <= 8 * 1024 * 1024 else {
+                throw InstanceFixtureError("Failure WK snapshot encoding unavailable or oversized")
+            }
+            let name = "workspace-failure.png"
+            try png.write(to: output.deletingLastPathComponent().appendingPathComponent(name), options: .atomic)
+            evidence["workspace_failure_snapshot"] = ["file": name, "kind": "actual WKWebView snapshot"]
+        } catch { evidence["workspace_failure_snapshot_error"] = error.localizedDescription }
+        write()
+    }
+
+    private static let workspaceDiagnosticsScript = #"""
+    (() => {
+      const events = [];
+      const append = (kind, message, url = '') => {
+        if (events.length < 16) events.push({kind, message: String(message).slice(0, 1500), url: String(url).slice(0, 500)});
+      };
+      window.__nacInstanceWorkspace = {events};
+      window.addEventListener('error', event => {
+        const target = event.target;
+        if (target && target !== window) append('resource-error', target.tagName || '', target.src || target.href || '');
+        else append('javascript-error', event.message || '', event.filename || '');
+      }, true);
+      window.addEventListener('unhandledrejection', event => append('unhandled-rejection', event.reason?.stack || event.reason));
+    })();
+    """#
+
+    private static let workspaceObservationScript = #"""
+    const text = document.body?.innerText || '';
+    const visible = element => !!element && element.getClientRects().length > 0 &&
+      getComputedStyle(element).visibility !== 'hidden' && getComputedStyle(element).display !== 'none';
+    const buttons = [...document.querySelectorAll('button')];
+    const empty = text.includes('No projects yet') && buttons.some(button =>
+      button.innerText.trim() === 'Get Started' && !button.disabled && visible(button));
+    const populated = [...document.querySelectorAll('[role="button"][data-item-kind="project"][data-item-id]')].some(card =>
+      visible(card) && card.innerText.includes('Native instance drain fixture'));
+    const events = window.__nacInstanceWorkspace?.events || [];
+    const semantic = empty ? 'empty-onboarding' : populated ? 'drain-fixture-project' : null;
+    return {
+      ready: location.origin === expectedOrigin && location.pathname === '/' &&
+        ['', '#', '#/'].includes(location.hash) && document.readyState === 'complete' &&
+        !!window.__nacInstanceWorkspace &&
+        !!document.getElementById('root')?.childElementCount && text.length > 80 &&
+        !text.includes('Internal Server Error') && events.length === 0 && semantic !== null,
+      url: location.href, ready_state: document.readyState, semantic, body_length: text.length,
+      body_text: text.slice(0, 8000), root_html: (document.getElementById('root')?.outerHTML || '').slice(0, 4000),
+      diagnostics_installed: !!window.__nacInstanceWorkspace, errors: events.slice(0, 16),
+      buttons: buttons.slice(0, 16).map(button => ({text: button.innerText.slice(0, 100),
+        label: button.getAttribute('aria-label'), disabled: button.disabled, visible: visible(button)})),
+      resources: performance.getEntriesByType('resource').slice(-24).map(resource => ({
+        url: resource.name.slice(0, 500), kind: resource.initiatorType, duration_ms: resource.duration,
+        response_status: Number.isFinite(resource.responseStatus) ? resource.responseStatus : null}))
+    };
+    """#
 
     private func command(_ name: String) async throws {
         let file = control.appendingPathComponent(name)
@@ -250,6 +368,28 @@ final class InstanceSmoke {
         if let data = try? JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: output, options: .atomic)
         }
+    }
+}
+
+/// A late WebKit callback cannot resume twice or retain native UI through a timer.
+@MainActor
+private final class InstanceWorkspaceCompletion<Value> {
+    private var continuation: CheckedContinuation<Value, Error>?
+    private var timer: DispatchWorkItem?
+
+    init(_ continuation: CheckedContinuation<Value, Error>, timeout: TimeInterval, label: String) {
+        self.continuation = continuation
+        let timer = DispatchWorkItem { self.finish(.failure(InstanceFixtureError("Timed out: \(label)"))) }
+        self.timer = timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, timeout), execute: timer)
+    }
+
+    func finish(_ result: Result<Value, Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        timer?.cancel()
+        timer = nil
+        continuation.resume(with: result)
     }
 }
 
