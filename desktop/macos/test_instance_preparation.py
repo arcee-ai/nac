@@ -71,6 +71,70 @@ class PreparationTests(unittest.TestCase):
         path.write_bytes(capture.encoded(value))
         path.chmod(0o600)
 
+    def reject_overlap_without_input_mutation(self, destination):
+        before = [capture.artifact_tree(app) for app in self.apps]
+        existed = destination.exists()
+        with patch.object(capture.os, 'mkdir', wraps=os.mkdir) as mkdir:
+            with self.assertRaises(ValueError):
+                self.run.prepare_fixture(*self.apps, destination, self.observer)
+        after = [capture.artifact_tree(app) for app in self.apps]
+        self.assertEqual(before, after, 'Rejected destination changed an original bundle inventory/identity/hash')
+        self.assertEqual(destination.exists(), existed, 'Rejected destination changed the source namespace')
+        mkdir.assert_not_called()
+        self.assertFalse((self.metadata / 'preparation-resources.json').exists())
+        self.assertFalse((self.metadata / 'prepared-fixture.json').exists())
+        with self.assertRaises(ValueError):
+            self.run.require_inline()
+
+    def private_bundles(self):
+        for track, app in zip(('dev', 'stable'), self.apps):
+            app.chmod(0o700)
+            (app / 'Contents').chmod(0o700)
+            # Private ordinary bundle directories are valid builder artifacts.
+            capture.bundle_snapshot(app, track, self.target, self.sources)
+
+    def test_nested_dev_destination_rejects_before_mutating_private_input(self):
+        self.private_bundles()
+        self.reject_overlap_without_input_mutation(self.apps[0] / 'Contents/nested-fixture')
+
+    def test_nested_stable_destination_rejects_before_mutating_private_input(self):
+        self.private_bundles()
+        self.reject_overlap_without_input_mutation(self.apps[1] / 'Contents/nested-fixture')
+
+    def test_dev_and_stable_exact_ancestor_and_descendant_overlaps_reject_before_mkdir(self):
+        self.private_bundles()
+        for track, app in zip(('dev', 'stable'), self.apps):
+            for relation, destination in (('exact', app), ('ancestor', app.parent), ('descendant', app / 'nested-fixture')):
+                with self.subTest(track=track, relation=relation):
+                    self.metadata = self.base / ('capture-' + track + '-' + relation)
+                    capture.prepare(self.metadata, self.target, self.harness)
+                    self.run = capture.CaptureRun(self.metadata)
+                    self.reject_overlap_without_input_mutation(destination)
+
+    def test_noncanonical_input_cannot_hide_destination_overlap(self):
+        self.private_bundles()
+        original = self.apps[0]
+        self.apps[0] = original.parent / 'alias.app'
+        self.apps[0].symlink_to(original, target_is_directory=True)
+        before = [capture.artifact_tree(app) for app in (original, self.apps[1])]
+        destination = original / 'Contents/nested-fixture'
+        with patch.object(capture.os, 'mkdir', wraps=os.mkdir) as mkdir:
+            with self.assertRaises(ValueError):
+                self.run.prepare_fixture(*self.apps, destination, self.observer)
+        self.assertEqual(before, [capture.artifact_tree(app) for app in (original, self.apps[1])])
+        self.assertFalse(destination.exists())
+        mkdir.assert_not_called()
+
+    def test_separate_adjacent_private_destination_preserves_both_inputs(self):
+        self.private_bundles()
+        self.apps[0].parent.chmod(0o700)
+        self.destination = self.apps[0].parent / 'NAC Instance Smoke.app.adjacent-fixture'
+        before = [capture.artifact_tree(app) for app in self.apps]
+        ready = self.prepare()
+        self.assertEqual(before, [capture.artifact_tree(app) for app in self.apps])
+        self.assertTrue(self.destination.is_dir())
+        self.assertEqual(self.consume(ready), ready['receipt'])
+
     def test_file_only_preparation_binds_full_inventory_without_profiles(self):
         before = [capture.artifact_tree(app) for app in self.apps]
         with ExitStack() as stack:

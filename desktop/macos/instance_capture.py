@@ -516,9 +516,10 @@ class CaptureRun:
                          preparation_nonce=nonce, manifest_sha256=self.digest, destination=str(destination))
             files.write('preparation-admission.json', claim)
             try:
-                if (not destination.is_absolute() or destination != destination.resolve()
+                if (any(not p.is_absolute() or p != p.resolve() for p in (destination, app, stable, observer))
                         or destination == self.directory or self.directory.is_relative_to(destination)
-                        or any(p.is_relative_to(destination) for p in (app, stable, observer))):
+                        or any(p.is_relative_to(destination) or destination.is_relative_to(p) for p in (app, stable))
+                        or observer.is_relative_to(destination)):
                     raise ValueError('Prepared destination must be fresh, canonical and separate')
                 # Parent descriptor precedes creation; no arbitrary existing root
                 # can be adopted. A failed/interrupted gap stays unproved/retained.

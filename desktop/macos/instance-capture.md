@@ -78,7 +78,11 @@ prepared = run.prepare_fixture(Path(DEV_APP), Path(STABLE_APP),
 
 All paths must be absolute and canonical. The destination must be absent, with
 an existing private owned parent; both input bundles and the observer stay
-outside it. The destination contains one private `nac-instance-app-NONCE` root
+outside it. Before creating any destination directory, preparation rejects
+equality or either-direction ancestry between the destination and either input
+bundle. This also protects bundles whose root or `Contents` directory is0700;
+an adjacent separate destination remains valid. The destination contains one
+private `nac-instance-app-NONCE` root
 and exactly the original two `Moved app with spaces N/NAC Instance Smoke.app`
 layouts. Ordinary builder JSON/plist formats and0644/0755 artifact modes are
 validated separately from private capture records. Symlinks, special files,
