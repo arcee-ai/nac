@@ -35,8 +35,16 @@ now pinned. No compiler version is inferred from the Xcode version. The first
 receipt failed the GUI prerequisite before building/launching the app and is
 not native app acceptance.
 
-A read-only IORegistry check requires the current runner user to own an unlocked,
-completed Aqua console login. Missing/locked/unknown GUI is an explicit failure.
+A read-only IORegistry check requires the current runner user to own the completed
+Aqua console login and the root lock observation to be explicitly false. Any
+explicit true session lock flag rejects launch. The diagnostic receipt from
+`41173830902` proved both optional session lock flags are absent on a hosted
+on-console session, so their absence alone does not stand in for a missing GUI.
+The public Quartz caller-session API must additionally confirm a console login,
+AppKit must see a screen, and the frontmost bundle must be available and differ
+from loginwindow. Missing/locked/unknown prerequisites fail explicitly. Absent
+optional lock flags stay null in evidence; only the full rendered app journey
+can qualify this environment.
 Read-only CoreGraphics/AppKit diagnostics additionally record whether a Quartz
 session exists, console/login state, optional lock flag, screen count and the
 frontmost bundle identifier. No user names or unrelated window titles are saved.

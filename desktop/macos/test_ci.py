@@ -10,30 +10,46 @@ from ci_support import MAX_FILE, console_state, export_evidence, qualify_toolcha
 
 
 class QualificationTests(unittest.TestCase):
+    quartz = {'quartz_session_available': True, 'on_console': True, 'login_done': True,
+              'screen_count': 1, 'screen_is_locked': None,
+              'frontmost_bundle': 'com.apple.AccessibilityUIServer'}
+
     def console(self, **changes):
         session = {'kCGSSessionUserIDKey': 123, 'kCGSSessionOnConsoleKey': True,
                    'kCGSessionLoginDoneKey': True, 'CGSSessionScreenIsLocked': False}
         session.update(changes)
-        return plistlib.dumps({'IOConsoleUsers': [session]})
+        return plistlib.dumps({'IOConsoleLocked': False, 'IOConsoleUsers': [session]})
 
     def test_locked_unknown_or_other_console_never_qualifies(self):
-        self.assertFalse(require_console(self.console(), 123)['locked'])
+        self.assertFalse(require_console(self.console(), 123, self.quartz)['session_lock_flag'])
         for changes in ({'CGSSessionScreenIsLocked': True},
                         {'kCGSSessionOnConsoleKey': False},
                         {'kCGSessionLoginDoneKey': False}):
             with self.assertRaisesRegex(RuntimeError, 'GUI unavailable'):
-                require_console(self.console(**changes), 123)
+                require_console(self.console(**changes), 123, self.quartz)
         with self.assertRaises(RuntimeError):
-            require_console(self.console(), 456)
+            require_console(self.console(), 456, self.quartz)
         root = plistlib.loads(self.console())
         del root['IOConsoleUsers'][0]['CGSSessionScreenIsLocked']
         self.assertIsNone(console_state(plistlib.dumps(root), 123)['locked'])
+        observed = require_console(plistlib.dumps(root), 123, self.quartz)
+        self.assertIsNone(observed['session_lock_flag'])
+        self.assertTrue(observed['rendered_app_qualification_required'])
+        for field, missing in [('quartz_session_available', False), ('on_console', False),
+                               ('login_done', False), ('screen_count', 0),
+                               ('frontmost_bundle', 'com.apple.loginwindow'),
+                               ('frontmost_bundle', 'unavailable')]:
+            with self.assertRaisesRegex(RuntimeError, 'unknown'):
+                require_console(plistlib.dumps(root), 123, {**self.quartz, field: missing})
+        with self.assertRaisesRegex(RuntimeError, 'locked'):
+            require_console(plistlib.dumps(root), 123, {**self.quartz, 'screen_is_locked': True})
+        del root['IOConsoleLocked']
         with self.assertRaisesRegex(RuntimeError, 'unknown'):
-            require_console(plistlib.dumps(root), 123)
+            require_console(plistlib.dumps(root), 123, self.quartz)
         root = plistlib.loads(self.console())
         root['IOConsoleLocked'] = True
         with self.assertRaisesRegex(RuntimeError, 'locked'):
-            require_console(plistlib.dumps(root), 123)
+            require_console(plistlib.dumps(root), 123, self.quartz)
 
     def test_toolchain_drift_and_unpinned_swift_cannot_pass(self):
         expected = json.loads(Path(__file__).with_name('ci-toolchain.json').read_text())

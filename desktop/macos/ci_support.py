@@ -21,13 +21,26 @@ def console_state(data, uid):
             'root_locked': root.get('IOConsoleLocked')}
 
 
-def require_console(data, uid):
+def require_console(data, uid, quartz):
     state = console_state(data, uid)
     if not state['same_user_on_console'] or state['login_done'] is not True:
         raise RuntimeError('GUI unavailable: runner is not the logged-in Aqua console user')
-    if state['root_locked'] is True or state['locked'] is not False:
-        raise RuntimeError('GUI unavailable: console locked or lock state unknown')
-    return {'on_console': True, 'login_done': True, 'locked': False}
+    if any(value is True for value in (state['root_locked'], state['locked'], quartz.get('screen_is_locked'))):
+        raise RuntimeError('GUI unavailable: console locked')
+    # The observed hosted session omits both optional session lock flags. Do
+    # not invent their values. Require independent positive observations from
+    # IORegistry and the public caller-session API before normal fixture launch.
+    if (state['root_locked'] is not False
+            or quartz.get('quartz_session_available') is not True
+            or quartz.get('on_console') is not True or quartz.get('login_done') is not True
+            or not isinstance(quartz.get('screen_count'), int) or quartz['screen_count'] < 1
+            or quartz.get('frontmost_bundle') in (None, '', 'unavailable', 'com.apple.loginwindow')
+            or any(value is not None and value is not False
+                   for value in (state['locked'], quartz.get('screen_is_locked')))):
+        raise RuntimeError('GUI unavailable: positive console/session/screen prerequisites missing or unknown')
+    return {'on_console': True, 'login_done': True, 'root_locked': False,
+            'session_lock_flag': state['locked'], 'quartz_lock_flag': quartz.get('screen_is_locked'),
+            'rendered_app_qualification_required': True}
 
 
 def qualify_toolchain(actual, expected):
