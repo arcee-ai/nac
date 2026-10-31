@@ -73,7 +73,14 @@ async fn native_attention_real_question_answer_and_goal_completion_are_exact_and
         .unwrap();
     });
     seed_direct_session_with_base_url(&root, "session", base);
-    let manager = test_manager(&root);
+    let manager = SessionManager::new_async(ServerOptions {
+        root_cwd: root.clone(),
+        store_path: Some(root.join("store.db")),
+        worker_executable: None,
+        managed_host: None,
+    })
+    .await
+    .unwrap();
     manager
         .inner
         .attention

@@ -257,6 +257,7 @@ async fn cancelled_owned_read_keeps_its_physical_seat_until_the_accepted_caller_
     let root = std::env::temp_dir().join(format!("nac-attention-owned-read-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let _env = crate::tests::ScopedModelEnv::isolated(&root.join("home"), Some("test-key"));
+    nac_core::store::initialize(&root.join("store.db")).unwrap();
     let manager = SessionManager::new_async(crate::ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
