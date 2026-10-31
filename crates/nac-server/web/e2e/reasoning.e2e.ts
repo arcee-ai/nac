@@ -72,6 +72,20 @@ for (const width of [1440, 768, 390]) {
         await page.keyboard.press("Space");
         await expect(settled).toHaveAttribute("aria-expanded", "true");
         await expect(settled).toBeFocused();
+        if (width === 390) {
+          const touch = await context.newCDPSession(page);
+          await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+          const target = await settled.boundingBox();
+          for (const expanded of ["false", "true"]) {
+            await touch.send("Input.dispatchTouchEvent", {
+              type: "touchStart",
+              touchPoints: [{ x: target!.x + 16, y: target!.y + 22 }],
+            });
+            await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+            await expect(settled).toHaveAttribute("aria-expanded", expanded);
+          }
+          await touch.detach();
+        }
         await expect(detail.getByText(REASONING.split("\n\n")[0], { exact: true })).toBeVisible();
         const copy = detail.getByRole("button", { name: /^Copy Reasoning/ });
         await copy.click();
@@ -157,6 +171,61 @@ for (const width of [1440, 768, 390]) {
   });
 }
 
+test("empty reasoning stays absent and settled long reasoning has one scroll owner", async ({
+  harness,
+  page,
+  request,
+}, info) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  const text = Array.from(
+    { length: 220 },
+    (_, i) => `Reasoning paragraph ${i}: inspect the existing build cache before changing it.`,
+  ).join("\n\n");
+  for (const [name, reasoning] of [
+    ["empty", " \n "],
+    ["long", text],
+  ]) {
+    harness.provider.enqueue(
+      name,
+      { token: `Reasoning ${name}` },
+      { kind: "text", text: ANSWER, reasoning },
+    );
+    const id = await createDirectSession(request, harness);
+    const run = await request.post(`${harness.baseUrl}/sessions/${id}/runs`, {
+      data: { prompt: `Reasoning ${name}` },
+    });
+    expect(run.status()).toBe(202);
+    await waitForRunIdle(request, harness, id);
+    await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
+    await expect(page.getByText(ANSWER, { exact: true })).toBeVisible();
+    if (name === "empty") {
+      await expect(page.getByRole("button", { name: /^(Total activity:|Thoughts$)/ })).toHaveCount(
+        0,
+      );
+      continue;
+    }
+    await page
+      .getByRole("button", { name: /^(Total activity:|Thoughts$)/ })
+      .first()
+      .click();
+    const detail = page.getByRole("region", { name: "Insights detail" });
+    await detail.getByRole("button", { name: /^Reasoning/ }).click();
+    await expect(detail.getByText(/^Reasoning paragraph 0:/)).toBeVisible();
+    await expect(detail.getByRole("button", { name: "Show all" })).toHaveCount(0);
+    await detail.getByText(/^Reasoning paragraph 219:/).scrollIntoViewIfNeeded();
+    await expect(detail.getByText(/^Reasoning paragraph 219:/)).toBeVisible();
+    expect(
+      await detail.evaluate((element) => {
+        const body = element.querySelector('[id$="-body"]');
+        return body && body.clientHeight === body.scrollHeight;
+      }),
+    ).toBe(true);
+    const file = info.outputPath("after-390-long.png");
+    await page.screenshot({ path: file, animations: "disabled" });
+    await info.attach("settled long reasoning", { path: file, contentType: "image/png" });
+  }
+});
+
 for (const outcome of ["cancel", "failure"] as const) {
   test(`partial reasoning retains ${outcome} semantics`, async ({ harness, page, request }) => {
     const gate = new ScriptGate();
@@ -180,8 +249,12 @@ for (const outcome of ["cancel", "failure"] as const) {
     await gate.accepted;
     try {
       await expect(page.getByRole("button", { name: "Thinking…", exact: true })).toBeVisible();
-      if (outcome === "cancel")
+      if (outcome === "cancel") {
         await page.getByRole("button", { name: "Stop run", exact: true }).first().click();
+        // Keep the provider held until cancellation settles. Releasing first can
+        // turn this into an empty completed response racing the stop request.
+        await waitForRunIdle(request, harness, id);
+      }
       gate.release();
       await waitForRunIdle(request, harness, id);
       if (outcome === "cancel") {
