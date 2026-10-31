@@ -45,7 +45,7 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if scenario == "normal" || scenario == "ci-terminal" { try await journey() }
+                if ["normal", "ci-terminal", "ci-terminal-xctest"].contains(scenario) { try await journey() }
                 else if scenario == "close-startup" {
                     try await wait("engine starting") { self.app.engine.pid > 0 }
                 } else {
@@ -130,8 +130,13 @@ final class PreviewSmoke {
         }
         evidence["persisted_assistant_message"] = true
         try await captureWeb("persisted-chat.png")
-        if scenario == "ci-terminal" {
-            evidence["trusted_terminal"] = try await CITerminal.run(app: app, sessionID: sessionID) {
+        if ["ci-terminal", "ci-terminal-xctest"].contains(scenario) {
+            let ready: (([String: Any]) -> Void)? = scenario == "ci-terminal-xctest" ? { fields in
+                self.evidence.merge(fields) { _, new in new }
+                self.recordOwnership()
+                self.write()
+            } : nil
+            evidence["trusted_terminal"] = try await CITerminal.run(app: app, sessionID: sessionID, externalReady: ready) {
                 try await self.captureWeb("trusted-terminal.png")
             }
         }
@@ -164,7 +169,7 @@ final class PreviewSmoke {
         while Date() < end {
             recordOwnership()
             if try await condition() { return }
-            if app.failure != nil && ["normal", "ci-terminal"].contains(scenario) { throw PreviewError.message(app.failure!) }
+            if app.failure != nil && ["normal", "ci-terminal", "ci-terminal-xctest"].contains(scenario) { throw PreviewError.message(app.failure!) }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         throw PreviewError.message("Timed out waiting for \(label)")

@@ -56,7 +56,7 @@ def qualify_toolchain(actual, expected):
 
 def require_terminal_evidence(record):
     terminal = record.get('trusted_terminal', {})
-    if (record.get('scenario') != 'ci-terminal' or record.get('passed') is not True
+    if (record.get('scenario') not in ('ci-terminal', 'ci-terminal-xctest') or record.get('passed') is not True
             or any(terminal.get(key) is not True for key in
                    ('exact_receipt', 'native_terminal_settled', 'unfocused_input_rejected'))
             or terminal.get('trusted_keydowns', 0) < 1 or terminal.get('synthetic_keydowns') != 0):
@@ -70,7 +70,7 @@ def export_evidence(raw, output, replacements):
     total = 0
     manifest = []
     for source in sorted(raw.rglob('*')):
-        if any(part.endswith('.app') for part in source.relative_to(raw).parts):
+        if any(part.endswith(('.app', '.xcresult')) for part in source.relative_to(raw).parts):
             continue
         if source.is_symlink() or not source.is_file():
             continue

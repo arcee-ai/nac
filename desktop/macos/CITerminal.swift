@@ -14,8 +14,9 @@ enum CITerminal {
         + "' > ci-native-input.txt; cat ci-native-input.txt"
 
     static func run(app: PreviewApp, sessionID: String,
+                    externalReady: (([String: Any]) -> Void)? = nil,
                     snapshot: () async throws -> Void) async throws -> [String: Any] {
-        guard CGPreflightPostEventAccess() else {
+        guard externalReady != nil || CGPreflightPostEventAccess() else {
             throw PreviewError.message("Native input unavailable: event-post access is not already granted; no prompt requested")
         }
         guard let profile = app.profile else { throw PreviewError.message("Missing CI terminal profile") }
@@ -92,7 +93,25 @@ enum CITerminal {
             }
             try requireTarget(app, window: app.window, number: app.window.windowNumber)
             _ = try await js("document.querySelector('.xterm-helper-textarea').focus(); return true;")
-            try await type(command, app: app, focused: focused)
+            if let externalReady {
+                // Read-only fixture evidence, never an input/command bridge.
+                // XCTest owns the launch and uses its supported keyboard API.
+                externalReady(["ci_terminal_xctest_ready": true,
+                               "target_window_number": app.window.windowNumber,
+                               "expected_operation": command,
+                               "app_event_post_access": CGPreflightPostEventAccess()])
+                let end = Date().addingTimeInterval(100)
+                while (try? Data(contentsOf: receipt)) != Data(marker.utf8) {
+                    try requireTarget(app, window: app.window, number: app.window.windowNumber)
+                    guard try await focused(), Date() < end else {
+                        throw PreviewError.message("External terminal input lost focus or exceeded its bounded deadline")
+                    }
+                    if let failure = app.failure { throw PreviewError.message(failure) }
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                }
+            } else {
+                try await type(command, app: app, focused: focused)
+            }
             try await wait("exact owned workspace receipt") {
                 (try? Data(contentsOf: receipt)) == Data(marker.utf8)
             }
@@ -105,7 +124,9 @@ enum CITerminal {
             }
             try await snapshot()
             try await terminate()
-            return ["terminal_id": terminalID, "input_method": "CoreGraphics CGEventPostToPid, owned active fixture only",
+            return ["terminal_id": terminalID,
+                    "input_method": externalReady == nil ? "CoreGraphics CGEventPostToPid, owned active fixture only" : "XCTest XCUIElement keyboard API, owned active fixture only",
+                    "app_event_post_access": CGPreflightPostEventAccess(),
                     "target_pid": getpid(), "target_window_number": app.window.windowNumber,
                     "operation": command, "trusted_keydowns": keys["trusted"] ?? 0,
                     "synthetic_keydowns": keys["synthetic"] ?? 0, "exact_receipt": true,
