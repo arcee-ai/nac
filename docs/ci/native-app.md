@@ -79,6 +79,13 @@ Xcode/SDK/OS envelope. Both exact inventory identities are now listed as
 candidates; the newer image passed the baseline described above. New image
 identities still fail, and ordinary Rust/Node versions remain explicitly pinned
 by setup actions regardless of the runner's defaults.
+Run `41180549503`, merge `0692a14f` / PR head `1a92e0d4`, then observed a
+third exact image, `20261021.0445.8`, and correctly failed before app launch.
+Its official inventory at runner-images commit
+[`9039987f0a4600ed0b8b67625c70583a3c825a71`](https://github.com/actions/runner-images/blob/9039987f0a4600ed0b8b67625c70583a3c825a71/images/macos/macos-26-arm64-Readme.md)
+matches the same Xcode/SDK/OS envelope and is now an explicit candidate. This
+does not establish GUI/XCTest acceptance on that image. Unknown image values
+still fail, and the exact observed Swift compiler check remains unchanged.
 The first hosted receipt (run `41173262488`, job `124455556461`, merge candidate
 `b7653271321d8b8fcfbfe71ca5c78a8eced2e4c7`) verified this envelope and recorded
 Swift driver 1.148.6 / Apple Swift 6.3.3, swiftlang-6.3.3.1.3,
