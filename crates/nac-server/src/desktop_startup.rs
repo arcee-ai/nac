@@ -88,6 +88,9 @@ fn select(root: &Path, store_path: Option<PathBuf>) -> Selection {
         &config,
         crate::build_identity::store_track(),
     );
+    let Ok(store) = nac_core::sessions::StoreProcessLease::prepare_path(&store) else {
+        return failed("store_directory", "NAC could not prepare the selected store directory. Check the configured storage.store_path or --store-path and directory access, then relaunch. The database was not opened and no alternative store was selected.");
+    };
     Selection::Selected {
         version: 1,
         root_cwd,

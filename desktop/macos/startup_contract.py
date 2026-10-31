@@ -87,6 +87,21 @@ def run_contract(engine, destination):
                 assert invoke(['--store-path', 'override store.db'], env)['store'] == str(root / 'override store.db')
             config.write_text('[storage]\nstore_path = "configured store.db"\n')
             assert invoke()['store'] == str(root / 'configured store.db')
+            missing = root / 'missing parents with spaces' / profile / 'selected.db'
+            assert not missing.parent.exists()
+            assert invoke(['--store-path', str(missing)])['store'] == str(missing)
+            assert missing.parent.is_dir() and not missing.exists()
+            assert not list(missing.parent.iterdir()), 'Selection must not acquire a store lease'
+            alias = root / (profile + '-alias.db')
+            alias_target = root / 'missing alias parents' / profile / 'selected.db'
+            alias.symlink_to(alias_target)
+            assert invoke(['--store-path', str(alias)])['store'] == str(alias_target)
+            assert alias.is_symlink() and not alias_target.exists()
+            blocker = root / (profile + '-not-a-directory')
+            blocker.write_text('preserve blocking file')
+            rejected = invoke(['--store-path', str(blocker / 'store.db')])
+            assert rejected['code'] == 'store_directory', rejected
+            assert blocker.read_text() == 'preserve blocking file'
             config.write_text('[storage]\nstore_path = [ invalid-secret-canary\n')
             failed = invoke()
             assert failed['status'] == 'failed' and failed['code'] == 'invalid_configuration', failed
@@ -97,7 +112,8 @@ def run_contract(engine, destination):
             config.unlink()
             results.append({'profile': profile, 'finder_terminal': True, 'configuration_override': True,
                             'invalid_configuration_redacted': True, 'no_store_opened': True,
-                            'no_credential_read': True})
+                            'no_credential_read': True, 'missing_parent_prepared_without_lease': True,
+                            'dangling_alias_target_preserved': True, 'directory_failure_actionable': True})
         managed = invoke(env=dict(environment, NAC_MANAGED_CONFIG='must-not-be-opened'))
         assert managed['code'] == 'managed_configuration', managed
         # A cooperating editor can hold the normal publication lock forever.

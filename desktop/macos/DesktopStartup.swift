@@ -104,6 +104,8 @@ enum DesktopStartup {
                 throw DesktopStartupError.message("The local Mac app cannot launch a managed host. Remove NAC_MANAGED_CONFIG from this app's launch environment and relaunch; use the managed-host entry point for managed deployments.")
             case "bootstrap_directory":
                 throw DesktopStartupError.message("The bootstrap directory is unavailable or inconsistent. Pass --directory with an existing absolute directory and relaunch NAC.")
+            case "store_directory":
+                throw DesktopStartupError.message("NAC could not prepare the selected store directory. Check storage.store_path or --store-path and directory access, then relaunch. No alternative store was selected.")
             default: throw invalidSelection()
             }
         }
