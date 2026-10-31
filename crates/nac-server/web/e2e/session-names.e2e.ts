@@ -10,6 +10,7 @@ import {
   expect,
   test,
   startForegroundChild,
+  showSubagents,
   waitForRunIdle,
 } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
@@ -751,3 +752,67 @@ test("full-name view is viewport-bounded with an oversized presentation ancestor
   });
   await fits(page, dialog);
 });
+
+for (const width of [768, 390])
+  test(`narrow delegated detail headers reveal the current full name ${width}`, async ({
+    harness,
+    page,
+    request,
+    context,
+  }, info) => {
+    test.skip(baseline);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const parent = await createSession(request, harness, "direct");
+    harness.provider.enqueue(
+      "NAME_NARROW_DETAIL",
+      { token: "NAME_NARROW_DETAIL" },
+      { kind: "text", text: "complete" },
+    );
+    const response = await startForegroundChild(
+      request,
+      harness,
+      parent,
+      names[1],
+      "NAME_NARROW_DETAIL",
+    );
+    expect(response.ok()).toBe(true);
+    const child = ((await response.json()) as { child_session_id: string }).child_session_id;
+    await rename(request, harness.baseUrl, child, names[1]);
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${harness.baseUrl}/#/session/${parent}/delegated`);
+    await showSubagents(page, width < 768);
+    if (width < 768) {
+      await page
+        .getByRole("dialog", { name: "Subagents", exact: true })
+        .getByRole("button", { name: new RegExp(`^${prefix}Beta`) })
+        .click();
+    }
+    const heading = page.getByRole("button", {
+      name: `View full name: ${names[1]}`,
+      exact: true,
+    });
+    await expect(heading).toBeVisible();
+    await fits(page, heading);
+    if (width >= 768) {
+      await heading.hover();
+      await expect(page.getByRole("tooltip")).toContainText(names[1]);
+      await page.keyboard.press("Escape");
+    }
+    const url = page.url();
+    const mutations: string[] = [];
+    page.on("request", (req) => {
+      if (!["GET", "HEAD"].includes(req.method())) mutations.push(req.url());
+    });
+    await viewName(page, heading, names[1]);
+    expect(page.url()).toBe(url);
+    expect(mutations).toEqual([]);
+    await capture(page, info, `delegated-detail-${width}`);
+    await rename(request, harness.baseUrl, child, names[1] + " updated", 1);
+    const updated = page.getByRole("button", {
+      name: `View full name: ${names[1]} updated`,
+      exact: true,
+    });
+    await viewName(page, updated, names[1] + " updated");
+    await page.getByRole("button", { name: "Open", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/session/${child}/`));
+  });

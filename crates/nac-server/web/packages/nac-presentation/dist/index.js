@@ -26226,9 +26226,10 @@ function Fk({ sessionId: e, behavior: t }) {
 	}) : null : null;
 	return /* @__PURE__ */ Y(Ax, {
 		listTitle: "Subagents",
-		title: w ? /* @__PURE__ */ Y("span", {
-			className: r(l && "font-medium", w.status === "running" && "text-shimmer-basic"),
-			children: j(w)
+		title: w ? /* @__PURE__ */ Y(ba, {
+			name: j(w),
+			running: w.status === "running",
+			className: r("min-w-0 max-w-full", l && "font-medium")
 		}) : void 0,
 		actions: oe,
 		listClassName: "px-1 py-6",
