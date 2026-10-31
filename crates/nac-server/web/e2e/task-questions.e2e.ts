@@ -282,7 +282,28 @@ test("exact human question survives restart, gates a goal, and resumes its reser
     { kind: "text", stream: "request", text: "The CSV export is complete." },
   );
   await page.getByRole("button", { name: "CSV", exact: true }).click();
+  const answerAcknowledgement = page.waitForResponse(
+    (response) =>
+      response.url() === `${harness.baseUrl}/sessions/${peer}/questions/release-choice/answer` &&
+      response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Send answer", exact: true }).click();
+  const acknowledged = await answerAcknowledgement;
+  expect(acknowledged.ok()).toBe(true);
+  const receipt = await acknowledged.json();
+  // A click and the old source's idle state do not prove answer delivery.
+  // Observe the exact durable obligation before waiting on its admitted run.
+  await expect
+    .poll(async () => {
+      const response = await request.get(
+        `${harness.baseUrl}/sessions/${peer}/questions/release-choice`,
+      );
+      expect(response.ok()).toBe(true);
+      const current = await response.json();
+      expect(current.answer).toEqual(receipt);
+      return current.continuation_state;
+    })
+    .toBe("delivered");
   await waitForRunIdle(request, harness, peer);
   const resolved = (
     await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json()
