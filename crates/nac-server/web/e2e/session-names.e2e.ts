@@ -74,6 +74,7 @@ async function viewName(page: Page, trigger: Locator, name: string) {
   else await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Full session name", exact: true });
   await expect(dialog).toBeVisible();
+  await expect(dialog).toBeInViewport({ ratio: 1 });
   const text = dialog.locator("[data-full-session-name]");
   await expect(text).toHaveText(name);
   expect(
@@ -106,6 +107,24 @@ async function viewName(page: Page, trigger: Locator, name: string) {
   await expect(trigger).toBeFocused();
 }
 async function capture(page: Page, info: TestInfo, name: string) {
+  await page.evaluate(async () => {
+    const { document } = globalThis as unknown as {
+      document: {
+        fonts: { ready: Promise<unknown> };
+        getAnimations(): {
+          effect: { getTiming(): { iterations: number } } | null;
+          finished: Promise<unknown>;
+        }[];
+      };
+    };
+    await document.fonts.ready;
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)),
+    );
+  });
   const cdp = await page.context().newCDPSession(page);
   try {
     const frame = await cdp.send("Page.captureScreenshot", {
@@ -307,6 +326,7 @@ test("extreme current name, rename, navigation and deletion lifetimes", async ({
     await page.getByRole("button", { name: `View full name: ${extreme}`, exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Full session name", exact: true });
     await expect(dialog).toBeVisible();
+    await expect(dialog).toBeInViewport({ ratio: 1 });
     await expect(dialog.locator("[data-full-session-name]")).toHaveText(extreme);
     expect(
       await dialog
