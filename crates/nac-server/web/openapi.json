@@ -12473,9 +12473,19 @@
           "queue"
         ]
       },
+      "InboxItemOrigin": {
+        "type": "string",
+        "description": "Who admitted an inbox item. `input` is anything a person, MCP client or\nNAC automation submitted; the other values are owned delegated results,\nrecorded durably when their generation settled. Only `input` items accept\nthe public update and cancel operations.",
+        "enum": [
+          "input",
+          "traditional_child",
+          "managed_orchestrator"
+        ]
+      },
       "InboxItemResponse": {
         "type": "object",
         "required": [
+          "origin",
           "id",
           "session_id",
           "delivery",
@@ -12519,6 +12529,9 @@
           "id": {
             "type": "integer",
             "format": "int64"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/InboxItemOrigin"
           },
           "prompt": {
             "type": "string"

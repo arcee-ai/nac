@@ -238,6 +238,7 @@ export declare function useSessionInbox(sessionId: string, enabled: boolean): im
     delivered_run_id?: string | null;
     delivery: import("../../types/openapi.generated").components["schemas"]["InboxDelivery"];
     id: number;
+    origin: import("../../types/openapi.generated").components["schemas"]["InboxItemOrigin"];
     prompt: string;
     session_id: string;
     status: import("../../types/openapi.generated").components["schemas"]["InboxStatus"];
@@ -254,6 +255,7 @@ export declare function useCreateInboxItem(): import("@tanstack/react-query").Us
     delivered_run_id?: string | null;
     delivery: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxDelivery"];
     id: number;
+    origin: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxItemOrigin"];
     prompt: string;
     session_id: string;
     status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxStatus"];
@@ -274,6 +276,7 @@ export declare function useUpdateInboxItem(): import("@tanstack/react-query").Us
     delivered_run_id?: string | null;
     delivery: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxDelivery"];
     id: number;
+    origin: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxItemOrigin"];
     prompt: string;
     session_id: string;
     status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxStatus"];
@@ -295,6 +298,7 @@ export declare function useCancelInboxItem(): import("@tanstack/react-query").Us
     delivered_run_id?: string | null;
     delivery: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxDelivery"];
     id: number;
+    origin: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxItemOrigin"];
     prompt: string;
     session_id: string;
     status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxStatus"];

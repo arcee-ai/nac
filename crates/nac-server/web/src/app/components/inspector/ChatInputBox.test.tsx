@@ -111,6 +111,7 @@ function goal(status: SessionGoalRecord["status"] = "active"): SessionGoalRecord
 
 function inbox(delivery: InboxItem["delivery"] = "steer"): InboxItem {
   return {
+    origin: "input",
     id: 7,
     session_id: "session",
     delivery,
@@ -898,6 +899,35 @@ describe("direct inbox and goal journeys", () => {
     });
     expect(screen.queryByRole("region", { name: "Terminal selection" })).toBeNull();
     expect(screen.getByLabelText("Pending messages").textContent).toContain('"text":"copied"');
+  });
+
+  it("lists only submitted input and counts delegated results without controls", async () => {
+    const human = { ...inbox("queue"), id: 8, prompt: "human follow-up" };
+    // Identical text never makes a person's item internal, or vice versa.
+    const childResult = { ...inbox(), id: 9, origin: "traditional_child" as const };
+    const orchestratorResult = {
+      ...inbox("queue"),
+      id: 10,
+      prompt: "human follow-up",
+      origin: "managed_orchestrator" as const,
+    };
+    composer({ behavior: "direct", inboxItems: [childResult, human, orchestratorResult] });
+    const note = () => screen.getByRole("status", { name: "Pending subagent results" });
+
+    const pending = screen.getByLabelText("Pending messages");
+    expect(pending.textContent).toContain("human follow-up");
+    expect(pending.textContent).not.toContain("pending instruction");
+    expect(screen.getAllByRole("button", { name: /^Change to / })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(1);
+    expect(note().textContent).toBe("2 subagent results pending");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(fakes.cancelInboxItem).toHaveBeenCalledWith("session", 8, 2));
+
+    cleanup();
+    composer({ behavior: "direct", inboxItems: [childResult] });
+    expect(screen.queryByLabelText("Pending messages")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(note().textContent).toBe("1 subagent result pending");
   });
 
   it("surfaces pending-message edit and cancellation failures", async () => {

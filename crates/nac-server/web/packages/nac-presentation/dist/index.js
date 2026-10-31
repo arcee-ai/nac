@@ -17869,7 +17869,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 	G(() => {
 		S(Be(t));
 	}, [S, t]);
-	let nt = a(t, n, P || me ? Qe : null, $e), rt = n?.summary.backend ?? t?.metadata.backend ?? null, ot = Rt(), st = Be(t), ct = nt.usage?.total_tokens || st?.total_tokens || null, lt = _(), ut = v(), dt = c(n?.summary), ft = s(dt), pt = at(), mt = Nn(n?.summary) === "SSH", ht = P && Te && !De, _t = P && we === "orchestrator" && !De, vt = ht || _t, yt = ee || ge.isPending || _e.isPending || L.isPending || ye.isPending || be.isPending || xe.isPending || Se.isPending || Me.isPending || Ne.isPending || Pe.isPending, bt = yt || me || P && !vt, xt = !!k.trim() && !bt, St = (ke.data ?? []).filter((e) => e.status === "pending"), Ct = async (t, n, r) => {
+	let nt = a(t, n, P || me ? Qe : null, $e), rt = n?.summary.backend ?? t?.metadata.backend ?? null, ot = Rt(), st = Be(t), ct = nt.usage?.total_tokens || st?.total_tokens || null, lt = _(), ut = v(), dt = c(n?.summary), ft = s(dt), pt = at(), mt = Nn(n?.summary) === "SSH", ht = P && Te && !De, _t = P && we === "orchestrator" && !De, vt = ht || _t, yt = ee || ge.isPending || _e.isPending || L.isPending || ye.isPending || be.isPending || xe.isPending || Se.isPending || Me.isPending || Ne.isPending || Pe.isPending, bt = yt || me || P && !vt, xt = !!k.trim() && !bt, St = (ke.data ?? []).filter((e) => e.status === "pending"), Ct = St.filter((e) => e.origin === "input"), wt = St.length - Ct.length, Tt = async (t, n, r) => {
 		try {
 			await xe.mutateAsync({
 				sessionId: e,
@@ -17880,7 +17880,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 		} catch (e) {
 			F.error(`Unable to change pending message: ${Vt(Ud(e))}`);
 		}
-	}, wt = async (t, n) => {
+	}, Et = async (t, n) => {
 		try {
 			await Se.mutateAsync({
 				sessionId: e,
@@ -17890,15 +17890,15 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 		} catch (e) {
 			F.error(`Unable to cancel pending message: ${Vt(Ud(e))}`);
 		}
-	}, Tt = W(() => {
+	}, Dt = W(() => {
 		let e = qe.current;
 		e && (e.style.height = `${pe}px`, e.style.height = `${Math.min(e.scrollHeight, Sb)}px`);
 	}, [pe]);
 	pi(() => {
 		let e = Ye.current, t = qe.current;
-		e !== null && t && (Ye.current = null, Tt(), t.focus(), t.setSelectionRange(e, e));
-	}, [Tt, k]);
-	let Et = pb({
+		e !== null && t && (Ye.current = null, Dt(), t.focus(), t.setSelectionRange(e, e));
+	}, [Dt, k]);
+	let Ot = pb({
 		prompts: K(() => {
 			let e = [];
 			for (let n of t?.messages ?? []) n.role === "user" && e.push(qt(n.content));
@@ -17908,87 +17908,87 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 		enabled: !j,
 		setValue: A,
 		textareaRef: qe,
-		afterCommit: Tt
-	}), Dt = Et.reset, Ot = fi();
-	G(() => Dt(), [e, Dt]);
-	let kt = K(() => Cb(k), [k]), At = K(() => {
-		if (!kt || !Ve) return [];
-		let e = kt.prefix.toLocaleLowerCase();
+		afterCommit: Dt
+	}), kt = Ot.reset, At = fi();
+	G(() => kt(), [e, kt]);
+	let jt = K(() => Cb(k), [k]), Mt = K(() => {
+		if (!jt || !Ve) return [];
+		let e = jt.prefix.toLocaleLowerCase();
 		return Ve.filter((t) => (t.name !== "goal" || Te) && t.name.toLocaleLowerCase().startsWith(e));
 	}, [
 		Ve,
-		kt,
+		jt,
 		Te
-	]), jt = K(() => yb(k, ie.start, ie.end, Ge ?? []), [
+	]), Nt = K(() => yb(k, ie.start, ie.end, Ge ?? []), [
 		ie,
 		Ge,
 		k
-	]), Mt = K(() => {
-		if (kt !== null || Ge !== void 0 || ie.start === 0 || ie.start !== ie.end) return null;
+	]), Pt = K(() => {
+		if (jt !== null || Ge !== void 0 || ie.start === 0 || ie.start !== ie.end) return null;
 		let e = k.lastIndexOf("$", ie.start - 1);
 		return e === -1 ? null : {
 			start: e,
 			end: ie.end
 		};
 	}, [
-		kt,
+		jt,
 		ie,
 		Ge,
 		k
-	]), Nt = kt ? "slash" : jt || Mt ? "skill" : null, Pt = K(() => Nt === "slash" ? At.map((e) => ({
+	]), Ft = jt ? "slash" : Nt || Pt ? "skill" : null, It = K(() => Ft === "slash" ? Mt.map((e) => ({
 		kind: "slash",
 		key: e.command,
 		name: `/${e.name}`,
 		description: e.description,
 		definition: e
-	})) : Nt === "skill" && jt ? jt.entries.map((e) => ({
+	})) : Ft === "skill" && Nt ? Nt.entries.map((e) => ({
 		kind: "skill",
 		key: e.name,
 		name: `$${e.name}`,
 		description: e.description,
 		definition: e
 	})) : [], [
-		At,
-		jt,
-		Nt
-	]), Ft = Nt === "slash" ? Tb("slash", k, 0, k.length) : Nt === "skill" ? Tb("skill", k, jt?.start ?? Mt?.start ?? ie.start, jt?.end ?? Mt?.end ?? ie.end) : null, It = ne && Nt !== null && Ft !== oe, Lt = Math.min(ce, Math.max(Pt.length - 1, 0)), zt = de !== null && de < Pt.length ? de : Lt, Bt = It ? Pt[zt] : void 0, Ht = Bt ? `${Ze}-option-${zt}` : void 0, Ut = W((e) => {
-		Bt && e.preventDefault();
-	}, [Bt]);
+		Mt,
+		Nt,
+		Ft
+	]), Lt = Ft === "slash" ? Tb("slash", k, 0, k.length) : Ft === "skill" ? Tb("skill", k, Nt?.start ?? Pt?.start ?? ie.start, Nt?.end ?? Pt?.end ?? ie.end) : null, zt = ne && Ft !== null && Lt !== oe, Bt = Math.min(ce, Math.max(It.length - 1, 0)), Ht = de !== null && de < It.length ? de : Bt, Ut = zt ? It[Ht] : void 0, Wt = Ut ? `${Ze}-option-${Ht}` : void 0, Gt = W((e) => {
+		Ut && e.preventDefault();
+	}, [Ut]);
 	G(() => {
-		It && Xe.current[Lt]?.scrollIntoView({ block: "nearest" });
+		zt && Xe.current[Bt]?.scrollIntoView({ block: "nearest" });
 	}, [
-		Lt,
-		It,
-		Pt
+		Bt,
+		zt,
+		It
 	]);
-	let Wt = W(() => {
-		se(Ft), fe(null);
-	}, [Ft]), Gt = W((e) => {
+	let Kt = W(() => {
+		se(Lt), fe(null);
+	}, [Lt]), Jt = W((e) => {
 		let t, n, r;
 		if (e.kind === "slash") {
-			if (!kt) return;
-			t = `${kt.leadingWhitespace}/${e.definition.name}${e.definition.accepts_arguments ? " " : ""}`, n = t.length, r = Tb("slash", t, 0, t.length);
-		} else {
 			if (!jt) return;
+			t = `${jt.leadingWhitespace}/${e.definition.name}${e.definition.accepts_arguments ? " " : ""}`, n = t.length, r = Tb("slash", t, 0, t.length);
+		} else {
+			if (!Nt) return;
 			let i = `$${e.definition.name}`;
-			t = `${k.slice(0, jt.start)}${i}${k.slice(jt.end)}`, n = jt.start + i.length, r = Tb("skill", t, jt.start, n);
+			t = `${k.slice(0, Nt.start)}${i}${k.slice(Nt.end)}`, n = Nt.start + i.length, r = Tb("skill", t, Nt.start, n);
 		}
-		t === k ? (Ye.current = null, Tt(), qe.current?.focus(), qe.current?.setSelectionRange(n, n)) : (Ye.current = n, A(t)), ae({
+		t === k ? (Ye.current = null, Dt(), qe.current?.focus(), qe.current?.setSelectionRange(n, n)) : (Ye.current = n, A(t)), ae({
 			start: n,
 			end: n
 		}), se(r), fe(null);
 	}, [
-		kt,
-		Tt,
-		A,
 		jt,
+		Dt,
+		A,
+		Nt,
 		k
-	]), Kt = K(() => vb(k, Ge ?? []), [Ge, k]), Jt = !Et.active && Kt.some((e) => e.skillName !== null);
+	]), Yt = K(() => vb(k, Ge ?? []), [Ge, k]), Xt = !Ot.active && Yt.some((e) => e.skillName !== null);
 	pi(() => {
 		let e = qe.current, t = Je.current;
-		Jt && e && t && (t.scrollTop = e.scrollTop, t.scrollLeft = e.scrollLeft);
-	}, [Jt, k]), G(() => Tt(), [Tt, k]);
-	let Yt = W(async () => {
+		Xt && e && t && (t.scrollTop = e.scrollTop, t.scrollLeft = e.scrollLeft);
+	}, [Xt, k]), G(() => Dt(), [Dt, k]);
+	let Zt = W(async () => {
 		if (dt && !pt.isPending) try {
 			await pt.mutateAsync(dt), d(dt);
 		} catch (e) {
@@ -18000,7 +18000,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 		d,
 		l,
 		F
-	]), Xt = W(async (t) => {
+	]), Qt = W(async (t) => {
 		if (!Te) throw Error("Durable goals are available only in direct chats");
 		let n = C(e), r = Ae;
 		if (r === void 0) {
@@ -18045,14 +18045,14 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 		je,
 		e,
 		Ne
-	]), Zt = W(async (n, r) => {
+	]), $t = W(async (n, r) => {
 		let i = n ?? k, a = cy(i), s = a.kind === "prompt" ? a.prompt.trim() : i.trim();
 		if (!s || bt) return;
 		let c = n === void 0 || r !== void 0, l = O.get(e), u = C(e), d = () => {
 			c && O.acknowledge(e, l) && u() && (ae({
 				start: 0,
 				end: 0
-			}), Dt(), qe.current && (qe.current.style.height = `${pe}px`));
+			}), kt(), qe.current && (qe.current.style.height = `${pe}px`));
 		}, f = O.claimSubmission(e);
 		if (f) try {
 			if (a.kind === "command") {
@@ -18094,7 +18094,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 			}
 			if (c?.command === "goal") {
 				try {
-					await Xt(s) !== !1 && d();
+					await Qt(s) !== !1 && d();
 				} catch (e) {
 					if (!u()) return;
 					F.error(`Goal command failed: ${nf(Ud(e))}`);
@@ -18138,7 +18138,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 		bt,
 		C,
 		e,
-		Dt,
+		kt,
 		pe,
 		Ve,
 		We,
@@ -18153,14 +18153,14 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 		ye,
 		b,
 		rt,
-		Xt,
+		Qt,
 		ht,
 		_t,
 		be,
 		L,
 		ge
 	]);
-	G(() => w((e) => void Zt(e)), [w, Zt]), G(() => {
+	G(() => w((e) => void $t(e)), [w, $t]), G(() => {
 		let t, n = T(e, (e) => {
 			A(e), t !== void 0 && cancelAnimationFrame(t), t = requestAnimationFrame(() => qe.current?.focus());
 		});
@@ -18172,18 +18172,18 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 		T,
 		A
 	]);
-	let Qt = W(async () => {
+	let en = W(async () => {
 		await he.stopRun(e);
-	}, [he, e]), $t = !!k.trim(), en = (P || me) && !$t, tn = /* @__PURE__ */ X(xy, {
+	}, [he, e]), tn = !!k.trim(), nn = (P || me) && !tn, rn = /* @__PURE__ */ X(xy, {
 		compact: j,
-		type: en ? "button" : "submit",
-		disabled: me || !en && !xt,
+		type: nn ? "button" : "submit",
+		disabled: me || !nn && !xt,
 		loading: me,
-		"aria-label": me ? "Stopping run" : P && !$t ? "Stop run" : vt ? "Steer active run" : "Send",
-		onPointerDown: Ut,
-		onClick: P && !$t && !me ? () => void Qt() : void 0,
-		children: /* @__PURE__ */ X(R, { iconName: en ? H.Stop : H.ArrowTop })
-	}), nn = Te && (!j || !ne && !k), rn = j ? nn ? "py-2 pr-2 pl-3" : "px-3 py-2" : nn ? "py-3 pr-2 pl-4" : "px-4 py-3", an = It ? Nt === "slash" ? Ve === void 0 ? He ? "Slash commands unavailable" : "Loading slash commands" : Pt.length ? `${Pt.length} slash ${Pt.length === 1 ? "command" : "commands"} available` : "No matching commands" : Ge === void 0 ? Ke ? "Skills unavailable" : "Loading skills" : `${Pt.length} ${Pt.length === 1 ? "skill" : "skills"} available` : "", on = /* @__PURE__ */ Z(yy, {
+		"aria-label": me ? "Stopping run" : P && !tn ? "Stop run" : vt ? "Steer active run" : "Send",
+		onPointerDown: Gt,
+		onClick: P && !tn && !me ? () => void en() : void 0,
+		children: /* @__PURE__ */ X(R, { iconName: nn ? H.Stop : H.ArrowTop })
+	}), an = Te && (!j || !ne && !k), on = j ? an ? "py-2 pr-2 pl-3" : "px-3 py-2" : an ? "py-3 pr-2 pl-4" : "px-4 py-3", sn = zt ? Ft === "slash" ? Ve === void 0 ? He ? "Slash commands unavailable" : "Loading slash commands" : It.length ? `${It.length} slash ${It.length === 1 ? "command" : "commands"} available` : "No matching commands" : Ge === void 0 ? Ke ? "Skills unavailable" : "Loading skills" : `${It.length} ${It.length === 1 ? "skill" : "skills"} available` : "", cn = /* @__PURE__ */ Z(yy, {
 		compact: j,
 		outline: ne ? "focus" : void 0,
 		children: [/* @__PURE__ */ Z("div", {
@@ -18194,41 +18194,41 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 					role: "status",
 					"aria-live": "polite",
 					"aria-atomic": "true",
-					children: an
+					children: sn
 				}),
-				Jt ? /* @__PURE__ */ Z("div", {
+				Xt ? /* @__PURE__ */ Z("div", {
 					ref: Je,
 					"aria-hidden": "true",
-					className: I("pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-medium text-input [scrollbar-gutter:stable]", rn),
-					children: [Db(Kt), k.endsWith("\n") ? " " : null]
+					className: I("pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-medium text-input [scrollbar-gutter:stable]", on),
+					children: [Db(Yt), k.endsWith("\n") ? " " : null]
 				}) : null,
 				/* @__PURE__ */ X("textarea", {
 					ref: qe,
-					className: I("relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap focus:placeholder:text-transparent [scrollbar-gutter:stable]", rn),
+					className: I("relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap focus:placeholder:text-transparent [scrollbar-gutter:stable]", on),
 					rows: 1,
 					role: "combobox",
 					"aria-label": "Message",
 					"aria-autocomplete": "list",
 					"aria-haspopup": "listbox",
-					"aria-expanded": It,
-					"aria-controls": It ? Ze : void 0,
-					"aria-activedescendant": Ht,
-					"aria-describedby": Et.active ? Ot : void 0,
+					"aria-expanded": zt,
+					"aria-controls": zt ? Ze : void 0,
+					"aria-activedescendant": Wt,
+					"aria-describedby": Ot.active ? At : void 0,
 					enterKeyHint: j ? "enter" : void 0,
-					placeholder: Et.active ? "" : bb,
+					placeholder: Ot.active ? "" : bb,
 					spellCheck: !1,
 					value: k,
 					style: {
 						minHeight: `${pe}px`,
 						maxHeight: `${Sb}px`,
-						color: Jt ? "transparent" : void 0,
-						caretColor: Jt ? "var(--color-text-input)" : void 0
+						color: Xt ? "transparent" : void 0,
+						caretColor: Xt ? "var(--color-text-input)" : void 0
 					},
 					onChange: (e) => {
-						e.target.value !== k && se(null), ue(0), fe(null), Et.onValueChange(e.target.value), A(e.target.value), ae({
+						e.target.value !== k && se(null), ue(0), fe(null), Ot.onValueChange(e.target.value), A(e.target.value), ae({
 							start: e.target.selectionStart,
 							end: e.target.selectionEnd
-						}), Tt();
+						}), Dt();
 					},
 					onSelect: (e) => {
 						let t = {
@@ -18247,41 +18247,41 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 						});
 					},
 					onBlur: () => {
-						re(!1), fe(null), Dt();
+						re(!1), fe(null), kt();
 					},
 					onKeyDown: (e) => {
 						if (!e.nativeEvent.isComposing && (e.key !== "Enter" || !j || e.metaKey || e.ctrlKey)) {
-							if (It && !e.shiftKey) {
+							if (zt && !e.shiftKey) {
 								if (e.key === "Escape") {
-									e.preventDefault(), Wt();
+									e.preventDefault(), Kt();
 									return;
 								}
-								if ((e.key === "ArrowDown" || e.key === "ArrowUp") && Pt.length) {
-									e.preventDefault(), ue(e.key === "ArrowDown" ? Math.min(zt + 1, Pt.length - 1) : Math.max(zt - 1, 0)), fe(null);
+								if ((e.key === "ArrowDown" || e.key === "ArrowUp") && It.length) {
+									e.preventDefault(), ue(e.key === "ArrowDown" ? Math.min(Ht + 1, It.length - 1) : Math.max(Ht - 1, 0)), fe(null);
 									return;
 								}
-								if (e.key === "Tab" && Bt) {
-									e.preventDefault(), Gt(Bt);
+								if (e.key === "Tab" && Ut) {
+									e.preventDefault(), Jt(Ut);
 									return;
 								}
-								if (e.key === "Enter" && (Bt || Nt === "slash")) {
-									e.preventDefault(), Bt && Gt(Bt);
+								if (e.key === "Enter" && (Ut || Ft === "slash")) {
+									e.preventDefault(), Ut && Jt(Ut);
 									return;
 								}
 							}
-							Et.onKeyDown(e) || e.key === "Enter" && (e.shiftKey || (e.preventDefault(), Zt()));
+							Ot.onKeyDown(e) || e.key === "Enter" && (e.shiftKey || (e.preventDefault(), $t()));
 						}
 					}
 				}),
-				Et.active ? /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X("span", {
-					id: Ot,
+				Ot.active ? /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X("span", {
+					id: At,
 					className: "sr-only",
 					children: "Press Tab to take this prompt, Escape to leave it, or start typing to dismiss it"
 				}), /* @__PURE__ */ Z("div", {
-					className: I("pointer-events-none absolute inset-0 flex items-center gap-2", rn),
+					className: I("pointer-events-none absolute inset-0 flex items-center gap-2", on),
 					children: [/* @__PURE__ */ X("span", {
 						className: "min-w-0 truncate text-medium text-input-placeholder",
-						children: Et.previewText
+						children: Ot.previewText
 					}), /* @__PURE__ */ X(Bn, {
 						keys: ["tab"],
 						spelled: !0,
@@ -18289,35 +18289,35 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 					})]
 				})] }) : null
 			]
-		}), nn ? /* @__PURE__ */ X($y, {
+		}), an ? /* @__PURE__ */ X($y, {
 			compact: j,
 			sessionId: e,
 			onOpen: ze
 		}) : null]
-	}), sn = /* @__PURE__ */ X("div", {
+	}), un = /* @__PURE__ */ X("div", {
 		id: Ze,
 		role: "listbox",
-		"aria-label": Nt === "skill" ? "Skills" : "Slash commands",
-		children: Nt === "slash" && Ve === void 0 ? /* @__PURE__ */ X("div", {
+		"aria-label": Ft === "skill" ? "Skills" : "Slash commands",
+		children: Ft === "slash" && Ve === void 0 ? /* @__PURE__ */ X("div", {
 			className: "px-3 py-2 text-small text-basic-secondary",
 			children: He ? "Slash commands unavailable" : "Loading commands…"
-		}) : Nt === "skill" && Ge === void 0 ? /* @__PURE__ */ X("div", {
+		}) : Ft === "skill" && Ge === void 0 ? /* @__PURE__ */ X("div", {
 			className: "px-3 py-2 text-small text-basic-secondary",
 			children: Ke ? "Skills unavailable" : "Loading skills…"
-		}) : Pt.length ? Pt.map((e, t) => /* @__PURE__ */ Z("button", {
+		}) : It.length ? It.map((e, t) => /* @__PURE__ */ Z("button", {
 			id: `${Ze}-option-${t}`,
 			ref: (e) => {
 				Xe.current[t] = e;
 			},
 			type: "button",
 			role: "option",
-			"aria-selected": t === zt,
+			"aria-selected": t === Ht,
 			tabIndex: -1,
-			className: I("flex min-h-10 w-full items-center gap-3 rounded-[4px] px-3 py-2 text-left", t === zt ? "btn-ghost-highlighted" : "btn-ghost"),
+			className: I("flex min-h-10 w-full items-center gap-3 rounded-[4px] px-3 py-2 text-left", t === Ht ? "btn-ghost-highlighted" : "btn-ghost"),
 			onPointerDown: (e) => e.preventDefault(),
 			onPointerMove: () => fe(t),
 			onPointerLeave: () => fe((e) => e === t ? null : e),
-			onClick: () => Gt(e),
+			onClick: () => Jt(e),
 			children: [/* @__PURE__ */ X("span", {
 				className: "code code-small shrink-0 text-basic-primary",
 				children: e.name
@@ -18329,10 +18329,10 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 			className: "px-3 py-2 text-small text-basic-secondary",
 			children: "No matching commands"
 		})
-	}), cn = /* @__PURE__ */ X(x, {
-		open: It,
-		onClose: Wt,
-		content: sn,
+	}), dn = /* @__PURE__ */ X(x, {
+		open: zt,
+		onClose: Kt,
+		content: un,
 		placement: M.TopRight,
 		sticky: !0,
 		closeOnEscape: !1,
@@ -18340,7 +18340,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 		className: "min-w-0 flex-1",
 		size: "w-[min(400px,calc(100vw-16px))]",
 		panelClassName: "max-h-[min(40vh,320px)] overflow-y-auto",
-		children: on
+		children: cn
 	});
 	return Oe ? De && Ee ? /* @__PURE__ */ X(ub, {
 		parentSessionId: Ee.parent_session_id,
@@ -18351,7 +18351,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 	}) : /* @__PURE__ */ Z(vy, {
 		compact: j,
 		onSubmit: (e) => {
-			e.preventDefault(), !Fe && (Bt ? Gt(Bt) : Zt());
+			e.preventDefault(), !Fe && (Ut ? Jt(Ut) : $t());
 		},
 		children: [
 			Fe && Te ? /* @__PURE__ */ X(eb, {
@@ -18360,15 +18360,15 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 				onClose: () => Ie(!1)
 			}) : /* @__PURE__ */ Z("div", {
 				className: "flex items-end gap-2",
-				children: [cn, tn]
+				children: [dn, rn]
 			}),
-			St.length ? /* @__PURE__ */ Z("div", {
+			Ct.length ? /* @__PURE__ */ Z("div", {
 				className: "flex flex-col gap-2",
 				"aria-label": "Pending messages",
 				children: [/* @__PURE__ */ X("div", {
 					className: "tag-label uppercase text-basic-secondary",
 					children: "Pending messages"
-				}), St.map((t) => /* @__PURE__ */ Z("div", {
+				}), Ct.map((t) => /* @__PURE__ */ Z("div", {
 					className: "flex flex-wrap items-center gap-2 rounded-[4px] border border-border-primary px-3 py-2",
 					children: [
 						/* @__PURE__ */ X("span", {
@@ -18388,7 +18388,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 							size: U.Small,
 							variant: B.Ghost,
 							disabled: yt,
-							onClick: () => void Ct(t.id, t.version, t.delivery === "steer" ? "queue" : "steer"),
+							onClick: () => void Tt(t.id, t.version, t.delivery === "steer" ? "queue" : "steer"),
 							children: ["Change to ", t.delivery === "steer" ? "queue" : "steer"]
 						}),
 						/* @__PURE__ */ X(z, {
@@ -18396,11 +18396,17 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 							size: U.Small,
 							variant: B.GhostDestructive,
 							disabled: yt,
-							onClick: () => void wt(t.id, t.version),
+							onClick: () => void Et(t.id, t.version),
 							children: "Cancel"
 						})
 					]
 				}, t.id))]
+			}) : null,
+			wt ? /* @__PURE__ */ X("div", {
+				role: "status",
+				"aria-label": "Pending subagent results",
+				className: "text-small text-basic-secondary",
+				children: wt === 1 ? "1 subagent result pending" : `${wt} subagent results pending`
 			}) : null,
 			/* @__PURE__ */ Z("div", {
 				className: I("flex flex-wrap items-center gap-y-1", j ? "gap-x-2" : "gap-x-2.5"),
@@ -18412,7 +18418,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 							size: U.Small,
 							variant: B.Secondary,
 							disabled: !xt,
-							onClick: () => void Zt(k, "queue"),
+							onClick: () => void $t(k, "queue"),
 							children: "Queue Next"
 						}) : null,
 						/* @__PURE__ */ X("div", {
@@ -18426,7 +18432,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 						}),
 						mt ? /* @__PURE__ */ X(jm, {
 							state: ft === "connected" ? "connected" : "reconnect",
-							onReconnect: () => void Yt()
+							onReconnect: () => void Zt()
 						}) : null
 					]
 				}), /* @__PURE__ */ Z("div", {
@@ -18484,7 +18490,7 @@ function Ob({ sessionId: e, snapshot: t, entry: n }) {
 				variant: B.GhostDestructive,
 				content: g.Text,
 				"aria-label": "Stop run",
-				onClick: () => void Qt(),
+				onClick: () => void en(),
 				children: "Stop"
 			})]
 		})
