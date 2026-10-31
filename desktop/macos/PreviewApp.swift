@@ -12,6 +12,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private(set) var failure: String?
     private(set) var stopping = false
     private var startup: Task<Void, Never>?
+    private var workspaceIncarnation: String?
+    private var navigationIncarnations: [WKNavigation: String] = [:]
     private var status: NSTextField!
     #if PREVIEW_SMOKE
     var smoke: PreviewSmoke?
@@ -65,8 +67,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             guard !stopping else { return }
             let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/nac-web")
             engine.onReady = { [weak self] url in
-                guard let self, !self.stopping, self.failure == nil else { return }
-                self.startup = Task { await self.load(url) }
+                guard let self, !self.stopping, self.failure == nil,
+                      let incarnation = self.engine.receipt?.incarnation else { return }
+                self.startup = Task { await self.load(url, incarnation: incarnation) }
             }
             engine.onExit = { [weak self] status in
                 self?.fail("The bundled engine stopped (status \(status)). Close this window and relaunch the preview.")
@@ -76,18 +79,38 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         } catch { if !stopping { fail(error.localizedDescription) } }
     }
 
-    private func load(_ url: URL) async {
+    private func load(_ url: URL, incarnation: String) async {
         do {
             guard let profile else { return }
             let project = try await FixtureBootstrap.seed(base: url, profile: profile, provider: provider)
-            guard !stopping, failure == nil, engine.pid > 0 else { return }
+            #if PREVIEW_SMOKE
+            try await smoke?.beforeLoad()
+            #endif
+            guard !stopping, failure == nil, engine.pid > 0,
+                  engine.receipt?.incarnation == incarnation else { return }
             baseURL = url
-            webView.load(URLRequest(url: URL(string: "#/project/\(project)", relativeTo: url)!.absoluteURL))
-        } catch { if !stopping { fail(error.localizedDescription) } }
+            workspaceIncarnation = incarnation
+            if let navigation = webView.load(URLRequest(url: URL(string: "#/project/\(project)", relativeTo: url)!.absoluteURL)) {
+                navigationIncarnations[navigation] = incarnation
+            }
+        } catch {
+            if !stopping, engine.receipt?.incarnation == incarnation { fail(error.localizedDescription) }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard let navigation, navigationIncarnations[navigation] == nil,
+              let incarnation = workspaceIncarnation, engine.receipt?.incarnation == incarnation,
+              let url = webView.url, let baseURL, url.scheme == baseURL.scheme,
+              url.host == baseURL.host, url.port == baseURL.port else { return }
+        // Includes ordinary WebView reloads while retaining the launch binding.
+        navigationIncarnations[navigation] = incarnation
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard !stopping, failure == nil else { return }
+        guard let navigation,
+              let incarnation = navigationIncarnations.removeValue(forKey: navigation),
+              !stopping, failure == nil, incarnation == engine.receipt?.incarnation else { return }
         status.isHidden = true
         webView.isHidden = false
     }
@@ -103,7 +126,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        if !stopping { fail("Could not load the bundled workspace: \(error.localizedDescription)") }
+        guard let navigation else { return }
+        let incarnation = navigationIncarnations.removeValue(forKey: navigation)
+        if !stopping, incarnation != nil, incarnation == engine.receipt?.incarnation {
+            fail("Could not load the bundled workspace: \(error.localizedDescription)")
+        }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         if !stopping { fail("The workspace renderer stopped. Close this window and relaunch the preview.") }

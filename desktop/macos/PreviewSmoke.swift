@@ -10,6 +10,7 @@ final class PreviewSmoke {
     private var evidence: [String: Any] = [:]
     private var passed = false
     private var cleanupError: String?
+    private var pausedFirstLoad = false
 
     init(app: PreviewApp) {
         self.app = app
@@ -47,7 +48,7 @@ final class PreviewSmoke {
             do {
                 if ["normal", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
                     if scenario == "stale-launch" {
-                        try await waitJS("first workspace", "return !!document.querySelector('[role=dialog]');")
+                        try await wait("first launch load barrier") { self.pausedFirstLoad }
                         let previous = app.engine.receipt!.incarnation
                         await withCheckedContinuation { continuation in app.engine.stop { continuation.resume() } }
                         try app.engine.launch(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/nac-web"),
@@ -55,7 +56,10 @@ final class PreviewSmoke {
                         try await wait("new launch receipt") { self.app.engine.receipt?.incarnation != nil && self.app.engine.receipt?.incarnation != previous }
                         let successor = app.engine.pid
                         try await Task.sleep(nanoseconds: 31_000_000_000)
-                        guard app.engine.pid == successor, app.failure == nil else { throw PreviewError.message("Stale launch callback affected successor") }
+                        guard app.engine.pid == successor, app.failure == nil,
+                              app.baseURL?.absoluteString == app.engine.receipt?.endpoint else {
+                            throw PreviewError.message("Stale launch callback affected successor")
+                        }
                         evidence["stale_callbacks_fenced"] = true
                     }
                     try await journey()
@@ -137,6 +141,13 @@ final class PreviewSmoke {
 
     func configure(_ engine: PreviewEngine) {
         engine.holdHello = ["parent-loss-startup", "channel-loss-startup"].contains(scenario)
+    }
+
+    func beforeLoad() async throws {
+        if scenario == "stale-launch" && !pausedFirstLoad {
+            pausedFirstLoad = true
+            try await Task.sleep(nanoseconds: 5_000_000_000)
+        }
     }
 
     private func lifecycle() async throws {
