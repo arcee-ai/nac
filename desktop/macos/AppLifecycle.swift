@@ -64,7 +64,11 @@ final class AppLifecycle {
     /// Startup/retry records a launch before asynchronous preparation begins.
     /// Once stopping starts, no successor may take over a late stop callback.
     func beginLaunch() -> UUID? {
-        guard phase == .running, launch == nil else { return nil }
+        guard launch == nil else { return nil }
+        switch phase {
+        case .running, .confirming: break
+        case .stopping, .shutdownFailed, .finished: return nil
+        }
         let next = UUID()
         launch = next
         return next

@@ -69,12 +69,31 @@ enum AppLifecycleTests {
     @MainActor
     static func main() {
         closeAndCancelPreserveOwners()
+        confirmationDoesNotDiscardScheduledStartup()
         onlyCompleteIdleEvidenceSkipsConfirmation()
         slowShutdownIsOnceAndWaitsForExit()
         childExitWhileConfirmingAndLateAnswer()
         timeoutDoesNotClaimCleanupOrResendStop()
         generationFences()
         print("App lifecycle: close/reopen, activity, cancel/stop, reentrancy, exit, timeout and stale callbacks passed.")
+    }
+
+    @MainActor
+    private static func confirmationDoesNotDiscardScheduledStartup() {
+        // The app/Retry scheduled its startup task, then Quit showed a sheet
+        // before that task recorded its launch. Cancel must not strand it.
+        let lifecycle = AppLifecycle()
+        guard case .confirm(let confirmation) = lifecycle.requestQuit(activity: .init()),
+              let launch = lifecycle.beginLaunch() else { preconditionFailure("Confirmation discarded startup") }
+        precondition(lifecycle.phase == .confirming(confirmation))
+        precondition(lifecycle.answer(confirmation, stop: false) == .cancel)
+        precondition(lifecycle.launch == launch && lifecycle.phase == .running)
+        precondition(lifecycle.beginLaunch() == nil, "Cancel must not replay startup")
+
+        let stoppedBeforeStartup = AppLifecycle()
+        guard case .confirm(let stopConfirmation) = stoppedBeforeStartup.requestQuit(activity: .init()),
+              case .stop = stoppedBeforeStartup.answer(stopConfirmation, stop: true) else { preconditionFailure() }
+        precondition(stoppedBeforeStartup.beginLaunch() == nil, "Stopped startup launched a successor")
     }
 
     @MainActor
