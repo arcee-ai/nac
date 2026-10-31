@@ -12135,6 +12135,7 @@ function Cg() {
 				children: [/* @__PURE__ */ Y(Qt, {
 					content: H.Icon,
 					className: "!size-11 shrink-0",
+					buttonClassName: "!size-11",
 					"aria-label": "All projects",
 					onClick: () => t(hn.list()),
 					children: /* @__PURE__ */ Y(Cu, {
@@ -12150,6 +12151,7 @@ function Cg() {
 			a ? /* @__PURE__ */ Y(Qt, {
 				content: H.Icon,
 				className: "!size-11 shrink-0",
+				buttonClassName: "!size-11",
 				"aria-label": "Open panel",
 				onClick: () => e(),
 				children: /* @__PURE__ */ Y(I, { iconName: B.ShowSidePanel })
@@ -12157,6 +12159,7 @@ function Cg() {
 			/* @__PURE__ */ Y(Qt, {
 				content: H.Icon,
 				className: "!size-11 shrink-0",
+				buttonClassName: "!size-11",
 				"aria-label": "Open the menu",
 				"aria-expanded": r,
 				onClick: () => i(!0),

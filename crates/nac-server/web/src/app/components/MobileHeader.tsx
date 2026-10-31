@@ -42,6 +42,7 @@ export function MobileHeader() {
           <StickyButton
             content={ButtonContent.Icon}
             className="!size-11 shrink-0"
+            buttonClassName="!size-11"
             aria-label="All projects"
             onClick={() => navigate(routes.list())}
           >
@@ -57,6 +58,7 @@ export function MobileHeader() {
           <StickyButton
             content={ButtonContent.Icon}
             className="!size-11 shrink-0"
+            buttonClassName="!size-11"
             aria-label="Open panel"
             onClick={() => openSidePanelList()}
           >
@@ -66,6 +68,7 @@ export function MobileHeader() {
         <StickyButton
           content={ButtonContent.Icon}
           className="!size-11 shrink-0"
+          buttonClassName="!size-11"
           aria-label="Open the menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen(true)}

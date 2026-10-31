@@ -44,6 +44,16 @@ test("delegated phone header retains intrinsic change counts and its parent rout
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${harness.baseUrl}/#/session/${child}/insights`);
   const heading = page.locator("header");
+  // Measure the actual buttons, not StickyButton's elevated outer wrappers.
+  for (const name of ["All projects", "Open panel", "Open the menu"]) {
+    const button = heading.getByRole("button", { name, exact: true });
+    await expect(button).toBeVisible();
+    const box = await button.boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  }
   const parentLink = heading.getByRole("button", { name: /, parent chat$/ });
   await expect(parentLink).toBeVisible();
   await expect(heading.getByText("1234 additions, 5678 deletions", { exact: true })).toHaveCount(1);
