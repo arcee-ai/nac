@@ -22,7 +22,7 @@ import type {
   ToolSegment,
 } from "@/app/features/insights/presentation/items/itemContent";
 import { otherContent } from "@/app/features/insights/presentation/items/OtherItem";
-import { reasoningContent } from "@/app/features/insights/presentation/items/ReasoningItem";
+import { ReasoningItem } from "@/app/features/insights/presentation/items/ReasoningItem";
 import {
   fileSearchContent,
   webContent,
@@ -72,8 +72,10 @@ function toolContent(segment: ToolSegment, context: ItemContext): ItemContent {
   }
 }
 
-function segmentContent(segment: InsightSegment, context: ItemContext): ItemContent {
-  if (segment.kind === "reasoning") return reasoningContent(segment);
+function segmentContent(
+  segment: Exclude<InsightSegment, { kind: "reasoning" }>,
+  context: ItemContext,
+): ItemContent {
   if (segment.kind === "workset") return worksetContent(segment, context);
   return toolContent(segment, context);
 }
@@ -95,8 +97,9 @@ export const InsightSegmentItem = memo(function InsightSegmentItem({
 }) {
   const status = segmentStatus(segment);
   const state = itemState(status);
-  const content = segmentContent(segment, context);
   const error = useErrorLine(segment, context.sessionId, state === InsightItemState.Error);
+  if (segment.kind === "reasoning") return <ReasoningItem segment={segment} active={active} />;
+  const content = segmentContent(segment, context);
   return (
     <InsightItem
       icon={detailIcon(segmentAction(segment))}

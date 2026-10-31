@@ -10,6 +10,10 @@ export interface InputWrapperProps {
     caption?: "large" | "compact";
     /** Info glyph beside the label, for the explanation that will not fit inline. */
     hoverHint?: HoverHintConfig;
+    /** Id of the control the label names. */
+    htmlFor?: string;
+    /** Id of the hint / validation line, for the control's `aria-describedby`. */
+    descriptionId?: string;
     className?: string;
     children?: React.ReactNode;
 }

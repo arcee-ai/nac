@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useId } from "react";
 import { cn } from "../../lib/cn";
+import { Input as UIInput } from "../../ui/input";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
 import InputWrapper from "./InputWrapper";
@@ -78,6 +79,8 @@ interface InputProps extends Omit<React.ComponentPropsWithRef<"input">, "size"> 
   required?: boolean;
   rounded?: boolean;
   isDisabled?: boolean;
+  /** The value is being submitted: the field reads as busy and stops taking edits. */
+  loading?: boolean;
   validation?: boolean;
   validationText?: string;
   hintText?: string;
@@ -102,13 +105,22 @@ const Input: React.FC<InputProps> & {
   rounded = false,
   placeholder = "",
   isDisabled = false,
+  loading = false,
   validation = false,
   validationText = "",
   hintText,
   className = "",
+  id,
+  readOnly,
+  "aria-describedby": ariaDescribedBy,
   ref,
   ...props
 }) => {
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
+  const description = validation ? validationText : hintText;
+  const descriptionId = description ? `${inputId}-description` : undefined;
+  const describedBy = [descriptionId, ariaDescribedBy].filter(Boolean).join(" ") || undefined;
   const hasLeading = leading !== InputLeading.None || Boolean(leadingSlot);
   const hasTrailing = trailing !== InputTrailing.None;
   const largeSearch = inputSize === InputSize.Large && hasLeading && !hasTrailing;
@@ -116,7 +128,7 @@ const Input: React.FC<InputProps> & {
     "w-full input font-normal",
     inputSize,
     inputClassName,
-    rounded ? "rounded-full" : "rounded-[4px]",
+    rounded ? "rounded-full" : "rounded-interaction",
     !hasLeading ? padLeft[inputSize] : largeSearch ? "input-pad-search" : padLeftIcon[inputSize],
     !hasTrailing ? padRight[inputSize] : padRightIcon[inputSize],
     isDisabled && "input-disabled",
@@ -134,6 +146,8 @@ const Input: React.FC<InputProps> & {
       validationText={validationText}
       hintText={hintText}
       caption={inputSize === InputSize.Large ? "large" : "compact"}
+      htmlFor={inputId}
+      descriptionId={descriptionId}
       className={className}
     >
       <div className="input-wrapper relative w-full h-fit">
@@ -171,11 +185,17 @@ const Input: React.FC<InputProps> & {
           </Button>
         ) : null}
 
-        <input
+        <UIInput
           ref={ref}
+          id={inputId}
           className={inputClasses}
           placeholder={placeholder}
           disabled={isDisabled}
+          readOnly={loading || readOnly}
+          aria-busy={loading || undefined}
+          aria-invalid={validation || undefined}
+          aria-required={required || undefined}
+          aria-describedby={describedBy}
           {...props}
         />
 

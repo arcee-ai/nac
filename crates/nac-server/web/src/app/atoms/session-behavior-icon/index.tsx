@@ -32,9 +32,9 @@ interface SessionBehaviorIconProps {
  * `useSessionBehaviorIconVisible`.
  *
  * Decorative: the parent's accessible name carries the type. Its states use the
- * `fill-btn-secondary*` tokens: inside a `.btn` the button stylesheet fills it,
- * elsewhere the parent sets them on the paths (`[&_path]:fill-…`). Without
- * either the glyph paints `currentColor`.
+ * `fill-btn-secondary*` tokens: inside a `.btn` the button stylesheet colors it,
+ * elsewhere the caller sets them as its color (`text-fill-…`). Without either
+ * the glyph draws in `currentColor`.
  */
 const SessionBehaviorIcon: React.FC<SessionBehaviorIconProps> = ({
   behavior,

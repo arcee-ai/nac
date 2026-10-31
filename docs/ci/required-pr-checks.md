@@ -1,79 +1,71 @@
-# Required PR checks and review rollout
+# Required PR checks and current dev protection
 
-ALL-450 provides the foundation for `dev <- ALL-450 <- ALL-451 <- ALL-452`.
-This change prepares enforcement; it does **not** activate a repository ruleset.
-Source and exact-image vulnerability gates are separate downstream changes.
+[ALL-506](https://linear.app/arcee/issue/ALL-506) prepares an additive update to
+NAC's **observed** ruleset 25983949. Live activation requires separate human
+authorization. No settings are changed by the tooling or this PR.
 
-## Same-run coverage contract
+The October 30 [nine-owner before snapshot](evidence/2026-10-30-required-check-before-nine-owners.json)
+shows active `main` on `~DEFAULT_BRANCH` (currently `dev`), no bypass actors,
+one approval, CODEOWNERS, last-push approval, resolved threads, and extra approval
+for unattributed changes. Stale-review dismissal is currently false. Existing
+merge methods, deletion/force-push protections, and inherited enterprise rules
+remain unchanged. [The intended plan](evidence/2026-10-30-required-check-plan-nine-owners.json)
+appends exactly one required-status-check rule: `Required PR checks`, GitHub
+Actions integration **15368**, strict current-base checks, enforced on creation.
+It updates that existing ruleset; it does not introduce a second review policy.
 
-`stable-release.yml` emits **Required PR checks** on every PR open, synchronize,
-reopen, ready-for-review and base edit, without branch or path filters. It also
-runs on the existing main/dev pushes, stable tags and manual dispatches. Each
-run checks out its immutable `github.sha`: on PRs this is GitHub's test merge
-commit, bound to that head and base. Strict up-to-date enforcement requires a
-new candidate after the base advances; a prior head's green check is insufficient.
+This snapshot records all nine designated owners' actual live permissions,
+including Crystalcareai (ID `162942000`, admin). It retains the **eight-owner
+CODEOWNERS actually served by dev** at `91fde731b6e5bf4097a37fbee854804859f22f95`.
+Crystalcareai's roster addition has not landed in that receipt. Permission to
+write alone is not proof of landed ownership or required-check activation.
 
-| Job | Every PR | Coverage |
-| --- | --- | --- |
-| prepare | yes | Exact source identity and complete merge diff applicability |
-| workflow-lint | yes | Pinned actionlint/ShellCheck over every tracked workflow and shell script, plus real-tool enforcement fixtures |
-| lint | yes | Workspace production clippy, web lint, Rust/web formatting |
-| test-server | yes | Server and stable binary, web tests, generated OpenAPI/types, all committed browser/client assets |
-| browser | yes | Same-candidate committed bundle and production Chromium journeys; separately required alongside the asset drift gate |
-| quality | yes | Exact candidate/repository/run/attempt receipt covering complete successful unit/assets/lint/workflow-lint results |
-| test-core | yes | Core/catalog tests, release policy, installer, PR gate/rollout model tests |
-| test-workspace | yes | Contracts, credentials, managed and process crate tests; source command/binary/size, durability, managed load and static image contracts |
-| macos-native | yes | Native ARM macOS process/credential suites and 12 exact core terminal regressions; measured first/warm runs and Darwin behavioral failure control ([coverage](native-macos.md)) |
-| test | yes | Compatibility result requires both shared quality and browser acceptance |
-| build | yes | Existing Linux musl and macOS ARM release binary/archive validation |
-| managed | explicit | Reusable contract, verified same-run quality reuse, private fault fixture, exact Linux image build, smoke and advisory findings |
-| required-pr-checks | always | Explicit result set and candidate binding; no cross-workflow lookup races |
+The original [three-owner snapshot](evidence/2026-10-27-required-check-before.json)
+and [plan](evidence/2026-10-27-required-check-plan.json), plus the
+[six-owner snapshot](evidence/2026-10-27-required-check-before-six-owners.json)
+and [plan](evidence/2026-10-27-required-check-plan-six-owners.json), plus the
+[seven-owner snapshot](evidence/2026-10-30-required-check-before-seven-owners.json)
+and [plan](evidence/2026-10-30-required-check-plan-seven-owners.json), remain unchanged
+historical receipts. The [prelanding eight-permission snapshot](evidence/2026-10-30-required-check-before-eight-owners.json)
+and [plan](evidence/2026-10-30-required-check-plan-eight-owners.json), and the
+[landed eight-owner snapshot](evidence/2026-10-30-required-check-before-eight-owners-landed.json)
+and [plan](evidence/2026-10-30-required-check-plan-eight-owners-landed.json), also
+remain unchanged. The latter records the actual landing of the
+[Ada/Scott roster PR #470](https://github.com/arcee-ai/nac/pull/470).
+These older receipts lack Crystalcareai's verified identity and cannot qualify
+the nine-owner baseline. Refresh the nine-owner snapshot after this roster
+lands before qualification or activation.
 
-Managed work applies when any changed path is under `.github/`, `crates/`,
-`docker/managed/` or `scripts/`, or is Cargo.toml, Cargo.lock, Makefile,
-.dockerignore or version.txt. NUL-delimited Git output preserves unusual names
-and renames/deletions. Non-PR runs conservatively enable managed work. The
-stable-release workflow is the sole main/dev push producer; managed-image has
-only reusable-call and manual
-triggers. Superseded ordinary PR runs cancel by PR number on synchronize or base-ref edits;
-metadata-only edits do not cancel active work. Other runs use a unique run
-identity and never cancel release/publication work. Each managed call retains a
-unique run/attempt identity; cancellation comes from its superseded parent PR,
-so unrelated callers cannot replace a pending call. Downstream trusted
-image rescans must select successful **stable-release.yml dev-push** artifacts,
-never PR, manual-dispatch or standalone managed workflow artifacts.
+ALL-450's earlier bypass/review proposal is historical and must not be applied
+to current settings. ALL-450 remains a completed foundation milestone; ALL-506
+owns this follow-up. A JSON proposal, PR merge or Done label never proves that
+production enforcement is active.
 
-| Change example | Core/web/release/build | Managed | Required result |
-| --- | --- | --- | --- |
-| Rust-only | run | run | emitted |
-| Web-only | run | run | emitted |
-| Workflow-only | run | run | emitted |
-| Docs-only | run | skip | emitted |
-| Managed image/runtime/smoke | run | run | emitted |
+## Complete aggregate and events
 
-The preparation output `managed_applicable` must be exactly `true` or `false`.
-Only a known non-applicable managed call may be `skipped`. Every expected job
-must be `success`; failure, cancellation, neutral, pending, missing and unexpected
-skip all fail. The reusable managed workflow independently requires all its inner
-jobs, preventing an accidentally skipped build/smoke from turning the call green.
-Cancellation of the aggregate itself blocks merging. Platform failure to start a
-workflow cannot emit a job; the missing required context still blocks merging.
+`stable-release.yml` emits `Required PR checks` for every eligible pull-request
+update and main/dev push without top-level path exclusions. It also accepts
+manual runs. Its preparation binds the immutable workflow candidate and explicit
+managed applicability; the always-run aggregate requires successful prepare,
+Rust server/core/workspace, lint/workflow lint, quality, browser, test, build,
+source security, and native macOS results. Applicable managed work requires its
+complete contract/quality/build/smoke/image-security graph. Only explicitly
+non-applicable managed work may skip. Missing, failed, pending, cancelled and
+unexpectedly skipped expected work fail closed. Tests live in
+`.github/scripts/pr-checks.test.mjs` and adjacent workflow/security contracts.
 
-Quality reuse, cache trust, the before/after coverage matrix and measurement
-procedure are documented in [CI efficiency](ci-efficiency.md).
+Docs-only changes still emit the complete aggregate, with managed explicitly
+non-applicable. Rust, web, API, Docker, workflow and script changes run managed
+coverage. No merge queue or `merge_group` contract is introduced. Nested reusable
+job names and the old `test` context are not substitutes for this exact context.
 
-Workflow/shell lint inventory, tool verification, dialects and seeded failure evidence
-are documented in [workflow-shell-lint.md](workflow-shell-lint.md).
+[ALL-505](https://linear.app/arcee/issue/ALL-505) owns strict image propagation
+and fresh combined-image/unchanged-image qualification. Historical successful
+aggregates under advisory image reporting cannot qualify activation. ALL-504
+owns Rust-toolchain coverage, ALL-500–503 content/applicability, and ALL-507 the
+private publisher. ALL-461 is deferred ArceeFM adoption, outside NAC enforcement.
 
-Extension contract: a source-security reusable call must become a direct
-`required-pr-checks.needs` dependency and an entry in `pr-checks.mjs`'s
-`requiredJobs`, atomically with its tests. Image security extends the immutable
-managed build/smoke graph and managed terminal dependency/result validation.
-Do not rely on a separate workflow finishing first. Do not activate downstream
-security enforcement before its fresh baseline is remediated or governed by
-approved narrow exceptions. ALL-447 remains Eric's separate remediation work.
-
-## Reviewer policy and stack limits
+## Read-only preparation and drift checks
 
 The verified owner roster and immutable GitHub account IDs live in
 `.github/scripts/pr-ruleset.mjs`. To add or remove an owner, verify that account's
@@ -83,138 +75,154 @@ reviewer list in the metadata-only workflow. `make lint-workflows` and the PR
 contract tests reject stale generated ownership files with the regeneration command.
 Sam (`samantha662`), Gerred (`gerred`) and Travis (`tmcarcee`) were verified with
 write/admin/write access on October 27, 2026.
+Ada (`adalundhe`, immutable account ID `23642200`) was verified with repository
+write access on October 30, 2026.
+Scott (`ScottZembsch`, immutable account ID `109129358`) was also verified with
+repository write access on October 30, 2026.
+Crystalcareai (immutable account ID `162942000`) was verified with repository
+admin access on October 30, 2026.
 
-GitHub uses CODEOWNERS from **each PR's base**;
-the base's existing owners remain effective until an ownership change lands. The
-metadata-only `pull_request_target` workflow requests the verified eligible set
-on open/reopen/ready, excludes the author, and does not execute candidate code.
-Bot authors receive the same owner requests. GitHub's native code-owner requests
-apply after the CODEOWNERS change reaches the relevant base.
-
-One eligible non-author approval is sufficient; author and outside-only approvals
-are insufficient. Changes dismiss stale approvals, and conversations must be
-resolved. Human approvals are never fabricated by tooling or local tests.
-The new ruleset targets `dev` only. Upper stack PRs targeting a feature branch
-do not inherit that dev ruleset merely because their eventual destination is dev.
-Qualify their base's CODEOWNERS and check each layer before landing; do not claim
-the ruleset protects arbitrary intermediate branches. Once a layer is retargeted
-to dev, refresh its exact head/base checks and review state.
-
-## Settings proposal and safeguards
-
-`evidence/2026-10-21-before.json` captures live settings. The inherited enterprise
-default-branch ruleset 2955537 blocks deletion and non-fast-forward changes,
-and enterprise ruleset 2955527 restricts repository transfer. Both report
-`current_user_can_bypass: never`. There was no classic dev protection (404) and
-no repository-level required-check ruleset. The proposal is **additional** and
-preserves the CLA/release workflows, merge methods, and all inherited settings.
-The proposed after-state is in `evidence/2026-10-21-proposed.json`; it is not an
-observed applied after-state.
-
-The payload requires PRs, one approval, code-owner review, dismissal of stale
-reviews, conversation resolution, and strict current-base checks. The exact
-context is bound to observed GitHub Actions integration ID **15368**. Its only
-added bypass actor is User **20910163**, mode **pull_request**. There are no role,
-team, bot, `always` or `exempt` bypasses. It does not grant direct-push authority
-or override inherited rules. A merge conflict still needs resolution.
-
-Reproduce the read-only dry run from the repository root:
+Run from the intended repository with authenticated read access:
 
 ```sh
 node .github/scripts/pr-ruleset.mjs snapshot arcee-ai/nac /tmp/nac-before.json
-node .github/scripts/pr-ruleset.mjs plan /tmp/nac-before.json
-node --test .github/scripts/pr-*.test.mjs
+node .github/scripts/pr-ruleset.mjs plan /tmp/nac-before.json > /tmp/nac-plan.json
 ```
 
-All commands in this tool are read-only against GitHub. Snapshot files are
-create-only. `plan` emits the exact active payload for review without applying
-it. Existing settings are captured with pagination, including inherited rules,
-classic protection and owner identities. Failures other than a documented
-classic-protection/CODEOWNERS 404 stop capture. No credential is saved.
+The snapshot captures repository merge methods, every repository/inherited
+ruleset, effective dev rules, classic protection, owner permissions, current dev
+revision, CODEOWNERS and check runs. `plan` preserves the existing writable
+ruleset fields and appends only the required-check rule. Unknown existing review
+parameters remain intact. An already-present status rule or changed target,
+branch condition, bypass policy or missing review protection requires rebaseline.
+No HTTP write command is implemented.
 
-## Safe fixture qualification and activation handoff
+The checked-in snapshot/plan are evidence of intent at capture time, not reusable
+activation receipts. Refresh them before qualification. A real fixture receipt
+must bind both the exact proposed payload digest and full settings identity.
+Never fill its fields with local model output or copy an old successful receipt.
 
-Use a separately approved disposable repository with Actions and rulesets support,
-an Allison account, ordinary non-bypass maintainer/App identities, the three
-eligible reviewers and an outside reviewer. That repository/access was **not
-provided or created** during this implementation. Platform evidence is pending.
-Do not test red merges, bypass, or direct pushes against production NAC.
+Planner tests preserve the actual eight-owner CODEOWNERS in the observed
+nine-permission fixture. Positive activation cases explicitly model hypothetical
+nine-owner CODEOWNERS, a passing check, and qualification receipts as synthetic
+local data. Negatives prove that both the observed eight-owner and historical
+six-owner CODEOWNERS cannot activate, even with a synthetic complete receipt and
+passing check. These models do not certify roster landing, platform qualification,
+or required-check activation.
 
-Copy the candidate workflows, policy scripts and CODEOWNERS into the fixture;
-create its dev base, apply the reviewed ruleset there, and preserve before/after
-settings. Adapt only the target repository, with the same policy payload. Use
-fixture-only commits to introduce deliberate failures; never add failure knobs
-to production workflows. Record the exact head, base, actor, check URLs, review
-state, attempted operation and observed API/UI result for each case in
-`evidence/qualification-template.json`. A `passed` entry means the expected
-outcome below was observed, not necessarily that a test check was green.
+## Real safe-repository and actor matrix — unperformed
 
-| Fixture group | Required observation |
+No disposable GitHub repository or ordinary-actor credentials were authorized or
+supplied in this lane. **All platform cases below remain unperformed.** Local
+planner/aggregate tests exercise JSON and result semantics only. They do not
+prove GitHub merge rejection, actor identity, CODEOWNERS behavior or enforcement.
+Do not attempt a deliberately red production merge to fill these gaps.
+
+With separately authorized fixture access, mirror the observed review and
+inherited protections plus the proposed status rule into the safe repository.
+Use an ordinary non-bypass actor's authentication for attempts. Record actor ID,
+PR/head/base SHAs, check-run ID/App, event, attempt time, actual API/UI rejection
+or success, and durable evidence URLs. Do not grant any bypass to run the matrix.
+`qualificationCases` in `pr-ruleset.mjs` is the exact machine-checked case list:
+
+| Cases | Required platform evidence |
 | --- | --- |
-| Rust, web, workflow, docs, managed positive PRs | All applicable work and stable aggregate finish; no stuck required context |
-| API and committed asset drift | Real drift check fails and ordinary merge is blocked |
-| Browser/image failure | Real failing journey/smoke fails aggregate and ordinary merge is blocked |
-| Failed, pending, cancelled, missing, stale, unexpected skip | Each expected-work condition blocks ordinary merge; stale green cannot satisfy new head/base |
-| Each eligible non-author | Each can independently satisfy the one-approval rule |
-| Author/outside reviewer | Self or outside-only approval cannot satisfy ownership |
-| Open, ready, bot authors | Exact eligible non-author default requests are visible |
-| New commit/unresolved conversation | Required approval becomes stale; unresolved thread blocks |
-| Two-layer stack | Each base CODEOWNERS drives requests; explicitly demonstrate intermediate-base limitation and retarget-to-dev checks |
-| Allison's own failed and pending PRs | With separate explicit human authorization for each fixture merge, the audited PR-only route works |
-| Ordinary user/App override | Same route cannot bypass; routine automation has no bypass actor |
-| Direct push/inherited restrictions | PR-only bypass cannot push directly or defeat inherited deletion/force-push restrictions |
+| Rust/web/workflow/docs/managed passes | Exact aggregate emitted and succeeds with complete expected results and explicit applicability |
+| API/assets/browser/image failure; image Unknown | Expected lane fails, artifacts survive, aggregate fails, ordinary merge rejected |
+| Failed/pending/cancelled/missing/unexpected skip | Actual state at attempted ordinary merge rejects it; pending attempt time precedes completion |
+| Stale check/base; wrong App | Old-head/base success and same-name foreign-App success cannot authorize merge |
+| ALL-505 strict baseline | Fresh complete combined native amd64 image scan and unchanged-image rescan, fresh DB, zero unresolved/unapproved blockers; link full reports, not advisory historical green |
+| Each of the nine designated non-author approvals | Eligible approval works when all other protections pass |
+| Self/outside-only/last-pusher approval | Cannot satisfy the preserved CODEOWNERS and last-push approval requirements |
+| Unattributed changes and threads | Required extra approval remains effective; unresolved conversation blocks |
+| Requests/bot PRs | Author excluded; eligible owner requests preserved |
+| Two-layer gh-stack | Both immediate bases contain intended CODEOWNERS; each PR emits complete candidate-bound checks; record the intermediate-base protection gap, then qualify strict/review enforcement after retarget to dev |
+| Ordinary/automation bypass and direct push | No bypass; inherited deletion/force-push/transfer restrictions remain effective |
 
-For blocked merge tests use each actor's own authentication and preserve the
-rejection. A bypass-eligible Allison token is not an ordinary-actor test. Pending
-checks must actually be pending at attempted merge time; record both timestamps.
-For successful override capture resulting merge SHA and audit/ruleset evidence,
-including Allison's authorship and the failed/pending current-head result.
+For the two-layer fixture, use the installed extension in the safe checkout:
 
-After fixture qualification, merge the implementation through ordinary review.
-Wait for the new context to succeed on the actual current dev revision. Refresh
-settings and generate a guarded activation handoff:
+```sh
+gh stack init --base dev codex/fixture-lower
+# Commit a harmless fixture change after verifying dev CODEOWNERS.
+gh stack add codex/fixture-upper
+# Commit a separate harmless change; retain CODEOWNERS in the lower base.
+gh stack submit --auto --open
+gh stack view --json
+```
+
+Capture both live PR bases, heads, diffs, requested reviewers and check runs.
+Verify the base branch's CODEOWNERS is authoritative for each PR. This exact
+ruleset targets only `~DEFAULT_BRANCH`: an upper PR targeting
+`codex/fixture-lower` does **not** inherit its required checks or review rules.
+CODEOWNERS in that base and a green aggregate do not establish enforcement.
+Record that intermediate-base limitation explicitly; do not broaden branch
+protection or claim that an intermediate PR is safe to merge. After a separately
+authorized lower-layer landing, retarget the upper PR to `dev`, refresh its
+candidate checks/review requests, and qualify stale-base invalidation and all
+preserved review requirements there. If landing/retarget access is unavailable,
+leave that platform case unperformed. No production
+stack or another owner's branch may be rebased for this exercise. Successful
+fixture merges need their own explicit authorization; planner tests are not that
+authority. If unavailable, leave the exact successful-merge cases unperformed.
+
+The [current template](evidence/qualification-template.json) is deliberately
+marked `template-not-qualification`, with every case `unperformed`. It cannot
+pass the validator. Populate only real observed evidence after separate fixture
+authorization and human inspection; never change result fields to bypass a gate.
+
+The receipt schema is `schema_version: 1`, `kind: github-platform-qualification`,
+`fixture_repository`, `baseline_sha256`, `payload_sha256`, `completed_at`, and
+`cases`. Each exact case needs `name`, `result: passed`, `actor_id`, full
+`head_sha`, and a fixture-repository `evidence_url`. It expires after seven days.
+A human must inspect underlying actor/results evidence: schema checks cannot
+verify that a linked claim actually occurred.
+
+## Administrator application, readback and rollback
+
+Only proceed after ALL-505 qualification, the real matrix, landed nine-owner CODEOWNERS,
+current-head/current-base aggregate success, and separate human activation
+authorization. Confirm the current aggregate actually uses strict image logic.
+Generate a fresh read-only activation handoff:
 
 ```sh
 node .github/scripts/pr-ruleset.mjs activation-plan /tmp/nac-before.json /tmp/fixture-qualified.json > /tmp/nac-activation-plan.json
 ```
 
-This refuses missing/expired fixture evidence, changed policy payload, stale or
-drifted settings, absent landed CODEOWNERS, and missing/wrong-App/wrong-revision
-or non-success current-dev context. It checks receipt structure; a human must
-inspect the linked evidence and identities. JSON claims alone do not prove GitHub
-enforcement. No settings mutation is implemented in the tool. After separate
-human authorization, an administrator may extract `proposed_ruleset` and create
-the additional repository ruleset with the GitHub ruleset UI or REST API. Capture
-an observed after snapshot, compare every inherited/classic protection and bypass
-actor, and repeat representative ordinary/override qualification. Do not update
-or delete existing rulesets to fit this payload. Rebaseline on any settings drift.
+This recaptures full settings and refuses drift, a snapshot older than one hour,
+wrong CODEOWNERS, or absent/non-success/wrong-App/old-head checks. The newest
+exact-App check-run wins; an older success cannot mask a queued/failed rerun.
+Do not apply the older checked-in plan directly. Rebaseline and repeat affected
+qualification on any policy drift.
 
-## Ordinary merge and deliberate override
+An authorized administrator should arrange exclusive settings ownership for the
+operation, refresh/compare immediately before writing, and use GitHub's ruleset
+UI or `PUT /repos/arcee-ai/nac/rulesets/25983949` with **only** the reviewed
+`proposed_ruleset` from that fresh handoff. GitHub does not offer an atomic
+compare-and-swap across these settings; the read-only tool cannot eliminate a
+concurrent administrator race. Abort if exclusive ownership or exact baseline
+cannot be confirmed. Do not create/delete rulesets or change review/bypass policy.
 
-For ordinary merges inspect `gh pr view <PR> --json headRefOid,baseRefOid,reviewDecision,mergeStateStatus`,
-`gh pr checks <PR>`, and current review conversations. Fetch the base and verify
-the candidate has no conflicts. Use `gh pr merge <PR> --squash --match-head-commit <exact-head-SHA>`
-with a non-bypass automation App identity. Keep human review and current-base
-requirements effective. With Allison's credentials, pause for human handling if
-the normal route would require or silently exercise bypass.
+After application, capture actual server state and verify it:
 
-For a deliberate override, Allison must explicitly authorize **that PR and
-current head** and record why. After matching the head again and inspecting its
-base/conflicts and outstanding checks/reviews, use GitHub's individual-PR merge
-UI with the explicit bypass acknowledgment, or the fixture-qualified individual
-route `gh pr merge <PR> --squash --admin --match-head-commit <exact-head-SHA>`.
-This is documentation of a future human operation, not authorization for an
-agent to run it. Preserve GitHub's audited bypass event; do not disable rules or
-switch to `exempt`. Reconfirm after any new commit. Inherited rules can still
-block the merge.
+```sh
+node .github/scripts/pr-ruleset.mjs snapshot arcee-ai/nac /tmp/nac-after.json
+node .github/scripts/pr-ruleset.mjs verify-readback /tmp/nac-before.json /tmp/nac-after.json > /tmp/nac-readback.json
+```
 
-gh-stack **v0.1.1 has no stack bypass**. An explicitly authorized override must
-handle one PR at a time, bottom first, refresh remaining bases/heads/reviews/checks
-and resolve actual conflicts. Do not promise atomic red-stack merging. GitHub
-cannot distinguish Allison from an agent holding her credentials. Agent policy
-requires explicit human per-merge intent; routine automation should use an App
-not present in the bypass list.
+Readback requires exactly the one rule addition in both the target and effective
+rules, preserving every other ruleset, branch condition, owner, merge method,
+classic protection and CODEOWNERS. Server-generated update timestamps and rule ordering may change; every rule's
+parameters and multiplicity must remain identical. Readback older than one hour,
+future or invalid capture times are rejected before a rollback payload is returned.
+Repeat representative fresh success and failed/pending/wrong-App ordinary-actor
+cases, plus last-push/thread rejection and a two-layer base check. Record actual
+observed after state and receipts separately from the intended plan.
 
-References: [CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners),
-[user bypass](https://github.blog/changelog/2026-05-07-repository-rulesets-user-bypass-and-branch-renaming/),
-[ruleset rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets).
+Rollback also needs separate human authorization. Refresh and rerun readback
+first; if anything else drifted, stop for a reviewed plan rather than overwriting
+it. A matching readback returns the original `rollback_ruleset`, which removes
+only this added status rule and retains the original review/no-bypass policy.
+This is emergency protection rollback, not a report-only image mode or authority
+to merge vulnerable candidates. Keep strict scanner/report failures in place,
+preserve evidence, and repair the failed lane. Re-read/verify restored rules and
+inherited/classic protection after any authorized rollback.

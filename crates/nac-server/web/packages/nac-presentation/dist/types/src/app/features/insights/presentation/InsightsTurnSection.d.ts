@@ -8,6 +8,9 @@ export interface InsightsRowController {
     /** Undefined for rows that navigate away instead of selecting themselves. */
     entrySelected(entry: InsightEntry): boolean | undefined;
     segmentSelected(entry: InsightGroupEntry, segment: InsightSegment): boolean | undefined;
+    /** The row the panel shows, which the list reveals whether or not it is marked. */
+    entryShown(entry: InsightEntry): boolean;
+    segmentShown(entry: InsightGroupEntry, segment: InsightSegment): boolean;
     /** Null when the row has nowhere to go. */
     entryAction(entry: InsightEntry): (() => void) | null;
     segmentAction(entry: InsightGroupEntry, segment: InsightSegment): (() => void) | null;

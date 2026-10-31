@@ -21,7 +21,7 @@ interface GitStatusTone {
   title: string;
   /** The colour of the name the status belongs to. */
   name: string;
-  /** The same colour as a fill, for a glyph that sits beside the name. */
+  /** The same colour from the fill tokens, for a glyph that sits beside the name. */
   fill: string;
   /** The letter's own colour; paths git leaves alone dim it below the name. */
   letter: string;
@@ -31,55 +31,55 @@ export const GIT_STATUS_TONE: Record<GitStatus, GitStatusTone> = {
   [GitStatus.Changed]: {
     title: "Modified",
     name: "text-danger-primary",
-    fill: "[&_path]:fill-danger-primary",
+    fill: "text-fill-danger-primary",
     letter: "text-danger-primary",
   },
   [GitStatus.Added]: {
     title: "Added",
     name: "text-info-primary",
-    fill: "[&_path]:fill-info-primary",
+    fill: "text-fill-info-primary",
     letter: "text-info-primary",
   },
   [GitStatus.Deleted]: {
     title: "Deleted",
     name: "text-error-primary",
-    fill: "[&_path]:fill-error-primary",
+    fill: "text-fill-error-primary",
     letter: "text-error-primary",
   },
   [GitStatus.ChangedName]: {
     title: "Renamed",
     name: "text-accent-primary",
-    fill: "[&_path]:fill-accent-primary",
+    fill: "text-fill-accent-primary",
     letter: "text-accent-primary",
   },
   [GitStatus.Copied]: {
     title: "Copied",
     name: "text-info-secondary",
-    fill: "[&_path]:fill-info-secondary",
+    fill: "text-fill-info-secondary",
     letter: "text-info-secondary",
   },
   [GitStatus.ChangedType]: {
     title: "Type changed",
     name: "text-danger-secondary",
-    fill: "[&_path]:fill-danger-secondary",
+    fill: "text-fill-danger-secondary",
     letter: "text-danger-secondary",
   },
   [GitStatus.Conflict]: {
     title: "Conflict",
     name: "text-error-secondary",
-    fill: "[&_path]:fill-error-secondary",
+    fill: "text-fill-error-secondary",
     letter: "text-error-secondary",
   },
   [GitStatus.NotTracked]: {
     title: "Untracked",
     name: "text-basic-tertiary",
-    fill: "[&_path]:fill-basic-tertiary",
+    fill: "text-fill-basic-tertiary",
     letter: "text-basic-muted",
   },
   [GitStatus.Ignored]: {
     title: "Ignored",
     name: "text-basic-tertiary",
-    fill: "[&_path]:fill-basic-tertiary",
+    fill: "text-fill-basic-tertiary",
     letter: "text-basic-muted",
   },
 };

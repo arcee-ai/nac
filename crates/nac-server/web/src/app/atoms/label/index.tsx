@@ -1,5 +1,6 @@
 import type React from "react";
 import { cn } from "../../lib/cn";
+import { Label as UILabel } from "../../ui/label";
 import HoverHint, { HoverHintSize } from "../hover-hint";
 import Icon, { IconName } from "../icon";
 
@@ -51,7 +52,7 @@ const Label: React.FC<LabelProps> & { Size: typeof LabelSize } = ({
   hoverHint,
   className = "",
 }) => (
-  <label
+  <UILabel
     htmlFor={htmlFor}
     className={cn(
       "flex items-center gap-1.5 min-w-0",
@@ -76,7 +77,7 @@ const Label: React.FC<LabelProps> & { Size: typeof LabelSize } = ({
         size={hintSizeFor[size]}
       />
     ) : null}
-  </label>
+  </UILabel>
 );
 
 Label.Size = LabelSize;

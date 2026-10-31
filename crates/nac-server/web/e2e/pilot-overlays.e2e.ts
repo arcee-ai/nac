@@ -1,0 +1,336 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { createProject, createSession, expect, test } from "./harness";
+
+test.skip(!!process.env.NAC_E2E_REMOTE, "Requires isolated pilot fixtures");
+test.use({ orchestration: "0" });
+
+test("rename and delete preserve the responsive pilot journey and accessibility", async ({
+  harness,
+  page,
+  request,
+}, info) => {
+  test.setTimeout(120_000);
+  const project = await createProject(request, harness, { name: "Pilot verification" });
+  const id = await createSession(request, harness, "direct", project);
+  const title = "Pilot overlay";
+  const presentation = await request.put(`${harness.baseUrl}/sessions/${id}/presentation`, {
+    data: { title, pinned: false, expected_version: 0 },
+  });
+  expect(presentation.ok()).toBe(true);
+  // An optional immutable dev bundle uses the same isolated API and fixture data.
+  // This is visual baseline capture, not a claim of running dev's server code.
+  const baseline = process.env.NAC_PILOT_BASELINE_DIST;
+  if (baseline) {
+    await page.route(`${harness.baseUrl}/assets/dist/**`, async (route) => {
+      const relative = new URL(route.request().url()).pathname.slice("/assets/dist/".length);
+      const file = path.resolve(baseline, relative);
+      if (!file.startsWith(path.resolve(baseline) + path.sep)) return route.abort();
+      const contentType = file.endsWith(".js")
+        ? "application/javascript"
+        : file.endsWith(".css")
+          ? "text/css"
+          : "application/octet-stream";
+      await route.fulfill({ body: await fs.readFile(file), contentType });
+    });
+    await page.route(
+      (url) => url.origin === new URL(harness.baseUrl).origin && url.pathname === "/",
+      async (route) => {
+        await route.fulfill({
+          body: await fs.readFile(path.join(baseline, "index.html")),
+          contentType: "text/html",
+        });
+      },
+    );
+  }
+  const captures: string[] = [];
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 768, height: 1024 },
+    { width: 390, height: 844 },
+    { width: 720, height: 450 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`${harness.baseUrl}/?pilotViewport=${viewport.width}#/session/${id}/files`);
+    await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
+    if (viewport.width < 768) {
+      const menu = page.getByRole("button", { name: "Open the menu", exact: true });
+      await expect(menu).toBeVisible();
+      await menu.click();
+      await expect(page.getByRole("dialog", { name: "Menu", exact: true })).toBeVisible();
+    } else {
+      const expand = page.getByRole("button", { name: "Show sidebar", exact: true });
+      if (await expand.isVisible()) await expand.click();
+    }
+    for (const theme of ["dark", "light"]) {
+      for (const action of ["Rename", "Delete"]) {
+        const opener = page.getByRole("button", { name: `${action} ${title}`, exact: true });
+        if (viewport.width < 768 && !(await opener.isVisible())) {
+          await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+        }
+        await expect(opener).toBeVisible();
+        await opener.focus();
+        await opener.click();
+        const dialog = page.getByRole(action === "Delete" && !baseline ? "alertdialog" : "dialog", {
+          name: `${action} session`,
+          exact: true,
+        });
+        await expect(dialog).toBeVisible();
+        // The product is dark-only. Exercise existing light token plumbing without
+        // representing it as a user-selectable theme.
+        await page.evaluate((theme) => {
+          type ThemeRoot = {
+            classList: { remove: (...names: string[]) => void; add: (name: string) => void };
+            setAttribute: (name: string, value: string) => void;
+          };
+          const { document } = globalThis as unknown as {
+            document: {
+              documentElement: ThemeRoot;
+              querySelectorAll: (selector: string) => Iterable<ThemeRoot>;
+            };
+          };
+          for (const root of [
+            document.documentElement,
+            ...document.querySelectorAll("[data-nac-runtime]"),
+          ]) {
+            root.classList.remove("light", "dark");
+            root.classList.add(theme);
+            root.setAttribute("data-theme", theme);
+          }
+        }, theme);
+        await page.evaluate(() =>
+          (
+            globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
+          ).document.fonts.ready.then(() => undefined),
+        );
+        await expect
+          .poll(async () => {
+            const bounds = await dialog.boundingBox();
+            return bounds ? bounds.x + bounds.width : Infinity;
+          })
+          .toBeLessThanOrEqual(viewport.width + 1);
+        const box = await dialog.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.x).toBeGreaterThanOrEqual(-1);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width + 1);
+        const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+        await expect(cancel).toBeInViewport();
+        await expect(
+          dialog.getByRole("button", {
+            name: action === "Rename" ? "Save" : "Delete session",
+            exact: true,
+          }),
+        ).toBeInViewport();
+        if (!baseline && action === "Rename") {
+          await expect(dialog.getByRole("textbox", { name: "Title", exact: true })).toBeVisible();
+        }
+        const name = `${baseline ? "dev" : "candidate"}-${viewport.width}-${theme}-${action.toLowerCase()}.png`;
+        const file = info.outputPath(name);
+        await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
+        captures.push(name);
+        await info.attach(name, { path: file, contentType: "image/png" });
+        await cancel.click();
+        await expect(dialog).toHaveCount(0);
+        if (!baseline) await expect(opener).toBeFocused();
+      }
+    }
+  }
+  if (!baseline) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${harness.baseUrl}/?pilotJourney=1#/session/${id}/files`);
+    const rename = page.getByRole("button", { name: `Rename ${title}`, exact: true });
+    await rename.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(rename).toBeFocused();
+    // Focusing a row action scrolls the project's session list for as long as
+    // its 500ms height transition runs; the hint has to outlast that.
+    await page.waitForTimeout(600);
+    await expect(page.getByRole("tooltip", { name: "Rename chat", exact: true })).toBeVisible();
+    await expect(rename).toHaveAccessibleDescription("Rename chat");
+    await page.keyboard.press("Escape");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await rename.click();
+    const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
+    const field = dialog.getByRole("textbox", { name: "Title", exact: true });
+    await field.fill("x".repeat(121));
+    await dialog.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText(/session title must not exceed 120 characters/)).toBeVisible();
+    await expect(dialog).toBeVisible();
+    await expect(field).toHaveValue("x".repeat(121));
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(rename).toBeFocused();
+    await rename.click();
+    await expect(field).toHaveValue(title);
+    const reopenedCapture = info.outputPath("candidate-rename-reopened.png");
+    await page.screenshot({ path: reopenedCapture, animations: "disabled", caret: "hide" });
+    await info.attach("canceled rename reopened", {
+      path: reopenedCapture,
+      contentType: "image/png",
+    });
+    const cdp = await page.context().newCDPSession(page);
+    await field.focus();
+    await cdp.send("Input.imeSetComposition", {
+      text: "にほん",
+      selectionStart: 3,
+      selectionEnd: 3,
+    });
+    await cdp.send("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 229,
+      nativeVirtualKeyCode: 229,
+      isKeypad: false,
+    });
+    await expect(dialog).toBeVisible();
+    await cdp.send("Input.insertText", { text: "日本" });
+    const staleSessions = await (await request.get(`${harness.baseUrl}/sessions`)).json();
+    let holdStaleList = true;
+    await page.route(
+      (url) => url.origin === new URL(harness.baseUrl).origin && url.pathname === "/sessions",
+      async (route) => {
+        if (holdStaleList && route.request().method() === "GET")
+          return route.fulfill({ json: staleSessions });
+        return route.continue();
+      },
+    );
+    await dialog.getByRole("checkbox").check();
+    await field.fill("Pilot renamed");
+    const writes: string[] = [];
+    page.on("request", (req) => {
+      if (["PUT", "DELETE"].includes(req.method()) && req.url().includes(`/sessions/${id}`))
+        writes.push(req.method());
+    });
+    const firstSave = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/sessions/${id}/presentation`) &&
+        response.request().method() === "PUT" &&
+        response.status() === 200,
+    );
+    await page.keyboard.press("Enter");
+    const accepted = await (await firstSave).json();
+    await expect(dialog).toHaveCount(0);
+    expect(writes).toEqual(["PUT"]);
+    // The list deliberately remains at its old snapshot while the accepted
+    // response is already authoritative for the modal's next open and save.
+    await rename.click();
+    await expect(field).toHaveValue("Pilot renamed");
+    await expect(dialog.getByRole("checkbox")).toBeChecked();
+    const acceptedCapture = info.outputPath("candidate-saved-rename-reopened.png");
+    await page.screenshot({ path: acceptedCapture, animations: "disabled", caret: "hide" });
+    await info.attach("saved rename reopened before list refresh", {
+      path: acceptedCapture,
+      contentType: "image/png",
+    });
+    await field.fill("Pilot renamed again");
+    const repeatSave = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/sessions/${id}/presentation`) &&
+        response.request().method() === "PUT" &&
+        response.status() === 200,
+    );
+    await page.keyboard.press("Enter");
+    const repeated = await repeatSave;
+    expect(repeated.request().postDataJSON().expected_version).toBe(accepted.presentation_version);
+    await expect(dialog).toHaveCount(0);
+    expect(writes).toEqual(["PUT", "PUT"]);
+    holdStaleList = false;
+    await page.reload();
+    const remove = page.getByRole("button", { name: "Delete Pilot renamed again", exact: true });
+    await remove.focus();
+    await remove.click();
+    const alert = page.getByRole("alertdialog", { name: "Delete session", exact: true });
+    await expect(alert).toHaveAccessibleDescription(/cannot be undone/);
+    await alert.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(remove).toBeFocused();
+    expect(writes).toEqual(["PUT", "PUT"]);
+    await remove.click();
+    await alert.getByRole("button", { name: "Delete session", exact: true }).dblclick();
+    await expect(alert).toHaveCount(0);
+    await expect(remove).toHaveCount(0);
+    expect(writes).toEqual(["PUT", "PUT", "DELETE"]);
+  }
+  await info.attach("pilot capture contract", {
+    contentType: "application/json",
+    body: JSON.stringify({
+      captures,
+      baseline: baseline ?? null,
+      notes:
+        "Actual production bundles and controlled isolated API. Light tokens applied explicitly; 720px capture is a 200% layout equivalent, not physical device/browser zoom. No real screen reader or OS input method driven.",
+    }),
+  });
+});
+
+for (const mobile of [false, true]) {
+  test(`pending rename survives exit and keyboard reopen ${mobile ? "on phone" : "on desktop"}`, async ({
+    harness,
+    page,
+    request,
+  }) => {
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+    const project = await createProject(request, harness, { name: "Pending rename pilot" });
+    const id = await createSession(request, harness, "direct", project);
+    const title = "Before pending rename";
+    const seeded = await request.put(`${harness.baseUrl}/sessions/${id}/presentation`, {
+      data: { title, pinned: false, expected_version: 0 },
+    });
+    expect(seeded.ok()).toBe(true);
+    const baseline = await seeded.json();
+    await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
+    if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+    const opener = page.getByRole("button", { name: `Rename ${title}`, exact: true });
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
+    const field = dialog.getByRole("textbox", { name: "Title", exact: true });
+    await field.fill("  Pending title  ");
+    await dialog.getByRole("checkbox").check();
+    const writes: unknown[] = [];
+    let releaseSave!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    await page.route(`${harness.baseUrl}/sessions/${id}/presentation`, async (route) => {
+      if (route.request().method() === "PUT") {
+        writes.push(route.request().postDataJSON());
+        await gate;
+      }
+      await route.continue();
+    });
+    try {
+      await field.focus();
+      await page.keyboard.press("Enter");
+      await expect.poll(() => writes.length).toBe(1);
+      await page.keyboard.press("Escape");
+      await expect(opener).toBeFocused();
+      // Deliberately cross the form's 300ms exit lifetime with the write held.
+      await page.waitForTimeout(350);
+      await opener.focus();
+      await page.keyboard.press("Enter");
+      await expect(field).toHaveValue("  Pending title  ");
+      await expect(field).toHaveAttribute("readonly", "");
+      await expect(dialog.getByRole("checkbox")).toBeChecked();
+      await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+      await field.focus();
+      await page.keyboard.press("Enter");
+      expect(writes).toEqual([
+        { title: "Pending title", pinned: true, expected_version: baseline.presentation_version },
+      ]);
+      const accepted = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/sessions/${id}/presentation`) &&
+          response.request().method() === "PUT",
+      );
+      releaseSave();
+      expect((await accepted).ok()).toBe(true);
+      await expect(dialog).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: "Rename Pending title", exact: true }),
+      ).toBeVisible();
+      expect(writes).toHaveLength(1);
+    } finally {
+      releaseSave();
+    }
+  });
+}

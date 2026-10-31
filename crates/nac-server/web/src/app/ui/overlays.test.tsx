@@ -1,0 +1,429 @@
+/** @vitest-environment jsdom */
+
+import { useState } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { Button, Modal, Select, Tooltip } from "@/app/atoms";
+import { PresentationBoundary } from "@/app/providers/PresentationBoundary";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "./popover";
+
+vi.mock("@/app/hooks/useMediaQuery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/hooks/useMediaQuery")>()),
+  useIsMobile: () => false,
+}));
+
+afterEach(cleanup);
+
+/** A dialog holding an atom select, a primitive menu and a hinted control. */
+function Workspace({ name }: { name: string }) {
+  const [open, setOpen] = useState(false);
+  const [plan, setPlan] = useState("draft");
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}>Open {name}</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title={`${name} settings`}>
+        <Select
+          items={[
+            { id: "draft", label: "Draft" },
+            { id: "final", label: "Final" },
+          ]}
+          value={plan}
+          onValueChange={setPlan}
+        />
+        <Popover>
+          <PopoverTrigger>More</PopoverTrigger>
+          <PopoverContent>
+            <button type="button">Archive</button>
+          </PopoverContent>
+        </Popover>
+        <Tooltip title="Saved automatically" sticky>
+          <Button>Status</Button>
+        </Tooltip>
+      </Modal>
+    </>
+  );
+}
+
+function mount(...names: string[]) {
+  return render(
+    <MemoryRouter>
+      {names.map((name) => (
+        <section key={name} aria-label={name}>
+          <PresentationBoundary>
+            <Workspace name={name} />
+          </PresentationBoundary>
+        </section>
+      ))}
+    </MemoryRouter>,
+  );
+}
+
+/** The standalone app, which owns the whole page's keyboard. */
+function mountStandalone() {
+  return render(
+    <MemoryRouter>
+      <section aria-label="main">
+        <PresentationBoundary globalKeyboard>
+          <Workspace name="main" />
+        </PresentationBoundary>
+      </section>
+    </MemoryRouter>,
+  );
+}
+
+const instance = (name: string) => screen.getByRole("region", { name });
+const content = (name: string) => instance(name).querySelector("[data-nac-content]");
+const scrim = (name: string) => instance(name).querySelector('[data-slot="dialog-overlay"]')!;
+
+function openDialog(name: string) {
+  const opener = within(instance(name)).getByRole("button", { name: `Open ${name}` });
+  act(() => opener.focus());
+  fireEvent.click(opener);
+  return {
+    opener,
+    dialog: within(instance(name)).getByRole("dialog", { name: `${name} settings` }),
+  };
+}
+
+function click(target: Element) {
+  fireEvent.mouseDown(target);
+  fireEvent.click(target);
+}
+
+/** Whether a wheel over `target` is kept from scrolling the page. */
+function wheelStopped(target: Element) {
+  const event = new Event("wheel", { bubbles: true, cancelable: true });
+  target.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
+describe("nested overlays", () => {
+  it("skips unavailable controls at the dialog boundary and holds an empty surface", () => {
+    render(
+      <MemoryRouter>
+        <PresentationBoundary>
+          <Modal open onClose={vi.fn()} title="Visible controls">
+            <button>Last visible</button>
+            <button disabled>Disabled</button>
+            <fieldset disabled>
+              <button>Disabled fieldset</button>
+            </fieldset>
+            <button tabIndex={-1}>Programmatic only</button>
+            <div hidden>
+              <button>Hidden</button>
+            </div>
+            <div style={{ display: "none" }}>
+              <button>CSS hidden</button>
+            </div>
+            <div inert>
+              <button>Inert</button>
+            </div>
+          </Modal>
+        </PresentationBoundary>
+      </MemoryRouter>,
+    );
+    const dialog = screen.getByRole("dialog");
+    const last = within(dialog).getByRole("button", { name: "Last visible" });
+    const first = within(dialog).getByRole("button", { name: "Close" });
+    act(() => last.focus());
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("keeps Tab on a dialog with no available controls", () => {
+    render(
+      <MemoryRouter>
+        <PresentationBoundary>
+          <Modal open title="Read only">
+            <p>Information</p>
+          </Modal>
+        </PresentationBoundary>
+      </MemoryRouter>,
+    );
+    const dialog = screen.getByRole("dialog");
+    act(() => dialog.focus());
+    expect(fireEvent.keyDown(dialog, { key: "Tab" })).toBe(false);
+    expect(document.activeElement).toBe(dialog);
+    expect(fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true })).toBe(false);
+    expect(document.activeElement).toBe(dialog);
+  });
+
+  it("close top first on Escape, then hand focus back to the dialog's opener", async () => {
+    mount("main");
+    const { opener, dialog } = openDialog("main");
+    expect(document.activeElement).toBe(dialog);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Draft" }));
+    expect(screen.getByRole("button", { name: "Final" })).toBeTruthy();
+
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Final" })).toBeNull();
+    expect(screen.getByRole("dialog")).toBe(dialog);
+
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+  });
+
+  it("let a press in the dialog or on its scrim close only the menu above it", () => {
+    mount("main");
+    const { dialog } = openDialog("main");
+    const more = within(dialog).getByRole("button", { name: "More" });
+
+    fireEvent.click(more);
+    click(within(dialog).getByText("main settings"));
+    expect(screen.queryByText("Archive")).toBeNull();
+    expect(screen.getByRole("dialog")).toBe(dialog);
+
+    fireEvent.click(more);
+    click(scrim("main"));
+    expect(screen.queryByText("Archive")).toBeNull();
+    expect(screen.getByRole("dialog")).toBe(dialog);
+
+    click(scrim("main"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("keep the view behind the scrim inert and still, but let the dialog scroll", () => {
+    mount("main");
+    const { dialog } = openDialog("main");
+    expect(content("main")?.hasAttribute("inert")).toBe(true);
+
+    for (const type of ["wheel", "touchmove"]) {
+      const behind = new Event(type, { bubbles: true, cancelable: true });
+      scrim("main").dispatchEvent(behind);
+      expect(behind.defaultPrevented).toBe(true);
+      const inside = new Event(type, { bubbles: true, cancelable: true });
+      dialog.dispatchEvent(inside);
+      expect(inside.defaultPrevented).toBe(false);
+    }
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(content("main")?.hasAttribute("inert")).toBe(false);
+  });
+
+  it("show a hint on hover and keyboard focus, and let Escape take it before the dialog", () => {
+    mount("main");
+    const { dialog } = openDialog("main");
+    const status = within(dialog).getByRole("button", { name: "Status" });
+
+    fireEvent.mouseEnter(status);
+    const hint = screen.getByRole("tooltip");
+    expect(hint.textContent).toBe("Saved automatically");
+    expect(hint.className).toContain("motion-reduce:!animate-none");
+    fireEvent.mouseLeave(status);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    act(() => status.focus());
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    fireEvent.keyDown(status, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(document.activeElement).toBe(status);
+  });
+
+  it("keep a keyboard hint through a scroll around its control, but not a hover hint", () => {
+    mount("main");
+    const { dialog } = openDialog("main");
+    const status = within(dialog).getByRole("button", { name: "Status" });
+
+    act(() => status.focus());
+    fireEvent.scroll(dialog);
+    expect(screen.getByRole("tooltip").textContent).toBe("Saved automatically");
+    expect(
+      within(dialog).getByRole("button", { name: "Status", description: "Saved automatically" }),
+    ).toBe(status);
+    act(() => status.blur());
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.mouseEnter(status);
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    fireEvent.scroll(dialog);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+});
+
+describe("two embedded instances", () => {
+  it("keeps both dialogs' Tab boundaries local after the other instance opens", () => {
+    mount("left", "right");
+    const left = openDialog("left").dialog;
+    const leftFirst = within(left).getByRole("button", { name: "Close" });
+    const leftLast = within(left).getByRole("button", { name: "Status" });
+    act(() => leftLast.focus());
+    expect(fireEvent.keyDown(leftLast, { key: "Tab" })).toBe(false);
+    expect(document.activeElement).toBe(leftFirst);
+
+    const right = openDialog("right").dialog;
+    for (const dialog of [left, right, left]) {
+      const first = within(dialog).getByRole("button", { name: "Close" });
+      const last = within(dialog).getByRole("button", { name: "Status" });
+      act(() => last.focus());
+      expect(fireEvent.keyDown(last, { key: "Tab" })).toBe(false);
+      expect(document.activeElement).toBe(first);
+      expect(fireEvent.keyDown(first, { key: "Tab", shiftKey: true })).toBe(false);
+      expect(document.activeElement).toBe(last);
+      act(() => dialog.focus());
+      fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+      expect(document.activeElement).toBe(last);
+    }
+  });
+
+  it("keep separate stacks: Escape, inertness and menus stay with their own view", () => {
+    mount("left", "right");
+    const left = openDialog("left").dialog;
+    const right = openDialog("right").dialog;
+    fireEvent.click(within(right).getByRole("button", { name: "More" }));
+    expect(content("left")?.hasAttribute("inert")).toBe(true);
+    expect(content("right")?.hasAttribute("inert")).toBe(true);
+
+    fireEvent.keyDown(left, { key: "Escape" });
+    expect(within(instance("left")).queryByRole("dialog")).toBeNull();
+    expect(within(instance("right")).getByRole("dialog")).toBe(right);
+    expect(within(instance("right")).getByText("Archive")).toBeTruthy();
+    expect(content("left")?.hasAttribute("inert")).toBe(false);
+    expect(content("right")?.hasAttribute("inert")).toBe(true);
+
+    fireEvent.keyDown(within(instance("right")).getByText("Archive"), { key: "Escape" });
+    expect(within(instance("right")).queryByText("Archive")).toBeNull();
+    expect(within(instance("right")).getByRole("dialog")).toBe(right);
+  });
+
+  it("portal into their own overlay roots and hold each scrim's scroll lock separately", () => {
+    mount("left", "right");
+    const left = openDialog("left").dialog;
+    const right = openDialog("right").dialog;
+    expect(instance("left").querySelector("[data-nac-overlays]")?.contains(left)).toBe(true);
+    expect(instance("right").querySelector("[data-nac-overlays]")?.contains(right)).toBe(true);
+    expect(wheelStopped(scrim("left"))).toBe(true);
+    expect(wheelStopped(scrim("right"))).toBe(true);
+
+    fireEvent.keyDown(left, { key: "Escape" });
+    expect(instance("left").querySelector('[data-slot="dialog-overlay"]')).toBeNull();
+    expect(wheelStopped(content("left")!)).toBe(false);
+    expect(wheelStopped(scrim("right"))).toBe(true);
+  });
+
+  it("let a press in one view dismiss the other's menu, but never its dialog", () => {
+    mount("left", "right");
+    const left = openDialog("left").dialog;
+    fireEvent.click(within(left).getByRole("button", { name: "More" }));
+    const right = openDialog("right").dialog;
+    expect(within(instance("left")).getByText("Archive")).toBeTruthy();
+
+    click(within(right).getByText("right settings"));
+    expect(within(instance("left")).queryByText("Archive")).toBeNull();
+    expect(within(instance("left")).getByRole("dialog")).toBe(left);
+    expect(within(instance("right")).getByRole("dialog")).toBe(right);
+
+    click(within(left).getByText("left settings"));
+    expect(within(instance("right")).getByRole("dialog")).toBe(right);
+  });
+
+  it("hand focus back to each view's own opener", async () => {
+    mount("left", "right");
+    const left = openDialog("left");
+    const right = openDialog("right");
+
+    act(() => left.dialog.focus());
+    fireEvent.keyDown(left.dialog, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(left.opener));
+    expect(within(instance("right")).getByRole("dialog")).toBe(right.dialog);
+
+    act(() => right.dialog.focus());
+    fireEvent.keyDown(right.dialog, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(right.opener));
+  });
+});
+
+describe("keyboard ownership", () => {
+  it("let the standalone app close its top layer on an Escape from anywhere on the page", () => {
+    mountStandalone();
+    const { dialog } = openDialog("main");
+    act(() => dialog.blur());
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("leave an embedded view's layers alone on an Escape meant for its host page", () => {
+    mount("main");
+    const { dialog } = openDialog("main");
+    act(() => dialog.blur());
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBe(dialog);
+  });
+});
+
+function ActionsMenu({ onArchive }: { onArchive: () => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger>Actions</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem onSelect={onArchive}>Archive chat</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+describe("dropdown menu", () => {
+  it("close on Escape or a press outside, select once and hand focus back to its trigger", async () => {
+    const onArchive = vi.fn();
+    render(
+      <MemoryRouter>
+        <PresentationBoundary>
+          <ActionsMenu onArchive={onArchive} />
+          <button type="button">Elsewhere</button>
+        </PresentationBoundary>
+      </MemoryRouter>,
+    );
+    const trigger = screen.getByRole("button", { name: "Actions" });
+    act(() => trigger.focus());
+
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    click(screen.getByRole("button", { name: "Elsewhere" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    act(() => trigger.focus());
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Archive chat" }));
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("close before the dialog it sits in", () => {
+    const onClose = vi.fn();
+    render(
+      <MemoryRouter>
+        <PresentationBoundary>
+          <Modal open onClose={onClose} title="Chat settings">
+            <ActionsMenu onArchive={vi.fn()} />
+          </Modal>
+        </PresentationBoundary>
+      </MemoryRouter>,
+    );
+    const trigger = screen.getByRole("button", { name: "Actions" });
+    act(() => trigger.focus());
+    fireEvent.keyDown(trigger, { key: "Enter" });
+
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});

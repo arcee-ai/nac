@@ -272,6 +272,34 @@
   line-height: 20px;
 }
 
+/* Reasoning detail is ordinary muted prose, sharing the column's scroll owner.
+   Keep this local: compact thread previews and answer typography are unchanged. */
+.reasoning-prose .chat-response p,
+.reasoning-prose .chat-response li {
+  font-size: 14px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+
+.reasoning-prose .chat-response p {
+  margin-block: 12px;
+}
+
+.reasoning-prose .chat-response :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--color-text-basic-secondary);
+  font-size: 14px;
+  line-height: 22px;
+  margin-block: 16px 8px;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reasoning-prose .chat-response.streaming .streaming-chunk {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 .chat-response a {
   color: var(--color-text-accent-primary);
   text-decoration: underline;

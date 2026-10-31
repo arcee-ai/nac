@@ -27,7 +27,6 @@ import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
-import { formatStoreTime } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import { routes, type SessionPanel } from "@/app/lib/routes";
@@ -540,7 +539,6 @@ export function Transcript({
                           )?.evidence) ?? undefined
                     }
                     invokedSkills={turn.invokedSkills}
-                    timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
                     messageIndex={turn.pending ? undefined : turn.messageIndex}
                     actionsDisabled={actionsBusy}
                     readOnly={readOnly}

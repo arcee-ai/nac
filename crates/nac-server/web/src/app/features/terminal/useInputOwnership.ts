@@ -21,21 +21,27 @@ function newer(previous: InputControlStatus | undefined, next: InputControlStatu
   return previous && BigInt(previous.revision) > BigInt(next.revision) ? previous : next;
 }
 
+/** Every reader of one terminal's control shares its cache and revision guard. */
+function useControlQuery(session: string, id: string, enabled: boolean) {
+  const { api } = useNativeRuntime();
+  return useQuery({
+    queryKey: inputOwnershipKey(session, id),
+    queryFn: ({ signal }) => api.getTerminalInputControl(session, id, signal),
+    enabled,
+    retry: false,
+    refetchInterval: enabled ? 1000 : false,
+    structuralSharing: (previous, next) =>
+      newer(previous as InputControlStatus | undefined, next as InputControlStatus),
+  });
+}
+
 /** Current control is independent of immutable output frames and provenance. */
 export function useInputOwnership(session: string, source: ExecutionStatus, readonly: boolean) {
   const { api } = useNativeRuntime();
   const client = useQueryClient();
   const key = inputOwnershipKey(session, source.id);
   const offered = mayOfferInputControl(source, readonly);
-  const query = useQuery({
-    queryKey: key,
-    queryFn: ({ signal }) => api.getTerminalInputControl(session, source.id, signal),
-    enabled: offered,
-    retry: false,
-    refetchInterval: offered ? 1000 : false,
-    structuralSharing: (previous, next) =>
-      newer(previous as InputControlStatus | undefined, next as InputControlStatus),
-  });
+  const query = useControlQuery(session, source.id, offered);
   const transition = useMutation({
     mutationFn: async ({
       controller,
@@ -71,4 +77,19 @@ export function useInputOwnership(session: string, source: ExecutionStatus, read
     change: transition.mutateAsync,
     refresh: query.refetch,
   };
+}
+
+/**
+ * Who holds a live human shell's input, for chrome that only names it. The open
+ * terminal already polls its own ownership, so its readers pass `poll` off and
+ * share that cache.
+ */
+export function useShellController(
+  session: string,
+  source: ExecutionStatus | undefined,
+  poll: boolean,
+) {
+  const watched = source?.origin === "human" && source.alive && mayOfferInputControl(source, false);
+  const query = useControlQuery(session, source?.id ?? "", watched && poll);
+  return watched && !query.isError ? query.data?.controller : undefined;
 }

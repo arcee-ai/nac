@@ -16,10 +16,15 @@ import {
 } from "@/app/atoms";
 import { FilesBranchRow, FilesListToolbar } from "@/app/components/inspector/FilesListControls";
 import { FilesSourceLabel } from "@/app/components/inspector/FilesSource";
-import { PanelFailure, PanelListNote } from "@/app/components/inspector/PanelMessages";
+import {
+  PanelEmptyState,
+  PanelFailure,
+  PanelListNote,
+} from "@/app/components/inspector/PanelMessages";
 import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useLiveWorkspace } from "@/app/hooks/useLiveWorkspace";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
+import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { cn } from "@/app/lib/cn";
 import { describeFilesSource, filesSourceState } from "@/app/lib/filesSource";
 import {
@@ -532,6 +537,7 @@ export function FilesView({
 
   const client = useQueryClient();
   const isMobile = useIsMobile();
+  const marksOpen = usePanelListMarksOpen();
   // Shared rather than local: the same panel also renders inside the
   // full-screen dialog, and it has to open on the file you were reading.
   const selected = useSelectedFile();
@@ -595,9 +601,7 @@ export function FilesView({
   const current = selected ?? changedNodes[0]?.path ?? null;
   const currentChange = current ? changedByPath.get(current) : undefined;
   const counts = useChangeCounts(sessionId, currentChange, revision);
-  // A phone opens on the list, before any file is open, so only a file you
-  // opened is marked there; the first change is merely where the detail lands.
-  const marked = isMobile ? selected : current;
+  const marked = marksOpen ? current : null;
 
   const failure = error ?? (revision != null ? revisionChanges.error : null);
   const source = useMemo(
@@ -618,7 +622,7 @@ export function FilesView({
     <FilesSourceLabel
       source={source}
       state={state}
-      autoSelected={!isMobile && selected == null && current != null}
+      autoSelected={marksOpen && selected == null && current != null}
       onReturn={() => selectRevision(null)}
     />
   );
@@ -645,6 +649,22 @@ export function FilesView({
   }
 
   const branch = workspace?.branch;
+  // A phone's only branch switcher, so an empty checkout keeps it as well.
+  const branchRow =
+    isMobile && branch ? (
+      <FilesBranchRow sessionId={sessionId} branch={branch} readOnly={readOnly} />
+    ) : null;
+  if (nodes.length === 0) {
+    // An empty capture still says which run it is and leads back from it.
+    if (revision != null) {
+      return (
+        <PanelSplit listTitle="Files" listHeader={sourceLabel} list={branchRow}>
+          <PanelEmpty title="No Files">This capture holds no files.</PanelEmpty>
+        </PanelSplit>
+      );
+    }
+    return <PanelEmptyState listTitle="Files" title="No Files" phoneLead={branchRow} />;
+  }
 
   return (
     <PanelSplit
@@ -671,12 +691,8 @@ export function FilesView({
       }
       list={
         <>
-          {isMobile && branch ? (
-            <FilesBranchRow sessionId={sessionId} branch={branch} readOnly={readOnly} />
-          ) : null}
-          {nodes.length === 0 ? (
-            <PanelListNote>No files in the workspace.</PanelListNote>
-          ) : fileListing === "changed" ? (
+          {branchRow}
+          {fileListing === "changed" ? (
             <ChangedList files={changedNodes} selected={marked} onSelect={selectFile} />
           ) : (
             <Tree
@@ -695,9 +711,7 @@ export function FilesView({
       }
     >
       {!current ? (
-        <PanelEmpty>
-          {nodes.length === 0 ? "No files in the workspace." : "Select a file to see it."}
-        </PanelEmpty>
+        <PanelEmpty>Select a file to see it.</PanelEmpty>
       ) : currentChange ? (
         <DiffPane
           // Keyed by source as well as path: a pane kept across a switch would

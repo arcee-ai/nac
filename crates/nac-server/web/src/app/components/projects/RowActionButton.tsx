@@ -1,10 +1,17 @@
-import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, type IconName } from "@/app/atoms";
+import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
+  Icon,
+  type IconName,
+  Tooltip,
+} from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 
 /**
- * One control at the end of a list row. A phone row draws a bare 20px glyph
- * 12px from its neighbour; the box keeps that size, and an invisible margin
- * around it takes the target to 32px without reaching the next one.
+ * One control at the end of a list row. Phone controls keep a 44px target;
+ * desktop controls retain the compact row's existing size.
  */
 export function RowActionButton({
   icon,
@@ -22,19 +29,17 @@ export function RowActionButton({
   onClick: () => void;
 }) {
   return (
-    <Button
-      variant={destructive ? ButtonVariant.GhostDestructive : ButtonVariant.Ghost}
-      size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-      content={ButtonContent.Icon}
-      title={title ?? label}
-      aria-label={label}
-      // `.btn-medium.btn-icon` sets the 36px box in unlayered CSS.
-      className={cn(
-        isMobile && "relative !h-5 !rounded-[8px] !p-0 after:absolute after:-inset-1.5",
-      )}
-      onClick={onClick}
-    >
-      <Icon iconName={icon} />
-    </Button>
+    <Tooltip title={title ?? label} sticky>
+      <Button
+        variant={destructive ? ButtonVariant.GhostDestructive : ButtonVariant.Ghost}
+        size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+        content={ButtonContent.Icon}
+        aria-label={label}
+        className={cn(isMobile && "!size-11 !rounded-lg !p-0")}
+        onClick={onClick}
+      >
+        <Icon iconName={icon} />
+      </Button>
+    </Tooltip>
   );
 }

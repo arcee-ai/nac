@@ -114,7 +114,7 @@ const FileButton: React.FC<FileButtonProps> = ({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "group/file-button inline-flex min-w-0 max-w-full items-center rounded-[4px]",
+        "group/file-button inline-flex min-w-0 max-w-full items-center rounded-interaction",
         "transition-colors duration-150 ease-out disabled:cursor-not-allowed",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]",
         style.box,

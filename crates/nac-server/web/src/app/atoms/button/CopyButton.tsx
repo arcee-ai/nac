@@ -14,6 +14,8 @@ interface CopyButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElem
   position?: AnchorPlacement;
   /** Label shown in the tooltip before anything is copied. */
   title?: string;
+  /** Pixel size of the default copy/check glyph; the Icon atom's default when omitted. */
+  iconSize?: number;
   onCopy?: () => void;
   children?: React.ReactNode;
 }
@@ -26,6 +28,7 @@ const CopyButton: React.FC<CopyButtonProps> = ({
   content = ButtonContent.Icon,
   position = AnchorPlacement.BottomCenter,
   title = "Copy",
+  iconSize,
   onCopy,
   className = "",
   children,
@@ -49,7 +52,11 @@ const CopyButton: React.FC<CopyButtonProps> = ({
         {...props}
       >
         {children ?? (
-          <Icon iconName={copied ? IconName.Check : IconName.FileCopy} className="fade" />
+          <Icon
+            iconName={copied ? IconName.Check : IconName.FileCopy}
+            size={iconSize}
+            className="fade"
+          />
         )}
       </Button>
     </Tooltip>
