@@ -12,6 +12,13 @@ use uuid::Uuid;
 use crate::agent::key_arg_preview;
 use crate::model::redact_credentials;
 
+mod attention;
+pub use attention::{
+    AttentionApply, AttentionChange, AttentionDecision, AttentionFact, AttentionGoal,
+    AttentionObserver, AttentionSource, AttentionSourceSnapshot, AttentionUnavailable, SettledWork,
+    SettledWorkDisposition,
+};
+
 pub const STDERR_EVENT_PREFIX: &str = "__NAC_EVENT__";
 pub const SESSION_EVENT_BUS_CAPACITY: usize = 1024;
 pub const SESSION_EVENT_BUS_REPLAY_BYTE_CAP: usize = 256 * 1024;
