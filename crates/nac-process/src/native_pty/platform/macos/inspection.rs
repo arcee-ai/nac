@@ -200,6 +200,8 @@ fn read_into<T>(
 
 #[inline(always)]
 pub(super) fn snapshot(pid: libc::pid_t, probe: &impl Probe) -> io::Result<Option<Snapshot>> {
+    #[cfg(test)]
+    let probe = &super::diagnostics::ObservedProbe::new(probe);
     for _ in 0..3 {
         let mut first = Unique::default();
         if !probe.unique_into(pid, &mut first)? {
