@@ -38,15 +38,20 @@ final class ExternalNavigationSmoke {
         guard blocked == true else { throw PreviewError.message("Automatic JavaScript popup was not blocked") }
         _ = try await js("location.assign('https://example.invalid/script');return true")
         _ = try await js(#"""
-        await new Promise(resolve=>{
-          const frame=document.createElement('iframe');
-          frame.srcdoc='<a href="https://example.invalid/subframe" target="_top">child</a>';
-          frame.onload=()=>{frame.contentDocument.querySelector('a').click();frame.remove();resolve()};
-          document.body.append(frame);
-        }); return true;
+        const frame=document.createElement('iframe');frame.id='external-navigation-child-fixture';
+        document.body.append(frame);
+        if(frame.contentWindow.origin!==window.origin)throw new Error('Child fixture has wrong origin');
+        frame.contentWindow.eval("const a=document.createElement('a');a.href='https://example.invalid/subframe';a.target='_top';document.body.append(a);a.click()");
+        return true;
         """#)
         try await link(target: "_self")
         try await wait("positive control after script and subframe negatives") { self.actions.count >= 2 }
+        let evaluations = app.commands.smokeExternalNavigation["evaluations"] as? [[String: Any]] ?? []
+        guard evaluations.contains(where: { $0["source_main_frame"] as? Bool == false &&
+            $0["navigation_type"] as? Int == WKNavigationType.linkActivated.rawValue && $0["admitted"] as? Bool == false }) else {
+            throw PreviewError.message("Actual child-frame navigation did not reach the rejection policy")
+        }
+        _ = try await js("document.getElementById('external-navigation-child-fixture').remove();return true")
         guard actions.count == 2, app.commands.currentDocument(in: app.webView) == expected,
               app.webView.url?.host == origin.host, app.webView.url?.port == origin.port else {
             throw PreviewError.message("Rejected navigation altered the live document or external-opener observations")

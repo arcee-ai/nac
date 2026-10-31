@@ -10,13 +10,14 @@ final class ExternalNavigation {
     private let policy: ExternalNavigationPolicy
     #if PREVIEW_SMOKE
     private var recordedActions: [[String: Any]] = []
+    private var evaluatedActions: [[String: Any]] = []
     private var recordingOnly: Bool {
         let args = CommandLine.arguments
         guard let index = args.firstIndex(of: "--smoke-scenario"), index + 1 < args.count else { return false }
         return args[index + 1] == "external-navigation-recording"
     }
     var smokeSnapshot: [String: Any] {
-        ["recording_only": recordingOnly, "actions": recordedActions,
+        ["recording_only": recordingOnly, "actions": recordedActions, "evaluations": evaluatedActions,
          "system_browser_qualified": false]
     }
     #endif
@@ -37,7 +38,7 @@ final class ExternalNavigation {
         components.scheme = source.protocol
         components.host = source.host
         components.port = source.port
-        return candidate === webView &&
+        let allowed = candidate === webView &&
               policy.allows(destination: action.request.url, source: components.url,
                             document: candidate.url, receipt: receipt(),
                             mainFrame: action.sourceFrame.isMainFrame,
@@ -46,6 +47,14 @@ final class ExternalNavigation {
                             activatedLink: action.navigationType == .linkActivated,
                             otherNavigation: action.navigationType == .other,
                             download: action.shouldPerformDownload)
+        #if PREVIEW_SMOKE
+        if evaluatedActions.count < 128 {
+            evaluatedActions.append(["admitted": allowed, "source_main_frame": action.sourceFrame.isMainFrame,
+                                     "target_main_frame": action.targetFrame?.isMainFrame == true,
+                                     "popup": action.targetFrame == nil, "navigation_type": action.navigationType.rawValue])
+        }
+        #endif
+        return allowed
     }
 
     @discardableResult
