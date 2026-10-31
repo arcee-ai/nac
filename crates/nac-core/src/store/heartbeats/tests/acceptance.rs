@@ -1019,3 +1019,115 @@ fn heartbeat_host_clock_rewind_defers_unused_schedule_after_excess_future_histor
         (waiting.occurrence_id, waiting.receipt_id)
     );
 }
+
+#[test]
+fn heartbeat_forward_controls_cannot_expire_admissions_needed_after_clock_rewind() {
+    let f = Fixture::new();
+    let running = f.create();
+    let first = materialize_heartbeats(&f.path, 61_000).unwrap().remove(0);
+    for now in [61_000, 76_000, 91_000, 106_000] {
+        let pending = if now == 61_000 {
+            first.clone()
+        } else {
+            f.control(
+                HeartbeatAction::RunNow {
+                    schedule_id: running.schedule_id.clone(),
+                    expected_version: running.version,
+                },
+                now,
+            )
+            .occurrence
+            .unwrap()
+        };
+        let active = f.admit(&pending, now);
+        committed(&f, &active);
+        report(&f, &active, HeartbeatOutcome::Unchanged);
+        f.settle(&active, HeartbeatOutcome::Unknown, Some(1));
+    }
+    for _ in 0..56 {
+        f.create();
+    }
+    let unused = [f.create(), f.create()];
+    let pending = materialize_heartbeats(&f.path, 106_000).unwrap();
+    let waiting: Vec<_> = unused
+        .iter()
+        .map(|schedule| {
+            pending
+                .iter()
+                .find(|occurrence| occurrence.schedule_id == schedule.schedule_id)
+                .unwrap()
+                .clone()
+        })
+        .collect();
+    for occurrence in pending.iter().filter(|occurrence| {
+        !unused
+            .iter()
+            .any(|s| s.schedule_id == occurrence.schedule_id)
+    }) {
+        let active = f.admit(occurrence, 106_000);
+        committed(&f, &active);
+        report(&f, &active, HeartbeatOutcome::Unchanged);
+        f.settle(&active, HeartbeatOutcome::Unknown, Some(1));
+    }
+    let attempt = |occurrence: &HeartbeatOccurrence, now| {
+        admit_heartbeat(
+            &f.path,
+            "direct",
+            &occurrence.occurrence_id,
+            occurrence.revision,
+            &uuid::Uuid::new_v4().to_string(),
+            &uuid::Uuid::new_v4().to_string(),
+            "same pending check",
+            "/tmp/project",
+            now,
+        )
+        .unwrap()
+    };
+    assert!(attempt(&waiting[0], 106_001).is_none());
+    let current = heartbeat_withdraw_many_unadmitted_requests(&f, running, 1_000_000);
+    // Four starts on A plus 56 others still fill the minute after rollback.
+    // Control timestamps must not expire three of A's four admission facts.
+    assert!(attempt(&waiting[0], 106_001).is_none());
+    let history = heartbeat_history(&f.path, "direct", &current.schedule_id).unwrap();
+    assert_eq!(history.len(), HEARTBEAT_HISTORY_LIMIT as usize);
+    assert_eq!(
+        history.iter().filter(|o| o.started_at_ms.is_some()).count(),
+        4
+    );
+    for original in &waiting {
+        let retained = heartbeat_history(&f.path, "direct", &original.schedule_id)
+            .unwrap()
+            .remove(0);
+        assert_eq!(retained, *original);
+        assert_eq!(retained.attempt_count, 0);
+    }
+    // Reopen the durable store: no new start, identity or rate reset appears.
+    initialize(&f.path).unwrap();
+    assert!(attempt(&waiting[0], 106_001).is_none());
+    let admitted = attempt(&waiting[0], 1_000_000).unwrap();
+    assert_eq!(
+        (&admitted.occurrence_id, &admitted.receipt_id),
+        (&waiting[0].occurrence_id, &waiting[0].receipt_id)
+    );
+    committed(&f, &admitted);
+    report(&f, &admitted, HeartbeatOutcome::Unchanged);
+    f.settle(&admitted, HeartbeatOutcome::Unknown, Some(1));
+    // A real later admission advances retention. Expired starts may now leave
+    // history, while the host's latest admitted start still fences rollback.
+    heartbeat_withdraw_many_unadmitted_requests(&f, current, 2_000_000);
+    let history = heartbeat_history(&f.path, "direct", &first.schedule_id).unwrap();
+    assert_eq!(history.len(), HEARTBEAT_HISTORY_LIMIT as usize);
+    assert_eq!(
+        history.iter().filter(|o| o.started_at_ms.is_some()).count(),
+        1
+    );
+    assert!(attempt(&waiting[1], 106_001).is_none());
+    let next = attempt(&waiting[1], 1_000_000).unwrap();
+    assert_eq!(
+        (next.occurrence_id, next.receipt_id),
+        (
+            waiting[1].occurrence_id.clone(),
+            waiting[1].receipt_id.clone()
+        )
+    );
+}

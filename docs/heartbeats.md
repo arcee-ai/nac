@@ -51,6 +51,8 @@ The initial finite operating limits are:
 
 Within the same history allowance, recent admitted starts take precedence over
 newer withdrawn requests so trimming cannot erase the start-rate fences.
+Only a later admitted start advances that retention window; control and
+settlement timestamps cannot expire starts needed after a clock rollback.
 If the wall clock falls behind the latest retained host start, heartbeat admission
 waits until it catches up. Pending receipt identity and retry allowance stay intact.
 
