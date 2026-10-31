@@ -465,7 +465,10 @@ async fn heartbeat_workspace_conflict_defers_without_consuming_transient_retry_a
     let pending = crate::store::materialize_heartbeats(&path, schedule.next_due_ms)
         .unwrap()
         .remove(0);
-    let identity = crate::workspace::GitTarget::local("/repo").lease_identity();
+    let identity = crate::workspace::GitTarget::local(
+        service.heartbeat_context.as_ref().unwrap().execution_cwd(),
+    )
+    .lease_identity();
     let mutation = sessions::WorkspaceMutationLease::try_acquire(&path, &identity).unwrap();
     for _ in 0..5 {
         let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();

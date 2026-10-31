@@ -79,7 +79,7 @@ pub(crate) fn heartbeat_attention_with_connection(
         }
     }
     {
-        let mut query=tx.prepare("SELECT s.session_id,json_extract(h.binding_json,'$._attention_base_updated_at') FROM sessions s JOIN heartbeat_schedules h ON h.session_id=s.session_id WHERE json_extract(h.binding_json,'$._attention_through_updated_at')=s.updated_at AND json_extract(h.binding_json,'$._attention_base_updated_at') IS NOT NULL AND EXISTS(SELECT 1 FROM heartbeat_occurrences o WHERE o.schedule_id=h.schedule_id AND o.outcome='unchanged' AND o.state='settled' AND o.settlement_sequence=(SELECT max(settlement_sequence) FROM heartbeat_occurrences WHERE session_id=s.session_id))")?;
+        let mut query=tx.prepare("SELECT s.session_id,json_extract(h.binding_json,'$._attention_base_updated_at') FROM sessions s JOIN heartbeat_schedules h ON h.session_id=s.session_id WHERE json_extract(h.binding_json,'$._attention_through_updated_at')=s.updated_at AND json_extract(h.binding_json,'$._attention_through_run_revision')=(SELECT coalesce(max(id),0) FROM session_run_outcomes WHERE session_id=s.session_id) AND json_extract(h.binding_json,'$._attention_base_updated_at') IS NOT NULL AND EXISTS(SELECT 1 FROM heartbeat_occurrences o WHERE o.schedule_id=h.schedule_id AND o.outcome='unchanged' AND o.state='settled' AND o.settlement_sequence=(SELECT max(settlement_sequence) FROM heartbeat_occurrences WHERE session_id=s.session_id))")?;
         for row in query.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })? {
