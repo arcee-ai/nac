@@ -7,6 +7,7 @@ The resulting production-schema records enter the actual Python owner/caller.
 from contextlib import ExitStack
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -243,6 +244,172 @@ class ProductionObserverControls(unittest.TestCase):
             self.assertEqual({row['pid'] for row in receipt['known_identities']}, {10, 11})
             retained = json.loads((folder / 'retained-fixture.json').read_text())
             self.assertFalse(retained['positive_process_settlement'])
+
+
+URL_DRIVER = r'''
+let rows = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [[String: Any]]
+let results: [[String: Any]] = rows.map { row in
+    if let lexical = row["lexical"] as? String { return ["accepted": StartupURLResources.lexical(lexical)] }
+    do {
+        let root = row["root"] as! String, app = row["app"] as! String
+        let resources = try StartupURLResources(root: root, app: app)
+        let before = resources.intact()
+        let paths = [root, app, app + "/Contents/MacOS/NACPreview"]
+        func identities() -> [[UInt64]] {
+            paths.map { path in
+                var info = stat()
+                guard lstat(path, &info) == 0 else { return [] }
+                return [UInt64(UInt32(bitPattern: info.st_dev)), UInt64(info.st_ino), UInt64(info.st_mode & mode_t(S_IFMT))]
+            }
+        }
+        let pinned = identities()
+        if let replacement = row["replace"] as? String {
+            let path = replacement == "root" ? root : replacement == "app" ? app : app + "/Contents/MacOS/NACPreview"
+            try FileManager.default.moveItem(atPath: path, toPath: path + ".retained")
+            if replacement == "native" {
+                try Data(contentsOf: URL(fileURLWithPath: path + ".retained")).write(to: URL(fileURLWithPath: path))
+            } else {
+                try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+                let member = replacement == "root" ? "/Moved app folder with spaces" : "/Contents"
+                // Keep the other pinned descendants' inodes unchanged. Only
+                // the replaced resource identity may explain rejection.
+                try FileManager.default.moveItem(atPath: path + ".retained" + member, toPath: path + member)
+            }
+        }
+        func observation(_ key: String) -> URL? {
+            guard let path = row[key] as? String else { return nil }
+            if row["non_file"] as? Bool == true { return URL(string: "https://example.invalid/resource") }
+            let url = URL(fileURLWithPath: path)
+            return row["foundation_resolve"] as? Bool == true ? url.resolvingSymlinksInPath() : url
+        }
+        return ["accepted": resources.matches(bundle: observation("bundle"), executable: observation("executable")),
+                "intact_before": before, "intact_after": resources.intact(),
+                "identities_before": pinned, "identities_after": identities(),
+                "scope": "Owned empty filesystem resources only; no app or process observations"]
+    } catch { return ["accepted": false, "declaration_rejected": true] }
+}
+FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: results, options: [.sortedKeys]))
+'''
+
+
+@unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Darwin Foundation resource controls unavailable')
+class FoundationURLResourceControls(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory(prefix='nac354-url-resource-controls-')
+        cls.addClassCleanup(cls.temporary.cleanup)
+        cls.root = Path(cls.temporary.name).resolve()
+        source = Path(__file__).with_name('CIStartupObserver.swift').read_text()
+        begin, end = '// BEGIN STARTUP FOUNDATION URL RESOURCES', '// END STARTUP FOUNDATION URL RESOURCES'
+        assert source.count(begin) == source.count(end) == 1
+        helpers = source.split(begin, 1)[1].split('\n', 1)[1].split(end, 1)[0]
+        file = cls.root / 'main.swift'
+        file.write_text('import Foundation\nimport Darwin\nenum OwnershipError: Error { case invalid }\n'
+                        + helpers + URL_DRIVER)
+        cls.executable = cls.root / 'URLResourceControls'
+        result = subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', str(file), '-o', str(cls.executable)],
+                                capture_output=True, text=True, timeout=45)
+        if result.returncode:
+            raise AssertionError(result.stderr[-8192:])
+        cls.fixture_source_sha256 = hashlib.sha256(file.read_bytes()).hexdigest()
+        cls.fixture_executable_sha256 = hashlib.sha256(cls.executable.read_bytes()).hexdigest()
+        cls.records = []
+
+    def fixture(self, name):
+        root = self.root / ('nac342-xctest-' + name)
+        app = root / 'Moved app folder with spaces/NAC.app'
+        native = app / 'Contents/MacOS/NACPreview'
+        native.parent.mkdir(parents=True)
+        native.write_bytes(b'empty-resource-fixture-not-an-executable')
+        return {'root': str(root), 'app': str(app), 'bundle': str(app), 'executable': str(native)}
+
+    def evaluate(self, rows):
+        result = subprocess.run([str(self.executable)], input=json.dumps(rows).encode(),
+                                capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr[-4096:])
+        self.assertLessEqual(len(result.stdout), 65536)
+        values = json.loads(result.stdout)
+        self.records.extend({'input': row, 'result': value} for row, value in zip(rows, values, strict=True))
+        return values
+
+    def test_observed_platform_alias_and_foundation_spellings_match_pinned_physical_resources(self):
+        row = self.fixture('platform')
+        self.assertTrue(row['root'].startswith('/private/var/'))
+        self.assertTrue(os.path.samefile('/var', '/private/var'))
+        alias = {**row, 'bundle': row['bundle'].replace('/private/var/', '/var/', 1),
+                 'executable': row['executable'].replace('/private/var/', '/var/', 1)}
+        values = self.evaluate([row, alias, {**row, 'foundation_resolve': True}])
+        self.assertTrue(all(value['accepted'] and value['intact_after'] for value in values))
+        # The same alias remains forbidden as an authoritative declaration.
+        declared_alias = {key: value.replace('/private/var/', '/var/', 1) for key, value in row.items()}
+        self.assertFalse(self.evaluate([declared_alias])[0]['accepted'])
+        if os.path.samefile('/tmp', '/private/tmp'):
+            temporary = tempfile.TemporaryDirectory(prefix='nac342-xctest-tmp-alias-', dir='/private/tmp')
+            self.addCleanup(temporary.cleanup)
+            physical = Path(temporary.name).resolve()
+            app = physical / 'Moved app folder with spaces/NAC.app'
+            native = app / 'Contents/MacOS/NACPreview'
+            native.parent.mkdir(parents=True)
+            native.write_bytes(b'empty-resource-fixture-not-an-executable')
+            row = {'root': str(physical), 'app': str(app), 'bundle': str(app).replace('/private/tmp/', '/tmp/', 1),
+                   'executable': str(native).replace('/private/tmp/', '/tmp/', 1)}
+            self.assertTrue(self.evaluate([row])[0]['accepted'])
+
+    def test_lexical_declarations_remain_bounded_absolute_and_component_clean(self):
+        bad = ['', '/', 'relative', '/a/', '//a', '/a//b', '/a/./b', '/a/../b',
+               '/a\0b', '/a\nb', '/a\tb', '/a\x7fb', '/a\u0085b', '/' + 'x' * 4096]
+        values = self.evaluate([{'lexical': value} for value in bad] + [{'lexical': '/owned space/a'}])
+        self.assertEqual([v['accepted'] for v in values], [False] * len(bad) + [True])
+
+    def test_foreign_wrong_layout_missing_and_non_file_observations_reject(self):
+        row, foreign = self.fixture('owned'), self.fixture('foreign')
+        bundle_link, native_link = self.root / 'foreign-bundle-link', self.root / 'foreign-native-link'
+        bundle_link.symlink_to(foreign['bundle'], target_is_directory=True)
+        native_link.symlink_to(foreign['executable'])
+        values = self.evaluate([{**row, 'app': foreign['app']},
+            {**row, 'app': row['app'].replace('NAC.app', 'Other.app')},
+            {**row, 'root': row['root'] + '/..'}, {**row, 'bundle': foreign['bundle']},
+            {**row, 'executable': foreign['executable']}, {**row, 'bundle': None},
+            {**row, 'executable': None}, {**row, 'non_file': True},
+            {**row, 'bundle': str(bundle_link)}, {**row, 'executable': str(native_link)}])
+        self.assertTrue(all(not value['accepted'] for value in values))
+
+    def test_root_interior_bundle_and_native_symlink_declarations_reject(self):
+        rows = []
+        for member in ['root', 'interior', 'app', 'native']:
+            row = self.fixture('link-' + member)
+            path = Path(row['root'] if member == 'root' else row['app'] if member == 'app' else
+                        row['executable'] if member == 'native' else str(Path(row['app']).parent))
+            retained = path.with_name(path.name + '.retained')
+            path.rename(retained)
+            path.symlink_to(retained, target_is_directory=member != 'native')
+            rows.append(row)
+        self.assertTrue(all(not value['accepted'] for value in self.evaluate(rows)))
+
+    def test_missing_wrong_type_and_pinned_resource_replacement_reject(self):
+        rows = []
+        for member in ['root', 'app', 'executable']:
+            for wrong_type in [False, True]:
+                row = self.fixture('missing-' + member + str(wrong_type))
+                path = Path(row[member])
+                if path.is_dir():
+                    shutil.rmtree(path)
+                    if wrong_type:
+                        path.write_bytes(b'wrong-type')
+                else:
+                    path.unlink()
+                    if wrong_type:
+                        path.mkdir()
+                rows.append(row)
+        rows += [{**self.fixture('replace-' + member), 'replace': member} for member in ['root', 'app', 'native']]
+        values = self.evaluate(rows)
+        self.assertTrue(all(not value['accepted'] for value in values))
+        self.assertTrue(all(value['intact_before'] and not value['intact_after'] for value in values[-3:]))
+        for replaced, value in enumerate(values[-3:]):
+            for index, (before, after) in enumerate(zip(value['identities_before'], value['identities_after'], strict=True)):
+                self.assertEqual(before[0], after[0])  # Same device and type; one inode changed.
+                self.assertEqual(before[2], after[2])
+                self.assertEqual(before[1] == after[1], index != replaced)
 
 
 if __name__ == '__main__':

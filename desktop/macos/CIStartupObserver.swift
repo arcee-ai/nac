@@ -127,6 +127,61 @@ enum StartupEnvironmentCheck {
 }
 // END STARTUP ENVIRONMENT CHECKS
 
+// BEGIN STARTUP FOUNDATION URL RESOURCES (owned Foundation/Darwin controls)
+struct StartupURLResources {
+    private struct Entry: Equatable {
+        let path: String
+        let kind: mode_t
+        let device: dev_t
+        let inode: ino_t
+    }
+    private let entries: [Entry]
+    private let appPath, nativePath: String
+
+    static func lexical(_ value: String) -> Bool {
+        guard value.hasPrefix("/"), value.utf8.count <= 4096,
+              !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return false }
+        return value.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
+            .allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
+
+    static func physical(_ value: String) -> String? {
+        guard lexical(value), let result = realpath(value, nil) else { return nil }
+        defer { free(result) }
+        return String(cString: result)
+    }
+
+    private static func entry(_ path: String, kind: mode_t) throws -> Entry {
+        var info = stat()
+        guard physical(path) == path, lstat(path, &info) == 0,
+              info.st_mode & mode_t(S_IFMT) == kind else { throw OwnershipError.invalid }
+        return Entry(path: path, kind: kind, device: info.st_dev, inode: info.st_ino)
+    }
+
+    init(root: String, app: String) throws {
+        guard Self.lexical(root), root.split(separator: "/").last?.hasPrefix("nac342-xctest-") == true,
+              app == root + "/Moved app folder with spaces/NAC.app" else { throw OwnershipError.invalid }
+        appPath = app
+        nativePath = app + "/Contents/MacOS/NACPreview"
+        entries = try [Self.entry(root, kind: mode_t(S_IFDIR)), Self.entry(app, kind: mode_t(S_IFDIR)),
+                       Self.entry(nativePath, kind: mode_t(S_IFREG))]
+    }
+
+    func intact() -> Bool {
+        entries.allSatisfy { (try? Self.entry($0.path, kind: $0.kind)) == $0 }
+    }
+
+    func matches(bundle: URL?, executable: URL?) -> Bool {
+        guard let bundle, let executable, bundle.isFileURL, executable.isFileURL,
+              Self.physical(bundle.path) == appPath,
+              Self.physical(executable.path) == nativePath else { return false }
+        // Resource identities were pinned once, before any app launch. Only
+        // observed Foundation spellings are mapped; raw proc paths/argv stay exact.
+        return intact()
+    }
+}
+// END STARTUP FOUNDATION URL RESOURCES
+
 @main
 enum StartupObserver {
     static func need(_ condition: Bool) throws {
@@ -180,13 +235,16 @@ enum StartupObserver {
         return Array(buffer.prefix(Int(count))).filter { $0 > 0 }
     }
 
-    static func snapshot(_ config: [String: Any], known: inout [Int32: StartupProcessIdentity]) throws -> [String: Any] {
+    static func snapshot(_ config: [String: Any], resources: StartupURLResources,
+                         known: inout [Int32: StartupProcessIdentity]) throws -> [String: Any] {
         let path = config["app_path"] as! String
         let identifier = config["bundle_id"] as! String
         let launcherEnvironment = config["environment"] as! [String: String]
         let childEnvironment = config["child_environment"] as! [String: String]
         let candidates = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).filter { !$0.isTerminated }
-        try need(candidates.count <= 1 && candidates.allSatisfy { $0.bundleURL?.resolvingSymlinksInPath().path == path })
+        try need(resources.intact() && candidates.count <= 1 && candidates.allSatisfy {
+            resources.matches(bundle: $0.bundleURL, executable: $0.executableURL)
+        })
         let app = candidates.first
         let nativePath = path + "/Contents/MacOS/NACPreview"
         let enginePath = path + "/Contents/Resources/nac-web"
@@ -318,13 +376,15 @@ enum StartupObserver {
             let config = try JSONSerialization.jsonObject(with: data) as! [String: Any]
             try need(config["schema"] as? String == "nac342-startup-xctest-v1")
             try need(config["app_path"] is String && config["bundle_id"] as? String == "ai.arcee.nac.dev"
-                && config["environment"] is [String: String] && config["child_environment"] is [String: String])
-            let initial = try snapshot(config, known: &known)
+                && config["fixture_root"] is String && config["environment"] is [String: String]
+                && config["child_environment"] is [String: String])
+            let resources = try StartupURLResources(root: config["fixture_root"] as! String, app: config["app_path"] as! String)
+            let initial = try snapshot(config, resources: resources, known: &known)
             try need((initial["nodes"] as! [[String: Any]]).isEmpty)
             try emit(readyRecord(SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()))
             let owner = getppid()
             while getppid() == owner {
-                try emit(snapshot(config, known: &known))
+                try emit(snapshot(config, resources: resources, known: &known))
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
             }
         } catch {
