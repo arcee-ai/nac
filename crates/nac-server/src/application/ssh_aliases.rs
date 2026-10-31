@@ -197,6 +197,9 @@ impl Walk {
         for directive in ssh_config::parse(text) {
             match directive {
                 Directive::Host(patterns) => {
+                    if patterns.is_empty() {
+                        self.warn(AliasDiscoveryWarning::MalformedLine);
+                    }
                     unconditional = ssh_config::matches_every_host(&patterns);
                     for pattern in &patterns {
                         self.record(ssh_config::classify(pattern));

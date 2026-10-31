@@ -39,8 +39,12 @@ fn splits_arguments_like_openssh() {
             "mid#hash",
         ]))]
     );
-    assert_eq!(parse("Host \"unterminated"), vec![Directive::Malformed]);
-    assert_eq!(parse("Host"), vec![Directive::Malformed]);
+    // A broken Host still opens a block, one that matches no host.
+    assert_eq!(
+        parse("Host \"unterminated"),
+        vec![Directive::Host(Vec::new())]
+    );
+    assert_eq!(parse("Host"), vec![Directive::Host(Vec::new())]);
     assert_eq!(
         parse("Include # only a comment"),
         vec![Directive::Malformed]

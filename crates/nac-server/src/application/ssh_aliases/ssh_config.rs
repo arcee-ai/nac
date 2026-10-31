@@ -64,6 +64,9 @@ fn parse_line(line: &str) -> Option<Directive> {
         // A Match line still opens a block even when it is malformed, so later
         // Host-less Includes are never mistaken for unconditional ones.
         _ if keyword.eq_ignore_ascii_case("match") => Some(Directive::Match),
+        // So does a Host line without patterns, which OpenSSH rejects: the
+        // empty block matches no host, and the walk reports it as malformed.
+        _ if keyword.eq_ignore_ascii_case("host") => Some(Directive::Host(Vec::new())),
         _ => Some(Directive::Malformed),
     }
 }

@@ -175,6 +175,28 @@ fn skips_includes_that_only_apply_to_one_host() {
 }
 
 #[test]
+fn an_empty_host_line_never_makes_a_later_include_unconditional() {
+    // OpenSSH rejects a Host line without patterns, so nothing after it is
+    // read for every host, even when the block before it was `Host *`.
+    let home = Home::new("empty_host");
+    home.write(&home.ssh("after-empty"), "Host hidden\n");
+    for config in [
+        "Host\n  Include after-empty\nHost kept\n",
+        "Host *\nHost\n  Include after-empty\nHost kept\n",
+        "Host *\nHost   # nothing\n  Include after-empty\nHost kept\n",
+    ] {
+        home.config(config);
+        let discovery = home.discover();
+        assert_eq!(aliases(&discovery), ["kept"], "{config:?}");
+        assert!(discovery.warnings.contains(&W::MalformedLine), "{config:?}");
+        assert!(
+            discovery.warnings.contains(&W::ConditionalIncludeSkipped),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
 fn refuses_includes_that_need_runtime_evaluation() {
     let home = Home::new("unsupported");
     home.write(&home.ssh("x"), "Host never\n");
