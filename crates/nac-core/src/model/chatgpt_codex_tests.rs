@@ -513,21 +513,10 @@ fn codex_goal_creation_wire_schema_preserves_no_budget() {
         .find(|tool| tool["name"] == "create_goal")
         .unwrap();
     let parameters = &tool["parameters"];
-    let required = parameters["required"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|value| value.as_str().unwrap())
-        .collect::<std::collections::HashSet<_>>();
     assert_eq!(
-        required,
-        parameters["properties"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect(),
-        "Responses strict normalization must not force an invented budget"
+        parameters["required"],
+        json!(["objective"]),
+        "The native budget must remain optional before provider normalization"
     );
     assert_eq!(
         parameters["properties"]["token_budget"]["type"],
@@ -535,6 +524,7 @@ fn codex_goal_creation_wire_schema_preserves_no_budget() {
     );
     assert_eq!(parameters["properties"]["token_budget"]["minimum"], 1);
     assert_eq!(parameters["additionalProperties"], false);
+    assert!(tool.get("strict").is_none());
 }
 
 #[test]

@@ -73,7 +73,7 @@ impl NativeTool for CreateGoalTool {
                     "objective": { "type": "string", "minLength": 1 },
                     "token_budget": { "type": ["integer", "null"], "minimum": 1, "description": "Optional total billable-token budget. Use null unless the user explicitly requested a positive budget." }
                 },
-                "required": ["objective", "token_budget"],
+                "required": ["objective"],
                 "additionalProperties": false
             }),
         )
