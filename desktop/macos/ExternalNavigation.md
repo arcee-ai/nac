@@ -30,7 +30,7 @@ properties, synthetic trusted input or global popup preference are used.
 
 The NAC serving origin uses the engine's actual assigned loopback port. Local
 MCP OAuth deliberately uses the separate Rust-owned
-`http://localhost:1456/callback` listener; Codex provider loopback sign-in uses
+`http://localhost:1456/mcp_library/oauth/callback` listener; Codex provider loopback sign-in uses
 its existing provider-specific listener. Configured remote MCP callback origins
 remain under the existing server validation. This adapter changes none of them.
 The existing UI polls after handoff and asks users to return to NAC. Denial,
@@ -66,6 +66,17 @@ fixture waits for the live loaded document before evaluating JavaScript,
 bounds each WK evaluation and records the existing ownership checkpoint so a
 failed run still has exact app/engine/profile cleanup evidence.
 
+Native `callAsyncJavaScript` execution is a separate popup context: an actual
+recording observed WebKit delivering its `.other` popup despite the disabled
+automatic-window preference. A null `window.open` result means the shell
+returned no child WK view; it does not establish that WebKit blocked delivery.
+The fixture preserves that counterexample as a positive control. Its separate
+document-start observer schedules a page-owned timer, records public
+`navigator.userActivation.isActive` and `hasBeenActive`, and attempts a popup
+only after observing inactive state. Missing public activation support fails
+coverage. Delegate deltas and a subsequent main-link control establish whether
+that page-owned attempt escaped; elapsed time alone establishes nothing.
+
 `ExternalAuthSmoke` is the separately named `external-auth` scenario. It uses
 production MCP controls and the actual NSWorkspace opener, preserving callback
 URLs inside the server/React/browser flow. `external_auth_fixture.py` provides
@@ -82,3 +93,49 @@ variables alone do not establish isolation. The fixture does not change the
 default browser, close unrelated tabs or qualify a real vendor. Its common
 builder/PreviewSmoke hook is included; hosted execution remains an integration
 gate.
+
+## Closed device-owner fixture
+
+`native-auth-fixture` is an explicit, nondefault server Cargo feature. It uses
+the existing local Arcee login constructor and the ordinary register, poll,
+cancel, status and credential owners. The double retains legacy `nac-cli`,
+canonical stored issuer/inference URLs and existing credential persistence.
+Only the service transport is local. Signed-in model enumeration is explicitly
+a deterministic read double; it qualifies neither inference nor vendor access.
+
+Feature builds require the dev track and force the existing build ID to start
+with `native-auth-fixture-v1-`, including when a build ID override is supplied.
+The v1 identity keeps exactly its original four fields and launch equality.
+Normal builds retain their build ID behavior. Ordinary shells reject the marker
+before configuration/store discovery; only `NATIVE_AUTH_FIXTURE` accepts it.
+The single `preview.sh auth-build` producer requires that actual engine before
+replacing bundle files, compiles the explicit test flags and uses the distinct
+`ai.arcee.nac.native-auth-fixture` bundle ID. Every normal mode refuses it.
+Existing distribution admission rejects its mode, flags, ID and marked identity.
+
+Before configuration discovery, the fixture validates an externally owned
+temporary UUID root, current-UID private directories, a no-follow private owner
+record bound to source/run, exact HOME/NAC_HOME/XDG/workspace/store selections,
+and a literal ephemeral IPv4 loopback service origin. Ambient provider keys,
+managed config and origin/host overrides fail admission. Serving additionally
+requires the validated desktop channel and ephemeral loopback bind. Identity
+inspection is pure; other effectful CLI commands fail closed. The fixture
+runner constructs a closed child environment rather than inheriting secrets.
+
+After admission a closed route allowlist permits shared onboarding/auth reads
+and the specific Arcee login/model-read operations. Harness, configuration,
+inference and future routes fail before handlers. Normal Origin/Host middleware
+still applies. No fixture token can reach a provider through session creation
+or model enumeration; normal executables contain no fixture environment adapter.
+
+`device_auth_contract.py` exercises actual marked-engine success, denial,
+expiry, timeout, cancellation, fresh-process credential readback, old-handle
+404/no replay, Origin refusals and effect exclusion using HTTP approval doubles.
+It explicitly provides no app/browser qualification. `DeviceAuthSmoke.swift`
+and hosted-only `device_auth_smoke.py` drive the actual shared provider UI and
+system-browser path. The runner owns the profile across Quit/relaunch and
+removes it only after bounded owned app/engine retirement. Real-browser runs
+require the coordinator-approved disposable hosted browser/profile contract;
+the runner never creates such a contract from environment flags. Real vendors,
+physical input, offline behavior and supported-OS qualification remain separate
+evidence obligations.

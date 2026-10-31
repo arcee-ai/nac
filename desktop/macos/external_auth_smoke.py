@@ -23,17 +23,32 @@ def digest(path):
         return hashlib.file_digest(file, 'sha256').hexdigest()
 
 
-def main():
-    source_app, output = (Path(argument).resolve() for argument in sys.argv[1:])
+def require_isolated_host():
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_OS') != 'macOS':
         raise SystemExit('Real external-browser qualification requires the coordinator-approved isolated hosted Mac contract; no launch attempted')
     console = session_lock_state()
     if not console['observed'] or console['locked'] is not False:
         raise SystemExit('Real external-browser qualification requires an unlocked isolated Mac/browser profile; no launch attempted')
+    return console
+
+
+def main():
+    source_app, output = (Path(argument).resolve() for argument in sys.argv[1:])
+    console = require_isolated_host()
     output.mkdir(parents=True, exist_ok=True)
     evidence = output / 'external-auth.json'
     assert not evidence.exists(), 'Use a fresh evidence destination'
     receipt = json.loads((source_app / 'Contents/Resources/build-receipt.json').read_text())
+    engine = source_app / 'Contents/Resources/nac-web'
+    build = json.loads(subprocess.check_output([str(engine), '__desktop-identity'], text=True))
+    assert set(build) == {'product_version', 'build_id', 'source_revision', 'track'}
+    assert not build['build_id'].startswith('native-auth-fixture-v1-')
+    assert receipt['engine_identity'] == build and receipt['source_head'] == build['source_revision']
+    assert receipt['mode'] == 'smoke-build' and receipt['source_dirty'] is False
+    assert receipt['smoke_instrumentation'] is True and receipt['normal_startup'] is False
+    assert 'PREVIEW_SMOKE' in receipt['compiler_flags'] and 'NATIVE_AUTH_FIXTURE' not in receipt['compiler_flags']
+    assert digest(engine) == receipt['engine_sha256']
+    assert digest(source_app / 'Contents/MacOS/NACPreview') == receipt['native_sha256']
     metadata = {'scope': 'actual-app-system-WK-to-real-system-browser; DOM-driven; local auth doubles',
                 'physical_input_qualified': False, 'real_vendor_qualified': False,
                 'session': console, 'build_receipt': receipt,

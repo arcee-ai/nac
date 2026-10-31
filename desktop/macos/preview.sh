@@ -2,9 +2,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 mode="${1:-run}"
-case "$mode" in build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke) ;; *) echo 'usage: preview.sh [build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke]' >&2; exit 2 ;; esac
+case "$mode" in build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|auth-build) ;; *) echo 'usage: preview.sh [build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|auth-build]' >&2; exit 2 ;; esac
 local_app=0
-case "$mode" in app-*|startup-*|instance-*) local_app=1 ;; esac
+case "$mode" in app-*|startup-*|instance-*|auth-build) local_app=1 ;; esac
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
     echo 'The development preview requires Apple Silicon macOS and an Apple Swift SDK.' >&2; exit 1;
 }
@@ -16,21 +16,39 @@ if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then app="$output/NAC Devel
 if [[ "$mode" == app-* ]]; then app="$output/NAC.app"; fi
 if [[ "$mode" == startup-* ]]; then app="$output/NAC Startup Smoke.app"; fi
 if [[ "$mode" == instance-* ]]; then app="$output/NAC Instance Smoke.app"; fi
+if [[ "$mode" == auth-build ]]; then app="$output/NAC Auth Fixture.app"; fi
 if [[ "${NAC_MAC_SKIP_ENGINE_BUILD:-0}" != 1 ]]; then
-    cargo build --locked -p nac-server --bin nac-web
+    engine_features=()
+    if [[ "$mode" == auth-build ]]; then engine_features=(--features native-auth-fixture); fi
+    cargo build --locked -p nac-server --bin nac-web "${engine_features[@]}"
 fi
 engine="${NAC_MAC_ENGINE:-${CARGO_TARGET_DIR:-$PWD/target}/debug/nac-web}"
 [[ -x "$engine" ]] || { echo "Missing compiled engine: $engine" >&2; exit 1; }
+# Inspect the actual selected executable before replacing ANY bundle artifact.
+# Fixture classification retains the existing strict four-field identity.
+engine_identity=$("$engine" __desktop-identity)
+engine_build_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["build_id"])' <<< "$engine_identity")
+engine_track=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["track"])' <<< "$engine_identity")
+fixture_engine=0
+case "$engine_build_id" in native-auth-fixture-v1-*) fixture_engine=1 ;; esac
+if [[ "$mode" == auth-build ]]; then
+    [[ "$fixture_engine" == 1 && "$engine_track" == dev ]] || { echo 'Auth mode requires its exact dev fixture engine.' >&2; exit 1; }
+elif [[ "$fixture_engine" == 1 ]]; then
+    echo 'Normal app modes reject the isolated auth-fixture engine.' >&2; exit 1
+fi
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp desktop/macos/Info.plist "$app/Contents/Info.plist"
 if [[ "$mode" == startup-* ]]; then
     /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier ai.arcee.nac.local-development' "$app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c 'Set :CFBundleName NAC' "$app/Contents/Info.plist"
 fi
+if [[ "$mode" == auth-build ]]; then
+    /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier ai.arcee.nac.native-auth-fixture' "$app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c 'Set :CFBundleName NAC Auth Fixture' "$app/Contents/Info.plist"
+fi
 if [[ ! "$engine" -ef "$app/Contents/Resources/nac-web" ]]; then
     cp "$engine" "$app/Contents/Resources/nac-web"
 fi
-engine_identity=$("$app/Contents/Resources/nac-web" __desktop-identity)
 printf '%s\n' "$engine_identity" > "$app/Contents/Resources/engine-identity.json"
 if [[ "$mode" == app-* || "$mode" == instance-* ]]; then
     identity_kind=normal
@@ -63,6 +81,10 @@ fi
 if [[ "$mode" == startup-* ]]; then
     sources+=(desktop/macos/StartupSmoke.swift)
     flags+=(-D PREVIEW_SMOKE)
+fi
+if [[ "$mode" == auth-build ]]; then
+    sources+=(desktop/macos/DeviceAuthSmoke.swift)
+    flags+=(-D PREVIEW_SMOKE -D NATIVE_AUTH_FIXTURE)
 fi
 if [[ "$mode" == instance-* ]]; then
     sources+=(desktop/macos/InstanceSmoke.swift)

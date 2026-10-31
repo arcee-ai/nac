@@ -37,6 +37,16 @@ fn main() {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| format!("{build_track}-{source_revision}"));
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_NATIVE_AUTH_FIXTURE");
+    let build_id = if std::env::var_os("CARGO_FEATURE_NATIVE_AUTH_FIXTURE").is_some() {
+        assert!(
+            build_track == "dev",
+            "native auth fixture builds require the dev track"
+        );
+        format!("native-auth-fixture-v1-{build_id}")
+    } else {
+        build_id
+    };
     println!("cargo:rustc-env=NAC_BUILD_ID={build_id}");
 
     let revision = source_revision.get(..12).unwrap_or(&source_revision);

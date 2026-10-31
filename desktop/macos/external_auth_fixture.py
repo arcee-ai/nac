@@ -17,9 +17,12 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 
 class AuthFixture(AbstractContextManager):
-    def __init__(self, callback='http://localhost:1456/callback', clock=time.monotonic):
+    def __init__(self, callback='http://localhost:1456/mcp_library/oauth/callback', clock=time.monotonic, device_mode='success'):
+        if device_mode not in ('success', 'denied', 'expired', 'hold', 'timeout'):
+            raise ValueError('Unknown device fixture mode')
         self.callback = callback
         self.clock = clock
+        self.device_mode = device_mode
         self.lock = threading.Lock()
         self.codes = {}
         self.devices = {}
@@ -41,7 +44,8 @@ class AuthFixture(AbstractContextManager):
 
     def snapshot(self):
         with self.lock:
-            return {'events': list(self.events), 'tokens_issued': sum(c['used'] for c in self.codes.values())}
+            return {'events': list(self.events), 'tokens_issued': sum(c['used'] for c in self.codes.values()),
+                    'device_tokens_issued': sum(event['kind'] == 'device_token' for event in self.events)}
 
     def handler(self):
         fixture = self
@@ -49,6 +53,10 @@ class AuthFixture(AbstractContextManager):
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_):
                 pass
+
+            def webkit_fixture(self):
+                return any(marker in self.headers.get('User-Agent', '')
+                           for marker in ('NACExternalAuthWK/', 'NACDeviceAuthWK/'))
 
             def reply(self, status, body, content_type='application/json'):
                 data = (json.dumps(body) if content_type == 'application/json' else body).encode()
@@ -83,16 +91,16 @@ class AuthFixture(AbstractContextManager):
                         fixture.codes[code] = {'challenge': one('code_challenge'), 'client': one('client_id'),
                                                'expires': fixture.clock() + 60, 'used': False}
                     self.event('authorization', mode=mode,
-                               webkit_fixture='NACExternalAuthWK/' in self.headers.get('User-Agent', ''))
+                               webkit_fixture=self.webkit_fixture())
                     callback = fixture.callback + '?' + urlencode(
                         {'error': 'access_denied', 'state': one('state')} if mode == 'denied' else
                         {'code': code, 'state': 'wrong-fixture-state' if mode == 'wrong-state' else one('state')})
                     # Observe the real external page before returning to Rust's
                     # callback. This is not a shell opener replacement.
-                    script = """
+                    script = r"""
                     fetch('/browser-observation', {method:'POST', headers:{'Content-Type':'application/json'},
                       body:JSON.stringify({bridge:typeof window.__nacDesktop !== 'undefined',
-                        wkFixture:navigator.userAgent.includes('NACExternalAuthWK/')})})
+                        wkFixture:/NAC(?:External|Device)AuthWK\//.test(navigator.userAgent)})})
                       .then(() => { CALLBACK });
                     """.replace('CALLBACK', '' if mode == 'hold' else f'location.replace({json.dumps(callback)})')
                     return self.reply(200, '<!doctype html><title>NAC local auth fixture</title>'
@@ -102,15 +110,15 @@ class AuthFixture(AbstractContextManager):
                     code = query.get('user_code', [''])[0]
                     with fixture.lock:
                         device = fixture.devices.get(code)
-                        if device and device['expires'] > fixture.clock():
+                        if device and device['expires'] > fixture.clock() and device['mode'] not in ('hold', 'timeout'):
                             device['approved'] = True
                     if not device:
                         return self.reply(400, {'error': 'invalid_request'})
-                    self.event('device_browser', webkit_fixture='NACExternalAuthWK/' in self.headers.get('User-Agent', ''))
+                    self.event('device_browser', webkit_fixture=self.webkit_fixture())
                     return self.reply(200, '<!doctype html><title>NAC device fixture</title><p>Approved. Return to NAC.</p>'
                                       "<script>fetch('/browser-observation',{method:'POST',body:JSON.stringify({"
                                       "bridge:typeof window.__nacDesktop!=='undefined',"
-                                      "wkFixture:navigator.userAgent.includes('NACExternalAuthWK/')})})</script>",
+                                      "wkFixture:/NAC(?:External|Device)AuthWK\\//.test(navigator.userAgent)})})</script>",
                                       'text/html; charset=utf-8')
                 self.reply(404, {'error': 'not_found'})
 
@@ -127,7 +135,13 @@ class AuthFixture(AbstractContextManager):
                             return self.reply(400, {'error': 'invalid_request'})
                         self.event('browser_observation', bridge=value['bridge'], webkit_fixture=value['wkFixture'])
                         return self.reply(200, {'observed': True})
-                    form = parse_qs(data.decode())
+                    if self.headers.get('Content-Type', '').startswith('application/json'):
+                        value = json.loads(data)
+                        if not isinstance(value, dict) or any(not isinstance(item, str) for item in value.values()):
+                            return self.reply(400, {'error': 'invalid_request'})
+                        form = {key: [item] for key, item in value.items()}
+                    else:
+                        form = parse_qs(data.decode())
                     one = lambda key: form.get(key, [''])[0]
                     if path == '/oauth/token':
                         digest = base64.urlsafe_b64encode(hashlib.sha256(one('code_verifier').encode()).digest()).rstrip(b'=').decode()
@@ -143,22 +157,31 @@ class AuthFixture(AbstractContextManager):
                         self.event('token_exchange', pkce_verified=True)
                         return self.reply(200, {'access_token': 'local-fixture-access', 'token_type': 'Bearer',
                                                 'expires_in': 3600, 'scope': 'fixture:read'})
-                    if path == '/device/code':
+                    if path in ('/device/code', '/app/v1/device/code'):
+                        if path.startswith('/app/') and one('client_id') != 'nac-cli':
+                            return self.reply(400, {'error': 'invalid_client'})
                         code = secrets.token_urlsafe(12)
+                        expiry = 3 if fixture.device_mode == 'timeout' else 60
                         with fixture.lock:
-                            fixture.devices[code] = {'approved': False, 'expires': fixture.clock() + 60}
+                            fixture.devices[code] = {'approved': False, 'expires': fixture.clock() + expiry, 'mode': fixture.device_mode}
                         self.event('device_started')
-                        return self.reply(200, {'device_code': code, 'user_code': code, 'expires_in': 60, 'interval': 1,
-                                                'verification_uri': fixture.origin + '/device/verify?' + urlencode({'user_code': code})})
-                    if path == '/device/token':
+                        verification = fixture.origin + '/device/verify?' + urlencode({'user_code': code})
+                        return self.reply(200, {'device_code': code, 'user_code': code, 'expires_in': expiry, 'interval': 1,
+                                                'verification_uri': verification, 'verification_uri_complete': verification})
+                    if path in ('/device/token', '/app/v1/device/token'):
+                        if path.startswith('/app/') and one('client_id') != 'nac-cli':
+                            return self.reply(400, {'error': 'invalid_client'})
                         with fixture.lock:
                             device = fixture.devices.get(one('device_code'))
                             error = ('expired_token' if not device or device['expires'] <= fixture.clock() else
-                                     None if device['approved'] else 'authorization_pending')
+                                     'authorization_pending' if not device['approved'] else
+                                     {'denied': 'access_denied', 'expired': 'expired_token'}.get(device['mode']))
                         if error:
                             return self.reply(400, {'error': error})
                         self.event('device_token')
-                        return self.reply(200, {'access_token': 'local-device-access', 'token_type': 'Bearer', 'expires_in': 3600})
+                        return self.reply(200, {'access_token': 'local-device-access', 'refresh_token': 'local-device-refresh',
+                            'token_type': 'Bearer', 'expires_in': 43200, 'base_url': 'https://api.arcee.ai/api/v1',
+                            'organization_id': 'local-fixture-org', 'workspace_name': 'local-fixture-workspace'})
                     return self.reply(404, {'error': 'not_found'})
                 except (ValueError, UnicodeError):
                     return self.reply(400, {'error': 'invalid_request'})

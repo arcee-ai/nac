@@ -38,7 +38,8 @@ class ExternalAuthFixtureTests(unittest.TestCase):
 
     def test_actual_callback_pkce_and_single_use_are_required(self):
         with AuthFixture() as fixture:
-            status, _, verifier = self.authorize(fixture)
+            status, _, verifier = self.authorize(fixture,
+                redirect_uri='http://localhost:1456/mcp_library/oauth/callback')
             self.assertEqual(status, 200)
             code = next(iter(fixture.codes))
             form = {'code': code, 'code_verifier': verifier, 'client_id': 'local-fixture-client',
@@ -53,7 +54,8 @@ class ExternalAuthFixtureTests(unittest.TestCase):
 
     def test_authorization_never_redirects_to_an_unbound_callback(self):
         with AuthFixture() as fixture:
-            for callback in ['https://example.test/callback', 'http://127.0.0.1:1456/callback',
+            for callback in ['http://localhost:1456/callback', 'https://example.test/callback',
+                             'http://127.0.0.1:1456/mcp_library/oauth/callback',
                              'http://localhost:1456/wrong', fixture.callback + '?state=other']:
                 with self.subTest(callback=callback):
                     self.assertEqual(self.authorize(fixture, redirect_uri=callback)[0], 400)
