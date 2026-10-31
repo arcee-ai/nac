@@ -148,7 +148,7 @@ fn v39_task_store_adds_review_without_changing_queued_child_authority() {
         )
         .unwrap();
     assert!(raw_intent.is_none());
-    assert_eq!(schema_version(), 40);
+    assert_eq!(schema_version(), STORE_SCHEMA_VERSION);
     drop(connection);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

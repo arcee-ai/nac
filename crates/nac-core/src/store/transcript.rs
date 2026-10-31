@@ -424,6 +424,7 @@ fn mark_inbox_item_delivered(
     run_id: &str,
     expected_content: &str,
 ) -> Result<()> {
+    super::task_questions::consume_question_answer(transaction, session_id, item_id, run_id)?;
     let now = now_utc();
     let changed = transaction.execute(
         "UPDATE session_inbox

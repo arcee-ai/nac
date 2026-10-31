@@ -40,7 +40,7 @@ pub(crate) struct ReadTaskInput {
     authorized_project: Option<String>,
 }
 
-fn definition(name: &str, description: &str, parameters: Value) -> ToolDefinition {
+pub(super) fn definition(name: &str, description: &str, parameters: Value) -> ToolDefinition {
     ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
@@ -51,11 +51,11 @@ fn definition(name: &str, description: &str, parameters: Value) -> ToolDefinitio
     }
 }
 
-fn invalid(message: impl std::fmt::Display) -> ToolResult {
+pub(super) fn invalid(message: impl std::fmt::Display) -> ToolResult {
     argument_error(message.to_string())
 }
 
-fn unavailable(error: impl std::fmt::Display) -> ToolResult {
+pub(super) fn unavailable(error: impl std::fmt::Display) -> ToolResult {
     ToolResult::text(
         json!({"status":"unavailable","detail":format!("task state is unavailable: {error}")})
             .to_string(),
@@ -111,11 +111,11 @@ fn open_cursor(caller: &str, project_id: &str, token: &str) -> Option<String> {
         .map(|cursor| cursor.position.clone())
 }
 
-fn result(value: Value) -> ToolResult {
+pub(super) fn result(value: Value) -> ToolResult {
     ToolResult::text(value.to_string(), false)
 }
 
-fn check_id(label: &str, value: &str) -> Result<(), ToolResult> {
+pub(super) fn check_id(label: &str, value: &str) -> Result<(), ToolResult> {
     if value.trim().is_empty() || value.len() > MAX_ID_BYTES {
         return Err(invalid(format!(
             "{label} must contain 1 to {MAX_ID_BYTES} bytes"
@@ -124,9 +124,13 @@ fn check_id(label: &str, value: &str) -> Result<(), ToolResult> {
     Ok(())
 }
 
-fn navigation(session_id: &str) -> String {
-    let mut route = String::from("/session/");
-    for byte in session_id.bytes() {
+pub(super) fn navigation(session_id: &str) -> String {
+    format!("/session/{}", url_component(session_id))
+}
+
+pub(crate) fn url_component(value: &str) -> String {
+    let mut route = String::new();
+    for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
             route.push(char::from(byte));
         } else {
@@ -137,7 +141,9 @@ fn navigation(session_id: &str) -> String {
 }
 
 /// Only an attached, persisted direct primary may discover peers.
-fn caller(services: ToolServices<'_>) -> Result<(String, Arc<PermissionBroker>), ToolResult> {
+pub(super) fn caller(
+    services: ToolServices<'_>,
+) -> Result<(String, Arc<PermissionBroker>), ToolResult> {
     match (
         services.runtime.permission_broker.as_ref(),
         services.runtime.session_id.as_deref(),
@@ -161,12 +167,12 @@ async fn store_call<R: Send + 'static>(
     }
 }
 
-fn task_resource(session_id: &str) -> PermissionResource {
+pub(super) fn task_resource(session_id: &str) -> PermissionResource {
     PermissionResource::new("task_read", format!("session:{session_id}"))
 }
 
 /// `project:current` stands in only until the caller's project is known to the broker.
-fn project_resource(project_id: Option<&str>) -> PermissionResource {
+pub(super) fn project_resource(project_id: Option<&str>) -> PermissionResource {
     PermissionResource::new(
         "task_read",
         format!("project:{}", project_id.unwrap_or("current")),
@@ -174,7 +180,7 @@ fn project_resource(project_id: Option<&str>) -> PermissionResource {
 }
 
 /// The project resource the kernel actually authorized for this invocation.
-fn authorized_project(resources: &[PermissionResource]) -> Option<String> {
+pub(super) fn authorized_project(resources: &[PermissionResource]) -> Option<String> {
     resources
         .iter()
         .find_map(|resource| resource.resource.strip_prefix("project:"))
@@ -223,6 +229,7 @@ fn found_task(snapshot: store::DirectTaskSnapshot) -> Value {
             "visible_message_count": snapshot.visible_message_count,
             "current_run": snapshot.current_run,
             "pending_inbox_items": snapshot.pending_inbox_items,
+            "pending_question": snapshot.pending_question,
             "goal": snapshot.goal,
             "goal_objective_truncated": snapshot.goal_objective_truncated,
             "goal_last_run_id": snapshot.goal_last_run_id,
@@ -236,7 +243,7 @@ fn found_task(snapshot: store::DirectTaskSnapshot) -> Value {
 }
 
 /// Withholds a target outside the caller's project unless that project is named.
-async fn exact_lookup(
+pub(super) async fn exact_lookup(
     tool: &str,
     services: ToolServices<'_>,
     context: &ToolCallContext,
@@ -636,4 +643,4 @@ impl NativeTool for ReadTaskTool {
 
 #[cfg(test)]
 #[path = "task_discovery_tests.rs"]
-mod tests;
+pub(super) mod tests;

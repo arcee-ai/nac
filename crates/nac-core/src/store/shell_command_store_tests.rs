@@ -113,8 +113,13 @@ fn human_shell_schema_upgrade_from_32_preserves_existing_sessions() {
         .unwrap();
     drop(connection);
     crate::store::initialize(&path).unwrap();
-    assert_eq!(crate::store::schema_version(), 40);
     let connection = open_runtime_connection(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        crate::store::schema_version()
+    );
     let after: String = connection
         .query_row(
             "SELECT messages_json FROM sessions WHERE session_id='session'",
