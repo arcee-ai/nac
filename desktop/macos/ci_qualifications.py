@@ -16,9 +16,17 @@ def select_target(key):
         raise RuntimeError('Unknown/unapproved qualification target')
     target = catalog[key]
     if (not re.fullmatch('[0-9a-f]{40}', target.get('source_sha', ''))
-            or target.get('profile') not in PROFILES or target.get('suite') not in ('preview', 'workspace', 'instances', 'terminal')
+            or target.get('profile') not in PROFILES or target.get('suite') not in ('preview', 'workspace', 'instances', 'terminal', 'startup')
             or not isinstance(target.get('scenario_count'), int) or target['scenario_count'] < 1):
         raise RuntimeError('Invalid immutable qualification contract')
+    if target['suite'] == 'startup':
+        from ci_startup_fixture import CASES, PRODUCT, TEST_SOURCE, TEST_FILES
+        from ci_startup_protocol import FILES, REVISION
+        if key != 'all-342-startup-macos26' or target != {
+            'source_sha': PRODUCT, 'test_source_sha': TEST_SOURCE, 'protocol_source_sha': REVISION,
+            'profile': 'macos26', 'suite': 'startup', 'scenario_count': 4, 'scenarios': list(CASES),
+            'test_files': TEST_FILES, 'protocol_files': FILES}:
+            raise RuntimeError('Startup P/Q/R four-case source contract differs')
     runner, envelope = PROFILES[target['profile']]
     toolchain = json.loads((DIRECTORY / envelope).read_text())
     return {**target, 'runner': runner, 'envelope': envelope,
