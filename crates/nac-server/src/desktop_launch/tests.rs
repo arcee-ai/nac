@@ -39,12 +39,68 @@ fn control_cannot_name_a_pid_or_store() {
 }
 
 fn channel() -> (UnixStream, DesktopLaunch) {
+    channel_for_store(Path::new("/tmp/desktop-channel-fixture.db"))
+}
+
+fn channel_for_store(store: &Path) -> (UnixStream, DesktopLaunch) {
     let (mut parent, child) = UnixStream::pair().unwrap();
     let hello = serde_json::json!({"kind":"hello", "version":VERSION,
         "incarnation":uuid::Uuid::new_v4().to_string(), "identity":Identity::current(),
-        "store":"/tmp/desktop-channel-fixture.db"});
+        "store":store});
     writeln!(parent, "{hello}").unwrap();
     (parent, DesktopLaunch::adopt(child).unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fresh_store_is_identified_only_after_the_shared_listener_initializes_it() {
+    let _lock = crate::tests::SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!("nac-desktop-fresh-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let _env = crate::tests::ScopedModelEnv::isolated(&root.join("nac-home"), None);
+    let store = root.join("store.db");
+    assert!(!store.exists());
+    let (mut parent, launch) = channel_for_store(&store);
+    let manager = SessionManager::new_async(crate::ServerOptions {
+        root_cwd: root.clone(),
+        store_path: Some(store.clone()),
+        worker_executable: None,
+        managed_host: None,
+    })
+    .await
+    .unwrap();
+    let server =
+        tokio::spawn(async move { launch.serve("127.0.0.1:0".parse().unwrap(), manager).await });
+    let (peer, receipt) = tokio::task::spawn_blocking(move || {
+        parent
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let bytes = read_record(&mut BufReader::new(parent.try_clone().unwrap())).unwrap();
+        (
+            parent,
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+        )
+    })
+    .await
+    .unwrap();
+    parent = peer;
+    assert_eq!(receipt["kind"], "ready");
+    assert_eq!(receipt["store"], store.to_str().unwrap());
+    assert_eq!(receipt["schema"], nac_core::store::schema_version());
+    nac_core::store::check_readiness(&store).unwrap();
+    writeln!(
+        parent,
+        "{}",
+        serde_json::json!({"kind":"stop", "version":VERSION,
+        "incarnation":receipt["incarnation"]})
+    )
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]

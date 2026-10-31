@@ -95,7 +95,7 @@ def run_contract(binary, destination):
                         assert failure is None or failure['kind'] == 'failed', failure
                     else:
                         receipt = record(parent)
-                        assert receipt['kind'] == 'ready' and receipt['identity'] == identity
+                        assert receipt['kind'] == 'ready' and receipt['identity'] == identity, (scenario, receipt, (profile / 'diagnostics').read_text())
                         assert receipt['version'] == 1 and receipt['incarnation'] == incarnation
                         assert receipt['store'] == str(store) and receipt['schema'] > 0
                         assert receipt['endpoint'].startswith('http://127.0.0.1:')
@@ -120,6 +120,15 @@ def run_contract(binary, destination):
                     if process.poll() is None:
                         process.kill()
                         process.wait()
+        environment.pop('NAC_DESKTOP_CHANNEL_FD', None)
+        helper = subprocess.run([str(binary), '__github-credential', '--state-root', str(root / 'helper-state'),
+                                 '--client-id', 'fixture', 'get'], env=environment,
+                                input=b'protocol=https\nhost=unrelated.example.test\n\n', capture_output=True, timeout=5)
+        assert helper.returncode == 0 and helper.stdout == b'', helper
+        worker = subprocess.run([str(binary), '__worker', '--help'], env=environment, capture_output=True, timeout=5)
+        assert worker.returncode == 0 and b'--session-id' in worker.stdout and b'--thread-name' in worker.stdout, worker
+        results.append(dict(scenario='bundled-helper-entrypoints', helper_code=helper.returncode,
+                            worker_help_code=worker.returncode, executable=str(binary)))
     Path(destination).write_text(json.dumps(dict(identity=identity, cases=results), indent=2) + '\n')
     return results
 

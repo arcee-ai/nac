@@ -209,10 +209,8 @@ impl DesktopLaunch {
             bail!("desktop launch requires a local ephemeral listener");
         }
         let info = manager.store_info();
-        let store = info.store_path.canonicalize()?;
-        if store.to_str() != Some(&self.expected_store) {
-            bail!("desktop selected store mismatch");
-        }
+        let selected_store = info.store_path;
+        let mut publication_failed = false;
         let mut stopped = self.stopped.clone();
         let shutdown = async move {
             tokio::select! {
@@ -220,7 +218,7 @@ impl DesktopLaunch {
                 _ = async { while !*stopped.borrow_and_update() { if stopped.changed().await.is_err() { break; } } } => {},
             }
         };
-        server::serve_with_lifecycle(
+        let result = server::serve_with_lifecycle(
             addr,
             BindPolicy::LoopbackOnly,
             manager,
@@ -228,6 +226,16 @@ impl DesktopLaunch {
                 if *self.stopped.borrow() {
                     return;
                 }
+                // The listener owner initializes/checks the store before this
+                // callback. A fresh store need not exist at manager creation.
+                let store = match selected_store.canonicalize() {
+                    Ok(store) if store.to_str() == Some(&self.expected_store) => store,
+                    _ => {
+                        publication_failed = true;
+                        let _ = self.stop.send(true);
+                        return;
+                    }
+                };
                 if self
                     .send(serde_json::json!({"kind":"ready", "version":VERSION,
                 "incarnation":self.incarnation, "endpoint":format!("http://{bound}"),
@@ -241,7 +249,11 @@ impl DesktopLaunch {
             ManagedReadinessPolicy::production(),
             shutdown,
         )
-        .await
+        .await;
+        if publication_failed {
+            bail!("desktop selected store mismatch");
+        }
+        result
     }
 }
 

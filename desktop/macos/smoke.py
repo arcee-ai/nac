@@ -136,7 +136,7 @@ def main():
             try:
                 # Each scenario launches the bundle in a different cwd and with a
                 # poisoned parent environment. The engine receives a clean allowlist.
-                for scenario in ('normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeout', 'migration-failure') + RECEIPT_FAILURES + CASES:
+                for scenario in ('normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeout', 'migration-failure', 'bind-conflict') + RECEIPT_FAILURES + CASES:
                     if scenario in ('normal', 'engine-exit', 'migration-failure') + CASES:
                         os.link(saved, engine)
                     elif scenario == 'missing':
@@ -145,6 +145,9 @@ def main():
                         fixture = Path(__file__).with_name('protocol_fixture.py').read_text()
                         engine.write_text('#!' + sys.executable + '\n' + fixture.split('\n', 1)[1])
                         engine.with_name('fixture-scenario').write_text(scenario)
+                        engine.chmod(0o755)
+                    elif scenario == 'bind-conflict':
+                        engine.write_text('#!/bin/sh\nshift 2\nexec "$(dirname "$0")/saved-engine" --bind 127.0.0.1:3210 "$@"\n')
                         engine.chmod(0o755)
                     else:
                         engine.write_text('#!/bin/sh\n' + ('exit 42\n' if scenario == 'exit' else
@@ -188,6 +191,8 @@ def main():
                     evidence.write_text(json.dumps(result, indent=2) + '\n')
                     assert (code == 0 or scenario.startswith('parent-loss')) and result.get('passed'), f'{scenario} failed: {result}'
                     assert result['engine_reaped'] and result['profile_removed'], result
+                    if not scenario.startswith('parent-loss'):
+                        assert result['identity_retired'], result
                     pid = result.get('engine_pid', 0)
                     if pid:
                         assert not alive(pid), f'Engine {pid} survived window close'

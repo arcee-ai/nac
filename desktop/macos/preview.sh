@@ -21,7 +21,8 @@ cp desktop/macos/Info.plist "$app/Contents/Info.plist"
 if [[ ! "$engine" -ef "$app/Contents/Resources/nac-web" ]]; then
     cp "$engine" "$app/Contents/Resources/nac-web"
 fi
-"$app/Contents/Resources/nac-web" __desktop-identity > "$app/Contents/Resources/engine-identity.json"
+engine_identity=$("$app/Contents/Resources/nac-web" __desktop-identity)
+printf '%s\n' "$engine_identity" > "$app/Contents/Resources/engine-identity.json"
 sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/PreviewEngine.swift
          desktop/macos/EngineProtocol.swift
          desktop/macos/PreviewProfile.swift desktop/macos/FixtureProvider.swift desktop/macos/FixtureBootstrap.swift)
@@ -41,6 +42,6 @@ case "$mode" in
             -o "$output/EngineProtocolTests"
         "$output/EngineProtocolTests"
         python3 -B -m unittest discover -s desktop/macos -p 'test_*.py'
-        exec python3 desktop/macos/smoke.py "$app" "$output/evidence"
+        exec python3 -B desktop/macos/smoke.py "$app" "$output/evidence"
         ;;
 esac

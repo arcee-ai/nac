@@ -10,7 +10,8 @@ final class PreviewEngine {
     private var run: EngineRun?
     var pid: pid_t { run?.pid ?? 0 }
     var log: String { run?.log ?? "" }
-    var receipt: EngineReceipt? { run?.protocolState.ready }
+    /// Valid only while this exact launch is live and has not begun retirement.
+    var receipt: EngineReceipt? { run?.receipt }
     var onReady: ((URL) -> Void)?
     var onExit: ((Int32) -> Void)?
     var onFailure: ((String) -> Void)?
@@ -55,6 +56,7 @@ private final class EngineRun {
     #endif
     private(set) var pid: pid_t = 0
     let protocolState: EngineProtocol
+    var receipt: EngineReceipt? { pid > 0 && !stopping && !failed ? protocolState.ready : nil }
     private(set) var log = ""
     private var output: DispatchSourceRead?
     private var channel: DispatchSourceRead?

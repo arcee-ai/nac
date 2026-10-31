@@ -50,7 +50,13 @@ final class PreviewSmoke {
                     if scenario == "stale-launch" {
                         try await wait("first launch load barrier") { self.pausedFirstLoad }
                         let previous = app.engine.receipt!.incarnation
-                        await withCheckedContinuation { continuation in app.engine.stop { continuation.resume() } }
+                        await withCheckedContinuation { continuation in
+                            app.engine.stop { continuation.resume() }
+                            evidence["identity_retired_before_reap"] = app.engine.pid > 0 && app.engine.receipt == nil
+                        }
+                        guard evidence["identity_retired_before_reap"] as? Bool == true else {
+                            throw PreviewError.message("Stopping launch retained active identity")
+                        }
                         try app.engine.launch(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/nac-web"),
                                               profile: app.profile!, provider: app.provider)
                         try await wait("new launch receipt") { self.app.engine.receipt?.incarnation != nil && self.app.engine.receipt?.incarnation != previous }
@@ -96,11 +102,12 @@ final class PreviewSmoke {
                     case "missing": expected = "missing or not executable"
                     case "timeout", "missing-receipt": expected = "within 30 seconds"
                     case "exit", "engine-exit": expected = "engine"
-                    case "migration-failure": expected = "could not initialize"
+                    case "migration-failure", "bind-conflict": expected = "could not initialize"
                     case "truncated": expected = "channel closed"
                     default: expected = "invalid launch receipt"
                     }
                     guard message.contains(expected) else { throw PreviewError.message("Unexpected failure: \(message)") }
+                    guard app.engine.receipt == nil else { throw PreviewError.message("Failed launch retained active identity") }
                     guard app.baseURL == nil || scenario == "engine-exit" else {
                         throw PreviewError.message("Unverified engine activated the workspace")
                     }
@@ -221,6 +228,7 @@ final class PreviewSmoke {
         } else if scenario == "channel-loss-active" {
             app.engine.loseChannel()
             try await wait("runtime channel loss") { self.app.failure != nil }
+            guard app.engine.receipt == nil else { throw PreviewError.message("Channel loss retained active identity") }
             try captureNative()
         } else {
             try await wait("runner owns store write barrier") {
@@ -346,6 +354,7 @@ final class PreviewSmoke {
         evidence["engine_log_after_shutdown"] = app.engine.log
         evidence["profile_removed"] = app.profile.map { !FileManager.default.fileExists(atPath: $0.root.path) } ?? true
         evidence["engine_reaped"] = app.engine.pid == 0
+        evidence["identity_retired"] = app.engine.receipt == nil
         evidence["cleanup_error"] = cleanupError
         evidence["passed"] = passed && cleanupError == nil && evidence["profile_removed"] as? Bool == true
         write()

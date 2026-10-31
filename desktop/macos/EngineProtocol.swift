@@ -23,6 +23,8 @@ struct EngineReceipt: Decodable {
 /// One parser belongs to one launch. Diagnostic output is never protocol input.
 final class EngineProtocol {
     static let limit = 16 * 1024
+    // Launch identity is distinct from the server's NativeRuntimeScope and
+    // any future WebView document identity.
     let incarnation = UUID().uuidString
     let identity: EngineIdentity
     let store: String

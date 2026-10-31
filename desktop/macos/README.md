@@ -135,6 +135,15 @@ no HTTP authentication, human-operation capability or agent approval authority.
 No channel is inherited by ordinary CLI invocations, whose existing lifetime
 and worker/helper dispatch remain independent.
 
+The native consumer seam is `PreviewEngine.receipt` and the existing
+`onReady(URL)`, `onFailure(String)`, `onExit(Int32)` and `stop(completion)`
+callbacks. The receipt is available only for the current verified live launch;
+stop, channel failure and exit retire it before notifying consumers. Its launch
+UUID is distinct from the server's `NativeRuntimeScope.incarnation` and any
+future WebView document/view identity. Store/schema metadata stays with the
+native process owner. Future menu/navigation commands belong to the separate
+document bridge owner, never this engine control channel.
+
 Actual-app acceptance also covers malformed/truncated/missing/duplicate/oversized
 receipts, identity/endpoint mismatches, migration failure, startup/runtime channel
 loss, abrupt parent death with helpers/terminal descendants, stale per-launch
