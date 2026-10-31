@@ -1,11 +1,13 @@
 """Synthetic OS records exercise the owner; no app/process signal is issued."""
 import copy
 import ctypes
+import errno
 import signal
 import unittest
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
-from ci_startup_owner import BSDInfo, OwnerWitness
+from ci_startup_owner import BSDInfo, OwnerWitness, identity, native_identity
 
 
 class StartupOwnerTests(unittest.TestCase):
@@ -20,6 +22,7 @@ class StartupOwnerTests(unittest.TestCase):
     def ready(self):
         self.sequence += 1
         self.owner.observe({'schema': 'nac342-owner-v1', 'event': 'ready', 'nodes': [],
+                            'complete': True, 'retired': [], 'enumerated_exits': [],
                             'observed_uptime_ns': str(int(self.clock * 1e9) + self.sequence),
                             'configuration_sha256': 'b' * 64})
 
@@ -35,7 +38,12 @@ class StartupOwnerTests(unittest.TestCase):
 
     def observe(self, nodes):
         self.sequence += 1
-        self.owner.observe({'schema': 'nac342-owner-v1', 'nodes': nodes,
+        # These synthetic fixtures explicitly assert positive exit for omitted
+        # prior identities. Missing/ambiguous retirement is tested separately.
+        retired = [{'identity': identity(node), 'proof': 'kill_zero_ESRCH'}
+                   for pid, node in self.owner.history.items() if pid not in {row['pid'] for row in nodes}]
+        self.owner.observe({'schema': 'nac342-owner-v1', 'nodes': nodes, 'complete': True,
+                            'retired': retired, 'enumerated_exits': [],
                             'observed_uptime_ns': str(int(self.clock * 1e9) + self.sequence)})
 
     def test_preinstall_live_parentage_incarnation_and_fresh_empty_are_distinct(self):
@@ -120,12 +128,91 @@ class StartupOwnerTests(unittest.TestCase):
     def test_buffered_empty_observation_does_not_gain_the_receivers_later_time(self):
         self.ready()
         self.clock = 105.0
-        self.owner.observe({'schema': 'nac342-owner-v1', 'nodes': [], 'observed_uptime_ns': '100500000000'})
+        record = {'schema': 'nac342-owner-v1', 'nodes': [], 'complete': True, 'retired': [], 'enumerated_exits': []}
+        self.owner.observe({**record, 'observed_uptime_ns': '100500000000'})
         self.assertEqual(self.owner.last_empty, 100.5)
         with self.assertRaises(RuntimeError):
-            self.owner.observe({'schema': 'nac342-owner-v1', 'nodes': [], 'observed_uptime_ns': '100500000000'})
+            self.owner.observe({**record, 'observed_uptime_ns': '100500000000'})
         with self.assertRaises(RuntimeError):
-            self.owner.observe({'schema': 'nac342-owner-v1', 'nodes': [], 'observed_uptime_ns': '200000000000'})
+            self.owner.observe({**record, 'observed_uptime_ns': '200000000000'})
+
+    def test_empty_or_retired_identity_mismatch_does_not_erase_known_owners(self):
+        self.ready()
+        self.observe([self.node('app', 10, 1), self.node('engine', 11, 10)])
+        prior = copy.deepcopy(self.owner.latest)
+        for retired in ([], [{'identity': {**identity(prior[0]), 'start_microseconds': 999}, 'proof': 'kill_zero_ESRCH'}],
+                        [{'identity': identity(node), 'proof': 'path_lookup_failed'} for node in prior]):
+            self.sequence += 1
+            with self.assertRaises(RuntimeError):
+                self.owner.observe({'schema': 'nac342-owner-v1', 'complete': True, 'nodes': [], 'retired': retired,
+                    'enumerated_exits': [], 'observed_uptime_ns': str(int(self.clock * 1e9) + self.sequence)})
+            self.assertEqual(self.owner.latest, prior)
+            self.assertFalse(self.owner.failure_receipt()['positive_settlement'])
+        self.owner.wait_empty = Mock(return_value=True)
+        with self.assertRaises(RuntimeError):
+            self.owner.settle(100)
+
+    def libc(self, *, failure=None, changed=None):
+        calls = {'bsd': 0, 'path': 0}
+        def bsd(pid, flavor, argument, pointer, size):
+            calls['bsd'] += 1
+            if failure and failure[0] == 'bsd':
+                ctypes.set_errno(failure[1])
+                return 0
+            value = ctypes.cast(pointer, ctypes.POINTER(BSDInfo)).contents
+            value.pid, value.parent, value.uid = pid, 50, 501
+            value.start_seconds, value.start_microseconds = 1234, 1
+            if changed and calls['bsd'] == 2:
+                for key, item in changed.items():
+                    if key != 'executable':
+                        setattr(value, key, item)
+            return size
+        def path(pid, buffer, size):
+            calls['path'] += 1
+            if failure and failure[0] == 'path':
+                ctypes.set_errno(failure[1])
+                return 0
+            value = changed.get('executable') if changed and calls['path'] == 2 else None
+            buffer.value = value or b'/private/owned/NAC.app/Contents/Resources/nac-web'
+            return len(buffer.value)
+        return SimpleNamespace(proc_pidinfo=Mock(side_effect=bsd), proc_pidpath=Mock(side_effect=path))
+
+    def test_python_kernel_probe_never_maps_denied_or_other_lookup_errors_to_exit(self):
+        for stage in ('bsd', 'path'):
+            for error in (errno.EACCES, errno.EPERM, errno.EIO, errno.ESRCH):
+                with self.subTest(stage=stage, error=error), \
+                        patch('ci_startup_owner.ctypes.CDLL', return_value=self.libc(failure=(stage, error))), \
+                        patch('ci_startup_owner.os.getuid', return_value=501), \
+                        patch('ci_startup_owner.os.kill', return_value=None) as probe, self.assertRaises(RuntimeError):
+                    native_identity(123)
+                probe.assert_called_once_with(123, 0)
+        with patch('ci_startup_owner.ctypes.CDLL', return_value=self.libc(failure=('path', errno.EIO))), \
+                patch('ci_startup_owner.os.getuid', return_value=501), \
+                patch('ci_startup_owner.os.kill', side_effect=PermissionError()), self.assertRaises(PermissionError):
+            native_identity(123)
+
+    def test_python_kernel_probe_retires_only_after_independent_positive_absence(self):
+        for stage in ('bsd', 'path'):
+            with self.subTest(stage=stage), \
+                    patch('ci_startup_owner.ctypes.CDLL', return_value=self.libc(failure=(stage, errno.EIO))), \
+                    patch('ci_startup_owner.os.getuid', return_value=501), \
+                    patch('ci_startup_owner.os.kill', side_effect=ProcessLookupError()) as probe:
+                self.assertIsNone(native_identity(123))
+            probe.assert_called_once_with(123, 0)
+
+    def test_python_kernel_probe_bookends_start_path_uid_and_parent_before_signaling(self):
+        for changed in ({'start_microseconds': 999}, {'executable': b'/foreign'}, {'uid': 999}, {'parent': 700},
+                        {'start_seconds': 0}, {'start_microseconds': 1000000}):
+            with self.subTest(changed=changed), \
+                    patch('ci_startup_owner.ctypes.CDLL', return_value=self.libc(changed=changed)), \
+                    patch('ci_startup_owner.os.getuid', return_value=501), \
+                    patch('ci_startup_owner.os.kill') as probe, self.assertRaises(RuntimeError):
+                native_identity(123)
+            probe.assert_not_called()
+        with patch('ci_startup_owner.ctypes.CDLL', return_value=self.libc()), \
+                patch('ci_startup_owner.os.getuid', return_value=501), patch('ci_startup_owner.os.kill') as probe:
+            self.assertEqual(native_identity(123)['start_microseconds'], 1)
+        probe.assert_not_called()
 
 
 if __name__ == '__main__':
