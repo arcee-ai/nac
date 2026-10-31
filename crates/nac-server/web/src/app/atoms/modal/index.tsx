@@ -55,6 +55,8 @@ interface ModalProps {
   /** Controls of the dialog's own, trailing the title in the header row. */
   headerActions?: React.ReactNode;
   size?: ModalSize;
+  /** Surface and scrim layer for a dialog opened above a panel or sheet. */
+  zIndex?: number;
   closeOnOverlay?: boolean;
   /** Stretch the body over a card the caller sizes; it still grows with its content. */
   flush?: boolean;
@@ -107,6 +109,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   subheader,
   headerActions,
   size = ModalSize.Medium,
+  zIndex = 100,
   closeOnOverlay = true,
   flush = false,
   fullScreen = false,
@@ -288,13 +291,14 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
         <Overlay asChild dismissible={overlayCloses}>
           <CoverBackground
             open={open && (!isMobile || !offscreen)}
-            zIndex={100}
+            zIndex={zIndex}
             opacity={0.25}
             blur={1}
             className={isMobile ? "!duration-300" : undefined}
           />
         </Overlay>
         <div
+          style={{ zIndex }}
           className={cn(
             "pointer-events-none fixed inset-0 z-[100] flex",
             // A phone panel is the viewport itself, so it never gets the inset

@@ -1,4 +1,4 @@
-import { $ as e, $i as t, $n as n, $r as r, $t as i, A as a, Ai as o, An as s, Ar as c, At as l, B as u, Bi as d, Bn as f, Br as p, Bt as m, C as h, Ci as g, Cn as _, Cr as v, Ct as y, D as b, Di as x, Dn as S, Dr as C, Dt as w, E as T, Ei as E, En as D, Er as O, Et as k, F as A, Fi as j, Fn as M, Fr as N, Ft as ee, G as te, Gi as ne, Gn as re, Gr as P, Gt as ie, H as ae, Hi as oe, Hn as se, Ht as ce, I as le, Ii as ue, In as de, Ir as fe, It as pe, J as me, Ji as he, Jn as F, Jr as I, Jt as ge, K as _e, Ki as ve, Kn as L, Kr as ye, Kt as be, L as xe, Li as Se, Ln as Ce, Lr as we, Lt as Te, M as Ee, Mi as De, Mn as Oe, Mr as ke, Mt as Ae, N as je, Ni as Me, Nn as Ne, Nr as Pe, Nt as Fe, O as Ie, Oi as Le, On as Re, Or as ze, Ot as Be, P as Ve, Pi as He, Pn as Ue, Pr as We, Pt as Ge, Q as Ke, Qi as qe, Qn as Je, Qr as R, Qt as Ye, R as Xe, Ri as Ze, Rn as Qe, Rr as $e, Rt as et, S as tt, Si as nt, Sn as rt, Sr as it, St as at, T as ot, Ti as st, Tn as ct, Tr as z, Tt as lt, U as ut, Ui as dt, Un as ft, Ur as pt, Ut as mt, V as ht, Vi as gt, Vn as _t, Vr as vt, Vt as yt, W as bt, Wi as xt, Wn as St, Wr as Ct, Wt as wt, X as Tt, Xi as Et, Xn as Dt, Xr as Ot, Xt as kt, Y as At, Yi as jt, Yn as Mt, Yr as Nt, Yt as Pt, Z as Ft, Zi as It, Zn as Lt, Zr as B, Zt as Rt, _ as zt, _i as Bt, _n as Vt, _r as Ht, _t as Ut, a as Wt, ai as Gt, an as Kt, ar as qt, at as Jt, b as Yt, bi as Xt, bn as Zt, br as Qt, bt as $t, c as en, ci as tn, cn as nn, cr as rn, ct as an, d as on, di as sn, dn as cn, dr as ln, dt as un, ea as dn, ei as fn, en as pn, er as mn, et as hn, f as gn, fi as _n, fn as vn, fr as yn, ft as bn, g as xn, gi as Sn, gn as Cn, gr as wn, gt as Tn, h as En, hi as Dn, hn as On, hr as kn, ht as An, i as jn, ii as Mn, in as Nn, ir as Pn, it as Fn, j as In, ji as Ln, jn as Rn, jr as zn, jt as Bn, k as Vn, ki as Hn, kn as Un, kr as Wn, kt as Gn, l as Kn, li as qn, ln as Jn, lr as Yn, lt as Xn, m as Zn, mi as Qn, mn as $n, mr as er, mt as tr, n as nr, ni as rr, nn as ir, nr as ar, nt as or, o as sr, oi as cr, on as lr, or as ur, ot as dr, p as fr, pi as pr, pn as mr, pt as hr, q as gr, qi as _r, qn as vr, qr as yr, qt as br, ri as xr, rn as Sr, rr as Cr, rt as wr, s as Tr, si as V, sn as Er, sr as Dr, st as Or, t as kr, ta as Ar, ti as jr, tn as Mr, tr as Nr, tt as Pr, u as Fr, ui as Ir, un as Lr, ur as Rr, ut as zr, v as Br, vi as Vr, vn as Hr, vr as Ur, vt as Wr, w as Gr, wi as Kr, wn as qr, wr as H, wt as Jr, x as Yr, xi as Xr, xn as Zr, xr as Qr, xt as $r, y as ei, yi as ti, yn as ni, yr as ri, yt as ii, z as ai, zi as oi, zn as si, zr as ci, zt as li } from "./chunks/PerfProfiler-CB0VuCV-.js";
+import { $ as e, $i as t, $n as n, $r as r, $t as i, A as a, Ai as o, An as s, Ar as c, At as l, B as u, Bi as d, Bn as f, Br as p, Bt as m, C as h, Ci as g, Cn as _, Cr as v, Ct as y, D as b, Di as x, Dn as S, Dr as C, Dt as w, E as T, Ei as E, En as D, Er as O, Et as k, F as A, Fi as j, Fn as M, Fr as N, Ft as ee, G as te, Gi as ne, Gn as re, Gr as P, Gt as ie, H as ae, Hi as oe, Hn as se, Ht as ce, I as le, Ii as ue, In as de, Ir as fe, It as pe, J as me, Ji as he, Jn as F, Jr as I, Jt as ge, K as _e, Ki as ve, Kn as L, Kr as ye, Kt as be, L as xe, Li as Se, Ln as Ce, Lr as we, Lt as Te, M as Ee, Mi as De, Mn as Oe, Mr as ke, Mt as Ae, N as je, Ni as Me, Nn as Ne, Nr as Pe, Nt as Fe, O as Ie, Oi as Le, On as Re, Or as ze, Ot as Be, P as Ve, Pi as He, Pn as Ue, Pr as We, Pt as Ge, Q as Ke, Qi as qe, Qn as Je, Qr as R, Qt as Ye, R as Xe, Ri as Ze, Rn as Qe, Rr as $e, Rt as et, S as tt, Si as nt, Sn as rt, Sr as it, St as at, T as ot, Ti as st, Tn as ct, Tr as z, Tt as lt, U as ut, Ui as dt, Un as ft, Ur as pt, Ut as mt, V as ht, Vi as gt, Vn as _t, Vr as vt, Vt as yt, W as bt, Wi as xt, Wn as St, Wr as Ct, Wt as wt, X as Tt, Xi as Et, Xn as Dt, Xr as Ot, Xt as kt, Y as At, Yi as jt, Yn as Mt, Yr as Nt, Yt as Pt, Z as Ft, Zi as It, Zn as Lt, Zr as B, Zt as Rt, _ as zt, _i as Bt, _n as Vt, _r as Ht, _t as Ut, a as Wt, ai as Gt, an as Kt, ar as qt, at as Jt, b as Yt, bi as Xt, bn as Zt, br as Qt, bt as $t, c as en, ci as tn, cn as nn, cr as rn, ct as an, d as on, di as sn, dn as cn, dr as ln, dt as un, ea as dn, ei as fn, en as pn, er as mn, et as hn, f as gn, fi as _n, fn as vn, fr as yn, ft as bn, g as xn, gi as Sn, gn as Cn, gr as wn, gt as Tn, h as En, hi as Dn, hn as On, hr as kn, ht as An, i as jn, ii as Mn, in as Nn, ir as Pn, it as Fn, j as In, ji as Ln, jn as Rn, jr as zn, jt as Bn, k as Vn, ki as Hn, kn as Un, kr as Wn, kt as Gn, l as Kn, li as qn, ln as Jn, lr as Yn, lt as Xn, m as Zn, mi as Qn, mn as $n, mr as er, mt as tr, n as nr, ni as rr, nn as ir, nr as ar, nt as or, o as sr, oi as cr, on as lr, or as ur, ot as dr, p as fr, pi as pr, pn as mr, pt as hr, q as gr, qi as _r, qn as vr, qr as yr, qt as br, ri as xr, rn as Sr, rr as Cr, rt as wr, s as Tr, si as V, sn as Er, sr as Dr, st as Or, t as kr, ta as Ar, ti as jr, tn as Mr, tr as Nr, tt as Pr, u as Fr, ui as Ir, un as Lr, ur as Rr, ut as zr, v as Br, vi as Vr, vn as Hr, vr as Ur, vt as Wr, w as Gr, wi as Kr, wn as qr, wr as H, wt as Jr, x as Yr, xi as Xr, xn as Zr, xr as Qr, xt as $r, y as ei, yi as ti, yn as ni, yr as ri, yt as ii, z as ai, zi as oi, zn as si, zr as ci, zt as li } from "./chunks/PerfProfiler-GsEiuEo7.js";
 import * as ui from "react";
 import di, { Fragment as fi, Suspense as pi, createContext as mi, lazy as hi, memo as gi, use as _i, useCallback as U, useContext as vi, useEffect as W, useId as yi, useLayoutEffect as bi, useMemo as G, useRef as K, useState as q, useSyncExternalStore as xi } from "react";
 import { QueryClientProvider as Si, QueryObserver as Ci, replaceEqualDeep as wi, useIsFetching as Ti, useMutation as Ei, useQueries as Di, useQuery as Oi, useQueryClient as ki } from "@tanstack/react-query";
@@ -311,14 +311,16 @@ function va({ name: e, description: t, disabled: n, children: r }) {
 	});
 }
 function ya(e, t) {
-	let [n, r] = q(!1), [i, a] = q(null), o = (e) => {
-		e.stopPropagation(), e.currentTarget.focus(), a(null), r(!0);
+	let [n, r] = q(!1), [i, a] = q(null);
+	n && !e && r(!1);
+	let o = (t) => {
+		t.stopPropagation(), e && (t.currentTarget.focus(), a(null), r(!0));
 	};
 	return {
 		hint: (r, i = !1) => /* @__PURE__ */ Y(va, {
 			name: e,
 			description: t,
-			disabled: n || i,
+			disabled: n || i || !e,
 			children: r
 		}),
 		view: o,
@@ -329,6 +331,7 @@ function ya(e, t) {
 			"aria-label": "View full name",
 			title: "View full name",
 			"aria-haspopup": "dialog",
+			disabled: !e,
 			onClick: o,
 			className: "session-name-view shrink-0",
 			children: /* @__PURE__ */ Y(B, { iconName: R.Info })
@@ -340,6 +343,7 @@ function ya(e, t) {
 				open: !0,
 				title: "Full session name",
 				className: "session-name-dialog",
+				zIndex: 130,
 				onClose: () => r(!1),
 				onNavigate: () => r(!1),
 				footer: /* @__PURE__ */ X("div", {
@@ -380,6 +384,7 @@ function ba({ name: e, className: t, running: n = !1 }) {
 		className: `flex items-center gap-1 text-left ${t ?? ""}`,
 		"aria-label": `View full name: ${e}`,
 		"aria-haspopup": "dialog",
+		disabled: !e,
 		onClick: r.view,
 		children: [/* @__PURE__ */ Y("span", {
 			className: `min-w-0 flex-1 truncate ${n ? "text-shimmer-basic" : ""}`,
@@ -14889,7 +14894,7 @@ function Pv(e, t) {
 // src/app/lib/markdownChunk.ts
 var Fv = null, Iv = !1;
 function Lv() {
-	return Fv ??= import("./chunks/markdown-renderer-C8HmFjIa.js").then((e) => e.t).then((e) => (Iv = !0, e)), Fv;
+	return Fv ??= import("./chunks/markdown-renderer-Bo8_vxMj.js").then((e) => e.t).then((e) => (Iv = !0, e)), Fv;
 }
 function Rv() {
 	return Iv;

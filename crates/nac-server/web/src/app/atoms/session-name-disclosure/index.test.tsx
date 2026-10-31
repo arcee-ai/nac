@@ -121,4 +121,20 @@ describe("session name disclosure", () => {
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
+  it("closes when the resolved name becomes unavailable and does not reopen for a replacement", () => {
+    const view = render(<SessionNameDisclosure name={long} />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByRole("button", { name: `View full name: ${long}` }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    view.rerender(<SessionNameDisclosure name="" />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "View full name:" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    view.rerender(<SessionNameDisclosure name="Replacement" />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View full name: Replacement" }));
+    expect(screen.getByRole("dialog").querySelector("[data-full-session-name]")?.textContent).toBe(
+      "Replacement",
+    );
+  });
 });

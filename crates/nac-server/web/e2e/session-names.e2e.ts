@@ -717,3 +717,30 @@ test("packed full-name view stays inside the hosted frame and preserves caller s
     await fixture.stop();
   }
 });
+
+test("full-name view is viewport-bounded with an oversized presentation ancestor", async ({
+  harness,
+  page,
+  request,
+}) => {
+  test.skip(baseline);
+  const id = await createSession(request, harness, "direct");
+  await rename(request, harness.baseUrl, id, names[0]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
+  const heading = page.getByRole("button", { name: `View full name: ${names[0]}`, exact: true });
+  await expect(heading).toBeVisible();
+  // A large layout viewport or host frame must not push the footer below the visible viewport.
+  await page.locator("html, body, #root").evaluateAll((nodes) => {
+    for (const node of nodes) {
+      (node as unknown as { style: { height: string } }).style.height = "calc(100dvh + 120px)";
+    }
+  });
+  await heading.tap();
+  const dialog = page.getByRole("dialog", { name: "Full session name", exact: true });
+  await expect(dialog).toBeInViewport({ ratio: 1 });
+  await expect(dialog.getByRole("button", { name: "Copy name", exact: true })).toBeInViewport({
+    ratio: 1,
+  });
+  await fits(page, dialog);
+});

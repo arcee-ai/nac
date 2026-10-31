@@ -50,15 +50,18 @@ function SessionNameHint({
 export function useSessionNameDisclosure(name: string, description?: string) {
   const [open, setOpen] = useState(false);
   const [copyStatus, setCopyStatus] = useState<{ name: string; message: string } | null>(null);
+  // An unavailable summary must not leave a stale or empty disclosure open.
+  if (open && !name) setOpen(false);
   const view = (event: React.MouseEvent<HTMLElement>) => {
     event.stopPropagation();
+    if (!name) return;
     event.currentTarget.focus();
     setCopyStatus(null);
     setOpen(true);
   };
   return {
     hint: (children: ReactElement, disabled = false) => (
-      <SessionNameHint name={name} description={description} disabled={open || disabled}>
+      <SessionNameHint name={name} description={description} disabled={open || disabled || !name}>
         {children}
       </SessionNameHint>
     ),
@@ -71,6 +74,7 @@ export function useSessionNameDisclosure(name: string, description?: string) {
         aria-label="View full name"
         title="View full name"
         aria-haspopup="dialog"
+        disabled={!name}
         onClick={view}
         className="session-name-view shrink-0"
       >
@@ -83,6 +87,8 @@ export function useSessionNameDisclosure(name: string, description?: string) {
           open
           title="Full session name"
           className="session-name-dialog"
+          // Popovers/sheets use layer 120; keep the caller mounted for focus return.
+          zIndex={130}
           onClose={() => setOpen(false)}
           onNavigate={() => setOpen(false)}
           footer={
@@ -137,6 +143,7 @@ export default function SessionNameDisclosure({
           className={`flex items-center gap-1 text-left ${className ?? ""}`}
           aria-label={`View full name: ${name}`}
           aria-haspopup="dialog"
+          disabled={!name}
           onClick={disclosure.view}
         >
           <span className={`min-w-0 flex-1 truncate ${running ? "text-shimmer-basic" : ""}`}>
