@@ -186,6 +186,7 @@ for (const width of [1440, 768, 390])
         const fallback = await createSession(request, harness, "direct", project);
         await page.goto(`${harness.baseUrl}/#/session/${ids[0]}/files`);
         await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
+        await expect(page.getByText("Explore this repository", { exact: true })).toBeVisible();
         await tokens(page, theme);
         const url = page.url();
         const mutations: string[] = [];
@@ -194,7 +195,6 @@ for (const width of [1440, 768, 390])
             mutations.push(req.url());
         });
         if (baseline) {
-          await expect(page.getByText("Explore this repository", { exact: true })).toBeVisible();
           if (width >= 768) {
             const show = page.getByRole("button", { name: "Show sidebar", exact: true });
             if (await show.isVisible()) await show.click();
