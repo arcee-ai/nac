@@ -339,6 +339,7 @@ function ya(e, t) {
 			children: /* @__PURE__ */ Y(Ht, {
 				open: !0,
 				title: "Full session name",
+				className: "session-name-dialog",
 				onClose: () => r(!1),
 				onNavigate: () => r(!1),
 				footer: /* @__PURE__ */ X("div", {

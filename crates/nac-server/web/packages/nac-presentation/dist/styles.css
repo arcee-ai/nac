@@ -8112,6 +8112,13 @@
 }
 
 @media (max-width: 767.98px) {
+  /* A hosted presentation can be shorter than the window. Fill its fixed overlay frame. */
+  [data-nac-runtime]:is(.session-name-dialog), [data-nac-runtime] .session-name-dialog {
+    height: 100%;
+    min-height: 100%;
+    max-height: 100%;
+  }
+
   [data-nac-runtime]:is(.btn.btn-icon.btn-tertiary.session-name-view), [data-nac-runtime] .btn.btn-icon.btn-tertiary.session-name-view {
     min-width: 44px;
     min-height: 44px;
