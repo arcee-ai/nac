@@ -282,9 +282,9 @@ export function ProjectCard({
       data-item-kind={facts.orphan ? "orphan" : "project"}
       data-item-pinned={facts.pinned ? "true" : "false"}
       className={cn(
-        "group fade relative flex flex-col gap-4 rounded-[16px] overflow-hidden cursor-default",
-        isDesktop ? "px-6 pt-5 pb-3" : "p-4",
-        "shadow-convex bg-elevation-level-1",
+        "group fade relative flex flex-col gap-4 rounded-xl border border-tertiary overflow-hidden cursor-default",
+        isDesktop ? "px-5 pt-4 pb-3" : "p-4",
+        "bg-elevation-level-1",
         dragging && "shadow-lg",
       )}
       role="button"
@@ -390,7 +390,7 @@ export function ProjectCard({
             ) : null}
             <div
               className={cn(
-                "header-md flex-1 min-w-0 truncate",
+                "text-base leading-6 font-medium flex-1 min-w-0 truncate",
                 facts.running ? "text-shimmer-primary" : "text-basic-primary",
               )}
             >
@@ -413,12 +413,14 @@ export function ProjectCard({
               </div>
             ) : null}
           </div>
-          <div className="code code-micro text-basic-tertiary truncate w-full">{facts.cwd}</div>
+          <div className="code text-xs leading-5 text-basic-tertiary truncate w-full">
+            {facts.cwd}
+          </div>
         </div>
       </div>
       {!isDesktop ? <Provenance facts={facts} /> : null}
 
-      <div className="relative flex items-center justify-between w-full h-6 gap-2">
+      <div className="relative flex flex-wrap items-center justify-between w-full min-h-6 gap-2">
         <Metrics facts={facts} />
         {showActions ? (
           <ProjectCardActions

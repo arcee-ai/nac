@@ -71,7 +71,7 @@ export { default as ProgressLoader } from "./loader/ProgressLoader";
 export { default as ShimmerLoader } from "./loader/ShimmerLoader";
 export { default as Logo } from "./logo";
 export { default as MessageBox, MessageBoxSize, MessageBoxVariant } from "./message-box";
-export { default as Modal, ModalSize } from "./modal";
+export { default as Modal, ModalDescription, ModalSize } from "./modal";
 export {
   default as ModelLoader,
   type ModelLoaderFrame,

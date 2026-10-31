@@ -26,7 +26,13 @@ function presentationOutput(): Plugin {
         .filter((output) => output.type === "asset" && output.fileName.startsWith("assets/"))
         .map((output) => output.fileName)
         .sort();
-      for (const license of ["lucide.txt", "xterm.txt"]) {
+      for (const license of [
+        "lucide.txt",
+        "xterm.txt",
+        "radix-ui.txt",
+        "floating-ui.txt",
+        "shadcn-ui.txt",
+      ]) {
         this.emitFile({
           type: "asset",
           fileName: `licenses/${license}`,
