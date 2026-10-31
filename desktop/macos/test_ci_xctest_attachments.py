@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -178,6 +179,46 @@ class AttachmentPolicyTests(unittest.TestCase):
             self.assertEqual(len(receipt['identity']['sha256']), 64)
             self.assertEqual(receipt['calls'][-1]['argv'][-1], '--schema')
             self.assertTrue(all(call['status'] == 0 for call in receipt['calls']))
+
+    def test_rejected_payload_never_retained_but_earlier_valid_prefix_survives(self):
+        for rejection in ('malformed-json', 'wrong-binding', 'rewritten-prefix'):
+            with self.subTest(rejection=rejection), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary) / 'raw'
+                raw.mkdir()
+                rejected = None
+                def command(argv):
+                    nonlocal rejected
+                    if argv[1:4] == ['get', 'test-results', 'tests']:
+                        return json.dumps({'testNodes': [self.test]})
+                    export = Path(argv[argv.index('--output-path') + 1])
+                    snapshots = self.snapshots()[:4]
+                    if rejection == 'wrong-binding':
+                        snapshots[2]['binding']['app']['terminal_id'] = 'FOREIGN-PAYLOAD-MUST-NOT-BE-RETAINED'
+                    if rejection == 'rewritten-prefix':
+                        snapshots[2]['rows'][0]['elapsed_ms'] = 9
+                    self.export(export, snapshots)
+                    file = export / 'payload-03.json'
+                    if rejection == 'malformed-json':
+                        file.write_bytes(b'{"FOREIGN-PAYLOAD-MUST-NOT-BE-RETAINED":')
+                    rejected = file.read_bytes()
+                    return 'Exported'
+                tool = AttachmentTool(raw, command)
+                tool.path = '/unit/xcresulttool'
+                with self.assertRaises((RuntimeError, json.JSONDecodeError)):
+                    tool.collect(raw / 'unit.xcresult', self.binding, self.operations)
+                folder = raw / 'xctest-dispatch-observations'
+                index = json.loads((folder / 'index.json').read_text())
+                self.assertEqual(index['observed_snapshots'], 2)
+                self.assertEqual(len(index['snapshots']), 2)
+                self.assertFalse(index['complete'])
+                self.assertFalse(index['rejected_input']['retained'])
+                self.assertEqual(index['rejected_input']['sha256'], hashlib.sha256(rejected).hexdigest())
+                self.assertEqual(index['rejected_input']['bytes'], len(rejected))
+                self.assertFalse((raw / 'xctest-driver.json').exists())
+                self.assertEqual(len(list(folder.glob(PROTOCOL + '-*.json'))), 2)
+                for file in raw.rglob('*'):
+                    if file.is_file():
+                        self.assertNotIn(b'FOREIGN-PAYLOAD-MUST-NOT-BE-RETAINED', file.read_bytes())
 
     def launch_adapter(self, raw, *, fail=False):
         # Portable orchestration fixture, never an actual Xcode/native qualification.
