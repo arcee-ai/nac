@@ -100,7 +100,7 @@ async fn attention_goal_free_real_owned_models_continue_queue_then_complete_only
         })
         .unwrap();
     let before = observer.0.lock().unwrap().len();
-    parts.service.publish_settled_attention(stale);
+    parts.service.publish_settled_attention(stale, None);
     assert_eq!(
         observer.0.lock().unwrap().len(),
         before,
@@ -222,7 +222,9 @@ async fn attention_goal_free_actual_older_completion_cannot_replace_newer_idle_r
         );
     }
     let before = observer.0.lock().unwrap().len();
-    parts.service.publish_settled_attention(receipts[0].clone());
+    parts
+        .service
+        .publish_settled_attention(receipts[0].clone(), None);
     assert_eq!(observer.0.lock().unwrap().len(), before);
     assert_eq!(
         observer.0.lock().unwrap().last().unwrap().settled,
@@ -231,6 +233,156 @@ async fn attention_goal_free_actual_older_completion_cannot_replace_newer_idle_r
     assert_eq!(provider.finish().len(), 2);
     drop(parts);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn attention_f1_three_real_runs_reject_delayed_a_while_c_is_active() {
+    let response = || {
+        ScriptedResponse::json("200 OK", serde_json::json!({
+        "status":"completed", "output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}],
+        "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+    }).to_string())
+    };
+    let (release_b, wait_b) = std::sync::mpsc::channel();
+    let (release_c, wait_c) = std::sync::mpsc::channel();
+    let b_reached = Arc::new(tokio::sync::Notify::new());
+    let b_arrived = b_reached.clone();
+    let c_reached = Arc::new(tokio::sync::Notify::new());
+    let reached = c_reached.clone();
+    let provider = ScriptedServer::start_observed_with_timeout(
+        vec![response(), response(), response()],
+        Duration::from_secs(10),
+        move |index, _| {
+            if index == 1 {
+                b_arrived.notify_one();
+                wait_b.recv_timeout(Duration::from_secs(10)).unwrap();
+            }
+            if index == 2 {
+                reached.notify_one();
+                wait_c.recv_timeout(Duration::from_secs(10)).unwrap();
+            }
+        },
+    );
+    let (parts, path) = crate::session_service::tests::test_direct_active_service(
+        "attention-f1-three-runs",
+        "session",
+        ModelClient::new_for_test_server(provider.base_url.clone()),
+    );
+    for prompt in ["A", "B", "C"] {
+        crate::store::create_session_inbox_item(
+            &path,
+            "session",
+            crate::store::InboxDelivery::Queue,
+            prompt,
+            None,
+            None,
+        )
+        .unwrap();
+    }
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let observer = Arc::new(Observer::default());
+    parts
+        .service
+        .install_attention_observer(observer.clone())
+        .unwrap();
+    let a = parts
+        .service
+        .start_next_direct_inbox_item()
+        .await
+        .unwrap()
+        .unwrap();
+    until(|| {
+        observer.0.lock().unwrap().iter().any(|snapshot| {
+            snapshot.settled.as_ref().is_some_and(|work| {
+                work.run_id == a.run_id.as_str()
+                    && work.disposition == SettledWorkDisposition::Continuing
+            })
+        })
+    })
+    .await;
+    tokio::time::timeout(Duration::from_secs(5), b_reached.notified())
+        .await
+        .unwrap();
+    let b = parts.service.active_run().unwrap();
+    let inbox = owner.list_session_inbox("session".into()).await.unwrap();
+    assert_eq!(
+        inbox[1].delivered_run_id.as_deref(),
+        Some(b.run_id.as_str())
+    );
+    assert_eq!(inbox[2].status, crate::store::InboxStatus::Pending);
+    // Capture the exact actually-selected B handle while B is gated. The
+    // production factory owns how that handle becomes a publication receipt.
+    let delayed_a_selection = ContinuationSelection::started(SessionRunHandle {
+        run_id: b.run_id.clone(),
+        client_id: b.client_id.clone(),
+    })
+    .disposition;
+    release_b.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), c_reached.notified())
+        .await
+        .unwrap();
+    until(|| {
+        observer.0.lock().unwrap().iter().any(|snapshot| {
+            snapshot.settled.as_ref().is_some_and(|work| {
+                work.run_id == b.run_id.as_str()
+                    && work.disposition == SettledWorkDisposition::Continuing
+            })
+        })
+    })
+    .await;
+    let c = parts.service.active_run().unwrap();
+    let before = observer.0.lock().unwrap().last().unwrap().clone();
+    assert_eq!(
+        before.operation,
+        AttentionOperation::Run(c.run_id.to_string())
+    );
+    assert_eq!(before.settled.as_ref().unwrap().run_id, b.run_id.as_str());
+    parts.service.publish_attention_completion(
+        &a.run_id,
+        true,
+        GoalAttentionSettlement {
+            known: true,
+            goal: None,
+        },
+        delayed_a_selection,
+    );
+    let after = observer.0.lock().unwrap().last().unwrap().clone();
+    assert_eq!(parts.service.active_run().unwrap().run_id, c.run_id);
+    release_c.send(()).unwrap();
+    until(|| {
+        observer.0.lock().unwrap().iter().any(|snapshot| {
+            snapshot.settled.as_ref().is_some_and(|work| {
+                work.run_id == c.run_id.as_str()
+                    && work.disposition == SettledWorkDisposition::Completed
+            })
+        })
+    })
+    .await;
+    let completed = observer
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|snapshot| snapshot.settled.clone())
+        .filter(|work| work.disposition == SettledWorkDisposition::Completed)
+        .collect::<Vec<_>>();
+    let calls = provider.finish().len();
+    owner.shutdown().await.unwrap();
+    drop(parts);
+    drop(owner);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    // Assert after cleanup so the intentional RED cannot strand C or its store.
+    assert_eq!(
+        after.settled, before.settled,
+        "delayed A must not replace B while actual C runs"
+    );
+    assert_eq!(
+        after.revision, before.revision,
+        "a stale publication cannot advance the producer frontier"
+    );
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0].run_id, c.run_id.as_str());
+    assert_eq!(calls, 3);
 }
 
 #[test]

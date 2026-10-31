@@ -8,6 +8,7 @@ enum Case {
     Complete,
     QueueAfterComplete,
     Queue,
+    QueueThree,
     Question,
     Cancel,
     SaveFailure,
@@ -24,6 +25,11 @@ async fn wait_for(mut condition: impl FnMut() -> bool) {
 }
 
 async fn run(case: Case) {
+    let planned_calls = match case {
+        Case::Queue => 2,
+        Case::QueueThree => 3,
+        _ => 1,
+    };
     let root = std::env::temp_dir().join(format!("nac-goal-free-feed-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
@@ -39,7 +45,7 @@ async fn run(case: Case) {
             let (seen, arrived, resume) = (seen.clone(), arrived.clone(), resume.clone());
             async move {
                 let index = seen.fetch_add(1, Ordering::SeqCst);
-                assert!(index < if case == Case::Queue { 2 } else { 1 }, "unexpected provider call");
+                assert!(index < planned_calls, "unexpected provider call");
                 arrived.notify_one();
                 resume.notified().await;
                 let item = if case == Case::Question {
@@ -89,10 +95,12 @@ async fn run(case: Case) {
     )
     .unwrap();
     let first_run = submitted["run_id"].as_str().unwrap().to_owned();
+    let mut expected_final = first_run.clone();
+    let mut three_run_frontier = None;
     tokio::time::timeout(Duration::from_secs(5), reached.notified())
         .await
         .unwrap();
-    if case == Case::Queue {
+    if matches!(case, Case::Queue | Case::QueueThree) {
         service
             .enqueue_direct_input(
                 store::InboxDelivery::Queue,
@@ -102,6 +110,17 @@ async fn run(case: Case) {
             )
             .await
             .unwrap();
+        if case == Case::QueueThree {
+            service
+                .enqueue_direct_input(
+                    store::InboxDelivery::Queue,
+                    "third requested work",
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+        }
     }
     if case == Case::SaveFailure {
         rusqlite::Connection::open(&path).unwrap().execute_batch("CREATE TRIGGER failed_terminal BEFORE INSERT ON session_run_outcomes BEGIN SELECT RAISE(ABORT,'terminal fixture failure'); END;").unwrap();
@@ -120,24 +139,107 @@ async fn run(case: Case) {
         tokio::time::timeout(Duration::from_secs(5), reached.notified())
             .await
             .unwrap();
+        expected_final = service.active_run().unwrap().run_id.to_string();
         let continuing = fact(&mut body, "work_settled").await;
         assert_eq!(continuing["change"]["work"]["run_id"], first_run);
         assert_eq!(continuing["change"]["work"]["disposition"], "continuing");
         assert_eq!(continuing["new_attention"], false);
         release.notify_one();
     }
+    if case == Case::QueueThree {
+        tokio::time::timeout(Duration::from_secs(5), reached.notified())
+            .await
+            .unwrap();
+        let b = service.active_run().unwrap().run_id.to_string();
+        let live = manager
+            .inner
+            .attention
+            .0
+            .lock()
+            .unwrap()
+            .live
+            .upgrade()
+            .unwrap();
+        wait_for(|| {
+            let state = live.state.lock().unwrap();
+            state.sources["session"]
+                .service
+                .as_ref()
+                .unwrap()
+                .settled
+                .as_ref()
+                .is_some_and(|work| {
+                    work.run_id == first_run
+                        && work.disposition == SettledWorkDisposition::Continuing
+                })
+        })
+        .await;
+        let a_producer_revision = live.state.lock().unwrap().sources["session"]
+            .service
+            .as_ref()
+            .unwrap()
+            .revision;
+        release.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), reached.notified())
+            .await
+            .unwrap();
+        expected_final = service.active_run().unwrap().run_id.to_string();
+        let continuing = fact(&mut body, "work_settled").await;
+        assert_eq!(continuing["change"]["work"]["run_id"], b);
+        assert_eq!(continuing["change"]["work"]["disposition"], "continuing");
+        assert_eq!(continuing["new_attention"], false);
+        let b_producer_revision = {
+            let state = live.state.lock().unwrap();
+            let current = state.sources["session"].service.as_ref().unwrap();
+            assert_eq!(current.settled.as_ref().unwrap().run_id, b);
+            assert_eq!(
+                current.operation,
+                AttentionOperation::Run(expected_final.clone())
+            );
+            assert!(current.revision > a_producer_revision);
+            current.revision
+        };
+        while let Ok(item) =
+            tokio::time::timeout(Duration::from_millis(100), frame(&mut body)).await
+        {
+            if item["change"]["kind"] == "work_settled" {
+                assert_eq!(
+                    item["change"]["work"]["run_id"], b,
+                    "producer/SSE cannot regress to A while C is active"
+                );
+                assert_ne!(item["change"]["work"]["disposition"], "completed");
+            }
+        }
+        three_run_frontier = Some((
+            Arc::downgrade(&live),
+            b_producer_revision,
+            continuing["source_revision"].as_u64().unwrap(),
+            continuing["source"]["epoch"].clone(),
+        ));
+        release.notify_one();
+    }
     if matches!(
         case,
-        Case::Complete | Case::Queue | Case::QueueAfterComplete
+        Case::Complete | Case::Queue | Case::QueueThree | Case::QueueAfterComplete
     ) {
         let completed = fact(&mut body, "work_settled").await;
         assert_eq!(completed["change"]["work"]["disposition"], "completed");
         assert!(completed["change"]["work"]["goal"].is_null());
         let run = completed["change"]["work"]["run_id"].as_str().unwrap();
-        assert_eq!(
-            run == first_run,
-            matches!(case, Case::Complete | Case::QueueAfterComplete)
-        );
+        assert_eq!(run, expected_final);
+        if let Some((weak, producer_revision, wire_revision, epoch)) = &three_run_frontier {
+            assert_eq!(completed["source"]["epoch"], *epoch);
+            assert!(completed["source_revision"].as_u64().unwrap() > *wire_revision);
+            let live = weak.upgrade().unwrap();
+            let state = live.state.lock().unwrap();
+            let current = state.sources["session"].service.as_ref().unwrap();
+            assert_eq!(current.settled.as_ref().unwrap().run_id, expected_final);
+            assert_eq!(
+                current.settled.as_ref().unwrap().disposition,
+                SettledWorkDisposition::Completed
+            );
+            assert!(current.revision > *producer_revision);
+        }
         assert_eq!(completed["new_attention"], true);
         assert!(!completed.to_string().contains("private result"));
         let metadata = store::read_attention_metadata(&path, Some("session"))
@@ -243,10 +345,7 @@ async fn run(case: Case) {
             "{case:?}: {item}"
         );
     }
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        if case == Case::Queue { 2 } else { 1 }
-    );
+    assert_eq!(calls.load(Ordering::SeqCst), planned_calls);
     assert!(!service.has_event_subscribers());
     drop(body);
     drop(service);
@@ -286,4 +385,12 @@ async fn attention_goal_free_committed_queue_with_foreign_wake_clears_old_comple
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     run(Case::QueueAfterComplete).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn attention_f1_actual_three_model_sse_keeps_b_identity_until_exact_c_completion() {
+    let _guard = SERVER_MODEL_ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    run(Case::QueueThree).await;
 }

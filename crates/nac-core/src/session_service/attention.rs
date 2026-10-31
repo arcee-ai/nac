@@ -8,7 +8,9 @@ use crate::events::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ContinuationDisposition {
-    Started,
+    Started {
+        successor: SessionRunId,
+    },
     WaitingForQuestion,
     RetryScheduled,
     Idle {
@@ -34,9 +36,10 @@ impl ContinuationSelection {
         }
     }
     pub fn started(run: SessionRunHandle) -> Self {
+        let successor = run.run_id.clone();
         Self {
             run: Some(run),
-            disposition: ContinuationDisposition::Started,
+            disposition: ContinuationDisposition::Started { successor },
         }
     }
 }
@@ -313,7 +316,11 @@ impl SessionService {
             .is_some()
     }
 
-    pub(super) fn publish_settled_attention(&self, work: SettledWork) {
+    pub(super) fn publish_settled_attention(
+        &self,
+        work: SettledWork,
+        selected_successor: Option<&SessionRunId>,
+    ) {
         let Some(id) = self.metadata.session_id.as_deref() else {
             return;
         };
@@ -322,19 +329,27 @@ impl SessionService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(state) = state.as_mut() {
-            if work.goal.is_none() {
-                let current = match work.disposition {
-                    SettledWorkDisposition::Continuing => {
-                        matches!(state.snapshot.operation, AttentionOperation::Run(_))
+            let current = match work.disposition {
+                SettledWorkDisposition::Continuing => match selected_successor {
+                    Some(successor) => matches!(&state.snapshot.operation,
+                        AttentionOperation::Run(current) if current == successor.as_str()),
+                    // A scheduled goal retry selects no run. Keep only the
+                    // exact still-idle predecessor, never invent a successor.
+                    None => {
+                        work.goal.is_some()
+                            && state.snapshot.operation == AttentionOperation::Idle
+                            && state.last_operation_run.as_deref() == Some(work.run_id.as_str())
                     }
-                    SettledWorkDisposition::Completed
-                    | SettledWorkDisposition::WaitingForDecision => {
-                        state.last_operation_run.as_deref() == Some(work.run_id.as_str())
-                    }
-                };
-                if !current {
-                    return;
+                },
+                SettledWorkDisposition::Completed | SettledWorkDisposition::WaitingForDecision
+                    if work.goal.is_none() =>
+                {
+                    state.last_operation_run.as_deref() == Some(work.run_id.as_str())
                 }
+                _ => true,
+            };
+            if !current {
+                return;
             }
             if work.disposition == SettledWorkDisposition::Completed
                 && state.snapshot.operation != AttentionOperation::Idle
@@ -372,26 +387,32 @@ impl SessionService {
         {
             return;
         }
-        let disposition = match selection {
-            ContinuationDisposition::Started | ContinuationDisposition::RetryScheduled => {
-                SettledWorkDisposition::Continuing
+        let (disposition, selected_successor) = match selection {
+            ContinuationDisposition::Started { successor } => {
+                (SettledWorkDisposition::Continuing, Some(successor))
+            }
+            ContinuationDisposition::RetryScheduled if goal.goal.is_some() => {
+                (SettledWorkDisposition::Continuing, None)
             }
             ContinuationDisposition::WaitingForQuestion => {
-                SettledWorkDisposition::WaitingForDecision
+                (SettledWorkDisposition::WaitingForDecision, None)
             }
             ContinuationDisposition::Idle {
                 goal: current,
                 last_run,
             } if current == goal.goal && last_run.as_deref() == Some(run_id.as_str()) => {
-                SettledWorkDisposition::Completed
+                (SettledWorkDisposition::Completed, None)
             }
             _ => return,
         };
-        self.publish_settled_attention(SettledWork {
-            run_id: run_id.to_string(),
-            goal: goal.goal,
-            disposition,
-        });
+        self.publish_settled_attention(
+            SettledWork {
+                run_id: run_id.to_string(),
+                goal: goal.goal,
+                disposition,
+            },
+            selected_successor.as_ref(),
+        );
     }
 }
 
