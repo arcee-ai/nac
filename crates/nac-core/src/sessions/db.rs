@@ -274,6 +274,7 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
         ));
     }
     let mut questions_changed = false;
+    let mut outcome_changed = false;
     let mut durable_failure = update.failed_run_failure.clone();
     if let Some(run_id) = update.finished_run_id.as_deref() {
         if let Some(goal) = update.goal_settlement.as_ref() {
@@ -292,7 +293,7 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
             .ok_or_else(|| anyhow!("finished run is missing its validated disposition"))?;
         questions_changed =
             crate::store::clear_active_run(&tx, &update.session_id, run_id, disposition)?;
-        crate::store::record_run_outcome_with_connection(
+        outcome_changed = crate::store::record_run_outcome_with_connection(
             &tx,
             &update.session_id,
             run_id,
@@ -321,7 +322,7 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
             run_id,
             durable_failure.as_ref(),
         )?;
-        crate::store::record_run_outcome_with_connection(
+        outcome_changed = crate::store::record_run_outcome_with_connection(
             &tx,
             &update.session_id,
             run_id,
@@ -331,7 +332,7 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
         )?;
     }
     tx.commit()?;
-    if binding_changed || questions_changed {
+    if binding_changed || questions_changed || outcome_changed {
         crate::store::goal_changes::session_committed(path, &update.session_id);
     }
     Ok(())

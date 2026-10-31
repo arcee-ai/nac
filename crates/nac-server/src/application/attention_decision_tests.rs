@@ -180,6 +180,13 @@ async fn journey(mode: Journey) {
     )
     .await;
     assert_eq!(submitted.status(), StatusCode::ACCEPTED);
+    let submitted: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(submitted.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let producing_run = submitted["run_id"].as_str().unwrap().to_owned();
     let pending = fact(&mut body, "decision_pending").await;
     assert_eq!(
         pending["change"]["decision"]["kind"],
@@ -243,6 +250,10 @@ async fn journey(mode: Journey) {
             let resolved = fact(&mut body, "decision_resolved").await;
             assert_eq!(resolved["change"]["decision"][id_field], id);
             assert_eq!(resolved["new_attention"], false);
+            let completed = fact(&mut body, "work_settled").await;
+            assert_eq!(completed["change"]["work"]["run_id"], producing_run);
+            assert_eq!(completed["change"]["work"]["disposition"], "completed");
+            assert!(completed["change"]["work"]["goal"].is_null());
         }
     }
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -255,29 +266,22 @@ async fn journey(mode: Journey) {
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     #[cfg(feature = "review-fixture")]
     if matches!(mode, Journey::ReviewRetry) {
-        let sql = rusqlite::Connection::open(root.join("store.db")).unwrap();
-        sql.execute_batch("CREATE TRIGGER rollback_retry BEFORE INSERT ON session_inbox BEGIN SELECT RAISE(ABORT,'retry fixture'); END; BEGIN IMMEDIATE;").unwrap();
-        let target = format!("/sessions/session/permissions/reviews/{id}/authorize-retry");
-        let requesting = app.clone();
-        let uri = target.clone();
-        let retry =
-            tokio::spawn(async move { post(requesting, &uri, serde_json::json!({})).await });
+        // Observe the real owner transitions without blocking their canonical read
+        // behind an enqueue writer. This feed carries current state, not lossless history.
+        let broker = service.permission_broker_for_test().unwrap();
+        let mode_before = service.permission_approval_mode().await.unwrap();
+        let grants_before = broker.grants().unwrap();
+        assert_eq!(broker.authorize_review_retry(&id).unwrap().id, id);
         let removed = fact(&mut body, "decision_resolved").await;
         assert_eq!(removed["change"]["decision"][id_field], id);
-        sql.execute_batch("ROLLBACK").unwrap();
-        assert_eq!(
-            retry.await.unwrap().status(),
-            StatusCode::INTERNAL_SERVER_ERROR
-        );
-        sql.execute_batch("DROP TRIGGER rollback_retry").unwrap();
-        drop(sql);
+        assert_eq!(removed["new_attention"], false);
+        assert!(broker.revoke_review_retry(&id));
         let restored = fact(&mut body, "decision_pending").await;
         assert_eq!(restored["change"]["decision"][id_field], id);
         assert_eq!(
             restored["new_attention"], false,
             "restoration is current membership, never a new notice"
         );
-        assert_eq!(service.list_blocked_permission_reviews().unwrap()[0].id, id);
         let live = manager
             .inner
             .attention
@@ -287,7 +291,63 @@ async fn journey(mode: Journey) {
             .live
             .upgrade()
             .unwrap();
-        assert!(live.state.lock().unwrap().sources["session"].published.as_ref().unwrap().pending.iter().any(|decision| matches!(decision, AttentionDecision::Review { review_id } if review_id == &id)));
+        let (before_generation, before_revision) = {
+            let state = live.state.lock().unwrap();
+            let source = &state.sources["session"];
+            (source.generation, source.service.as_ref().unwrap().revision)
+        };
+        // Separately exercise the actual retry endpoint and real SQL rollback.
+        // Holding BEGIN IMMEDIATE while awaiting SSE deadlocks a read queued
+        // behind this write, so the abort trigger owns the failure boundary.
+        let sql = rusqlite::Connection::open(root.join("store.db")).unwrap();
+        sql.execute_batch("CREATE TRIGGER rollback_retry BEFORE INSERT ON session_inbox BEGIN SELECT RAISE(ABORT,'retry fixture'); END;").unwrap();
+        let target = format!("/sessions/session/permissions/reviews/{id}/authorize-retry");
+        assert_eq!(
+            post(app.clone(), &target, serde_json::json!({}))
+                .await
+                .status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        sql.execute_batch("DROP TRIGGER rollback_retry").unwrap();
+        drop(sql);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let reconciled = {
+                    let state = live.state.lock().unwrap();
+                    let source = &state.sources["session"];
+                    source.generation > before_generation && !state.dirty.contains("session")
+                        && source.service.as_ref().unwrap().revision > before_revision
+                        && source.published.as_ref().unwrap().pending.iter().any(|decision| matches!(decision, AttentionDecision::Review { review_id } if review_id == &id))
+                        && !source.stored.as_ref().unwrap().inbox_pending
+                };
+                if reconciled { break; }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.unwrap();
+        // Coalescing may omit a transient pair. Every delivered restoration must
+        // still be the same identity and silent, and fresh generations above prove
+        // the post-rollback current state was reconciled rather than left stale.
+        while let Ok(item) =
+            tokio::time::timeout(Duration::from_millis(100), frame(&mut body)).await
+        {
+            if matches!(
+                item["change"]["kind"].as_str(),
+                Some("decision_pending" | "decision_resolved")
+            ) {
+                assert_eq!(item["change"]["decision"][id_field], id);
+                assert_eq!(item["new_attention"], false);
+            }
+            assert_ne!(item["change"]["work"]["disposition"], "completed");
+        }
+        assert_eq!(service.list_blocked_permission_reviews().unwrap()[0].id, id);
+        assert!(service.list_direct_inbox().unwrap().is_empty());
+        assert_eq!(broker.pending_retry_authorizations_for_test(), 0);
+        assert_eq!(
+            service.permission_approval_mode().await.unwrap(),
+            mode_before
+        );
+        assert_eq!(broker.grants().unwrap(), grants_before);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
         nac_core::session_service::SessionService::fail_next_retry_wake_for_test();
         assert_eq!(
             post(app.clone(), &target, serde_json::json!({}))
@@ -309,6 +369,11 @@ async fn journey(mode: Journey) {
             2,
             "failed wake keeps the real committed inbox item without a model run"
         );
+        assert_eq!(
+            service.permission_approval_mode().await.unwrap(),
+            mode_before
+        );
+        assert_eq!(broker.grants().unwrap(), grants_before);
     }
     if reset {
         drop(body);
@@ -341,6 +406,11 @@ async fn journey(mode: Journey) {
             "{lost}"
         );
         assert_eq!(lost["new_attention"], false);
+        assert_eq!(
+            lost["change"]["snapshot"]["availability"]["work"],
+            "unknown"
+        );
+        assert!(lost["change"]["snapshot"]["work"].is_null());
         assert_eq!(lost["change"]["snapshot"]["pending"], serde_json::json!([]));
         let replacement = manager.attach_session("session").await.unwrap();
         let replaced = fact(&mut body, "source_replaced").await;
@@ -349,6 +419,7 @@ async fn journey(mode: Journey) {
             "{replaced}"
         );
         assert_ne!(lost["source"]["epoch"], replaced["source"]["epoch"]);
+        assert!(replaced["change"]["snapshot"]["work"].is_null());
         assert_eq!(
             calls.load(Ordering::SeqCst),
             2,
@@ -400,3 +471,6 @@ async fn actual_idle_actionable_review_owner_eviction_is_unknown_not_resolution_
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     journey(Journey::ReviewLost).await;
 }
+
+#[path = "attention_goal_free_tests.rs"]
+mod goal_free;

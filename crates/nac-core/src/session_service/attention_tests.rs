@@ -1,6 +1,9 @@
 use super::*;
 use crate::model::ModelClient;
 
+#[path = "attention_goal_free_tests.rs"]
+mod goal_free;
+
 #[derive(Default)]
 struct Observer(StdMutex<Vec<AttentionServiceSnapshot>>, StdMutex<Vec<Uuid>>);
 impl AttentionServiceObserver for Observer {

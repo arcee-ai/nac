@@ -301,6 +301,8 @@ fn create_inbox_item(
             admission.review_intent,
         ],
     )?;
+    // The pending item is committed even if the following row read/ack fails.
+    super::goal_changes::session_committed(path, session_id);
     load_session_inbox_item_with_connection(&connection, session_id, connection.last_insert_rowid())
 }
 
@@ -470,6 +472,7 @@ pub fn cancel_pending_session_inbox_item(
     super::task_questions::cancel_question_inbox(&transaction,session_id,item_id)?;
     let item=load_session_inbox_item_with_connection(&transaction,session_id,item_id)?;
     transaction.commit()?;
+    super::goal_changes::session_committed(path, session_id);
     Ok(item)
 }
 command CancelPendingSessionInboxItemCommand {

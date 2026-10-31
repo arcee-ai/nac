@@ -205,3 +205,134 @@ fn metadata_helper_does_not_weaken_the_canonical_question_readers_goal_validatio
 
 #[path = "attention_scope_tests.rs"]
 mod scope;
+
+#[path = "attention_inbox_tests.rs"]
+mod inbox;
+
+#[test]
+fn attention_goal_free_metadata_reads_exact_latest_outcome_and_recovery_without_content() {
+    let path = fixture();
+    let read = || {
+        read_attention_metadata(&path, Some("session"))
+            .unwrap()
+            .remove(0)
+    };
+    assert!(!read().verifies_goal_free_idle("run", Some(0)));
+    let mut connection = open_runtime_connection(&path).unwrap();
+    for (run, disposition) in [
+        ("run", RunOutcomeDisposition::Completed),
+        ("cancelled", RunOutcomeDisposition::Cancelled),
+        ("failed", RunOutcomeDisposition::Failed),
+        ("newer", RunOutcomeDisposition::Completed),
+    ] {
+        let transaction = connection.transaction().unwrap();
+        record_run_outcome_with_connection(
+            &transaction,
+            "session",
+            run,
+            disposition,
+            Some("private terminal content must not leave metadata"),
+            None,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+        let metadata = read();
+        assert_eq!(metadata.last_outcome.as_ref().unwrap().run_id, run);
+        assert_eq!(
+            metadata.verifies_goal_free_idle(run, Some(0)),
+            disposition == RunOutcomeDisposition::Completed
+        );
+        assert!(!metadata.verifies_goal_free_idle("wrong-run", Some(0)));
+        assert!(!metadata.verifies_goal_free_idle(run, None));
+        assert!(!metadata.verifies_goal_free_idle(run, Some(1)));
+        assert!(!format!("{metadata:?}").contains("private terminal content"));
+    }
+    assert!(
+        !read().verifies_goal_free_idle("run", Some(0)),
+        "older completed history is insufficient"
+    );
+    TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            "session",
+            0,
+            &crate::types::Message::User {
+                content: "new active prompt".into(),
+            },
+            "active",
+        )
+        .unwrap();
+    assert!(read().recovery_pending);
+    assert!(!read().verifies_goal_free_idle("newer", Some(0)));
+    let transaction = connection.transaction().unwrap();
+    mark_active_run_failed(&transaction, "session", "active", None).unwrap();
+    transaction.commit().unwrap();
+    assert!(!read().verifies_goal_free_idle("newer", Some(0)));
+    // A failed or interrupted durable recovery obligation is also unverified.
+    connection
+        .execute(
+            "UPDATE session_run_recovery SET status='interrupted' WHERE session_id='session'",
+            [],
+        )
+        .unwrap();
+    assert!(!read().verifies_goal_free_idle("newer", Some(0)));
+    connection
+        .execute(
+            "DELETE FROM session_run_recovery WHERE session_id='session'",
+            [],
+        )
+        .unwrap();
+    assert!(read().verifies_goal_free_idle("newer", Some(0)));
+    let queued = create_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Queue,
+        "later work",
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(!read().verifies_goal_free_idle("newer", Some(0)));
+    cancel_pending_session_inbox_item(&path, "session", queued.id, queued.version).unwrap();
+    let goal = create_session_goal(&path, "session", "new goal", None, None).unwrap();
+    assert!(!read().verifies_goal_free_idle("newer", Some(0)));
+    clear_session_goal(&path, "session", &goal.goal_id, goal.version).unwrap();
+    connection
+        .execute(
+            "UPDATE sessions SET config_version=1 WHERE session_id='session'",
+            [],
+        )
+        .unwrap();
+    assert!(!read().verifies_goal_free_idle("newer", Some(0)));
+    connection
+        .execute(
+            "UPDATE sessions SET host_id='foreign' WHERE session_id='session'",
+            [],
+        )
+        .unwrap();
+    assert!(!read().verifies_goal_free_idle("newer", Some(1)));
+    connection
+        .execute(
+            "UPDATE sessions SET host_id=NULL WHERE session_id='session'",
+            [],
+        )
+        .unwrap();
+    for index in 0..9 {
+        record_run_outcome_with_connection(
+            &connection,
+            "session",
+            &format!("recent-{index}"),
+            RunOutcomeDisposition::Completed,
+            None,
+            None,
+        )
+        .unwrap();
+    }
+    assert_eq!(connection.query_row("SELECT count(*) FROM session_run_outcomes WHERE session_id='session' AND run_id='run'", [], |row| row.get::<_,i64>(0)).unwrap(), 0);
+    assert!(
+        !read().verifies_goal_free_idle("run", Some(1)),
+        "pruned history is unverified"
+    );
+    drop(connection);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}

@@ -83,6 +83,7 @@ struct Binding {
     service: Weak<SessionService>,
     token: Uuid,
     registration: Option<Uuid>,
+    config_version: Option<i64>,
 }
 struct Source {
     epoch: Uuid,
@@ -591,6 +592,7 @@ impl Live {
     }
     fn bind(self: &Arc<Self>, service: &Arc<SessionService>) {
         let metadata = service.metadata();
+        let config_version = service.config_version();
         let Some(id) = metadata.session_id.as_deref() else {
             return;
         };
@@ -623,6 +625,7 @@ impl Live {
                 service: Arc::downgrade(service),
                 token,
                 registration: None,
+                config_version,
             });
             self.dirty(&mut state, id);
             previous
