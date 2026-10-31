@@ -423,7 +423,16 @@ async fn fixture(case: &'static str) {
             .any(|tool| tool["name"] == "subagent")
     }) {
         let tools = request["tools"].as_array().unwrap();
-        for forbidden in ["subagent", "create_goal", "orchestrator"] {
+        for forbidden in [
+            "subagent",
+            "create_goal",
+            "orchestrator_launch",
+            "orchestrator_status",
+            "orchestrator_steer",
+            "orchestrator_read",
+            "orchestrator_wait",
+            "orchestrator_cancel",
+        ] {
             assert!(!tools.iter().any(|tool| tool["name"] == forbidden));
         }
     }
