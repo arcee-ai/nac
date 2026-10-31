@@ -14,15 +14,15 @@ from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
 PRODUCT = 'd443a2aca506def2817b9afc0c9a20a75f5c4b5d'
-TEST_SOURCE = '1412af562c56edebc63dbf61af849f08e2255b54'
+TEST_SOURCE = 'ddb2cb82ba9f17e662a96ccfe7b2f08442470d81'
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 SCHEMA = 'nac342-startup-xctest-v1'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 TEST_FILES = {
-    'README.md': 'ef79761bd31774dec00f080a80392b988215ca87be0c1b8512fc54112f694021',
-    'StartupJourneys.swift': '1288826cbfd9f2ba3aa604d6be03a1ab3616f1f7b9ce66ac29ed6d1ee91869cd',
+    'README.md': '1a5c8590992df95d73d35b94e3adba27e779f4e09fdba9e5d8a72f8562bc332b',
+    'StartupJourneys.swift': '60473fa8af3306146d546982f775e4856b6bffb0a8516728e211bfd26fbdc28e',
     'contract.py': '86d5182b77f64301b6c14f97642fff3ebcb1f656502b406606c68e42e0b94048',
-    'test_contract.py': '3556f47d0ae8ea1ef68e55f76dd4d263d4afe250984ce61a2ed1e3a64ca2e220',
+    'test_contract.py': '650a67bebd47864ac3f24fe8997c0aff0ba2933656d112ea2597fbf6b7bce7ed',
 }
 FUTURE_MESSAGE = ('The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. '
                   'Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.')
