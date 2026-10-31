@@ -8,6 +8,7 @@ import WebKit
 final class ExternalNavigationSmoke {
     private unowned let app: PreviewApp
     private let checkpoint: () -> Void
+    private var diagnostics: [[String: Any]] = []
     init(app: PreviewApp, checkpoint: @escaping () -> Void) { self.app = app; self.checkpoint = checkpoint }
 
     func run() async throws -> [String: Any] {
@@ -19,6 +20,7 @@ final class ExternalNavigationSmoke {
         try await wait("current live document") { self.app.commands.currentDocument(in: self.app.webView) != nil }
         let expected = app.commands.currentDocument(in: app.webView)!
         let origin = app.baseURL!
+        try record("loaded", expected: expected, origin: origin)
         guard app.webView.configuration.preferences.javaScriptCanOpenWindowsAutomatically == false,
               app.commands.smokeExternalNavigation["recording_only"] as? Bool == true else {
             throw PreviewError.message("Recording fixture did not retain the user-interaction popup gate")
@@ -34,6 +36,7 @@ final class ExternalNavigationSmoke {
               actions[0]["navigation_type"] as? Int == WKNavigationType.linkActivated.rawValue else {
             throw PreviewError.message("Activated external link did not retain its WK navigation classification")
         }
+        try record("first-main-link", expected: expected, origin: origin)
         let blocked = try await js("return window.open('https://example.invalid/automatic') === null") as? Bool
         guard blocked == true else { throw PreviewError.message("Automatic JavaScript popup was not blocked") }
         _ = try await js("location.assign('https://example.invalid/script');return true")
@@ -52,10 +55,13 @@ final class ExternalNavigationSmoke {
             throw PreviewError.message("Actual child-frame navigation did not reach the rejection policy")
         }
         _ = try await js("document.getElementById('external-navigation-child-fixture').remove();return true")
-        guard actions.count == 2, app.commands.currentDocument(in: app.webView) == expected,
-              app.webView.url?.host == origin.host, app.webView.url?.port == origin.port else {
-            throw PreviewError.message("Rejected navigation altered the live document or external-opener observations")
+        try record("post-negative", expected: expected, origin: origin)
+        guard actions.count == 2 else { throw PreviewError.message("Post-negative external-action count differed") }
+        guard app.commands.currentDocument(in: app.webView) == expected else {
+            throw PreviewError.message("Post-negative current-document correlation differed")
         }
+        guard app.webView.url?.scheme == origin.scheme, app.webView.url?.host == origin.host,
+              app.webView.url?.port == origin.port else { throw PreviewError.message("Post-negative origin differed") }
 
         // A synthetic target=_blank click may be blocked by WebKit's gesture
         // gate. Record what the real WK does without claiming physical intent.
@@ -92,6 +98,30 @@ final class ExternalNavigationSmoke {
     }
 
     private var actions: [[String: Any]] { app.commands.smokeExternalNavigation["actions"] as? [[String: Any]] ?? [] }
+
+    /// Only fixed labels, bounded native classifications and booleans leave
+    /// this fixture. No document contents, destinations or callback values.
+    private func record(_ phase: String, expected: NativeDocumentBinding, origin: URL) throws {
+        let binding = app.commands.currentDocument(in: app.webView)
+        let value: [String: Any] = ["phase": phase, "action_count": actions.count,
+            "current_document_present": binding != nil, "same_document": binding == expected,
+            "same_scheme": app.webView.url?.scheme == origin.scheme,
+            "same_host": app.webView.url?.host == origin.host, "same_port": app.webView.url?.port == origin.port,
+            "application_active": NSApp.isActive, "window_key": app.window.isKeyWindow,
+            "window_visible": app.window.isVisible, "window_minimized": app.window.isMiniaturized,
+            "webview_hidden": app.webView.isHidden, "navigation": app.commands.smokeExternalNavigation,
+            "system_browser_qualified": false, "physical_input_qualified": false]
+        guard diagnostics.count < 16 else { throw PreviewError.message("Recording fixture diagnostic bound exceeded") }
+        diagnostics.append(value)
+        let args = CommandLine.arguments
+        guard let index = args.firstIndex(of: "--smoke-output"), index + 1 < args.count else {
+            throw PreviewError.message("Recording fixture output unavailable")
+        }
+        let output = URL(fileURLWithPath: args[index + 1]).deletingLastPathComponent()
+            .appendingPathComponent("external-navigation-diagnostics.json")
+        try JSONSerialization.data(withJSONObject: ["stages": diagnostics], options: [.prettyPrinted, .sortedKeys])
+            .write(to: output, options: .atomic)
+    }
 
     private func link(target: String) async throws {
         _ = try await js("const a=document.createElement('a');a.href='https://example.invalid/auth?state=local-fixture';a.target=target;document.body.append(a);a.click();a.remove();return true", arguments: ["target": target])
