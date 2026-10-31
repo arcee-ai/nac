@@ -65,6 +65,12 @@ class PackageContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'inventory'):
             package.verify_files(self.manifest, self.root)
 
+    def test_special_executable_permission_changes_are_part_of_integrity(self):
+        self.engine.chmod(0o4755)
+        self.assertEqual(inventory(self.app)['Contents/Resources/nac-web']['mode'], 0o4755)
+        with self.assertRaisesRegex(ValueError, 'inventory'):
+            package.verify_files(self.manifest, self.root)
+
     def test_container_tampering_fails_even_with_untouched_app(self):
         self.archive.write_bytes(b'changed archive')
         with self.assertRaisesRegex(ValueError, 'Container'):

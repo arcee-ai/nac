@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -38,7 +39,7 @@ def inventory(root):
             raise ValueError(f'Unsupported bundle entry: {path}')
         rows[path.relative_to(root).as_posix()] = {
             'sha256': digest(path), 'size': path.stat().st_size,
-            'mode': path.stat().st_mode & 0o777,
+            'mode': stat.S_IMODE(path.stat().st_mode),
         }
     if not rows:
         raise ValueError('Empty file inventory')
