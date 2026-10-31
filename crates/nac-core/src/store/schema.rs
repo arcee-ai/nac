@@ -47,7 +47,7 @@ pub(super) use managed_tables::create_managed_maintenance_tables;
 use managed_tables::create_terminal_remote_cleanups_table;
 use model_configurations::create_model_configurations_table;
 use transcript_tables::{
-    create_session_run_recovery_table, create_transcript_append_receipts_table,
+    backfill_run_counts, create_session_run_recovery_table, create_transcript_append_receipts_table,
 };
 
 #[cfg(test)]
@@ -1900,6 +1900,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "workspace_revisions",
         "session_run_recovery",
         "session_inbox",
+        "task_followups",
         "session_mcp_refresh",
         "human_shell_operations",
         "permission_grants",
@@ -1928,24 +1929,6 @@ fn ensure_workset_items_acceptance_column(conn: &Connection) -> Result<()> {
     }
     conn.execute(
         "ALTER TABLE workset_items ADD COLUMN acceptance TEXT NOT NULL DEFAULT ''",
-        [],
-    )?;
-    Ok(())
-}
-
-/// Seeds the run counter for sessions that predate it. One run submits exactly
-/// one user message, so the stored history is the best available estimate.
-/// Rows that already counted a run keep their value, and unparseable history
-/// stays at zero rather than failing the migration.
-fn backfill_run_counts(conn: &Connection) -> Result<()> {
-    conn.execute(
-        "UPDATE sessions
-         SET run_count = (
-             SELECT COUNT(*)
-             FROM json_each(sessions.messages_json)
-             WHERE json_extract(value, '$.role') = 'user'
-         )
-         WHERE run_count = 0 AND json_valid(messages_json)",
         [],
     )?;
     Ok(())
