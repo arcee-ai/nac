@@ -209,6 +209,15 @@ while the app exits and checks that its preflight child exits without creating a
 database. Termination and cleanup require matching this fixture's bundle paths;
 unknown ownership retains the disposable profile for inspection.
 
+For the separately authorized real-vendor case, set `NAC_STARTUP_REAL_VENDOR=1`
+and `NAC_STARTUP_SCENARIOS=startup-real-arcee` when invoking the same runner.
+It uses the existing ARCEE_API_KEY
+child-environment reference and the ordinary catalog/default model selection.
+It creates no key preset and verifies `arcee-api` plus the environment variable
+name before sending one text-only prompt through the shared UI. The key is never
+put in arguments or evidence; HOME/NAC_HOME/store remain disposable. This case
+is excluded from default runs and never uses OAuth refresh or personal stores.
+
 Every builder mode emits `Contents/Resources/build-receipt.json` with source,
 compiler flags, native source hashes, engine identity and both executable
 hashes. It rejects an engine from another source revision or source changes

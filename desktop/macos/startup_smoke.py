@@ -42,6 +42,13 @@ def main():
     app, destination = (Path(value).resolve() for value in sys.argv[1:])
     destination.mkdir(parents=True, exist_ok=True)
     locked = console_locked()
+    vendor = os.environ.get('NAC_STARTUP_SCENARIOS') == 'startup-real-arcee'
+    if vendor and os.environ.get('NAC_STARTUP_REAL_VENDOR') != '1':
+        raise RuntimeError('The real-vendor case requires explicit NAC_STARTUP_REAL_VENDOR=1')
+    if vendor and 'ARCEE_API_KEY' not in os.environ:
+        raise RuntimeError('The authorized existing ARCEE_API_KEY environment reference is unavailable')
+    if 'startup-real-arcee' in os.environ.get('NAC_STARTUP_SCENARIOS', '') and not vendor:
+        raise RuntimeError('Run the single bounded real-vendor case separately from dummy fixtures')
     identity = json.loads((app / 'Contents/Resources/engine-identity.json').read_text())
     metadata = {
         'source_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
@@ -53,7 +60,7 @@ def main():
         'sdk': subprocess.check_output(['xcrun', '--show-sdk-version'], text=True).strip(),
         'screen_locked': locked,
         'visible_paint_acceptance': 'pending_locked_session' if locked else 'requires_image_review',
-        'vendor_authentication': 'not_exercised_dummy_provider',
+        'vendor_authentication': 'arcee_api_environment_reference_requested' if vendor else 'not_exercised_dummy_provider',
     }
     (destination / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
     catalog = ThreadingHTTPServer(('127.0.0.1', 0), Catalog)
@@ -82,6 +89,10 @@ def main():
                         'LANG': 'en_US.UTF-8', 'NAC_TELEMETRY': 'disabled', 'NAC_ORCHESTRATION': '0',
                         'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null', 'BROWSER': 'none',
                         'MODELS_DEV_URL': f'http://127.0.0.1:{catalog.server_port}/models-dev'}
+                    if vendor:
+                        # Existing child-environment inheritance only: never use
+                        # command arguments, fixtures, preferences or key files.
+                        environment['ARCEE_API_KEY'] = os.environ['ARCEE_API_KEY']
                     nac = home / '.config/nac'
                     if scenario == 'startup-nac-relative':
                         environment.update(NAC_HOME='selected nac', XDG_CONFIG_HOME='ignored xdg')

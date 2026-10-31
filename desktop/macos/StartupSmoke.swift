@@ -95,6 +95,9 @@ final class StartupSmoke {
     }
 
     private func configuredJourney() async throws {
+        let vendor = scenario == "startup-real-arcee"
+        let responseText = vendor ? "NAC_LOCAL_ARCEE_OK" : "Finder configured local response."
+        if !vendor {
         let provider = value("--smoke-provider")!
         _ = try await js("""
         const response = await fetch('/model-configs', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
@@ -106,6 +109,7 @@ final class StartupSmoke {
         _ = try await js("window.__startupReloading = true; return true;")
         app.webView.reload()
         try await waitJS("onboarding after configuration", "return !window.__startupReloading && [...document.querySelectorAll('button')].some(b => b.textContent.includes('Get Started'));")
+        }
         _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Get Started')).click(); return true;")
         try await waitJS("project creation dialog", "return document.body.innerText.includes('New Project');")
         let workspace = value("--smoke-workspace")!
@@ -125,14 +129,25 @@ final class StartupSmoke {
         try await waitJS("configured project ready", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create Project' && !b.disabled);")
         _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Create Project' && !b.disabled).click(); return true;")
         try await waitJS("configured local chat", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
+        if vendor {
+            let selected = try await js("return (await (await fetch('/sessions/'+location.hash.split('/')[2])).json()).metadata;") as! [String: Any]
+            guard selected["backend"] as? String == "arcee-api", selected["api_key_env"] as? String == "ARCEE_API_KEY" else {
+                throw DesktopStartupError.message("Real-vendor fixture requires ordinary Arcee API environment selection before sending")
+            }
+            evidence["vendor_backend"] = "arcee-api"
+            evidence["credential_source"] = "existing ARCEE_API_KEY environment reference"
+            evidence["vendor_model"] = selected["model"]
+        }
+        let prompt = vendor ? "Do not use tools. Reply only with the uppercase sequence obtained by joining NAC, LOCAL, ARCEE, OK with underscores." : "FINDER_CONFIGURED_LOCAL_" + scenario
         _ = try await js("""
         const input=document.querySelector('[role=combobox][aria-label=Message]');
-        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,\(json("FINDER_CONFIGURED_LOCAL_" + scenario)));
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,\(json(prompt)));
         input.dispatchEvent(new Event('input',{bubbles:true})); return true;
         """)
         try await waitJS("enabled shared Send", "return !!document.querySelector('button[aria-label=Send]:not(:disabled)');")
         _ = try await js("document.querySelector('button[aria-label=Send]').click(); return true;")
-        try await waitJS("configured local response", "return document.body.innerText.includes('Finder configured local response.');")
+        try await waitJS("configured local response", "return document.body.innerText.includes(\(json(responseText)));")
+        try await waitJS("configured run settlement", "return (await (await fetch('/sessions/'+location.hash.split('/')[2])).json()).active_run == null;")
         let snapshot = try await js("return await (await fetch('/sessions/'+location.hash.split('/')[2])).json();") as! [String: Any]
         let metadata = snapshot["metadata"] as! [String: Any]
         let summaries = snapshot["sessions"] as? [[String: Any]] ?? []
@@ -145,10 +160,11 @@ final class StartupSmoke {
         evidence["execution_backend"] = "local"
         evidence["project_created_in_shared_ui"] = true
         evidence["configured_local_run"] = true
+        evidence["real_vendor_run"] = vendor
         evidence["behavior"] = (snapshot["metadata"] as? [String: Any])?["behavior"]
         _ = try await js("window.__startupReloading = true; return true;")
         app.webView.reload()
-        try await waitJS("retained configured transcript", "return !window.__startupReloading && document.body.innerText.includes('Finder configured local response.');")
+        try await waitJS("retained configured transcript", "return !window.__startupReloading && document.body.innerText.includes(\(json(responseText)));")
         evidence["persisted_reload"] = true
         if value("--smoke-paint") == "1" { try await capture() }
     }
