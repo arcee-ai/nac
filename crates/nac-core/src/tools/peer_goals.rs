@@ -256,6 +256,9 @@ impl NativeTool for PeerGoalTool {
             let Some(broker) = services.runtime.permission_broker.as_ref() else {
                 return failure(anyhow::anyhow!("missing ordinary permission broker"));
             };
+            let Some(caller) = services.runtime.session_id.clone() else {
+                return failure(anyhow::anyhow!("missing attached caller session"));
+            };
             if let Err(e) = broker
                 .validate_execution_observation_binding(
                     &services.runtime.store_path,
@@ -278,7 +281,7 @@ impl NativeTool for PeerGoalTool {
             } = &input
             {
                 let request = crate::store::PeerGoalStart {
-                    caller_session_id: services.runtime.session_id.clone().unwrap(),
+                    caller_session_id: caller.clone(),
                     request_id: request_id.clone(),
                     target_session_id: session_id.clone(),
                     project_id: project_id.clone(),
@@ -297,8 +300,7 @@ impl NativeTool for PeerGoalTool {
                         return ToolResult::text(value.to_string(), false);
                     }
                     Ok(Ok(None)) => (),
-                    Ok(Err(error)) => return failure(error),
-                    Err(error) => return failure(error),
+                    Ok(Err(error)) | Err(error) => return failure(error),
                 }
             }
             match context
@@ -331,7 +333,6 @@ impl NativeTool for PeerGoalTool {
             let path = services.runtime.store_path.clone();
             let target = target.to_owned();
             let project = project.to_owned();
-            let caller = services.runtime.session_id.clone().unwrap();
             // Passive exact revalidation after the approval wait, including caller
             // binding; authenticated-human tool contexts cannot skip the reply.
             let is_read = matches!(&input, Input::Read { .. });
@@ -366,8 +367,7 @@ impl NativeTool for PeerGoalTool {
                 .await;
             let snapshot = match checked {
                 Ok(Ok(snapshot)) => snapshot,
-                Ok(Err(e)) => return failure(e),
-                Err(e) => return failure(e),
+                Ok(Err(e)) | Err(e) => return failure(e),
             };
             if let Input::Read { .. } = input {
                 return ToolResult::text(json!({"status":"found","session_id":target,"as_of":crate::store::now_utc(),"goal":snapshot.goal,"goal_objective_truncated":snapshot.goal_objective_truncated,"goal_last_run_id":snapshot.goal_last_run_id,"prior_goals":snapshot.prior_goals,"provenance":"passive durable goal owner; no attachment or wake"}).to_string(), false);
