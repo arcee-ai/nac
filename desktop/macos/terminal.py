@@ -89,7 +89,7 @@ def main():
         provenance.update(runner_sources=sources(),
                           asset_files={'/assets/dist/' + str(p.relative_to(Path('crates/nac-server/assets/dist'))): sha256(p)
                                        for p in sorted(Path('crates/nac-server/assets/dist').rglob('*')) if p.is_file()},
-                          source_base='90bba43bdc957e2e2535312a0c247b8408c626c2',
+                          source_base='fa94a859b648cb36fbdcb251bfe4bc9541de3f48',
                           original_supplier='f71515d14068592a161c17cbd53832ae1b295263',
                           compile_flags=['PREVIEW_SMOKE', 'TERMINAL_SMOKE'],
                           normal_sha256=sha256(app.parent / 'normal-preview'),
