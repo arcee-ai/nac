@@ -18,6 +18,9 @@ final class NativeCommandSmoke {
         try await wait("session composer") { try await self.js("return !!document.querySelector('[role=combobox][aria-label=Message]')") as? Bool == true }
         _ = try await js("document.querySelector('[role=combobox][aria-label=Message]').focus(); return true")
         try await wait("current document UI command owner") { self.commands.smokeSnapshot["ready"] as? Bool == true }
+        let boundary = try await receiptBoundary(captures: captures)
+        let beforeBad = boundary.before
+        let base = boundary.record
         try await wait("current menu focus owner") { self.commands.smokeSnapshot["available"] as? Bool == true }
         var inputEvidence: [String: Any]?
         if trustedInput {
@@ -63,43 +66,6 @@ final class NativeCommandSmoke {
         // Closing our own key window restores AppKit's previous responder.
         try await wait("owned main window restored") { self.app.window.isKeyWindow }
         _ = try await js("document.querySelector('[role=combobox][aria-label=Message]').focus(); return true")
-        let beforeBad = commands.smokeSnapshot
-        let binding = beforeBad["binding"] as! [String: Any]
-        let request = beforeBad["request"] as! Int
-        let base: [String: Any] = ["version": 1, "kind": "ready", "launch": binding["launch"]!, "view": binding["view"]!, "document": binding["document"]!]
-        // These traverse the actual WKScriptMessage boundary, not a parser mock.
-        _ = try await js(#"""
-        const post = x => webkit.messageHandlers.nacUIReceipt.postMessage(x);
-        post('{bad'); post('x'.repeat(2049)); post({version:1});
-        for (const key of ['launch','view','document','version','kind'])
-          post(JSON.stringify({...record,[key]:'wrong'}));
-        post(JSON.stringify({...record,extra:true}));
-        post(JSON.stringify(record));
-        post(JSON.stringify({...record,kind:'settled',request,accepted:true}));
-        const frame = document.createElement('iframe');
-        frame.srcdoc = '<script>webkit.messageHandlers.nacUIReceipt.postMessage('+JSON.stringify(JSON.stringify(record))+')<'+'/script>';
-        document.body.append(frame);
-        return true;
-        """#, arguments: ["record": base, "request": request])
-        try await wait("rejected actual WK messages") { self.delta("rejected", beforeBad) >= 12 }
-        guard delta("dispatches", beforeBad) == 0 else { throw PreviewError.message("Web receipt dispatched a native command") }
-        let beforeForeign = commands.smokeSnapshot
-        let other = WKWebView(frame: .zero, configuration: app.webView.configuration)
-        other.loadHTMLString("<body id='foreign-view'></body>", baseURL: app.baseURL)
-        try await wait("secondary fixture WebView") {
-            (try? await other.callAsyncJavaScript("return document.body?.id === 'foreign-view'", arguments: [:], in: nil, contentWorld: .page)) as? Bool == true
-        }
-        _ = try await other.callAsyncJavaScript("webkit.messageHandlers.nacUIReceipt.postMessage(JSON.stringify(record)); return true", arguments: ["record": base], in: nil, contentWorld: .page)
-        try await wait("actual foreign WebView rejected") { self.delta("rejected", beforeForeign) == 1 }
-        other.stopLoading()
-        let address = app.webView.url!
-        // No popup can become a shell-owned WebView.
-        let popup = try await js("return window.open('https://example.invalid/') === null") as? Bool
-        guard popup == true, app.webView.url == address else { throw PreviewError.message("Popup escaped navigation policy") }
-        _ = try await js("const f = document.createElement('iframe'); f.src = 'https://example.invalid/'; document.body.append(f); return true")
-        app.webView.load(URLRequest(url: URL(string: "https://example.invalid/")!))
-        try await Task.sleep(nanoseconds: 200_000_000)
-        guard app.webView.url == address else { throw PreviewError.message("Untrusted navigation replaced the workspace") }
         let old = commands.smokeSnapshot["binding"] as! [String: Any]
         app.webView.reload()
         try await wait("new document bridge") {
@@ -117,6 +83,66 @@ final class NativeCommandSmoke {
                 "shared_focus_restored": true, "projects_once_same_document": true, "foreign_window_rejected": true, "negative_WK_receipts": rejected, "initial_bridge": first, "final_bridge": final,
                 "navigation_popup_restricted": true, "document_replaced": true, "retired": true,
                 "trusted_keyboard_edit_qualified": trustedInput, "input": inputEvidence ?? [:]]
+    }
+
+    /// Runs on the real system WebView before any foreground-only operation.
+    /// These receipts cannot select commands; locked runs still test the boundary.
+    private func receiptBoundary(captures: URL?) async throws -> (before: [String: Any], record: [String: Any]) {
+        let beforeBad = commands.smokeSnapshot
+        let binding = beforeBad["binding"] as! [String: Any]
+        let request = beforeBad["request"] as! Int
+        let base: [String: Any] = ["version": 1, "kind": "ready", "launch": binding["launch"]!, "view": binding["view"]!, "document": binding["document"]!]
+        // Matching main-frame retirement is a positive control for the exact
+        // payload later sent from a child frame and a foreign WebView.
+        _ = try await js("webkit.messageHandlers.nacUIReceipt.postMessage(JSON.stringify({...record,kind:'retired'})); return true", arguments: ["record": base])
+        try await wait("main-frame retirement receipt accepted") { self.commands.smokeSnapshot["ready"] as? Bool == false }
+        _ = try await js("webkit.messageHandlers.nacUIReceipt.postMessage(JSON.stringify(record)); return true", arguments: ["record": base])
+        try await wait("main-frame owner readiness restored") { self.commands.smokeSnapshot["ready"] as? Bool == true }
+        // These traverse the actual WKScriptMessage boundary, not a parser mock.
+        let origins = try await js(#"""
+        const post = x => webkit.messageHandlers.nacUIReceipt.postMessage(x);
+        post('{bad'); post('x'.repeat(2049)); post({version:1});
+        for (const key of ['launch','view','document','version','kind'])
+          post(JSON.stringify({...record,[key]:'wrong'}));
+        post(JSON.stringify({...record,extra:true}));
+        post(JSON.stringify(record));
+        post(JSON.stringify({...record,kind:'settled',request,accepted:true}));
+        const frame = document.createElement('iframe');
+        document.body.append(frame);
+        frame.contentWindow.eval('webkit.messageHandlers.nacUIReceipt.postMessage('+JSON.stringify(JSON.stringify({...record,kind:'retired'}))+')');
+        return {main:window.origin,frame:frame.contentWindow.origin};
+        """#, arguments: ["record": base, "request": request]) as! [String: String]
+        guard origins["main"] == origins["frame"] else { throw PreviewError.message("Child frame did not retain the verified origin") }
+        try await wait("rejected actual WK messages") { self.delta("rejected", beforeBad) >= 12 }
+        guard delta("dispatches", beforeBad) == 0 else { throw PreviewError.message("Web receipt dispatched a native command") }
+        let beforeForeign = commands.smokeSnapshot
+        let other = WKWebView(frame: .zero, configuration: app.webView.configuration)
+        other.load(URLRequest(url: app.baseURL!.appendingPathComponent("health")))
+        try await wait("secondary fixture WebView") {
+            (try? await other.callAsyncJavaScript("return location.pathname === '/health' && document.readyState === 'complete'", arguments: [:], in: nil, contentWorld: .page)) as? Bool == true
+        }
+        let foreignOrigin = try await other.callAsyncJavaScript("return window.origin", arguments: [:], in: nil, contentWorld: .page) as? String
+        guard foreignOrigin == origins["main"] else { throw PreviewError.message("Foreign WebView did not retain the verified origin") }
+        _ = try await other.callAsyncJavaScript("webkit.messageHandlers.nacUIReceipt.postMessage(JSON.stringify({...record,kind:'retired'})); return true", arguments: ["record": base], in: nil, contentWorld: .page)
+        try await wait("actual foreign WebView rejected") { self.delta("rejected", beforeForeign) == 1 }
+        other.stopLoading()
+        let address = app.webView.url!
+        // No popup can become a shell-owned WebView.
+        let popup = try await js("return window.open('https://example.invalid/') === null") as? Bool
+        guard popup == true, app.webView.url == address else { throw PreviewError.message("Popup escaped navigation policy") }
+        _ = try await js("const f = document.createElement('iframe'); f.src = 'https://example.invalid/'; document.body.append(f); return true")
+        app.webView.load(URLRequest(url: URL(string: "https://example.invalid/")!))
+        try await Task.sleep(nanoseconds: 200_000_000)
+        guard app.webView.url == address else { throw PreviewError.message("Untrusted navigation replaced the workspace") }
+        guard commands.smokeSnapshot["ready"] as? Bool == true else { throw PreviewError.message("Rejected frame/view/navigation retired the current owner") }
+        if let captures {
+            let evidence: [String: Any] = ["scope": "actual-WK-message-boundary-only", "before": beforeBad,
+                "after": commands.smokeSnapshot, "wrong_frame_and_view_rejected": true, "matching_main_frame_control_accepted": true, "origins": origins, "foreign_view_origin": foreignOrigin ?? "", "untrusted_navigation_rejected": true,
+                "native_menu_qualified": false, "OS_input_qualified": false]
+            let data = try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: captures.appendingPathComponent("commands-message-boundary.json"), options: .atomic)
+        }
+        return (beforeBad, base)
     }
 
     private func capture(_ name: String, trustedInput: Bool, directory: URL?) async throws {
