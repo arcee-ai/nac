@@ -117,12 +117,18 @@ test("native saved-project launches open independent named-skill tasks across Gi
       token: "DISCOVER_NATIVE_PROJECTS",
       requiredTools: ["list_projects", "launch_task", "task_launch_status"],
     },
-    { kind: "function_call", name: "list_projects", callId: "discover", arguments: {} },
+    {
+      kind: "function_call",
+      stream: "request",
+      name: "list_projects",
+      callId: "discover",
+      arguments: {},
+    },
   );
   harness.provider.enqueue(
     "discover-ack",
     { functionOutputCallId: "discover" },
-    { kind: "text", text: "Saved projects discovered" },
+    { kind: "text", stream: "request", text: "Saved projects discovered" },
   );
   await send(page, "DISCOVER_NATIVE_PROJECTS");
   await expect(page.getByText("Saved projects discovered", { exact: true })).toBeVisible();
@@ -154,18 +160,19 @@ test("native saved-project launches open independent named-skill tasks across Gi
     harness.provider.enqueue(
       `launch-${kind}`,
       { token: `NATIVE_LAUNCH_${kind}` },
-      { kind: "function_call", name: "launch_task", callId, arguments: input },
+      { kind: "function_call", stream: "request", name: "launch_task", callId, arguments: input },
     );
     harness.provider.enqueue(
       `launch-ack-${kind}`,
       { functionOutputCallId: callId },
-      { kind: "text", text: `Separate ${kind} launch accepted` },
+      { kind: "text", stream: "request", text: `Separate ${kind} launch accepted` },
     );
     harness.provider.enqueue(
       `skill-${kind}`,
       { token: `NATIVE_CHILD_${kind}`, requiredTools: ["read"] },
       {
         kind: "function_call",
+        stream: "request",
         name: "read",
         callId: `skill-${kind}`,
         arguments: { path: ".agents/skills/launch-proof/SKILL.md" },
@@ -174,7 +181,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
     harness.provider.enqueue(
       `child-done-${kind}`,
       { functionOutputCallId: `skill-${kind}` },
-      { kind: "text", text: `NATIVE_SKILL_READ_${kind}` },
+      { kind: "text", stream: "request", text: `NATIVE_SKILL_READ_${kind}` },
     );
     await send(page, `NATIVE_LAUNCH_${kind}: Start a separate task using the launch-proof skill.`);
     const acknowledgement = page.getByText(`Separate ${kind} launch accepted`, { exact: true });
@@ -252,12 +259,18 @@ test("native saved-project launches open independent named-skill tasks across Gi
   harness.provider.enqueue(
     "retry",
     { token: "RETRY_NATIVE_SAME" },
-    { kind: "function_call", name: "launch_task", callId: "retry", arguments: intents[0] },
+    {
+      kind: "function_call",
+      stream: "request",
+      name: "launch_task",
+      callId: "retry",
+      arguments: intents[0],
+    },
   );
   harness.provider.enqueue(
     "retry-ack",
     { functionOutputCallId: "retry" },
-    { kind: "text", text: "Original task recovered" },
+    { kind: "text", stream: "request", text: "Original task recovered" },
   );
   await send(page, "RETRY_NATIVE_SAME: retry the exact launch after restart.");
   await expect(page.getByText("Original task recovered", { exact: true })).toBeVisible();
@@ -271,7 +284,11 @@ test("native saved-project launches open independent named-skill tasks across Gi
   expect((await inventory(same)).length).toBe(1);
   for (const [index, id] of [caller, ...receipts.map((r) => r.launch.session_id)].entries()) {
     const token = `INDEPENDENT_STEER_${index}`;
-    harness.provider.enqueue(token, { token }, { kind: "text", text: `${token} accepted` });
+    harness.provider.enqueue(
+      token,
+      { token },
+      { kind: "text", stream: "request", text: `${token} accepted` },
+    );
     await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
     await send(page, token);
     await expect(page.getByText(`${token} accepted`, { exact: true })).toBeVisible();
@@ -286,7 +303,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
   harness.provider.enqueue(
     "cancel-target",
     { token: "CANCEL_NATIVE_TASK" },
-    { kind: "text", text: "Cancelled output" },
+    { kind: "text", stream: "request", text: "Cancelled output" },
     cancelGate,
   );
   await page.goto(`${harness.baseUrl}/#/session/${cancelTarget}/insights`);
@@ -306,6 +323,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
     { token: "READ_NATIVE_STATUS" },
     {
       kind: "function_call",
+      stream: "request",
       name: "task_launch_status",
       callId: "native-status",
       arguments: { request_id: intents[0].request_id },
@@ -314,7 +332,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
   harness.provider.enqueue(
     "status-ack",
     { functionOutputCallId: "native-status" },
-    { kind: "text", text: "Passive launch status read" },
+    { kind: "text", stream: "request", text: "Passive launch status read" },
   );
   await page.goto(`${harness.baseUrl}/#/session/${caller}/insights`);
   const targetRequests = harness.provider.requests.filter(

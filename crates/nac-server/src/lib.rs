@@ -610,6 +610,14 @@ impl SessionManager {
             store_path.clone(),
             Arc::new(application::native_task_launches::NativeTaskLaunchController::new(&manager)),
         );
+        nac_core::task_followups::register_controller(
+            store_path.clone(),
+            Arc::new(application::task_followups::ServerTaskFollowupController {
+                manager: Arc::downgrade(&manager.inner),
+                #[cfg(test)]
+                after_admission: None,
+            }),
+        );
         nac_core::traditional_children::register_controller(
             store_path.clone(),
             Arc::new(ServerTraditionalChildController {

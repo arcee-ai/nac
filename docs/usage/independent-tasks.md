@@ -134,3 +134,48 @@ tool response is lost. Interrupted preparation is reported as failed and can be
 reconciled by an exact retry. A cancelled publication cannot insert a session
 or initial input. Published tasks retain their workspace under the existing
 retention contract; cancelling a run is independent of steering the caller.
+## Authorized follow-up
+
+`send_task_followup` submits guidance to an exact independent plain-direct Local
+task. Human authorization must cover the target and action. A peer asking for a
+reply does not authorize sending it; read access and broad coordination intent
+do not authorize arbitrary mutations. The tool uses ordinary agent permission
+evaluation with an invocation-only Ask default and the selected target resource
+`session:<id>`. Its action is `task_followup_queue`, `task_followup_steer` or
+`task_followup_auto`; configured Deny remains effective, and a headless Ask fails
+closed. An admitted peer message never becomes human review intent in the target.
+
+Supply the target `session_id`, a stable `request_id`, `action` and `prompt`.
+Crossing saved projects requires the target's `project_id` explicitly.
+
+- `queue` admits a task-bound FIFO successor. An optional `run_id` checks that
+  exact current run at admission, without changing queue delivery.
+- `steer` requires the exact active `run_id` and delivers at the next safe agent
+  boundary. Guidance admitted just before finishing stays pending for a successor.
+- `auto` resolves once against committed active-run state: steer when active,
+  otherwise queue a successor. An optional `run_id` is an exact binding and
+  conflicts if it is no longer active.
+
+The key is scoped to the caller's session, and binds target, project selector,
+action, exact prompt and supplied run. Repeating identical arguments returns the
+original admission and current delivery state, including after restart or a lost
+acknowledgement. Changing arguments with that key conflicts. A stale explicit run
+never silently targets a later run. Replays never recreate an item or blindly
+wake another turn, even after delivery or cancellation. If an initial wake fails,
+the input remains durable for the target's normal attachment/recovery path.
+
+The receipt includes `requested_action`, `resolved_delivery`, immutable
+`admitted_run_id`, `inbox_item_id`, eventual `delivered_run_id`, and task
+navigation. `accepted_pending` means the input is admitted but has not entered
+the model transcript; `delivered` means transcript delivery, not completed work
+or exactly-once provider execution. `cancelled` is terminal for that item.
+`unknown` means the commit or inbox evidence is unavailable and must not be
+treated as a fresh request. Receipts survive deletion of their inbox items and
+then report unknown rather than recreating work.
+
+Use `read_task_followup` with the original `request_id` and target `session_id`
+for passive inspection without repeating the prompt. It reads only this caller's
+receipts under `task_read` policy, and never attaches, wakes, consumes input,
+acquires execution leases or adds an approval subscription. Cancelling the
+coordinator or its tool wait does not cancel the independent target or erase an
+accepted input.

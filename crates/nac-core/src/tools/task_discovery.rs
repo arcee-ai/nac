@@ -124,7 +124,7 @@ fn check_id(label: &str, value: &str) -> Result<(), ToolResult> {
     Ok(())
 }
 
-fn navigation(session_id: &str) -> String {
+pub(super) fn navigation(session_id: &str) -> String {
     let mut route = String::from("/session/");
     for byte in session_id.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {

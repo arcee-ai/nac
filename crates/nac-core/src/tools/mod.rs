@@ -34,6 +34,7 @@ pub mod read;
 mod runtime_context;
 pub(crate) mod subagent;
 mod task_discovery;
+mod task_followups;
 mod task_launch;
 mod terminal_tools;
 pub mod thread;
@@ -163,8 +164,10 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
     "read_command_output",
 ];
 
+pub(crate) const TASK_FOLLOWUP_TOOL_NAMES: [&str; 2] = ["send_task_followup", "read_task_followup"];
+
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 20] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 22] = [
     "read",
     "write",
     "edit",
@@ -179,6 +182,8 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 20] = [
     "task_launch_status",
     "find_tasks",
     "read_task",
+    "send_task_followup",
+    "read_task_followup",
     "create_goal",
     "get_goal",
     "update_goal",
@@ -242,6 +247,8 @@ fn worker_tool_registry(
         .register(task_launch::TaskLaunchStatusTool)
         .register(task_discovery::FindTasksTool)
         .register(task_discovery::ReadTaskTool)
+        .register(task_followups::SendTaskFollowupTool)
+        .register(task_followups::ReadTaskFollowupTool)
         .register(goal::CreateGoalTool)
         .register(goal::GetGoalTool)
         .register(goal::UpdateGoalTool)
@@ -332,7 +339,9 @@ pub(crate) fn direct_with_orchestrator_tool_definitions_with_web(
 }
 
 fn is_complete_direct_capability(name: &str) -> bool {
-    DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name) || WEB_TOOL_NAMES.contains(&name)
+    DIRECT_TOOL_NAMES.contains(&name)
+        || DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name)
+        || WEB_TOOL_NAMES.contains(&name)
 }
 
 #[expect(
