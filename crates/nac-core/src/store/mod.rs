@@ -74,8 +74,9 @@ pub use run_recovery::{
 };
 pub use schema::{
     check_readiness, default_store_path, default_store_path_for_track, initialize,
-    migration_status, observe_probe_migration_status, schema_version, StoreMigrationFailure,
-    StoreMigrationState, StoreMigrationStatus, StoreTrack, MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+    migration_status, observe_probe_migration_status, schema_version, StoreFutureSchemaError,
+    StoreMigrationFailure, StoreMigrationState, StoreMigrationStatus, StoreTrack,
+    MINIMUM_MIGRATABLE_SCHEMA_VERSION,
 };
 pub use session_forks::{
     clone_session_conversation_artifacts, dismiss_session_fork, insert_session_fork,

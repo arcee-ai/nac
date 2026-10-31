@@ -19,8 +19,8 @@ mod wal_preflight;
 use migration_status::has_migration_observation;
 use migration_status::{begin_migration, finish_migration};
 pub use migration_status::{
-    migration_status, observe_probe_migration_status, StoreMigrationFailure, StoreMigrationState,
-    StoreMigrationStatus,
+    migration_status, observe_probe_migration_status, StoreFutureSchemaError,
+    StoreMigrationFailure, StoreMigrationState, StoreMigrationStatus,
 };
 
 pub(super) use managed_tables::create_managed_maintenance_tables;
@@ -451,9 +451,7 @@ fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
 fn reject_future_schema_before_open(path: &Path) -> Result<()> {
     if let Some(version) = preflight_schema_version(path)? {
         if version > STORE_SCHEMA_VERSION {
-            return Err(anyhow!(
-                "unsupported store schema version {version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
-            ));
+            return Err(StoreFutureSchemaError::new(version).into());
         }
     }
     Ok(())
@@ -663,9 +661,7 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
     let conn = connect(path)?;
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version > STORE_SCHEMA_VERSION {
-        return Err(anyhow!(
-            "unsupported store schema version {schema_version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
-        ));
+        return Err(StoreFutureSchemaError::new(schema_version).into());
     }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let journal_mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
@@ -723,9 +719,7 @@ fn open_connection_with_hooks(
     let preflight_schema_version: i64 =
         conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if preflight_schema_version > STORE_SCHEMA_VERSION {
-        return Err(anyhow!(
-            "unsupported store schema version {preflight_schema_version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
-        ));
+        return Err(StoreFutureSchemaError::new(preflight_schema_version).into());
     }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     if preflight_schema_version == STORE_SCHEMA_VERSION {
@@ -787,6 +781,9 @@ fn open_connection_with_hooks(
         | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
         | 38 | 39 | STORE_SCHEMA_VERSION => {}
         unsupported => {
+            if unsupported > STORE_SCHEMA_VERSION {
+                return Err(StoreFutureSchemaError::new(unsupported).into());
+            }
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
             ));
