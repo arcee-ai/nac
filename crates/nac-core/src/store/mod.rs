@@ -25,6 +25,7 @@ mod schema;
 mod session_forks;
 mod session_goals;
 mod session_inbox;
+mod session_mcp_refresh;
 mod shell_commands;
 pub use shell_commands::recent_shell_commands;
 pub(crate) use shell_commands::{
@@ -85,6 +86,7 @@ pub use session_forks::{
 pub(crate) use session_forks::{fork_origin_from_parts, list_session_forks_with_connection};
 pub use session_goals::*;
 pub use session_inbox::*;
+pub use session_mcp_refresh::*;
 pub use ssh_configurations::*;
 pub use steering::*;
 pub use task_discovery::*;
