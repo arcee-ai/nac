@@ -1,12 +1,13 @@
 import Foundation
+import Darwin
 
 @main
 struct ProtocolTests {
     static func main() throws {
         let identity = EngineIdentity(product_version: "1.2.3", build_id: "test-build",
                                       source_revision: "test-source", track: "dev")
-        func parser() -> EngineProtocol {
-            EngineProtocol(identity: identity, store: URL(fileURLWithPath: "/tmp/store.db"))
+        func parser() throws -> EngineProtocol {
+            try EngineProtocol(identity: identity, store: URL(fileURLWithPath: "/tmp/store.db"))
         }
         func ready(_ state: EngineProtocol) throws -> [String: Any] {
             ["kind": "ready", "version": 1, "incarnation": state.incarnation,
@@ -22,7 +23,10 @@ struct ProtocolTests {
             do { _ = try state.receive(bytes); preconditionFailure("Invalid receipt accepted") }
             catch { precondition(error.localizedDescription.contains("launch receipt") || error.localizedDescription.contains("initialize")) }
         }
-        let state = parser()
+        let state = try parser()
+        let physical = realpath("/tmp", nil)!
+        defer { free(physical) }
+        precondition(state.store == String(cString: physical) + "/store.db")
         let valid = try line(ready(state))
         for byte in valid.dropLast() {
             let result = try state.receive(Data([byte]))
@@ -31,13 +35,13 @@ struct ProtocolTests {
         let endpoint = try state.receive(Data([10]))
         precondition(endpoint?.port == 1234)
         rejected(state, valid) // duplicate across callbacks
-        let duplicate = parser()
+        let duplicate = try parser()
         let record = try line(ready(duplicate))
         rejected(duplicate, record + record) // duplicate within one dispatch
-        rejected(parser(), Data(repeating: 120, count: EngineProtocol.limit + 1))
-        rejected(parser(), Data("{bad}\n".utf8))
+        rejected(try parser(), Data(repeating: 120, count: EngineProtocol.limit + 1))
+        rejected(try parser(), Data("{bad}\n".utf8))
         for key in ["kind", "version", "incarnation", "endpoint", "identity", "store", "schema"] {
-            let state = parser()
+            let state = try parser()
             var value = try ready(state)
             value.removeValue(forKey: key)
             rejected(state, try line(value))

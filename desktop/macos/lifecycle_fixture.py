@@ -4,9 +4,11 @@ import os
 from pathlib import Path
 import signal
 import sqlite3
+import socket
 import subprocess
 import threading
 import time
+from urllib.parse import urlparse
 
 CASES = ('parent-loss-startup', 'parent-loss-active', 'channel-loss-startup',
          'channel-loss-active', 'parent-loss-initialization', 'channel-loss-initialization',
@@ -75,10 +77,14 @@ class LifecycleControl:
                 helper_command = subprocess.check_output(['/bin/ps', '-p', str(helper), '-o', 'command='], text=True).strip()
                 assert helper_command == '/bin/sleep ' + record['app_helper_argument'], helper_command
                 try:
+                    engine_channel = subprocess.run(['/usr/sbin/lsof', '-a', '-p', str(pid), '-d', '3', '-U', '-Fn'], capture_output=True, text=True)
+                    assert engine_channel.returncode == 0 and engine_channel.stdout.strip(), 'Cannot inspect the engine channel descriptor'
                     for child in (helper, record.get('descendant_pid')):
                         if child:
+                            standard = subprocess.run(['/usr/sbin/lsof', '-a', '-p', str(child), '-d', '0,1,2', '-Fn'], capture_output=True, text=True)
+                            assert standard.returncode == 0 and standard.stdout.strip(), f'Cannot inspect fixture descendant {child}'
                             unix = subprocess.run(['/usr/sbin/lsof', '-a', '-p', str(child), '-U', '-Fn'], capture_output=True, text=True)
-                            assert not unix.stdout.strip(), f'Private channel leaked into descendant {child}: {unix.stdout}'
+                            assert unix.returncode in (0, 1) and not unix.stdout.strip() and not unix.stderr.strip(), f'Private channel leaked into descendant {child}: {unix.stdout} {unix.stderr}'
                     started = time.monotonic()
                     os.kill(record['app_pid'], signal.SIGKILL)
                     if startup_connection is not None:
@@ -91,6 +97,11 @@ class LifecycleControl:
                     assert alive(helper), 'Reverse inheritance fixture did not outlive owning app'
                     if record.get('descendant_pid'):
                         wait_dead(record['descendant_pid'], timeout=3)
+                    if self.scenario == 'parent-loss-startup':
+                        assert record.get('workspace_not_activated') is True, record
+                        assert not (profile / 'store.db').exists(), 'Pre-adoption parent loss performed store work'
+                        assert not list((profile / 'nac-home').iterdir()), 'Pre-adoption parent loss constructed configuration'
+                        record['store_work_absent'] = True
                     if (profile / 'store.db').exists():
                         with sqlite3.connect(profile / 'store.db') as connection:
                             assert connection.execute('PRAGMA quick_check').fetchone() == ('ok',)
@@ -119,11 +130,27 @@ class LifecycleControl:
                 self.result = dict(startup_store_barrier_seconds=2)
             else:
                 connection = sqlite3.connect(profile / 'store.db', timeout=2)
+                stream = None
                 try:
+                    if self.scenario == 'watchdog':
+                        # Reuse the existing complete-shutdown SSE boundary:
+                        # this observer stays connected even if WebKit tears down.
+                        endpoint = urlparse(record['base_url'])
+                        stream = socket.create_connection((endpoint.hostname, endpoint.port), timeout=3)
+                        stream.sendall((f"GET /sessions/{record['session_id']}/events/stream HTTP/1.1\r\n"
+                                        "Host: 127.0.0.1\r\nAccept: text/event-stream\r\n\r\n").encode())
+                        response = b''
+                        while b'\r\n\r\n' not in response:
+                            data = stream.recv(4096)
+                            assert data, 'Watchdog observer closed before setup'
+                            response += data
+                        assert response.startswith(b'HTTP/1.1 200'), response[:100]
                     connection.execute('BEGIN IMMEDIATE')
                     (profile / 'shutdown-go').touch()
                     started = time.monotonic()
-                    hold = 5.5 if self.scenario == 'slow-drain' else 24
+                    # Exceed four seconds without crossing one SQLite call's
+                    # separate five-second busy timeout in the slow-drain case.
+                    hold = 4.5 if self.scenario == 'slow-drain' else 24
                     if self.scenario == 'watchdog':
                         wait_dead(pid, timeout=23)
                         elapsed = time.monotonic() - started
@@ -140,6 +167,8 @@ class LifecycleControl:
                     self.result = dict(store_barrier_seconds=round(time.monotonic()-started, 3))
                 finally:
                     connection.close()
+                    if stream is not None:
+                        stream.close()
         except BaseException as error:
             self.error = error
         finally:

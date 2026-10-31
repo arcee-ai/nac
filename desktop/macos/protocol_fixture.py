@@ -29,6 +29,12 @@ elif scenario == 'wrong-endpoint':
     ready['endpoint'] = 'http://example.test:3210'
 record = json.dumps(ready).encode() + b'\n'
 if scenario == 'malformed':
+    # Logs cannot establish readiness. Drain both streams under pressure while
+    # preserving native/channel responsiveness and a 64 KiB retention bound.
+    sys.stdout.buffer.write(b'nac-web listening on http://127.0.0.1:3210\n' + b'x' * 524288)
+    sys.stdout.buffer.flush()
+    sys.stderr.buffer.write(b'y' * 524288)
+    sys.stderr.buffer.flush()
     record = b'{broken}\n'
 elif scenario == 'truncated':
     record = record[:-2]

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct EngineIdentity: Codable, Equatable {
     let product_version: String
@@ -31,10 +32,15 @@ final class EngineProtocol {
     private var pending = Data()
     private(set) var ready: EngineReceipt?
 
-    init(identity: EngineIdentity, store: URL) {
+    init(identity: EngineIdentity, store: URL) throws {
         self.identity = identity
-        self.store = store.deletingLastPathComponent().resolvingSymlinksInPath()
-            .appendingPathComponent(store.lastPathComponent).path
+        guard let parent = realpath(store.deletingLastPathComponent().path, nil) else {
+            throw PreviewError.message("Could not resolve the selected store directory.")
+        }
+        defer { free(parent) }
+        // Foundation's URL normalization can hide Darwin's /private prefix.
+        // Keep the physical POSIX path used by Rust without following the file.
+        self.store = String(cString: parent) + "/" + store.lastPathComponent
     }
 
     func hello() throws -> Data {

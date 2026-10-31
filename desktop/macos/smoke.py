@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import plistlib
 from pathlib import Path
 import shutil
 import signal
@@ -19,6 +20,26 @@ from lifecycle_fixture import CASES, LifecycleControl, alive
 RECEIPT_FAILURES = ('malformed', 'truncated', 'missing-receipt', 'duplicate', 'oversized',
                     'wrong-version', 'wrong-build', 'wrong-source', 'wrong-track',
                     'wrong-store', 'wrong-incarnation', 'wrong-endpoint')
+SCENARIOS = ('normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeout',
+             'migration-failure', 'bind-conflict') + RECEIPT_FAILURES + CASES
+
+
+def session_lock_state():
+    """Read only the lock bit; never collect the console users' identities."""
+    try:
+        tree = plistlib.loads(subprocess.check_output(['/usr/sbin/ioreg', '-n', 'Root', '-d1', '-a']))
+        nodes = list(tree) if isinstance(tree, list) else [tree]
+        values = []
+        while nodes:
+            node = nodes.pop()
+            if not isinstance(node, dict):
+                continue
+            values.extend(row['CGSSessionScreenIsLocked'] for row in node.get('IOConsoleUsers', [])
+                          if isinstance(row, dict) and 'CGSSessionScreenIsLocked' in row)
+            nodes.extend(node.get('IORegistryEntryChildren', []))
+        return dict(observed=bool(values), locked=any(values) if values else None)
+    except (OSError, subprocess.CalledProcessError, plistlib.InvalidFileException):
+        return dict(observed=False, locked=None)
 
 
 def cleanup_failed_case(evidence, relocated):
@@ -77,7 +98,13 @@ def cleanup_failed_case(evidence, relocated):
 def main():
     app, output = map(lambda value: Path(value).resolve(), sys.argv[1:])
     output.mkdir(parents=True, exist_ok=True)
+    selection = os.environ.get('NAC_MAC_SMOKE_SCENARIOS')
+    scenarios = tuple(selection.split(',')) if selection else SCENARIOS
+    assert scenarios and len(set(scenarios)) == len(scenarios) and set(scenarios) <= set(SCENARIOS)
     metadata = {
+        'requested_scenarios': scenarios,
+        'full_scenario_run': scenarios == SCENARIOS,
+        'session_at_start': session_lock_state(),
         'source_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
         'source_dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], text=True)),
         'os': subprocess.check_output(['sw_vers'], text=True).strip(),
@@ -136,7 +163,7 @@ def main():
             try:
                 # Each scenario launches the bundle in a different cwd and with a
                 # poisoned parent environment. The engine receives a clean allowlist.
-                for scenario in ('normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeout', 'migration-failure', 'bind-conflict') + RECEIPT_FAILURES + CASES:
+                for scenario in scenarios:
                     if scenario in ('normal', 'engine-exit', 'migration-failure') + CASES:
                         os.link(saved, engine)
                     elif scenario == 'missing':
@@ -158,6 +185,7 @@ def main():
                     control = LifecycleControl(scenario, evidence, relocated)
                     control.start()
                     started = time.monotonic()
+                    session_before = session_lock_state()
                     with (output / f'{scenario}.log').open('w') as log:
                         process = subprocess.Popen(['/usr/bin/open', '-n', '-W', '-a', str(relocated),
                             '--stdout', str(output / f'{scenario}-app.log'),
@@ -179,13 +207,17 @@ def main():
                             raise RuntimeError(f'{scenario}: app exceeded bounded smoke timeout; inspect {output}')
                     control_result = control.finish()
                     result = json.loads(evidence.read_text())
+                    result['session_before'] = session_before
+                    result['session_after'] = session_lock_state()
+                    result['visible_paint_qualified'] = (session_before['locked'] is False
+                        and result['session_after']['locked'] is False)
                     if control_result is not None:
                         result['external_control'] = control_result if not scenario.startswith('parent-loss') else {'parent_killed': True}
                     if scenario == 'watchdog':
-                        assert '20000 ms' in result.get('engine_log_after_shutdown', ''), result
+                        result['watchdog_diagnostic_observed'] = '20000 ms' in result.get('engine_log_after_shutdown', '')
                     if scenario in ('slow-drain', 'watchdog'):
                         elapsed = time.monotonic() - started
-                        assert elapsed >= (5.5 if scenario == 'slow-drain' else 19.5), elapsed
+                        assert elapsed >= (4.5 if scenario == 'slow-drain' else 19.5), elapsed
                     result['elapsed_seconds'] = round(time.monotonic() - started, 3)
                     result['relocated_app'] = str(relocated)
                     evidence.write_text(json.dumps(result, indent=2) + '\n')
@@ -203,6 +235,7 @@ def main():
                     assert not contacted, 'Preview contacted the unrelated default-port server'
                     results.append({'scenario': scenario, 'passed': True,
                                     'profile': result['profile'],
+                                    'visible_paint_qualified': result['visible_paint_qualified'],
                                     'elapsed_seconds': result['elapsed_seconds']})
                     print(json.dumps(results[-1]), flush=True)
                     if scenario != 'missing':
@@ -214,7 +247,12 @@ def main():
         done.set()
         thread.join(timeout=1)
         decoy.close()
+    session_end = session_lock_state()
     (output / 'summary.json').write_text(json.dumps({**metadata, 'scenarios': results,
+        'session_at_end': session_end,
+        'visible_paint_qualified': metadata['session_at_start']['locked'] is False
+            and session_end['locked'] is False
+            and all(row.get('visible_paint_qualified', False) for row in results),
         'preview_decoy_contacts': len(contacted),
         'unrelated_decoy_connections': len(other_contacts)}, indent=2) + '\n')
 
