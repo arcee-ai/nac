@@ -4,18 +4,36 @@ import tempfile
 import unittest
 
 from ci_support import export_evidence
-from ci_xctest import require_generated_runner, require_prerequisites, result_receipt
+from ci_xctest import authorization_policy, require_generated_runner, require_prerequisites, result_receipt
 
 
 class XCTestPolicyTests(unittest.TestCase):
     def test_missing_existing_permission_never_admits_ui_test(self):
         valid = ('2', 'Developer mode is currently enabled.', 'Automation DOES NOT REQUIRE authentication.')
-        self.assertFalse(require_prerequisites(*valid)['permission_mutations'])
+        self.assertTrue(require_prerequisites(*valid)['declared_no_permission_mutation_commands'])
         for values in [('0', *valid[1:]), ('', *valid[1:]),
                        ('2', 'Developer mode is disabled.', valid[2]),
                        (*valid[:2], 'Automation requires authentication.')]:
             with self.assertRaisesRegex(RuntimeError, 'no grant requested'):
                 require_prerequisites(*values)
+
+    def test_active_session_mode_is_distinct_from_existing_authorization_policy(self):
+        row = {'service': 'kTCCServiceAccessibility', 'client': 'com.apple.dt.Xcode-Helper',
+               'client_type': 0, 'auth_value': 2, 'csreq_hex': '', 'last_modified': 1}
+        before = {'xcode_helper_accessibility_rows': [row],
+                  'developer_status': 'Developer mode is enabled.',
+                  'automation_status': 'Automation Mode is disabled. This device DOES NOT REQUIRE authentication.'}
+        policy = authorization_policy(before)
+        self.assertEqual(authorization_policy({**before, 'automation_status':
+            'Automation Mode is enabled. This device DOES NOT REQUIRE authentication.',
+            'xcode_helper_accessibility_rows': [{**row, 'last_modified': 2}]}), policy)
+        self.assertNotEqual(authorization_policy({**before, 'xcode_helper_accessibility_rows':
+            [{**row, 'csreq_hex': 'ABCD'}]}), policy)
+        for changed in ({'xcode_helper_accessibility_rows': []},
+                        {'xcode_helper_accessibility_rows': [{**row, 'auth_value': 0}]},
+                        {'automation_status': 'This device requires authentication.'}):
+            with self.assertRaises(RuntimeError):
+                authorization_policy({**before, **changed})
 
     def test_generated_runner_must_bind_only_one_exact_fixture(self):
         target = {'IsUITestBundle': True, 'BlueprintName': 'NACNativeUITests',
