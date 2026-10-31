@@ -120,9 +120,11 @@ export function useSessionNameDisclosure(name: string, description?: string) {
 export default function SessionNameDisclosure({
   name,
   className,
+  running = false,
 }: {
   name: string;
   className?: string;
+  running?: boolean;
 }) {
   const disclosure = useSessionNameDisclosure(name);
   return (
@@ -135,7 +137,9 @@ export default function SessionNameDisclosure({
           aria-haspopup="dialog"
           onClick={disclosure.view}
         >
-          <span className="min-w-0 flex-1 truncate">{name}</span>
+          <span className={`min-w-0 flex-1 truncate ${running ? "text-shimmer-basic" : ""}`}>
+            {name}
+          </span>
           <Icon iconName={IconName.Info} size={16} className="shrink-0 text-basic-tertiary" />
         </button>,
       )}

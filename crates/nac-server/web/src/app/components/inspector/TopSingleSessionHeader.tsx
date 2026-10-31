@@ -157,10 +157,8 @@ export function TopSingleSessionHeader({
               <SessionNameDisclosure
                 key={sessionId}
                 name={title}
-                className={cn(
-                  "header-sm min-w-0 truncate text-left",
-                  running ? "text-shimmer-basic" : "text-basic-primary",
-                )}
+                running={running}
+                className={cn("header-sm min-w-0 truncate text-left", "text-basic-primary")}
               />
               {/* Beside the side panel the chat can drop to 200px, too narrow
                   for the title and a whole badge, so the badge truncates

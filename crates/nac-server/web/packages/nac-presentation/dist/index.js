@@ -372,23 +372,23 @@ function ya(e, t) {
 		}) : null
 	};
 }
-function ba({ name: e, className: t }) {
-	let n = ya(e);
-	return /* @__PURE__ */ X(J, { children: [n.hint(/* @__PURE__ */ X("button", {
+function ba({ name: e, className: t, running: n = !1 }) {
+	let r = ya(e);
+	return /* @__PURE__ */ X(J, { children: [r.hint(/* @__PURE__ */ X("button", {
 		type: "button",
 		className: `flex items-center gap-1 text-left ${t ?? ""}`,
 		"aria-label": `View full name: ${e}`,
 		"aria-haspopup": "dialog",
-		onClick: n.view,
+		onClick: r.view,
 		children: [/* @__PURE__ */ Y("span", {
-			className: "min-w-0 flex-1 truncate",
+			className: `min-w-0 flex-1 truncate ${n ? "text-shimmer-basic" : ""}`,
 			children: e
 		}), /* @__PURE__ */ Y(B, {
 			iconName: R.Info,
 			size: 16,
 			className: "shrink-0 text-basic-tertiary"
 		})]
-	})), n.overlay] });
+	})), r.overlay] });
 }
 // src/app/atoms/chat-session-fork-mark/index.tsx
 var xa = ({ forkedFromTitle: e, running: t = !1, className: n = "" }) => {
@@ -725,7 +725,7 @@ var Qa = /* @__PURE__ */ function(e) {
 				]
 			})),
 			/* @__PURE__ */ X("div", {
-				className: r("flex items-center shrink-0", f ? "gap-3" : "gap-1 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden"),
+				className: r("flex flex-wrap max-w-full justify-end items-center shrink-0", f ? "gap-3" : "gap-1 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden"),
 				children: [y.action, m]
 			}),
 			y.overlay
@@ -12292,7 +12292,8 @@ function Ag({ sessionId: t }) {
 		total_deletions: 0
 	}, h = m?.total_additions ?? 0, g = m?.total_deletions ?? 0, _ = p?.repo_label ?? p?.workspace_display ?? null, b = c?.lineage ?? s?.lineage ?? null, x = b ? l.find((e) => e.summary.session_id === b.parent_session_id) : void 0, S = x ? o(x.summary) : "Parent session", C = ya(S), w = /* @__PURE__ */ Y(ba, {
 		name: o(c?.summary),
-		className: r("text-sm leading-5 font-medium min-w-0 flex-1 truncate text-left", u ? "text-shimmer-basic" : "text-btn-secondary-pressed")
+		running: u,
+		className: r("text-sm leading-5 font-medium min-w-0 flex-1 truncate text-left", "text-btn-secondary-pressed")
 	}, t);
 	return /* @__PURE__ */ X("div", {
 		className: "flex min-w-0 flex-1 flex-col gap-1",
@@ -15820,17 +15821,18 @@ function Ty({ item: e, selected: t, attention: n, onOpen: i, onDelete: a, onTogg
 	let d = xy(e, Rd()), f = ya(d.title), p = d.representative?.model_config_error, m = Ct(), h = yh(), [g, _] = q(!1), [v, y] = q(!1), [b, x] = q(!1), S = K(!1), w = K(null), T = !m || g || v || t, E = !!l && m, D = !!l && !m, O = m && g, k = () => {
 		S.current ? S.current = !1 : i();
 	};
-	return f.hint(/* @__PURE__ */ X("div", {
+	return /* @__PURE__ */ X("div", {
 		ref: w,
 		"data-item-id": d.id,
 		"data-item-kind": d.orphan ? "orphan" : "project",
 		"data-item-pinned": d.pinned ? "true" : "false",
 		className: r("group fade relative flex flex-col gap-4 rounded-xl border border-tertiary overflow-hidden cursor-default", m ? "px-5 pt-4 pb-3" : "p-4", "bg-elevation-level-1", u && "shadow-lg"),
-		role: "button",
-		tabIndex: 0,
-		"aria-pressed": t,
-		"aria-label": d.orphan ? d.title : void 0,
-		onClick: k,
+		role: d.orphan ? void 0 : "button",
+		tabIndex: d.orphan ? void 0 : 0,
+		"aria-pressed": d.orphan ? void 0 : t,
+		onClick: (e) => {
+			d.orphan && e.target.closest("button, a, input, textarea") || k();
+		},
 		onKeyDown: (e) => {
 			e.target === e.currentTarget && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), k());
 		},
@@ -15848,6 +15850,16 @@ function Ty({ item: e, selected: t, attention: n, onOpen: i, onDelete: a, onTogg
 		onPointerUp: () => x(!1),
 		onPointerCancel: () => x(!1),
 		children: [
+			d.orphan ? f.hint(/* @__PURE__ */ Y("button", {
+				type: "button",
+				"aria-label": d.title,
+				"aria-pressed": t,
+				className: "absolute inset-0 rounded-[inherit] outline-none",
+				onClick: k,
+				onPointerDown: (e) => {
+					e.button === 0 && x(!0);
+				}
+			})) : null,
 			/* @__PURE__ */ Y("div", {
 				className: "absolute inset-0 rounded-[inherit] pointer-events-none ease-out",
 				style: { backgroundColor: `var(${by({
@@ -15876,7 +15888,7 @@ function Ty({ item: e, selected: t, attention: n, onOpen: i, onDelete: a, onTogg
 				}
 			}) : null,
 			/* @__PURE__ */ X("div", {
-				className: r("relative flex gap-4 w-full", m ? "items-center" : "items-start"),
+				className: r("relative flex gap-4 w-full", m ? "items-center" : "items-start", d.orphan && "pointer-events-none"),
 				children: [d.orphan ? null : /* @__PURE__ */ Y(td, {
 					id: d.id,
 					size: 40,
@@ -15904,6 +15916,7 @@ function Ty({ item: e, selected: t, attention: n, onOpen: i, onDelete: a, onTogg
 								title: p,
 								position: yr.BottomRight,
 								sticky: !0,
+								className: d.orphan ? "pointer-events-auto" : void 0,
 								children: /* @__PURE__ */ Y(B, {
 									iconName: R.Repair,
 									className: "text-error-primary shrink-0"
@@ -15928,11 +15941,10 @@ function Ty({ item: e, selected: t, attention: n, onOpen: i, onDelete: a, onTogg
 			}),
 			m ? null : /* @__PURE__ */ Y(Cy, { facts: d }),
 			/* @__PURE__ */ X("div", {
-				className: "relative flex flex-wrap items-center justify-between w-full min-h-6 gap-2",
-				children: [
-					/* @__PURE__ */ Y(Sy, { facts: d }),
-					d.orphan ? f.action : null,
-					T ? /* @__PURE__ */ Y(vy, {
+				className: r("relative flex flex-wrap items-center justify-between w-full min-h-6 gap-2", d.orphan && "pointer-events-none"),
+				children: [/* @__PURE__ */ Y(Sy, { facts: d }), /* @__PURE__ */ X("div", {
+					className: r("contents", d.orphan && "pointer-events-auto"),
+					children: [d.orphan ? f.action : null, T ? /* @__PURE__ */ Y(vy, {
 						orphan: d.orphan,
 						pinned: d.pinned,
 						onTogglePin: o,
@@ -15945,12 +15957,12 @@ function Ty({ item: e, selected: t, attention: n, onOpen: i, onDelete: a, onTogg
 							onMoveUp: l.onMoveUp,
 							onMoveDown: l.onMoveDown
 						} : void 0
-					}) : /* @__PURE__ */ Y(Cy, { facts: d })
-				]
+					}) : /* @__PURE__ */ Y(Cy, { facts: d })]
+				})]
 			}),
 			d.orphan ? f.overlay : null
 		]
-	}), !d.orphan);
+	});
 }
 // src/app/components/projects/ProjectsEmptyState.tsx
 function Ey({ onStart: e, onAddRepository: t, onManagedSettings: n, modelReady: i, githubConnected: a, mobile: o }) {
@@ -25963,7 +25975,8 @@ function Ak({ sessionId: e, title: t, fallbackText: n, icon: i, header: a = !0, 
 				}) : null,
 				/* @__PURE__ */ Y(ba, {
 					name: t,
-					className: r("label-small min-w-0 flex-1 truncate text-left", x ? "text-shimmer-basic" : "text-basic-primary")
+					running: x,
+					className: r("label-small min-w-0 flex-1 truncate text-left", "text-basic-primary")
 				}, e),
 				/* @__PURE__ */ X(v, {
 					size: z.Small,
@@ -27544,7 +27557,8 @@ function NA({ sessionId: t, snapshot: n, entry: i, onShowPanel: a }) {
 							className: "flex min-w-0 items-center gap-2",
 							children: [/* @__PURE__ */ Y(ba, {
 								name: ge,
-								className: r("header-sm min-w-0 truncate text-left", S ? "text-shimmer-basic" : "text-basic-primary")
+								running: S,
+								className: r("header-sm min-w-0 truncate text-left", "text-basic-primary")
 							}, t), I ? /* @__PURE__ */ Y("span", {
 								className: "tag-label min-w-0 truncate rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-2 py-[3px] text-basic-tertiary",
 								title: I,

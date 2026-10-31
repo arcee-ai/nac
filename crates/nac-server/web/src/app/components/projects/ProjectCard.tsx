@@ -277,7 +277,7 @@ export function ProjectCard({
     onOpen();
   };
 
-  return disclosure.hint(
+  return (
     <div
       ref={cardRef}
       data-item-id={facts.id}
@@ -289,11 +289,14 @@ export function ProjectCard({
         "bg-elevation-level-1",
         dragging && "shadow-lg",
       )}
-      role="button"
-      tabIndex={0}
-      aria-pressed={selected}
-      aria-label={facts.orphan ? facts.title : undefined}
-      onClick={activate}
+      role={facts.orphan ? undefined : "button"}
+      tabIndex={facts.orphan ? undefined : 0}
+      aria-pressed={facts.orphan ? undefined : selected}
+      onClick={(event) => {
+        if (facts.orphan && (event.target as HTMLElement).closest("button, a, input, textarea"))
+          return;
+        activate();
+      }}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
@@ -324,6 +327,20 @@ export function ProjectCard({
       onPointerUp={() => setPressed(false)}
       onPointerCancel={() => setPressed(false)}
     >
+      {facts.orphan
+        ? disclosure.hint(
+            <button
+              type="button"
+              aria-label={facts.title}
+              aria-pressed={selected}
+              className="absolute inset-0 rounded-[inherit] outline-none"
+              onClick={activate}
+              onPointerDown={(event) => {
+                if (event.button === 0) setPressed(true);
+              }}
+            />,
+          )
+        : null}
       <div
         className="absolute inset-0 rounded-[inherit] pointer-events-none ease-out"
         style={{
@@ -364,7 +381,13 @@ export function ProjectCard({
         />
       ) : null}
 
-      <div className={cn("relative flex gap-4 w-full", isDesktop ? "items-center" : "items-start")}>
+      <div
+        className={cn(
+          "relative flex gap-4 w-full",
+          isDesktop ? "items-center" : "items-start",
+          facts.orphan && "pointer-events-none",
+        )}
+      >
         {facts.orphan ? null : <SessionAvatar id={facts.id} size={40} isRunning={facts.running} />}
         <div
           className={cn(
@@ -400,7 +423,12 @@ export function ProjectCard({
               {facts.title}
             </div>
             {configError ? (
-              <Tooltip title={configError} position={TooltipPosition.BottomRight} sticky>
+              <Tooltip
+                title={configError}
+                position={TooltipPosition.BottomRight}
+                sticky
+                className={facts.orphan ? "pointer-events-auto" : undefined}
+              >
                 <Icon iconName={IconName.Repair} className="text-error-primary shrink-0" />
               </Tooltip>
             ) : null}
@@ -423,34 +451,40 @@ export function ProjectCard({
       </div>
       {!isDesktop ? <Provenance facts={facts} /> : null}
 
-      <div className="relative flex flex-wrap items-center justify-between w-full min-h-6 gap-2">
-        <Metrics facts={facts} />
-        {facts.orphan ? disclosure.action : null}
-        {showActions ? (
-          <ProjectCardActions
-            orphan={facts.orphan}
-            pinned={facts.pinned}
-            onTogglePin={onTogglePin}
-            onRename={onRename}
-            onDelete={onDelete}
-            onAssign={onAssign}
-            reorder={
-              showMobileReorder && reorder
-                ? {
-                    canMoveUp: reorder.canMoveUp,
-                    canMoveDown: reorder.canMoveDown,
-                    onMoveUp: reorder.onMoveUp,
-                    onMoveDown: reorder.onMoveDown,
-                  }
-                : undefined
-            }
-          />
-        ) : (
-          <Provenance facts={facts} />
+      <div
+        className={cn(
+          "relative flex flex-wrap items-center justify-between w-full min-h-6 gap-2",
+          facts.orphan && "pointer-events-none",
         )}
+      >
+        <Metrics facts={facts} />
+        <div className={cn("contents", facts.orphan && "pointer-events-auto")}>
+          {facts.orphan ? disclosure.action : null}
+          {showActions ? (
+            <ProjectCardActions
+              orphan={facts.orphan}
+              pinned={facts.pinned}
+              onTogglePin={onTogglePin}
+              onRename={onRename}
+              onDelete={onDelete}
+              onAssign={onAssign}
+              reorder={
+                showMobileReorder && reorder
+                  ? {
+                      canMoveUp: reorder.canMoveUp,
+                      canMoveDown: reorder.canMoveDown,
+                      onMoveUp: reorder.onMoveUp,
+                      onMoveDown: reorder.onMoveDown,
+                    }
+                  : undefined
+              }
+            />
+          ) : (
+            <Provenance facts={facts} />
+          )}
+        </div>
       </div>
       {facts.orphan ? disclosure.overlay : null}
-    </div>,
-    !facts.orphan,
+    </div>
   );
 }

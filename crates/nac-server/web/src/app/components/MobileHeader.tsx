@@ -117,9 +117,10 @@ function SessionHeading({ sessionId }: { sessionId: string }) {
     <SessionNameDisclosure
       key={sessionId}
       name={sessionTitle(entry?.summary)}
+      running={running}
       className={cn(
         "text-sm leading-5 font-medium min-w-0 flex-1 truncate text-left",
-        running ? "text-shimmer-basic" : "text-btn-secondary-pressed",
+        "text-btn-secondary-pressed",
       )}
     />
   );

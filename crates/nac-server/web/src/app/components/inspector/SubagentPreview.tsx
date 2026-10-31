@@ -165,10 +165,8 @@ export function SubagentPreview({
           <SessionNameDisclosure
             key={sessionId}
             name={title}
-            className={cn(
-              "label-small min-w-0 flex-1 truncate text-left",
-              running ? "text-shimmer-basic" : "text-basic-primary",
-            )}
+            running={running}
+            className={cn("label-small min-w-0 flex-1 truncate text-left", "text-basic-primary")}
           />
           <Button
             size={ButtonSize.Small}

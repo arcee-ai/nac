@@ -1,8 +1,16 @@
+import { ScriptGate } from "./scripted-provider";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { openNameZoom } from "./session-name-zoom";
 import type { APIRequestContext, Locator, Page, TestInfo } from "@playwright/test";
-import { createProject, createSession, expect, test, startForegroundChild } from "./harness";
+import {
+  createProject,
+  createSession,
+  expect,
+  test,
+  startForegroundChild,
+  waitForRunIdle,
+} from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
 
 const prefix = "Investigate the same long session prefix and preserve all navigation cues — ";
@@ -234,7 +242,11 @@ for (const width of [1440, 768, 390])
         await page.getByRole("button", { name: "Open the menu", exact: true }).click();
       }
       // Both project history and phone navigation consume the same row atom.
-      const visibleRows = page.locator("button[aria-label]").filter({ hasText: names[1] });
+      const navigation = page.getByRole("dialog", {
+        name: width >= 768 ? "Search Chats" : "Menu",
+        exact: true,
+      });
+      const visibleRows = navigation.locator("button[aria-label]").filter({ hasText: names[1] });
       const row = visibleRows.last();
       await expect(row).toBeVisible();
       if (width >= 768) await row.hover();
@@ -242,14 +254,17 @@ for (const width of [1440, 768, 390])
         .locator("..")
         .getByRole("button", { name: "View full name", exact: true });
       await viewName(page, rowAction, names[1]);
-      const unbroken = page.locator("button[aria-label]").filter({ hasText: names[2] }).last();
+      const unbroken = navigation
+        .locator("button[aria-label]")
+        .filter({ hasText: names[2] })
+        .last();
       if (width >= 768) await unbroken.hover();
       await viewName(
         page,
         unbroken.locator("..").getByRole("button", { name: "View full name", exact: true }),
         names[2],
       );
-      const fallbackRow = page.getByRole("button", { name: /^New Session(?:,|$)/ }).last();
+      const fallbackRow = navigation.getByRole("button", { name: /^New Session(?:,|$)/ }).last();
       if (width >= 768) await fallbackRow.hover();
       await viewName(
         page,
@@ -521,9 +536,128 @@ test("full names at real 200 percent browser zoom", async ({ harness, request },
         await heading.click();
         await capture(page, info, `zoom200-${width}-${theme}`);
         await page.keyboard.press("Escape");
+        await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+        await page
+          .getByRole("dialog", { name: "Menu", exact: true })
+          .getByRole("button", { name: "Search Chats", exact: true })
+          .click();
+        const search = page.getByRole("dialog", { name: "Search Chats", exact: true });
+        const row = search.getByRole("button", {
+          name: new RegExp(`^${names[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:,|$)`),
+        });
+        const action = row
+          .locator("..")
+          .getByRole("button", { name: "View full name", exact: true });
+        for (const control of [
+          action,
+          search.getByRole("button", { name: `Rename ${names[0]}`, exact: true }),
+          search.getByRole("button", { name: `Delete ${names[0]}`, exact: true }),
+        ]) {
+          await expect(control).toBeInViewport({ ratio: 1 });
+          await fits(page, control);
+        }
+        await viewName(page, action, names[0]);
+        await page.keyboard.press("Escape");
+        await expect(search).toBeHidden();
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog", { name: "Menu", exact: true })).toBeHidden();
       }
     }
   } finally {
     await context.close();
   }
 });
+
+test("running full-name headings keep their visible shimmer text", async ({
+  harness,
+  page,
+  request,
+}, info) => {
+  test.skip(baseline);
+  test.setTimeout(90_000);
+  const id = await createSession(request, harness, "direct");
+  await rename(request, harness.baseUrl, id, names[0]);
+  const gate = new ScriptGate();
+  harness.provider.enqueue(
+    "RUNNING_NAME",
+    { token: "RUNNING_NAME" },
+    { kind: "text", text: "done" },
+    gate,
+  );
+  expect(
+    (
+      await request.post(`${harness.baseUrl}/sessions/${id}/runs`, {
+        data: { prompt: "RUNNING_NAME" },
+      })
+    ).ok(),
+  ).toBe(true);
+  try {
+    await gate.accepted;
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
+      const heading = page.getByRole("button", {
+        name: `View full name: ${names[0]}`,
+        exact: true,
+      });
+      const name = heading.locator("span").first();
+      await expect(name).toHaveText(names[0]);
+      await expect(name).toHaveClass(/text-shimmer-basic/);
+      expect(
+        await name.evaluate(
+          (node) => node.ownerDocument.defaultView!.getComputedStyle(node).backgroundImage,
+        ),
+      ).not.toBe("none");
+      await capture(page, info, `running-${width}`);
+      await heading.click();
+      await expect(page.locator("[data-full-session-name]")).toHaveText(names[0]);
+      await page.keyboard.press("Escape");
+    }
+  } finally {
+    gate.release();
+    await waitForRunIdle(request, harness, id);
+  }
+});
+
+for (const width of [1440, 390])
+  test(`orphan cards disclose names without nested controls ${width}`, async ({
+    harness,
+    page,
+    request,
+    context,
+  }, info) => {
+    test.skip(baseline);
+    test.setTimeout(90_000);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const ids: string[] = [];
+    for (const name of names.slice(0, 2)) {
+      const id = await createSession(request, harness, "direct");
+      await rename(request, harness.baseUrl, id, name);
+      ids.push(id);
+    }
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(harness.baseUrl);
+    const url = page.url();
+    for (const [at, name] of names.slice(0, 2).entries()) {
+      const card = page.locator(`[data-item-id="${ids[at]}"]`);
+      const open = card.getByRole("button", { name, exact: true });
+      await expect(open).toBeVisible();
+      await expect(card.locator('button button, [role="button"] button')).toHaveCount(0);
+      if (width >= 768) {
+        await open.hover();
+        await expect(page.getByRole("tooltip")).toHaveText(name);
+        await page.keyboard.press("Escape");
+      }
+      await viewName(page, card.getByRole("button", { name: "View full name", exact: true }), name);
+      expect(page.url()).toBe(url);
+    }
+    await capture(page, info, `orphan-cards-${width}`);
+    const open = page
+      .locator(`[data-item-id="${ids[1]}"]`)
+      .getByRole("button", { name: names[1], exact: true });
+    if (width >= 768) {
+      await open.focus();
+      await page.keyboard.press("Enter");
+    } else await open.tap();
+    await expect(page).toHaveURL(new RegExp(`/session/${ids[1]}/`));
+  });

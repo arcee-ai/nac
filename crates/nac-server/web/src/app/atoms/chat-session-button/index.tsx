@@ -160,7 +160,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
       )}
       <div
         className={cn(
-          "flex items-center shrink-0",
+          "flex flex-wrap max-w-full justify-end items-center shrink-0",
           isMobile
             ? "gap-3"
             : "gap-1 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden",

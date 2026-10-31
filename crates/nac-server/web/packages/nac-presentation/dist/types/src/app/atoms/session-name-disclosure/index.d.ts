@@ -7,7 +7,8 @@ export declare function useSessionNameDisclosure(name: string, description?: str
     overlay: import("react").JSX.Element | null;
 };
 /** A heading's name is itself the explicit read-only disclosure action. */
-export default function SessionNameDisclosure({ name, className, }: {
+export default function SessionNameDisclosure({ name, className, running, }: {
     name: string;
     className?: string;
+    running?: boolean;
 }): import("react").JSX.Element;
