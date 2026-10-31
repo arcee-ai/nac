@@ -196,6 +196,56 @@ runs only for manual `codex/` branch CI. Ordinary PR required jobs and all
 publication/tag guards stay unchanged; a manual qualification does not authorize
 publication, a tag, merge or deployment.
 
+`all-342-startup-macos26` prepares a separate four-case ordinary-app lane:
+onboarding, configured local workspace, invalid configuration, and future-schema
+store recovery. Product P is `d443a2aca506def2817b9afc0c9a20a75f5c4b5d`;
+external XCTest source Q is `1412af562c56edebc63dbf61af849f08e2255b54`;
+external Rust verifier R is `25046f450110d1b795d529d046d2c1deee880877`.
+H is the exact committed harness revision. This entry checks out all four
+identities separately and runs locked setup in each; other entries retain two
+checkouts. Only Q's four hash-pinned `startup_xctest` files are consumed. P owns
+the ordinary release engine, embedded assets and `LOCAL_APP` package builder;
+Q's product files are never build inputs. R supplies only its independent
+process tests and is never merged into the app.
+
+P's normal ad-hoc package, full inventory and signatures are verified before
+and after R's four process cases and the UI matrix. H builds R with its own
+source revision, selects the actual Cargo test artifact, copies and hashes it
+privately before reuse, runs its adapter controls, then supplies all four strict
+runtime overrides for this job's newly built signed engine and full identity.
+Its authentic private-channel failures, protected bytes and checked process-tree
+cleanup remain standalone process evidence, separate from Q's ordinary-app UI.
+
+H derives `NACStartupUITests` from the maintained hash-pinned project and builds
+Q's exact Swift source with the selected full SDK. It validates the actual
+generated runner's P/Q/H/configuration and source bindings before requesting
+public XCTest input. Each case has a new private home, store, workspace and
+relocated app. A read-only OS witness is installed before launch and binds the
+actual bundle path, process start identity, parent, UID, environment and window.
+Cleanup signals require a fresh kernel identity match to an already observed
+owner; unknown fixtures remain intact. Existing authorization policy is
+observed before build, before testing and afterward without changing grants.
+
+Configured local startup uses the shared scripted provider and ordinary Rust
+model-configuration API with one dummy credential. No project or run is seeded.
+While the app runs, H reads its owned engine API to verify the selected store,
+local workspace/backend, saved model, completed run and canonical transcript,
+plus the production index and its initial JS/CSS references. After positive
+process settlement, a separately owned server checks persisted state. Q has
+eleven declared operations and twenty-two paired dispatch attachments; it does
+not reload the rendered UI. The persisted API read never earns UI reload credit.
+
+Only named, correctly bound JSON and PNG attachments are retained. The collector
+keeps an unambiguous continuous dispatch prefix on failure, invalidates late
+duplicate identities/files, and never interprets unknown completion as zero
+input. JSON is bounded to 64 KiB and complete PNGs to 2 MiB, within the existing
+12 MiB export budget. Automatic media, raw results and private profiles are not
+uploaded. Actual PNG decoding/OCR must show onboarding, the configured response,
+actionable invalid-configuration guidance, or the complete unique future-schema
+message as appropriate. Runtime execution, actual SDK result format admission,
+image review and current-head checks remain unqualified until separately run;
+this source entry alone establishes no native acceptance or full ALL-354 pass.
+
 `all-343-macos26` adds the exact corrected instance fixture
 `f4832ed44f948a88170f5d3bc25322852dbce347`, using the same strict macOS 26
 envelope. The earlier `0d78ee38` hosted qualification failed, as detailed below.

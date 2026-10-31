@@ -21,6 +21,9 @@ func inspect(_ path: String, kind: String) throws -> [String: Any] {
                    "instance-empty": ["No projects yet", "Get Started"],
                    "instance-conflict": ["Another NAC process", "Retry", "store-path"],
                    "instance-drain": ["Native instance", "drain"],
+                   "startup-configured": ["Finder configured local response."],
+                   "startup-invalid": ["config.toml", "repair", "relaunch"],
+                   "startup-future": ["The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected."],
                    "terminal-unicode": ["WK-XCTEST-UNICODE"],
                    "terminal-completed": ["WK-XCTEST-RECOVERED", "WK-XCTEST-SIZE"]]
     let expected = markers[kind]!
@@ -38,6 +41,7 @@ do {
     var paths = Array(CommandLine.arguments.dropFirst())
     let modes = ["--terminal": "terminal", "--workspace": "workspace", "--approval": "approval",
                  "--instance-empty": "instance-empty", "--instance-conflict": "instance-conflict", "--instance-drain": "instance-drain",
+                 "--startup-configured": "startup-configured", "--startup-invalid": "startup-invalid", "--startup-future": "startup-future",
                  "--terminal-unicode": "terminal-unicode", "--terminal-completed": "terminal-completed"]
     let kind = paths.first.flatMap { modes[$0] } ?? "chat"
     if kind != "chat" { paths.removeFirst() }

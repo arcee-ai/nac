@@ -1,4 +1,5 @@
 import json
+import hashlib
 from pathlib import Path
 import plistlib
 import tempfile
@@ -108,6 +109,20 @@ class QualificationTests(unittest.TestCase):
                     {**record, 'trusted_terminal': {**terminal, 'native_terminal_settled': False}}):
             with self.assertRaisesRegex(RuntimeError, 'missing or incomplete'):
                 require_terminal_evidence(bad)
+
+    def test_startup_export_distinguishes_source_and_redacted_output_hashes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            raw, output = Path(temporary) / 'private', Path(temporary) / 'public'
+            raw.mkdir()
+            original = b'{"path":"/owned/private/home"}\n'
+            (raw / 'fixture.json').write_bytes(original)
+            export_evidence(raw, output, [('/owned/private/home', '<fixture-home>')], include_hashes=True)
+            manifest = json.loads((output / 'export.json').read_text())[0]
+            self.assertEqual(manifest['raw_source_sha256'], hashlib.sha256(original).hexdigest())
+            self.assertEqual(manifest['raw_source_bytes'], len(original))
+            self.assertEqual(manifest['exported_sha256'], hashlib.sha256((output / 'fixture.json').read_bytes()).hexdigest())
+            self.assertNotEqual(manifest['raw_source_sha256'], manifest['exported_sha256'])
+            self.assertFalse(manifest['truncated'])
 
     def test_orphan_engine_cleanup_uses_only_relocated_bundle_record(self):
         with tempfile.TemporaryDirectory() as temporary:

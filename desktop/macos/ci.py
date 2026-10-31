@@ -22,6 +22,7 @@ from ci_qualifications import require_checkout, require_full_preview, require_wo
 from ci_xctest import run_terminal
 from ci_instances import audit_cleanup as audit_instances, qualify as qualify_instances, retain_receipt as retain_instances
 from ci_terminal import qualify as qualify_terminal
+from ci_startup import qualify as qualify_startup
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DEADLINE = time.monotonic() + 30 * 60  # Leave ten job minutes for cleanup/upload.
@@ -152,6 +153,8 @@ def main():
     parser.add_argument('--preflight-only', action='store_true')
     parser.add_argument('--qualification', help='One checked-in immutable supplier target')
     parser.add_argument('--source-root', type=Path, help='Separate unchanged target checkout')
+    parser.add_argument('--test-source-root', type=Path, help='Exact external startup XCTest checkout')
+    parser.add_argument('--protocol-source-root', type=Path, help='Exact external startup Rust verifier checkout')
     args = parser.parse_args()
     output = args.output.resolve()
     if output.exists():
@@ -172,6 +175,7 @@ def main():
     workspace = False
     instances = False
     terminal = False
+    startup = False
     def interrupt(signum, _frame):
         raise RuntimeError(f'CI interrupted by signal {signum}')
     for signum in (signal.SIGTERM, signal.SIGINT):
@@ -184,6 +188,7 @@ def main():
             workspace = target['suite'] == 'workspace'
             instances = target['suite'] == 'instances'
             terminal = target['suite'] == 'terminal'
+            startup = target['suite'] == 'startup'
             if not args.source_root or args.source_root.is_symlink():
                 raise RuntimeError('Qualification requires an explicit non-symlink source root')
             source_root = args.source_root.resolve()
@@ -193,13 +198,33 @@ def main():
             report['target_contract'] = target
         elif args.source_root:
             raise RuntimeError('Separate source root requires an approved qualification key')
+        external_roots = []
+        if startup:
+            if not args.source_root.is_absolute() or args.source_root.resolve() != args.source_root:
+                raise RuntimeError('Startup requires a canonical absolute product checkout')
+            for path, key in ((args.test_source_root, 'test_source_sha'),
+                              (args.protocol_source_root, 'protocol_source_sha')):
+                if path is None or not path.is_absolute() or path.is_symlink() or path.resolve() != path:
+                    raise RuntimeError('Startup requires exact canonical external source checkouts')
+                external_roots.append((path, target[key]))
+            roots = [ROOT, source_root, *(root for root, _ in external_roots)]
+            if any(a == b or a.is_relative_to(b) or b.is_relative_to(a)
+                   for index, a in enumerate(roots) for b in roots[index + 1:]):
+                raise RuntimeError('Startup P/Q/R/H checkouts must be separate and non-overlapping')
+        elif args.test_source_root or args.protocol_source_root:
+            raise RuntimeError('External test/protocol sources require the finite startup qualification')
         report.update(require_checkout(source_root, target['source_sha'] if target else args.expected_sha))
+        for root, sha in external_roots:
+            require_checkout(root, sha)
         if platform.system() != 'Darwin' or platform.machine() != 'arm64':
             raise RuntimeError('Native prerequisite unavailable: Darwin ARM64 required')
         run(['make', 'setup'], raw / 'setup.log', 600)
         if target:
             run(['make', 'setup'], raw / 'target-setup.log', 600, cwd=source_root)
             require_checkout(source_root, target['source_sha'])
+        for index, (root, sha) in enumerate(external_roots):
+            run(['make', 'setup'], raw / f'external-{index}-setup.log', 600, cwd=root)
+            require_checkout(root, sha)
         if command(['git', 'status', '--porcelain']):
             raise RuntimeError('Locked setup modified the candidate source')
         run(['python3', '-B', '-m', 'unittest', 'discover', '-s', 'desktop/macos', '-p', 'test_*.py'],
@@ -233,7 +258,7 @@ def main():
             os.environ.pop(key, None)
         os.environ.update(NAC_SOURCE_REVISION=report['source_sha'], NAC_BUILD_TRACK='dev',
                           NAC_BUILD_ID='dev-' + report['source_sha'])
-        if target and not instances:
+        if target and not instances and not startup:
             # Reuse the exact source owner's failure cleanup, including its
             # native fixture helpers. No code is copied into that checkout.
             sys.path.insert(0, str(source_root / 'desktop/macos'))
@@ -244,7 +269,10 @@ def main():
                 target_module = loaded
             finally:
                 sys.path.pop(0)
-        if instances:
+        if startup:
+            report.update(qualify_startup(raw, source_root, args.test_source_root, args.protocol_source_root,
+                                         args.expected_sha, run, command, native_report))
+        elif instances:
             report.update(qualify_instances(raw, source_root, target, run, command, native_report))
         elif terminal:
             report.update(qualify_terminal(raw, source_root, target, run, command, native_report,
@@ -326,8 +354,12 @@ def main():
                     report['instance_cleanup'] = audit_instances(raw / 'instances', raw / 'instance-dev/InstanceObservation', command)
                 finally:
                     report['instance_receipt_index'] = retain_instances(raw / 'instances')
-            report['cleanup'] = settle_apps(raw, cleanup=target_module.cleanup_failed_case if target_module else None,
-                                            extra_alive=getattr(target_module, 'alive', None), workspace=workspace or terminal)
+            if startup:
+                report['cleanup'] = {'owner': 'startup preinstalled OS witness; per-case receipts',
+                                     'generic_JSON_PID_cleanup_used': False}
+            else:
+                report['cleanup'] = settle_apps(raw, cleanup=target_module.cleanup_failed_case if target_module else None,
+                                                extra_alive=getattr(target_module, 'alive', None), workspace=workspace or terminal)
         except Exception as error:
             report['cleanup_error'] = str(error)
             report['result'] = 'failed'
@@ -345,7 +377,7 @@ def main():
             (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
             # Bundle resources and binaries are not uploaded. Export only bounded
             # evidence, logs and our report, with exact-value redaction.
-            export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()])
+            export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup)
 
 
 if __name__ == '__main__':

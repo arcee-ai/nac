@@ -1,5 +1,6 @@
 """Pure qualification policy and bounded, exact-value fixture evidence export."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import plistlib
@@ -64,7 +65,7 @@ def require_terminal_evidence(record):
     return terminal
 
 
-def export_evidence(raw, output, replacements):
+def export_evidence(raw, output, replacements, *, include_hashes=False):
     """Export only our fixture files, never arbitrary HOME or process listings."""
     output.mkdir(parents=True, exist_ok=True)
     total = 0
@@ -82,6 +83,9 @@ def export_evidence(raw, output, replacements):
             raise RuntimeError(f'Image exceeds evidence limit: {source.name}')
         with source.open('rb') as stream:
             data = stream.read(limit)
+            if include_hashes:
+                stream.seek(0)
+                source_sha256 = hashlib.file_digest(stream, 'sha256').hexdigest()
         if source.suffix != '.png':
             text = data.decode('utf-8', errors='replace')
             for original, replacement in replacements:
@@ -94,7 +98,11 @@ def export_evidence(raw, output, replacements):
         target = output / source.relative_to(raw)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
-        manifest.append({'file': str(source.relative_to(raw)), 'bytes': len(data), 'truncated': size > limit})
+        entry = {'file': str(source.relative_to(raw)), 'bytes': len(data), 'truncated': size > limit}
+        if include_hashes:
+            entry.update(raw_source_sha256=source_sha256, raw_source_bytes=size,
+                         exported_sha256=hashlib.sha256(data).hexdigest())
+        manifest.append(entry)
     (output / 'export.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
 
