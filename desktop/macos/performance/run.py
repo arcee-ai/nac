@@ -19,6 +19,8 @@ import threading
 import time
 from urllib.request import Request, urlopen
 
+from fixture import FixtureWorkloads, trial_plan
+
 
 HERE = Path(__file__).resolve().parent
 SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -66,6 +68,16 @@ def validate_contract(contract, workloads):
         raise ValueError("Required signal removed")
     if set(contract["required_process_roles"]) != {"shell", "webcontent", "network", "gpu", "backend", "provider", "pty"}:
         raise ValueError("Required process role removed")
+    if (workloads["transcript"]["turns"] != 64 or workloads["stream"]["deltas"] != 256
+            or workloads["stream"]["interval_ms"] != 50
+            or workloads["sessions"] != {"behavior": "direct", "counts": [1, 8], "ptys_per_session": 1}
+            or workloads["terminal"] != {"duration_seconds": 30, "batches_per_second": 20,
+                "lines_per_batch": 32, "columns": 120, "rows": 36, "line_ascii_bytes_including_lf": 128}):
+        raise ValueError("Required corpus, session or PTY workload changed")
+    cells = workloads["finite_cells"]
+    required = set(contract["required_cells"]) - {"cold_launch", "first_useful_workspace", "consumer_window_reopen", "notifications"}
+    if len(cells) != 10 or {c["cell"] for c in cells} != required | {"hide_reshow"}:
+        raise ValueError("Finite workload coverage changed")
     return {p["name"]: p["cap_seconds"] for p in phases}
 
 
@@ -75,6 +87,16 @@ def require_approval(contract, target, harness, reference):
     if (contract.get("nominated_target_sha") != target or contract.get("nominated_harness_sha") != harness
             or not reference or contract.get("dispatch_reference") != reference):
         raise ValueError("Target/harness nomination and separate dispatch approval are absent or mismatched")
+
+
+def require_collection_admission():
+    # These are missing source integrations, not flags that an input JSON can
+    # assert away. Revisit only with actual owner implementations and retained
+    # exact-H/P/T calibration, raw-signal/loss and quiet-allocation proof.
+    raise ValueError("Collection unavailable: H must build/select testFiniteTrial; "
+        "native runtime/PTY ownership and equal CSS viewport receipts are absent; "
+        "approved queue/frame/trusted-input observation sink and observer-off proof are absent; "
+        "exact H/P/T calibration and quiet VM allocation have not been admitted")
 
 
 def require_calibration_result(summary):
@@ -331,6 +353,7 @@ class Calibration:
         return value
 
     def command(self, argv, name, cwd=None, env=None, limit=120):
+        self.remaining()  # Admission/deadline precedes process creation.
         item = OwnedCommand(argv, env or os.environ.copy(), cwd or self.args.source_root,
                             self.private / (name + ".log"))
         self.owned.append(item)
@@ -362,6 +385,7 @@ class Calibration:
             "GIT_CONFIG_GLOBAL": "/dev/null"}
 
     def launch_backend(self, engine, workspace, store, env, name):
+        self.remaining()
         with socket.socket() as reservation:
             reservation.bind(("127.0.0.1", 0))
             port = reservation.getsockname()[1]
@@ -386,8 +410,9 @@ class Calibration:
             time.sleep(.1)
         raise TimeoutError("Exact backend listener/readiness unavailable")
 
-    def api(self, base, path, body):
-        request = Request(base + "/" + path, json.dumps(body).encode(), {"Content-Type": "application/json"})
+    def api(self, base, path, body, method=None):
+        request = Request(base + "/" + path, None if body is None else json.dumps(body).encode(),
+                          {"Content-Type": "application/json"}, method=method)
         with urlopen(request, timeout=min(10, self.remaining())) as response:
             data = response.read(2_000_001)
         if len(data) > 2_000_000:
@@ -468,8 +493,9 @@ class Calibration:
         write_json(self.private / "cpu-unit-control.json", receipt)
         return receipt
 
-    def fixture(self, engine):
-        provider = OwnedCommand([sys.executable, "-B", str(HERE / "fixture.py"), "--mode", "stream",
+    def fixture_support(self, mode):
+        self.remaining()
+        provider = OwnedCommand([sys.executable, "-B", str(HERE / "fixture.py"), "--mode", mode,
             "--evidence", str(self.private / "provider.jsonl")], os.environ.copy(), HERE,
             self.private / "provider-start.log")
         self.owned.append(provider)
@@ -489,6 +515,11 @@ class Calibration:
         self.command(["git", "-C", str(workspace), "-c", "user.name=Disposable NAC performance fixture",
             "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "commit",
             "--quiet", "--allow-empty", "-m", "fixture baseline"], "fixture-commit", env=seed_env)
+        return provider, workspace, base
+
+    def fixture(self, engine):
+        provider, workspace, base = self.fixture_support("stream")
+        seed_env = self.environment(self.private / "calibration-seed-home", base)
         seed = self.private / "seed.db"
         backend, endpoint = self.launch_backend(engine, workspace, seed, seed_env, "seed-backend")
         config = self.api(endpoint, "model-configs", {"name": "Dummy performance calibration", "backend": "openai-responses",
@@ -631,20 +662,29 @@ class Calibration:
                         (str(self.args.harness_root), "<harness>"), (str(HERE.parents[2]), "<tools>")]
         total = 0
         index = {}
-        for file in sorted(self.private.iterdir()):
+        files = list(self.private.iterdir())
+        # Only allocated trial receipts join top-level sanitized evidence.
+        # Never traverse HOME, stores, app bundles or raw XCTest bundles.
+        for folder in list(files):
+            if re.fullmatch(r"trial-[0-9]{4}", folder.name) and not folder.is_symlink() and folder.is_dir():
+                files.extend(folder.iterdir())
+        for file in sorted(files):
             if file.is_symlink() or not file.is_file() or file.suffix not in (".json", ".jsonl", ".log"):
                 continue
             size = file.stat().st_size
             if size > 10 * 1024 * 1024 or total + size > MAX_EXPORT_BYTES:
-                self.report.setdefault("export_omissions", []).append(file.name)
+                self.report.setdefault("export_omissions", []).append(str(file.relative_to(self.private)))
                 continue
             text = file.read_text(errors="replace")
             for old, new in replacements:
                 text = text.replace(old, new)
-            target = self.args.output / file.name
+            relative = file.relative_to(self.private)
+            target = self.args.output / relative
+            target.parent.mkdir(mode=0o700, exist_ok=True)
             target.write_text(text)
+            self.report.setdefault("export_source_sha256", {})[str(relative)] = digest(file)
             total += size
-            index[file.name] = digest(target)
+            index[str(relative)] = digest(target)
         encoded = json.dumps(self.report, indent=2, allow_nan=False)
         for old, new in replacements:
             encoded = encoded.replace(old, new)
@@ -657,6 +697,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--contract", type=Path, default=HERE / "allocation-v2.json")
     parser.add_argument("--calibrate", action="store_true", help="Requires separate exact nomination/dispatch approval")
+    parser.add_argument("--collect", action="store_true", help="Finite controller; admission remains closed on missing integrations")
     parser.add_argument("--source-root", type=Path)
     parser.add_argument("--harness-root", type=Path)
     parser.add_argument("--target-sha")
@@ -686,13 +727,20 @@ def execute(args):
     validate_contract(contract, read_json(HERE / "workloads.json"))
     if args.output.exists() or args.output.is_symlink():
         raise ValueError("Evidence destination must be new")
-    if not args.calibrate:
+    if args.calibrate and args.collect:
+        raise ValueError("Choose calibration or collection")
+    if not args.calibrate and not args.collect:
         args.output.mkdir(mode=0o700)
+        write_json(args.output / "finite-plan.json", {"schema": "nac-mac-finite-plan-v1",
+            "executed": False, "trials": trial_plan(contract)})
         write_json(args.output / "contract-validation.json", {"result": "CONTRACT_ONLY",
             "core_cap_seconds": contract["core_cap_seconds"], "nac_performance_trials": 0,
+            "planned_arms": len(trial_plan(contract)),
             "dispatch_approved": False, "known_unavailable": contract["known_unavailable"]})
         return 0
     require_approval(contract, args.target_sha, args.harness_sha, args.dispatch_reference)
+    if args.collect:
+        require_collection_admission()
     if os.uname().sysname != "Darwin" or os.uname().machine != "arm64" or not args.epoch:
         raise ValueError("Actual allocated ARM Mac and first-step epoch required")
     if not args.source_root or not args.harness_root or not SHA.fullmatch(args.tools_sha or ""):
@@ -706,7 +754,10 @@ def execute(args):
         raise ValueError("Expired or invalid job epoch")
     calibration = Calibration(args, contract, epoch)
     try:
-        calibration.run()
+        if args.collect:
+            FixtureWorkloads(calibration).run()
+        else:
+            calibration.run()
     except BaseException as error:
         calibration.report.update(result="PREREQUISITE_OR_CALIBRATION_FAILED", error_type=type(error).__name__,
                                   error=str(error)[:600], measurement_ready=False)

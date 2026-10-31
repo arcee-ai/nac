@@ -8,11 +8,75 @@ accepted performance budgets. No optimized artifact has been measured here.
 ## Allocated executable calibration
 
 The manually dispatched `macos-performance.yml` and `run.py` implement a bounded
-calibration stage. They do not execute the full required performance matrix.
+calibration stage. The workflow exposes calibration only. The allocated sources
+also contain a finite workload controller; collection admission is closed as
+described below, and no full-matrix execution has occurred.
 The stored allocation has null target/harness nomination and dispatch fields;
 `--calibrate` fails before launching commands until a separately approved,
 committed allocation matches all three. Manual workflow default is validation
 only. No workflow has been dispatched by this work.
+
+## Finite controller source milestone (unexecuted)
+
+`workloads.json` defines ten executable cells: fresh-profile/warm-cache launch,
+warm-store launch, four idle combinations (1/8 direct sessions with one PTY
+each, active/hidden), long transcript, streaming, noisy terminal and hide/reshow.
+`fixture.py` constructs20 AB/BA pairs for each, plus one proposed diagnostic
+observer-off pair per cell:400 principal arms and20 control arms. Off controls
+are retained separately and never substituted into the20-pair distributions.
+First useful workspace is an endpoint of the launch cells; its current AX
+milestone is not a paint measurement. Cold boot, ALL-344 consumer close/reopen,
+ALL-350 notifications, physical energy and the supported-OS/hardware matrix
+remain explicitly unavailable required evidence.
+
+The default validation command writes `finite-plan.json` with `executed=false`.
+The finite controller records a start receipt before each dispatch and a terminal
+receipt afterward, binding trial/pair/arm/control/phase, source and engine/assets
+identity, monotonic clock and phase/core deadline. A failed ownership, fixture,
+driver or deadline check stops dispatch and retains the remaining planned arms
+as censored. It never replaces failed pairs or summarizes only successful arms.
+Execution completion alone remains unqualified; raw signal loss stays unknown
+and performance distributions stay null.
+
+The seed builder uses existing model-config/project/direct-session/presentation
+and run APIs to create closed1-session,8-session and64-turn transcript stores.
+Every transcript turn must yield its exact completed assistant content before
+the next submission. The writer stops and its WAL must drain before byte-identical
+per-arm copies are admitted. The suite provider allows precisely those64 seed
+turns followed by42 streaming requests; additional/wrong requests fail closed.
+Streaming remains256 deltas at50ms, and terminal output remains600 batches of
+4096 bytes over30s. Producer receipts establish source bytes, not rendered bytes.
+
+`PerformanceJourneys/testFiniteTrial` drives the normal UI, retains exact app
+launch ownership, supports launch-only warmup and active/hidden intervals, and
+requests100 characters on each input surface. Its observations explicitly leave
+trusted-event counts, load/input overlap, actual CSS/PTY dimensions, engine
+incarnation and frame samples unknown. Public typing API duration is not input
+latency. The source neither shortens the stream nor reduces the input count to
+fit the currently observed driver cadence.
+
+`--collect` refuses before any build/process/API/UI call, even if a caller invents
+nomination fields. `require_collection_admission()` names the missing calls:
+actual H source inclusion/selection of `testFiniteTrial`; an independently bound
+native engine receipt enabling the existing user-terminal APIs to open/verify
+all session PTYs at120×36; equal actual CSS viewports; approved passive raw
+queue/frame/trusted-input observation and loss receipts; clock correlation and
+observer-off proof; exact H/P/T calibration and coordinator-confirmed quiet VM
+allocation. The browser adapter already uses version1 human terminal admission
+through its owned backend endpoint; the native adapter has only UI shell creation
+until that receipt exists. UI shell creation alone cannot prove cardinality or
+dimensions, so this asymmetry is an admission blocker. No shared hook or native
+endpoint discovery fallback was added.
+
+The added source adapter builds the driver once and invokes the real XCTest case
+per arm, retaining actual unskipped test summaries and cleanup receipts. Whether
+that invocation cadence fits the phase caps requires calibration; a cap overrun
+censors the run. Full SDK compilation and real H/P/T execution remain unverified.
+Current observer-on source uses the existing process sampler; product diagnostic
+export remains disabled pending the approved owner sink. Off disables that
+sampler while retaining controller/provider receipts. This is not yet complete
+observer overhead evidence. Sanitized nested trial receipts join the existing
+bounded export; profiles, databases and raw XCTest bundles remain private.
 
 Validate the schema, full scope, 100-input requirement and phase accounting:
 

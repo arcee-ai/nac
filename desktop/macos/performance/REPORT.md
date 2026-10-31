@@ -6,6 +6,18 @@ budget recommendations exist yet. This checkpoint does not complete ALL-353
 acceptance or clear ALL-358. No observed data supports a WebKit speed claim,
 performance remediation under ALL-357, or a runtime/model cost estimate.
 
+The subsequent source milestone adds the finite420-arm plan (400 principal
+arms plus20 diagnostic controls), closed API fixture seeds, paired attempt
+accounting and the allocated finite UI driver. This is source implementation
+only:26 Python protocol cases are verified (24 in the full suite, followed by23
+affected cases including two new guards), while full-Xcode compilation, actual H
+integration, native runtime/PTY receipts, raw observations and timing/allocation
+proof remain missing. Collection admission deliberately refuses before commands.
+No NAC workload, collection run or performance result was produced. See the
+[finite controller source milestone](README.md#finite-controller-source-milestone-unexecuted)
+for exact blocked calls and retained required cells. This does not complete the
+investigation or reset its native goal.
+
 ## Source and retained evidence
 
 - Task: `01a190a6-f47b-75f0-abd1-f8c961e566a5`; stored native finite goal

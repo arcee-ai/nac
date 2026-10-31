@@ -1,19 +1,164 @@
 {
   "schema": "nac-mac-performance-workloads-v1",
   "status": "protocol-only; execution requires qualified host and pinned fixture adapter",
-  "comparison": ["ordinary Safari browser plus nac-web", "AppKit/WKWebView plus same nac-web"],
-  "sessions": {"behavior": "direct", "counts": [1, 8], "ptys_per_session": 1},
-  "window": {"content_points": [1280, 800], "states": ["active", "hidden"]},
-  "repetitions": {"paired_blocks": 20, "order": "AB,BA alternating", "idle_seconds": 120},
-  "launch": ["cold first after reboot", "fresh profile with warm OS caches", "warm existing store", "window reopen without engine restart"],
+  "comparison": [
+    "ordinary Safari browser plus nac-web",
+    "AppKit/WKWebView plus same nac-web"
+  ],
+  "sessions": {
+    "behavior": "direct",
+    "counts": [
+      1,
+      8
+    ],
+    "ptys_per_session": 1
+  },
+  "window": {
+    "content_points": [
+      1280,
+      800
+    ],
+    "states": [
+      "active",
+      "hidden"
+    ]
+  },
+  "repetitions": {
+    "paired_blocks": 20,
+    "order": "AB,BA alternating",
+    "idle_seconds": 120
+  },
+  "launch": [
+    "cold first after reboot",
+    "fresh profile with warm OS caches",
+    "warm existing store",
+    "window reopen without engine restart"
+  ],
   "transcript": {
     "turns": 64,
     "user_template": "MAC_PERF_V1_TURN_{index:03d}",
     "assistant_template": "## Turn {index:03d}\n\nDeterministic local performance fixture. **Bold** and *italic*.\n\n| n | value |\n|---|---|\n| {index} | fixture |\n\nInline math $x^2 + y^2$ and display math:\n\n$$\\sum_{k=1}^{32} k = 528$$\n\n```rust\nfn fixture_{index:03d}() -> usize { (0..32).sum() }\n```\n\n",
     "assistant_repeats_per_turn": 16
   },
-  "stream": {"deltas": 256, "interval_ms": 50, "delta_template": "MAC_PERF_V1_DELTA_{index:03d} ", "tail": "MAC_PERF_V1_DONE"},
-  "terminal": {"duration_seconds": 30, "batches_per_second": 20, "lines_per_batch": 32, "columns": 120, "rows": 36, "line_ascii_bytes_including_lf": 128},
-  "input": {"trusted_events_per_block": 100, "target": "composer typing and terminal echo separately", "timeout_ms": 5000},
-  "notifications": {"events_per_block": 1, "trigger": "local provider completion with hidden window", "requires": "nominated notification-capable candidate and existing permission"}
+  "stream": {
+    "deltas": 256,
+    "interval_ms": 50,
+    "delta_template": "MAC_PERF_V1_DELTA_{index:03d} ",
+    "tail": "MAC_PERF_V1_DONE"
+  },
+  "terminal": {
+    "duration_seconds": 30,
+    "batches_per_second": 20,
+    "lines_per_batch": 32,
+    "columns": 120,
+    "rows": 36,
+    "line_ascii_bytes_including_lf": 128
+  },
+  "input": {
+    "trusted_events_per_block": 100,
+    "target": "composer typing and terminal echo separately",
+    "timeout_ms": 5000
+  },
+  "notifications": {
+    "events_per_block": 1,
+    "trigger": "local provider completion with hidden window",
+    "requires": "nominated notification-capable candidate and existing permission"
+  },
+  "finite_cells": [
+    {
+      "cell": "fresh_profile_warm_cache_launch",
+      "phase": "fresh_and_warm_launch",
+      "seed": "empty_1",
+      "action": "fresh_launch",
+      "window_state": "active",
+      "duration_seconds": 0,
+      "input": false
+    },
+    {
+      "cell": "warm_store_launch",
+      "phase": "fresh_and_warm_launch",
+      "seed": "empty_1",
+      "action": "warm_launch",
+      "window_state": "active",
+      "duration_seconds": 0,
+      "input": false
+    },
+    {
+      "cell": "idle_1_pty_active",
+      "phase": "idle_1_8_active_hidden",
+      "seed": "empty_1",
+      "action": "idle",
+      "window_state": "active",
+      "duration_seconds": 30,
+      "input": false
+    },
+    {
+      "cell": "idle_1_pty_hidden",
+      "phase": "idle_1_8_active_hidden",
+      "seed": "empty_1",
+      "action": "idle",
+      "window_state": "hidden",
+      "duration_seconds": 30,
+      "input": false
+    },
+    {
+      "cell": "idle_8_ptys_active",
+      "phase": "idle_1_8_active_hidden",
+      "seed": "empty_8",
+      "action": "idle",
+      "window_state": "active",
+      "duration_seconds": 30,
+      "input": false
+    },
+    {
+      "cell": "idle_8_ptys_hidden",
+      "phase": "idle_1_8_active_hidden",
+      "seed": "empty_8",
+      "action": "idle",
+      "window_state": "hidden",
+      "duration_seconds": 30,
+      "input": false
+    },
+    {
+      "cell": "long_transcript",
+      "phase": "long_transcript_and_input",
+      "seed": "transcript_1",
+      "action": "transcript",
+      "window_state": "active",
+      "duration_seconds": 0,
+      "input": true
+    },
+    {
+      "cell": "streaming",
+      "phase": "streaming_and_input",
+      "seed": "empty_1",
+      "action": "stream",
+      "window_state": "active",
+      "duration_seconds": 12.8,
+      "input": true
+    },
+    {
+      "cell": "noisy_terminal",
+      "phase": "noisy_terminal_and_input",
+      "seed": "empty_1",
+      "action": "terminal",
+      "window_state": "active",
+      "duration_seconds": 30,
+      "input": true
+    },
+    {
+      "cell": "hide_reshow",
+      "phase": "preview_hide_reshow",
+      "seed": "empty_1",
+      "action": "hide_reshow",
+      "window_state": "active",
+      "duration_seconds": 5,
+      "input": false
+    }
+  ],
+  "finite_controls": {
+    "observer_off_pairs_per_cell": 1,
+    "scope": "diagnostic overhead control; excluded from20-pair product distributions",
+    "observer_off": "passive signal collector and product diagnostic export disabled; UI controller and bounded receipts remain"
+  }
 }

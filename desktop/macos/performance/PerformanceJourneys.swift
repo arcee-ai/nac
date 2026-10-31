@@ -49,6 +49,21 @@ final class PerformanceJourneys: XCTestCase {
         let requested_input_characters: Int
         let input_batch_characters: Int
         let arms: [Arm]
+        let trial: Trial?
+    }
+    struct Trial: Decodable {
+        let trial: Int
+        let action: String
+        let cell: String
+        let observer: String
+        let window_state: String
+        let session_count: Int
+        let session_titles: [String]
+        let preopened_ptys: Bool
+        let settle_seconds: Int
+        let duration_seconds: Double
+        let input: Bool
+        let terminal_command: String
     }
     private var records: [[String: Any]] = []
     private var config: Configuration!
@@ -69,6 +84,7 @@ final class PerformanceJourneys: XCTestCase {
             "frame_samples": NSNull(), "trusted_event_count": NSNull(),
             "scope": "Public driver calibration; API scheduling and AX observations are not key-to-paint latency"
         ], options: [.prettyPrinted, .sortedKeys])
+        try require(data.count <= 4 * 1024 * 1024, "Driver receipt byte limit exceeded; evidence incomplete")
         try data.write(to: output, options: .atomic)
     }
 
@@ -242,6 +258,14 @@ final class PerformanceJourneys: XCTestCase {
                     "paint_time_ns": NSNull(), "actual_css_viewport": NSNull(),
                     "ax_webview_width_points": app.webViews.firstMatch.frame.width,
                     "ax_webview_height_points": app.webViews.firstMatch.frame.height])
+                if let trial = config.trial {
+                    if trial.action == "warmup" {
+                        try record("warmup_workspace_ready", ["trial": trial.trial])
+                        return
+                    }
+                    try performTrial(trial, app: app, arm: arm, binding: binding, url: url)
+                    return
+                }
                 try type100(composer, binding: binding, url: url, arm: arm.name, surface: "composer")
                 try guardInput(binding, url: url)
                 composer.typeKey("a", modifierFlags: .command)
@@ -283,6 +307,138 @@ final class PerformanceJourneys: XCTestCase {
                 return true
             } catch { return false }
         })
+    }
+
+    @MainActor
+    private func pause(_ seconds: Double, binding: (NSRunningApplication, Date, Int),
+                       url: URL, hidden: Bool = false) throws {
+        let until = DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
+        while DispatchTime.now().uptimeNanoseconds < until {
+            try deadline()
+            try console()
+            try require(!binding.0.isTerminated && binding.0.launchDate == binding.1,
+                        "Owned process changed during workload interval")
+            if hidden {
+                try require(binding.0.isHidden && NSWorkspace.shared.frontmostApplication?.processIdentifier
+                    != binding.0.processIdentifier, "Hidden workload became active")
+            } else { try guardInput(binding, url: url) }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+    }
+
+    @MainActor
+    private func performTrial(_ trial: Trial, app: XCUIApplication, arm: Arm,
+        binding: (NSRunningApplication, Date, Int), url: URL) throws {
+        try require([1, 8].contains(trial.session_count) && trial.session_titles.count == trial.session_count,
+                    "Closed fixture session cardinality changed")
+        try require(["active", "hidden"].contains(trial.window_state)
+            && ["on", "off"].contains(trial.observer), "Unsupported finite workload state")
+        try record("finite_workload_setup", ["trial": trial.trial, "cell": trial.cell,
+            "session_count": trial.session_count, "requested_pty_columns": 120, "requested_pty_rows": 36,
+            "actual_pty_dimensions": NSNull(), "requested_css_viewport": [900, 600],
+            "actual_css_viewport": NSNull(), "observer": trial.observer,
+            "clock_mapping_uncertainty_ns": NSNull()])
+        for title in trial.session_titles {
+            let session = try element(app.webViews.buttons, label: title)
+            try guardInput(binding, url: url)
+            session.click()
+            let panel = app.webViews.buttons.matching(identifier: "Show panel").firstMatch
+            if panel.exists { try guardInput(binding, url: url); panel.click() }
+            let tab = app.webViews.buttons.matching(identifier: "Terminal").firstMatch
+            if tab.exists { try guardInput(binding, url: url); tab.click() }
+            if !trial.preopened_ptys {
+                let shell = try element(app.webViews.buttons, label: "New shell")
+                try guardInput(binding, url: url)
+                shell.click()
+            }
+            _ = try element(app.webViews.textViews, label: "Terminal input")
+            try record("session_shell_ui_opened", ["trial": trial.trial, "session_title": title,
+                "pty_incarnation": NSNull(), "live_session_pty_count_verified": false])
+        }
+        // Keep all previously opened session shells alive through normal UI
+        // ownership. The missing native runtime receipt/API binding must prove
+        // their identities, cardinality and120x36 dimensions before admission.
+        try pause(Double(trial.settle_seconds), binding: binding, url: url)
+        let began = DispatchTime.now().uptimeNanoseconds
+        try record("finite_workload_started", ["trial": trial.trial, "action": trial.action])
+        if trial.window_state == "hidden" || trial.action == "hide_reshow" {
+            try guardInput(binding, url: url)
+            try require(binding.0.hide(), "Owned application did not hide")
+            try pause(trial.duration_seconds, binding: binding, url: url, hidden: true)
+            try require(binding.0.launchDate == binding.1 && !binding.0.isTerminated,
+                        "Owned app changed before explicit reshow")
+            try require(binding.0.unhide() && binding.0.activate(options: []), "Owned app reshow failed")
+            try guardInput(binding, url: url)
+            try record("owned_window_reshown", ["trial": trial.trial,
+                "first_frame_ns": NSNull(), "same_engine_incarnation": NSNull()])
+        } else {
+            let composer = try element(app.webViews.firstMatch.descendants(matching: .any), label: "Message")
+            let terminal = try element(app.webViews.textViews, label: "Terminal input")
+            if trial.action == "stream" {
+                try guardInput(binding, url: url)
+                composer.click()
+                composer.typeText("MAC_PERF_V1_STREAM")
+                try guardInput(binding, url: url)
+                composer.typeKey(.return, modifierFlags: [])
+            } else if trial.action == "terminal" {
+                try guardInput(binding, url: url)
+                terminal.click()
+                terminal.typeText(trial.terminal_command)
+                try guardInput(binding, url: url)
+                terminal.typeKey(.return, modifierFlags: [])
+            }
+            if trial.input {
+                try type100(composer, binding: binding, url: url, arm: arm.name, surface: "composer")
+                try type100(terminal, binding: binding, url: url, arm: arm.name, surface: "terminal")
+            }
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - began) / 1_000_000_000
+            if trial.duration_seconds > elapsed {
+                try pause(trial.duration_seconds - elapsed, binding: binding, url: url)
+            }
+            if trial.action == "stream" {
+                try require(app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS %@",
+                    "MAC_PERF_V1_DONE")).firstMatch.waitForExistence(timeout: 5), "Final streamed tail missing")
+            }
+        }
+        try record("finite_trial_completed", ["trial": trial.trial, "cell": trial.cell,
+            "elapsed_uptime_ns": String(DispatchTime.now().uptimeNanoseconds - began),
+            "raw_frame_samples": NSNull(), "trusted_input_samples": NSNull(),
+            "all100_events_overlap_load": NSNull(), "raw_signal_loss": NSNull(), "qualified": false])
+    }
+
+    @MainActor
+    func testFiniteTrial() throws {
+        continueAfterFailure = false
+        executionTimeAllowance = 240
+        let path = try XCTUnwrap(ProcessInfo.processInfo.environment["NAC_UI_FIXTURE"])
+        config = try JSONDecoder().decode(Configuration.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        try require(config.schema == "nac-mac-finite-driver-v1" && config.arms.count == 1
+            && config.requested_input_characters == 100 && config.input_batch_characters == 1,
+                    "Unsupported finite driver contract")
+        let trial = try XCTUnwrap(config.trial)
+        try require(["fresh_launch", "warm_launch", "idle", "transcript", "stream", "terminal", "hide_reshow"]
+            .contains(trial.action), "Unimplemented workload cannot be passed")
+        output = URL(fileURLWithPath: config.output)
+        try require(!FileManager.default.fileExists(atPath: output.path), "Refusing to overwrite trial evidence")
+        try record("finite_trial_dispatch", ["trial": trial.trial])
+        if trial.action == "warm_launch" {
+            // Prime the same isolated profile/store, then measure its relaunch.
+            // The first launch is retained as warmup, never a paired sample.
+            try record("warmup_started", ["trial": trial.trial])
+            let saved = config!
+            // A launch-only warmup never types or creates an extra shell.
+            config = Configuration(schema: saved.schema, output: saved.output,
+                deadline_uptime_ns: saved.deadline_uptime_ns, requested_input_characters: saved.requested_input_characters,
+                input_batch_characters: saved.input_batch_characters, arms: saved.arms,
+                trial: Trial(trial: trial.trial, action: "warmup", cell: "warmup", observer: trial.observer,
+                    window_state: "active", session_count: trial.session_count, session_titles: trial.session_titles,
+                    preopened_ptys: trial.preopened_ptys,
+                    settle_seconds: 0, duration_seconds: 0, input: false, terminal_command: ""))
+            try calibrate(config.arms[0])
+            config = saved
+            try record("warmup_completed", ["trial": trial.trial])
+        }
+        try calibrate(config.arms[0])
     }
 
     @MainActor

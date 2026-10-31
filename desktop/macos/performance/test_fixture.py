@@ -11,7 +11,8 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from fixture import Fixture, MODEL, WORKLOAD, stream_parts, transcript
+from fixture import (ClosedSeeds, FiniteController, Fixture, MODEL, WORKLOAD,
+                     stream_parts, transcript, trial_plan, verify_terminal_producer)
 import run as performance
 
 
@@ -73,6 +74,184 @@ class FixtureContract(unittest.TestCase):
             self.post(server, "MAC_PERF_V1_STREAM", stream=True)
         self.assertEqual(error.exception.code, 409)
 
+    def test_suite_provider_has_one_seed_then_exact_finite_stream_allowance(self):
+        server, _ = self.start("suite")
+        server.sequence = 63  # Earlier turns are exercised by the64-turn HTTP test.
+        self.post(server, transcript(63)["user"])
+        with self.assertRaises(HTTPError):
+            self.post(server, transcript(63)["user"])
+        for _ in range(42):
+            result = json.loads(self.post(server, "MAC_PERF_V1_STREAM"))
+            self.assertEqual(result["output"][0]["content"][0]["text"], "".join(stream_parts()))
+        with self.assertRaises(HTTPError):
+            self.post(server, "MAC_PERF_V1_STREAM")
+
+
+class FiniteProtocolContract(unittest.TestCase):
+    def setUp(self):
+        self.contract = json.loads(Path(__file__).with_name("allocation-v2.json").read_text())
+
+    def test_full_plan_pairs_order_controls_and_original_loads(self):
+        plan = trial_plan(self.contract)
+        self.assertEqual(len(plan), 420)
+        for cell in WORKLOAD["finite_cells"]:
+            rows = [r for r in plan if r["cell"] == cell["cell"]]
+            self.assertEqual(len(rows), 42)
+            for pair in range(20):
+                arms = [r["arm"] for r in rows if r["pair"] == pair and not r["control_only"]]
+                self.assertEqual(arms, ["native", "browser"] if pair % 2 == 0 else ["browser", "native"])
+            self.assertEqual(sum(r["control_only"] for r in rows), 2)
+            self.assertTrue(all(r["columns"] == 120 and r["rows"] == 36 and r["ptys_per_session"] == 1 for r in rows))
+            if cell["input"]:
+                self.assertTrue(all(r["trusted_events_per_surface"] == 100 for r in rows))
+        for count in (1, 8):
+            for state in ("active", "hidden"):
+                rows = [r for r in plan if r["cell"] == f"idle_{count}_{'pty' if count == 1 else 'ptys'}_{state}"]
+                self.assertEqual(len(rows), 42)
+                self.assertTrue(all(r["session_count"] == count and r["duration_seconds"] == 30 for r in rows))
+        self.assertFalse({"cold_launch", "consumer_window_reopen", "notifications"} & {r["cell"] for r in plan})
+
+    def test_complete_dispatch_is_never_qualified_without_actual_raw_evidence(self):
+        retained, invoked = [], []
+        controller = FiniteController(self.contract, {"scope": "unit-test-only"}, retained.append, 0, clock=lambda: 1)
+        def fake(row, end):
+            invoked.append(row["trial"])
+            row["pair"] = -1  # A callback cannot mutate the immutable plan/ledger.
+            return {"execution_complete": True}
+        result = controller.run(fake)
+        self.assertEqual(invoked, list(range(420)))
+        self.assertEqual(result["recorded_arms"], 420)
+        self.assertIsNone(result["performance_distributions"])
+        self.assertFalse(result["measurement_ready"])
+        for cell in result["cells"].values():
+            self.assertEqual(cell["executed_pairs"], 20)
+            self.assertEqual(cell["qualified_pairs"], 0)
+            self.assertEqual(cell["observer_off_arms"], 2)
+        self.assertEqual(len(retained), 840)  # Durable start and terminal receipts.
+
+    def test_failure_or_deadline_censors_tail_without_replacement_pairs(self):
+        for kind in ("error", "deadline", "no_receipt"):
+            now, invoked, retained = [1], [], []
+            controller = FiniteController(self.contract, {}, retained.append, 0, clock=lambda: now[0])
+            def fake(row, end):
+                invoked.append(row["trial"])
+                if kind == "error":
+                    raise ValueError("simulated ownership failure")
+                if kind == "deadline":
+                    now[0] = end
+                return {"execution_complete": kind != "no_receipt"}
+            controller.run(fake)
+            self.assertEqual(invoked, [0])
+            self.assertEqual(controller.ledger.rows[0]["status"], "failed")
+            self.assertEqual(len(controller.ledger.rows), 420)
+            self.assertTrue(all(r["status"] == "censored" for r in controller.ledger.rows[1:]))
+            self.assertTrue(all(r["receipt"] is None for r in controller.ledger.rows))
+
+    def test_expired_core_never_invokes_fixture_or_driver(self):
+        controller = FiniteController(self.contract, {}, lambda _: None, 0, clock=lambda: 12600 * 10**9)
+        with patch("fixture.FixtureWorkloads.execute", side_effect=AssertionError("must not dispatch")) as execute:
+            result = controller.run(execute)
+        self.assertEqual(result["recorded_arms"], 420)
+        execute.assert_not_called()
+
+    def test_measurement_stays_closed_even_with_fabricated_nomination(self):
+        with self.assertRaisesRegex(ValueError, "native runtime/PTY"):
+            performance.require_collection_admission()
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "denied"
+            contract = Path(folder) / "contract.json"
+            proposed = self.contract | {"nominated_target_sha": "a" * 40,
+                "nominated_harness_sha": "b" * 40, "dispatch_reference": "unit-test-only"}
+            contract.write_text(json.dumps(proposed))
+            with patch.object(performance, "OwnedCommand", side_effect=AssertionError("no process")):
+                result = performance.main(["--collect", "--contract", str(contract), "--target-sha", "a" * 40,
+                    "--harness-sha", "b" * 40, "--dispatch-reference", "unit-test-only", "--output", str(output)])
+            self.assertEqual(result, 2)
+            self.assertEqual(json.loads((output / "attempt.json").read_text())["nac_performance_trials"], 0)
+
+    def test_closed_api_seeds_wait_for_exact_assistant_and_clone_without_wal(self):
+        with tempfile.TemporaryDirectory() as folder:
+            class FakeRunner:
+                private = Path(folder)
+                owned = []
+                prompts = []
+                session_index = 0
+                stopped = []
+                def environment(self, *_):
+                    return {}
+                def remaining(self):
+                    return 100
+                def launch_backend(self, engine, workspace, store, env, name):
+                    store.write_bytes(b"unit-test-only closed fixture, not SQLite")
+                    backend = type("FakeBackend", (), {"stop": lambda _: self.stopped.append(name)})()
+                    self.owned.append(backend)
+                    return backend, name
+                def api(self, endpoint, path, body, method=None):
+                    if path == "model-configs":
+                        return {"config_id": "unit-model"}
+                    if path == "projects":
+                        return {"project_id": "unit-project"}
+                    if path == "sessions":
+                        self.session_index += 1
+                        return {"metadata": {"session_id": f"unit-session-{self.session_index}"}}
+                    if path.endswith("/presentation"):
+                        assert method == "PUT" and body["expected_version"] == 0
+                        return {}
+                    if path.endswith("/runs"):
+                        self.prompts.append(body["prompt"])
+                        return {"run_id": "unit-run"}
+                    return {"messages": [{"role": "assistant", "content": transcript(len(self.prompts) - 1)["assistant"]}]}
+            fake = FakeRunner()
+            seeds = ClosedSeeds(fake, Path("not-executed"), Path(folder), "http://unit.invalid").build()
+            self.assertEqual(fake.prompts, [transcript(i)["user"] for i in range(64)])
+            self.assertEqual([len(s["sessions"]) for s in seeds.values()], [1, 8, 1])
+            self.assertEqual([s["turns"] for s in seeds.values()], [0, 0, 64])
+            self.assertEqual(len(fake.stopped), 3)
+            self.assertEqual(fake.owned, [])
+            target = Path(folder) / "clone.db"
+            ClosedSeeds.clone(seeds["transcript_1"], target)
+            self.assertEqual(target.read_bytes(), seeds["transcript_1"]["path"].read_bytes())
+            with self.assertRaises(ValueError):
+                ClosedSeeds.clone(seeds["transcript_1"], target)
+            seeds["transcript_1"]["path"].write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "changed"):
+                ClosedSeeds.clone(seeds["transcript_1"], Path(folder) / "another.db")
+
+    def test_pty_fixture_uses_existing_human_admission_and_rejects_partial_cardinality(self):
+        sessions = [{"id": f"unit-{i}"} for i in range(8)]
+        requests = []
+        def api(endpoint, path, body):
+            requests.append((endpoint, path, body))
+            return {"protocol_version": 1, "terminal_id": path, "cols": 120, "rows": 36, "alive": True}
+        runner = type("Fake", (), {"api": staticmethod(api)})()
+        result = ClosedSeeds.open_ptys(runner, "http://owned-unit-endpoint.invalid", sessions)
+        self.assertEqual(len(result), 8)
+        self.assertEqual(len({r[2]["launch_id"] for r in requests}), 8)
+        self.assertTrue(all(r[2]["protocol_version"] == 1 and "input" not in r[2] for r in requests))
+        bad = type("Fake", (), {"api": staticmethod(lambda *_: {"protocol_version": 1,
+            "terminal_id": "same-id", "cols": 120, "rows": 36, "alive": True})})()
+        with self.assertRaisesRegex(ValueError, "Duplicate"):
+            ClosedSeeds.open_ptys(bad, "http://owned-unit-endpoint.invalid", sessions)
+
+    def test_terminal_producer_accounting_rejects_holes_partial_writes_and_reordering(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "producer.jsonl"
+            rows = [{"schema": "nac-mac-perf-terminal-v1", "batch": i, "scheduled_ns": i * 50_000_000,
+                "written_ns": i * 50_000_000, "source_bytes": 4096, "total_source_bytes": (i + 1) * 4096}
+                for i in range(600)]
+            def save(values):
+                path.write_text("\n".join(json.dumps(row) for row in values) + "\n")
+            save(rows)
+            self.assertEqual(verify_terminal_producer(path)["source_bytes"], 2_457_600)
+            broken = [rows[:-1], [rows[1], rows[0], *rows[2:]]]
+            partial = copy.deepcopy(rows)
+            partial[-1]["source_bytes"] = 1
+            broken.append(partial)
+            for values in broken:
+                save(values)
+                with self.assertRaises(ValueError):
+                    verify_terminal_producer(path)
+
 
 class CollectionContract(unittest.TestCase):
     def setUp(self):
@@ -82,6 +261,40 @@ class CollectionContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "nomination"):
             performance.require_approval(self.contract, self.contract["proposed_target_sha"],
                 self.contract["proven_harness_base_sha"], "some-decision")
+
+    def test_expired_budget_precedes_every_owned_process_creation(self):
+        runner = performance.Calibration.__new__(performance.Calibration)
+        runner.remaining = lambda: (_ for _ in ()).throw(TimeoutError("unit-test expired guard"))
+        with patch.object(performance, "OwnedCommand", side_effect=AssertionError("must not spawn")):
+            for operation in (lambda: runner.command(["not-executed"], "expired"),
+                lambda: runner.launch_backend(None, None, None, None, "expired"),
+                lambda: runner.fixture_support("suite")):
+                with self.assertRaises(TimeoutError):
+                    operation()
+
+    def test_export_retains_nested_trial_receipts_without_profiles_or_raw_bundles(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            runner = performance.Calibration.__new__(performance.Calibration)
+            runner.private = root / "private"
+            runner.private.mkdir()
+            runner.report = {}
+            runner.args = SimpleNamespace(output=root / "export", source_root=root / "target", harness_root=root / "harness")
+            trial = runner.private / "trial-0000"
+            trial.mkdir()
+            (trial / "ui.json").write_text(json.dumps({"private": str(runner.private)}))
+            (trial / "home").mkdir()
+            (trial / "home/personal.log").write_text("not exported")
+            (trial / "trial.xcresult").mkdir()
+            (trial / "trial.xcresult/raw.log").write_text("not exported")
+            runner.export()
+            index = json.loads((runner.args.output / "evidence-index.json").read_text())
+            self.assertIn("trial-0000/ui.json", index)
+            self.assertEqual(json.loads((runner.args.output / "trial-0000/ui.json").read_text())["private"], "<private-fixture>")
+            self.assertFalse((runner.args.output / "trial-0000/home").exists())
+            self.assertFalse((runner.args.output / "trial-0000/trial.xcresult").exists())
+            self.assertEqual(runner.report["export_source_sha256"]["trial-0000/ui.json"], performance.digest(trial / "ui.json"))
 
     def test_count_phase_and_signal_requirements_cannot_shrink(self):
         performance.validate_contract(self.contract, WORKLOAD)
