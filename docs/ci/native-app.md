@@ -381,6 +381,38 @@ permission, entitlement, policy, phase, literal, count or timeout changes. The
 custom attachment producer/collector still needs actual full-SDK qualification
 in a separately authorized run; portable fixtures and parsing are not that proof.
 
+`ci_xctest_project.materialize_project(H, H_SHA)` selects the original
+`NACNativeUITests` project and scheme with no optional performance reference.
+The checked-in definition stays byte-identical. An explicit performance
+selection additionally requires canonical clean `performance_root`, immutable
+`performance_sha`, exact `performance_source_sha256`, and an absent private
+`output` directory outside both checkouts. The reviewed tools source is
+`b8b805cea10b95722f886b6bdb44f4d2dd937ad2`; its existing
+`desktop/macos/performance/PerformanceJourneys.swift` has SHA256
+`ab353e8888a87f8abaed765d8bce2d825f827b1cb343494b9623405987e4926d`.
+This is a tools-source identity, not a measured target nomination.
+
+The private variant derives from the same hash-locked project definition. It
+binds the inherited native Swift reference to the real H file, adds an absolute
+reference to the real P file, and writes only project/scheme metadata and a hash
+receipt. The pinned definition has no other configuration/resource input paths;
+any future definition change requires reviewing every inherited reference.
+The ordinary shared scheme remains byte-identical, while the separate
+`NACPerformanceUITests` scheme selects exactly that target. No code is copied
+and no generated runner metadata is manufactured.
+
+The consumer must build the returned project/scheme with real Xcode, then pass
+its actual generated runner to
+`require_generated_runner(data, fixture, 'NACPerformanceUITests',
+project_selection=selection['receipt'])`. The guard requires exactly one UI
+bundle globally, the selected blueprint, exact fixture path, and expanded
+performance source path/hash matching the materializer receipt. The default
+ordinary target remains `NACNativeUITests`. Generated project hashes are source
+checks only: full SDK compilation, actual runner expansion/selection, and any
+separately authorized finite test remain future gates. In particular P's direct
+output-file writes have no XCTest permission qualification; this materializer
+does not establish collection admission, calibration or performance results.
+
 Ordinary required CI at harness `0ec96e49` passed in run `41189561712` attempt 2,
 after one authorized unchanged process-job replay. Its actual merge
 `74c03b4f8ebb6bdd847981d660d3e23f798ea4a8` has the same tree as that head.
