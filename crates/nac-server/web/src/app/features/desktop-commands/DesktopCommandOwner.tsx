@@ -16,7 +16,7 @@ export function DesktopCommandOwner({ port }: { port: DesktopCommandPort }) {
     latest.current = { commands, ownsKeyboard, layers };
   });
   useLayoutEffect(() => {
-    const invoke = (action: () => void) => {
+    const invoke = (action: () => boolean | void) => {
       const { ownsKeyboard, layers } = latest.current;
       if (
         !document.hasFocus() ||
@@ -25,12 +25,15 @@ export function DesktopCommandOwner({ port }: { port: DesktopCommandPort }) {
       ) {
         throw new Error("The workspace does not own keyboard focus");
       }
-      action();
+      return action();
     };
     return connectDesktopCommands(port, {
       newSession: () => invoke(() => latest.current.commands.newSession()),
       settings: () => invoke(() => latest.current.commands.openConfigurations()),
-      projects: () => invoke(() => latest.current.commands.openProjects()),
+      projects: () =>
+        invoke(() => {
+          void latest.current.commands.openProjects();
+        }),
     });
   }, [port]);
   return null;

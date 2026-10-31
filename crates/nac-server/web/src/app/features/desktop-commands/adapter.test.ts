@@ -25,6 +25,7 @@ describe("desktop UI capability", () => {
     const request = { version: 1, request: 1, action: "newSession" };
     expect(callback?.(request)).toBe(true);
     expect(callback?.(request)).toBe(false);
+    expect(callback?.(Object.assign(Object.create(request), { a: 1, b: 2, c: 3 }))).toBe(false);
     expect(owners.newSession).toHaveBeenCalledOnce();
     for (const bad of [
       null,
@@ -67,4 +68,23 @@ describe("desktop UI capability", () => {
     expect(fail).toHaveBeenCalledOnce();
     close();
   });
+});
+
+it("reports an unavailable shared owner as unhandled without replay", () => {
+  let callback!: (message: unknown) => boolean;
+  const unavailable = vi.fn(() => false);
+  const close = connectDesktopCommands(
+    {
+      connect: (owner) => {
+        callback = owner;
+        return () => {};
+      },
+    },
+    { newSession: unavailable, settings: vi.fn(), projects: vi.fn() },
+  );
+  const message = { version: 1, request: 1, action: "newSession" };
+  expect(callback(message)).toBe(false);
+  expect(callback(message)).toBe(false);
+  expect(unavailable).toHaveBeenCalledOnce();
+  close();
 });

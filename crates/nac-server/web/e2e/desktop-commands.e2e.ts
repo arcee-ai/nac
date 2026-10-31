@@ -1,17 +1,19 @@
-import { createSession, expect, test } from "./harness";
+import { createProject, createSession, expect, test } from "./harness";
 
 test("browser without a desktop bridge retains shared New Chat and focus", async ({
   harness,
   page,
   request,
 }) => {
-  const id = await createSession(request, harness, "direct");
+  const project = await createProject(request, harness);
+  const id = await createSession(request, harness, "direct", project);
   await page.goto(`${harness.baseUrl}/#/session/${id}`);
   const composer = page.getByRole("combobox", { name: "Message" });
   await expect(composer).toBeVisible();
   expect(await page.evaluate(() => Reflect.has(globalThis, "__nacDesktop"))).toBe(false);
   await composer.focus();
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+O" : "Control+Shift+O");
+  const mac = await page.evaluate("/Mac|iPhone|iPad|iPod/.test(navigator.userAgent)");
+  await page.keyboard.press(mac ? "Meta+Shift+O" : "Control+Shift+O");
   const dialog = page.getByRole("dialog", { name: "New Chat", exact: true });
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
@@ -40,7 +42,8 @@ test("injected UI capability opens shared owners once without submitting a sessi
       (message: unknown) => owner?.(message) ?? false,
     );
   });
-  const id = await createSession(request, harness, "direct");
+  const project = await createProject(request, harness);
+  const id = await createSession(request, harness, "direct", project);
   await page.goto(`${harness.baseUrl}/#/session/${id}`);
   const composer = page.getByRole("combobox", { name: "Message" });
   await expect(composer).toBeVisible();

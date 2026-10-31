@@ -8122,9 +8122,7 @@ function Pm() {
 		activeMcp: d,
 		sshCount: s?.configurations.length ?? 0,
 		mcpLabel: d ? `MCP servers, ${d} active` : "MCP servers",
-		newSession: () => {
-			u ? r.newChat(u) : (!c || l) && r.create();
-		},
+		newSession: () => u ? (r.newChat(u), !0) : c && !l ? !1 : (r.create(), !0),
 		newProject: () => {
 			i.isManaged ? i.addRepository() : r.create();
 		},
@@ -8143,10 +8141,14 @@ function Fm(e, t) {
 	let n = !0, r = 0, i = e.connect((e) => {
 		if (!n || !e || typeof e != "object") return !1;
 		let i = e;
-		if (Object.keys(i).length !== 3 || i.version !== 1 || !Number.isSafeInteger(i.request) || i.request <= r || i.request > 2147483647 || i.action !== "newSession" && i.action !== "settings" && i.action !== "projects") return !1;
+		if (Object.keys(i).length !== 3 || ![
+			"version",
+			"request",
+			"action"
+		].every((e) => Object.hasOwn(i, e)) || i.version !== 1 || !Number.isSafeInteger(i.request) || i.request <= r || i.request > 2147483647 || i.action !== "newSession" && i.action !== "settings" && i.action !== "projects") return !1;
 		r = i.request;
 		try {
-			return t[i.action](), !0;
+			return t[i.action]() !== !1;
 		} catch {
 			return !1;
 		}
@@ -8172,12 +8174,14 @@ function Im({ port: e }) {
 		let t = (e) => {
 			let { ownsKeyboard: t, layers: n } = i.current;
 			if (!document.hasFocus() || !t(document.activeElement) || n.modalDepth() > 0) throw Error("The workspace does not own keyboard focus");
-			e();
+			return e();
 		};
 		return Fm(e, {
 			newSession: () => t(() => i.current.commands.newSession()),
 			settings: () => t(() => i.current.commands.openConfigurations()),
-			projects: () => t(() => i.current.commands.openProjects())
+			projects: () => t(() => {
+				i.current.commands.openProjects();
+			})
 		});
 	}, [e]), null;
 }

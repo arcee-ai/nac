@@ -67,7 +67,7 @@ it.each(["orchestrator", "direct-with-orchestrator"] as const)(
 
 it("waits for canonical route identity before choosing a creation destination", () => {
   const { result, rerender } = renderHook(useSidebarCommands, { wrapper });
-  act(() => result.current.newSession());
+  act(() => expect(result.current.newSession()).toBe(false));
   expect(state.create).not.toHaveBeenCalled();
   expect(state.newChat).not.toHaveBeenCalled();
   state.sessions = [legacy("orchestrator")];

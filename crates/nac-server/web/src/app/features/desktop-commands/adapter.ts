@@ -3,7 +3,7 @@ export type DesktopUIAction = "newSession" | "settings" | "projects";
 export interface DesktopCommandPort {
   connect(owner: (message: unknown) => boolean): () => void;
 }
-export type DesktopUIOwners = Record<DesktopUIAction, () => void>;
+export type DesktopUIOwners = Record<DesktopUIAction, () => boolean | void>;
 
 export function connectDesktopCommands(
   port: DesktopCommandPort | undefined,
@@ -17,6 +17,7 @@ export function connectDesktopCommands(
     const request = message as Record<string, unknown>;
     if (
       Object.keys(request).length !== 3 ||
+      !["version", "request", "action"].every((key) => Object.hasOwn(request, key)) ||
       request.version !== 1 ||
       !Number.isSafeInteger(request.request) ||
       (request.request as number) <= lastRequest ||
@@ -29,8 +30,7 @@ export function connectDesktopCommands(
     // Consume before invoking: throwing or synchronously replacing an owner never replays.
     lastRequest = request.request as number;
     try {
-      owners[request.action]();
-      return true;
+      return owners[request.action]() !== false;
     } catch {
       return false;
     }

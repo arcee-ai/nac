@@ -10,7 +10,7 @@ final class NativeCommandSmoke {
     private let commands: NativeCommands
     init(app: PreviewApp, commands: NativeCommands) { self.app = app; self.commands = commands }
 
-    func run(trustedInput: Bool = false) async throws -> [String: Any] {
+    func run(trustedInput: Bool = false, captures: URL? = nil) async throws -> [String: Any] {
         try await wait("production create-chat UI") {
             try await self.js("return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create chat' && !b.disabled)") as? Bool == true
         }
@@ -23,12 +23,14 @@ final class NativeCommandSmoke {
         let first = commands.smokeSnapshot
         try perform(menu: "NAC", title: "Settings…")
         try await dialog("Configurations", visible: true)
+        try await capture("settings", trustedInput: trustedInput, directory: captures)
         guard delta("dispatches", first) == 1 else { throw PreviewError.message("Settings was not dispatched once") }
         try await closeDialog()
         try await wait("composer focus restoration") { try await self.js("return document.activeElement?.getAttribute('aria-label') === 'Message'") as? Bool == true }
         let beforeNew = commands.smokeSnapshot
         try perform(menu: "File", title: "New Session")
         try await dialog("New Chat", visible: true)
+        try await capture("new-chat", trustedInput: trustedInput, directory: captures)
         guard delta("dispatches", beforeNew) == 1 else { throw PreviewError.message("New Session was not dispatched once") }
         try await closeDialog()
         try await wait("second composer focus restoration") { try await self.js("return document.activeElement?.getAttribute('aria-label') === 'Message'") as? Bool == true }
@@ -86,6 +88,17 @@ final class NativeCommandSmoke {
                 "shared_focus_restored": true, "negative_WK_receipts": rejected, "initial_bridge": first, "final_bridge": final,
                 "navigation_popup_restricted": true, "document_replaced": true, "retired": true,
                 "trusted_keyboard_edit_qualified": trustedInput, "input": inputEvidence ?? [:]]
+    }
+
+    private func capture(_ name: String, trustedInput: Bool, directory: URL?) async throws {
+        guard let directory else { return }
+        let image = try await app.webView.takeSnapshot(configuration: nil)
+        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw PreviewError.message("Command fixture snapshot encoding failed")
+        }
+        let prefix = trustedInput ? "commands-input" : "commands"
+        try png.write(to: directory.appendingPathComponent("\(prefix)-\(name).png"))
     }
 
     private func delta(_ key: String, _ before: [String: Any]) -> Int {
