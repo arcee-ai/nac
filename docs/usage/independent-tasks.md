@@ -96,7 +96,11 @@ explicit goal-action question.
 Start requires an explicitly requested finite `objective` and a stable
 caller-scoped `request_id`. Supply `token_budget` only if the human requested one.
 For strict Responses calls, pass `null` for an unrequested budget and arguments
-that do not apply to the selected action; ordinary callers may omit them.
+that do not apply to the selected action; ordinary callers may omit them. The
+flat input also accepts well-typed unused fields from providers and discards
+them. Only the selected action's fields enter its permissions and canonical
+request binding; unused values cannot edit or retarget a goal. Required active
+IDs, versions and objectives are never filled in automatically.
 Control replies and start receipts redact objectives and cut them to 1,000
 characters, with `objective_truncated` on each object. Reads retain the
 `read_task` current and prior objective-truncation flags. Stored argument

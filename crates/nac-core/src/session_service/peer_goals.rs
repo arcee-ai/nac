@@ -96,10 +96,11 @@ impl SessionService {
                             &service.metadata.store_path,
                             request.target(),
                         )
-                        .map_err(|_| {
-                            anyhow::anyhow!(PeerGoalError::Unavailable(
-                                "target is owned by another process"
-                            ))
+                        .map_err(|error| match error {
+                            sessions::SessionOperationLeaseError::Busy(_) => anyhow::anyhow!(
+                                PeerGoalError::Unavailable("target is owned by another process")
+                            ),
+                            sessions::SessionOperationLeaseError::Store(error) => error,
                         })?,
                     ),
                 };

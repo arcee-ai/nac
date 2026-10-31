@@ -198,7 +198,6 @@ fn unsupported_mutations_and_cross_action_argument_confusion_are_rejected() {
         json!({"action":"complete","session_id":"target","project_id":"project"}),
         json!({"action":"blocked","session_id":"target","project_id":"project"}),
         json!({"action":"clear","session_id":"target","project_id":"project"}),
-        json!({"action":"resume","session_id":"target","project_id":"project","goal_id":"g","expected_version":1,"objective":"replacement"}),
         json!({"action":"start","session_id":"target","project_id":"project","objective":"work"}),
     ] {
         assert!(PeerGoalTool.decode(input).is_err());
@@ -425,4 +424,42 @@ async fn lost_ack_restart_reconciliation_is_headless_and_passive_but_changed_arg
         .unwrap()
         .pending()
         .is_empty());
+}
+
+#[test]
+fn flat_provider_fields_are_projected_without_fabricating_required_identity_or_budget() {
+    for action in ["read", "start", "pause", "resume"] {
+        let wire = json!({"action":action,"session_id":"target","project_id":"project","request_id":"provider-request","objective":"provider objective","token_budget":37,"goal_id":"current-goal","expected_version":7});
+        let projected = PeerGoalTool.decode(wire).unwrap();
+        assert_eq!(projected.scope(), (action, "target", "project"));
+        match projected {
+            Input::Read { .. } => (),
+            Input::Start {
+                request_id,
+                objective,
+                token_budget,
+                ..
+            } => {
+                assert_eq!(request_id, "provider-request");
+                assert_eq!(objective, "provider objective");
+                assert_eq!(token_budget, Some(37));
+            }
+            Input::Pause {
+                goal_id,
+                expected_version,
+                ..
+            }
+            | Input::Resume {
+                goal_id,
+                expected_version,
+                ..
+            } => {
+                assert_eq!(goal_id, "current-goal");
+                assert_eq!(expected_version, 7);
+            }
+        }
+    }
+    for action in ["pause", "resume"] {
+        assert!(PeerGoalTool.decode(json!({"action":action,"session_id":"target","project_id":"project","goal_id":null,"expected_version":null,"request_id":"unused","objective":"unused","token_budget":37})).is_err());
+    }
 }

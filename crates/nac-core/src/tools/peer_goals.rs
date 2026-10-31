@@ -9,7 +9,31 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(rename_all = "snake_case")]
+enum Operation {
+    Read,
+    Start,
+    Pause,
+    Resume,
+}
+
+/// Match the advertised flat wire shape before projecting the selected action.
+/// Optional fields may be absent/null or supplied incidentally by a provider;
+/// only the selected operation's fields have meaning or mutation authority.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireInput {
+    action: Operation,
+    session_id: String,
+    project_id: String,
+    request_id: Option<String>,
+    objective: Option<String>,
+    token_budget: Option<u64>,
+    goal_id: Option<String>,
+    expected_version: Option<i64>,
+}
+
+#[derive(Debug)]
 pub(crate) enum Input {
     Read {
         session_id: String,
@@ -105,38 +129,67 @@ impl NativeTool for PeerGoalTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {def_type:"function".into(), function:FunctionDef {
             name:"task_goal".into(),
-            description:"Read, start, pause or resume a finite goal on an exact independent plain direct Local task. Each new goal action requires ordinary permission evaluation AND an explicit human reply for this exact action/target/arguments. An exact previously admitted start request replays its immutable receipt under ordinary policy without a fresh mutation or approval. General coordination intent, read access, auto-approval and peer messages grant no goal authority. Start only for explicitly requested finite objective/budget intent; omit token_budget unless supplied. Persist request_id and reuse identical arguments after lost acknowledgement; the immutable receipt describes original admission, never current completion. Pause/resume require current goal_id and expected_version. Pause prevents future continuation without cancelling active tools/turns. Resume preserves remaining budget and cannot restart terminal/exhausted goals. Only the target can mark complete/blocked. No replacement, clear or budget editing. Pass null for arguments that do not apply to this action and for an unrequested token budget.".into(),
+            description:"Read, start, pause or resume a finite goal on an exact independent plain direct Local task. Each new goal action requires ordinary permission evaluation AND an explicit human reply for this exact action/target/arguments. An exact previously admitted start request replays its immutable receipt under ordinary policy without a fresh mutation or approval. General coordination intent, read access, auto-approval and peer messages grant no goal authority. Start only for explicitly requested finite objective/budget intent; omit token_budget unless supplied. Persist request_id and reuse identical arguments after lost acknowledgement; the immutable receipt describes original admission, never current completion. Pause/resume require current goal_id and expected_version. Pause prevents future continuation without cancelling active tools/turns. Resume preserves remaining budget and cannot restart terminal/exhausted goals. Only the target can mark complete/blocked. No replacement, clear or budget editing. Pass null for arguments that do not apply to this action and for an unrequested start token budget. Unused fields are ignored and can never change the chosen action, target, objective or budget.".into(),
             parameters:json!({"type":"object","additionalProperties":false,"properties":{
                 "action":{"type":"string","enum":["read","start","pause","resume"]},
                 "session_id":{"type":"string","maxLength":160},"project_id":{"type":"string","maxLength":160},
-                "request_id":{"type":["string","null"],"maxLength":160,"description":"Required for start; durable caller-scoped idempotency key"},
-                "objective":{"type":["string","null"],"maxLength":8000},"token_budget":{"type":["integer","null"],"minimum":1},
-                "goal_id":{"type":["string","null"],"maxLength":160},"expected_version":{"type":["integer","null"],"minimum":0}
+                "request_id":{"type":["string","null"],"maxLength":160,"description":"Used only for start; durable caller-scoped idempotency key"},
+                "objective":{"type":["string","null"],"maxLength":8000,"description":"Finite objective required for start; ignored by other actions"},"token_budget":{"type":["integer","null"],"minimum":1,"description":"Only start uses this optional budget; null unless the human supplied one"},
+                "goal_id":{"type":["string","null"],"maxLength":160,"description":"Required only for pause/resume; exact current goal identity"},"expected_version":{"type":["integer","null"],"minimum":0,"description":"Required only for pause/resume; exact current goal version"}
             },"required":["action","session_id","project_id","request_id","objective","token_budget","goal_id","expected_version"]}),
         }}
     }
     fn admission(&self) -> ToolAdmission {
         ToolAdmission::Exclusive
     }
-    fn decode(&self, mut value: Value) -> Result<Input, ToolResult> {
-        // Strict Responses represents optional/action-inapplicable arguments as
-        // null. Preserve omission for ordinary callers, and reject unknown
-        // fields even when null. The tagged decoder enforces action requirements.
-        if let Some(object) = value.as_object_mut() {
-            for key in [
-                "request_id",
-                "objective",
-                "token_budget",
-                "goal_id",
-                "expected_version",
-            ] {
-                if object.get(key).is_some_and(Value::is_null) {
-                    object.remove(key);
+    fn decode(&self, value: Value) -> Result<Input, ToolResult> {
+        let WireInput {
+            action,
+            session_id,
+            project_id,
+            request_id,
+            objective,
+            token_budget,
+            goal_id,
+            expected_version,
+        } = serde_json::from_value(value)
+            .map_err(|error| argument_error(format!("invalid task_goal arguments: {error}")))?;
+        let input = match action {
+            Operation::Read => Input::Read {
+                session_id,
+                project_id,
+            },
+            Operation::Start => Input::Start {
+                session_id,
+                project_id,
+                request_id: request_id
+                    .ok_or_else(|| argument_error("start requires request_id"))?,
+                objective: objective
+                    .ok_or_else(|| argument_error("start requires an explicit finite objective"))?,
+                token_budget,
+            },
+            operation @ (Operation::Pause | Operation::Resume) => {
+                let goal_id =
+                    goal_id.ok_or_else(|| argument_error("pause/resume require exact goal_id"))?;
+                let expected_version = expected_version
+                    .ok_or_else(|| argument_error("pause/resume require expected_version"))?;
+                if matches!(operation, Operation::Pause) {
+                    Input::Pause {
+                        session_id,
+                        project_id,
+                        goal_id,
+                        expected_version,
+                    }
+                } else {
+                    Input::Resume {
+                        session_id,
+                        project_id,
+                        goal_id,
+                        expected_version,
+                    }
                 }
             }
-        }
-        let input: Input =
-            serde_json::from_value(value).map_err(|e| argument_error(e.to_string()))?;
+        };
         let (_, target, project) = input.scope();
         let valid_id = |s: &str| !s.trim().is_empty() && s.len() <= 160;
         if !valid_id(target) || !valid_id(project) {
@@ -289,7 +342,7 @@ impl NativeTool for PeerGoalTool {
                     anyhow::ensure!(
                         crate::store::load_session_project_id(&path, &check_target)?.as_deref()
                             == Some(&check_project),
-                        "target is outside the named project"
+                        "target is unavailable in the named project"
                     );
                     if is_read {
                         let summary = crate::sessions::load_session_summary(&path, &check_target)?

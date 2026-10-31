@@ -215,7 +215,7 @@ async fn peer_goals_native_authorization_reaches_real_target_owner_and_replays_a
     let _human = bus.subscribe_assistant_deltas();
     let mut events = bus.subscribe();
     broker.attach_event_bus(bus);
-    let start = json!({"action":"start","session_id":"target","project_id":"project","request_id":"native","objective":"finite native task","token_budget":100,"goal_id":null,"expected_version":null,"_nac":null});
+    let start = json!({"action":"start","session_id":"target","project_id":"project","request_id":"native","objective":"finite native task","token_budget":100,"goal_id":"unused-provider-goal","expected_version":999,"_nac":null});
     let admitted = native_with_human_reply(&runtime, &broker, &mut events, start.clone()).await;
     assert!(!admitted.is_error, "{}", admitted.content);
     let current = store::load_session_goal(&path, "target").unwrap().unwrap();
@@ -238,7 +238,7 @@ async fn peer_goals_native_authorization_reaches_real_target_owner_and_replays_a
         },
     )
     .unwrap();
-    let paused = native_with_human_reply(&runtime, &broker, &mut events, json!({"action":"pause","session_id":"target","project_id":"project","goal_id":current.goal_id,"expected_version":current.version,"request_id":null,"objective":null,"token_budget":null,"_nac":null})).await;
+    let paused = native_with_human_reply(&runtime, &broker, &mut events, json!({"action":"pause","session_id":"target","project_id":"project","goal_id":current.goal_id,"expected_version":current.version,"request_id":"unused-provider-request","objective":"unused provider objective","token_budget":1,"_nac":null})).await;
     assert!(!paused.is_error, "{}", paused.content);
     assert!(!paused
         .content
@@ -248,6 +248,10 @@ async fn peer_goals_native_authorization_reaches_real_target_owner_and_replays_a
     let paused: serde_json::Value =
         serde_json::from_str(paused.content.as_text().unwrap()).unwrap();
     assert_eq!(paused["goal"]["objective_truncated"], true);
+    assert_eq!(
+        paused["goal"]["token_budget"], 100,
+        "unused pause budget cannot edit the goal"
+    );
     assert!(
         paused["goal"]["objective"]
             .as_str()
