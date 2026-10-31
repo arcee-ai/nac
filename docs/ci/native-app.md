@@ -22,7 +22,7 @@ passed OCR and were visually inspected as readable system WKWebView images.
 This qualifies that baseline on image 20261026.0455.2, not the full ticket or
 the older image candidate.
 
-The CI runner now opts into the additional `ci-terminal` scenario. It creates
+The optional `ci-terminal` scenario creates
 one human shell through the production New shell control, checks event-post
 capability without prompting, and sends one predeclared harmless workspace-file
 operation through public CoreGraphics `CGEventPostToPid`. Each paired key is
@@ -41,6 +41,27 @@ scenarios passed again. Required trusted-input acceptance stays failed; no
 permission prompt or grant was attempted. This case does not establish
 ALL-352's physical typing, IME, paste or fidelity acceptance.
 
+The primary CI job now requires `ci-terminal-xctest`, a separate supported
+XCTest keyboard path with the same exact-file/trusted-DOM/cleanup assertions.
+The checked-in UI test project and shared scheme generate a real `.xctestrun`
+with `xcodebuild build-for-testing`; CI validates its fixture binding, then uses
+`test-without-building` with parallel testing disabled and one explicit test.
+The test owns launch from the exact verified relocated `.app` URL, refuses any
+existing preview instance, and checks PID incarnation, bundle URL, window and
+fresh unlocked console ownership before each character. It uses the focused
+terminal's public `XCUIElement.typeText`/`typeKey` APIs without clicking,
+refocusing or substituting another element. The app independently guards its
+terminal focus while awaiting input. The app's CoreGraphics capability remains
+a separate recorded observation, including false.
+
+Read-only preflight inspects only the existing Xcode Helper Accessibility row,
+`DevToolsSecurity -status` and no-argument `automationmodetool` status. Missing
+authorization stops before XCTest launch; no provisioning/grant/prompt/enable
+command exists in this runner. Actual generated `.xcresult` identity and
+sanitized `xcresulttool` summary are retained; raw result diagnostics stay
+private. This path is a candidate pending its first full-Xcode result and does
+not establish physical keyboard, CJK, clipboard or VoiceOver acceptance.
+
 `CITerminal.swift` and its dispatcher/source-list hooks are smoke-only. Ordinary
 preview builds and default `preview.sh smoke` keep their existing behavior;
 only `NAC_MAC_CI_TERMINAL=1` requests the extra scenario. The ordinary binary's
@@ -55,7 +76,7 @@ The same-head repeat `41173290903` landed on image `20261013.0424.1` and failed
 that drift guard. Its official inventory at runner-images commit
 `49bfbe040355338053d9ef330e4e7a1190c59714` was checked against the recorded
 Xcode/SDK/OS envelope. Both exact inventory identities are now listed as
-candidates; neither has passed the actual-app GUI journey yet. New image
+candidates; the newer image passed the baseline described above. New image
 identities still fail, and ordinary Rust/Node versions remain explicitly pinned
 by setup actions regardless of the runner's defaults.
 The first hosted receipt (run `41173262488`, job `124455556461`, merge candidate
@@ -113,7 +134,7 @@ not yet qualify terminal descendants or consumer lifecycle behavior.
 | Consumer close/reopen/explicit Quit | ALL-344 supplier not integrated; preview close is not consumer lifecycle |
 | Shared approval | Pending exact scripted operation and actual-app journey |
 | Renderer replacement | Pending supported supplier and actual-app journey |
-| Trusted OS terminal input and descendant cleanup | ALL-354 `ci-terminal` candidate uses the delivered Local terminal owner; actual OS typing/cleanup qualification pending. Broader ALL-352 remains separate |
+| Trusted OS terminal input and descendant cleanup | ALL-354 `ci-terminal-xctest` candidate uses the delivered Local terminal owner; actual OS typing/cleanup qualification pending. App-owned `ci-terminal` CG capability unavailable; broader ALL-352 remains separate |
 
 Baseline smoke is a useful first milestone, **not full ALL-354 completion**.
 Continue the remaining rows against actual committed suppliers without changing
@@ -171,8 +192,9 @@ patch version or treat the moving label as an immutable image pin.
 The source's workspace builder receives the exact just-built private engine,
 then its six baseline scenarios and both direct/legacy workspace scenarios run
 against the same instrumented native binary. The source's manifest/projection
-must agree on source/native/engine identity; all scripted checks and cleanup must
-pass. External OCR checks baseline chat, rich workspace, approval and legacy
+must agree on source/native/engine identity; all required scripted checks and cleanup must
+pass. The explicitly separate external-link row may remain unavailable and keeps
+that disposition; visible paint remains required. External OCR checks baseline chat, rich workspace, approval and legacy
 captures. Physical input/IME/VoiceOver and product-minimum rows remain explicitly
 unavailable in the unchanged source report. Exact 14.8.9 plus its observed modern
 system WebKit/Safari does not establish 14.0 or original-Sonoma WebKit behavior.
@@ -183,3 +205,14 @@ environment, never a pass. Primary macOS 26 is unchanged, and no minimum product
 OS is selected. `DEVELOPER_DIR` is the compiler selector; the separate
 `xcode_select_default` field explains any unchanged global-default path in the
 target's raw report. No global toolchain selection is modified.
+
+The single macOS 14 diagnostic `41179611704`, native job `124474237215`, artifact
+`13034552442` built exact target `fa94a859` from harness `27275a34`. It observed
+Swift driver 1.115.1 / Apple Swift 6.0.3 (swiftlang-6.0.3.1.10,
+clang-1600.0.30.1), system WebKit 19618.3.11.11.5 and Safari 26.6 /
+19624.4.5.18.1. All six baseline cases and both source drivers passed with owned
+cleanup and no crash report. Qualification still failed: projects and child
+transcript images visibly contain loading placeholders, matching the target's
+`visible-paint: unavailable` disposition. Rich chat and approval captures were
+readable on inspection. The observed compiler is not yet a qualified pin; this
+diagnostic establishes neither full workspace acceptance nor a product minimum.

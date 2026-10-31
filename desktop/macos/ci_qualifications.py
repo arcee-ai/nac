@@ -68,7 +68,9 @@ def require_workspace(matrix, episodes, baseline, target):
     for scenario, record in episodes.items():
         if (any(record.get(key) is not True for key in ('passed', 'engine_reaped', 'profile_removed'))
                 or record.get('launcher_exit_code') != 0 or not record.get('checks')
-                or any(check.get('status') != 'pass' for check in record['checks'].values())):
+                or any(check.get('status') != 'pass'
+                       and not (key == 'links' and check.get('status') == 'unavailable')
+                       for key, check in record['checks'].items())):
             raise RuntimeError(f'Workspace scenario incomplete or failed: {scenario}')
         checks[scenario] = {key: check['status'] for key, check in record['checks'].items()}
     return {'workspace_checks': checks, 'baseline_scenarios': len(cases),

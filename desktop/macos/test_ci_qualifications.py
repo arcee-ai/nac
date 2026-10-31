@@ -71,6 +71,9 @@ class ExactSourceTests(unittest.TestCase):
                 'launcher_exit_code': 0, 'checks': {'visible-paint': {'status': 'pass'}}}
         episodes = {name: case for name in ('workspace-direct', 'workspace-legacy')}
         self.assertIsNone(require_workspace(matrix, episodes, baseline, target)['target_minimum_selected'])
+        separate_links = {**case, 'checks': {**case['checks'], 'links': {'status': 'unavailable'}}}
+        disposition = require_workspace(matrix, {**episodes, 'workspace-direct': separate_links}, baseline, target)
+        self.assertEqual(disposition['workspace_checks']['workspace-direct']['links'], 'unavailable')
         with self.assertRaisesRegex(RuntimeError, 'identity'):
             require_workspace(matrix, episodes, {**baseline, 'native_sha256': 'c' * 64}, target)
         with self.assertRaisesRegex(RuntimeError, 'failed'):
