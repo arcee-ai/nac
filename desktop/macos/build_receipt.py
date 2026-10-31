@@ -50,6 +50,19 @@ def main():
             raise SystemExit('Native source changed while building; discard this artifact and rebuild.')
         if digest(app / 'Contents/Resources/nac-web') != receipt['engine_sha256']:
             raise SystemExit('Bundled engine changed while compiling the native owner.')
+        if digest(app / 'Contents/Info.plist') != receipt['info_plist_sha256']:
+            raise SystemExit('Bundle metadata changed while compiling the native owner.')
+        if receipt['normal_startup']:
+            fixtures = {'PreviewProfile.swift', 'FixtureProvider.swift', 'FixtureBootstrap.swift'}
+            if fixtures.intersection(Path(path).name for path in receipt['native_source_files']):
+                raise SystemExit('LOCAL_APP compiler inputs contain disposable preview definitions.')
+            receipt['preview_definitions_excluded'] = True
+            if not receipt['smoke_instrumentation']:
+                markers = ['preview-dummy-only', 'nac-mac-preview-', 'FixtureProvider', 'FixtureBootstrap']
+                binary = (app / 'Contents/MacOS/NACPreview').read_bytes()
+                if any(marker.encode() in binary for marker in markers):
+                    raise SystemExit('Ordinary app binary contains disposable fixture markers.')
+                receipt['fixture_markers_absent'] = markers
         receipt['native_sha256'] = digest(app / 'Contents/MacOS/NACPreview')
         (app / 'Contents/Resources/build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     else:

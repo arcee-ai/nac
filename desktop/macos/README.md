@@ -181,6 +181,12 @@ stores or inherited environment; the native app never copies or persists them.
 Missing Git prevents launch with recovery guidance. Optional SSH, Podman and
 MCP discovery retain their normal shared settings and chosen execution backend.
 
+Ordinary and startup-smoke builds exclude PreviewProfile, FixtureProvider and
+FixtureBootstrap definitions from their compiler inputs. The ordinary binary
+also rejects disposable fixture markers during provenance verification.
+`smoke-build` builds the existing disposable preview instrumentation without
+launching it, allowing separate build and native/browser leases.
+
 `startup-build` compiles `LOCAL_APP` plus `PREVIEW_SMOKE` into the separate
 `NAC Startup Smoke.app`. Run `python3 -B desktop/macos/startup_smoke.py APP OUTPUT`
 under the host's native/browser lease. `startup-smoke` combines those steps for

@@ -16,12 +16,14 @@ final class PreviewEngine {
     var onExit: ((Int32) -> Void)?
     var onFailure: ((String) -> Void)?
 
+    #if !LOCAL_APP
     func launch(executable: URL, profile: PreviewProfile, provider: FixtureProvider) throws {
         var environment = profile.environment
         environment["MODELS_DEV_URL"] = provider.baseURL.appendingPathComponent("models-dev").absoluteString
         try launch(executable: executable, configuration: EngineLaunchConfiguration(
             cwd: profile.workspace, store: profile.store, environment: environment))
     }
+    #endif
 
     func launch(executable: URL, configuration: EngineLaunchConfiguration) throws {
         guard run == nil || run?.pid == 0 else { throw PreviewError.message("The previous engine is still stopping.") }

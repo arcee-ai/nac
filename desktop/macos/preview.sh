@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 mode="${1:-run}"
-case "$mode" in build|run|smoke|app-build|app-run|startup-build|startup-smoke) ;; *) echo 'usage: preview.sh [build|run|smoke|app-build|app-run|startup-build|startup-smoke]' >&2; exit 2 ;; esac
+case "$mode" in build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke) ;; *) echo 'usage: preview.sh [build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke]' >&2; exit 2 ;; esac
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
     echo 'The development preview requires Apple Silicon macOS and an Apple Swift SDK.' >&2; exit 1;
 }
@@ -10,7 +10,7 @@ output="${NAC_MAC_OUTPUT:-$PWD/target/macos-preview}"
 mkdir -p "$output"
 output="$(cd "$output" && pwd)"
 app="$output/NAC Development Preview.app"
-if [[ "$mode" == smoke ]]; then app="$output/NAC Development Preview Smoke.app"; fi
+if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then app="$output/NAC Development Preview Smoke.app"; fi
 if [[ "$mode" == app-* ]]; then app="$output/NAC.app"; fi
 if [[ "$mode" == startup-* ]]; then app="$output/NAC Startup Smoke.app"; fi
 if [[ "${NAC_MAC_SKIP_ENGINE_BUILD:-0}" != 1 ]]; then
@@ -31,10 +31,13 @@ engine_identity=$("$app/Contents/Resources/nac-web" __desktop-identity)
 printf '%s\n' "$engine_identity" > "$app/Contents/Resources/engine-identity.json"
 sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/PreviewEngine.swift
          desktop/macos/EngineProtocol.swift
-         desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift
-         desktop/macos/PreviewProfile.swift desktop/macos/FixtureProvider.swift desktop/macos/FixtureBootstrap.swift)
-flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O)
-if [[ "$mode" == smoke ]]; then
+         desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift)
+flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O -framework AppKit -framework WebKit)
+if [[ "$mode" != app-* && "$mode" != startup-* ]]; then
+    sources+=(desktop/macos/PreviewProfile.swift desktop/macos/FixtureProvider.swift desktop/macos/FixtureBootstrap.swift)
+    flags+=(-framework Network)
+fi
+if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then
     sources+=(desktop/macos/PreviewSmoke.swift)
     flags+=(-D PREVIEW_SMOKE)
 fi
@@ -45,7 +48,7 @@ if [[ "$mode" == startup-* ]]; then
 fi
 receipt_inputs="$output/build-inputs-$mode.json"
 python3 -B desktop/macos/build_receipt.py capture "$receipt_inputs" "$app" "$mode" "${flags[@]}" -- "${sources[@]}"
-xcrun swiftc "${flags[@]}" -framework AppKit -framework WebKit -framework Network \
+xcrun swiftc "${flags[@]}" \
     "${sources[@]}" -o "$app/Contents/MacOS/NACPreview"
 python3 -B desktop/macos/build_receipt.py finish "$receipt_inputs" "$app"
 printf '%s\n' "$app"

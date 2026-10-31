@@ -5,8 +5,10 @@ import WebKit
 final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
     private(set) var window: NSWindow!
     private(set) var webView: WKWebView!
+    #if !LOCAL_APP
     private(set) var profile: PreviewProfile?
     let provider = FixtureProvider()
+    #endif
     let engine = PreviewEngine()
     private(set) var baseURL: URL?
     private(set) var failure: String?
@@ -200,7 +202,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         #else
         status.stringValue = "NAC preview could not continue\n\n\(message)\n\nClose this window to clean up the disposable fixture.\n\n\(engine.log.suffix(4000))"
         #endif
+        #if !LOCAL_APP
         provider.stop()
+        #endif
         engine.stop {}
     }
 
@@ -221,6 +225,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         // Let Rust cancel runs and settle persistence before stopping the provider.
         engine.stop { [weak self] in
             guard let self else { return }
+            #if !LOCAL_APP
             self.provider.stop()
             do { try self.profile?.remove() }
             catch {
@@ -231,6 +236,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
                 #endif
                 #endif
             }
+            #endif
             #if PREVIEW_SMOKE
             #if LOCAL_APP
             self.startupSmoke?.didStop()

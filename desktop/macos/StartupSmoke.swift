@@ -83,7 +83,7 @@ final class StartupSmoke {
             evidence["base_url"] = app.baseURL?.absoluteString
             evidence["selected_cwd"] = app.launchConfiguration?.cwd.path
             evidence["selected_store"] = app.launchConfiguration?.store.path
-            evidence["fixture_provider_responses"] = app.provider.responseCount
+            evidence["internal_fixture_provider"] = "excluded_from_LOCAL_APP"
             if evidence["paint"] == nil {
                 evidence["paint"] = value("--smoke-paint") == "1" ? "not_captured" : "pending_locked_session"
             }
@@ -135,8 +135,10 @@ final class StartupSmoke {
         try await waitJS("configured local response", "return document.body.innerText.includes('Finder configured local response.');")
         let snapshot = try await js("return await (await fetch('/sessions/'+location.hash.split('/')[2])).json();") as! [String: Any]
         let metadata = snapshot["metadata"] as! [String: Any]
-        guard metadata["sandboxed"] as? Bool == false,
-              metadata["ssh_host"] == nil || metadata["ssh_host"] is NSNull else {
+        let summaries = snapshot["sessions"] as? [[String: Any]] ?? []
+        guard let summary = summaries.first(where: { ($0["session_id"] as? String) == (metadata["session_id"] as? String) }),
+              summary["sandboxed"] as? Bool == false,
+              summary["ssh_host"] == nil || summary["ssh_host"] is NSNull else {
             throw DesktopStartupError.message("Configured run did not retain Local execution")
         }
         evidence["session_id"] = metadata["session_id"]
