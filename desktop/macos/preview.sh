@@ -38,7 +38,7 @@ if [[ "$mode" != app-* && "$mode" != startup-* ]]; then
     flags+=(-framework Network)
 fi
 if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then
-    sources+=(desktop/macos/PreviewSmoke.swift)
+    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/CITerminal.swift)
     flags+=(-D PREVIEW_SMOKE)
 fi
 if [[ "$mode" == app-* || "$mode" == startup-* ]]; then flags+=(-D LOCAL_APP); fi

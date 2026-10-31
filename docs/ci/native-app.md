@@ -15,6 +15,32 @@ uses Apple's local Vision OCR to reject blank/loading snapshots and require the
 known transcript in both streamed and persisted WKWebView captures. This reader
 is a CI executable, never bundled with the application.
 
+The baseline on merge candidate `d0254106b0885b751110e8d5041d63f31d5653dd`
+(PR head `329e64ac`, base `f71515d`) passed all six ALL-340 scenarios in hosted
+run `41174077406`, job `124458145320`, artifact `13032293753`. Both chat captures
+passed OCR and were visually inspected as readable system WKWebView images.
+This qualifies that baseline on image 20261026.0455.2, not the full ticket or
+the older image candidate.
+
+The CI runner now opts into the additional `ci-terminal` scenario. It creates
+one human shell through the production New shell control, checks event-post
+capability without prompting, and sends one predeclared harmless workspace-file
+operation through public CoreGraphics `CGEventPostToPid`. Each paired key is
+bound to this exact frontmost/key fixture window, focused xterm textarea and a
+fresh unlocked console observation. Key-up always targets the same owned
+process; focus loss stops input. An unfocused-terminal negative control must
+reject before any key posts. The journey requires genuine DOM `isTrusted`
+keydown observations, exact native workspace-file bytes, rendered terminal
+output and settled production terminal termination. It never overrides trust,
+uses clipboard data, changes TCC or replays uncertain input/termination. This
+one ASCII typing case is awaiting hosted qualification; it does not establish
+ALL-352's physical typing, IME, paste or fidelity acceptance.
+
+`CITerminal.swift` and its dispatcher/source-list hooks are smoke-only. Ordinary
+preview builds and default `preview.sh smoke` keep their existing behavior;
+only `NAC_MAC_CI_TERMINAL=1` requests the extra scenario. The ordinary binary's
+symbol/string check also rejects CI instrumentation.
+
 `desktop/macos/ci-toolchain.json` records the qualification envelope from the
 official runner-images revision `102f6553849daabcbd37e321e2e224dbab45c469`:
 Xcode 26.6 build 17F113, SDK 26.5, macOS 26.6.2 / 25G83, image
@@ -56,7 +82,10 @@ PR head/base and workflow candidate SHA (normally the PR merge candidate), exact
 OS/image/Xcode/SDK/Swift, Rust/Node, existing smoke binary digests, per-scenario
 results, bounded logs, WKWebView/native PNGs and up to three new NACPreview crash
 reports. Export masks exact inherited secret values and runner/checkout paths;
-logs/JSON are capped at 256 KiB, images at 2 MiB, total at 12 MiB. Only exported
+logs/JSON are capped at 256 KiB, images at 2 MiB, total at 12 MiB. Locked setup
+and fixture controls run inside the evidence supervisor so network/setup
+failure retains bounded redacted logs too. Commands share a 30-minute budget,
+leaving ten minutes of the job limit for owned cleanup and artifact upload. Only exported
 fixture evidence is uploaded, with `always()` and seven-day retention. No store,
 bundle, environment dump, unrelated crash report or global process listing is
 uploaded. Setup/network failure remains a failed step; absent evidence is also
@@ -73,13 +102,13 @@ not yet qualify terminal descendants or consumer lifecycle behavior.
 | Journey | Committed supplier / state |
 | --- | --- |
 | Actual launch, Create chat, partial stream, reload, local fonts/chunks | ALL-340 `f71515d14068592a161c17cbd53832ae1b295263`, `PreviewSmoke.swift` |
-| Missing/exiting/hung engine, close during startup/active run | Same ALL-340 baseline; actual hosted qualification pending |
-| Readable snapshots, full-Xcode/image checks, CI export | ALL-354 candidate; actual hosted qualification pending |
+| Missing/exiting/hung engine, close during startup/active run | Same ALL-340 baseline; hosted baseline passed at `d0254106` |
+| Readable snapshots, full-Xcode/image checks, CI export | ALL-354 baseline `329e64ac`, hosted merge `d0254106` passed |
 | Native workspace menus | ALL-346 supplier not integrated |
 | Consumer close/reopen/explicit Quit | ALL-344 supplier not integrated; preview close is not consumer lifecycle |
 | Shared approval | Pending exact scripted operation and actual-app journey |
 | Renderer replacement | Pending supported supplier and actual-app journey |
-| Trusted OS terminal input and descendant cleanup | ALL-352 supplier not integrated; DOM events cannot qualify this |
+| Trusted OS terminal input and descendant cleanup | ALL-354 `ci-terminal` candidate uses the delivered Local terminal owner; actual OS typing/cleanup qualification pending. Broader ALL-352 remains separate |
 
 Baseline smoke is a useful first milestone, **not full ALL-354 completion**.
 Continue the remaining rows against actual committed suppliers without changing
