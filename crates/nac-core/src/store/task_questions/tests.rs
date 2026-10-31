@@ -520,3 +520,60 @@ fn masking_never_collapses_changed_creation_or_answer_arguments() {
     assert!(!serialized.contains("private answer"));
     cleanup(&path);
 }
+
+#[test]
+fn exact_read_rejects_reassignment_after_scope_snapshot_without_disclosing_new_owner_question() {
+    let (path, original) = fixture(QuestionResponder::Information);
+    let TaskLookup::Found(snapshot) = load_direct_task(&path, "target").unwrap() else {
+        panic!("expected authorized target snapshot")
+    };
+    assert_eq!(
+        load_task_question_scoped(
+            &path,
+            "target",
+            &original.request.request_id,
+            snapshot.project_id.as_deref()
+        )
+        .unwrap(),
+        Some(original.clone())
+    );
+    insert_project(
+        &path,
+        NewProject {
+            project_id: "new-owner".into(),
+            name: None,
+            description: None,
+            cwd: PathBuf::from("/tmp/project"),
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        },
+    )
+    .unwrap();
+    // Deterministic supported mutation between the native scope snapshot and
+    // exact read. It cancels the old question and the new owner creates one.
+    assign_session_to_project(&path, "new-owner", "target").unwrap();
+    let mut request = original.request.clone();
+    request.request_id = "new-owner-question".into();
+    request.text = "New owner's private question".into();
+    let question = create_task_question(&path, &request, 0).unwrap();
+    for id in [&original.request.request_id, &request.request_id] {
+        let error = load_task_question_scoped(&path, "target", id, snapshot.project_id.as_deref())
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<QuestionError>(),
+            Some(&QuestionError::Conflict)
+        );
+        assert!(!error.to_string().contains(&request.text));
+    }
+    assert_eq!(
+        load_task_question_scoped(&path, "target", &request.request_id, Some("new-owner")).unwrap(),
+        Some(question)
+    );
+    assert_eq!(
+        load_task_question_scoped(&path, "target", "missing", Some("new-owner")).unwrap(),
+        None
+    );
+    cleanup(&path);
+}

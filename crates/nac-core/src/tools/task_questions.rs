@@ -228,9 +228,15 @@ impl NativeTool for ReadQuestionTool {
             if scoped["status"] != "found" {
                 return read::result(scoped);
             }
+            let expected_project = scoped["task"]["project_id"].as_str().map(str::to_owned);
             let path = services.runtime.store_path.clone();
             match crate::store::spawn_blocking_store_caller(move || {
-                crate::store::load_task_question(&path, &input.session_id, &input.request_id)
+                crate::store::task_questions::load_task_question_scoped(
+                    &path,
+                    &input.session_id,
+                    &input.request_id,
+                    expected_project.as_deref(),
+                )
             })
             .await
             {
