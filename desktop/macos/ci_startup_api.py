@@ -19,9 +19,53 @@ from ci_startup_owner import native_identity, signature
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def require(condition, reason):
+DIAGNOSTIC_GUARDS = frozenset('''
+api_witness_unavailable ambiguous_serving_engine app_owned_serving_parent serving_engine_replaced
+listener_process_generation owned_listener_observation listener_pid unique_local_listener
+listener_process_changed ready_build_identity api_response_bound owned_loopback_endpoint
+entry_asset_root entry_asset_prefix entry_asset_path entry_asset_source entry_asset_inventory
+asset_observation_interrupted served_entry_asset_bytes onboarding_empty_store api_listener_changed
+entry_document_bound entry_document_position entry_document_json entry_document_duplicate_key
+entry_document_shape entry_document_identity entry_document_scope entry_document_uuid
+entry_document_release live_app_api_evidence_missing owned_store_cardinality
+local_project_workspace local_session_model_and_project selected_store_session_metadata
+saved_dummy_model_configuration canonical_transcript unexpected_tool_or_message unexpected_tool_request
+persisted_transcript_matches_snapshot unexpected_terminal event_schema canonical_completed_run
+'''.split())
+
+
+def diagnostic_facts(facts):
+    result = {}
+    for key, value in (facts or {}).items():
+        if key in ('expected_bytes', 'actual_bytes', 'asset_ordinal', 'http_status'):
+            if type(value) is int and 0 <= value <= 8 * 1024 * 1024:
+                result[key] = value
+        elif key in ('expected_sha256', 'actual_sha256'):
+            if type(value) is str and re.fullmatch('[0-9a-f]{64}', value):
+                result[key] = value
+    return result
+
+
+class FixtureFailure(RuntimeError):
+    def __init__(self, reason, facts=None):
+        super().__init__('Startup external fixture failed: ' + reason)
+        self.code = reason if reason in DIAGNOSTIC_GUARDS else 'unclassified_fixture_guard'
+        self.facts = diagnostic_facts(facts)
+
+
+def failure_metadata(error):
+    # Never format an arbitrary exception: messages may contain HTTP bodies,
+    # credentials, paths or even a user-defined __str__ implementation.
+    known = (RuntimeError, ValueError, TypeError, AttributeError, KeyError, json.JSONDecodeError)
+    coded = type(error) is FixtureFailure
+    return {'exception_type': 'FixtureFailure' if coded else type(error).__name__ if type(error) in known else 'unknown',
+            'guard_code': error.code if coded and error.code in DIAGNOSTIC_GUARDS else 'unknown',
+            'operands': diagnostic_facts(error.facts) if coded else {}}
+
+
+def require(condition, reason, *, facts=None):
     if not condition:
-        raise RuntimeError('Startup external fixture failed: ' + reason)
+        raise FixtureFailure(reason, facts)
 
 
 def endpoint(value):
