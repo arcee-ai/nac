@@ -6,8 +6,8 @@ use std::{
 };
 
 use nac_core::events::{
-    AttentionApply, AttentionChange, AttentionDecision, AttentionFact, AttentionObserver,
-    AttentionSource, AttentionSourceSnapshot, AttentionUnavailable, SettledWork,
+    AttentionApply, AttentionAvailability, AttentionChange, AttentionDecision, AttentionFact,
+    AttentionObserver, AttentionSource, AttentionSourceSnapshot, AttentionUnavailable, SettledWork,
     SettledWorkDisposition,
 };
 use tokio::sync::watch;
@@ -94,6 +94,7 @@ pub(crate) enum AttentionRead {
     Closed,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AttentionRetention {
     pub sources: usize,
@@ -119,6 +120,7 @@ struct SourceState {
     decisions: Vec<DecisionState>,
     completed_runs: BTreeSet<String>,
     deleted: bool,
+    availability: AttentionAvailability,
 }
 
 impl SourceState {
@@ -145,6 +147,7 @@ impl SourceState {
                 .collect(),
             completed_runs,
             deleted: false,
+            availability: snapshot.availability,
         }
     }
 
@@ -159,6 +162,7 @@ impl SourceState {
                 .filter(|d| d.pending)
                 .map(|d| d.decision.clone())
                 .collect(),
+            availability: self.availability,
         }
     }
 
@@ -253,6 +257,7 @@ impl AttentionHub {
         self.lock().boundary
     }
 
+    #[cfg(test)]
     pub fn retention(&self) -> AttentionRetention {
         let state = self.lock();
         let (identities, current_bytes) = metrics(&state.sources);
@@ -494,9 +499,16 @@ impl AttentionObserver for AttentionHub {
                 {
                     return self.invalidate(&mut state, AttentionUnavailable::InvalidMetadata);
                 }
-                if source.completed_runs.contains(&work.run_id)
-                    || source.work.as_ref() == Some(work)
-                {
+                if source.completed_runs.contains(&work.run_id) {
+                    if source.work.is_none()
+                        && work.disposition == SettledWorkDisposition::Completed
+                    {
+                        source.work = Some(work.clone());
+                        (true, false)
+                    } else {
+                        (false, false)
+                    }
+                } else if source.work.as_ref() == Some(work) {
                     (false, false)
                 } else {
                     let completed = work.disposition == SettledWorkDisposition::Completed;
@@ -507,6 +519,7 @@ impl AttentionObserver for AttentionHub {
                     (true, completed)
                 }
             }
+            AttentionChange::WorkCleared => (source.work.take().is_some(), false),
             AttentionChange::DecisionPending(decision)
             | AttentionChange::DecisionResolved(decision) => {
                 let pending = matches!(&fact.change, AttentionChange::DecisionPending(_));
@@ -541,6 +554,11 @@ impl AttentionObserver for AttentionHub {
                 source.decisions.clear();
                 source.completed_runs.clear();
                 (true, false)
+            }
+            AttentionChange::Availability(availability) => {
+                let changed = source.availability != *availability;
+                source.availability = *availability;
+                (changed, false)
             }
         };
         // Even a semantic repeat advances the producer frontier. Recording the
@@ -694,7 +712,9 @@ fn valid_change(change: &AttentionChange) -> bool {
         AttentionChange::DecisionPending(d) | AttentionChange::DecisionResolved(d) => {
             valid_decision(d)
         }
-        AttentionChange::SessionDeleted => true,
+        AttentionChange::SessionDeleted
+        | AttentionChange::WorkCleared
+        | AttentionChange::Availability(_) => true,
     }
 }
 fn same_decision(a: &AttentionDecision, b: &AttentionDecision) -> bool {
@@ -756,10 +776,11 @@ fn change_bytes(change: &AttentionChange) -> usize {
         AttentionChange::DecisionPending(d) | AttentionChange::DecisionResolved(d) => {
             decision_bytes(d)
         }
-        AttentionChange::SessionDeleted => 1,
+        AttentionChange::SessionDeleted | AttentionChange::WorkCleared => 1,
+        AttentionChange::Availability(_) => 16,
     }
 }
-fn snapshot_bytes(snapshot: &AttentionSourceSnapshot) -> usize {
+pub(super) fn snapshot_bytes(snapshot: &AttentionSourceSnapshot) -> usize {
     source_bytes(&snapshot.source)
         + 8
         + snapshot.work.as_ref().map_or(0, work_bytes)

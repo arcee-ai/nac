@@ -14,9 +14,10 @@ use crate::model::redact_credentials;
 
 mod attention;
 pub use attention::{
-    AttentionApply, AttentionChange, AttentionDecision, AttentionFact, AttentionGoal,
-    AttentionObserver, AttentionSource, AttentionSourceSnapshot, AttentionUnavailable, SettledWork,
-    SettledWorkDisposition,
+    AttentionApply, AttentionAvailability, AttentionChange, AttentionDecision, AttentionFacet,
+    AttentionFact, AttentionGoal, AttentionObserver, AttentionOperation, AttentionServiceObserver,
+    AttentionServiceSnapshot, AttentionSource, AttentionSourceSnapshot, AttentionUnavailable,
+    SettledWork, SettledWorkDisposition,
 };
 
 pub const STDERR_EVENT_PREFIX: &str = "__NAC_EVENT__";

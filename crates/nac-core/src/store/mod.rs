@@ -11,6 +11,11 @@ pub(crate) use blocking_caller::call_legacy_store;
 pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 #[macro_use]
 pub(crate) mod coordinated_commands;
+mod attention;
+pub use attention::{
+    read_attention_metadata, AttentionStoreObservation, AttentionStoredGoal,
+    AttentionStoredSession, ATTENTION_METADATA_BYTES, ATTENTION_SOURCE_LIMIT,
+};
 mod managed_maintenance;
 mod managed_orchestrators;
 mod managed_probe;

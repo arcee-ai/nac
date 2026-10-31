@@ -1,5 +1,5 @@
 use super::*;
-use nac_core::events::AttentionGoal;
+use nac_core::events::{AttentionFacet, AttentionGoal};
 use std::{future::Future, sync::Barrier, task::Poll, time::Duration};
 
 fn source(id: &str) -> AttentionSource {
@@ -15,6 +15,13 @@ fn snapshot(source: &AttentionSource) -> AttentionSourceSnapshot {
         revision: 0,
         work: None,
         pending: vec![],
+        availability: AttentionAvailability {
+            work: AttentionFacet::Available,
+            questions: AttentionFacet::Available,
+            permissions: AttentionFacet::Available,
+            reviews: AttentionFacet::Available,
+            topology: AttentionFacet::Available,
+        },
     }
 }
 

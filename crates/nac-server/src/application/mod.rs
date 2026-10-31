@@ -1,6 +1,6 @@
-pub(crate) mod credentials;
-// ALL-350's optional port is deliberately uncomposed until producer allocation.
 pub(crate) mod attention;
+pub(crate) mod attention_runtime;
+pub(crate) mod credentials;
 pub(crate) mod delegation;
 pub(crate) mod managed;
 pub(crate) mod model_catalog;

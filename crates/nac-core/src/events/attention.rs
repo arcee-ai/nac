@@ -7,10 +7,27 @@
 
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttentionFacet {
+    Available,
+    Unknown,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttentionAvailability {
+    pub work: AttentionFacet,
+    pub questions: AttentionFacet,
+    pub permissions: AttentionFacet,
+    pub reviews: AttentionFacet,
+    pub topology: AttentionFacet,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttentionSource {
     pub session_id: String,
-    /// One current service/broker owner, replaced on reconstruction.
+    /// One normalized projection owner; a dormant baseline can hand off to
+    /// the actual service without attaching it for observation.
     pub epoch: Uuid,
 }
 
@@ -61,15 +78,41 @@ pub struct AttentionSourceSnapshot {
     pub revision: u64,
     pub work: Option<SettledWork>,
     pub pending: Vec<AttentionDecision>,
+    pub availability: AttentionAvailability,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttentionChange {
     WorkSettled(SettledWork),
+    WorkCleared,
     DecisionPending(AttentionDecision),
     DecisionResolved(AttentionDecision),
     /// Published only after successful canonical deletion, including cascades.
     SessionDeleted,
+    Availability(AttentionAvailability),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttentionOperation {
+    Idle,
+    Run(String),
+    Manual(String),
+    Compaction(String),
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionServiceSnapshot {
+    pub epoch: Uuid,
+    pub revision: u64,
+    pub operation: AttentionOperation,
+    pub settled: Option<SettledWork>,
+}
+
+/// Optional local producer sink. Implementations only copy bounded metadata;
+/// they cannot call the service/store back while a source guard is held.
+pub trait AttentionServiceObserver: Send + Sync {
+    fn service_changed(&self, session_id: &str, snapshot: AttentionServiceSnapshot);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -673,6 +673,7 @@ fn embedded_frontend_router() -> Router {
 fn documented_api() -> OpenApiRouter<SessionManager> {
     let mut documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
+        .routes(routes!(delivery::attention::events))
         .routes(routes!(ui_configuration::get_ui_configuration))
         .routes(routes!(managed_status::healthz_handler))
         .routes(routes!(managed_status::readyz_handler))
