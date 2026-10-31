@@ -6,6 +6,7 @@ import { createSession, expect, test, waitForRunIdle } from "./harness";
 async function inspect(page: Page, mobile: boolean) {
   if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
   await page.getByRole("button", { name: "NAC capabilities", exact: true }).click();
+  if (mobile) await expect(page.getByRole("dialog", { name: "Menu", exact: true })).toBeHidden();
   const context = page.getByRole("dialog", { name: "NAC capabilities", exact: true });
   await expect(context.getByText("installed-runtime", { exact: true })).toBeVisible();
   return context;
@@ -27,6 +28,9 @@ for (const mobile of [false, true]) {
     request,
   }) => {
     const id = await createSession(request, harness, "direct");
+    const initialConfig = await (
+      await request.get(`${harness.baseUrl}/sessions/${id}/config`)
+    ).json();
     await page.setViewportSize(
       mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
     );
@@ -50,8 +54,12 @@ for (const mobile of [false, true]) {
     const mutations: string[] = [];
     page.on("request", (event) => {
       const route = new URL(event.url()).pathname;
-      if (event.method() !== "GET" && route !== "/product-destinations/resolve")
-        mutations.push(`${event.method()} ${route}`);
+      // These POST endpoints are read-only queries. Existing configuration
+      // dialogs inspect provider models without saving credentials/configuration.
+      const passivePost =
+        event.method() === "POST" &&
+        ["/product-destinations/resolve", "/providers/models"].includes(route);
+      if (event.method() !== "GET" && !passivePost) mutations.push(`${event.method()} ${route}`);
     });
     const original = page.url();
     let context = await inspect(page, mobile);
@@ -99,18 +107,22 @@ for (const mobile of [false, true]) {
       await context.getByRole("button", { name: `Open ${label}`, exact: true }).click();
       await expect(context).toBeHidden();
       await expect(page).toHaveURL(new RegExp(`/session/${id}/${panel}$`));
-      const panelDialog = page.getByRole("dialog");
-      if (await panelDialog.count()) {
-        await page.keyboard.press("Escape");
-        await expect(panelDialog).toBeHidden();
-      }
+      const panelDialog = mobile
+        ? page.getByRole("dialog", { name: label, exact: true })
+        : page.getByRole("dialog");
+      await expect(panelDialog).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(panelDialog).toBeHidden();
     }
     context = await inspect(page, mobile);
     await context.getByRole("button", { name: "Open History", exact: true }).click();
     if (mobile) {
       await expect(context).toBeHidden();
       await expect(page).toHaveURL(new RegExp(`/session/${id}/history$`));
+      const history = page.getByRole("dialog", { name: "History", exact: true });
+      await expect(history).toBeVisible();
       await page.keyboard.press("Escape");
+      await expect(history).toBeHidden();
     } else {
       await expect(context).toBeVisible();
       await expect(context.getByText(/use the revision selector on desktop/)).toBeVisible();
@@ -120,6 +132,9 @@ for (const mobile of [false, true]) {
     await context.getByRole("button", { name: "Open Projects", exact: true }).click();
     await expect(page).toHaveURL(`${harness.baseUrl}/#/`);
     expect(mutations).toEqual([]);
+    expect(await (await request.get(`${harness.baseUrl}/sessions/${id}/config`)).json()).toEqual(
+      initialConfig,
+    );
     const facts = await request.get(`${harness.baseUrl}/product-context?session_id=${id}`);
     expect(facts.ok()).toBe(true);
     expect((await facts.json()).session.execution_backend).toBe("local");
