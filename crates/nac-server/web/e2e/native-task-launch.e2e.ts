@@ -1,13 +1,27 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
+import { createProject, createSession, expect, test as baseTest, waitForRunIdle } from "./harness";
 import type { Page } from "@playwright/test";
 import { ScriptGate } from "./scripted-provider";
 
 const execute = promisify(execFile);
+const test = baseTest.extend<{ ordinaryDirectory: string }>({
+  ordinaryDirectory: async ({ browserName }, use, info) => {
+    // CI keeps run artifacts inside the source checkout. A non-Git fixture
+    // must live outside that checkout's ancestors rather than inheriting it.
+    const directory = await fs.mkdtemp(path.join(tmpdir(), `nac-native-ordinary-${browserName}-`));
+    try {
+      await use(directory);
+    } finally {
+      if (process.env.KEEP_E2E !== "1" && info.status === info.expectedStatus)
+        await fs.rm(directory, { recursive: true, force: true });
+    }
+  },
+});
 test.use({ managedNativeWeb: false });
 
 interface Receipt {
@@ -50,12 +64,14 @@ test("native saved-project launches open independent named-skill tasks across Gi
   harness,
   page,
   request,
+  ordinaryDirectory,
 }, info) => {
   test.setTimeout(120_000);
   const source = path.join(harness.runRoot, "workspace");
   const destination = path.join(harness.runRoot, "destination");
-  const ordinary = path.join(harness.runRoot, "ordinary");
+  const ordinary = ordinaryDirectory;
   const git = (cwd: string, ...args: string[]) => execute("git", ["-C", cwd, ...args]);
+  await expect(git(ordinary, "rev-parse", "--show-toplevel")).rejects.toThrow();
   async function skill(cwd: string) {
     const directory = path.join(cwd, ".agents/skills/launch-proof");
     await fs.mkdir(directory, { recursive: true });
