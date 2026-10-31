@@ -132,12 +132,19 @@ final class StartupSmoke {
         try await waitJS("configured local chat", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
         if vendor {
             let selected = try await js("return (await (await fetch('/sessions/'+location.hash.split('/')[2])).json()).metadata;") as! [String: Any]
-            guard selected["backend"] as? String == "arcee-api", selected["api_key_env"] as? String == "ARCEE_API_KEY" else {
-                throw DesktopStartupError.message("Real-vendor fixture requires ordinary Arcee API environment selection before sending")
+            let expectedModel = evidence["selected_available_model"] as? String
+            guard expectedModel != nil, selected["model"] as? String == expectedModel,
+                  selected["backend"] as? String == "arcee-api", selected["api_key_env"] as? String == "ARCEE_API_KEY" else {
+                throw DesktopStartupError.message("Real-vendor fixture requires the exact discovered model and Arcee API environment selection before sending")
             }
             evidence["vendor_backend"] = "arcee-api"
             evidence["credential_source"] = "existing ARCEE_API_KEY environment reference"
             evidence["vendor_model"] = selected["model"]
+            evidence["vendor_selection_verified"] = true
+            if value("--smoke-selection-only") == "1" {
+                evidence["model_requests_sent"] = 0
+                return
+            }
         }
         let prompt = vendor ? "Do not use tools. Reply only with the uppercase sequence obtained by joining NAC, LOCAL, ARCEE, OK with underscores." : "FINDER_CONFIGURED_LOCAL_" + scenario
         _ = try await js("""
@@ -194,7 +201,9 @@ final class StartupSmoke {
         try await fill("input[placeholder=\"Search models…\"]", model)
         let selected = "[...document.querySelectorAll('button[data-row]')].find(b => b.textContent.includes(\(json(model))) && b.parentElement.textContent.includes('Arcee API (Key)'))"
         try await waitJS("available Arcee model row", "return !!(\(selected));")
+        let label = try await js("return \(selected).querySelector('span').textContent.trim();") as! String
         _ = try await js("\(selected).click(); return true;")
+        try await waitJS("committed Arcee model choice", "return !document.querySelector('input[placeholder=\"Search models…\"]') && [...document.querySelectorAll('button[aria-expanded=false]')].some(b => b.textContent.includes(\(json(label))) && b.textContent.includes('Arcee API (Key)'));")
     }
 
     private func commandJourney() async throws {

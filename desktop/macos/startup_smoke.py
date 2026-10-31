@@ -152,6 +152,8 @@ def main():
                         '--smoke-scenario', scenario, '--smoke-output', str(evidence),
                         '--smoke-workspace', str(workspace), '--smoke-expected-store', str(store),
                         '--smoke-provider', provider_url, '--smoke-paint', '0' if locked else '1'] + launch_options
+                    if vendor and os.environ.get('NAC_STARTUP_VENDOR_SELECTION_ONLY') == '1':
+                        command += ['--smoke-selection-only', '1']
                     with (case / 'launch.log').open('w') as log:
                         opened = subprocess.Popen(command, cwd='/', env=environment, stdout=log, stderr=log)
                         try:

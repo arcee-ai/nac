@@ -218,6 +218,9 @@ It creates no key preset and verifies `arcee-api` plus the environment variable
 name before sending one text-only prompt through the shared UI. The key is never
 put in arguments or evidence; HOME/NAC_HOME/store remain disposable. This case
 is excluded from default runs and never uses OAuth refresh or personal stores.
+For selection-only repair verification, `NAC_STARTUP_VENDOR_SELECTION_ONLY=1`
+stops after verifying that the session persisted the exact discovered model,
+before sending any model prompt.
 
 Every builder mode emits `Contents/Resources/build-receipt.json` with source,
 compiler flags, native source hashes, engine identity and both executable
