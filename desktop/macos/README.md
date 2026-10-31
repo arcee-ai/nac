@@ -40,8 +40,10 @@ product/build/source/track identity, canonical selected store and opened schema
 before seeding or loading the workspace. Stdout/stderr are asynchronously drained
 into a separate bounded 64 KiB diagnostic buffer; logs never establish identity.
 The shell never probes or adopts port 3210.
-Main-frame navigation is confined to that origin. There is no web-to-native
-message bridge.
+Main-frame navigation is confined to that origin. The bounded native UI bridge
+accepts only ready/retirement/settlement receipts from the current main frame;
+workspace actions remain with the shared React owners. Native Edit uses the
+AppKit/WK responder chain. See [NativeCommands.md](NativeCommands.md).
 
 Missing/unlaunchable engine, startup exit, readiness timeout and WebKit load or
 renderer failure display a native status message. Close or Cmd-Q initiates Rust
@@ -115,7 +117,7 @@ for the entire build/test journey, including use of a shared binary.
 The compiler target is macOS 14, the parent's candidate minimum. Actual smoke
 evidence records the host OS/SDK separately; this preview makes no claim of
 macOS 14 qualification, signing/notarization, consumer installation, background
-window lifecycle, native menus/bridge, or performance.
+window lifecycle, trusted native input or performance beyond the explicitly recorded command fixtures.
 Those have separate owners in the ALL-339 work map.
 
 ## Private launch contract (ALL-341)
@@ -259,3 +261,22 @@ fails before app launch on a locked console. Only its own live app incarnation
 and fixture-owned CLI handles can receive cleanup controls; focus restoration
 is conditional on the fixture still being frontmost. These checks require
 actual AppKit/system WKWebView evidence, with screenshots reviewed separately.
+
+## Native command qualification (ALL-346)
+
+The `commands` smoke scenario opens Settings and New Session through native
+menus once, checks shared focus return and Projects routing, rejects a foreign
+key window, exercises malformed/stale/duplicate/iframe/foreign-WebView receipts,
+blocks navigation/popups, and verifies document replacement and retirement.
+The `commands-input` scenario additionally uses paired OS events targeted only
+to the fixture process for Cmd-N, Settings and native Edit. It requires existing
+event-post access and fresh unlocked console/window/DOM ownership; it never
+requests privacy changes. Prior clipboard representations stay only in memory
+and are restored only if the change count is still owned by the fixture.
+
+Select either with `NAC_MAC_SMOKE_SCENARIOS=commands` or
+`NAC_MAC_SMOKE_SCENARIOS=commands-input` before `preview.sh smoke`.
+Programmatic NSMenu results do not qualify OS keyboard/Edit provenance. A locked
+console, missing event-post access or unqualified paint is incomplete acceptance,
+even when compilation, parser tests or scripted DOM journeys pass. Normal app
+compiler inputs and binaries exclude all command fixture instrumentation.

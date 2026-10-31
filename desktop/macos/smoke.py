@@ -21,7 +21,7 @@ RECEIPT_FAILURES = ('malformed', 'truncated', 'missing-receipt', 'duplicate', 'o
                     'wrong-version', 'wrong-build', 'wrong-source', 'wrong-track',
                     'wrong-store', 'wrong-incarnation', 'wrong-endpoint')
 SCENARIOS = ('normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeout',
-             'migration-failure', 'bind-conflict') + RECEIPT_FAILURES + CASES
+             'migration-failure', 'bind-conflict', 'commands', 'commands-input') + RECEIPT_FAILURES + CASES
 
 
 def session_lock_state():
@@ -164,7 +164,7 @@ def main():
                 # Each scenario launches the bundle in a different cwd and with a
                 # poisoned parent environment. The engine receives a clean allowlist.
                 for scenario in scenarios:
-                    if scenario in ('normal', 'engine-exit', 'migration-failure') + CASES:
+                    if scenario in ('normal', 'engine-exit', 'migration-failure', 'commands', 'commands-input') + CASES:
                         os.link(saved, engine)
                     elif scenario == 'missing':
                         engine.unlink(missing_ok=True)

@@ -35,12 +35,13 @@ export function useSidebarCommands() {
   const newSession = () => {
     if (projectId) {
       void actions.newChat(projectId);
-      return;
+      return true;
     }
     // A session route's project id arrives with the list. Opening New Project
     // before that lands sends the click to the wrong dialog.
-    if (sessionId && !sessionKnown) return;
+    if (sessionId && !sessionKnown) return false;
     actions.create();
+    return true;
   };
 
   const newProject = () => {
