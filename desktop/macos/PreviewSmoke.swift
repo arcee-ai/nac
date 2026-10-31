@@ -10,6 +10,7 @@ final class PreviewSmoke {
     private var evidence: [String: Any] = [:]
     private var passed = false
     private var cleanupError: String?
+    private var pausedFirstLoad = false
 
     init(app: PreviewApp) {
         self.app = app
@@ -45,7 +46,63 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if scenario == "normal" { try await journey() }
+                if ["normal", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
+                    if scenario == "stale-launch" {
+                        try await wait("first launch load barrier") { self.pausedFirstLoad }
+                        let previous = app.engine.receipt!.incarnation
+                        // Suppress successor bootstrap only in this fixture.
+                        // The delayed old success must never load its document.
+                        app.engine.onReady = { _ in }
+                        await withCheckedContinuation { continuation in
+                            app.engine.stop { continuation.resume() }
+                            evidence["identity_retired_before_reap"] = app.engine.pid > 0 && app.engine.receipt == nil
+                        }
+                        guard evidence["identity_retired_before_reap"] as? Bool == true else {
+                            throw PreviewError.message("Stopping launch retained active identity")
+                        }
+                        try app.engine.launch(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/nac-web"),
+                                              profile: app.profile!, provider: app.provider)
+                        try await wait("new launch receipt") { self.app.engine.receipt?.incarnation != nil && self.app.engine.receipt?.incarnation != previous }
+                        let successor = app.engine.pid
+                        try await Task.sleep(nanoseconds: 31_000_000_000)
+                        guard app.engine.pid == successor, app.failure == nil,
+                              app.baseURL == nil, app.webView.isHidden else {
+                            throw PreviewError.message("Stale launch callback affected successor")
+                        }
+                        evidence["stale_callbacks_fenced"] = true
+                        evidence["stale_workspace_not_activated"] = true
+                        try captureNative()
+                    }
+                    if scenario != "stale-launch" {
+                        try await journey()
+                        if scenario != "normal" { try await lifecycle() }
+                    }
+                }
+                else if ["parent-loss-startup", "channel-loss-startup", "parent-loss-initialization", "channel-loss-initialization"].contains(scenario) {
+                    try await wait("engine awaiting hello") { self.app.engine.pid > 0 }
+                    if scenario.hasSuffix("initialization") {
+                        try await wait("post-adoption manager entry") {
+                            if let failure = self.app.failure { throw PreviewError.message(failure) }
+                            return self.app.engine.log.contains("project:")
+                        }
+                        evidence["post_adoption_verified"] = true
+                        evidence["startup_engine_log"] = app.engine.log
+                    }
+                    if scenario.hasPrefix("parent-loss") { try await lifecycle() }
+                    else {
+                        if scenario == "channel-loss-initialization" {
+                            evidence["engine_pid"] = app.engine.pid
+                            evidence["profile"] = app.profile!.root.path
+                            evidence["lifecycle_ready"] = true
+                            write()
+                        }
+                        app.engine.loseChannel()
+                        try await wait("startup channel loss") { self.app.failure != nil }
+                        evidence["workspace_not_activated"] = app.baseURL == nil
+                        guard app.baseURL == nil else { throw PreviewError.message("Startup channel loss activated workspace") }
+                        try captureNative()
+                    }
+                }
                 else if scenario == "close-startup" {
                     try await wait("engine starting") { self.app.engine.pid > 0 }
                 } else {
@@ -55,10 +112,28 @@ final class PreviewSmoke {
                     }
                     try await wait("native failure state", timeout: 65) { self.app.failure != nil }
                     let message = app.failure!
-                    let expected = scenario == "missing" ? "missing or not executable" :
-                        scenario == "timeout" ? "within 30 seconds" : "engine stopped"
+                    let expected: String
+                    switch scenario {
+                    case "missing": expected = "missing or not executable"
+                    case "timeout", "missing-receipt": expected = "within 30 seconds"
+                    case "exit", "engine-exit": expected = "engine"
+                    case "migration-failure", "bind-conflict": expected = "could not initialize"
+                    case "truncated": expected = "channel closed"
+                    default: expected = "invalid launch receipt"
+                    }
                     guard message.contains(expected) else { throw PreviewError.message("Unexpected failure: \(message)") }
+                    guard app.engine.receipt == nil else { throw PreviewError.message("Failed launch retained active identity") }
+                    guard app.baseURL == nil || scenario == "engine-exit" else {
+                        throw PreviewError.message("Unverified engine activated the workspace")
+                    }
+                    evidence["workspace_not_activated"] = app.baseURL == nil
                     evidence["native_failure"] = message
+                    evidence["diagnostic_bytes_retained"] = app.engine.log.utf8.count
+                    if scenario == "malformed" {
+                        guard (60000...65536).contains(app.engine.log.utf8.count) else {
+                            throw PreviewError.message("Diagnostic retention exceeded its bound or pressure fixture did not drain")
+                        }
+                    }
                     try captureNative()
                 }
                 passed = true
@@ -73,12 +148,125 @@ final class PreviewSmoke {
             evidence["provider_url"] = app.provider.baseURL?.absoluteString
             evidence["provider_responses"] = app.provider.responseCount
             evidence["scenario"] = scenario
+            if let receipt = app.engine.receipt {
+                evidence["launch_incarnation"] = receipt.incarnation
+                evidence["ready_store"] = receipt.store
+                evidence["ready_endpoint"] = receipt.endpoint
+                evidence["ready_source"] = receipt.identity?.source_revision
+                evidence["ready_build"] = receipt.identity?.build_id
+                evidence["ready_track"] = receipt.identity?.track
+                evidence["ready_schema"] = receipt.schema
+            }
             write()
             // Exercise the actual NSWindow close delegate and termination reply.
             // AppKit's terminateLater spins a native loop. Leave the Swift task
             // first so that loop can drain the main dispatch queue during shutdown.
             RunLoop.main.perform(inModes: [.common]) { [self] in
                 MainActor.assumeIsolated { app.window.performClose(nil) }
+            }
+        }
+    }
+
+    func configure(_ profile: PreviewProfile) throws {
+        if scenario == "migration-failure" {
+            try Data("not a SQLite store".utf8).write(to: profile.store)
+        }
+        if scenario.hasSuffix("initialization") {
+            evidence["profile"] = profile.root.path
+            evidence["startup_store_barrier_ready"] = true
+            write()
+        }
+    }
+
+    func beforeLaunch(_ profile: PreviewProfile) async throws {
+        if scenario.hasSuffix("initialization") {
+            try await wait("startup store barrier") {
+                FileManager.default.fileExists(atPath: profile.root.appendingPathComponent("startup-go").path)
+            }
+        }
+    }
+
+    func configure(_ engine: PreviewEngine) {
+        engine.holdHello = ["parent-loss-startup", "channel-loss-startup"].contains(scenario)
+    }
+
+    func beforeLoad() async throws {
+        if scenario == "stale-launch" && !pausedFirstLoad {
+            pausedFirstLoad = true
+            try await Task.sleep(nanoseconds: 5_000_000_000)
+        }
+    }
+
+    private func lifecycle() async throws {
+        if scenario.hasSuffix("active") {
+            // Exercise the existing revision-fenced human terminal API from the
+            // actual shared WebView. This is lifecycle evidence, not OS input QA.
+            _ = try await js(#"""
+            const session = location.hash.split('/')[2];
+            const post = async (path, body) => {
+              const response = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+              if (!response.ok) throw new Error(await response.text());
+              return response.json();
+            };
+            const terminal = await post(`/sessions/${session}/user-terminals`, {protocol_version:1, launch_id:crypto.randomUUID(), cols:80, rows:24});
+            const path = `/sessions/${session}/executions/${terminal.terminal_id}`;
+            const control = await (await fetch(path + '/input-control')).json();
+            const command = "set +H\r/bin/sleep 90 & child=$!; printf '%s' $child > descendant-pid\r";
+            const receipt = await post(path + '/input', {protocol_version:1, expected_revision:control.revision, bytes:[...new TextEncoder().encode(command)]});
+            if (receipt.outcome !== 'written') throw new Error('fixture input was not written');
+            return true;
+            """#)
+            let file = app.profile!.workspace.appendingPathComponent("descendant-pid")
+            try await wait("real terminal descendant") { FileManager.default.fileExists(atPath: file.path) }
+            evidence["descendant_pid"] = Int(try String(contentsOf: file, encoding: .utf8))
+        }
+        if scenario.hasPrefix("parent-loss") {
+            if scenario != "parent-loss-active" {
+                evidence["workspace_not_activated"] = app.baseURL == nil && app.webView.isHidden
+                evidence["startup_stage"] = scenario == "parent-loss-startup" ? "awaiting_hello" : "initializing_store"
+                guard evidence["workspace_not_activated"] as? Bool == true else {
+                    throw PreviewError.message("Startup parent-loss fixture activated the workspace")
+                }
+                if scenario == "parent-loss-startup" {
+                    guard !FileManager.default.fileExists(atPath: app.profile!.store.path) else {
+                        throw PreviewError.message("Pre-adoption fixture performed store work")
+                    }
+                    evidence["store_work_absent"] = true
+                }
+            }
+            // A shell helper must not inherit the parent side of the channel.
+            let helper = Process()
+            helper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            let argument = "90.\(UInt32.random(in: 100000000...999999999))"
+            helper.arguments = [argument]
+            try helper.run()
+            evidence["app_helper_pid"] = helper.processIdentifier
+            evidence["app_helper_argument"] = argument
+        }
+        evidence["engine_pid"] = app.engine.pid
+        evidence["profile"] = app.profile!.root.path
+        evidence["base_url"] = app.baseURL?.absoluteString
+        if let receipt = app.engine.receipt {
+            evidence["launch_incarnation"] = receipt.incarnation
+            evidence["ready_endpoint"] = receipt.endpoint
+            evidence["ready_store"] = receipt.store
+            evidence["ready_build"] = receipt.identity?.build_id
+            evidence["ready_source"] = receipt.identity?.source_revision
+            evidence["ready_track"] = receipt.identity?.track
+            evidence["ready_schema"] = receipt.schema
+        }
+        evidence["lifecycle_ready"] = true
+        write()
+        if scenario.hasPrefix("parent-loss") {
+            try await wait("runner kills owning app", timeout: 70) { false }
+        } else if scenario == "channel-loss-active" {
+            app.engine.loseChannel()
+            try await wait("runtime channel loss") { self.app.failure != nil }
+            guard app.engine.receipt == nil else { throw PreviewError.message("Channel loss retained active identity") }
+            try captureNative()
+        } else {
+            try await wait("runner owns store write barrier") {
+                FileManager.default.fileExists(atPath: self.app.profile!.root.appendingPathComponent("shutdown-go").path)
             }
         }
     }
@@ -174,10 +362,12 @@ final class PreviewSmoke {
     }
 
     private func captureWeb(_ name: String) async throws {
+        evidence["frontmost_at_capture"] = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let image = try await app.webView.takeSnapshot(configuration: nil)
         try writePNG(image, name)
     }
     private func captureNative() throws {
+        evidence["frontmost_at_capture"] = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let view = app.window.contentView!
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
             throw PreviewError.message("Native failure capture unavailable")
@@ -197,8 +387,10 @@ final class PreviewSmoke {
     }
     func cleanupFailed(_ error: Error) { cleanupError = String(describing: error) }
     func didCleanUp() {
+        evidence["engine_log_after_shutdown"] = app.engine.log
         evidence["profile_removed"] = app.profile.map { !FileManager.default.fileExists(atPath: $0.root.path) } ?? true
         evidence["engine_reaped"] = app.engine.pid == 0
+        evidence["identity_retired"] = app.engine.receipt == nil
         evidence["cleanup_error"] = cleanupError
         evidence["passed"] = passed && cleanupError == nil && evidence["profile_removed"] as? Bool == true
         write()

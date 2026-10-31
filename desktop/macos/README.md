@@ -34,9 +34,12 @@ only a dummy model configuration and fixture project through existing HTTP
 routes; session creation and all chat/history behavior use the production UI.
 
 The exact bundled child binds `127.0.0.1:0`, with `--directory`, `--store-path`,
-`--worker-executable` and `--no-open`. Its inherited diagnostic pipe reports the
-actual address after bind; the shell never probes or adopts port 3210. This is
-the existing CLI readiness seam, not a versioned identity/control protocol.
+`--worker-executable` and `--no-open`. A private inherited Unix socketpair reports the actual address only after bind
+and store readiness. The shell verifies version, launch incarnation, compiled
+product/build/source/track identity, canonical selected store and opened schema
+before seeding or loading the workspace. Stdout/stderr are asynchronously drained
+into a separate bounded 64 KiB diagnostic buffer; logs never establish identity.
+The shell never probes or adopts port 3210.
 Main-frame navigation is confined to that origin. There is no web-to-native
 message bridge.
 
@@ -44,9 +47,13 @@ Missing/unlaunchable engine, startup exit, readiness timeout and WebKit load or
 renderer failure display a native status message. Close or Cmd-Q initiates Rust
 shutdown; the app waits for its child, allows the server's 20-second shutdown
 watchdog, and kills the owned process group after 23 seconds if needed. It
-removes the profile only after the child is reaped. An OS force-kill of the app
-is outside this preview's orderly-close contract and can leave temporary data;
-later engine/lifecycle slices own crash recovery.
+removes the profile only after the child is reaped. If the app is killed or its private channel closes, the engine latches the same
+shutdown request, including during startup. A runtime-independent 20-second cap
+starts at channel loss; the existing server owns run cancellation, descendant
+cleanup and persistence drain. Parent death can leave the disposable profile on
+disk because AppKit cannot run its deletion callback; the smoke runner removes
+only its own recorded fixture after checking engine settlement.
+Watchdog diagnostics are best effort and never gate the forced-exit callback.
 
 ## Acceptance checks
 
@@ -71,6 +78,11 @@ Unrelated shared-host connections are reported separately. Keep that port free
 before running this control. Fixture profiles and process termination are
 checked for every scenario. Evidence JSON, logs and
 PNG snapshots are written under `target/macos-preview/evidence/`.
+The runner records the console lock bit and keeps locked-session DOM/lifecycle
+results separate from visible-paint qualification. Fresh paint acceptance needs
+an unlocked Aqua session. For a focused repair run, set
+`NAC_MAC_SMOKE_SCENARIOS` to comma-separated scenario names; its summary records
+`full_scenario_run: false`, and it does not replace the complete candidate run.
 
 Smoke instrumentation exists only in builds compiled with `PREVIEW_SMOKE`.
 Every later native slice extends this checked-in actual-app/WKWebView journey
@@ -103,5 +115,94 @@ for the entire build/test journey, including use of a shared binary.
 The compiler target is macOS 14, the parent's candidate minimum. Actual smoke
 evidence records the host OS/SDK separately; this preview makes no claim of
 macOS 14 qualification, signing/notarization, consumer installation, background
-window lifecycle, versioned engine control, native menus/bridge, or performance.
+window lifecycle, native menus/bridge, or performance.
 Those have separate owners in the ALL-339 work map.
+
+## Private launch contract (ALL-341)
+
+The builder asks the exact bundled executable for `__desktop-identity` and saves
+that immutable identity as `Contents/Resources/engine-identity.json`. The shell
+passes only `NAC_DESKTOP_CHANNEL_FD=3` as private launch metadata. It sends a
+version-1 JSON line `hello` with a random UUID `incarnation`, expected `identity`
+and canonical `store`. The engine adopts the descriptor before constructing a
+manager/helper, restores CLOEXEC immediately and removes the environment marker.
+All clones and the shell endpoint are CLOEXEC, so exec descendants cannot hold
+either side alive. Every record, including its newline, is at most 16 KiB.
+
+A single `ready` record repeats the version/incarnation and reports the actual
+bound loopback `endpoint`, compiled `identity`, canonical opened `store` and
+`schema`. A bounded constant `failed` record reports startup stage/code/message
+without serializing raw errors or credentials. A `stop` record names only version
+and incarnation: it cannot target a PID, external listener or another store.
+Malformed control, duplicate hello and EOF fail closed by stopping this launch.
+The shell rejects malformed, missing, duplicate, oversized or mismatched receipts
+and displays a native failure before activating the workspace. A receipt conveys
+no HTTP authentication, human-operation capability or agent approval authority.
+No channel is inherited by ordinary CLI invocations, whose existing lifetime
+and worker/helper dispatch remain independent.
+
+The native consumer seam is `PreviewEngine.receipt` and the existing
+`onReady(URL)`, `onFailure(String)`, `onExit(Int32)` and `stop(completion)`
+callbacks. The receipt is available only for the current verified live launch;
+stop, channel failure and exit retire it before notifying consumers. Its launch
+UUID is distinct from the server's `NativeRuntimeScope.incarnation` and any
+future WebView document/view identity. Store/schema metadata stays with the
+native process owner. Future menu/navigation commands belong to the separate
+document bridge owner, never this engine control channel.
+
+Actual-app acceptance also covers malformed/truncated/missing/duplicate/oversized
+receipts, identity/endpoint mismatches, migration failure, startup/runtime channel
+loss, abrupt parent death with helpers/terminal descendants, stale per-launch
+callbacks, a write barrier held for over four seconds and the real 20-second
+watchdog. The checked-in runner records source/engine/native binary identities,
+exact receipts, OS/SDK, native failure snapshots and cleanup. `engine_contract.py`
+adds direct binary/channel controls using the same bundled executable. These
+fixtures add no production bridge and make no trusted OS input qualification.
+
+## Normal local startup (ALL-342)
+
+`./desktop/macos/preview.sh app-build` produces the ordinary `NAC.app` with
+`LOCAL_APP`; `app-run` opens it. It starts in HOME by default, independently of
+the app's location or LaunchServices cwd. `--directory` selects another existing
+bootstrap directory; relative arguments resolve from HOME. `--store-path`
+overrides the normal Rust configuration/track store choice. Repeated
+`--command-path directory` arguments prepend explicit command locations before
+the inherited PATH and standard Apple Silicon/Intel Homebrew directories.
+No shell, dotfiles, global preferences or installer runs during discovery.
+
+The exact bundled Rust engine performs bounded `__desktop-configuration`
+discovery using the ordinary NAC_HOME/XDG_CONFIG_HOME/HOME and immutable build
+track owners, including stable legacy-store fallback. It recovers pending
+configuration publications and prepares store parents through their existing
+Rust owners; it opens neither a database nor a serving lease. The subsequent
+identified engine opens that exact selected store and launches workers using
+its own bundled executable. Credentials remain in the existing hardened Rust
+stores or inherited environment; the native app never copies or persists them.
+Missing Git prevents launch with recovery guidance. Optional SSH, Podman and
+MCP discovery retain their normal shared settings and chosen execution backend.
+
+Ordinary and startup-smoke builds exclude PreviewProfile, FixtureProvider and
+FixtureBootstrap definitions from their compiler inputs. The ordinary binary
+also rejects disposable fixture markers during provenance verification.
+`smoke-build` builds the existing disposable preview instrumentation without
+launching it, allowing separate build and native/browser leases.
+
+`startup-build` compiles `LOCAL_APP` plus `PREVIEW_SMOKE` into the separate
+`NAC Startup Smoke.app`. Run `python3 -B desktop/macos/startup_smoke.py APP OUTPUT`
+under the host's native/browser lease. `startup-smoke` combines those steps for
+hosts without a separate lease requirement. The runner relocates the real app,
+uses disposable profiles, drives the production UI in system WKWebView, and
+records startup, configured Local runs, failures and bounded cleanup. Optional
+command cases are selected with `NAC_STARTUP_SCENARIOS` (comma-separated
+`startup-missing-ssh`, `startup-missing-podman`, `startup-missing-mcp`,
+`startup-custom-mcp`). The test-only missing-command switch excludes fallback
+directories only in that smoke bundle. Dummy provider results do not establish
+real-vendor authentication; locked-session DOM results do not establish visible
+paint or trusted OS input.
+
+Every builder mode emits `Contents/Resources/build-receipt.json` with source,
+compiler flags, native source hashes, engine identity and both executable
+hashes. It rejects an engine from another source revision or source changes
+during compilation. This is unsigned compiler provenance for the packaging
+owner; signing requires a separate final artifact manifest. The local builder's
+development bundle identifier is not the distribution or track identity contract.

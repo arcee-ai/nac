@@ -5,6 +5,12 @@ mod build_identity;
 mod compaction;
 mod delegation_runtime;
 mod delivery;
+#[cfg(unix)]
+#[doc(hidden)]
+pub mod desktop_launch;
+#[cfg(unix)]
+#[doc(hidden)]
+pub mod desktop_startup;
 mod executable;
 mod filesystem;
 mod fork;
