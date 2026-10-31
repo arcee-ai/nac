@@ -60,7 +60,13 @@ test("caller-owned preferences survive real runtime close and reconstruction", a
     const reconstructed = await read();
     expect(reconstructed).toMatchObject({ ...expected, stored: expected, closed: false });
     expect(fixture.calls.filter((call) => call.path.endsWith("/events/stream"))).toHaveLength(3);
-    expect(fixture.calls.filter((call) => call.method !== "GET")).toEqual([]);
+    // Model discovery is the existing POST read (api.listProviderModels), not
+    // an execution/control mutation. Every other non-GET operation is forbidden.
+    const nonReads = fixture.calls.filter((call) => call.method !== "GET");
+    const mutationRequests = nonReads.filter(
+      (call) => call.method !== "POST" || call.path !== "/providers/models",
+    );
+    expect(mutationRequests).toEqual([]);
     await page.getByRole("button", { name: "Close runtime", exact: true }).click();
     await expect.poll(fixture.activeStreams).toBe(0);
     await info.attach("production shared-runtime preference lifecycle", {
@@ -72,10 +78,12 @@ test("caller-owned preferences survive real runtime close and reconstruction", a
           replaced,
           closed,
           reconstructed,
-          mutationRequests: fixture.calls.filter((call) => call.method !== "GET"),
+          modelDiscoveryReads: nonReads.filter((call) => call.path === "/providers/models"),
+          mutationRequests,
           activeStreamsAfterClose: fixture.activeStreams(),
-          source: process.env.NAC_PREFERENCE_SOURCE_SHA,
-          base: "6f77f6c57d66dad1c657fdad7852c4ccb148d701",
+          source: process.env.NAC_PREFERENCE_SOURCE_SHA ?? process.env.GITHUB_SHA,
+          base: process.env.NAC_PREFERENCE_BASE_SHA,
+          binarySource: process.env.NAC_PREFERENCE_BINARY_SOURCE_SHA,
         },
         null,
         2,
