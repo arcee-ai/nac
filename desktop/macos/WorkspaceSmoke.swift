@@ -208,9 +208,22 @@ final class WorkspaceSmoke {
       }
       return null;
     }
-    const element = expected.kind === 'project' ?
-      [...document.querySelectorAll('[data-item-kind="project"]')].find(e =>
-        e.dataset.itemId === expected.id && e.textContent.includes(expected.text)) : findText(expected.text);
+    let element = expected.kind === 'project' ? null : findText(expected.text);
+    if (expected.kind === 'project') {
+      // The reorder wrapper shares the card ID. Inspect the rendered title
+      // under the actual animated ProjectCard, including all its ancestors.
+      const card = [...document.querySelectorAll('[role="button"][data-item-kind="project"]')]
+        .find(e => e.dataset.itemId === expected.id);
+      if (card) {
+        const title = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+        while (title.nextNode()) {
+          if (title.currentNode.textContent.trim() === expected.text) {
+            element = title.currentNode.parentElement;
+            break;
+          }
+        }
+      }
+    }
     function inspect(element) {
       const ancestors = [];
       for (let e = element; e; e = e.parentElement) {

@@ -10,7 +10,9 @@ const swift = fs.readFileSync(new URL('WorkspaceSmoke.swift', import.meta.url), 
 const script = swift.match(/static let captureReadinessScript = #"""\n([\s\S]*?)\n    """#/)[1];
 const project = { kind: 'project', id: 'owned-project', text: 'Disposable Mac preview' };
 const child = { kind: 'transcript', id: 'owned-child', text: 'Hello from the isolated NAC Mac preview.', readOnly: true, identityText: 'WK_CHILD' };
-const card = '<div data-item-kind="project" data-item-id="owned-project">Disposable Mac preview</div>';
+// ProjectsListPage and ProjectCard both carry identity attributes. Only the
+// inner role=button card and its rendered title establish visible content.
+const card = '<div data-item-kind="project" data-item-id="owned-project"><div role="button" class="fade" data-item-kind="project" data-item-id="owned-project"><div class="project-title">Disposable Mac preview</div></div></div>';
 const chrome = '<button aria-label="Fixture, parent chat">Parent</button>';
 const message = '<div id="transcript" class="overflow-auto"><p>WK_CHILD</p><p>Hello from the isolated NAC Mac preview.</p></div>';
 const loader = '<div role="status" aria-label="Loading conversation">Loading</div>';
@@ -53,7 +55,24 @@ test('recorded projects boundary: hash plus sidebar name cannot qualify the old 
 });
 
 test('project title with wrong owned identity is rejected', () => {
-  assert.equal(observation(card.replace('owned-project', 'other-project'), project, '#/').ready, false);
+  assert.equal(observation(card.replaceAll('owned-project', 'other-project'), project, '#/').ready, false);
+});
+
+test('project identity wrapper without a mounted card is rejected', () => {
+  const wrapper = '<div data-item-kind="project" data-item-id="owned-project">Disposable Mac preview</div>';
+  assert.equal(observation(wrapper, project, '#/').ready, false);
+});
+
+for (const opacity of ['0', '0.5']) {
+  test('nested animated project card at opacity ' + opacity + ' is rejected', () => {
+    const hiddenCard = card.replace('role="button"', 'role="button" style="opacity:' + opacity + '"');
+    assert.equal(observation(hiddenCard, project, '#/').ready, false);
+  });
+}
+
+test('hidden project title inside a visible nested card is rejected', () => {
+  const hiddenTitle = card.replace('class="project-title"', 'class="project-title" style="opacity:0"');
+  assert.equal(observation(hiddenTitle, project, '#/').ready, false);
 });
 
 test('project card in wrong route is rejected', () => {
