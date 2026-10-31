@@ -191,6 +191,24 @@ describe("recent terminal activity", () => {
     expectNoProcessAction(f.api);
   });
 
+  it("replaces an evicted open history entry with its bounded-history notice without process actions", async () => {
+    const f = fixture();
+    await f.open();
+    await waitFor(() => expect(f.api.attachExecution).toHaveBeenCalledOnce());
+    f.api.listExecutionHistory.mockResolvedValue({
+      ...f.response([]),
+      history: { entries: [], limit: 32, older_entries_omitted: true },
+    });
+    await act(async () => {
+      await f.client.invalidateQueries({ queryKey: executionHistoryKey("session") });
+    });
+    await screen.findByText("Selected activity is no longer in bounded history.");
+    expect(screen.getByText("Older entries are omitted from this recent view.")).toBeTruthy();
+    await waitFor(() => expect(f.api.detachExecution).toHaveBeenCalledOnce());
+    expect(f.api.attachExecution).toHaveBeenCalledOnce();
+    expectNoProcessAction(f.api);
+  });
+
   it("shows literal canonical previews and loss separately from known results", async () => {
     const command = {
       request_id: "request",
