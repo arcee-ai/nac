@@ -213,7 +213,7 @@ test-managed-fault-fixture:
 ## Reproduce the deterministic 1/2/4 Managed NAC orchestration load scenario
 test-managed-load:
 	$(CARGO) build --locked -p $(PKG) --bin $(BIN)
-	NAC_MANAGED_LOAD_WORKER="$(CURDIR)/target/debug/$(BIN)" \
+	NAC_MANAGED_LOAD_WORKER="$${CARGO_TARGET_DIR:-$(CURDIR)/target}/debug/$(BIN)" \
 		$(CARGO) test --locked -p nac-server \
 			tests::managed_load::managed_load_scenario -- --ignored --exact --nocapture --test-threads=1
 
