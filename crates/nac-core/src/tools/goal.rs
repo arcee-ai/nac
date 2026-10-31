@@ -71,9 +71,9 @@ impl NativeTool for CreateGoalTool {
                 "type": "object",
                 "properties": {
                     "objective": { "type": "string", "minLength": 1 },
-                    "token_budget": { "type": "integer", "minimum": 1, "description": "Optional total billable-token budget. Omit unless explicitly requested." }
+                    "token_budget": { "type": ["integer", "null"], "minimum": 1, "description": "Optional total billable-token budget. Use null unless the user explicitly requested a positive budget." }
                 },
-                "required": ["objective"],
+                "required": ["objective", "token_budget"],
                 "additionalProperties": false
             }),
         )
@@ -247,6 +247,79 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+
+    #[tokio::test]
+    async fn model_creation_preserves_omitted_null_and_explicit_budgets() {
+        let path = std::env::temp_dir()
+            .join(format!("nac-goal-budget-tool-{}", uuid::Uuid::new_v4()))
+            .join("store.db");
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "direct");
+        crate::store::open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'direct'",
+                [],
+            )
+            .unwrap();
+        let mut runtime = crate::tools::test_runtime();
+        runtime.store_path = path.clone();
+        runtime.session_id = Some("direct".to_string());
+        let goals = Arc::new(crate::goals::GoalRuntime::new(
+            path.clone(),
+            "direct".to_string(),
+        ));
+        goals.begin_run("budget-run");
+        runtime.goal_runtime = Some(goals);
+        runtime.allowed_tools = None;
+        let client = crate::model::ModelClient::new_for_test();
+
+        for (input, expected_budget) in [
+            (json!({"objective":"omitted budget"}), None),
+            (
+                json!({"objective":"null budget", "token_budget":null}),
+                None,
+            ),
+            (
+                json!({"objective":"explicit budget", "token_budget":42}),
+                Some(42),
+            ),
+        ] {
+            let created = crate::tools::execute_tool("create_goal", input, &runtime, &client).await;
+            assert!(!created.is_error, "{:?}", created.content.as_text());
+            let created: crate::store::SessionGoalRecord =
+                serde_json::from_str(created.content.as_text().unwrap()).unwrap();
+            assert_eq!(created.token_budget, expected_budget);
+            let persisted = crate::store::load_session_goal(&path, "direct")
+                .unwrap()
+                .unwrap();
+            assert_eq!(persisted.token_budget, expected_budget);
+            let completed = crate::tools::execute_tool(
+                "update_goal",
+                json!({"goal_id":created.goal_id,"status":"complete"}),
+                &runtime,
+                &client,
+            )
+            .await;
+            assert!(!completed.is_error);
+        }
+        let invalid = crate::tools::execute_tool(
+            "create_goal",
+            json!({"objective":"invalid zero budget", "token_budget":0}),
+            &runtime,
+            &client,
+        )
+        .await;
+        assert!(invalid.is_error);
+        assert_eq!(
+            crate::store::load_session_goal(&path, "direct")
+                .unwrap()
+                .unwrap()
+                .status,
+            GoalStatus::Complete
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
 
     #[tokio::test]
     async fn model_boundary_create_get_and_update_share_durable_goal_state() {

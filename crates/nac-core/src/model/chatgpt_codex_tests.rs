@@ -493,6 +493,51 @@ fn codex_request_reasoning_is_driven_only_by_explicit_effort() {
 }
 
 #[test]
+fn codex_goal_creation_wire_schema_preserves_no_budget() {
+    let levels =
+        catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol").thinking_level_map;
+    let request = codex_responses_request(
+        "gpt-5.6-sol",
+        None,
+        &[Message::User {
+            content: "Start a finite goal without a token budget".to_string(),
+        }],
+        &crate::tools::direct_tool_definitions(false),
+        &levels,
+        Some("goal-session"),
+    );
+    let tool = request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "create_goal")
+        .unwrap();
+    let parameters = &tool["parameters"];
+    let required = parameters["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        required,
+        parameters["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect(),
+        "Responses strict normalization must not force an invented budget"
+    );
+    assert_eq!(
+        parameters["properties"]["token_budget"]["type"],
+        json!(["integer", "null"])
+    );
+    assert_eq!(parameters["properties"]["token_budget"]["minimum"], 1);
+    assert_eq!(parameters["additionalProperties"], false);
+}
+
+#[test]
 fn codex_request_preserves_nullable_new_delegation_contracts() {
     let messages = [Message::User {
         content: "delegate this work".to_string(),
