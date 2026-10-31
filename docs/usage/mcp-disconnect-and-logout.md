@@ -13,8 +13,9 @@ keeps its captured definitions and policy. Refresh never replays a tool call,
 changes the chat's execution backend or grants tool approval.
 
 The control reports the requested revision and, for an attached direct agent,
-the revision applied by its current process incarnation. Pending means the
-agent has not reached the boundary yet. Unavailable agents do not report an
+the revision applied by its current process incarnation. Before any refresh has
+been requested, status is `not_requested`. Pending means the agent has not
+reached the boundary for a requested refresh yet. Unavailable agents do not report an
 applied revision. Orchestrators schedule refresh for their independently running
 workers at each worker's next model boundary; they do not report an aggregate
 worker acknowledgement. New worker dispatches mount the current configuration.
@@ -24,7 +25,7 @@ refreshing a parent does not refresh those sessions.
 
 Explicit mount refresh discards obsolete mounts for future requests. Optional
 servers that fail to mount are omitted and status reports degraded integrations;
-a required-server or concurrent-publication failure blocks the next model request
+a required-server, unreadable or invalid configuration, or concurrent-publication failure blocks the next model request
 and reports failure. Repair/connect the integration and explicitly refresh again.
 Catalog notifications for an unchanged mounted server retain their existing
 last-known-good catalog behavior. Cancellation while loading leaves the request

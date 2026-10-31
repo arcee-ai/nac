@@ -1,5 +1,7 @@
 pub(crate) mod credentials;
 pub(crate) mod delegation;
+pub(crate) mod heartbeat_scheduler;
+pub(crate) mod heartbeats;
 pub(crate) mod managed;
 pub(crate) mod model_catalog;
 pub(crate) mod model_configurations;

@@ -10,6 +10,8 @@ pub(crate) use blocking_caller::call_legacy_store;
 pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 #[macro_use]
 pub(crate) mod coordinated_commands;
+mod heartbeats;
+pub use heartbeats::*;
 mod managed_maintenance;
 mod managed_orchestrators;
 mod managed_probe;

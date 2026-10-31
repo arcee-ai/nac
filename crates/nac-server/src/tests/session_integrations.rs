@@ -14,6 +14,7 @@ async fn session_integration_refresh_is_passive_scoped_revision_checked_and_rest
     assert_eq!(initial.status(), StatusCode::OK);
     let initial = response_json(initial).await;
     assert_eq!(initial["revision"], 0);
+    assert_eq!(initial["state"], "not_requested");
     assert!(initial["applied_revision"].is_null());
     assert!(manager.inner.active_sessions.read().await.is_empty());
     let refreshed = post_json(
@@ -79,6 +80,10 @@ async fn session_integration_refresh_is_passive_scoped_revision_checked_and_rest
         response_json(get_response(app.clone(), "/sessions/separate/integrations", None).await)
             .await;
     assert_eq!(separate["revision"], 0);
+    let no_worker_request =
+        response_json(get_response(app.clone(), "/sessions/orchestrator/integrations", None).await)
+            .await;
+    assert_eq!(no_worker_request["state"], "not_requested");
     let workers = response_json(
         post_json(
             app.clone(),
@@ -154,6 +159,10 @@ async fn session_integration_status_does_not_acknowledge_a_stale_cached_incarnat
         .await
         .unwrap();
     assert_eq!(first.applied_revision, Some(0));
+    assert_eq!(
+        first.state,
+        nac_core::mcp_configurations::SessionMcpRefreshState::NotRequested
+    );
     assert!(first.incarnation_id.is_some());
     let path = root.join("store.db");
     let mut saved = sessions::load_session(&path, "direct").unwrap();

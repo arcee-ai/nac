@@ -56,7 +56,9 @@ impl<'a> SessionIntegrationApplication<'a> {
             requested_at: request.requested_at,
             applied_revision: None,
             incarnation_id: None,
-            state: if behavior == sessions::SessionBehavior::Orchestrator {
+            state: if request.revision == 0 {
+                SessionMcpRefreshState::NotRequested
+            } else if behavior == sessions::SessionBehavior::Orchestrator {
                 SessionMcpRefreshState::ScheduledForWorkers
             } else {
                 SessionMcpRefreshState::Pending

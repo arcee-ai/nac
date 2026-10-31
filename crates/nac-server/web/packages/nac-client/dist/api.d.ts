@@ -599,6 +599,9 @@ export declare function createNacApi(nacClient: NacClient): {
     listSessions: (options?: ListSessionsOptions, signal?: AbortSignal) => Promise<{
         active: boolean;
         active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("./openapi.generated.js").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("./openapi.generated.js").components["schemas"]["WorkspaceDiffTotals"] | null;

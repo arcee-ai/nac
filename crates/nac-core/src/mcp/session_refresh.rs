@@ -7,6 +7,7 @@ use std::sync::RwLock;
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum SessionMcpRefreshState {
+    NotRequested,
     Current,
     Pending,
     Degraded,
@@ -117,7 +118,9 @@ impl SessionMcpMounts {
             requested_at: request.requested_at,
             applied_revision: (!self.workers).then_some(state.applied_revision).flatten(),
             incarnation_id: (!self.workers).then(|| self.incarnation.clone()),
-            state: if self.workers {
+            state: if request.revision == 0 {
+                SessionMcpRefreshState::NotRequested
+            } else if self.workers {
                 SessionMcpRefreshState::ScheduledForWorkers
             } else if request.revision > state.revision {
                 SessionMcpRefreshState::Pending

@@ -83,7 +83,7 @@ for (const mobile of [false, true]) {
       harness.provider.enqueue(
         "before-mount",
         { token: "REFRESH_BEFORE", forbiddenTools: [ECHO] },
-        { kind: "text", text: "Chat predates integration" },
+        { kind: "text", text: "Chat predates integration", stream: "request" },
       );
       await run(request, harness, session, "REFRESH_BEFORE");
       const added = await request.post(`${harness.baseUrl}/mcp_library/servers`, {
@@ -109,6 +109,9 @@ for (const mobile of [false, true]) {
       await page.getByRole("button", { name: "Chat integrations", exact: true }).click();
       const panel = page.getByRole("dialog", { name: "Chat integrations", exact: true });
       await expect(panel).toBeVisible();
+      await expect(panel.getByRole("status")).toHaveText(
+        "Refresh to apply current MCP settings to this chat.",
+      );
       await panel.getByRole("button", { name: "Refresh integrations", exact: true }).click();
       await expect(panel.getByRole("status")).toHaveText(
         "Changes will apply before the next model request.",
@@ -127,12 +130,18 @@ for (const mobile of [false, true]) {
       harness.provider.enqueue(
         "new-mount",
         { token: "REFRESH_ADDED", requiredTools: [ECHO] },
-        { kind: "function_call", name: ECHO, callId: "refresh-echo", arguments: {} },
+        {
+          kind: "function_call",
+          name: ECHO,
+          callId: "refresh-echo",
+          arguments: {},
+          stream: "request",
+        },
       );
       harness.provider.enqueue(
         "after-echo",
         { functionOutputCallId: "refresh-echo" },
-        { kind: "text", text: "New integration completed" },
+        { kind: "text", text: "New integration completed", stream: "request" },
       );
       await run(request, harness, session, "REFRESH_ADDED");
       expect(fixture.calls()).toBe(1);
@@ -149,7 +158,7 @@ for (const mobile of [false, true]) {
       harness.provider.enqueue(
         "removed-mount",
         { token: "REFRESH_REMOVED", forbiddenTools: [ECHO] },
-        { kind: "text", text: "Removed integration is absent" },
+        { kind: "text", text: "Removed integration is absent", stream: "request" },
       );
       await run(request, harness, session, "REFRESH_REMOVED");
       await expect(panel.getByText("Refresh 2 · Applied 2", { exact: true })).toBeVisible();
@@ -159,7 +168,7 @@ for (const mobile of [false, true]) {
       harness.provider.enqueue(
         "restart-no-replay",
         { token: "REFRESH_RESTART", forbiddenTools: [ECHO] },
-        { kind: "text", text: "Restart retained refresh intent" },
+        { kind: "text", text: "Restart retained refresh intent", stream: "request" },
       );
       await run(request, harness, session, "REFRESH_RESTART");
       expect(fixture.calls()).toBe(1);

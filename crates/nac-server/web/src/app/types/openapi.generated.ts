@@ -441,6 +441,114 @@ export interface components {
     GitIdentityResponse: { email: string; name: string };
     GoalStatus: "active" | "paused" | "blocked" | "usage_limited" | "budget_limited" | "complete";
     HealthResponse: { status: string };
+    HeartbeatAction:
+      | { action: "create"; spec: components["schemas"]["HeartbeatSpec"] }
+      | {
+          action: "edit";
+          expected_version: number;
+          schedule_id: string;
+          spec: components["schemas"]["HeartbeatSpec"];
+        }
+      | { action: "pause"; expected_version: number; schedule_id: string }
+      | { action: "resume"; expected_version: number; schedule_id: string }
+      | { action: "stop"; expected_version: number; schedule_id: string }
+      | { action: "delete"; expected_version: number; schedule_id: string }
+      | { action: "run_now"; expected_version: number; schedule_id: string };
+    HeartbeatAttentionAcknowledgement: { through_sequence: number };
+    HeartbeatAttentionResult: {
+      occurrence_id: string;
+      outcome: components["schemas"]["HeartbeatOutcome"];
+      run_id?: string | null;
+      schedule_id: string;
+      seen: boolean;
+      sequence: number;
+    };
+    HeartbeatBinding: {
+      backend: string;
+      config_version: number;
+      cwd: string;
+      execution_cwd?: string | null;
+      project_id?: string | null;
+      scheduling_request?: string | null;
+      seen_through_sequence?: number;
+    };
+    HeartbeatControlRequest: {
+      operation: components["schemas"]["HeartbeatAction"];
+      request_id: string;
+    };
+    HeartbeatInspection: {
+      history: components["schemas"]["HeartbeatOccurrence"][];
+      schedule: components["schemas"]["HeartbeatSchedule"];
+    };
+    HeartbeatOccurrence: {
+      attempt_count: number;
+      coalesced_count: number;
+      due_first_ms: number;
+      due_last_ms: number;
+      evidence?: string | null;
+      generation?: string | null;
+      inbox_item_id?: number | null;
+      occurrence_id: string;
+      outcome?: components["schemas"]["HeartbeatOutcome"] | null;
+      provisional_outcome?: components["schemas"]["HeartbeatOutcome"] | null;
+      receipt_id: string;
+      revision: number;
+      run_id?: string | null;
+      run_now: boolean;
+      schedule_id: string;
+      schedule_version: number;
+      session_id: string;
+      settled_at_ms?: number | null;
+      settlement_sequence?: number | null;
+      spec: components["schemas"]["HeartbeatSpec"];
+      started_at_ms?: number | null;
+      state: components["schemas"]["HeartbeatOccurrenceState"];
+      tokens_used?: number | null;
+    };
+    HeartbeatOccurrenceState: "pending" | "admitted" | "settled" | "withdrawn";
+    HeartbeatOutcome:
+      | "unchanged"
+      | "meaningful"
+      | "finished"
+      | "needs_human_action"
+      | "failed"
+      | "interrupted"
+      | "unknown";
+    HeartbeatReceipt: {
+      active_occurrence?: components["schemas"]["HeartbeatOccurrence"] | null;
+      occurrence?: components["schemas"]["HeartbeatOccurrence"] | null;
+      request_id: string;
+      schedule: components["schemas"]["HeartbeatSchedule"];
+    };
+    HeartbeatSchedule: {
+      anchor_ms: number;
+      binding: components["schemas"]["HeartbeatBinding"];
+      created_at_ms: number;
+      next_due_ms: number;
+      reason?: string | null;
+      schedule_id: string;
+      session_id: string;
+      spec: components["schemas"]["HeartbeatSpec"];
+      starts: number;
+      state: components["schemas"]["HeartbeatState"];
+      time_used_ms: number;
+      tokens_used: number;
+      updated_at_ms: number;
+      usage_unknown: boolean;
+      version: number;
+    };
+    HeartbeatSpec: {
+      end_condition: string;
+      execution_timeout_ms?: number;
+      goal_id?: string | null;
+      instructions: string;
+      interval_ms: number;
+      max_occurrences?: number;
+      name: string;
+      skills?: string[];
+      token_allowance?: number | null;
+    };
+    HeartbeatState: "active" | "paused" | "suspended" | "stopped" | "finished" | "deleted";
     InboxDelivery: "steer" | "queue";
     InboxItemResponse: {
       cancelled_at?: string | null;
@@ -605,6 +713,9 @@ export interface components {
     ManagedSessionSummary: {
       active: boolean;
       active_run?: components["schemas"]["ActiveRunSnapshot"] | null;
+      attention_revision?: number;
+      attention_updated_at?: string | null;
+      heartbeat_results?: components["schemas"]["HeartbeatAttentionResult"][];
       lineage?: components["schemas"]["SessionLineageSnapshot"] | null;
       summary: components["schemas"]["SessionSummarySnapshot"];
       workspace_diff?: components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1221,7 +1332,13 @@ export interface components {
       parent_session_id: string;
       root_session_id: string;
     };
-    SessionMcpRefreshState: "current" | "pending" | "degraded" | "failed" | "scheduled_for_workers";
+    SessionMcpRefreshState:
+      | "not_requested"
+      | "current"
+      | "pending"
+      | "degraded"
+      | "failed"
+      | "scheduled_for_workers";
     SessionMcpRefreshStatus: {
       applied_revision: number | null;
       incarnation_id: string | null;

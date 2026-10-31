@@ -88,6 +88,12 @@ impl SessionService {
                 run_config.client.clone(),
             ))
         });
+        let heartbeat_context = run_config.agent.user_terminal_runtime().map(|runtime| {
+            Arc::new(heartbeats::HeartbeatContext::new(
+                runtime,
+                run_config.client.clone(),
+            ))
+        });
         if let Some(target) = workspace_git.as_ref() {
             terminal_manager.configure_workspace_authority(
                 metadata.store_path.clone(),
@@ -132,6 +138,7 @@ impl SessionService {
             mcp,
             terminal_manager,
             user_terminal_context,
+            heartbeat_context,
             shell_runtime,
             permission_broker,
             sandbox_resource_lease: Arc::new(StdMutex::new(None)),

@@ -1,87 +1,101 @@
-// Sessions whose run finished while the user was looking elsewhere. The list
-// view renders a dot for them until they are opened.
-
+// One presentation's attention dots. Durable heartbeat outcomes and human
+// acknowledgements survive reconnect through the serving store.
 import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 import { isActiveRun } from "@/app/lib/format";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
 interface AttentionState {
   flagged: Record<string, boolean>;
+  acknowledgements: Record<string, number>;
+}
+interface ActiveObservation {
+  runId: string;
+  revision: number;
+  waits: number;
 }
 
-// Previous run state per session, kept outside the store because it is only an
-// implementation detail of the transition detection.
-interface ActiveById {
-  [id: string]: boolean;
-}
-/** One presentation lifetime; hosted preferences are ephemeral. */
 export function createAttentionStore(_storage?: Pick<Storage, "getItem" | "setItem">) {
-  const attentionStore = createStore<AttentionState>({ flagged: {} });
-  const initial_attentionStore = attentionStore.getState();
-
+  const attentionStore = createStore<AttentionState>({ flagged: {}, acknowledgements: {} });
   const { getState, setState, useStore } = attentionStore;
+  let previous: Record<string, ActiveObservation> = {};
+  let resultsThrough: Record<string, number> = {};
+  let acknowledged: Record<string, number> = {};
 
-  let previouslyActive: ActiveById = {};
-
-  /**
-   * Flag every session that stopped running since the last call, except the one
-   * currently open. Call this whenever a fresh session list arrives.
-   */
-  function trackAttention(sessions: ManagedSessionSummary[], selectedId: string | null): void {
-    const nextActive: Record<string, boolean> = {};
+  function clearAttentionAll(ids: string[]): void {
     const flagged = { ...getState().flagged };
-    let changed = false;
+    const acknowledgements = { ...getState().acknowledgements };
+    for (const id of ids) {
+      delete flagged[id];
+      const sequence = resultsThrough[id] ?? 0;
+      if (sequence > (acknowledged[id] ?? 0)) {
+        acknowledged[id] = sequence;
+        acknowledgements[id] = Math.max(sequence, acknowledgements[id] ?? 0);
+      }
+    }
+    setState({ flagged, acknowledgements });
+  }
+  function clearAttention(id: string): void {
+    clearAttentionAll([id]);
+  }
 
+  function trackAttention(sessions: ManagedSessionSummary[], selectedId: string | null): void {
+    const next: Record<string, ActiveObservation> = {};
+    const flagged = { ...getState().flagged };
+    const through: Record<string, number> = {};
     for (const entry of sessions) {
       const id = entry.summary.session_id;
-      const active = isActiveRun(entry.active_run);
-      nextActive[id] = active;
-      if (previouslyActive[id] === true && !active && id !== selectedId) {
-        if (!flagged[id]) {
+      const results = entry.heartbeat_results ?? [];
+      through[id] = results.reduce((maximum, result) => Math.max(maximum, result.sequence), 0);
+      const revision = entry.attention_revision ?? 0;
+      if (
+        results.some(
+          (result) =>
+            !result.seen &&
+            result.sequence > (acknowledged[id] ?? 0) &&
+            result.outcome !== "unchanged",
+        )
+      ) {
+        flagged[id] = true;
+      }
+      if (isActiveRun(entry.active_run) && entry.active_run) {
+        next[id] = { runId: entry.active_run.run_id, revision, waits: 0 };
+      } else if (previous[id]) {
+        const observation = previous[id];
+        const result = results.find((item) => item.run_id === observation.runId);
+        // The process cache may clear active_run after the list's database
+        // snapshot. Wait one poll for canonical settlement before classifying.
+        if (
+          !result &&
+          revision <= observation.revision &&
+          observation.waits === 0 &&
+          entry.attention_revision !== undefined
+        ) {
+          next[id] = { ...observation, waits: 1 };
+        } else if (!result || result.outcome !== "unchanged") {
           flagged[id] = true;
-          changed = true;
         }
       }
     }
-
-    previouslyActive = nextActive;
-    if (changed) setState({ flagged });
+    previous = next;
+    resultsThrough = through;
+    setState({ flagged });
+    if (selectedId) clearAttention(selectedId);
   }
 
-  function clearAttention(id: string): void {
-    const flagged = getState().flagged;
-    if (!flagged[id]) return;
-    const next = { ...flagged };
-    delete next[id];
-    setState({ flagged: next });
+  function acknowledgeSucceeded(id: string, sequence: number): void {
+    const acknowledgements = { ...getState().acknowledgements };
+    if ((acknowledgements[id] ?? 0) <= sequence) delete acknowledgements[id];
+    setState({ acknowledgements });
   }
-
   const useAttention = (id: string) => useStore((s) => Boolean(s.flagged[id]));
-
-  /**
-   * A project card stands in for the chats inside it, so it lights up when any of
-   * them finished unseen. The selector reduces to a boolean, so a change to an
-   * unrelated session never re-renders the card.
-   */
   const useAnyAttention = (ids: string[]) =>
     useStore((s) => ids.some((id) => Boolean(s.flagged[id])));
-
-  /** Clears every chat of a project at once, when its card is opened. */
-  function clearAttentionAll(ids: string[]): void {
-    const flagged = getState().flagged;
-    const next = { ...flagged };
-    let changed = false;
-    for (const id of ids) {
-      if (next[id]) {
-        delete next[id];
-        changed = true;
-      }
-    }
-    if (changed) setState({ flagged: next });
-  }
   return {
     release: () => {
-      attentionStore.setState(initial_attentionStore);
+      previous = {};
+      resultsThrough = {};
+      acknowledged = {};
+      setState({ flagged: {}, acknowledgements: {} });
     },
     attentionStore,
     trackAttention,
@@ -89,9 +103,9 @@ export function createAttentionStore(_storage?: Pick<Storage, "getItem" | "setIt
     useAttention,
     useAnyAttention,
     clearAttentionAll,
+    acknowledgeSucceeded,
   };
 }
-
 export const {
   release,
   attentionStore,
@@ -100,4 +114,5 @@ export const {
   useAttention,
   useAnyAttention,
   clearAttentionAll,
+  acknowledgeSucceeded,
 } = createAttentionStore(standalonePreferenceStorage);

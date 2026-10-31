@@ -1325,6 +1325,7 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
 
     let (prompt_commit, _prompt_commit_receiver) = watch::channel(RunPromptCommitStatus::Pending);
     *service.lock_active_operation() = Some(ActiveSessionOperation::Run(ActiveRunState {
+        heartbeat: false,
         snapshot: ActiveRunSnapshot {
             run_id: SessionRunId::new(),
             client_id: None,

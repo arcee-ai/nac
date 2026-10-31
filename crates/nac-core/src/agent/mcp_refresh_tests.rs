@@ -323,6 +323,39 @@ async fn mcp_mount_refresh_required_failure_invalidates_old_mounts_until_explici
 }
 
 #[tokio::test]
+async fn mcp_mount_refresh_invalid_configuration_fails_closed_until_explicit_retry() {
+    let _env = crate::TEST_ENV_LOCK.lock().unwrap();
+    let server = RecordingMcpServer::start();
+    let home = TestHome::new("mcp-refresh-invalid-config", "recorded", &server.url);
+    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    assert!(names(&mut agent).contains(&ECHO.to_string()));
+    std::fs::write(home.path.join("config.toml"), "[mcp_servers.recorded\n").unwrap();
+    request(&agent, 0);
+    assert!(agent.admit_mcp_mount_refresh().await.is_err());
+    assert!(agent.mcp_mounts.registry().is_none());
+    assert!(!names(&mut agent).contains(&ECHO.to_string()));
+    let status = agent.mcp_mounts.status(
+        crate::store::load_session_mcp_refresh(
+            &agent.tool_runtime.store_path,
+            agent.tool_runtime.session_id.as_deref().unwrap(),
+        )
+        .unwrap(),
+    );
+    assert_eq!(status.state, crate::mcp::SessionMcpRefreshState::Failed);
+    assert_eq!(status.applied_revision, None);
+    let diagnostic = status.message.unwrap();
+    assert!(diagnostic.contains("configuration"));
+    assert!(diagnostic.len() < 256);
+    assert!(!diagnostic.contains(home.path.to_string_lossy().as_ref()));
+    configure(&home, &server.url, "approval = \"allow\"");
+    assert!(agent.admit_mcp_mount_refresh().await.is_err());
+    request(&agent, 1);
+    agent.admit_mcp_mount_refresh().await.unwrap();
+    assert!(names(&mut agent).contains(&ECHO.to_string()));
+    assert!(server.authorizations("tools/call").is_empty());
+}
+
+#[tokio::test]
 async fn mcp_mount_refresh_superseded_load_cannot_publish_an_older_revision() {
     let _env = crate::TEST_ENV_LOCK.lock().unwrap();
     let (first, arrived, release) = RecordingMcpServer::start_holding_first("tools/list");

@@ -1,3 +1,9 @@
+import type {
+  HeartbeatSchedule,
+  HeartbeatInspection,
+  HeartbeatReceipt,
+  HeartbeatControlRequest,
+} from "@/app/types/api";
 // Standalone compatibility facade; feature owners obtain their API from runtime context.
 import { createNacApi } from "../../../packages/nac-client/src/api.js";
 import type {
@@ -14,6 +20,14 @@ export type NativeApi = ReturnType<typeof createNacApi> & {
     id: string,
     expectedRevision: number,
   ): Promise<SessionMcpRefreshStatus>;
+  heartbeatInventory(sessionId?: string, signal?: AbortSignal): Promise<HeartbeatSchedule[]>;
+  heartbeatInspection(
+    sessionId: string,
+    scheduleId: string,
+    signal?: AbortSignal,
+  ): Promise<HeartbeatInspection>;
+  controlHeartbeat(sessionId: string, request: HeartbeatControlRequest): Promise<HeartbeatReceipt>;
+  acknowledgeHeartbeats(sessionId: string, throughSequence: number): Promise<void>;
   startTaskLaunch(request: TaskLaunchRequest): Promise<TaskLaunchRecord>;
   taskLaunchStatus(id: string, signal?: AbortSignal): Promise<TaskLaunchRecord>;
   taskLaunchInventory(projectId: string, signal?: AbortSignal): Promise<TaskLaunchRecord[]>;
@@ -37,6 +51,28 @@ export function createNativeApi(client: typeof nacClient): NativeApi {
         `/sessions/${encodeURIComponent(id)}/integrations/refresh`,
         { body: { expected_revision: expectedRevision } },
       ),
+    heartbeatInventory: (sessionId, signal) =>
+      request<HeartbeatSchedule[]>(
+        "GET",
+        `/heartbeats${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`,
+        { signal },
+      ),
+    heartbeatInspection: (sessionId, scheduleId, signal) =>
+      request<HeartbeatInspection>(
+        "GET",
+        `/sessions/${encodeURIComponent(sessionId)}/heartbeats/${encodeURIComponent(scheduleId)}`,
+        { signal },
+      ),
+    controlHeartbeat: (sessionId, body) =>
+      request<HeartbeatReceipt>(
+        "POST",
+        `/sessions/${encodeURIComponent(sessionId)}/heartbeats/control`,
+        { body },
+      ),
+    acknowledgeHeartbeats: (sessionId, throughSequence) =>
+      request<void>("POST", `/sessions/${encodeURIComponent(sessionId)}/heartbeats/attention`, {
+        body: { through_sequence: throughSequence },
+      }),
     startTaskLaunch: (body: TaskLaunchRequest) =>
       request<TaskLaunchRecord>("POST", "/task-launches", { body }),
     taskLaunchStatus: (id: string, signal?: AbortSignal) =>
