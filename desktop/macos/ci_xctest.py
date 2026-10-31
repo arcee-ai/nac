@@ -4,6 +4,7 @@ import json
 from contextlib import contextmanager
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -84,8 +85,10 @@ def authorization_policy(observation):
             'developer_mode_enabled': True, 'automation_authentication_required': False}
 
 
-def require_generated_runner(data, config_path):
+def require_generated_runner(data, config_path, expected_target='NACNativeUITests', *, project_selection=None):
     """Inspect Xcode's actual generated runner without manufacturing metadata."""
+    if expected_target not in ('NACNativeUITests', 'NACPerformanceUITests'):
+        raise RuntimeError('Unknown generated XCTest target selection')
     def dictionaries(value):
         if isinstance(value, dict):
             yield value
@@ -94,14 +97,24 @@ def require_generated_runner(data, config_path):
         elif isinstance(value, list):
             for child in value:
                 yield from dictionaries(child)
-    matches = [node for node in dictionaries(data)
-               if node.get('IsUITestBundle') is True and node.get('BlueprintName') == 'NACNativeUITests']
-    if len(matches) != 1:
+    matches = [node for node in dictionaries(data) if node.get('IsUITestBundle') is True]
+    if len(matches) != 1 or matches[0].get('BlueprintName') != expected_target:
         raise RuntimeError('Expected exactly one actual generated native UI test target')
     target = matches[0]
     if (target.get('EnvironmentVariables', {}).get('NAC_UI_FIXTURE') != str(config_path)
             or not target.get('TestBundlePath', '').endswith('.xctest')):
         raise RuntimeError('Generated XCTest runner did not bind the exact fixture configuration')
+    if expected_target == 'NACPerformanceUITests':
+        selection = project_selection or {}
+        source = selection.get('performance_source_path', '')
+        source_hash = selection.get('performance_source_sha256', '')
+        environment = target.get('EnvironmentVariables', {})
+        if (selection.get('generated') is not True or selection.get('expected_target') != expected_target
+                or not isinstance(source, str) or not Path(source).is_absolute()
+                or not isinstance(source_hash, str) or not re.fullmatch('[0-9a-f]{64}', source_hash)
+                or environment.get('NAC_PERFORMANCE_SOURCE_PATH') != source
+                or environment.get('NAC_PERFORMANCE_SOURCE_SHA256') != source_hash):
+            raise RuntimeError('Generated performance runner did not bind the exact materialized source')
     return target
 
 
