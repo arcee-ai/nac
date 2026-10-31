@@ -1,0 +1,97 @@
+name: Manual Mac performance calibration
+
+on:
+  workflow_dispatch:
+    inputs:
+      harness_sha:
+        description: Exact separately nominated ALL-354 harness commit
+        required: true
+        type: string
+      target_sha:
+        description: Exact separately nominated ordinary app source commit
+        required: true
+        type: string
+      dispatch_reference:
+        description: Coordinator dispatch decision matching the committed allocation
+        required: true
+        type: string
+      calibrate:
+        description: Execute only after separate coordinator dispatch approval
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nac-manual-macos-performance
+  cancel-in-progress: false
+
+jobs:
+  calibration:
+    runs-on: macos-26
+    timeout-minutes: 220
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      CARGO_BUILD_JOBS: "4"
+    steps:
+      - name: Start the entire finite job clock before checkout and setup
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, time
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'nac-perf-epoch.json').write_text(
+              json.dumps({'monotonic_ns': time.monotonic_ns()}))
+          PY
+      - name: Check out allocated performance tools
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: performance-tools
+          persist-credentials: false
+      - name: Validate full source identities before using them
+        env:
+          HARNESS_SHA: ${{ inputs.harness_sha }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          for key in ['HARNESS_SHA', 'TARGET_SHA']:
+              if not re.fullmatch('[0-9a-f]{40}', os.environ[key]):
+                  raise SystemExit('Exact full source identities required')
+          PY
+      - name: Check out external public UI harness
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.harness_sha }}
+          path: ci-harness
+          persist-credentials: false
+      - name: Check out unchanged release candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.target_sha }}
+          path: release-target
+          persist-credentials: false
+      - name: Validate or execute the separately approved calibration
+        env:
+          HARNESS_SHA: ${{ inputs.harness_sha }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          TOOLS_SHA: ${{ github.sha }}
+          DISPATCH_REFERENCE: ${{ inputs.dispatch_reference }}
+          EXECUTE_CALIBRATION: ${{ inputs.calibrate }}
+        run: |
+          args=()
+          if [[ "$EXECUTE_CALIBRATION" == true ]]; then args+=(--calibrate); fi
+          python3 -B performance-tools/desktop/macos/performance/run.py \
+            "${args[@]}" --source-root "$GITHUB_WORKSPACE/release-target" \
+            --harness-root "$GITHUB_WORKSPACE/ci-harness" \
+            --target-sha "$TARGET_SHA" --harness-sha "$HARNESS_SHA" --tools-sha "$TOOLS_SHA" \
+            --dispatch-reference "$DISPATCH_REFERENCE" \
+            --epoch "$RUNNER_TEMP/nac-perf-epoch.json" --output "$RUNNER_TEMP/nac-perf-evidence"
+      - name: Retain sanitized attempts, explicit gaps and source identity
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mac-performance-calibration-${{ github.sha }}
+          path: ${{ runner.temp }}/nac-perf-evidence
+          if-no-files-found: error
+          retention-days: 7

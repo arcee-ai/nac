@@ -8,7 +8,9 @@ performance remediation under ALL-357, or a runtime/model cost estimate.
 
 ## Source and retained evidence
 
-- Task: `01a190a6-f47b-75f0-abd1-f8c961e566a5`; native finite goal active.
+- Task: `01a190a6-f47b-75f0-abd1-f8c961e566a5`; stored native finite goal
+  BLOCKED. The coordinator subsequently authorized ordinary bounded preparation
+  and the narrow calibration implementation; no native-goal reset occurs.
 - Repository: `/Users/allison/.codex/worktrees/08e6/allison-demo`;
   branch `codex/all-353-mac-performance`.
 - Baseline: `f71515d14068592a161c17cbd53832ae1b295263`, accepted preview
@@ -66,16 +68,38 @@ No expensive release build was started before this gate was characterized.
 ## Hosted next checkpoint
 
 The coordinator identified an existing standard ARM macOS 26 VM with full Xcode
-as a possible environment. Prior ALL-354 AppKit smoke results are context, not
-performance data or a qualified source nomination. Its direct CG-post route
-was unavailable; a proposed XCTest/XcodeHelper route must prove actual event
-delivery before trusted-input measurements. No permissions are granted here.
+as a possible environment. Actual ALL-354 public XCTest ASCII terminal evidence
+is now available at source/workflow `1d3d77f73c4620e69ead8a525f9950efbb57cd9f`,
+tree-identical to PR head `d1154138af5de035cf1489bee40c3675f8d437c5`:
+run `41182519978`, job `124482718942`, artifact `13035643282`. It records 126
+trusted and zero synthetic keydown receipts, exact terminal input/output, the
+focus negative, unchanged existing Helper/no-auth policy and cleanup. It proves
+one smoke-case driver capability, not ordinary release timing, Safari parity,
+raw frame/input distributions, IME or physical keyboard behavior. The app's
+direct CG-post case remains unavailable. No permissions are granted here.
+
+The allocated implementation now includes a manual-only contents-read workflow,
+a finite release-build/calibration runner, a fixed-field read-only process
+probe and the external `PerformanceJourneys/testCalibration` source. Nomination
+and dispatch fields are null. The runner refuses execution without a separately
+approved exact allocation, and refuses measurement readiness for missing raw
+signals, XPC attribution, cleanup identity or workload repetitions. The same
+empty closed-store calibration seed/engine is used for both arms; it is explicitly
+not the 64-turn measurement fixture. The full required matrix remains unfinished.
+
+Local verification covers provider HTTP and negative collection contracts,
+Python parsing and C syntax only. No process probe, AppKit input, release build,
+measurement, remote job, global lease or final reviewer was run from this
+allocation. Actual Swift SDK/runtime verification awaits ALL-354 integration
+and a separate coordinator decision. No ordinary app/shared harness source,
+builder, API or generated asset was edited.
 
 At a clean idle checkpoint, obtain explicit exact source nomination (frozen
-ALL-341 engine `1a4f9c31f27b4656897673084f3440e05373393d` is available for
-proposal only), proven external ALL-354 driver source, exact hosted job/run
-allocation and coordinator-confirmed quiet conditions. Do not consume moving
-ALL-342 startup or other owners' branches. Build private release artifacts,
+ordinary source `66dfa1ea6dae9bd825224674026a4ff32e1e64e4` is proposed, with
+ALL-341 as an ancestor), an exact ALL-354 integration commit accepting the
+allocated `NAC_PERFORMANCE_SOURCE` file, exact hosted job/run allocation and
+coordinator-confirmed quiet conditions. Do not consume the moving ALL-344
+lifecycle or other owners' branches. Build private release artifacts,
 verify source/assets/provider/fixture identity, then acquire the coordinated
 exclusive measurement lane. Execute the paired workloads from README, preserving
 failed cells, raw traces and provenance. Inspect observer overhead and process

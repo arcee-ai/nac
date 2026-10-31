@@ -5,6 +5,78 @@ This directory defines a matched measurement, not a passing benchmark. Read
 sample counts in [workloads.json](workloads.json) are experimental inputs, not
 accepted performance budgets. No optimized artifact has been measured here.
 
+## Allocated executable calibration
+
+The manually dispatched `macos-performance.yml` and `run.py` implement a bounded
+calibration stage. They do not execute the full required performance matrix.
+The stored allocation has null target/harness nomination and dispatch fields;
+`--calibrate` fails before launching commands until a separately approved,
+committed allocation matches all three. Manual workflow default is validation
+only. No workflow has been dispatched by this work.
+
+Validate the schema, full scope, 100-input requirement and phase accounting:
+
+```sh
+python3 -B desktop/macos/performance/run.py --output /tmp/mac-perf-contract-validation
+python3 -B -m unittest discover -s desktop/macos/performance -p 'test_*.py'
+```
+
+The evidence directory must be new. Calibration admission refusal also retains
+an explicit attempt receipt; it never becomes an empty successful run. The
+`process_usage.c` helper reads one same-user PID, brackets process identity,
+and emits fixed SDK-declared resource fields. Failed reads/identity uncertainty
+retain null metrics. CPU counters are retained raw with timebase metadata;
+CPU percentages require runtime unit calibration. No signaling or undocumented
+coalition API is added to this helper. PPID discovery is explicitly incomplete
+for XPC helpers and cannot establish whole-set totals or cleanup.
+
+`PerformanceJourneys.swift` defines `PerformanceJourneys/testCalibration` in
+the existing `NACNativeUITests` module. ALL-354 alone integrates that source
+using the `NAC_PERFORMANCE_SOURCE` build setting, and retains ownership of the
+real Xcode project and `ci_xctest.py`. The runner checks actual generated
+`.xctestrun` metadata and an actual one-test passed/unskipped xcresult; a zero-test
+exit 0 is not qualification. Existing preconfigured Helper/no-auth policy is
+observed before and after; no permission changes or prompts are requested.
+
+The calibration creates one empty direct-session seed through real APIs,
+orderly stops/checkpoints it, clones identical stores, and uses one dummy local
+provider and the same private release engine bytes. This seed is for calibrating
+public UI access, not a substitute for the 64-turn benchmark. The native arm is
+an ordinary `app-build` with `LOCAL_APP`, Swift `-O`, no smoke definitions and
+Rust `--release --locked`. Safari is ordinary installed Safari with a private
+owned window; no WebDriver/AppleEvents preference or global setting is enabled.
+Only exact newly launched app/active-window identities receive public input.
+
+Both surfaces request 100 ASCII typing characters. Actual event receipts and
+event-to-paint/frame observations are unavailable in the normal target until
+separately approved observation sources exist. API scheduling, AX readiness,
+and AX WebContent point dimensions remain labelled calibration observations.
+They are not raw input latency, rendered frame distributions or verified CSS
+viewport dimensions. Any batching/timing revision requires actual calibration
+and identical versioned changes between arms; current batching remains one.
+
+The calibration deliberately reports `measurement_ready=false` and exits 2
+while required observations/full trials remain missing. It retains sanitized
+JSON/JSONL/logs, a hash index, failed attempts, capped-export omissions and known
+unsupported rows. Raw xcresult diagnostics, private binaries and profiles are
+not uploaded. Failed profiles are preserved; success of a test runner never
+proves missing XPC/process cleanup. No numerical product budget is generated.
+
+The v2 core cap is 12,600 seconds including first-step checkout/setup, builds,
+all planned phases, cleanup and export. The workflow adds a 600-second outer
+upload/final-cleanup envelope and a 220-minute timeout. Per-phase values are
+experiment guards. The 20 paired blocks and full required matrix remain future
+measurement obligations; cold/reopen/notifications/physical energy/OS gaps are
+explicit in `allocation-v2.json`. This calibration is a preparation milestone,
+not ALL-353 completion or release acceptance.
+
+Precise separate owner requests remain: complete bounded native telemetry
+retention instead of the engine's 64 KiB stderr tail, and an opt-in read-only
+document/paint observation source with clock/loss/overhead receipts. Any such
+target amendment needs ALL-344/common-owner agreement and a new exact nominated
+target, plus matching uninstrumented controls. None of those shared files or
+hooks is changed or assumed by this implementation.
+
 ## Prerequisites and reproducible preparation
 
 From the repository root, on the allocated Mac:
@@ -67,11 +139,12 @@ python3 /tmp/nac-35-01a18fbf/gate.py exclusive /absolute/path/to/pinned-run-comm
 ```
 
 `private-build-command` and `pinned-run-command` above are allocation-specific
-inputs, **not provided drivers**. The baseline lacks the matched fixture and
-native timing hooks required below. Preflight is the only executable capture
-for system prerequisites. `fixture.py` supplies the versioned provider input,
-but no browser/native journey driver is delivered here. Do not report this
-protocol as an executed full benchmark.
+inputs, **not provided full benchmark drivers**. The source baseline lacks the
+raw observation hooks required below. Preflight captures system prerequisites;
+`fixture.py` supplies versioned provider input. The allocated public native/browser
+calibration source still needs ALL-354 project integration and a separate runtime
+decision. It does not execute the complete matched measurement matrix. Do not
+report this protocol or calibration as an executed full benchmark.
 
 ## Matching contract and fixture construction
 

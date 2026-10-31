@@ -1,0 +1,64 @@
+{
+  "schema": "nac-mac-performance-allocation-v2",
+  "status": "implementation allocated; no target nomination or dispatch approved",
+  "proposed_target_sha": "66dfa1ea6dae9bd825224674026a4ff32e1e64e4",
+  "proven_harness_base_sha": "1d3d77f73c4620e69ead8a525f9950efbb57cd9f",
+  "nominated_target_sha": null,
+  "nominated_harness_sha": null,
+  "dispatch_reference": null,
+  "core_cap_seconds": 12600,
+  "upload_cleanup_envelope_seconds": 600,
+  "workflow_timeout_minutes": 220,
+  "paired_blocks": 20,
+  "arm_order": "AB,BA alternating",
+  "idle_seconds": 30,
+  "settlement_seconds": 5,
+  "trusted_input_events": 100,
+  "input_batch_characters": 1,
+  "input_pacing_status": "uncalibrated; never change count or workload timing silently",
+  "proposed_css_viewport": [900, 600],
+  "viewport_status": "explicit proposal replacing v1 1280x800; equal actual viewports require calibration and approval",
+  "phases": [
+    {"name": "setup_and_private_release_build", "cap_seconds": 1200},
+    {"name": "calibration_and_process_attribution", "cap_seconds": 240},
+    {"name": "fresh_and_warm_launch", "cap_seconds": 840},
+    {"name": "idle_1_8_active_hidden", "cap_seconds": 6120},
+    {"name": "long_transcript_and_input", "cap_seconds": 960},
+    {"name": "streaming_and_input", "cap_seconds": 720},
+    {"name": "noisy_terminal_and_input", "cap_seconds": 1440},
+    {"name": "preview_hide_reshow", "cap_seconds": 360},
+    {"name": "cleanup_and_evidence_export", "cap_seconds": 600},
+    {"name": "summary_and_final_receipts", "cap_seconds": 120}
+  ],
+  "required_cells": [
+    "cold_launch", "fresh_profile_warm_cache_launch", "warm_store_launch",
+    "first_useful_workspace", "consumer_window_reopen",
+    "idle_1_pty_active", "idle_1_pty_hidden", "idle_8_ptys_active", "idle_8_ptys_hidden",
+    "long_transcript", "streaming", "noisy_terminal", "notifications"
+  ],
+  "required_raw_signals": [
+    "memory", "cpu", "wakeups", "queue", "frame", "input_latency"
+  ],
+  "required_process_roles": [
+    "shell", "webcontent", "network", "gpu", "backend", "provider", "pty"
+  ],
+  "known_unavailable": {
+    "cold_launch": "No approved repeated reboot; fresh profile is not cold boot",
+    "consumer_window_reopen": "Proposed target predates ALL-344 close lifecycle",
+    "notifications": "ALL-350 implementation not in proposed target",
+    "physical_energy": "Hosted VM is not physical M5 power measurement",
+    "supported_os_hardware_matrix": "One standard ARM macOS26 VM cannot qualify macOS14 or physical hardware",
+    "raw_frame_input": "Public driver dispatch/hitch/AX measurements do not supply event-to-paint or per-frame samples",
+    "backend_queue_capture": "Normal PreviewEngine retains only64KiB stderr tail; no approved lossless observation sink"
+  },
+  "runner": "macos-26",
+  "developer_directory": "/Applications/Xcode_26.6.app/Contents/Developer",
+  "constraints": [
+    "no competing NAC-heavy job inside allocated VM",
+    "no physical hypervisor exclusivity or physical energy claim",
+    "no permissions, settings, automation grants or provisioning changes",
+    "no implicit target source edits or diagnostic hooks",
+    "all phase caps are experiment guards, not product budgets",
+    "all failures and incomplete cells remain retained"
+  ]
+}
