@@ -13,7 +13,7 @@ struct StoreConflict: Equatable {
         Track: \(track)
         Store: \(canonicalStore)
 
-        The owner may be a CLI you started in Terminal or another NAC app. Stop it deliberately using its own Quit or Terminal controls. Wait for its shutdown to finish, then choose Retry. Retry asks the bundled engine to acquire the ordinary store lease again; it can still report a conflict while the owner is stopping.
+        The owner may be a CLI you started in Terminal or another NAC app. Stop it deliberately using its own Quit or Terminal controls. Wait for its shutdown to finish, then choose Retry. If the owner is still stopping, Retry will show this conflict again.
 
         To use a separate profile, quit this app and relaunch with an explicit --store-path pointing to a different database. Selecting a separate profile shows that database's projects.
         """

@@ -104,6 +104,7 @@ class OwnedEngine:
         receipt = receipt or record(self.channel)
         assert receipt['kind'] == 'failed' and receipt['incarnation'] == self.incarnation, receipt
         assert receipt['version'] == 1 and not receipt.get('endpoint'), receipt
+        assert receipt['stage'] == 'startup' and receipt['code'] == 'store_owned', receipt
         assert self.process.wait(timeout=5) != 0, 'Conflicting desktop launch reported success'
         return receipt
 

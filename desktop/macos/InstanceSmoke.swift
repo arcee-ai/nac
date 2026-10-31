@@ -153,9 +153,11 @@ final class InstanceSmoke {
     }
 
     private func clickRetry() throws {
+        guard NSApp.isActive, window.isKeyWindow else {
+            throw InstanceFixtureError("User focus changed before fixture Retry")
+        }
         guard let button = retryButton(), button.isEnabled,
-              engine.pid == 0, engine.receipt == nil,
-              NSApp.isActive, window.isKeyWindow else {
+              engine.pid == 0, engine.receipt == nil else {
             throw InstanceFixtureError("Native Retry was available before failed child retirement")
         }
         button.performClick(nil)

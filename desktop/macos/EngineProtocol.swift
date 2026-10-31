@@ -77,8 +77,9 @@ final class EngineProtocol {
             pending.removeAll(keepingCapacity: true)
             guard receipt.version == 1, receipt.incarnation == incarnation else { throw invalid() }
             if receipt.kind == "failed" {
+                guard ready == nil else { throw invalid() }
                 // Display a shell-owned message; never render arbitrary peer bytes.
-                throw PreviewError.message("The bundled engine could not initialize its selected store or listener.")
+                throw EngineFailure.startup(stage: receipt.stage, code: receipt.code)
             }
             guard receipt.kind == "ready", ready == nil,
                   receipt.identity == identity, receipt.store == store,
