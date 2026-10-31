@@ -19,12 +19,14 @@ enum NativeCommandScript {
       const port = Object.freeze({
         connect(callback) {
           if (retired || owner || typeof callback !== 'function') throw new Error('UI owner unavailable');
-          owner = callback;
+          // A stale cleanup must not remove a later use of the same callback.
+          const connection = {callback};
+          owner = connection;
           if (binding) post('ready');
           return () => {
-            if (owner !== callback) return;
-            post('retired');
+            if (owner !== connection) return;
             owner = null;
+            post('retired');
           };
         },
         activate(next) {
@@ -36,13 +38,13 @@ enum NativeCommandScript {
         dispatch(expected, request) {
           if (retired || !same(expected) || !owner) return false;
           let accepted = false;
-          try { accepted = owner(request) === true; } catch {}
+          try { accepted = owner.callback(request) === true; } catch {}
           post('settled', {request: request.request, accepted});
           return true;
         },
         retire(expected) {
           if (!same(expected)) return;
-          post('retired');
+          // Native already retired and may have removed the receipt handler.
           retired = true; owner = null; binding = null;
         }
       });
