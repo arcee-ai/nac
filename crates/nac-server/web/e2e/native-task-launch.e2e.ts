@@ -257,7 +257,10 @@ test("native saved-project launches open independent named-skill tasks across Gi
       page.getByText("Separate ordinary launch accepted", { exact: true }),
     ).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
-    await page.screenshot({ path: info.outputPath("native-task-before.png"), animations: "disabled" });
+    await page.screenshot({
+      path: info.outputPath("native-task-before.png"),
+      animations: "disabled",
+    });
     await page.unrouteAll();
     await page.reload();
   }
