@@ -129,6 +129,19 @@ retires the phase and state. Metadata failure never skips the original owned-app
 and engine cleanup. Forced app death needs no notification cleanup token: the
 actor must reject a vanished/replaced app incarnation.
 
+Cleanup owners attempt the drain barrier, every app journey in the original
+reverse order, and the exact owned CLI independently, even if metadata retirement
+or another cleanup fails. A journey likewise attempts its app/engine observations
+and log close after a metadata failure. Observation failure does not authorize
+adopting an unobserved app or PID. A pending operation exception remains the
+primary exception; cleanup failures are retained on it separately. Without an
+operation failure, the first cleanup error fails the case after later owners
+have been attempted. No returned cleanup call is presented as settlement proof.
+Failure summaries retain `operation_failure`, up to32 `cleanup_errors` with owner,
+type,512-character message prefix, full-message byte count/SHA256, and the truthful
+`cleanup_error_count`/`cleanup_errors_truncated`. This does not relax any cleanup
+observation, resource guard or deadline, or turn unproved cleanup into success.
+
 ## H notification and acceptance obligations
 
 T allocates **no Darwin notification tokens**. H's existing controller and
