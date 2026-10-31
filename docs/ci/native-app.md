@@ -33,7 +33,12 @@ reject before any key posts. The journey requires genuine DOM `isTrusted`
 keydown observations, exact native workspace-file bytes, rendered terminal
 output and settled production terminal termination. It never overrides trust,
 uses clipboard data, changes TCC or replays uncertain input/termination. This
-one ASCII typing case is awaiting hosted qualification; it does not establish
+one ASCII typing case was unavailable on hosted merge `46b20eea1e19792607a745e48e56b4485d94728c`
+(PR head `8a2c1c6c`), run `41175634167`, job `124462707944`: the app's
+`CGPreflightPostEventAccess()` was false. It stopped before opening a terminal
+or posting keys and reported engine reaping/profile removal. The six baseline
+scenarios passed again. Required trusted-input acceptance stays failed; no
+permission prompt or grant was attempted. This case does not establish
 ALL-352's physical typing, IME, paste or fidelity acceptance.
 
 `CITerminal.swift` and its dispatcher/source-list hooks are smoke-only. Ordinary
@@ -125,3 +130,33 @@ The hosted runner invokes `python3 -B desktop/macos/ci.py --expected-sha <SHA>
 --output <new-directory>`. Use a dedicated runner, the pinned `DEVELOPER_DIR`,
 and job-local `CARGO_BUILD_JOBS=4`. Shared local machines must use their supplied
 admission gate; that temporary gate is not a CI dependency.
+
+## Exact supplier source qualification
+
+The existing Stable release manual CI entry has an explicit `native_qualification`
+choice, default `none`. `all-341-macos26` selects only the checked-in immutable
+supplier `1a4f9c31f27b4656897673084f3440e05373393d`, its full 29-scenario preview
+contract and the existing strict macOS 26 toolchain envelope. The optional job
+runs only for manual `codex/` branch CI. Ordinary PR required jobs and all
+publication/tag guards stay unchanged; a manual qualification does not authorize
+publication, a tag, merge or deployment.
+
+One standard Mac job checks out the CI harness and supplier into separate sibling
+directories. It verifies both exact clean Git roots, sets up both fresh checkouts,
+then uses the supplier's own checked-in builder and native test driver. No harness
+code is copied or compiled into the target app. Build revision/engine identity
+bind to the target SHA, while workflow/harness SHA and PR context remain separate.
+The target's own failure cleanup handles its native helpers; residual app, engine,
+helper, descendant or profile state fails the external supervisor.
+
+The external reader checks the target's raw WKWebView images and records positive
+console observations before/after the suite, actual system WebKit/Safari builds,
+and read-only event-post capability. The target's own conservative paint flag
+is retained unchanged: an absent optional lock bit may leave that flag false,
+while separate actual image/session evidence remains available for human review.
+The coordinator must inspect the target PNGs before accepting supplier paint.
+
+Only named source/profile records resolve; there is no arbitrary SHA, command,
+paid-runner or matrix input. Additional 351 and macOS 14 entries require corrected
+immutable nominations and separate bounded qualification. The macOS 14 opportunity
+does not change the primary 26 lane or select a product minimum OS.
