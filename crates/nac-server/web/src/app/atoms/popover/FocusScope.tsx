@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 
 const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
@@ -8,37 +8,24 @@ const focusableItems = (scope: HTMLElement) =>
       item.tabIndex >= 0 && !item.matches(":disabled") && !item.closest("[inert], [hidden]"),
   );
 
-/** Opt-in keyboard ownership for actions portaled outside an enclosing dialog. */
+/** Initial focus and Tab navigation; the presentation layer owns dismissal and focus return. */
 export function PopoverFocusScope({
   open,
   label,
-  onClose,
   children,
 }: {
   open: boolean;
   label: string;
-  onClose?: () => void;
   children: ReactNode;
 }) {
   const host = useRef<HTMLDivElement>(null);
-  const close = useRef(onClose);
-  const activation = useRef<{ scope: HTMLElement; opener: Element | null } | null>(null);
-  useLayoutEffect(() => {
-    close.current = onClose;
-  }, [onClose]);
 
   useLayoutEffect(() => {
     const scope = host.current;
     if (!open || !scope) return;
-    const opener = document.activeElement;
-    activation.current = { scope, opener };
     (focusableItems(scope)[0] ?? scope).focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        close.current?.();
-      } else if (event.key === "Tab") {
+      if (event.key === "Tab") {
         // Keep both native modal traps and xterm's keyboard input out of this event.
         event.preventDefault();
         event.stopPropagation();
@@ -69,22 +56,6 @@ export function PopoverFocusScope({
       (focusableItems(scope)[0] ?? scope).focus({ preventScroll: true });
     }
   });
-
-  useEffect(() => {
-    if (!open || !activation.current) return;
-    const { scope, opener } = activation.current;
-    return () => {
-      // Restore after React's commit focus restoration: a closing phone sheet
-      // keeps its DOM during the exit animation. A new dialog may own focus.
-      if (
-        opener instanceof HTMLElement &&
-        opener.isConnected &&
-        (scope.contains(document.activeElement) || document.activeElement === document.body)
-      ) {
-        opener.focus({ preventScroll: true });
-      }
-    };
-  }, [open]);
 
   return (
     <div

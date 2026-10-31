@@ -720,6 +720,13 @@
 .tab-btn.btn-large {
   gap: 12px;
 }
+/* A row without a leading icon starts on its label, a step further in. */
+.tab-btn.btn-small:not(:has(> .icon:first-child)) {
+  padding-left: 8px;
+}
+.tab-btn.btn-medium:not(:has(> .icon:first-child)) {
+  padding-left: 12px;
+}
 
 .tab-btn-regular {
   color: var(--color-text-btn-secondary);

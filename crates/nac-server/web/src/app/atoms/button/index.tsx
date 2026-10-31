@@ -1,41 +1,12 @@
 import type React from "react";
 
-import { cn } from "../../lib/cn";
+import { Button as UIButton, ButtonContent, ButtonSize, ButtonVariant } from "../../ui/button";
 import Loader, { LoaderSize, LoaderVariant } from "../loader";
 
-// Enums
-export enum ButtonSize {
-  Medium = "btn-medium",
-  Small = "btn-small",
-  Large = "btn-large",
-}
-
-export enum ButtonVariant {
-  Primary = "btn-primary",
-  Secondary = "btn-secondary",
-  SecondaryHighlighted = "btn-secondary-highlighted",
-  SecondaryDestructive = "btn-secondary-destructive",
-  SecondaryAccent = "btn-secondary-accent",
-  SecondaryAccentHighlighted = "btn-secondary-accent-highlighted",
-  Tertiary = "btn-tertiary",
-  TertiaryDestructive = "btn-tertiary-destructive",
-  TertiaryAccent = "btn-tertiary-accent",
-  Ghost = "btn-ghost",
-  GhostDestructive = "btn-ghost-destructive",
-  GhostAccent = "btn-ghost-accent",
-  GhostHighlighted = "btn-ghost-highlighted",
-  GhostHighlightedAccent = "btn-ghost-highlighted-accent",
-}
-
-export enum ButtonContent {
-  Icon = "btn-icon",
-  IconLeft = "btn-icon-left",
-  IconRight = "btn-icon-right",
-  Text = "btn-text",
-}
+export { ButtonContent, ButtonSize, ButtonVariant };
 
 // Props
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonProps extends React.ComponentPropsWithRef<"button"> {
   size?: ButtonSize;
   variant?: ButtonVariant;
   content?: ButtonContent;
@@ -82,22 +53,28 @@ const Button: React.FC<ButtonProps> & {
   loading = false,
   type = "button",
   ...props
-}) => {
-  const classes = cn(
-    "btn",
-    size,
-    variant,
-    content,
-    (disabled || loading) && "btn-disabled",
-    className,
-  );
-
-  return (
-    <button type={type} className={classes} disabled={disabled || loading} {...props}>
-      {loading ? <Loader size={loaderSize[size]} variant={loaderVariant[variant]} /> : children}
-    </button>
-  );
-};
+}) => (
+  <UIButton
+    size={size}
+    variant={variant}
+    content={content}
+    className={className}
+    type={type}
+    disabled={disabled || loading}
+    aria-busy={loading || undefined}
+    {...props}
+  >
+    {loading ? (
+      <>
+        <Loader size={loaderSize[size]} variant={loaderVariant[variant]} />
+        {/* The spinner stands in for the label on screen, not for a screen reader. */}
+        <span className="sr-only">{children}</span>
+      </>
+    ) : (
+      children
+    )}
+  </UIButton>
+);
 
 // Attach enums to the Button object
 Button.Size = ButtonSize;

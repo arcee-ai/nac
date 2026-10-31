@@ -44,7 +44,8 @@ function modelCopyText(turn: ModelTurn): string {
 const COMPACTION_ACTIVITY = "Compacting context…";
 
 /** Dimmed at rest; keyboard focus lifts it so the focus ring keeps its contrast. */
-const ACTION_CLASS = "opacity-75 focus-visible:opacity-100";
+const ACTION_CLASS =
+  "opacity-75 hover:opacity-100 focus-visible:opacity-100 max-md:!size-11 max-md:!min-h-11";
 
 /**
  * What the run is busy with when nothing in the turn shows it. The badge only

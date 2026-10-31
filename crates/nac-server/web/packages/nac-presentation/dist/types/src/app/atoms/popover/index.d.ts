@@ -5,8 +5,10 @@ export declare enum PopoverSize {
     Small = "w-[240px]",
     Medium = "w-[320px]",
     Large = "w-[400px]",
-    /** As wide as the content, useful together with `min-w-full` on the panel. */
-    Fit = "w-max"
+    /** As wide as the content. */
+    Fit = "w-max",
+    /** At least as wide as the trigger, and wider when the content asks for it. */
+    TriggerWidth = "min-w-[var(--radix-popover-trigger-width)]"
 }
 interface PopoverProps {
     open: boolean;
@@ -18,8 +20,8 @@ interface PopoverProps {
     placement?: AnchorPlacement;
     size?: PopoverSize | string;
     /**
-     * Portal the panel to the body and place it from measured coordinates, so an
-     * ancestor with clipped overflow cannot cut it off.
+     * Portal the panel to the presentation's overlay layer, so an ancestor with
+     * clipped overflow cannot cut it off.
      */
     sticky?: boolean;
     closeOnOutsideClick?: boolean;

@@ -1,8 +1,7 @@
 import { type ReactNode } from "react";
-/** Opt-in keyboard ownership for actions portaled outside an enclosing dialog. */
-export declare function PopoverFocusScope({ open, label, onClose, children, }: {
+/** Initial focus and Tab navigation; the presentation layer owns dismissal and focus return. */
+export declare function PopoverFocusScope({ open, label, children, }: {
     open: boolean;
     label: string;
-    onClose?: () => void;
     children: ReactNode;
 }): import("react").JSX.Element;

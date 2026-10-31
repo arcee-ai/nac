@@ -1,21 +1,25 @@
-import {
-  usePresentationPortalTarget,
-  usePresentationInertTarget,
-  usePresentationKeyboardOwner,
-} from "@/app/providers/PresentationBoundary";
 import React, { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 import { useIsMobile } from "../../hooks/useMediaQuery";
-import { createModalId, useModalStack } from "../../hooks/useModalStack";
 import { cn } from "../../lib/cn";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogOverlay,
+  AlertDialogTitle,
+} from "../../ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle,
+} from "../../ui/dialog";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import StickyButton from "../button/StickyButton";
 import CoverBackground from "../cover-background";
 import Icon, { IconName } from "../icon";
-
-const FOCUSABLE =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** Kept in step with the mobile slide transition. */
 const MOBILE_EXIT_MS = 300;
@@ -78,6 +82,11 @@ interface ModalProps {
    * puts the route there — the session side box switches panels by navigating.
    */
   keepOnNavigate?: boolean;
+  /**
+   * A confirmation before something that cannot be undone: the card is an
+   * `alertdialog`, described by the `ModalDescription` in its body.
+   */
+  alert?: boolean;
   className?: string;
   /** Overrides the body's own padding and scrolling, for full-bleed content. */
   bodyClassName?: string;
@@ -105,27 +114,16 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   mobileCloseIcon = IconName.Left,
   hideClose = false,
   keepOnNavigate = false,
+  alert = false,
   className = "",
   bodyClassName = "",
   children,
   footer,
 }) => {
-  const portalTarget = usePresentationPortalTarget();
-  const inertTarget = usePresentationInertTarget();
-
-  const ownsKeyboard = usePresentationKeyboardOwner();
-  const closeRef = useRef(onClose);
-  useEffect(() => {
-    closeRef.current = onClose;
-  }, [onClose]);
   const isMobile = useIsMobile();
   const cardRef = useRef<HTMLDivElement>(null);
-  // Identity of this dialog in the shared stack. It is state rather than a ref
-  // because the render below compares it against the top of the stack.
-  const [token] = useState(() => createModalId());
   const previousPathnameRef = useRef("");
   const location = useLocation();
-  const { modalStack, pushModal, popModal, isModalOnTop, getStackLength } = useModalStack();
 
   // Mobile keeps the panel mounted through the exit slide; desktop unmounts
   // immediately because the enter animation is a one-shot fade.
@@ -165,70 +163,11 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
     return () => clearTimeout(timer);
   }, [open, isMobile, mounted]);
 
+  // The card itself takes the focus rather than the first field: landing in a
+  // text input pops up the keyboard on a phone and steals typing from someone
+  // who only meant to read.
   useEffect(() => {
-    if (!open) return undefined;
-    const self = token;
-    pushModal({ id: self });
-    // Keep the view background out of the tab order; the overlay target stays
-    // reachable. Desktop only: on a phone the panel covers the view and inert
-    // is unnecessary.
-    const root = inertTarget;
-    if (!isMobile) root?.setAttribute("inert", "");
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || !ownsKeyboard(e.target)) return;
-      if (!isModalOnTop(self)) return;
-      closeRef.current?.();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      popModal(self);
-      // Only clear inert when nothing else is left open.
-      if (!isMobile && getStackLength() === 0) {
-        root?.removeAttribute("inert");
-      }
-    };
-  }, [
-    open,
-    ownsKeyboard,
-    isMobile,
-    token,
-    pushModal,
-    popModal,
-    isModalOnTop,
-    getStackLength,
-    inertTarget,
-  ]);
-
-  // Move focus into the dialog and trap Tab within it. The card itself takes
-  // the focus rather than the first field: landing in a text input pops up the
-  // keyboard on a phone and steals typing from someone who only meant to read.
-  useEffect(() => {
-    if (!open) return undefined;
-    const card = cardRef.current;
-    if (!card) return undefined;
-    const focusables = () => Array.from(card.querySelectorAll<HTMLElement>(FOCUSABLE));
-    card.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") return;
-      const items = focusables();
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      // The card holds the focus until the first Tab, and it is not one of the
-      // items, so shift-tabbing off it would escape into the browser chrome.
-      const onCard = document.activeElement === card;
-      if (e.shiftKey && (onCard || document.activeElement === first)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    card.addEventListener("keydown", onKey);
-    return () => card.removeEventListener("keydown", onKey);
+    if (open) cardRef.current?.focus();
   }, [open]);
 
   // Close when navigating away — leftover dialogs over a new route are wrong.
@@ -246,7 +185,11 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
 
   if (!mounted) return null;
 
-  const onTop = modalStack.length === 0 || modalStack[modalStack.length - 1]?.id === token;
+  const Root = alert ? AlertDialog : Dialog;
+  const Overlay = alert ? AlertDialogOverlay : DialogOverlay;
+  const Content = alert ? AlertDialogContent : DialogContent;
+  const Title = alert ? AlertDialogTitle : DialogTitle;
+
   // On a phone the scrim never dismisses — only the back/close control does.
   const overlayCloses = closeOnOverlay && !isMobile;
 
@@ -286,6 +229,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   // already puts Close in the header row.
   const chromelessClose = chromeless && (isFullScreen || isMobile) && onClose && !hideClose;
 
+  const titleClassName = "header-md flex min-w-0 flex-1 items-center text-basic-primary";
   const headerRow = (
     <div
       className={cn(
@@ -295,7 +239,13 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       )}
     >
       {isMobile && onClose ? closeButton(mobileCloseIcon) : null}
-      <div className="header-md flex min-w-0 flex-1 items-center text-basic-primary">{title}</div>
+      {title ? (
+        <Title asChild>
+          <div className={titleClassName}>{title}</div>
+        </Title>
+      ) : (
+        <div className={titleClassName} />
+      )}
       {headerActions ? (
         <div className="flex shrink-0 items-center gap-1">{headerActions}</div>
       ) : null}
@@ -322,111 +272,121 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       </header>
     ) : null;
 
-  const mobileTransform = open
-    ? onTop
-      ? "translate-x-0"
-      : "translate-x-[-30px]"
-    : "translate-x-full";
+  const mobileTransform =
+    open && !offscreen ? "translate-x-0 data-[covered]:translate-x-[-30px]" : "translate-x-full";
 
-  return createPortal(
-    <>
-      <CoverBackground
-        open={open && (!isMobile || !offscreen)}
-        zIndex={100}
-        opacity={0.25}
-        blur={1}
-        className={isMobile ? "!duration-300" : undefined}
-        onClick={overlayCloses ? onClose : undefined}
-      />
-      <div
-        className={cn(
-          "pointer-events-none fixed inset-0 z-[100] flex",
-          // A phone panel is the viewport itself, so it never gets the inset
-          // the desktop card sits in.
-          !isMobile && "items-center justify-center p-4",
-        )}
-      >
+  return (
+    <Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose?.();
+      }}
+      // Desktop only: on a phone the panel covers the view and inert is unnecessary.
+      inertBackground={!isMobile}
+    >
+      <DialogPortal forceMount>
+        <Overlay asChild dismissible={overlayCloses}>
+          <CoverBackground
+            open={open && (!isMobile || !offscreen)}
+            zIndex={100}
+            opacity={0.25}
+            blur={1}
+            className={isMobile ? "!duration-300" : undefined}
+          />
+        </Overlay>
         <div
-          ref={cardRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label={typeof title === "string" ? title : undefined}
-          tabIndex={-1}
-          data-modal-open={open ? "true" : undefined}
           className={cn(
-            "pointer-events-auto relative flex flex-col outline-none",
-            isMobile
-              ? cn(
-                  "rounded-none transition-transform duration-300 ease-in-out",
-                  offscreen && open ? "translate-x-full" : mobileTransform,
-                  !chromeless && "bg-elevation-ground",
-                )
-              : cn(
-                  "fade w-full",
-                  size,
-                  chromeless
-                    ? "shadow-none"
-                    : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-[20px] bg-elevation-level-2 shadow-xl",
-                  isFullScreen && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden",
-                ),
-            className,
-            // Callers size the desktop card through `className`
-            // (CreateProjectModal asks for `h-[680px]`). On a phone the panel
-            // *is* the screen, so
-            // its own sizing has to win: it comes after `className`, which is
-            // where tailwind-merge resolves the conflict, and the min/max pair
-            // clamps anything the caller adds on top.
-            isMobile && "h-[100dvh] max-h-[100dvh] min-h-[100dvh] w-full min-w-full max-w-full",
+            "pointer-events-none fixed inset-0 z-[100] flex",
+            // A phone panel is the viewport itself, so it never gets the inset
+            // the desktop card sits in.
+            !isMobile && "items-center justify-center p-4",
           )}
         >
-          {chromelessClose ? (
-            <div className="absolute top-1 right-2 z-10">{closeButton(IconName.Close)}</div>
-          ) : null}
-          {header}
-          <div
+          <Content
+            ref={cardRef}
+            forceMount
+            aria-modal="true"
+            aria-label={typeof title === "string" ? title : undefined}
+            tabIndex={-1}
+            data-modal-open={open ? "true" : undefined}
+            onOpenAutoFocus={(event) => event.preventDefault()}
             className={cn(
-              "flex w-full min-h-0 flex-auto flex-col overflow-auto",
-              floatingHeader && !chromeless && MOBILE_HEADER_CLEARANCE,
+              "pointer-events-auto relative flex flex-col outline-none",
+              isMobile
+                ? cn(
+                    "rounded-none transition-transform duration-300 ease-in-out motion-reduce:transition-none",
+                    mobileTransform,
+                    !chromeless && "bg-elevation-ground",
+                  )
+                : cn(
+                    "fade w-full motion-reduce:!animate-none",
+                    size,
+                    chromeless
+                      ? "shadow-none"
+                      : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-[20px] bg-elevation-level-2 shadow-xl",
+                    isFullScreen && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden",
+                  ),
+              className,
+              // Callers size the desktop card through `className`
+              // (CreateProjectModal asks for `h-[680px]`). On a phone the panel
+              // *is* the screen, so
+              // its own sizing has to win: it comes after `className`, which is
+              // where tailwind-merge resolves the conflict, and the min/max pair
+              // clamps anything the caller adds on top.
+              isMobile && "h-[100dvh] max-h-[100dvh] min-h-[100dvh] w-full min-w-full max-w-full",
             )}
           >
+            {chromelessClose ? (
+              <div className="absolute top-1 right-2 z-10">{closeButton(IconName.Close)}</div>
+            ) : null}
+            {header}
             <div
               className={cn(
-                chromeless
-                  ? "flex min-h-0 w-full flex-1 flex-col"
-                  : "paragraph-medium flex flex-col p-4 text-basic-secondary",
-                // A phone or full-screen body is pinned to the visible height so
-                // `h-full` children can scroll themselves; it scrolls too, so
-                // taller content keeps the padding and footer clearance below it.
-                // A flush card body fills the card but grows with its content,
-                // so the wrapper scrolls it; panes that scroll themselves pass
-                // `min-h-0` or `overflow-hidden` to stay pinned.
-                isMobile || isFullScreen ? "min-h-0 flex-1 overflow-auto" : flush && "flex-1",
-                isMobile && footer && MOBILE_FOOTER_CLEARANCE,
-                bodyClassName,
+                "flex w-full min-h-0 flex-auto flex-col overflow-auto overscroll-contain",
+                floatingHeader && !chromeless && MOBILE_HEADER_CLEARANCE,
               )}
             >
-              {children}
+              <div
+                className={cn(
+                  chromeless
+                    ? "flex min-h-0 w-full flex-1 flex-col"
+                    : "paragraph-medium flex flex-col p-4 text-basic-secondary",
+                  // A phone or full-screen body is pinned to the visible height so
+                  // `h-full` children can scroll themselves; it scrolls too, so
+                  // taller content keeps the padding and footer clearance below it.
+                  // A flush card body fills the card but grows with its content,
+                  // so the wrapper scrolls it; panes that scroll themselves pass
+                  // `min-h-0` or `overflow-hidden` to stay pinned.
+                  isMobile || isFullScreen ? "min-h-0 flex-1 overflow-auto" : flush && "flex-1",
+                  isMobile && footer && MOBILE_FOOTER_CLEARANCE,
+                  bodyClassName,
+                )}
+              >
+                {children}
+              </div>
             </div>
-          </div>
-          {footer ? (
-            <footer
-              className={cn(
-                "modal-footer flex items-center justify-end",
-                isMobile
-                  ? "modal-footer-mobile fade-from-bottom absolute inset-x-0 bottom-0 z-10 gap-3 p-3"
-                  : "shrink-0 gap-2 border-t border-muted p-4",
-              )}
-            >
-              {footer}
-            </footer>
-          ) : null}
+            {footer ? (
+              <footer
+                className={cn(
+                  "modal-footer flex items-center justify-end",
+                  isMobile
+                    ? "modal-footer-mobile fade-from-bottom absolute inset-x-0 bottom-0 z-10 gap-3 p-3"
+                    : "shrink-0 gap-2 border-t border-muted p-4",
+                )}
+              >
+                {footer}
+              </footer>
+            ) : null}
+          </Content>
         </div>
-      </div>
-    </>,
-    portalTarget,
+      </DialogPortal>
+    </Root>
   );
 };
 
 Modal.Size = ModalSize;
+
+/** Body text the dialog is described by; an `alert` confirmation says in it what goes. */
+export const ModalDescription = DialogDescription;
 
 export default Modal;
