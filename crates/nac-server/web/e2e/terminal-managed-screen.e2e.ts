@@ -51,7 +51,7 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
   await page.goto(harness.baseUrl + "/#/session/" + session + "/terminal");
   await showSidePanel(page);
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
   const inputs: number[][] = [];
@@ -67,7 +67,7 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
   const started = performance.now();
   const observations: Record<string, unknown> = {};
   try {
-    await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+    await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
     await page.keyboard.type("python3 secret_screen.py");
     await page.keyboard.press("Enter");
     await expect

@@ -53,29 +53,30 @@ test("retained terminal history reopens without input, expires independently and
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();
+  const pane = page.getByRole("region", { name: "Session terminal", exact: true });
   const recent = page.getByRole("region", { name: "Recent terminal activity", exact: true });
-  await expect(recent.getByRole("option", { name: /known-history|Human command/ })).toHaveCount(1);
+  const known = recent.getByRole("button", { name: /^! printf RETAINED-HISTORY; exit 7, / });
+  await expect(known).toHaveCount(1);
   const operations: string[] = [];
   page.on("request", (sent) => {
     if (sent.method() !== "GET" && sent.url().includes(`/sessions/${session}/`))
       operations.push(sent.url());
   });
-  const humanHistory = (await api.listExecutionHistory(session)).history.entries.find(
-    (entry) => entry.execution?.id === shell.terminal_id,
-  )!;
-  await recent.getByLabel("Recent activity").selectOption(humanHistory.id);
-  await recent.getByRole("button", { name: "Reopen retained output", exact: true }).click();
-  const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await expect(
-    pane.getByRole("button", { name: "Return to live source", exact: true }),
-  ).toBeVisible();
+  const humanRow = recent.getByRole("button", { name: /^Shell · / });
+  await humanRow.click();
+  await expect(humanRow).toHaveAttribute("aria-pressed", "true");
   await expect(
     pane
       .getByRole("region", { name: "Interactive terminal", exact: true })
       .locator(".xterm-accessibility"),
   ).toContainText("HUMAN-HISTORY");
-  await expect(pane.getByRole("button", { name: "Close shell", exact: true })).toHaveCount(0);
-  await expect(pane.getByRole("button", { name: "Stop execution", exact: true })).toHaveCount(0);
+  // Recent rows offer no lifetime action, and the open entry no control or review.
+  await expect(recent.getByRole("button", { name: /^(Close|Stop) / })).toHaveCount(0);
+  await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Reconnect", exact: true })).toBeVisible();
+  for (const name of ["Give Agent Control", "Reclaim Input", "Review Selected text"])
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
   operations.length = 0;
   await pane.locator(".xterm-screen").click();
   await page.keyboard.type("printf MUST-NOT-HISTORY");
@@ -83,10 +84,8 @@ test("retained terminal history reopens without input, expires independently and
   expect(operations.some((url) => /\/(input|resize|stop)$/.test(url))).toBe(false);
   expect((await api.getUserTerminal(session, shell.terminal_id)).alive).toBe(true);
   await api.terminateTerminal(session, shell.terminal_id);
-  await recent.getByLabel("Recent activity").selectOption(first.id);
-  await expect(recent.getByLabel("Recorded stdout")).toHaveText("RETAINED-HISTORY");
   operations.length = 0;
-  await recent.getByRole("button", { name: "Reopen retained output", exact: true }).click();
+  await known.click();
   await expect
     .poll(() => operations.some((url) => url.includes(`/executions/${id}/observers`)))
     .toBe(true);
@@ -109,9 +108,9 @@ test("retained terminal history reopens without input, expires independently and
   expect(expired.output.availability).toBe("process_local_unavailable");
   expect(expired.command?.state).toBe("completed");
   expect(expired.command?.stdout).toBe("RETAINED-HISTORY");
-  await expect(
-    recent.getByRole("button", { name: "Reopen retained output", exact: true }),
-  ).toBeDisabled();
+  // The open entry follows history to its record instead of a live log.
+  await expect(pane.getByLabel("Recorded stdout")).toHaveText("RETAINED-HISTORY");
+  await expect(pane.getByRole("region", { name: "Execution log", exact: true })).toHaveCount(0);
   // A current-owner unexpired seat keeps only the page already admitted.
   // It cannot obtain another page from the expired execution after its ACK.
   expect(
@@ -155,9 +154,9 @@ test("retained terminal history reopens without input, expires independently and
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
   const panel = page.getByRole("button", { name: "Show panel", exact: true });
   if (await panel.isVisible()) await panel.click();
-  await recent.getByLabel("Recent activity").selectOption(first.id);
-  await expect(recent.getByLabel("Recorded stdout")).toHaveText("RETAINED-HISTORY");
-  await expect(recent).toContainText("no restored live handle");
+  await known.click();
+  await expect(pane.getByLabel("Recorded stdout")).toHaveText("RETAINED-HISTORY");
+  await expect(pane).toContainText("no restored live handle");
   expect(harness.provider.requests).toHaveLength(0);
 });
 
@@ -214,9 +213,9 @@ test("production history preserves exact byte gaps and requires reset before ret
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();
   const recent = page.getByRole("region", { name: "Recent terminal activity", exact: true });
-  await recent.getByLabel("Recent activity").selectOption(entry.id);
-  await expect(recent).toContainText(`Retained bytes ${start}–${end}`);
-  await recent.getByRole("button", { name: "Reopen retained output", exact: true }).click();
+  await recent.getByRole("button", { name: /^! python3 -c / }).click();
+  const pane = page.getByRole("region", { name: "Session terminal", exact: true });
+  await expect(pane).toContainText(`Retained bytes ${start}–${end}`);
   await expect(page.getByRole("region", { name: "Execution log", exact: true })).toContainText(
     "GAP-END",
     { timeout: 30_000 },

@@ -407,4 +407,7 @@ Constrain images and videos to the parent width and preserve their intrinsic asp
   --color-outline-input-focus: var(--color-accent-primary);
   --color-outline-input-hovered: var(--color-accent-secondary);
   --color-outline-input-error: var(--color-error-primary);
+
+  /* Figma "Interaction_rounded": the corner shared by buttons, inputs and tabs. */
+  --interaction-rounded: 8px;
 }

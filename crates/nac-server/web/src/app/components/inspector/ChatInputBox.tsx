@@ -18,14 +18,14 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import {
+  ComposerCard,
   ComposerFrame,
-  ComposerPill,
-  ComposerSendButton,
+  ComposerIconButton,
 } from "@/app/components/inspector/composer/ComposerFrame";
 import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
-import { GoalEditor, GoalFlag } from "@/app/components/inspector/GoalComposer";
+import { GoalComposer, GoalFlag } from "@/app/components/inspector/GoalComposer";
 import { SessionUsage } from "@/app/components/inspector/SessionUsage";
 import { SubagentSessionComposer } from "@/app/components/inspector/SubagentComposer";
 import { SshBadge } from "@/app/components/SshBadge";
@@ -79,7 +79,7 @@ import type {
 
 const PLACEHOLDER = "Send a message";
 
-/** One line of the field. */
+/** One line of the field, which is also its collapsed height. */
 const ROW_PX = { mobile: 40, wide: 48 };
 
 /** How far the field grows before it starts scrolling instead. */
@@ -215,6 +215,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   // takes the highlight with it instead of stranding it on the last row crossed.
   const [hoveredSuggestion, setHoveredSuggestion] = useState<number | null>(null);
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
+  // A message the field is not editing rests on one truncated line.
+  const collapsed = !focused && value !== "";
   const running = useRunning(sessionId);
   const stopping = useCancelArmed(sessionId);
   const toast = useToast();
@@ -327,8 +329,27 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     const el = ref.current;
     if (!el) return;
     el.style.height = `${rowPx}px`;
+    if (collapsed) return;
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
-  }, [rowPx]);
+  }, [collapsed, rowPx]);
+
+  // Tapping the collapsed line carries on writing, so the caret goes last.
+  const focusEnd = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    // iOS Safari honours the properties but not setSelectionRange here, and
+    // only once the field has actually taken the focus.
+    requestAnimationFrame(() => {
+      const textarea = ref.current;
+      if (!textarea) return;
+      const end = textarea.value.length;
+      textarea.selectionStart = end;
+      textarea.selectionEnd = end;
+      setSelection({ start: end, end });
+      textarea.scrollTop = textarea.scrollHeight;
+    });
+  }, []);
 
   useLayoutEffect(() => {
     const caret = completionCaretRef.current;
@@ -506,16 +527,19 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   );
   const mirrorActive =
     !history.active && skillSegments.some((segment) => segment.skillName !== null);
+  // The collapsed line draws the highlights itself.
+  const mirrorShown = mirrorActive && !collapsed;
+
+  // Before the mirror sync below, which reads the scroll the new height leaves.
+  useLayoutEffect(() => resize(), [resize, value]);
 
   useLayoutEffect(() => {
     const textarea = ref.current;
     const mirror = mirrorRef.current;
-    if (!mirrorActive || !textarea || !mirror) return;
+    if (!mirrorShown || !textarea || !mirror) return;
     mirror.scrollTop = textarea.scrollTop;
     mirror.scrollLeft = textarea.scrollLeft;
-  }, [mirrorActive, value]);
-
-  useEffect(() => resize(), [resize, value]);
+  }, [mirrorShown, value]);
 
   const reconnectSsh = useCallback(async () => {
     if (!sshTarget || connectSsh.isPending) return;
@@ -762,8 +786,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   // An empty field during a run is the stop control. Text turns it back into send.
   const stopFromSend = (running || stopping) && !filled;
   const sendButton = (
-    <ComposerSendButton
+    <ComposerIconButton
       compact={isMobile}
+      variant={ButtonVariant.Primary}
       type={stopFromSend ? "button" : "submit"}
       disabled={stopping || (!stopFromSend && !canSend)}
       loading={stopping}
@@ -780,20 +805,13 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       onClick={running && !filled && !stopping ? () => void stop() : undefined}
     >
       <Icon iconName={stopFromSend ? IconName.Stop : IconName.ArrowTop} />
-    </ComposerSendButton>
+    </ComposerIconButton>
   );
 
-  // A phone gives the goal button to an empty pill at rest, and the whole
-  // width to anything being written.
-  const sideButtons = direct && (!isMobile || (!focused && !value));
+  // The goal flag rests beside Send and gives way to anything being written.
+  const goalFlag = direct && !focused;
   // The text, its skill mirror and the lines drawn over it share one inset.
-  const textInset = isMobile
-    ? sideButtons
-      ? "py-2 pr-2 pl-3"
-      : "px-3 py-2"
-    : sideButtons
-      ? "py-3 pr-2 pl-4"
-      : "px-4 py-3";
+  const textInset = isMobile ? "py-2 pr-2 pl-3" : "py-3 pr-2 pl-4";
 
   const suggestionStatus = suggestionsOpen
     ? suggestionKind === "slash"
@@ -812,12 +830,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     : "";
 
   const field = (
-    <ComposerPill compact={isMobile} outline={focused ? "focus" : undefined}>
+    <div className="flex min-w-0 items-end">
       <div className="relative flex-1 min-w-0">
         <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {suggestionStatus}
         </span>
-        {mirrorActive ? (
+        {mirrorShown ? (
           <div
             ref={mirrorRef}
             aria-hidden="true"
@@ -835,6 +853,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           className={cn(
             "relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap focus:placeholder:text-transparent [scrollbar-gutter:stable]",
             textInset,
+            collapsed && "pointer-events-none overflow-hidden opacity-0",
           )}
           rows={1}
           role="combobox"
@@ -966,11 +985,22 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             </div>
           </>
         ) : null}
+        {collapsed ? (
+          <div
+            aria-hidden="true"
+            className={cn("absolute inset-0 flex cursor-text items-center", textInset)}
+            onClick={focusEnd}
+          >
+            <span className="w-full truncate text-medium text-input">
+              {highlightedSkillText(skillSegments)}
+            </span>
+          </div>
+        ) : null}
       </div>
-      {sideButtons ? (
+      {goalFlag ? (
         <GoalFlag compact={isMobile} sessionId={sessionId} onOpen={openGoalEditor} />
       ) : null}
-    </ComposerPill>
+    </div>
   );
 
   const suggestions = (
@@ -1051,8 +1081,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       <ComposerFrame compact={isMobile} onSubmit={(event) => event.preventDefault()}>
         <div
           className={cn(
-            "flex items-center gap-3 bg-elevation-level-3 text-small text-basic-secondary shadow-xl",
-            isMobile ? "min-h-10 rounded-[20px] px-3 py-1" : "min-h-12 rounded-[24px] px-4 py-2",
+            "flex items-center gap-3 bg-elevation-level-1 text-small text-basic-secondary shadow-xl",
+            isMobile ? "min-h-12 rounded-[24px] px-4 py-1" : "min-h-16 rounded-[32px] px-6 py-2",
           )}
         >
           <span className="flex-1">Loading session controls…</span>
@@ -1085,12 +1115,15 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     );
   }
 
+  // A phone has no room for the goal editor in the card, so it gets a dialog.
+  const inlineGoal = goalEditing && direct && !isMobile;
+
   return (
     <ComposerFrame
       compact={isMobile}
       onSubmit={(event) => {
         event.preventDefault();
-        if (goalEditing) return;
+        if (inlineGoal) return;
         if (selectedSuggestion) {
           completeSuggestion(selectedSuggestion);
           return;
@@ -1098,149 +1131,157 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         void submit();
       }}
     >
-      {goalEditing && direct ? (
-        <GoalEditor
-          sessionId={sessionId}
-          compact={isMobile}
-          onClose={() => setGoalEditing(false)}
-        />
-      ) : (
-        <div className="flex items-end gap-2">
-          {fieldWithSuggestions}
-          {sendButton}
+      <ComposerCard
+        compact={isMobile}
+        surface={inlineGoal ? "goal" : focused ? "focus" : undefined}
+      >
+        <div className="relative flex flex-col">
+          {direct ? (
+            <GoalComposer
+              key={sessionId}
+              sessionId={sessionId}
+              open={goalEditing}
+              mobile={isMobile}
+              onClose={() => setGoalEditing(false)}
+            />
+          ) : null}
+          {!inlineGoal ? (
+            <div className="flex items-end">
+              {fieldWithSuggestions}
+              {sendButton}
+            </div>
+          ) : null}
         </div>
-      )}
 
-      {pendingInbox.length ? (
-        <div className="flex flex-col gap-2" aria-label="Pending messages">
-          <div className="tag-label uppercase text-basic-secondary">Pending messages</div>
-          {pendingInbox.map((item) => (
-            <div
-              key={item.id}
-              className="flex flex-wrap items-center gap-2 rounded-[4px] border border-border-primary px-3 py-2"
-            >
-              <span className="tag-label text-accent-primary">{item.delivery}</span>
-              {item.terminal_selection ? (
-                <TerminalSelectionAttachment
-                  evidence={item.terminal_selection}
-                  canonicalText={item.prompt}
-                  sessionId={sessionId}
-                />
-              ) : (
-                <span className="min-w-0 flex-1 truncate text-small text-basic-primary">
-                  {item.prompt}
-                </span>
-              )}
+        {pendingInbox.length ? (
+          <div className="relative flex flex-col gap-2 px-2" aria-label="Pending messages">
+            <div className="tag-label uppercase text-basic-secondary">Pending messages</div>
+            {pendingInbox.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-wrap items-center gap-2 rounded-[4px] border border-border-primary px-3 py-2"
+              >
+                <span className="tag-label text-accent-primary">{item.delivery}</span>
+                {item.terminal_selection ? (
+                  <TerminalSelectionAttachment
+                    evidence={item.terminal_selection}
+                    canonicalText={item.prompt}
+                    sessionId={sessionId}
+                  />
+                ) : (
+                  <span className="min-w-0 flex-1 truncate text-small text-basic-primary">
+                    {item.prompt}
+                  </span>
+                )}
+                <Button
+                  type="button"
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Ghost}
+                  disabled={mutationPending}
+                  onClick={() =>
+                    void changeInboxDelivery(
+                      item.id,
+                      item.version,
+                      item.delivery === "steer" ? "queue" : "steer",
+                    )
+                  }
+                >
+                  Change to {item.delivery === "steer" ? "queue" : "steer"}
+                </Button>
+                <Button
+                  type="button"
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.GhostDestructive}
+                  disabled={mutationPending}
+                  onClick={() => void cancelPendingInbox(item.id, item.version)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {/* The row wraps rather than letting its `shrink-0` controls run into
+            each other, which a run's Queue Next makes them do on a phone. */}
+        <div className="relative flex min-h-6 flex-wrap items-center gap-x-2.5 gap-y-1 px-2">
+          <div
+            className={cn(
+              "flex grow min-w-0 flex-wrap items-center gap-y-1",
+              isMobile ? "gap-x-1" : "gap-x-2",
+            )}
+          >
+            {runningDirect ? (
+              <Button
+                type="button"
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Secondary}
+                disabled={!canSend}
+                onClick={() => void submit(value, "queue")}
+              >
+                Queue Next
+              </Button>
+            ) : null}
+
+            {/* Breaks the line at a fixed width and grows back to its own, so
+                Queue Next shortens the model label for the run instead of
+                wrapping the row and moving the box when a run starts and ends. */}
+            <div className="flex min-w-0 grow basis-[160px] max-w-fit">
+              <ModelPicker
+                sessionId={sessionId}
+                metadata={snapshot?.metadata ?? null}
+                label={metrics.model}
+                disabled={busy}
+              />
+            </div>
+
+            {isSsh ? (
+              <SshBadge
+                state={sshStatus === "connected" ? "connected" : "reconnect"}
+                onReconnect={() => void reconnectSsh()}
+              />
+            ) : null}
+          </div>
+
+          <div className={cn("ml-auto flex shrink-0 items-center", isMobile ? "gap-3" : "gap-4")}>
+            {isMobile ? (
+              <SessionUsage
+                compact
+                context={formatTokensCompact(contextTokens)}
+                contextShare={contextShare(
+                  contextTokens,
+                  resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
+                )}
+                input={formatTokensCompact(metrics.usage?.input_tokens)}
+                output={formatTokensCompact(metrics.usage?.output_tokens)}
+                cacheRead={
+                  metrics.usage?.cache_read_tokens
+                    ? formatTokensCompact(metrics.usage.cache_read_tokens)
+                    : null
+                }
+                cost={formatCostMicros(metrics.usage?.cost?.total)}
+                running={running}
+                startedAt={runStartedAt}
+                lastElapsedMs={lastElapsedMs ?? metrics.lastResponseMs}
+                environment={metrics.env}
+              />
+            ) : null}
+            <Tooltip title="Session settings" position={TooltipPosition.TopLeft}>
               <Button
                 type="button"
                 size={ButtonSize.Small}
                 variant={ButtonVariant.Ghost}
-                disabled={mutationPending}
-                onClick={() =>
-                  void changeInboxDelivery(
-                    item.id,
-                    item.version,
-                    item.delivery === "steer" ? "queue" : "steer",
-                  )
-                }
+                content={ButtonContent.Icon}
+                aria-label="Session settings"
+                onClick={() => actions.settings(sessionId)}
               >
-                Change to {item.delivery === "steer" ? "queue" : "steer"}
+                <Icon iconName={IconName.Gear} size={16} />
               </Button>
-              <Button
-                type="button"
-                size={ButtonSize.Small}
-                variant={ButtonVariant.GhostDestructive}
-                disabled={mutationPending}
-                onClick={() => void cancelPendingInbox(item.id, item.version)}
-              >
-                Cancel
-              </Button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {/* The row wraps rather than letting its `shrink-0` controls run into
-          each other, which a run's Queue Next makes them do on a phone. */}
-      <div
-        className={cn("flex flex-wrap items-center gap-y-1", isMobile ? "gap-x-2" : "gap-x-2.5")}
-      >
-        <div
-          className={cn(
-            "flex grow min-w-0 flex-wrap items-center gap-y-1",
-            isMobile ? "gap-x-1" : "gap-x-2",
-          )}
-        >
-          {runningDirect ? (
-            <Button
-              type="button"
-              size={ButtonSize.Small}
-              variant={ButtonVariant.Secondary}
-              disabled={!canSend}
-              onClick={() => void submit(value, "queue")}
-            >
-              Queue Next
-            </Button>
-          ) : null}
-
-          {/* Breaks the line at a fixed width and grows back to its own, so
-              Queue Next shortens the model label for the run instead of
-              wrapping the row and moving the box when a run starts and ends. */}
-          <div className="flex min-w-0 grow basis-[160px] max-w-fit">
-            <ModelPicker
-              sessionId={sessionId}
-              metadata={snapshot?.metadata ?? null}
-              label={metrics.model}
-              disabled={busy}
-            />
+            </Tooltip>
+            <PermissionControls sessionId={sessionId} behavior={behavior} compact={isMobile} />
           </div>
-
-          {isSsh ? (
-            <SshBadge
-              state={sshStatus === "connected" ? "connected" : "reconnect"}
-              onReconnect={() => void reconnectSsh()}
-            />
-          ) : null}
         </div>
-
-        <div className={cn("ml-auto flex shrink-0 items-center", isMobile ? "gap-3" : "gap-4")}>
-          {isMobile ? (
-            <SessionUsage
-              compact
-              context={formatTokensCompact(contextTokens)}
-              contextShare={contextShare(
-                contextTokens,
-                resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
-              )}
-              input={formatTokensCompact(metrics.usage?.input_tokens)}
-              output={formatTokensCompact(metrics.usage?.output_tokens)}
-              cacheRead={
-                metrics.usage?.cache_read_tokens
-                  ? formatTokensCompact(metrics.usage.cache_read_tokens)
-                  : null
-              }
-              cost={formatCostMicros(metrics.usage?.cost?.total)}
-              running={running}
-              startedAt={runStartedAt}
-              lastElapsedMs={lastElapsedMs ?? metrics.lastResponseMs}
-              environment={metrics.env}
-            />
-          ) : null}
-          <Tooltip title="Session settings" position={TooltipPosition.TopLeft}>
-            <Button
-              type="button"
-              size={ButtonSize.Small}
-              variant={ButtonVariant.Ghost}
-              content={ButtonContent.Icon}
-              aria-label="Session settings"
-              onClick={() => actions.settings(sessionId)}
-            >
-              <Icon iconName={IconName.Gear} size={16} />
-            </Button>
-          </Tooltip>
-          <PermissionControls sessionId={sessionId} behavior={behavior} compact={isMobile} />
-        </div>
-      </div>
+      </ComposerCard>
     </ComposerFrame>
   );
 }

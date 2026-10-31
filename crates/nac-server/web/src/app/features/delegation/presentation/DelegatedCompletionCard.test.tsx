@@ -76,45 +76,53 @@ function CurrentRoute() {
   return <output aria-label="Route">{useLocation().pathname}</output>;
 }
 
-it.each([true, false])("keeps generation reports reachable with interactive=%s", (interactive) => {
-  render(
-    <MemoryRouter>
-      <UiPolicyContext.Provider value={{ orchestrationEnabled: false }}>
-        {[1, 2].map((generation) => (
-          <DelegatedCompletionCard
-            key={generation}
-            interactive={interactive}
-            turn={{
-              kind: "delegated-completion",
-              key: `event-${generation}`,
-              messageIndex: generation,
-              createdAt: null,
-              completion: {
-                kind: "nac-orchestrator",
-                sessionId: "orchestrator",
-                generation,
-                status: "failed",
-                description: "Plan changes",
-                outcome: `Failure generation ${generation}`,
-                changes: `Changes generation ${generation}`,
-                verification: `Checks generation ${generation}`,
-              },
-            }}
-          />
-        ))}
-      </UiPolicyContext.Provider>
-    </MemoryRouter>,
-  );
-  for (const generation of [1, 2]) {
-    const summary = screen.getByText(`Generation ${generation} result`);
-    fireEvent.click(summary);
-    const details = summary.closest("details")!;
-    expect(details.textContent).toContain(`Failure generation ${generation}`);
-    expect(details.textContent).toContain(`Changes: Changes generation ${generation}`);
-    expect(details.textContent).toContain(`Verification: Checks generation ${generation}`);
-  }
-  expect(screen.queryByRole("link")).toBeNull();
-});
+it.each([
+  { interactive: true, orchestrationEnabled: true },
+  { interactive: false, orchestrationEnabled: true },
+  { interactive: true, orchestrationEnabled: false },
+  { interactive: false, orchestrationEnabled: false },
+])(
+  "keeps generation reports reachable with interactive=$interactive and orchestration=$orchestrationEnabled",
+  ({ interactive, orchestrationEnabled }) => {
+    render(
+      <MemoryRouter>
+        <UiPolicyContext.Provider value={{ orchestrationEnabled }}>
+          {[1, 2].map((generation) => (
+            <DelegatedCompletionCard
+              key={generation}
+              interactive={interactive}
+              turn={{
+                kind: "delegated-completion",
+                key: `event-${generation}`,
+                messageIndex: generation,
+                createdAt: null,
+                completion: {
+                  kind: "nac-orchestrator",
+                  sessionId: "orchestrator",
+                  generation,
+                  status: "failed",
+                  description: "Plan changes",
+                  outcome: `Failure generation ${generation}`,
+                  changes: `Changes generation ${generation}`,
+                  verification: `Checks generation ${generation}`,
+                },
+              }}
+            />
+          ))}
+        </UiPolicyContext.Provider>
+      </MemoryRouter>,
+    );
+    for (const generation of [1, 2]) {
+      const summary = screen.getByText(`Generation ${generation} result`);
+      fireEvent.click(summary);
+      const details = summary.closest("details")!;
+      expect(details.textContent).toContain(`Failure generation ${generation}`);
+      expect(details.textContent).toContain(`Changes: Changes generation ${generation}`);
+      expect(details.textContent).toContain(`Verification: Checks generation ${generation}`);
+    }
+    expect(screen.queryAllByRole("link")).toHaveLength(interactive && orchestrationEnabled ? 2 : 0);
+  },
+);
 
 it("keeps completion links inside a hosted MemoryRouter", () => {
   render(

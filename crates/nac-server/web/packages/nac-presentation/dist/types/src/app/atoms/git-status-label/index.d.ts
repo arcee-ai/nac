@@ -18,7 +18,7 @@ interface GitStatusTone {
     title: string;
     /** The colour of the name the status belongs to. */
     name: string;
-    /** The same colour as a fill, for a glyph that sits beside the name. */
+    /** The same colour from the fill tokens, for a glyph that sits beside the name. */
     fill: string;
     /** The letter's own colour; paths git leaves alone dim it below the name. */
     letter: string;

@@ -10,7 +10,7 @@ export declare enum LoaderSize {
     X3Large = 40,
     XLarge = 48
 }
-/** CSS color for the spinning glyph; the icon path renders with currentColor. */
+/** CSS color for the spinning glyph, which draws with currentColor. */
 export declare enum LoaderVariant {
     Brand = "var(--color-fill-accent-primary)",
     Neutral = "var(--color-fill-basic-primary)",

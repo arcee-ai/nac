@@ -1,14 +1,10 @@
 import type { ReactNode } from "react";
 
 import { Badge, BadgeColor, Icon, IconName } from "@/app/atoms";
-import { PanelFailure, PanelListNote } from "@/app/components/inspector/PanelMessages";
-import {
-  PanelEmpty,
-  PanelLoading,
-  PanelRow,
-  PanelSplit,
-} from "@/app/components/inspector/PanelSplit";
+import { PanelEmptyState, PanelFailure } from "@/app/components/inspector/PanelMessages";
+import { PanelLoading, PanelRow, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { cn } from "@/app/lib/cn";
 import type {
   SessionSnapshotResponse,
@@ -151,49 +147,47 @@ export function WorksetsView({
   onSelect: (id: string) => void;
 }) {
   const isMobile = useIsMobile();
+  const marksOpen = usePanelListMarksOpen();
   if (!snapshot) return <PanelLoading listTitle="Worksets" />;
 
   const worksets = snapshot.worksets;
   if (worksets.error) {
     return <PanelFailure listTitle="Worksets">{worksets.error}</PanelFailure>;
   }
+  if (worksets.items.length === 0) {
+    return (
+      <PanelEmptyState
+        listTitle="Worksets"
+        title="No worksets yet"
+        description="Worksets will appear here once the Orchestrator decides to create them."
+      />
+    );
+  }
 
-  const current = worksets.items.find((item) => item.id === selected) ?? worksets.items[0] ?? null;
-  // A phone opens on the list, so only a workset you opened is marked there.
-  const marked = isMobile ? selected : current?.id;
+  const current = worksets.items.find((item) => item.id === selected) ?? worksets.items[0];
 
   return (
     <PanelSplit
       listTitle="Worksets"
-      title={current?.id}
+      title={current.id}
       listClassName="px-2"
       list={
-        worksets.items.length === 0 ? (
-          <PanelListNote>No worksets defined for this session.</PanelListNote>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {worksets.items.map((workset) => (
-              <PanelRow
-                key={workset.id}
-                label={workset.id}
-                active={workset.id === marked}
-                trailing={
-                  isMobile ? (
-                    <Icon iconName={IconName.Right} size={24} className="shrink-0" />
-                  ) : null
-                }
-                onClick={() => onSelect(workset.id)}
-              />
-            ))}
-          </div>
-        )
+        <div className="flex flex-col gap-1">
+          {worksets.items.map((workset) => (
+            <PanelRow
+              key={workset.id}
+              label={workset.id}
+              active={marksOpen && workset.id === current.id}
+              trailing={
+                isMobile ? <Icon iconName={IconName.Right} size={24} className="shrink-0" /> : null
+              }
+              onClick={() => onSelect(workset.id)}
+            />
+          ))}
+        </div>
       }
     >
-      {current ? (
-        <Detail workset={current} />
-      ) : (
-        <PanelEmpty>No worksets defined for this session.</PanelEmpty>
-      )}
+      <Detail workset={current} />
     </PanelSplit>
   );
 }

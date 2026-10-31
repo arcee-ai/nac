@@ -23,6 +23,8 @@ interface ChatSessionButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     unread?: boolean;
     /** Taller touch target and always-visible actions for the mobile modal. */
     isMobile?: boolean;
+    /** Label-xs title for a side panel's narrower list; the mobile row keeps Label-md. */
+    smallTitle?: boolean;
     /** Pin, rename and delete controls, revealed on hover and on keyboard focus. */
     actions?: React.ReactNode;
 }
@@ -41,6 +43,10 @@ interface ChatSessionButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
  * the title keeps the full row until then. They are visually hidden rather
  * than removed: focus leaves the row before it reaches the first action, and
  * a removed action could not take it.
+ *
+ * The button's `::after` spans the whole row beneath the content, so the
+ * padding and gaps press the button too. `isolate` keeps that layer above the
+ * row's background and under the fork tooltip and the actions.
  */
 declare const ChatSessionButton: React.FC<ChatSessionButtonProps>;
 export default ChatSessionButton;

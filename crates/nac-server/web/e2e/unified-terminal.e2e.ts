@@ -84,8 +84,14 @@ for (const mobile of [false, true]) {
       await expect(show.or(pane)).toBeVisible();
       if (await show.isVisible()) await show.click();
     }
-    await pane.getByRole("button", { name: "New shell", exact: true }).click();
+    await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    // A phone shows one screen at a time, and an open row is a step past its list.
+    const fromList = async (name: RegExp) => {
+      const back = pane.getByRole("button", { name: "Open list", exact: true });
+      if (mobile && (await back.isVisible())) await back.click();
+      await pane.getByRole("button", { name }).click();
+    };
     const human = (await api.listExecutions(session)).executions.find(
       (entry) => entry.origin === "human",
     )!;
@@ -99,7 +105,7 @@ for (const mobile of [false, true]) {
     )!;
     expect(agent).toBeTruthy();
     expect(agent.retained).toBe(false);
-    await pane.getByRole("combobox", { name: "Shell" }).selectOption(agent.id);
+    await fromList(/^PTY \d+, Agent, running$/);
     await expect(pane.locator(".xterm-accessibility")).toContainText("AGENT-PTY-READY");
     expect(
       (await api.listExecutions(session)).executions.find((entry) => entry.id === agent.id)
@@ -128,7 +134,7 @@ for (const mobile of [false, true]) {
       data: { request_id: randomUUID(), command: "true" },
     });
     expect(busy.status()).toBe(409);
-    await pane.getByRole("combobox", { name: "Shell" }).selectOption(pipe.id);
+    await fromList(/^Command \d+, Agent, running$/);
     await expect(pane.getByRole("region", { name: "Execution log" })).toContainText(
       "AGENT-PIPE-READY",
     );
@@ -137,7 +143,7 @@ for (const mobile of [false, true]) {
     ).toBe(true);
     await expect(pane.getByText(/Agent execution.*Read-only/)).toBeVisible();
     expect(harness.provider.requests).toHaveLength(3);
-    await pane.getByRole("button", { name: "Stop execution", exact: true }).click();
+    await fromList(/^Stop Command \d+$/);
     await waitForRunIdle(request, harness, session);
     expect(
       (await api.listExecutions(session)).executions.find((entry) => entry.id === human.id)?.alive,
@@ -169,7 +175,7 @@ for (const mobile of [false, true]) {
     );
     expect(bang.input).toBe(false);
     expect(bang.resize).toBe(false);
-    await pane.getByRole("combobox", { name: "Shell" }).selectOption(bang.id);
+    await fromList(/^! command \d+, running$/);
     await expect(pane.getByRole("region", { name: "Execution log" })).toContainText("BANG-READY");
     await expect(
       pane.getByText(
@@ -182,7 +188,9 @@ for (const mobile of [false, true]) {
     await expect(
       pane.getByText("Earlier output was discarded. The log was reset before replay."),
     ).toHaveCount(0);
-    await pane.getByRole("button", { name: "Reconnect", exact: true }).click();
+    // A phone's menu is a sheet outside the pane.
+    await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
+    await page.getByRole("button", { name: "Reconnect", exact: true }).click();
     await expect(pane.getByRole("region", { name: "Execution log" })).toContainText("BANG-READY");
     await expect(
       pane.getByText(
@@ -210,7 +218,7 @@ for (const mobile of [false, true]) {
       expect(await page.locator("html").evaluate((node) => node.scrollWidth)).toBeLessThanOrEqual(
         390,
       );
-    await pane.getByRole("button", { name: "Stop execution", exact: true }).click();
+    await fromList(/^Stop ! command \d+$/);
     await expect
       .poll(async () => (await api.getShellCommand(session, commandId)).state)
       .toBe("cancelled");

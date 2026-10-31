@@ -131,6 +131,14 @@ function inbox(delivery: InboxItem["delivery"] = "steer"): InboxItem {
 let commandFixtures: SlashCommandDefinition[] | undefined;
 let skillFixtures: SkillCatalogEntry[] | undefined;
 let mobile = false;
+const mediaListeners = new Set<() => void>();
+
+function resizeComposer(phone: boolean) {
+  act(() => {
+    mobile = phone;
+    for (const listener of mediaListeners) listener();
+  });
+}
 
 function composer(
   {
@@ -247,6 +255,7 @@ beforeEach(() => {
   purgeAll();
   resetRuntime("session");
   mobile = false;
+  mediaListeners.clear();
   commandFixtures = [compactDefinition, goalDefinition];
   skillFixtures = [
     {
@@ -318,11 +327,13 @@ beforeEach(() => {
   fakes.getModelCatalog.mockReset().mockImplementation(() => pending());
   fakes.getStore.mockReset().mockImplementation(() => pending());
   vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: mobile && query === "(max-width: 767.98px)",
+    get matches() {
+      return mobile && query === "(max-width: 767.98px)";
+    },
     media: query,
     onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
+    addEventListener: (_event: string, listener: () => void) => mediaListeners.add(listener),
+    removeEventListener: (_event: string, listener: () => void) => mediaListeners.delete(listener),
     addListener: () => {},
     removeListener: () => {},
     dispatchEvent: () => false,
@@ -948,6 +959,97 @@ describe("direct inbox and goal journeys", () => {
     expect(screen.getByText("Current Goal")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Close goal editor" })).toBeTruthy();
     expect(screen.getByDisplayValue("existing objective")).toBeTruthy();
+  });
+
+  it.each([false, true])(
+    "preserves a goal draft across viewport changes from mobile=%s",
+    async (phone) => {
+      mobile = phone;
+      const textarea = composer({
+        behavior: "direct",
+        goalState: { ...goal(), token_budget: 500 },
+      });
+      fireEvent.blur(textarea);
+      fireEvent.click(screen.getByRole("button", { name: "Edit goal: Active" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Goal objective" }), {
+        target: { value: "unsaved objective" },
+      });
+      fireEvent.keyDown(screen.getByRole("slider", { name: "Token budget" }), {
+        key: "ArrowRight",
+      });
+
+      resizeComposer(!phone);
+      expect(
+        (screen.getByRole("textbox", { name: "Goal objective" }) as HTMLTextAreaElement).value,
+      ).toBe("unsaved objective");
+      expect(
+        screen.getByRole("slider", { name: "Token budget" }).getAttribute("aria-valuenow"),
+      ).toBe("600");
+      resizeComposer(phone);
+      expect(
+        (screen.getByRole("textbox", { name: "Goal objective" }) as HTMLTextAreaElement).value,
+      ).toBe("unsaved objective");
+      expect(
+        screen.getByRole("slider", { name: "Token budget" }).getAttribute("aria-valuenow"),
+      ).toBe("600");
+      fireEvent.click(screen.getByRole("button", { name: "Update" }));
+      await waitFor(() =>
+        expect(fakes.updateGoal).toHaveBeenCalledWith("session", "goal-1", {
+          expected_version: 3,
+          objective: "unsaved objective",
+          token_budget: 600,
+        }),
+      );
+    },
+  );
+
+  it("preserves a pending or failed goal edit across viewport changes", async () => {
+    const update = Promise.withResolvers<SessionGoalRecord>();
+    fakes.updateGoal.mockImplementationOnce(() => update.promise);
+    const textarea = composer({ behavior: "direct", goalState: goal() });
+    fireEvent.blur(textarea);
+    fireEvent.click(screen.getByRole("button", { name: "Edit goal: Active" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Goal objective" }), {
+      target: { value: "keep this failed edit" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    resizeComposer(true);
+    expect((screen.getByRole("button", { name: "Update" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    await act(async () => update.reject(new Error("version conflict")));
+    expect(await screen.findByText(/Unable to update goal: version conflict/)).toBeTruthy();
+    resizeComposer(false);
+    expect(
+      (screen.getByRole("textbox", { name: "Goal objective" }) as HTMLTextAreaElement).value,
+    ).toBe("keep this failed edit");
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await waitFor(() =>
+      expect(fakes.updateGoal).toHaveBeenLastCalledWith("session", "goal-1", {
+        expected_version: 3,
+        objective: "keep this failed edit",
+      }),
+    );
+  });
+
+  it("starts from the stored goal after explicitly closing a resized editor", () => {
+    const textarea = composer({ behavior: "direct", goalState: { ...goal(), token_budget: 500 } });
+    fireEvent.blur(textarea);
+    fireEvent.click(screen.getByRole("button", { name: "Edit goal: Active" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Goal objective" }), {
+      target: { value: "discard only on close" },
+    });
+    resizeComposer(true);
+    resizeComposer(false);
+    fireEvent.click(screen.getByRole("button", { name: "Close goal editor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit goal: Active" }));
+    expect(
+      (screen.getByRole("textbox", { name: "Goal objective" }) as HTMLTextAreaElement).value,
+    ).toBe("existing objective");
+    expect(screen.getByRole("slider", { name: "Token budget" }).getAttribute("aria-valuenow")).toBe(
+      "500",
+    );
+    expect(fakes.updateGoal).not.toHaveBeenCalled();
   });
 });
 

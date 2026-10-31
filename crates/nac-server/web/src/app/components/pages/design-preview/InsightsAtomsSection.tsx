@@ -112,7 +112,7 @@ const ACTION_SAMPLES: ActionSample[] = [
   },
   {
     type: "Read goal",
-    icon: IconName.Important,
+    icon: IconName.Goal,
     label: "Get goal",
     meta: "Read",
     runningLabel: "Get goal…",

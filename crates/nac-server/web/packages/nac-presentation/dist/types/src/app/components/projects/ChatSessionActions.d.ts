@@ -2,7 +2,7 @@ interface ChatSessionActionsProps {
     title: string;
     pinned?: boolean;
     /**
-     * Bare 20px glyphs for the mobile row. Desktop stays small: its 24px target
+     * 44px phone targets with a shared narrow-screen action layout. Desktop keeps a 24px target; it
      * is the WCAG 2.5.8 minimum.
      */
     isMobile?: boolean;
