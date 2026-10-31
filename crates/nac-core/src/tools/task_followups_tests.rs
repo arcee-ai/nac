@@ -76,6 +76,53 @@ fn followup_capability_surface_is_plain_direct_only() {
         assert!(crate::tools::direct_tool_admission(name).is_some());
     }
 }
+
+#[test]
+fn followup_nullable_bindings_preserve_raw_optional_task_scope() {
+    let tool = SendTaskFollowupTool;
+    let parameters = tool.definition().function.parameters;
+    assert_eq!(
+        parameters["required"],
+        json!(["session_id", "request_id", "action", "prompt"])
+    );
+    for field in ["project_id", "run_id"] {
+        assert_eq!(
+            parameters["properties"][field]["type"],
+            json!(["string", "null"])
+        );
+    }
+    for action in ["queue", "auto"] {
+        for explicit_null in [false, true] {
+            let mut args = input();
+            args["action"] = json!(action);
+            if explicit_null {
+                args["project_id"] = Value::Null;
+                args["run_id"] = Value::Null;
+            }
+            let decoded = tool.decode(args).unwrap();
+            let request = request(&decoded, "caller");
+            assert!(request.project_id.is_none());
+            assert!(request.expected_run_id.is_none());
+        }
+    }
+    // Every declared field belongs to this flat input for every action.
+    // Queue/auto may also explicitly bind a selected run; steer requires it.
+    for action in ["queue", "auto", "steer"] {
+        let mut args = input();
+        args["action"] = json!(action);
+        args["project_id"] = json!("selected-project");
+        args["run_id"] = json!("selected-run");
+        let decoded = tool.decode(args.clone()).unwrap();
+        let projected = request(&decoded, "caller");
+        assert_eq!(projected.project_id.as_deref(), Some("selected-project"));
+        assert_eq!(projected.expected_run_id.as_deref(), Some("selected-run"));
+        if action == "steer" {
+            args["run_id"] = Value::Null;
+            assert!(tool.decode(args).is_err());
+        }
+    }
+}
+
 async fn call(rt: &super::super::ToolRuntime, name: &str, args: Value) -> ToolResult {
     super::super::execute_tool(name, args, rt, &crate::model::ModelClient::new_for_test()).await
 }
