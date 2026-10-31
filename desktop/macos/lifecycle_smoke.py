@@ -36,11 +36,27 @@ def verify_native_quit_completion(stopped):
     assert stopped['application_class'] == 'NSApplication', stopped
     assert stopped['quit_confirmation_decisions'] == stopped['quit_sheet_presentations'] == 2, stopped
     assert stopped['quit_cancel_choices'] == stopped['quit_stop_completions'] == 1, stopped
-    assert stopped['native_duplicate_returned'], stopped
-    assert stopped['native_duplicate_delegate_after'] == stopped['native_duplicate_delegate_before'] + 1, stopped
-    # Initial, measured native duplicate, and genuine later Quit. AppKit may
-    # terminate the settled app without another delegate call.
-    assert stopped['quit_delegate_requests'] >= 3, stopped
+    invocation = stopped['native_duplicate_invocation']
+    assert invocation['command'] == 'duplicate-quit' and invocation['id'], stopped
+    assert invocation['began'] and invocation['returned'] and stopped['native_duplicate_returned'], stopped
+    before, after = invocation['before'], invocation['after']
+    assert before['confirmation_id'] and before['confirmation_id'] == after['confirmation_id'], stopped
+    assert before['sheet_window'] > 0 and before['sheet_window'] == after['sheet_window'], stopped
+    assert before['document'] and before['document'] == after['document'], stopped
+    assert before['engine_pid'] > 0 and before['engine_pid'] == after['engine_pid'], stopped
+    assert before['launch_incarnation'] and before['launch_incarnation'] == after['launch_incarnation'], stopped
+    for snapshot in (before, after):
+        assert snapshot['owners_intact'] and not snapshot['stop_started'], stopped
+        assert snapshot['confirmation_decisions'] == snapshot['sheet_presentations'] == 1, stopped
+        assert snapshot['cancel_choices'] == snapshot['stop_completions'] == 0, stopped
+    assert stopped['native_duplicate_delegate_before'] == before['delegate_calls'], stopped
+    assert stopped['native_duplicate_delegate_after'] == after['delegate_calls'], stopped
+    # Record zero or one callbacks without assigning a general AppKit cause.
+    # The actual invocation/return and unchanged live episode prove this path.
+    assert after['delegate_calls'] - before['delegate_calls'] in (0, 1), stopped
+    assert before['delegate_calls'] >= 1, stopped
+    assert stopped['quit_delegate_requests'] >= after['delegate_calls'] + 1, stopped
+    assert stopped['quit_delegate_requests'] >= stopped['quit_confirmation_decisions'], stopped
     assert stopped['application_will_terminate'], stopped
     assert stopped['termination_phase'].startswith('finished('), stopped
 
@@ -141,6 +157,7 @@ def run_contract(bundle, destination, observer):
                 # delegate while its first confirmation was still outstanding.
                 if scenario != 'run':
                     journey.stage('duplicate-confirming')
+                    fixture.assert_work_running()
                 journey.command_file('cancel')
                 cancelled = journey.stage('cancelled')
                 assert cancelled['cancel_retained_owners']

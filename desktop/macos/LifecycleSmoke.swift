@@ -99,8 +99,18 @@ final class LifecycleSmoke {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     let before = self.app.quit.smokeQuitRequests
+                    var invocation: [String: Any] = [:]
+                    if command == "duplicate-quit" {
+                        invocation = ["command": command, "id": UUID().uuidString,
+                                      "began": true, "before": self.duplicateOwners()]
+                        self.evidence["native_duplicate_invocation"] = invocation
+                        self.publish(self.stage)
+                    }
                     NSApp.terminate(nil)
                     if command == "duplicate-quit" {
+                        invocation["returned"] = true
+                        invocation["after"] = self.duplicateOwners()
+                        self.evidence["native_duplicate_invocation"] = invocation
                         self.evidence["native_duplicate_delegate_before"] = before
                         self.evidence["native_duplicate_delegate_after"] = self.app.quit.smokeQuitRequests
                         self.evidence["native_duplicate_returned"] = true
@@ -160,6 +170,24 @@ final class LifecycleSmoke {
             app.engine.receipt?.endpoint == originalReceipt?.endpoint && app.engine.receipt?.store == originalReceipt?.store &&
             app.window.windowNumber == originalWindow && !app.stopping &&
             app.commands.smokeSnapshot["installed"] as? Bool == true
+    }
+
+    /// Read the actual current episode/owners around the public terminate call.
+    /// No engine control, permission, replay, or synthetic callback is issued.
+    private func duplicateOwners() -> [String: Any] {
+        guard case .confirming(let episode) = app.quit.lifecycle.phase else { return [:] }
+        let document = app.webView
+        return ["confirmation_id": episode.id.uuidString,
+                "sheet_window": app.window.attachedSheet?.windowNumber ?? -1,
+                "document": document.map { String(describing: ObjectIdentifier($0)) } ?? "",
+                "engine_pid": app.engine.pid,
+                "launch_incarnation": app.engine.receipt?.incarnation ?? "",
+                "owners_intact": intact(), "stop_started": app.stopping,
+                "delegate_calls": app.quit.smokeQuitRequests,
+                "confirmation_decisions": app.quit.smokeConfirmationDecisions,
+                "sheet_presentations": app.quit.smokeSheetPresentations,
+                "cancel_choices": app.quit.smokeCancelChoices,
+                "stop_completions": app.quit.smokeStopCompletions]
     }
 
     private func capture(_ name: String) async throws {
