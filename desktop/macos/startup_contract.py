@@ -7,6 +7,43 @@ import subprocess
 import sys
 import tempfile
 import time
+import shutil
+
+
+def parent_loss_contract(engine):
+    root = Path(tempfile.mkdtemp(prefix='nac-config-parent-loss-')).resolve()
+    nac = root / 'nac-home'
+    nac.mkdir()
+    environment = {'HOME': str(root), 'NAC_HOME': str(nac), 'PATH': '/usr/bin:/bin',
+                   'NAC_TELEMETRY': 'disabled'}
+    command = [str(engine), '__desktop-configuration', '--directory', str(root)]
+    child_gone = False
+    try:
+        with (nac / 'config.toml.lock').open('a+') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            # The owning parent disappears immediately, before or after helper
+            # adoption. Either path must bound the orphan's lifetime.
+            parent = subprocess.run([sys.executable, '-c',
+                'import subprocess,sys; '
+                'p=subprocess.Popen(sys.argv[1:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); '
+                'print(p.pid)', *command], cwd=root, env=environment,
+                capture_output=True, check=True, text=True, timeout=5)
+            pid = int(parent.stdout.strip())
+            deadline = time.monotonic() + 13
+            while True:
+                observed = subprocess.run(['/bin/ps', '-ww', '-p', str(pid), '-o', 'stat=,command='],
+                                          capture_output=True, check=False, text=True, timeout=2).stdout.strip()
+                # A zombie or reused PID is no longer this live owned helper.
+                if not observed or observed.startswith('Z') or str(root) not in observed or str(engine) not in observed:
+                    child_gone = True
+                    return {'immediate_parent_loss_bounded': True}
+                assert time.monotonic() < deadline, f'Private configuration helper survived parent loss; retained {root}'
+                time.sleep(0.05)
+    finally:
+        if child_gone:
+            shutil.rmtree(root)
+        else:
+            print(f'Parent-loss fixture retained for inspection: {root}', file=sys.stderr)
 
 
 def run_contract(engine, destination):
@@ -73,6 +110,7 @@ def run_contract(engine, destination):
             assert bounded.returncode == 70 and elapsed < 13, (bounded.returncode, elapsed)
             assert not bounded.stdout and not (selected / 'dev.db').exists()
         results.append({'publication_lock_wait_bounded': True, 'helper_exit': bounded.returncode})
+        results.append(parent_loss_contract(engine))
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps({'engine_identity': identity, 'profiles': results}, indent=2) + '\n')
