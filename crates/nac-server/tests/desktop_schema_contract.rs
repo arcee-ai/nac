@@ -586,7 +586,10 @@ async fn unrelated_invalid_store_retains_generic_failure() -> Result<()> {
 
 fn fake_options() -> (Fixture, BTreeMap<String, String>) {
     let path = std::env::temp_dir().join(format!("nac-adapter-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir(&path).unwrap();
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&path)
+        .unwrap();
     let fixture = Fixture {
         path: path.canonicalize().unwrap(),
         settled: true,
