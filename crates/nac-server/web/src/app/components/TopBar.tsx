@@ -1,5 +1,5 @@
+import { useProductNavigationOwner } from "@/app/features/product-context/context";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { Logo } from "@/app/atoms";
@@ -7,9 +7,6 @@ import { Breadcrumbs } from "@/app/components/Breadcrumbs";
 import { HeaderMenu } from "@/app/components/HeaderMenu";
 import { McpServersButton } from "@/app/components/McpServersButton";
 import { MobileHeader } from "@/app/components/MobileHeader";
-import { ConfigurationsModal } from "@/app/components/modals/ConfigurationsModal";
-import { McpServersModal } from "@/app/components/modals/MCPServersModal/McpServersModal";
-import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
@@ -31,9 +28,7 @@ export function TopBar() {
 function WideTopBar() {
   const { useSidebarOffset } = useNativeRuntime().stores.sidebarLayoutStore;
 
-  const [configuring, setConfiguring] = useState(false);
-  const [sshConfigs, setSshConfigs] = useState(false);
-  const [mcpServers, setMcpServers] = useState(false);
+  const navigation = useProductNavigationOwner();
   const isTablet = useIsTablet();
   const { pathname } = useLocation();
   const managed = useManagedHost();
@@ -67,17 +62,14 @@ function WideTopBar() {
           <Breadcrumbs />
         </div>
         <div className="relative flex items-center shrink-0 gap-2">
-          <McpServersButton onOpen={() => setMcpServers(true)} />
+          <McpServersButton onOpen={navigation.openMcp} />
           <HeaderMenu
-            onConfigurations={() => setConfiguring(true)}
-            onSshConfigs={() => setSshConfigs(true)}
+            onConfigurations={navigation.openConfigurations}
+            onSshConfigs={navigation.openSsh}
             onManagedHost={managed.isManaged ? managed.openSettings : undefined}
           />
         </div>
       </header>
-      <ConfigurationsModal open={configuring} onClose={() => setConfiguring(false)} />
-      <SshConfigsModal open={sshConfigs} onClose={() => setSshConfigs(false)} />
-      <McpServersModal open={mcpServers} onClose={() => setMcpServers(false)} />
     </>
   );
 }
