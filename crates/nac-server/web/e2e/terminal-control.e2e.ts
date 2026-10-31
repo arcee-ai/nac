@@ -98,15 +98,26 @@ for (const mobile of [false, true]) {
       await expect(show.or(pane)).toBeVisible();
       if (await show.isVisible()) await show.click();
     }
-    await pane.getByRole("combobox", { name: "Shell" }).selectOption(agent.id);
+    await pane.getByRole("button", { name: /^PTY \d+, Agent, running$/ }).click();
     await expect(pane.locator(".xterm-accessibility")).toContainText("CONTROL-READY:agent");
     await expect(pane.getByLabel("Input controller")).toHaveText("Input: Agent");
     const bytes = async (name: string) =>
       Array.from(
         await fs.readFile(path.join(workspace, `${name}.bytes`)).catch(() => Buffer.alloc(0)),
       );
+    // A phone's menu is a sheet outside the pane.
+    const choose = async (name: string, settledAction: string) => {
+      await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
+      await page.getByRole("button", { name, exact: true }).click();
+      // The ownership badge can update before the mutation's reconciliation
+      // GET settles. Input remains paused during that operation. The reciprocal
+      // action becomes enabled only once the same input binding is ready.
+      await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
+      await expect(page.getByRole("button", { name: settledAction, exact: true })).toBeEnabled();
+      await page.keyboard.press("Escape");
+    };
     const type = async (text: string) => {
-      await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+      await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
       // Playwright's non-ASCII keyboard.type uses insertText without intent.
       // Use the existing trusted browser composition path for UTF8 qualification.
       for (const part of text.split(/(π)/)) {
@@ -127,7 +138,7 @@ for (const mobile of [false, true]) {
       }
       await page.keyboard.press("Enter");
     };
-    await pane.getByRole("button", { name: "Take control", exact: true }).click();
+    await choose("Take Control", "Give Agent Control");
     await expect(pane.getByLabel("Input controller")).toHaveText("Input: Human");
     await type("agent-π<RET>");
     const agentHumanBytes = Array.from(new TextEncoder().encode("agent-π<RET>\r"));
@@ -183,7 +194,7 @@ for (const mobile of [false, true]) {
       await api.replyPermission(session, approval.id, "once");
       await waitForRunIdle(request, harness, session);
     };
-    await pane.getByRole("button", { name: "Give agent control", exact: true }).click();
+    await choose("Give Agent Control", "Take Control");
     await expect(pane.getByLabel("Input controller")).toHaveText("Input: Agent");
     await modelInput("AGENT_RETURN_INPUT", agent.id, "agent-model<RET>");
     await expect
@@ -191,7 +202,8 @@ for (const mobile of [false, true]) {
       .toEqual([...agentHumanBytes, ...Array.from(new TextEncoder().encode("agent-model\r"))]);
     expect(await fs.readFile(path.join(workspace, "agent.pid"), "utf8")).toBe(agentPid);
 
-    await pane.getByRole("button", { name: "New shell", exact: true }).click();
+    if (mobile) await pane.getByRole("button", { name: "Open list", exact: true }).click();
+    await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByLabel("Input controller")).toHaveText("Input: Human");
     const human = (await api.listExecutions(session)).executions.find(
       (entry) => entry.origin === "human",
@@ -202,11 +214,15 @@ for (const mobile of [false, true]) {
     await type("human-π<RET>");
     const humanBytes = Array.from(new TextEncoder().encode("human-π<RET>\r"));
     await expect.poll(() => bytes("human")).toEqual(humanBytes);
-    await pane.getByRole("button", { name: "Give agent control", exact: true }).click();
-    await expect(pane.getByRole("button", { name: "Reclaim input", exact: true })).toBeVisible();
+    await choose("Give Agent Control", "Reclaim Input");
+    await expect(pane.getByLabel("Input controller")).toHaveText("Input: Agent");
+    // A phone shows the list on its own screen.
+    const handedRow = pane.getByRole("button", { name: /^Shell \d+, Agent, / });
+    if (!mobile) await expect(handedRow).toBeVisible();
     await modelInput("STALE_HUMAN_INPUT", human.id, "must-not-write<RET>", async () => {
-      await pane.getByRole("button", { name: "Reclaim input", exact: true }).click();
+      await choose("Reclaim Input", "Give Agent Control");
       await expect(pane.getByLabel("Input controller")).toHaveText("Input: Human");
+      if (!mobile) await expect(handedRow).toHaveCount(0);
     });
     expect(await bytes("human")).toEqual(humanBytes);
     await type("fresh-human");

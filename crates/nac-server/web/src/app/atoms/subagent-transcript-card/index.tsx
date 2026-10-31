@@ -57,9 +57,9 @@ const STATUS_NAME: Record<SubagentCardStatus, string | null> = {
 };
 
 const LINK_CLASS = cn(
-  "pointer-events-auto relative z-10 flex h-7 min-w-0 items-center gap-1 rounded-[4px] p-1 label-micro",
+  "pointer-events-auto relative z-10 flex h-7 min-w-0 items-center gap-1 rounded-interaction p-1 label-micro",
   "text-btn-secondary hover:text-btn-secondary-hovered active:text-btn-secondary-pressed",
-  "[&_path]:fill-btn-secondary hover:[&_path]:fill-btn-secondary-hovered active:[&_path]:fill-btn-secondary-pressed",
+  "[&_.icon]:text-fill-btn-secondary hover:[&_.icon]:text-fill-btn-secondary-hovered active:[&_.icon]:text-fill-btn-secondary-pressed",
   "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
 );
 
@@ -87,7 +87,7 @@ function CardLeading({
           iconName={IconName.Close}
           size={20}
           aria-hidden
-          className="shrink-0 [&_path]:fill-btn-secondary-disabled"
+          className="shrink-0 text-fill-btn-secondary-disabled"
         />
       );
     default:
@@ -96,7 +96,7 @@ function CardLeading({
           behavior={behavior}
           lineage={lineage}
           size={SessionBehaviorIconSize.Medium}
-          className="[&_path]:fill-btn-secondary"
+          className="text-fill-btn-secondary"
         />
       ) : null;
   }
@@ -143,8 +143,8 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
     <div
       title={notFound ? undefined : title}
       className={cn(
-        "relative isolate flex w-[320px] max-w-full min-w-0 flex-col gap-4 rounded-[4px] p-3",
-        "bg-elevation-level-1 shadow-convex",
+        "relative isolate flex w-[320px] max-w-full min-w-0 flex-col gap-4 rounded-[16px] p-3",
+        "bg-elevation-level-1",
         "-outline-offset-2 outline-[var(--color-border-focus-outline)] has-[>button:focus-visible]:outline-2",
         className,
       )}
@@ -155,7 +155,7 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
           aria-label={openName}
           aria-describedby={reason ? errorId : undefined}
           onClick={onOpen}
-          className="absolute inset-0 rounded-[4px] outline-none hover:bg-btn-ghost-hovered active:bg-btn-ghost-pressed"
+          className="absolute inset-0 rounded-[inherit] outline-none hover:bg-btn-ghost-hovered active:bg-btn-ghost-pressed"
         />
       ) : null}
       <div

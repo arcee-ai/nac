@@ -22,7 +22,7 @@ for (const mobile of [false, true]) {
     }
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
     await expect(pane).toBeVisible();
-    await pane.getByRole("button", { name: "New shell", exact: true }).click();
+    await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     const shell = (await api.listUserTerminals(session)).terminals[0];
     const permissions = await api.getPermissions(session);
@@ -30,7 +30,8 @@ for (const mobile of [false, true]) {
     expect(permissions.requests).toHaveLength(0);
     expect(permissions.grants).toHaveLength(0);
     const input = pane.locator(".xterm-helper-textarea");
-    await pane.getByRole("button", { name: "Focus terminal" }).click();
+    const viewport = pane.getByRole("region", { name: "Interactive terminal" });
+    await viewport.click();
     await expect(input).toBeFocused();
     // The marker does not occur literally in echoed input.
     await page.keyboard.type(
@@ -63,7 +64,11 @@ for (const mobile of [false, true]) {
       expect((await api.getUserTerminal(session, shell.terminal_id)).alive).toBe(true);
     }
     await page.reload();
-    if (mobile) await page.getByRole("button", { name: "Open panel", exact: true }).click();
+    if (mobile) {
+      // A phone reopens on the list, as its tab bar does.
+      await page.getByRole("button", { name: "Open panel", exact: true }).click();
+      await pane.getByRole("button", { name: /^Shell 1, / }).click();
+    }
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     await expect(accessible).toContainText("PANE-OK");
     expect(
@@ -72,11 +77,10 @@ for (const mobile of [false, true]) {
     await expect(
       pane.getByRole("button", { name: "Enable terminal input", exact: true }),
     ).toHaveCount(0);
-    await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+    await viewport.click();
     await page.keyboard.type("printf '\\122\\105\\101\\124\\124\\101\\103\\110\\055\\117\\113\\n'");
     await page.keyboard.press("Enter");
     await expect(accessible).toContainText("REATTACH-OK");
-    const viewport = pane.getByRole("region", { name: "Interactive terminal" });
     await expect
       .poll(async () => {
         const host = await viewport.boundingBox();
@@ -90,11 +94,13 @@ for (const mobile of [false, true]) {
       path: testInfo.outputPath(`terminal-${mobile ? "mobile" : "desktop"}.png`),
       fullPage: true,
     });
-    if (mobile)
+    if (mobile) {
       expect(await page.locator("html").evaluate((node) => node.scrollWidth)).toBeLessThanOrEqual(
         390,
       );
-    await pane.getByRole("button", { name: "Close shell", exact: true }).click();
+      await pane.getByRole("button", { name: "Open list", exact: true }).click();
+    }
+    await pane.getByRole("button", { name: "Close Shell 1", exact: true }).click();
     await expect
       .poll(async () => {
         const status = await api.getUserTerminal(session, shell.terminal_id);
@@ -182,7 +188,7 @@ test("embedded pane resets and replays an actual retention gap", async ({
   await expect(pane.locator(".xterm-rows")).toContainText("GAP-OK");
   await expect(pane.locator(".xterm-accessibility")).toContainText("GAP-OK");
   expect((await api.getUserTerminal(session, terminal.terminal_id)).alive).toBe(true);
-  await pane.getByRole("button", { name: "Close shell", exact: true }).click();
+  await pane.getByRole("button", { name: "Close Shell 1", exact: true }).click();
   await expect
     .poll(async () => !(await api.getUserTerminal(session, terminal.terminal_id)).alive)
     .toBe(true);
@@ -212,10 +218,10 @@ test.describe("full-screen terminal at browser scale 1.25", () => {
     const show = page.getByRole("button", { name: "Show panel", exact: true });
     if (await show.isVisible()) await show.click();
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-    await pane.getByRole("button", { name: "New shell", exact: true }).click();
+    await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     const shell = (await api.listUserTerminals(session)).terminals[0];
-    await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+    await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
     await page.keyboard.type(
       "/usr/bin/vim -Nu NONE -n -i NONE --cmd 'set encoding=utf-8' fullscreen.txt",
     );
@@ -270,7 +276,9 @@ test.describe("full-screen terminal at browser scale 1.25", () => {
     await page.keyboard.press("Enter");
     await expect(accessible).toContainText("SHELL-BACK");
     expect((await api.getUserTerminal(session, shell.terminal_id)).alive).toBe(true);
-    await pane.getByRole("button", { name: "Close shell", exact: true }).click();
+    // The resize reached the tablet layout, whose list is a screen of its own.
+    await pane.getByRole("button", { name: "Open list", exact: true }).click();
+    await pane.getByRole("button", { name: "Close Shell 1", exact: true }).click();
     await expect
       .poll(async () => {
         const status = await api.getUserTerminal(session, shell.terminal_id);

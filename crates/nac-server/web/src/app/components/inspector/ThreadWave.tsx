@@ -62,7 +62,7 @@ function StateIcon({ state }: { state: ThreadState }) {
     return (
       <Icon
         iconName={IconName.Timelaps}
-        className={cn(ICON_SIZE, "shrink-0 [&>path]:!fill-basic-muted")}
+        className={cn(ICON_SIZE, "shrink-0 !text-fill-basic-muted")}
       />
     );
   }
@@ -70,8 +70,8 @@ function StateIcon({ state }: { state: ThreadState }) {
     return (
       <Icon
         iconName={IconName.Danger}
-        // Beat `.btn-ghost .icon path { fill: … }` from atoms.css.
-        className={cn(ICON_SIZE, "shrink-0 [&>path]:!fill-error-primary")}
+        // Beat `.btn-ghost .icon { color: … }` from atoms.css.
+        className={cn(ICON_SIZE, "shrink-0 !text-fill-error-primary")}
       />
     );
   }
@@ -79,14 +79,14 @@ function StateIcon({ state }: { state: ThreadState }) {
     return (
       <Icon
         iconName={IconName.Close}
-        className={cn(ICON_SIZE, "shrink-0 [&>path]:!fill-basic-muted")}
+        className={cn(ICON_SIZE, "shrink-0 !text-fill-basic-muted")}
       />
     );
   }
   return (
     <Icon
       iconName={IconName.CheckCircle}
-      className={cn(ICON_SIZE, "shrink-0 [&>path]:!fill-basic-primary")}
+      className={cn(ICON_SIZE, "shrink-0 !text-fill-basic-primary")}
     />
   );
 }

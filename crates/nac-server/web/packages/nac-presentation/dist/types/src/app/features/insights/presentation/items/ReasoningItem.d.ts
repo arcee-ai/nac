@@ -1,3 +1,6 @@
-import { type ItemContent, type ReasoningSegment } from "./itemContent";
-/** The text stays visible while it streams, so the detail can follow it. */
-export declare function reasoningContent(segment: ReasoningSegment): ItemContent;
+import { type ReasoningSegment } from "./itemContent";
+/** One disclosure per real reasoning segment; timing remains transcript-owned. */
+export declare function ReasoningItem({ segment, active }: {
+    segment: ReasoningSegment;
+    active: boolean;
+}): import("react").JSX.Element | null;

@@ -1,33 +1,8 @@
 import type React from "react";
+import { ButtonContent, ButtonSize, ButtonVariant } from "../../ui/button";
 import { LoaderVariant } from "../loader";
-export declare enum ButtonSize {
-    Medium = "btn-medium",
-    Small = "btn-small",
-    Large = "btn-large"
-}
-export declare enum ButtonVariant {
-    Primary = "btn-primary",
-    Secondary = "btn-secondary",
-    SecondaryHighlighted = "btn-secondary-highlighted",
-    SecondaryDestructive = "btn-secondary-destructive",
-    SecondaryAccent = "btn-secondary-accent",
-    SecondaryAccentHighlighted = "btn-secondary-accent-highlighted",
-    Tertiary = "btn-tertiary",
-    TertiaryDestructive = "btn-tertiary-destructive",
-    TertiaryAccent = "btn-tertiary-accent",
-    Ghost = "btn-ghost",
-    GhostDestructive = "btn-ghost-destructive",
-    GhostAccent = "btn-ghost-accent",
-    GhostHighlighted = "btn-ghost-highlighted",
-    GhostHighlightedAccent = "btn-ghost-highlighted-accent"
-}
-export declare enum ButtonContent {
-    Icon = "btn-icon",
-    IconLeft = "btn-icon-left",
-    IconRight = "btn-icon-right",
-    Text = "btn-text"
-}
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+export { ButtonContent, ButtonSize, ButtonVariant };
+interface ButtonProps extends React.ComponentPropsWithRef<"button"> {
     size?: ButtonSize;
     variant?: ButtonVariant;
     content?: ButtonContent;

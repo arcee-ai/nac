@@ -152,7 +152,7 @@ test("shows a /goal objective and keeps a custom budget above the slider", async
     (entry) =>
       entry.url().includes(`/sessions/${sessionId}/goal/`) && entry.request().method() === "PATCH",
   );
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Update" }).click();
   expect((await budgetSaved).ok()).toBe(true);
   expect((await storedGoal(request, harness, sessionId))?.token_budget).toBe(2_500_000);
 
@@ -166,7 +166,7 @@ test("shows a /goal objective and keeps a custom budget above the slider", async
   const objectiveSaved = page.waitForRequest(
     (entry) => entry.url().includes(`/sessions/${sessionId}/goal/`) && entry.method() === "PATCH",
   );
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Update" }).click();
   expect((await objectiveSaved).postDataJSON()).not.toHaveProperty("token_budget");
   await expect
     .poll(async () => await storedGoal(request, harness, sessionId))

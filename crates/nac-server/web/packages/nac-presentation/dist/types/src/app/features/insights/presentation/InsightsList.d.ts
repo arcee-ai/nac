@@ -6,7 +6,7 @@ export declare const InsightsList: import("react").MemoExoticComponent<({ sectio
     /** The prompt a streamed turn answers before the snapshot shows it. */
     pendingPrompt: string;
     emptyCopy: InsightsEmptyCopy;
-    /** Bumps on every pick; the picked row is scrolled into view. */
+    /** Bumps on every pick; the shown row is scrolled into view. */
     focusNonce: number;
     controller: InsightsRowController;
     /** After the oldest section, and under the empty copy too. */

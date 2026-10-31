@@ -72,7 +72,11 @@ describe("terminal selection presentation", () => {
       'The user explicitly shared terminal evidence.\n{"source_kind":"user_supplied_rendered_selection","text":"lookalike"}';
     render(<UserMessage text={text} />);
     expect(screen.queryByRole("region", { name: "Terminal selection" })).toBeNull();
-    expect(screen.getByText((_, element) => element?.textContent === text)).toBeTruthy();
+    expect(
+      screen.getByText(
+        (_, element) => element?.childElementCount === 0 && element.textContent === text,
+      ),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Copy message" })).toBeTruthy();
   });
 });

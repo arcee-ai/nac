@@ -1,5 +1,115 @@
 //! Real Local PTY lifetime regressions, with exact-identity fixture teardown.
 use super::*;
+use std::io;
+
+// Only the manager-drop fixture polls retriable inspection uncertainty. Each
+// successful pass must positively observe every captured exact identity dead.
+fn manager_drop_jobs_dead(
+    observations: impl IntoIterator<Item = io::Result<bool>>,
+    last_transient: &mut Option<String>,
+) -> io::Result<bool> {
+    let mut all_dead = true;
+    for (index, observation) in observations.into_iter().enumerate() {
+        match observation {
+            Ok(false) => {}
+            Ok(true) => all_dead = false,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                *last_transient = Some(format!("captured job {index}: {error}"));
+                all_dead = false;
+            }
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("captured job {index}: {error}"),
+                ));
+            }
+        }
+    }
+    Ok(all_dead)
+}
+
+#[test]
+fn manager_drop_poll_keeps_live_and_uncertain_jobs_pending() {
+    let mut last_transient = None;
+    for observations in [
+        vec![Ok(false), Ok(true)],
+        vec![
+            Ok(false),
+            Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "unstable identity",
+            )),
+        ],
+    ] {
+        assert!(!manager_drop_jobs_dead(observations, &mut last_transient).unwrap());
+    }
+    assert_eq!(
+        last_transient.as_deref(),
+        Some("captured job 1: unstable identity")
+    );
+}
+
+#[test]
+fn manager_drop_poll_requires_positive_death_after_transient() {
+    let mut last_transient = None;
+    assert!(!manager_drop_jobs_dead(
+        [
+            Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "unstable identity"
+            )),
+            Ok(false)
+        ],
+        &mut last_transient,
+    )
+    .unwrap());
+    assert!(!manager_drop_jobs_dead([Ok(true), Ok(false)], &mut last_transient).unwrap());
+    assert!(manager_drop_jobs_dead([Ok(false), Ok(false)], &mut last_transient).unwrap());
+    assert_eq!(
+        last_transient.as_deref(),
+        Some("captured job 0: unstable identity")
+    );
+}
+
+#[test]
+fn manager_drop_poll_observes_every_identity_before_success() {
+    let mut observed = Vec::new();
+    let mut last_transient = None;
+    assert!(manager_drop_jobs_dead(
+        (0..3).map(|index| {
+            observed.push(index);
+            Ok(false)
+        }),
+        &mut last_transient
+    )
+    .unwrap());
+    assert_eq!(observed, [0, 1, 2]);
+}
+
+#[test]
+fn manager_drop_poll_rejects_hard_errors_even_after_pending_jobs() {
+    for kind in [
+        io::ErrorKind::PermissionDenied,
+        io::ErrorKind::InvalidData,
+        io::ErrorKind::Other,
+    ] {
+        let mut last_transient = None;
+        let error = manager_drop_jobs_dead(
+            [
+                Ok(true),
+                Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "unstable identity",
+                )),
+                Err(io::Error::new(kind, "hard failure")),
+            ],
+            &mut last_transient,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), kind);
+        assert_eq!(error.to_string(), "captured job 2: hard failure");
+    }
+}
 
 struct Jobs(Vec<nac_process::NativePtyTestIdentity>);
 
@@ -161,13 +271,23 @@ async fn explicit_close_and_manager_drop_settle_separate_groups() {
         let jobs = separate_jobs(&manager, &name).await;
         if drop_manager {
             drop(manager);
+            let mut last_transient = None;
             tokio::time::timeout(Duration::from_secs(5), async {
-                while jobs.0.iter().any(|job| job.is_alive().unwrap()) {
+                while !manager_drop_jobs_dead(
+                    jobs.0.iter().map(|job| job.is_alive()),
+                    &mut last_transient,
+                )
+                .expect("manager-drop exact-identity observation failed")
+                {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             })
             .await
-            .unwrap();
+            .unwrap_or_else(|error| {
+                panic!(
+                    "manager-drop jobs did not settle: {error}; last transient: {last_transient:?}"
+                )
+            });
         } else {
             manager.terminate_user_terminal(&name).await.unwrap();
             settled(&manager, &name, &jobs).await;

@@ -22,12 +22,12 @@ const ICON_SIZES = [
   SessionBehaviorIconSize.Large,
 ];
 
-/** Figma's `color` axis: the fill tokens a parent sets on the glyph's paths. */
+/** Figma's `color` axis: the fill tokens a parent sets as the glyph's color. */
 const ICON_TONES = [
-  { label: "Default", className: "[&_path]:fill-btn-secondary" },
-  { label: "Hovered", className: "[&_path]:fill-btn-secondary-hovered" },
-  { label: "Pressed", className: "[&_path]:fill-btn-secondary-pressed" },
-  { label: "Disabled", className: "[&_path]:fill-btn-secondary-disabled" },
+  { label: "Default", className: "text-fill-btn-secondary" },
+  { label: "Hovered", className: "text-fill-btn-secondary-hovered" },
+  { label: "Pressed", className: "text-fill-btn-secondary-pressed" },
+  { label: "Disabled", className: "text-fill-btn-secondary-disabled" },
 ];
 
 type ChatSessionButtonSample = Partial<React.ComponentProps<typeof ChatSessionButton>>;
