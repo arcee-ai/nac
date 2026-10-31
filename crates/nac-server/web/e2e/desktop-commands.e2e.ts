@@ -50,8 +50,14 @@ test("injected UI capability opens shared owners once without submitting a sessi
   await composer.focus();
   const mutations: string[] = [];
   page.on("request", (event) => {
-    if (event.method() !== "GET" && new URL(event.url()).pathname !== "/providers/models") {
-      mutations.push(`${event.method()} ${new URL(event.url()).pathname}`);
+    const route = new URL(event.url()).pathname;
+    // Both POST routes resolve model catalogs; neither saves configuration or
+    // admits a session. Keep every other non-GET operation in the mutation guard.
+    const catalogQuery =
+      event.method() === "POST" &&
+      (route === "/providers/models" || /^\/model-configs\/[^/]+\/models$/.test(route));
+    if (event.method() !== "GET" && !catalogQuery) {
+      mutations.push(`${event.method()} ${route}`);
     }
   });
   const dispatch = (request: number, action: string) =>
