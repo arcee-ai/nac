@@ -30,6 +30,18 @@ CPU percentages require runtime unit calibration. No signaling or undocumented
 coalition API is added to this helper. PPID discovery is explicitly incomplete
 for XPC helpers and cannot establish whole-set totals or cleanup.
 
+Admission now requires immutable expected launch evidence before the first
+sample: an unreaped live `Popen` child plus its launch-time window/executable,
+the current observer process, or an actual XCTest launch receipt containing
+PID, executable and launch date. The first probe never supplies its own expected
+identity. Each observed result must match that evidence; exited handles,
+replacement births, mismatched executables and unknown identities retain null
+unattributed fields. Descendants seen only through PPID/name are candidates,
+not admitted resource samples. XCTest cleanup is registered before launch and
+before any fallible provenance/recording operation. Unknown ownership records
+failed cleanup without broadly terminating a bundle; failed cleanup or failed
+receipt retention cannot return successful calibration.
+
 `PerformanceJourneys.swift` defines `PerformanceJourneys/testCalibration` in
 the existing `NACNativeUITests` module. ALL-354 alone integrates that source
 using the `NAC_PERFORMANCE_SOURCE` build setting, and retains ownership of the
@@ -76,6 +88,90 @@ document/paint observation source with clock/loss/overhead receipts. Any such
 target amendment needs ALL-344/common-owner agreement and a new exact nominated
 target, plus matching uninstrumented controls. None of those shared files or
 hooks is changed or assumed by this implementation.
+
+## Source-only observation schema and precise owner requests
+
+This is an interface proposal, **not implemented hooks or collected evidence**.
+Current `Calibration.environment()` explicitly sets `NAC_TELEMETRY=disabled`.
+No queue observations or zero-loss claim can be inferred from that state. Use
+the existing Rust `NAC_TELEMETRY=stderr` exporter when an approved fixture enables
+it in both arms; retain its actual `nac-telemetry ` records and
+`nac-telemetry-export ` receipts unchanged. Do not add another Rust queue,
+replacement exporter, metric vocabulary or core/HTTP DTO for this investigation.
+
+The fixture envelope would use `nac-mac-observation-v1` with these closed fields:
+
+| Field | Contract |
+| --- | --- |
+| `experiment`, `trial`, `arm`, `workload`, `window_state` | Versioned fixture IDs; native/browser and active/hidden remain separate |
+| `source_revision`, `binary_sha256`, `asset_tree` | Exact approved identity; instrumented/control artifact and enabled probes recorded separately |
+| `owner` | PID plus independently captured executable/launch identity; engine incarnation, document generation or terminal/controller/observer generation when applicable. Missing binding means unavailable |
+| `clock` | Actual clock name/value, time origin/synchronization receipt and uncertainty; decimal strings for wide integers. Unknown synchronization never becomes zero |
+| `sequence`, `kind` | Fixture-local decimal sequence and one of the bounded event kinds below; wrapper sequence is not a Rust producer sequence |
+| `observation` | Only the selected numeric/boolean fields, units, status and unavailable reason. Never prompt/transcript text, keystroke bytes, SQL, commands, environment or secrets |
+| `loss` | This source's capacity/accepted/dropped/exported/failures/truncation and terminal receipt, or explicit unknown/disabled; source layers have independent loss accounting |
+
+Proposed observation buffers are capped at 4,096 rows **and** 4 MiB, whichever
+comes first; an individual framed line is capped at 16 KiB. Oversized/newly
+dropped observations increment diagnostic loss counters; they never block the
+app/model loop or alter terminal ACK/retry/input behavior. Export chunks are at
+most 64 KiB. These are proposed instrumentation limits, not product budgets.
+Final source receipts are mandatory for a complete trace. Missing receipts,
+disabled probes, frame buffers that never emitted, queue overload, clock
+uncertainty and observed dropped rows remain explicit incomplete evidence.
+
+Exact requested owners/seams, before any implementation outside this directory:
+
+1. **Common App/Engine owner (ALL-344; startup builder remains its single writer):**
+   approve opt-in, content-free milestones at launch invocation, configuration
+   selected, exact engine receipt accepted, navigation start/finish, workspace
+   ready, window active/hidden and orderly stop. Bind each to the retained engine
+   receipt/document generation; navigation finish and UI readiness are not paint.
+   In `PreviewEngine.swift`'s existing diagnostic-read branch, propose a bounded
+   fixture sink that forwards only complete existing Rust telemetry/export-receipt
+   lines before the 64 KiB UI log tail truncates. Use the existing recorder and
+   its `recorder_id`, process ID, capacity, accepted/dropped/exported/failures,
+   receipt failures and `final_receipt`. Current exporter default capacity is
+   1,024, maximum 4,096. Preserve actual periodic/final accounting; do not invent
+   a zero-filled final receipt. Retain the record's existing clock/duration
+   semantics; a framer's arrival timestamp is not an operation-start timestamp.
+   Native framing/file failures need separate loss
+   counts. The sink must be off by default, generation-bound, nonblocking and
+   write only a precreated private fixture destination with no-follow handling.
+   No existing launch, app bridge, backend, approval or shutdown behavior changes.
+
+2. **Shared web input/render owner (coordinate ALL-351/352 and shared web ownership):**
+   propose the same read-only opt-in observation source on the same optimized
+   assets for both browser and WKWebView. Record trusted/untrusted event counts,
+   opaque event index, event timestamp/time-origin, processing start/end and
+   actual supported Event Timing entries, plus document/visibility generations.
+   Do not log typed characters or synthesize input. Feature-probe and retain
+   actual clock resolution/support: a missing Event Timing source stays missing.
+   Name rAF records `raf_callback`, never `frame_present`; rAF, AX values and
+   screenshot completion are not raw presentation proof. A supported compositor
+   or frame-presentation source with matching clocks must qualify any claimed
+   per-frame/presentation latency. If unavailable on the VM, keep that required
+   row unavailable; hitch aggregates do not fill it. Retire observation on the
+   existing document/runtime lifecycle, preserving transport and mutation policy.
+
+3. **Terminal SDK/runtime/renderer owners (ALL-352 and their shared owners):**
+   expose passive content-free snapshots of existing `UserTerminalInputPump`
+   `pendingBytes`, `hasActiveInput`, failure/uncertainty and its existing 16 KiB
+   pending limit. In `userTerminalConnection.ts`, observe pull receipt, retained
+   cursor bounds, gap/reset, renderer submission/completion and ACK advancement;
+   preserve decimal cursor strings. In `xtermAdapter.ts`, time the existing
+   public `terminal.write` parser callback. Parser completion and ACK are distinct
+   from frame presentation. Compute output backlog only from actual matching
+   retained/acknowledged offsets, with their clock/window status. Never retain
+   bytes or change the existing one-frame pull/ACK backpressure, revision fence,
+   no-replay rule, input admission, selected backend or generation ownership.
+
+ALL-354 continues to own the actual Xcode project/selection, public driver and
+supported platform collection. It must preserve ordinary baseline builds when
+the performance source is absent. Any approved target amendment requires a new
+exact source/binary identity, disabled/enabled probe controls and measured probe
+overhead before budget recommendations. This request does not allocate those
+shared files, assume a hook exists or authorize a job.
 
 ## Prerequisites and reproducible preparation
 

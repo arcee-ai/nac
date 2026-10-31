@@ -127,16 +127,79 @@ class CollectionContract(unittest.TestCase):
         row = {"schema": "nac-mac-process-v1", "pid": 42, "status": "unavailable",
                "reason": "rusage_unavailable", "errno": 1, "identity": None, "cpu_user_raw": None}
         result = type("Result", (), {"returncode": 2, "stdout": json.dumps(row).encode()})()
-        entry = {"role": "backend", "start": None}
+        entry = {"role": "backend", "receipt": {"kind": "xcui_launch", "pid": 42,
+            "executable": "/fixture/nac-web", "launch_unix_us": "7000123"}}
         sampler = performance.Sampler(Path("probe-not-executed"), Path("unused"), Path("unused-ui"), None)
         with patch.object(performance.subprocess, "run", return_value=result):
             observed = sampler.sample(42, entry)
         self.assertIsNone(observed["cpu_user_raw"])
-        self.assertIsNone(entry["start"])
+        self.assertEqual(entry["receipt"]["launch_unix_us"], "7000123")
+        self.assertIsNone(observed["role"])
         self.assertFalse(observed["full_process_set"])
         with patch.object(performance.subprocess, "run", return_value=result):
-            with self.assertRaisesRegex(ValueError, "PID binding"):
-                sampler.sample(43, entry)
+            self.assertEqual(sampler.sample(43, entry)["status"], "unavailable")
+
+    def process_row(self):
+        return {"schema": "nac-mac-process-v1", "status": "observed", "pid": 42,
+            "executable": "/fixture/nac-web", "identity": {"start_mach_ticks": "500",
+                "start_wall_seconds": "7", "start_wall_microseconds": "123"},
+            "cpu_user_raw": "1234", "cpu_system_raw": "20", "resident_bytes": "1024"}
+
+    def test_delayed_first_sample_replacement_executable_and_unknown_never_attribute(self):
+        sampler = performance.Sampler(Path("never-executed"), Path("unused"), Path("unused-ui"), None)
+        receipt = {"kind": "xcui_launch", "pid": 42, "executable": "/fixture/nac-web", "launch_unix_us": "7000123"}
+        sampler.add(42, "shell", receipt)
+        expected = copy.deepcopy(sampler.roots[42])
+        replacement = self.process_row() | {"identity": {"start_mach_ticks": "900",
+            "start_wall_seconds": "8", "start_wall_microseconds": "123"}}
+        for row in (replacement, self.process_row() | {"executable": "/foreign/nac-web"},
+                    self.process_row() | {"identity": None}):
+            result = type("Result", (), {"returncode": 0, "stdout": json.dumps(row).encode()})()
+            with patch.object(performance.subprocess, "run", return_value=result):
+                observed = sampler.sample(42, sampler.roots[42])
+            self.assertEqual(observed["status"], "unavailable")
+            self.assertFalse(observed["attributed"])
+            self.assertIsNone(observed["role"])
+            self.assertIsNone(observed["cpu_user_raw"])
+            self.assertEqual(sampler.roots[42], expected)  # No first-probe self-binding.
+        with patch.object(performance.subprocess, "run") as probe:
+            self.assertEqual(sampler.sample(42, {"role": "shell", "receipt": None})["status"], "unavailable")
+            probe.assert_not_called()
+
+    def test_owned_handle_exit_before_or_during_first_probe_discards_counters(self):
+        handle = type("Handle", (), {"pid": 42, "poll": lambda _: 1})()
+        receipt = {"kind": "owned_child", "pid": 42, "executable": "/fixture/nac-web",
+                   "launch_window_us": (7000000, 7001000), "handle": handle}
+        sampler = performance.Sampler(Path("never-executed"), Path("unused"), Path("unused-ui"), None)
+        sampler.add(42, "backend", receipt)
+        with patch.object(performance.subprocess, "run") as probe:
+            observed = sampler.sample(42, sampler.roots[42])
+            self.assertTrue(observed["owned_incarnation_dead"])
+            probe.assert_not_called()
+        calls = iter((None, 1))
+        with patch.object(handle, "poll", side_effect=lambda: next(calls)):
+            result = type("Result", (), {"returncode": 0, "stdout": json.dumps(self.process_row()).encode()})()
+            with patch.object(performance.subprocess, "run", return_value=result):
+                observed = sampler.sample(42, sampler.roots[42])
+        self.assertEqual(observed["status"], "unavailable")
+        self.assertIsNone(observed["cpu_user_raw"])
+        missing_handle = {"role": "backend", "receipt": receipt | {"handle": None}}
+        with patch.object(performance.subprocess, "run") as probe:
+            observed = sampler.sample(42, missing_handle)
+            probe.assert_not_called()
+        self.assertEqual(observed["status"], "unavailable")
+        self.assertFalse(observed.get("owned_incarnation_dead", False))
+
+    def test_expected_launch_receipt_allows_matching_process_without_mutating_identity(self):
+        sampler = performance.Sampler(Path("never-executed"), Path("unused"), Path("unused-ui"), None)
+        receipt = {"kind": "xcui_launch", "pid": 42, "executable": "/fixture/nac-web", "launch_unix_us": "7000123"}
+        sampler.add(42, "shell", receipt)
+        result = type("Result", (), {"returncode": 0, "stdout": json.dumps(self.process_row()).encode()})()
+        with patch.object(performance.subprocess, "run", return_value=result):
+            row = sampler.sample(42, sampler.roots[42])
+        self.assertTrue(row["attributed"])
+        self.assertEqual(row["cpu_user_raw"], "1234")
+        self.assertEqual(sampler.roots[42]["receipt"], receipt)
 
     def test_evidence_never_overwrites_or_reads_a_symlink(self):
         with tempfile.TemporaryDirectory() as temporary:

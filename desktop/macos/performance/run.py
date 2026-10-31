@@ -156,13 +156,23 @@ def paired_distribution(samples, expected_pairs=20):
 
 class OwnedCommand:
     def __init__(self, argv, env, cwd, log):
+        executable = shutil.which(argv[0], path=env.get("PATH"))
+        if executable is None:
+            raise ValueError("Owned command executable unavailable")
+        self.executable = str(Path(executable).resolve())
         self.log = log.open("xb")
         try:
+            self.launch_before_us = time.time_ns() // 1000
             self.process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                 stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True)
+            self.launch_after_us = time.time_ns() // 1000 + 1
         except BaseException:
             self.log.close()
             raise
+
+    def sampling_receipt(self):
+        return {"kind": "owned_child", "pid": self.process.pid, "executable": self.executable,
+                "launch_window_us": (self.launch_before_us, self.launch_after_us), "handle": self.process}
 
     def stop(self):
         # Popen retains our child; never signal by executable name or a stale
@@ -187,13 +197,38 @@ class Sampler:
         self.error = None
         self.thread = threading.Thread(target=self.loop)
 
-    def add(self, pid, role):
-        self.roots.setdefault(pid, {"role": role, "start": None})
+    def add(self, pid, role, receipt=None):
+        entry = {"role": role, "receipt": dict(receipt) if receipt else None}
+        if pid in self.roots and self.roots[pid] != entry:
+            self.roots[pid]["conflict"] = True
+        else:
+            self.roots.setdefault(pid, entry)
+
+    def unavailable(self, pid, entry, reason, **extra):
+        return {"schema": "nac-mac-process-v1", "pid": pid, "status": "unavailable", "reason": reason,
+                "requested_role": entry["role"], "role": None, "attributed": False, "full_process_set": False,
+                **{k: None for k in ("identity", "cpu_user_raw", "cpu_system_raw", "resident_bytes",
+                    "physical_footprint_bytes", "package_idle_wakeups", "interrupt_wakeups")}, **extra}
 
     def sample(self, pid, entry):
+        receipt = entry.get("receipt") or {}
+        kind = receipt.get("kind")
+        if (entry.get("conflict") or receipt.get("pid") != pid
+                or not isinstance(receipt.get("executable"), str) or not Path(receipt["executable"]).is_absolute()
+                or kind not in ("owned_child", "current_process", "xcui_launch")):
+            return self.unavailable(pid, entry, "missing_or_conflicting_launch_receipt")
+        handle = receipt.get("handle")
+        if kind == "owned_child" and (handle is None or handle.pid != pid):
+            return self.unavailable(pid, entry, "owned_handle_missing_or_mismatched")
+        def live():
+            return (handle is not None and handle.pid == pid and handle.poll() is None) if kind == "owned_child" else (
+                pid == os.getpid() if kind == "current_process" else True)
+        if not live():
+            return self.unavailable(pid, entry, "owned_handle_no_longer_live",
+                                    owned_incarnation_dead=kind == "owned_child")
+        if kind == "xcui_launch" and not str(receipt.get("launch_unix_us", "")).isdigit():
+            return self.unavailable(pid, entry, "launch_incarnation_unknown")
         argv = [str(self.binary), "--pid", str(pid)]
-        if entry["start"] is not None:
-            argv += ["--expect-start", entry["start"]]
         result = subprocess.run(argv, capture_output=True, timeout=3, check=False)
         if result.returncode not in (0, 2) or len(result.stdout) > 16384:
             raise ValueError("Process probe failed or exceeded bounded output")
@@ -201,10 +236,24 @@ class Sampler:
         if (row.get("schema") != "nac-mac-process-v1" or row.get("pid") != pid
                 or row.get("status") not in ("observed", "unavailable")):
             raise ValueError("Process probe schema/PID binding mismatch")
-        if row["status"] == "observed" and entry["start"] is None:
-            entry["start"] = row["identity"]["start_mach_ticks"]
+        if row["status"] != "observed":
+            return self.unavailable(pid, entry, row.get("reason", "probe_unavailable"), errno=row.get("errno"))
+        if not live():
+            return self.unavailable(pid, entry, "owned_handle_exited_during_probe", owned_incarnation_dead=kind == "owned_child")
+        try:
+            birth = int(row["identity"]["start_wall_seconds"]) * 1_000_000 + int(row["identity"]["start_wall_microseconds"])
+            same_executable = Path(row["executable"]).is_absolute() and Path(row["executable"]).resolve() == Path(receipt["executable"]).resolve()
+            same_birth = (receipt["launch_window_us"][0] <= birth <= receipt["launch_window_us"][1]
+                          if kind == "owned_child" else abs(birth - int(receipt["launch_unix_us"])) <= 1
+                          if kind == "xcui_launch" else True)
+            start = row["identity"]["start_mach_ticks"]
+            valid = same_executable and same_birth and str(start).isdigit() and int(start) > 0
+        except (KeyError, TypeError, ValueError, OSError):
+            valid = False
+        if not valid:
+            return self.unavailable(pid, entry, "launch_executable_or_incarnation_mismatch")
         return row | {"role": entry["role"], "sample_time_ns": time.monotonic_ns(),
-                      "full_process_set": False}
+                      "attributed": True, "ownership_evidence": kind, "full_process_set": False}
 
     def loop(self):
         try:
@@ -216,24 +265,23 @@ class Sampler:
                         ui = read_json(self.ui_output)
                         for row in ui.get("observations", []):
                             if row.get("event") == "app_launched":
-                                self.add(int(row["pid"]), "shell")
+                                self.add(int(row["pid"]), "shell", {"kind": "xcui_launch", "pid": row["pid"],
+                                    "executable": row.get("executable"), "launch_unix_us": row.get("launch_unix_us")})
                     # Discovery is explicitly incomplete for reparented XPC
                     # helpers; no global name match becomes owned attribution.
                     table = subprocess.run(["/bin/ps", "-axo", "pid=,ppid=,comm="],
                         capture_output=True, text=True, timeout=3, check=True).stdout
-                    discovered = []
                     unbound = []
                     for line in table.splitlines():
                         parts = line.strip().split(None, 2)
                         if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
                             pid, parent = int(parts[0]), int(parts[1])
                             if parent in self.roots and pid not in self.roots:
-                                discovered.append((pid, "backend" if parts[2].endswith("/nac-web") else "unclassified_descendant"))
+                                unbound.append({"pid": pid, "name": Path(parts[2]).name,
+                                                "ownership": "no_owned_launch_receipt", "included_in_app_totals": False})
                             elif pid not in self.roots and any(tag in parts[2] for tag in ("WebKit", "WebContent", "Safari")):
                                 unbound.append({"pid": pid, "name": Path(parts[2]).name,
                                                 "ownership": "unbound", "included_in_app_totals": False})
-                    for pid, role in discovered:
-                        self.add(pid, role)
                     if len(self.roots) > 128:
                         raise ValueError("Calibration process registry full")
                     output.write(json.dumps({"event": "unattributed_helper_candidates", "candidates": unbound[:128],
@@ -405,7 +453,8 @@ class Calibration:
 
     def cpu_control(self):
         probe = Sampler(self.private / "process-usage", Path("unused"), Path("unused"), self)
-        entry = {"role": "observer", "start": None}
+        entry = {"role": "observer", "receipt": {"kind": "current_process", "pid": os.getpid(),
+                                                   "executable": str(Path(sys.executable).resolve())}}
         before = probe.sample(os.getpid(), entry)
         initial = resource.getrusage(resource.RUSAGE_SELF)
         cpu_start = time.process_time()
@@ -420,7 +469,7 @@ class Calibration:
         return receipt
 
     def fixture(self, engine):
-        provider = OwnedCommand(["python3", "-B", str(HERE / "fixture.py"), "--mode", "stream",
+        provider = OwnedCommand([sys.executable, "-B", str(HERE / "fixture.py"), "--mode", "stream",
             "--evidence", str(self.private / "provider.jsonl")], os.environ.copy(), HERE,
             self.private / "provider-start.log")
         self.owned.append(provider)
@@ -507,9 +556,10 @@ class Calibration:
         config_path.write_text(json.dumps(config))
         sampler = Sampler(self.private / "process-usage", self.private / "processes.jsonl", ui, self)
         self.sampler = sampler
-        sampler.add(provider.process.pid, "provider")
-        sampler.add(browser_backend.process.pid, "backend")
-        sampler.add(os.getpid(), "observer")
+        sampler.add(provider.process.pid, "provider", provider.sampling_receipt())
+        sampler.add(browser_backend.process.pid, "backend", browser_backend.sampling_receipt())
+        sampler.add(os.getpid(), "observer", {"kind": "current_process", "pid": os.getpid(),
+                                              "executable": str(Path(sys.executable).resolve())})
         sampler.thread.start()
         try:
             self.command(["xcodebuild", "test-without-building", "-xctestrun", str(runners[0]),
@@ -565,7 +615,7 @@ class Calibration:
                     if time.monotonic() >= end:
                         break
                     row = self.sampler.sample(pid, entry)
-                    if row.get("status") == "unavailable" and row.get("errno") == 3:
+                    if row.get("owned_incarnation_dead") or row.get("status") == "unavailable" and row.get("errno") == 3:
                         pending.pop(pid)
                 if pending:
                     time.sleep(.1)

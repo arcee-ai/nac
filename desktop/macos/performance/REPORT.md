@@ -94,6 +94,17 @@ allocation. Actual Swift SDK/runtime verification awaits ALL-354 integration
 and a separate coordinator decision. No ordinary app/shared harness source,
 builder, API or generated asset was edited.
 
+The first tools-only repair closes the coordinator's two feasibility findings:
+sampling no longer self-binds its first result, and the public driver's bounded
+cleanup scope is established before launch or any throwing post-launch metadata/
+recording operation. Focused Python cases cover delayed-first-sample replacement,
+executable/unknown identity, owned-handle exit and permitted receipt matches.
+The same Swift lifecycle helper has a fault-injection XCTest case for launch,
+process-count, launch-date, recording, cleanup and receipt failures; its actual
+SDK execution remains held, not reported as passed. No final independent review
+was consumed. The source-only observation schema/owner requests in README reuse
+the existing Rust exporter, explicitly disabled in the current environment.
+
 At a clean idle checkpoint, obtain explicit exact source nomination (frozen
 ordinary source `66dfa1ea6dae9bd825224674026a4ff32e1e64e4` is proposed, with
 ALL-341 as an ancestor), an exact ALL-354 integration commit accepting the

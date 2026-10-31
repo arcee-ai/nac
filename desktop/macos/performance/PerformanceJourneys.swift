@@ -5,6 +5,31 @@ import IOKit
 import XCTest
 import XCUIAutomation
 
+private enum OwnedLaunchFailure: Error { case identityUnknown, cleanupOrReceiptFailed }
+
+/// Installs failure cleanup before launch, not after fallible provenance/logging.
+/// An unknown owner is recorded as failed cleanup and never broadly terminated.
+@MainActor
+private func withOwnedAppLaunch<Owner>(launch: () throws -> Void, capture: () -> Owner?,
+    operation: (Owner) throws -> Void, cleanup: (Owner) -> Bool,
+    retain: (Bool, String) -> Bool) throws {
+    var owner: Owner?
+    var finalized = false
+    func finish() -> Bool {
+        let stopped = owner.map(cleanup) ?? false
+        let retained = retain(stopped, owner == nil ? "launch_identity_unknown" : stopped ? "owned_app_stopped" : "cleanup_failed")
+        return stopped && retained
+    }
+    defer { if !finalized { _ = finish() } }
+    try launch()
+    owner = capture() // Nonthrowing; unknown/ambiguous identity is not authority.
+    guard let owner else { throw OwnedLaunchFailure.identityUnknown }
+    try operation(owner)
+    let completed = finish()
+    finalized = true
+    guard completed else { throw OwnedLaunchFailure.cleanupOrReceiptFailed }
+}
+
 /// External calibration of ordinary release apps. Never an input-latency probe.
 /// ALL-354 integrates this allocated source into its real Xcode UI-test target.
 final class PerformanceJourneys: XCTestCase {
@@ -160,82 +185,137 @@ final class PerformanceJourneys: XCTestCase {
         app.launchArguments = arm.arguments
         app.launchEnvironment = arm.environment
         let start = DispatchTime.now().uptimeNanoseconds
-        app.launch()
-        let processes = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).filter {
-            !$0.isTerminated && $0.bundleURL?.resolvingSymlinksInPath() == url
-        }
-        try require(processes.count == 1, "Newly launched app identity is ambiguous; no input")
-        let running = processes[0]
-        let launch = try XCTUnwrap(running.launchDate)
-        try record("app_launched", ["arm": arm.name, "pid": running.processIdentifier,
-            "launch_date": launch.timeIntervalSince1970,
-            "native_sha256": hash, "invoked_uptime_ns": String(start)])
-        defer {
-            let same = running.launchDate == launch && running.bundleURL?.resolvingSymlinksInPath() == url
-            if same && !running.isTerminated { app.terminate() }
-            let stopped = same && app.wait(for: .notRunning, timeout: 30)
-            try? record("app_cleanup", ["arm": arm.name, "app_stopped": stopped,
-                "engine_pty_cleanup": "external exact-identity collector must confirm"])
-        }
-        do {
-            var binding = try bind(app, url: url)
-            try guardInput(binding, url: url)
-            if arm.name == "browser" {
-                try require(identifier == "com.apple.Safari", "Browser arm must be ordinary Safari")
-                // Close only this newly launched fixture's initial window.
-                // Never change a browser preference to obtain private mode.
-                app.typeKey("w", modifierFlags: .command)
-                try require(app.windows.count == 0 && !binding.0.isTerminated
-                    && binding.0.launchDate == binding.1
-                    && NSWorkspace.shared.frontmostApplication?.processIdentifier == binding.0.processIdentifier,
-                    "Safari initial window did not close under retained ownership")
-                try console()
-                app.typeKey("n", modifierFlags: [.command, .shift])
-                try require(app.windows.count == 1, "Safari needs one isolated private fixture window")
-                binding = try bind(app, url: url)
-                let address = try XCTUnwrap(arm.url)
-                let parsed = try XCTUnwrap(URL(string: address))
-                try require(parsed.scheme == "http" && parsed.host == "127.0.0.1"
-                    && parsed.port != nil && parsed.user == nil && parsed.password == nil,
-                    "Fixture URL is not an explicit owned loopback endpoint")
-                try guardInput(binding, url: url)
-                app.typeKey("l", modifierFlags: .command)
-                app.typeText(address)
-                app.typeKey(.return, modifierFlags: [])
+        let invoked = Date()
+        var unknown = "launch_did_not_return"
+        var ownedPID: pid_t?
+        try withOwnedAppLaunch(launch: { app.launch() }, capture: { () -> (NSRunningApplication, Date)? in
+            let processes = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).filter {
+                !$0.isTerminated && $0.bundleURL?.resolvingSymlinksInPath() == url
             }
-            let project = try element(app.webViews.staticTexts, label: arm.project_label)
-            try guardInput(binding, url: url)
-            project.click()
-            let composer = try element(app.webViews.firstMatch.descendants(matching: .any), label: "Message")
-            try record("workspace_ax_ready", ["arm": arm.name,
-                "paint_time_ns": NSNull(), "actual_css_viewport": NSNull(),
-                "ax_webview_width_points": app.webViews.firstMatch.frame.width,
-                "ax_webview_height_points": app.webViews.firstMatch.frame.height])
-            try type100(composer, binding: binding, url: url, arm: arm.name, surface: "composer")
-            try guardInput(binding, url: url)
-            composer.typeKey("a", modifierFlags: .command)
-            composer.typeKey(.delete, modifierFlags: [])
-            let panel = app.webViews.buttons.matching(identifier: "Show panel").firstMatch
-            if panel.exists {
-                try guardInput(binding, url: url)
-                panel.click()
+            guard processes.count == 1 else { unknown = "process_count_not_one"; return nil }
+            let running = processes[0]
+            guard let date = running.launchDate, date >= invoked else { unknown = "launch_date_unknown_or_older"; return nil }
+            guard running.executableURL?.resolvingSymlinksInPath() == executable.resolvingSymlinksInPath()
+                && (app.state == .runningForeground || app.state == .runningBackground) else {
+                unknown = "owned_launch_handle_or_executable_unknown"; return nil
             }
-            let terminalTab = app.webViews.buttons.matching(identifier: "Terminal").firstMatch
-            if terminalTab.exists {
+            ownedPID = running.processIdentifier
+            return (running, date)
+        }, operation: { owner in
+            let (running, launch) = owner
+            try record("app_launched", ["arm": arm.name, "pid": running.processIdentifier,
+                "launch_date": launch.timeIntervalSince1970,
+                "launch_unix_us": String(Int64((launch.timeIntervalSince1970 * 1_000_000).rounded())),
+                "executable": executable.resolvingSymlinksInPath().path,
+                "native_sha256": hash, "invoked_uptime_ns": String(start)])
+            do {
+                var binding = try bind(app, url: url)
                 try guardInput(binding, url: url)
-                terminalTab.click()
+                if arm.name == "browser" {
+                    try require(identifier == "com.apple.Safari", "Browser arm must be ordinary Safari")
+                    // Close only this newly launched fixture's initial window.
+                    // Never change a browser preference to obtain private mode.
+                    app.typeKey("w", modifierFlags: .command)
+                    try require(app.windows.count == 0 && !binding.0.isTerminated
+                        && binding.0.launchDate == binding.1
+                        && NSWorkspace.shared.frontmostApplication?.processIdentifier == binding.0.processIdentifier,
+                        "Safari initial window did not close under retained ownership")
+                    try console()
+                    app.typeKey("n", modifierFlags: [.command, .shift])
+                    try require(app.windows.count == 1, "Safari needs one isolated private fixture window")
+                    binding = try bind(app, url: url)
+                    let address = try XCTUnwrap(arm.url)
+                    let parsed = try XCTUnwrap(URL(string: address))
+                    try require(parsed.scheme == "http" && parsed.host == "127.0.0.1"
+                        && parsed.port != nil && parsed.user == nil && parsed.password == nil,
+                        "Fixture URL is not an explicit owned loopback endpoint")
+                    try guardInput(binding, url: url)
+                    app.typeKey("l", modifierFlags: .command)
+                    app.typeText(address)
+                    app.typeKey(.return, modifierFlags: [])
+                }
+                let project = try element(app.webViews.staticTexts, label: arm.project_label)
+                try guardInput(binding, url: url)
+                project.click()
+                let composer = try element(app.webViews.firstMatch.descendants(matching: .any), label: "Message")
+                try record("workspace_ax_ready", ["arm": arm.name,
+                    "paint_time_ns": NSNull(), "actual_css_viewport": NSNull(),
+                    "ax_webview_width_points": app.webViews.firstMatch.frame.width,
+                    "ax_webview_height_points": app.webViews.firstMatch.frame.height])
+                try type100(composer, binding: binding, url: url, arm: arm.name, surface: "composer")
+                try guardInput(binding, url: url)
+                composer.typeKey("a", modifierFlags: .command)
+                composer.typeKey(.delete, modifierFlags: [])
+                let panel = app.webViews.buttons.matching(identifier: "Show panel").firstMatch
+                if panel.exists {
+                    try guardInput(binding, url: url)
+                    panel.click()
+                }
+                let terminalTab = app.webViews.buttons.matching(identifier: "Terminal").firstMatch
+                if terminalTab.exists {
+                    try guardInput(binding, url: url)
+                    terminalTab.click()
+                }
+                let newShell = try element(app.webViews.buttons, label: "New shell")
+                try guardInput(binding, url: url)
+                newShell.click()
+                let terminal = try element(app.webViews.textViews, label: "Terminal input")
+                try type100(terminal, binding: binding, url: url, arm: arm.name, surface: "terminal")
+                try record("arm_calibration_completed", ["arm": arm.name,
+                    "actual_input_latency_distribution": NSNull(), "frame_distribution": NSNull()])
+            } catch {
+                try? record("arm_calibration_failed", ["arm": arm.name, "reason": "UI calibration or ownership gate failed"])
+                throw error
             }
-            let newShell = try element(app.webViews.buttons, label: "New shell")
-            try guardInput(binding, url: url)
-            newShell.click()
-            let terminal = try element(app.webViews.textViews, label: "Terminal input")
-            try type100(terminal, binding: binding, url: url, arm: arm.name, surface: "terminal")
-            try record("arm_calibration_completed", ["arm": arm.name,
-                "actual_input_latency_distribution": NSNull(), "frame_distribution": NSNull()])
-        } catch {
-            try? record("arm_calibration_failed", ["arm": arm.name, "reason": "UI calibration or ownership gate failed"])
-            throw error
+        }, cleanup: { owner in
+            let (running, launch) = owner
+            guard running.launchDate == launch && running.bundleURL?.resolvingSymlinksInPath() == url
+                && running.executableURL?.resolvingSymlinksInPath() == executable.resolvingSymlinksInPath() else { return false }
+            if running.isTerminated { return true }
+            app.terminate() // The exact XCUIApplication launch handle, never a bundle-name sweep.
+            return app.wait(for: .notRunning, timeout: 30) && running.isTerminated
+        }, retain: { stopped, reason in
+            do {
+                try record("app_cleanup", ["arm": arm.name, "owned_pid": ownedPID.map { Int($0) as Any } ?? NSNull(),
+                    "app_stopped": stopped, "cleanup_status": stopped ? "confirmed" : "failed_or_unknown",
+                    "reason": reason == "launch_identity_unknown" ? unknown : reason,
+                    "engine_pty_cleanup": "external exact-identity collector must confirm"])
+                return true
+            } catch { return false }
+        })
+    }
+
+    @MainActor
+    func testLaunchFailureCleanupContract() throws {
+        enum Fault: Error { case injected }
+        for stage in ["launch", "process_count", "launch_date", "record", "cleanup", "receipt"] {
+            var cleanups = 0
+            var retained: [Bool] = []
+            XCTAssertThrowsError(try withOwnedAppLaunch(launch: {
+                if stage == "launch" { throw Fault.injected }
+            }, capture: { () -> Int? in
+                stage == "process_count" || stage == "launch_date" ? nil : 7
+            }, operation: { owner in
+                XCTAssertEqual(owner, 7)
+                if stage == "record" { throw Fault.injected }
+            }, cleanup: { owner in
+                XCTAssertEqual(owner, 7); cleanups += 1
+                return stage != "cleanup"
+            }, retain: { stopped, _ in
+                retained.append(stopped)
+                return stage != "receipt"
+            }))
+            XCTAssertEqual(cleanups, ["launch", "process_count", "launch_date"].contains(stage) ? 0 : 1)
+            XCTAssertEqual(retained.count, 1)
+            if cleanups == 0 || stage == "cleanup" { XCTAssertEqual(retained, [false]) }
         }
+        var cleanups = 0
+        var retained: [Bool] = []
+        try withOwnedAppLaunch(launch: {}, capture: { 7 }, operation: { XCTAssertEqual($0, 7) },
+            cleanup: { XCTAssertEqual($0, 7); cleanups += 1; return true },
+            retain: { stopped, _ in retained.append(stopped); return true })
+        XCTAssertEqual(cleanups, 1)
+        XCTAssertEqual(retained, [true])
     }
 
     @MainActor
