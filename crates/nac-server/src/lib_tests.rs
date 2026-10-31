@@ -1026,6 +1026,8 @@ mod compaction;
 mod configuration;
 #[path = "tests/contract.rs"]
 mod contract;
+#[path = "tests/direct_qa.rs"]
+mod direct_qa;
 #[path = "tests/lifecycle.rs"]
 mod lifecycle;
 #[path = "tests/managed_delivery.rs"]
