@@ -191,7 +191,9 @@ test("native saved-project launches open independent named-skill tasks across Gi
     );
     await send(page, `NATIVE_LAUNCH_${kind}: Start a separate task using the launch-proof skill.`);
     const acknowledgement = page.getByText(`Separate ${kind} launch accepted`, { exact: true });
-    const allow = page.getByRole("button", { name: "Allow once", exact: true });
+    const allow = page
+      .getByRole("button", { name: "Allow once", exact: true })
+      .and(page.locator(":enabled"));
     // Ordinary agent authorization can ask separately for the destination and pinned Git effects.
     for (let attempt = 0; attempt < 4; attempt += 1) {
       await Promise.race([

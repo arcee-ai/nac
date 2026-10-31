@@ -251,3 +251,125 @@ async fn native_ready_retry_recovers_only_the_pending_initial_input_and_clears_w
     stop(&restarted).await;
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_git_source_resolution_keeps_identity_lease_after_caller_is_lost() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("native_source_response_loss");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let manager = test_manager(&root);
+    let (controller, caller, input) = fixture_context(&root, &manager, true).await;
+    let gate = Arc::new(application::session_creation::CreationProjectionGate::default());
+    *manager
+        .inner
+        .task_preparations
+        .source_resolution
+        .lock()
+        .unwrap() = Some(gate.clone());
+    let worker = manager.clone();
+    let owner = caller.clone();
+    let intent = input.clone();
+    let waiter = tokio::spawn(async move {
+        let controller = NativeTaskLaunchController::new(&worker);
+        start(&controller, &owner, intent, &worker.inner.store_path).await
+    });
+    tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+        .await
+        .unwrap();
+    assert!(
+        nac_core::store::load_task_launch(&manager.inner.store_path, &input.request_id)
+            .unwrap()
+            .is_none()
+    );
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    let retry = start(
+        &controller,
+        &caller,
+        input.clone(),
+        &manager.inner.store_path,
+    )
+    .await;
+    assert_eq!(retry.launch.phase, "reserved");
+    assert!(retry.launch.error.is_none());
+    assert!(matches!(
+        sessions::SessionOperationLease::try_acquire(
+            &manager.inner.store_path,
+            &format!("native-task-launch:{}", input.request_id)
+        ),
+        Err(sessions::SessionOperationLeaseError::Busy(_))
+    ));
+    gate.resume.notify_one();
+    settle(&manager).await;
+    let ready = controller.status(&caller, &input.request_id).await.unwrap();
+    assert_eq!(ready.launch.phase, "ready", "{:?}", ready.launch.error);
+    assert_eq!(ready.launch.session_id, retry.launch.session_id);
+    assert_eq!(
+        nac_core::store::list_session_inbox(&manager.inner.store_path, &ready.launch.session_id)
+            .unwrap()
+            .len(),
+        1
+    );
+    stop(&manager).await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_saved_symlink_projects_bind_canonical_targets_and_reject_retargeting() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    for retained in [false, true] {
+        let root = temp_root("native_symlink_project");
+        let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+        let manager = test_manager(&root);
+        let (controller, caller, input) = fixture_context(&root, &manager, retained).await;
+        let original = controller.resolve(&caller, &input).await.unwrap();
+        let alias = root.join("saved-alias");
+        std::os::unix::fs::symlink(&original.cwd, &alias).unwrap();
+        rusqlite::Connection::open(&manager.inner.store_path)
+            .unwrap()
+            .execute(
+                "UPDATE projects SET cwd=?2 WHERE project_id=?1",
+                rusqlite::params![original.project_id, alias.to_string_lossy()],
+            )
+            .unwrap();
+        let first = start(
+            &controller,
+            &caller,
+            input.clone(),
+            &manager.inner.store_path,
+        )
+        .await;
+        settle(&manager).await;
+        let ready = controller.status(&caller, &input.request_id).await.unwrap();
+        assert_eq!(ready.launch.phase, "ready", "{:?}", ready.launch.error);
+        assert_eq!(ready.launch.session_id, first.launch.session_id);
+        assert_eq!(ready.launch.source_cwd, original.cwd);
+        let mut changed = input;
+        changed.request_id = uuid::Uuid::new_v4().to_string();
+        let target = controller.resolve(&caller, &changed).await.unwrap();
+        let other = root.join("other");
+        std::fs::create_dir(&other).unwrap();
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(other, alias).unwrap();
+        let authorization =
+            nac_core::task_launch_control::NativeTaskAuthorization::for_local_fixture(
+                manager.inner.store_path.clone(),
+                caller.clone(),
+                target.cwd.clone(),
+            );
+        let rejected = controller
+            .launch(&caller, changed.clone(), target, authorization)
+            .await
+            .unwrap_err();
+        assert!(rejected.to_string().contains("binding changed"));
+        assert!(nac_core::store::load_native_task_launch(
+            &manager.inner.store_path,
+            &changed.request_id
+        )
+        .unwrap()
+        .is_none());
+        stop(&manager).await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

@@ -285,3 +285,16 @@ fn native_launch_wire_inputs_match_nullable_fields_and_each_workspace_choice() {
         .decode(json!({"request_id":null}))
         .is_err());
 }
+
+#[test]
+fn native_advertised_prompt_boundary_leaves_room_for_the_longest_skill_handoff() {
+    let max = LaunchTaskTool.definition().function.parameters["properties"]["prompt"]["maxLength"]
+        .as_u64()
+        .unwrap() as usize;
+    let mut input = request();
+    input["prompt"] = json!("a".repeat(max));
+    input["skill"] = json!("s".repeat(256));
+    assert!(LaunchTaskTool.decode(input.clone()).is_ok());
+    input["prompt"] = json!("a".repeat(max + 1));
+    assert!(LaunchTaskTool.decode(input).is_err());
+}

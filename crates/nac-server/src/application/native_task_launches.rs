@@ -95,7 +95,7 @@ async fn resolve(
     } else {
         request.project_id.clone().or(caller.project_id).ok_or_else(|| anyhow!("missing saved project: use list_projects and pass an explicit project_id; no directory/projectless substitution"))?
     };
-    let target = projects(manager)
+    let mut target = projects(manager)
         .await?
         .into_iter()
         .find(|p| p.project_id == project_id)
@@ -103,6 +103,9 @@ async fn resolve(
             anyhow!("saved project '{project_id}' not found; use list_projects for candidates")
         })?;
     anyhow::ensure!(target.eligible, "{}", target.eligibility_detail);
+    // Saved spelling remains inventory data; authorization binds its current
+    // canonical directory and re-resolves it before preparation.
+    target.cwd = std::fs::canonicalize(&target.cwd)?;
     Ok(target)
 }
 
@@ -385,13 +388,23 @@ impl TaskLaunchController for NativeTaskLaunchController {
                     };
                     let launch = phase(&manager, &id, phase_name, None).await?;
                     if launch.retained {
-                        let _lease = lease;
-                        if let Err(error) =
-                            prepare(&manager, launch, admission, authorization).await
-                        {
-                            let _ =
-                                phase(&manager, &id, "failed", Some(format!("{error:#}"))).await;
-                        }
+                        let worker = manager.clone();
+                        let (acknowledged, acknowledgement) = tokio::sync::oneshot::channel();
+                        tokio::spawn(async move {
+                            // Source resolution is already registered work. A
+                            // lost caller cannot release this identity lease.
+                            let _lease = lease;
+                            if let Err(error) =
+                                prepare(&worker, launch, admission, authorization).await
+                            {
+                                let _ =
+                                    phase(&worker, &id, "failed", Some(format!("{error:#}"))).await;
+                            }
+                            let _ = acknowledged.send(());
+                        });
+                        acknowledgement
+                            .await
+                            .map_err(|_| anyhow!("native launch preparation stopped"))?;
                         return receipt(&manager, caller_id, &receipt_id).await;
                     }
                     // Publish the owned retry's preparation state before its

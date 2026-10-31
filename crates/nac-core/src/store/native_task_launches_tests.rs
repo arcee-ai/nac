@@ -1,6 +1,10 @@
 use super::*;
 use crate::task_launch_control::TaskWorkspace;
 
+fn cwd(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path.parent().unwrap()).unwrap()
+}
+
 fn fixture() -> (PathBuf, NativeTaskRequest) {
     let path = std::env::temp_dir()
         .join(format!("nac-native-intent-{}", uuid::Uuid::new_v4()))
@@ -12,7 +16,7 @@ fn fixture() -> (PathBuf, NativeTaskRequest) {
             project_id: "p".into(),
             name: None,
             description: None,
-            cwd: "/repo".into(),
+            cwd: cwd(&path),
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
@@ -23,8 +27,8 @@ fn fixture() -> (PathBuf, NativeTaskRequest) {
     insert_test_session(&path, "caller");
     let conn = open_runtime_connection(&path).unwrap();
     conn.execute(
-        "UPDATE sessions SET behavior='direct',cwd='/repo' WHERE session_id='caller'",
-        [],
+        "UPDATE sessions SET behavior='direct',cwd=?1 WHERE session_id='caller'",
+        params![cwd(&path).to_string_lossy()],
     )
     .unwrap();
     drop(conn);
@@ -49,49 +53,31 @@ fn fixture() -> (PathBuf, NativeTaskRequest) {
 #[test]
 fn native_intent_retry_reopens_original_identity_and_distinguishes_new_requests() {
     let (path, request) = fixture();
-    let first = reserve_native_task_launch(
-        &path,
-        "caller",
-        "p",
-        Path::new("/repo"),
-        false,
-        request.clone(),
-    )
-    .unwrap();
+    let first =
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .unwrap();
     assert_eq!(
         first,
-        reserve_native_task_launch(
-            &path,
-            "caller",
-            "p",
-            Path::new("/repo"),
-            false,
-            request.clone()
-        )
-        .unwrap()
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .unwrap()
     );
     let mut changed = request.clone();
     changed.skill = Some("release".into());
     assert!(
-        reserve_native_task_launch(&path, "caller", "p", Path::new("/repo"), false, changed)
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, changed)
             .unwrap_err()
             .to_string()
             .contains("conflict")
     );
-    assert!(reserve_native_task_launch(
-        &path,
-        "foreign",
-        "p",
-        Path::new("/repo"),
-        false,
-        request.clone()
-    )
-    .is_err());
+    assert!(
+        reserve_native_task_launch(&path, "foreign", "p", &cwd(&path), false, request.clone())
+            .is_err()
+    );
     let mut other = request;
     other.request_id = uuid::Uuid::new_v4().to_string();
     assert_ne!(
         first.session_id,
-        reserve_native_task_launch(&path, "caller", "p", Path::new("/repo"), false, other)
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, other)
             .unwrap()
             .session_id
     );
@@ -117,24 +103,16 @@ fn native_intent_refuses_wrong_project_source_and_nonlocal_callers() {
         [],
     )
     .unwrap();
-    assert!(reserve_native_task_launch(
-        &path,
-        "caller",
-        "p",
-        Path::new("/repo"),
-        false,
-        request.clone()
-    )
-    .is_err());
+    assert!(
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .is_err()
+    );
     conn.execute(
         "UPDATE sessions SET host_id=NULL,behavior='orchestrator' WHERE session_id='caller'",
         [],
     )
     .unwrap();
-    assert!(
-        reserve_native_task_launch(&path, "caller", "p", Path::new("/repo"), false, request)
-            .is_err()
-    );
+    assert!(reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request).is_err());
     drop(conn);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
@@ -142,15 +120,9 @@ fn native_intent_refuses_wrong_project_source_and_nonlocal_callers() {
 #[test]
 fn native_restart_observation_respects_live_preparation_and_never_admits_input() {
     let (path, request) = fixture();
-    let launch = reserve_native_task_launch(
-        &path,
-        "caller",
-        "p",
-        Path::new("/repo"),
-        false,
-        request.clone(),
-    )
-    .unwrap();
+    let launch =
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .unwrap();
     let lease = crate::sessions::SessionOperationLease::try_acquire(
         &path,
         &format!("native-task-launch:{}", request.request_id),
@@ -173,8 +145,7 @@ fn native_restart_observation_respects_live_preparation_and_never_admits_input()
     assert!(observed.error.unwrap().contains("restart"));
     assert!(!crate::sessions::session_exists(&path, &launch.session_id).unwrap());
     let retry =
-        reserve_native_task_launch(&path, "caller", "p", Path::new("/repo"), false, request)
-            .unwrap();
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request).unwrap();
     assert_eq!(retry.session_id, launch.session_id);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

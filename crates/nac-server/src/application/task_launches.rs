@@ -184,6 +184,20 @@ impl<'a> TaskLaunchApplication<'a> {
         }
         let (project, bound, invoking) =
             context.ok_or_else(|| anyhow!("launch source context missing"))?;
+        #[cfg(test)]
+        {
+            let gate = manager
+                .inner
+                .task_preparations
+                .source_resolution
+                .lock()
+                .unwrap()
+                .clone();
+            if let Some(gate) = gate {
+                gate.reached.notify_one();
+                gate.resume.notified().await;
+            }
+        }
         let source = manager
             .inner
             .task_preparations

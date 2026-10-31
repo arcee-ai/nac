@@ -21,7 +21,7 @@ pub(crate) fn reserved_identity(
     };
     anyhow::ensure!(
         record.retained
-            && record.source_cwd == source.project_cwd
+            && record.source_cwd == std::fs::canonicalize(&source.project_cwd)?
             && record.project_id == request.project_id
             && request.invoking_session_id.as_deref() == Some(record.caller_session_id.as_str())
             && record.request.title == request.title
@@ -95,7 +95,7 @@ pub fn reserve_native_task_launch(path: &Path, caller: &str, project_id: &str, s
     let occupied:bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM task_launches WHERE request_id=?1)",params![request.request_id],|r|r.get(0))?;
     anyhow::ensure!(!occupied,"conflict: launch identity already belongs to another launch request");
     let project = projects::load_project_with_connection(&tx, project_id)?;
-    anyhow::ensure!(project.ssh_host.is_none() && project.cwd == source_cwd,
+    anyhow::ensure!(project.ssh_host.is_none() && std::fs::canonicalize(&project.cwd)? == source_cwd,
         "conflict: native launch saved Local project binding changed");
     let caller_local: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sessions s WHERE session_id=?1
         AND behavior IN ('direct','direct-with-orchestrator') AND host_id IS NULL AND sandbox_json IS NULL
@@ -177,7 +177,7 @@ pub(crate) fn publish_in_transaction(
     );
     let project = projects::load_project_with_connection(tx, &record.project_id)?;
     anyhow::ensure!(
-        project.ssh_host.is_none() && project.cwd == snapshot.cwd,
+        project.ssh_host.is_none() && std::fs::canonicalize(&project.cwd)? == snapshot.cwd,
         "conflict: saved project moved during preparation"
     );
     tx.execute(

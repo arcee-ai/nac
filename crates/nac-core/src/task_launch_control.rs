@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::{DirectTaskSnapshot, TaskLaunchRecord};
 
+/// Leaves room for the bounded skill handoff line in the shared initial brief.
+pub(crate) const MAX_NATIVE_TASK_PROMPT_BYTES: usize = 130_700;
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskWorkspace {
@@ -39,6 +42,10 @@ pub struct NativeTaskRequest {
 
 impl NativeTaskRequest {
     pub fn validate(&self) -> Result<()> {
+        anyhow::ensure!(
+            self.prompt.len() <= MAX_NATIVE_TASK_PROMPT_BYTES,
+            "invalid request: prompt exceeds {MAX_NATIVE_TASK_PROMPT_BYTES} UTF-8 bytes"
+        );
         crate::store::TaskLaunchRequest {
             request_id: self.request_id.clone(),
             project_id: self.project_id.clone().unwrap_or_else(|| "current".into()),
