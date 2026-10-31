@@ -39,7 +39,7 @@ pub(crate) async fn read_question(
 
 #[utoipa::path(post, path="/sessions/{session_id}/questions/{request_id}/answer", operation_id="post_sessions_session_id_questions_request_id_answer", tag="conversation",
 params(("session_id"=String,Path),("request_id"=String,Path)),request_body=QuestionAnswer,
-responses((status=200,body=QuestionAnswerReceipt),(status=400,body=ApiErrorBody),(status=409,body=ApiErrorBody),(status=500,body=ApiErrorBody)))]
+responses((status=200,body=QuestionAnswerReceipt),(status=400,body=ApiErrorBody),(status=403,body=ApiErrorBody),(status=404,body=ApiErrorBody),(status=409,body=ApiErrorBody),(status=500,body=ApiErrorBody)))]
 pub(crate) async fn answer_question(
     State(manager): State<SessionManager>,
     Path((session, request)): Path<(String, String)>,
@@ -61,7 +61,7 @@ pub(crate) async fn answer_question(
 
 #[utoipa::path(post, path="/sessions/{session_id}/questions/{request_id}/cancel", operation_id="post_sessions_session_id_questions_request_id_cancel", tag="conversation",
 params(("session_id"=String,Path),("request_id"=String,Path)),request_body=CancelQuestionRequest,
-responses((status=200,body=QuestionRecord),(status=400,body=ApiErrorBody),(status=409,body=ApiErrorBody),(status=500,body=ApiErrorBody)))]
+responses((status=200,body=QuestionRecord),(status=400,body=ApiErrorBody),(status=403,body=ApiErrorBody),(status=404,body=ApiErrorBody),(status=409,body=ApiErrorBody),(status=500,body=ApiErrorBody)))]
 pub(crate) async fn cancel_question(
     State(manager): State<SessionManager>,
     Path((session, request)): Path<(String, String)>,

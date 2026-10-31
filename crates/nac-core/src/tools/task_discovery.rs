@@ -128,7 +128,7 @@ pub(super) fn navigation(session_id: &str) -> String {
     format!("/session/{}", url_component(session_id))
 }
 
-pub(super) fn url_component(value: &str) -> String {
+pub(crate) fn url_component(value: &str) -> String {
     let mut route = String::new();
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {

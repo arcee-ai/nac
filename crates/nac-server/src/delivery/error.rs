@@ -289,7 +289,7 @@ impl From<anyhow::Error> for ApiError {
             let status = match question {
                 QuestionError::Invalid => StatusCode::BAD_REQUEST,
                 QuestionError::NotFound => StatusCode::NOT_FOUND,
-                QuestionError::HumanRequired => StatusCode::FORBIDDEN,
+                QuestionError::HumanRequired | QuestionError::Denied => StatusCode::FORBIDDEN,
                 QuestionError::Conflict | QuestionError::Unavailable => StatusCode::CONFLICT,
             };
             return Self::new(status, error.to_string());

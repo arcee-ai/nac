@@ -30,6 +30,32 @@ pub trait TaskQuestionAnswerPort: Send + Sync {
     ) -> futures_util::future::BoxFuture<'_, Result<QuestionAnswerReceipt>>;
 }
 
+/// Private, service-issued authority for one human response. Model inputs
+/// cannot manufacture this capability or select its policy action.
+pub(crate) struct SubmittedQuestionResponse {
+    resource: crate::tools::kernel::PermissionResource,
+}
+impl SubmittedQuestionResponse {
+    pub(crate) fn resource(&self) -> &crate::tools::kernel::PermissionResource {
+        &self.resource
+    }
+}
+
+pub(crate) fn response_resource(
+    action: &str,
+    session: &str,
+    request: &str,
+) -> crate::tools::kernel::PermissionResource {
+    crate::tools::kernel::PermissionResource::new(
+        action,
+        format!(
+            "session:{}/question:{}",
+            crate::tools::url_component(session),
+            crate::tools::url_component(request),
+        ),
+    )
+}
+
 pub(super) struct QuestionOwner {
     // Captured before its registration handle is installed on the outer
     // service. This clone has no registration handle, so there is no cycle.
@@ -193,7 +219,23 @@ impl SessionService {
         &self,
         answer: QuestionAnswer,
     ) -> Result<QuestionAnswerReceipt> {
+        self.authorize_human_question_response("task_question_answer", &answer.request_id)?;
         self.answer_question_inner(answer, None, None).await
+    }
+
+    fn authorize_human_question_response(&self, action: &str, request: &str) -> Result<()> {
+        let session = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or(crate::store::QuestionError::Unavailable)?;
+        let submission = SubmittedQuestionResponse {
+            resource: response_resource(action, session, request),
+        };
+        self.permission_broker
+            .as_ref()
+            .ok_or(crate::store::QuestionError::Unavailable)?
+            .authorize_submitted_question_response(&submission)
     }
 
     async fn answer_question_inner(
@@ -286,6 +328,7 @@ impl SessionService {
         expected_revision: i64,
     ) -> Result<QuestionRecord> {
         self.require_question_session().await?;
+        self.authorize_human_question_response("task_question_cancel", &request_id)?;
         self.coordinate_local(move |service| {
             let _active = service.lock_active_operation();
             let session = service
@@ -316,64 +359,5 @@ impl SessionService {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[tokio::test]
-    async fn cached_idle_question_owner_cannot_answer_while_foreign_run_lease_is_live() {
-        let (parts, path) = crate::session_service::tests::test_direct_active_service(
-            "question-foreign-owner",
-            "target",
-            crate::model::ModelClient::new_for_test(),
-        );
-        let run = uuid::Uuid::new_v4().to_string();
-        let snapshot = crate::sessions::load_session(&path, "target").unwrap();
-        crate::store::TranscriptLogWriter::new(&path)
-            .unwrap()
-            .append_run_prompt(
-                "target",
-                snapshot.messages.len() as u64,
-                &crate::types::Message::User {
-                    content: "work".into(),
-                },
-                &run,
-            )
-            .unwrap();
-        let question = crate::store::create_task_question(
-            &path,
-            &QuestionRequest {
-                session_id: "target".into(),
-                request_id: "exact".into(),
-                run_id: run.clone(),
-                generation: run,
-                text: "Which format?".into(),
-                choices: vec![],
-                responder_class: crate::store::QuestionResponder::Information,
-            },
-            0,
-        )
-        .unwrap();
-        let peer = sessions::SessionOperationLease::try_acquire(&path, "target").unwrap();
-        let error = parts
-            .service
-            .answer_task_question(QuestionAnswer {
-                request_id: "exact".into(),
-                run_id: question.request.run_id.clone(),
-                generation: question.request.generation.clone(),
-                expected_revision: 1,
-                answer: "CSV".into(),
-            })
-            .await
-            .unwrap_err();
-        assert_eq!(
-            error.downcast_ref::<crate::store::QuestionError>(),
-            Some(&crate::store::QuestionError::Conflict)
-        );
-        assert_eq!(
-            crate::store::pending_task_question(&path, "target").unwrap(),
-            Some(question)
-        );
-        drop(peer);
-        drop(parts);
-        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
-    }
-}
+#[path = "questions_tests.rs"]
+mod tests;
