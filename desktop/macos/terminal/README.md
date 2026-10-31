@@ -11,6 +11,10 @@ private HOME. Startup and a bounded file rendezvous producer emit deterministic
 Unicode, split output, alternate-screen sequences, OSC52/query sequences and a
 12 MiB retention overflow. These are fixture-generated output, never human input.
 The synthetic key/paste/composition negative control must issue zero input POSTs.
+The startup fixture holds an incomplete UTF-8 scalar and an incomplete CSI
+sequence until the actual production observer ACKs each prefix's frame. Only
+then does the driver release the continuation through a bounded file rendezvous.
+This prevents stdout coalescing from manufacturing a split-frame parser pass.
 Transport observations are bounded metadata; typed or pasted contents are not
 recorded. OSC write attempts are counted and suppressed without reading or
 changing the system clipboard.
@@ -51,6 +55,18 @@ Use `--scenario terminal-output` for the output suite. The
 WebContent crash seam as unavailable; it does not simulate a crash and claim
 recovery. Existing ALL-340 startup/failure/close acceptance remains reproducible
 with `desktop/macos/smoke.py` on the same instrumented bundle.
+
+On an already unlocked authorized Mac, `--scenario terminal-manual` stages the
+same deterministic shell for up to 180 seconds. Its smoke-only native **Edit**
+menu uses ordinary Copy/Paste/Select All responder-chain actions; the fixture
+never invokes those actions or reads/writes the system clipboard automatically.
+A real operator can click the terminal input area, type fixture-only commands, exercise CJK composition and
+Edit-menu paste, resize, use a pager/job control, then choose **Edit → Finish
+terminal capture**. The fixture records bounded content-free event provenance,
+input/control counts and a snapshot before normal cleanup. It refuses staging
+while locked/inactive/occluded and never retries activation or requests TCC.
+This mode collects evidence; event counts alone cannot certify exact PTY bytes,
+IME correctness or full ALL-352 acceptance. Do not enter real credentials.
 
 ## Evidence contract
 

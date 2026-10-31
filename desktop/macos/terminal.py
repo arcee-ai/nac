@@ -12,6 +12,8 @@ from workspace_report import identity, sha256
 REQUIRED = {
     'embedded-asset-source': 'terminal-output',
     'unicode-osc': 'terminal-output',
+    'osc-response-authority': 'terminal-output',
+    'partial-frame-parser-completion': 'terminal-output',
     'exact-value-masking': 'terminal-output',
     'synthetic-input-denied': 'terminal-output',
     'alternate-screen-output': 'terminal-output',
@@ -74,7 +76,7 @@ def main():
     parser.add_argument('mode', choices=['capture-build', 'run'])
     parser.add_argument('app', type=Path)
     parser.add_argument('output', type=Path, nargs='?')
-    parser.add_argument('--scenario', choices=['terminal-output', 'terminal-renderer-failure'])
+    parser.add_argument('--scenario', choices=['terminal-output', 'terminal-renderer-failure', 'terminal-manual'])
     args = parser.parse_args()
     app = args.app.resolve()
     manifest = app / 'Contents/Resources/terminal-build.json'
@@ -114,6 +116,9 @@ def main():
         for scenario in [args.scenario] if args.scenario else ['terminal-output', 'terminal-renderer-failure']:
             episodes[scenario] = run_case(app, output, scenario)
             episode = episodes[scenario]
+            if scenario == 'terminal-manual':
+                episode['interaction_method'] = ('real operator capture; no automated terminal input'
+                    if episode.get('manual_stage_ready') else 'manual capture unavailable; no automated input attempted')
             assets = episode.get('embedded_assets', [])
             matched = len(assets) >= 2 and all(
                 provenance['asset_files'].get(asset.get('path')) == asset.get('sha256') for asset in assets)
@@ -126,7 +131,7 @@ def main():
             (output / f'{scenario}.json').write_text(json.dumps(episode, indent=2) + '\n')
     finally:
         for path in output.glob('terminal-*.json'):
-            if path.stem in ('terminal-output', 'terminal-renderer-failure'):
+            if path.stem in ('terminal-output', 'terminal-renderer-failure', 'terminal-manual'):
                 episodes[path.stem] = json.loads(path.read_text())
         report = {**matrix(episodes), 'provenance': provenance, 'episodes': episodes}
         (output / 'matrix.json').write_text(json.dumps(report, indent=2) + '\n')

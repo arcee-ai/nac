@@ -7,7 +7,22 @@ enum TerminalFixture {
     static let bashrc = #"""
     export PS1='WK-SHELL> '
     export HISTFILE=/dev/null
-    printf '\033[2J\033[HWK-UNICODE: \316\251\344\270\255\360\237\231\202\r\n'
+    wk352_wait() {
+      local count=0
+      while [ ! -f "$1" ] && [ "$count" -lt 400 ]; do
+        /bin/sleep .05
+        count=$((count+1))
+      done
+      [ -f "$1" ] || { printf 'WK-FIXTURE-RENDEZVOUS-TIMEOUT\r\n'; return 1; }
+      /bin/rm "$1"
+    }
+    printf '\033[2J\033[HWK-UTF8-SPLIT-READY\r\nWK-UNICODE: \316'
+    wk352_wait wk-unicode-continue || return
+    printf '\251\344\270\255\360\237\231\202\r\n'
+    printf 'WK-CSI-SPLIT-READY\r\n\033['
+    wk352_wait wk-csi-continue || return
+    printf '31mWK-CSI-JOINED\033[0m\r\n'
+    unset -f wk352_wait
     printf 'WK-SPLIT:literal-'
     /bin/sleep .05
     printf 'fixture-only\r\n'
@@ -42,7 +57,8 @@ enum TerminalFixture {
     static let observer = #"""
     window.__terminal352 = {inputPosts:0, inputBytes:0, controls:0, gapFrames:0, resetAcks:0, maxFrameBytes:0, markerReceipts:{}, frames:[], events:[], clipboardWrites:0};
     const evidence = window.__terminal352;
-    const markerNames=['WK-OSC-DONE','WK-ALT-SCREEN','WK-NORMAL-SCREEN','WK-RETAINED-TAIL'];
+    const markerNames=['WK-UTF8-SPLIT-READY','WK-CSI-SPLIT-READY','WK-OSC-DONE',
+      'WK-ALT-SCREEN','WK-NORMAL-SCREEN','WK-RETAINED-TAIL'];
     const tails=new Map();
     const acceptedAcks=new Map();
     const push = (name, row) => { const list=evidence[name]; list.push(row); if(list.length>128) list.shift(); };

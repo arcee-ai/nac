@@ -4,11 +4,17 @@ import AppKit
 extension TerminalSmoke {
     func outputJourney() async throws {
         checks["exact-value-masking"] = ["status": "unavailable", "detail": "Unmanaged preview has no injected command-environment redaction snapshot; provider model keys are outside that policy. Core masking tests are supplier evidence, not this WK qualification"]
+        await check("osc-response-authority") {
+            try await self.acknowledged("WK-OSC-DONE")
+            try await self.require("OSC/query output acquired input or clipboard authority", "return __terminal352.clipboardWrites===0 && __terminal352.inputPosts===0;")
+            return "Actual WK parser ACKed OSC52 and device-query fixture frame; zero clipboard write attempts and zero input POSTs. Decoded display remains separate"
+        }
         await check("unicode-osc") {
             try await self.screen("WK-OSC-DONE")
             try await self.require("Unicode, split text or OSC policy failed", #"""
             const text=document.querySelector('.xterm-accessibility-tree').textContent;
             return text.includes('WK-UNICODE: Ω中🙂') && text.includes('WK-SPLIT:literal-fixture-only') &&
+              text.includes('WK-CSI-JOINED') && !text.includes('31mWK-CSI-JOINED') &&
               __terminal352.clipboardWrites===0 && __terminal352.inputPosts===0;
             """#)
             try await self.snapshot("initial-output")
@@ -51,15 +57,16 @@ extension TerminalSmoke {
         }
         await check("view-lifetime-retention") {
             for _ in 0..<4 {
+                let previous = try await self.js("return __terminal352.markerReceipts['WK-OSC-DONE']?.observer || '';") as! String
                 try await self.button("Hide panel")
                 try await self.button("Show panel")
                 try await self.navigate("files")
                 try await self.waitJS("terminal unmounted", "return !document.querySelector('.xterm-helper-textarea');")
                 try await self.navigate("terminal")
-                try await self.screen("WK-UNICODE:")
+                try await self.waitJS("replacement observer's completed replay", "return __terminal352.markerReceipts['WK-OSC-DONE']?.observer!==\(self.quote(previous)) && __terminal352.markerReceipts['WK-OSC-DONE']?.acknowledged===true;")
             }
             try await self.require("View replacement replayed input", "return __terminal352.inputPosts===0;")
-            return "Four hide/reopen and full route unmount/remount cycles retained shell output with zero input POSTs"
+            return "Four hide/reopen and full route unmount/remount cycles each replayed retained fixture bytes through a new WK observer/parser ACK, with zero input POSTs; paint remains separate"
         }
         await check("controller-replacement") {
             try await self.button("Terminal options")
@@ -67,7 +74,7 @@ extension TerminalSmoke {
             try await self.waitJS("agent control", "return document.querySelector('[aria-label=\"Input controller\"]')?.textContent==='Input: Agent';")
             try await self.navigate("files")
             try await self.navigate("terminal")
-            try await self.screen("WK-UNICODE:")
+            try await self.waitJS("replacement controller badge", "return document.querySelector('[aria-label=\"Input controller\"]')?.textContent==='Input: Agent';")
             try await self.button("Terminal options")
             try await self.button("Reclaim Input")
             try await self.waitJS("human control", "return document.querySelector('[aria-label=\"Input controller\"]')?.textContent==='Input: Human';")
@@ -100,12 +107,48 @@ extension TerminalSmoke {
     }
 
     func rendererFailure() async throws {
-        try await screen("WK-OSC-DONE")
+        try await acknowledged("WK-OSC-DONE")
         // There is no public WKWebView crash primitive. Never terminate an
         // arbitrary shared WebContent process or call a private WebKit selector.
         checks["renderer-crash"] = ["status": "unavailable",
             "detail": "Preview has a native failure delegate but no public exact-owned WebContent crash seam; actual crash/recovery awaits owning lifecycle integration"]
         record(["checks": checks])
+    }
+
+    func manualJourney() async throws {
+        // Real responder-chain actions, owned only by this smoke app. There is
+        // no JavaScript paste bridge and no automatic clipboard access/action.
+        let item = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(.separator())
+        let finish = NSMenuItem(title: "Finish terminal capture", action: #selector(finishManualCapture(_:)), keyEquivalent: "")
+        finish.target = self
+        edit.addItem(finish)
+        item.submenu = edit
+        NSApp.mainMenu?.addItem(item)
+        record(["native_edit_menu": ["copy": "copy:", "paste": "paste:",
+                "select_all": "selectAll:", "target": "nil: AppKit responder chain",
+                "automatic_actions": 0, "automatic_clipboard_access": false]])
+        guard !CommandLine.arguments.contains("--workspace-console-locked"), NSApp.isActive,
+              app.window.isKeyWindow, app.window.occlusionState.contains(.visible) else {
+            checks["manual-operator-capture"] = ["status": "unavailable",
+                "detail": "Requires an already unlocked, active, visible owned fixture and a real operator; no input, activation retry, TCC prompt or clipboard operation attempted"]
+            return
+        }
+        record(["manual_stage_ready": true, "manual_seconds_limit": 180,
+                "interaction_method": "real operator capture; no synthetic OS or JavaScript terminal input"])
+        let end = Date().addingTimeInterval(180)
+        while !manualFinished && Date() < end {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        record(["manual_finished_by_operator": manualFinished,
+                "manual_observations": try await js("return __terminal352;")])
+        try await snapshot("manual-capture")
+        checks["manual-operator-capture"] = ["status": "unavailable",
+            "detail": "Event/counter/snapshot capture only; exact written-byte receipts, operator IME/paste observations and source acceptance review are still required. No physical acceptance row is inferred from event counts"]
     }
 }
 #endif

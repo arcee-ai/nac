@@ -7,7 +7,7 @@ enum TerminalEvidenceUnavailable: Error { case display(String) }
 /// Actual system WKWebView characterization, explicitly separate from trusted
 /// OS-input acceptance. Uses only the existing preview's isolated engine/UI.
 @MainActor
-final class TerminalSmoke {
+final class TerminalSmoke: NSObject {
     let app: PreviewApp
     let scenario: String
     let output: URL
@@ -16,12 +16,14 @@ final class TerminalSmoke {
     var sessionID = ""
     var terminalID = ""
     var lockedPaintUnavailable = false
+    var manualFinished = false
 
     init(app: PreviewApp, scenario: String, output: URL, record: @escaping ([String: Any]) -> Void) {
         self.app = app
         self.scenario = scenario
         self.output = output.deletingLastPathComponent()
         self.record = record
+        super.init()
     }
 
     func run() async throws {
@@ -44,7 +46,7 @@ final class TerminalSmoke {
                 record(["prior_focus_restored": prior.activate(options: [])])
             }
         }
-        guard ["terminal-output", "terminal-renderer-failure"].contains(scenario) else {
+        guard ["terminal-output", "terminal-renderer-failure", "terminal-manual"].contains(scenario) else {
             throw PreviewError.message("Unknown terminal scenario")
         }
         record(["interaction_method": "scripted production UI; owned bashrc output in actual system WKWebView",
@@ -68,6 +70,15 @@ final class TerminalSmoke {
             throw PreviewError.message("Expected exactly one owned shell")
         }
         terminalID = id
+        // A successful production ACK must precede each continuation. Thus the
+        // split UTF-8/CSI prefixes crossed real HTTP frames and xterm callbacks,
+        // instead of merely separate stdout writes coalesced before attach.
+        try await acknowledged("WK-UTF8-SPLIT-READY")
+        try trigger("unicode-continue")
+        try await acknowledged("WK-CSI-SPLIT-READY")
+        try trigger("csi-continue")
+        checks["partial-frame-parser-completion"] = ["status": "pass",
+            "detail": "Actual WK xterm parser-complete ACKs released fixture-held UTF-8 and CSI continuations; no input API or synthetic authority involved"]
         record(["session_id": sessionID, "terminal_id": terminalID,
                 "user_agent": try await js("return navigator.userAgent;"),
                 "embedded_assets": try await js(#"""
@@ -85,13 +96,20 @@ final class TerminalSmoke {
                             "window_frame": NSStringFromRect(app.window.frame),
                             "screen_frame": app.window.screen.map { NSStringFromRect($0.frame) } ?? "unavailable",
                             "backing_scale": app.window.backingScaleFactor]])
+        // Measure painting before any assertion that needs a refreshed current
+        // screen. A held partial prefix can be the last accessibility update
+        // on a locked WebView even while parser callbacks/ACKs keep completing.
+        try await snapshot("before-output-assertions")
         if scenario == "terminal-output" { try await outputJourney() }
+        else if scenario == "terminal-manual" { try await manualJourney() }
         else { try await rendererFailure() }
         record(["checks": checks])
         if checks.values.contains(where: { $0["status"] as? String == "fail" }) {
             throw PreviewError.message("Terminal characterization failed; see checks")
         }
     }
+
+    @objc func finishManualCapture(_ sender: Any?) { manualFinished = true }
 
     func check(_ id: String, _ operation: () async throws -> String) async {
         do { checks[id] = ["status": "pass", "detail": try await operation()] }
@@ -142,7 +160,10 @@ final class TerminalSmoke {
     func screen(_ marker: String) async throws {
         // The public current-screen accessibility mirror is parser evidence.
         // xterm's historical live region and snapshots are not screen receipts.
-        try await waitJS("current accessible screen \(marker)", "return document.querySelector('.xterm-accessibility-tree')?.textContent.includes(\(quote(marker)));", timeout: 15)
+        let predicate = "return document.querySelector('.xterm-accessibility-tree')?.textContent.includes(\(quote(marker)));"
+        if try await js(predicate) as? Bool == true { return }
+        try requirePainting("Current accessible screen \(marker)")
+        try await waitJS("current accessible screen \(marker)", predicate, timeout: 15)
     }
 
     func acknowledged(_ marker: String) async throws {
