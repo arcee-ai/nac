@@ -285,6 +285,24 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
+// Recheck the project selected by native authorization in the same read
+// transaction as the question. A preflight snapshot never authorizes a later
+// owner's data after a supported reassignment.
+coordinated_command! {
+pub(crate) fn load_task_question_scoped(path:&Path,session_id:&str,request_id:&str,expected_project:Option<&str>)->Result<Option<QuestionRecord>> {
+    let mut conn=open_runtime_connection(path)?;
+    let tx=conn.transaction()?;
+    anyhow::ensure!(project(&tx,session_id)?.as_deref()==expected_project,QuestionError::Conflict);
+    let question=load(&tx,session_id,request_id)?;
+    tx.commit()?;
+    Ok(question)
+}
+command LoadTaskQuestionScoped { session_id:String=session_id.to_owned(),request_id:String=request_id.to_owned(),expected_project:Option<String>=expected_project.map(str::to_owned) }
+call |command| (&command.session_id,&command.request_id,command.expected_project.as_deref())
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
+}
+
 coordinated_command! {
 pub fn list_task_questions(path:&Path,session_id:&str)->Result<Vec<QuestionRecord>> {
     let conn=open_runtime_connection(path)?;
