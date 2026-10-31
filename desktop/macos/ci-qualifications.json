@@ -27,7 +27,7 @@
   },
   "all-342-startup-macos26": {
     "source_sha": "ef2cce9141973f37bf35e33d113e35eaa7a91f19",
-    "test_source_sha": "ed55d58ef9c3489e47869fb3c85d94c4cffa42fb",
+    "test_source_sha": "55cbda6b5b626408dc822d90b8fecab0d5828434",
     "protocol_source_sha": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
     "profile": "macos26",
     "suite": "startup",
