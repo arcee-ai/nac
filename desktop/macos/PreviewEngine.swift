@@ -176,7 +176,11 @@ private final class EngineRun {
         guard !stopping else { return }
         stopping = true
         do { try send(protocolState.stop()) }
-        catch { kill(-pid, SIGTERM) }
+        catch {
+            // EOF is the engine's startup/runtime shutdown request. SIGTERM
+            // could arrive before the CLI has installed its signal handler.
+            if channelFD >= 0 { shutdown(channelFD, SHUT_RDWR) }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 23) { [weak self] in
             guard let self, self.pid > 0 else { return }
             kill(-self.pid, SIGKILL)

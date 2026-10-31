@@ -118,6 +118,12 @@ impl DesktopLaunch {
         }
         // SAFETY: explicit private launch mode transfers this inherited descriptor.
         let stream = unsafe { UnixStream::from_raw_fd(fd) };
+        Self::adopt(stream).map(Some)
+    }
+
+    fn adopt(stream: UnixStream) -> Result<Self> {
+        use std::os::fd::AsRawFd;
+        let fd = stream.as_raw_fd();
         // SAFETY: fcntl acts on the descriptor now exclusively owned by stream.
         if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
             return Err(std::io::Error::last_os_error().into());
@@ -176,7 +182,7 @@ impl DesktopLaunch {
                     });
                 }
             })?;
-        Ok(Some(launch))
+        Ok(launch)
     }
 
     fn send(&self, value: serde_json::Value) -> Result<()> {

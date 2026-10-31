@@ -64,6 +64,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             smoke?.configure(engine)
             #endif
             try await provider.start()
+            #if PREVIEW_SMOKE
+            try await smoke?.beforeLaunch(profile)
+            #endif
             guard !stopping else { return }
             let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/nac-web")
             engine.onReady = { [weak self] url in

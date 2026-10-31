@@ -65,10 +65,16 @@ final class PreviewSmoke {
                     try await journey()
                     if scenario != "normal" && scenario != "stale-launch" { try await lifecycle() }
                 }
-                else if ["parent-loss-startup", "channel-loss-startup"].contains(scenario) {
+                else if ["parent-loss-startup", "channel-loss-startup", "parent-loss-initialization", "channel-loss-initialization"].contains(scenario) {
                     try await wait("engine awaiting hello") { self.app.engine.pid > 0 }
-                    if scenario == "parent-loss-startup" { try await lifecycle() }
+                    if scenario.hasPrefix("parent-loss") { try await lifecycle() }
                     else {
+                        if scenario == "channel-loss-initialization" {
+                            evidence["engine_pid"] = app.engine.pid
+                            evidence["profile"] = app.profile!.root.path
+                            evidence["lifecycle_ready"] = true
+                            write()
+                        }
                         app.engine.loseChannel()
                         try await wait("startup channel loss") { self.app.failure != nil }
                         evidence["workspace_not_activated"] = app.baseURL == nil
@@ -136,6 +142,19 @@ final class PreviewSmoke {
     func configure(_ profile: PreviewProfile) throws {
         if scenario == "migration-failure" {
             try Data("not a SQLite store".utf8).write(to: profile.store)
+        }
+        if scenario.hasSuffix("initialization") {
+            evidence["profile"] = profile.root.path
+            evidence["startup_store_barrier_ready"] = true
+            write()
+        }
+    }
+
+    func beforeLaunch(_ profile: PreviewProfile) async throws {
+        if scenario.hasSuffix("initialization") {
+            try await wait("startup store barrier") {
+                FileManager.default.fileExists(atPath: profile.root.appendingPathComponent("startup-go").path)
+            }
         }
     }
 

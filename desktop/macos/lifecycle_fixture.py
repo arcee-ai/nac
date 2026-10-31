@@ -9,7 +9,8 @@ import threading
 import time
 
 CASES = ('parent-loss-startup', 'parent-loss-active', 'channel-loss-startup',
-         'channel-loss-active', 'slow-drain', 'watchdog', 'stale-launch')
+         'channel-loss-active', 'parent-loss-initialization', 'channel-loss-initialization',
+         'slow-drain', 'watchdog', 'stale-launch')
 
 
 def alive(pid):
@@ -32,7 +33,7 @@ class LifecycleControl:
         self.thread = threading.Thread(target=self.run, daemon=True)
 
     def start(self):
-        if self.scenario.startswith('parent-loss') or self.scenario in ('slow-drain', 'watchdog'):
+        if self.scenario.startswith('parent-loss') or self.scenario.endswith('initialization') or self.scenario in ('slow-drain', 'watchdog'):
             self.thread.start()
 
     def finish(self):
@@ -44,11 +45,17 @@ class LifecycleControl:
         return self.result
 
     def run(self):
+        startup_connection = None
         try:
             end = time.monotonic() + 65
             while time.monotonic() < end:
                 try:
                     record = json.loads(self.evidence.read_text())
+                    if self.scenario.endswith('initialization') and startup_connection is None and record.get('startup_store_barrier_ready'):
+                        profile = Path(record['profile']).resolve()
+                        startup_connection = sqlite3.connect(profile / 'store.db')
+                        startup_connection.execute('BEGIN EXCLUSIVE')
+                        (profile / 'startup-go').touch()
                     if record.get('lifecycle_ready'):
                         break
                 except (FileNotFoundError, json.JSONDecodeError):
@@ -74,6 +81,12 @@ class LifecycleControl:
                             assert not unix.stdout.strip(), f'Private channel leaked into descendant {child}: {unix.stdout}'
                     started = time.monotonic()
                     os.kill(record['app_pid'], signal.SIGKILL)
+                    if startup_connection is not None:
+                        time.sleep(2)
+                        assert alive(pid), 'Engine was killed instead of settling startup'
+                        startup_connection.rollback()
+                        startup_connection.close()
+                        startup_connection = None
                     wait_dead(pid)
                     assert alive(helper), 'Reverse inheritance fixture did not outlive owning app'
                     if record.get('descendant_pid'):
@@ -96,6 +109,14 @@ class LifecycleControl:
                         assert actual == helper_command, 'Refusing cleanup of a replaced app helper'
                         os.kill(helper, signal.SIGTERM)
                         wait_dead(helper, timeout=3)
+            elif self.scenario == 'channel-loss-initialization':
+                time.sleep(2)
+                assert alive(pid), 'Channel loss killed the engine during store initialization'
+                startup_connection.rollback()
+                startup_connection.close()
+                startup_connection = None
+                wait_dead(pid)
+                self.result = dict(startup_store_barrier_seconds=2)
             else:
                 connection = sqlite3.connect(profile / 'store.db', timeout=2)
                 try:
@@ -121,3 +142,6 @@ class LifecycleControl:
                     connection.close()
         except BaseException as error:
             self.error = error
+        finally:
+            if startup_connection is not None:
+                startup_connection.close()
