@@ -142,7 +142,7 @@ No channel is inherited by ordinary CLI invocations, whose existing lifetime
 and worker/helper dispatch remain independent.
 
 The native consumer seam is `PreviewEngine.receipt` and the existing
-`onReady(URL)`, `onFailure(String)`, `onExit(Int32)` and `stop(completion)`
+`onReady(URL)`, `onFailure(EngineFailure)`, `onExit(Int32)` and `stop(completion)`
 callbacks. The receipt is available only for the current verified live launch;
 stop, channel failure and exit retire it before notifying consumers. Its launch
 UUID is distinct from the server's `NativeRuntimeScope.incarnation` and any
@@ -226,5 +226,58 @@ Every builder mode emits `Contents/Resources/build-receipt.json` with source,
 compiler flags, native source hashes, engine identity and both executable
 hashes. It rejects an engine from another source revision or source changes
 during compilation. This is unsigned compiler provenance for the packaging
-owner; signing requires a separate final artifact manifest. The local builder's
-development bundle identifier is not the distribution or track identity contract.
+owner; signing requires a separate final artifact manifest. This receipt also
+records the selected bundle ID/name, build-support hashes and whether instance
+instrumentation was compiled. Distribution/signing policy remains separately owned.
+
+## App instances and store conflicts (ALL-343)
+
+`app-run` uses ordinary LaunchServices opening, without `-n`. Finder/Dock reopen
+events focus or restore the existing window; they never start another engine
+or replay a command. The current close-to-quit policy remains unchanged.
+
+Normal app identities come only from the exact bundled engine's compiled track:
+
+| Track | Bundle ID | Display name |
+| --- | --- | --- |
+| stable | `ai.arcee.nac` | NAC |
+| beta | `ai.arcee.nac.beta` | NAC Beta |
+| dev | `ai.arcee.nac.dev` | NAC Development |
+
+The read-only `BundleIdentity.sh` metadata helper is the mapping owner. Inherited
+`NAC_BUILD_TRACK` cannot select a different bundle identity. The preview retains
+its separate development identity. This partition adds no beta publication policy.
+
+Rust's ordinary serving lease still decides ownership. A typed busy error uses
+the existing private version-1 failure envelope with `stage: startup` and
+`code: store_owned`. Swift validates version/incarnation before recognizing it;
+unknown codes and peer text never become native diagnostic text. A conflict
+shows the selected canonical store and track, explains deliberate owner shutdown
+or an explicit different `--store-path`, and enables **Retry** only after the
+failed bundled child is reaped. Retry keeps the selected configuration and asks
+the ordinary engine to start again. It cannot signal an existing CLI, delete a
+lock, select another store, attach to a server or grant execution authority.
+No custom app discovery/PID records are introduced; a retained lock file is
+not proof of a live owner.
+
+`instance-build` produces the separate `NAC Instance Smoke.app` with
+`LOCAL_APP`, `PREVIEW_SMOKE` and `INSTANCE_SMOKE`, plus `InstanceObservation`.
+Its bundle ID has an `.instance-smoke` suffix. Use separate output directories
+and exact same-source private dev/stable engines to build the two track fixtures.
+Then run under the native/browser lease:
+
+```sh
+python3 -B desktop/macos/instance_smoke.py DEV_APP OUTPUT OBSERVER STABLE_APP
+```
+
+`instance-smoke` combines build/run; supply the stable fixture through
+`NAC_MAC_STABLE_APP`. `NAC_INSTANCE_SCENARIOS` selects bounded cases and records
+whether the full set ran. The eight cases cover simultaneous ordinary opens,
+same-window reopen, real CLI conflicts through canonical/file/directory aliases,
+retry while the CLI remains live, graceful/crash/draining-owner exit, app-crash
+relaunch and dev/stable coexistence. The runner verifies served assets, native
+window/engine/store identities, screenshots and bounded fixture cleanup. It
+fails before app launch on a locked console. Only its own live app incarnation
+and fixture-owned CLI handles can receive cleanup controls; focus restoration
+is conditional on the fixture still being frontmost. These checks require
+actual AppKit/system WKWebView evidence, with screenshots reviewed separately.
