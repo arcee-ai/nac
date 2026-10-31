@@ -612,6 +612,12 @@ impl SessionManager {
                 manager: Arc::downgrade(&manager.inner),
             }),
         );
+        nac_core::peer_goal_control::register_controller(
+            store_path.clone(),
+            Arc::new(application::peer_goals::ServerPeerGoalController {
+                manager: Arc::downgrade(&manager.inner),
+            }),
+        );
         nac_core::orchestration_control::register_controller(
             store_path,
             Arc::new(ServerOrchestrationController {

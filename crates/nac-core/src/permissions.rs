@@ -190,6 +190,7 @@ pub enum AuthorizationOutcome {
 }
 
 struct PendingPermission {
+    explicit_human: bool,
     request: PermissionRequest,
     reply: tokio::sync::oneshot::Sender<PermissionReply>,
 }

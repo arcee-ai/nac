@@ -74,3 +74,65 @@ checked, so one Ask covers the call.
 Sessions whose `session:<id>` is not allowed without a prompt are skipped before
 matching and never count toward the 500-row scan, so they affect no
 candidate, count, flag or cursor.
+
+
+## Explicit peer goal controls
+
+`task_goal` provides `read`, `start`, `pause` and `resume` for an exact independent
+plain `direct` task on an unmanaged Local host. Pass its `session_id` and saved
+`project_id` explicitly, or pass `project_id: null` for a projectless target. The
+project scope is never inferred. Ordinary task launch remains goal-free.
+
+Every call first passes ordinary `task_goal_<action>` permission evaluation on
+`session:<id>` and, for a saved project, `project:<id>`. A new goal action then
+requires a separate manual human reply
+for this invocation's exact action, target and arguments. Broad coordination
+instructions, read permission, a peer message, remembered grants, Auto-approve,
+Approve for me and authenticated human product invocation markers do not supply
+that reply. Configured Deny still wins, and a headless caller fails closed.
+This deliberately uses the existing approval interface; it does not transfer the
+human goal panel's authority to an agent or create a reusable grant. A configured
+Ask can therefore produce an ordinary permission question before the additional
+explicit goal-action question.
+
+Start requires an explicitly requested finite `objective` and a stable
+caller-scoped `request_id`. Supply `token_budget` only if the human requested one.
+For strict Responses calls, pass `null` for an unrequested budget and arguments
+that do not apply to the selected action; ordinary callers may omit them. The
+flat input also accepts well-typed unused fields from providers and discards
+them. Only the selected action's fields enter its permissions and canonical
+request binding; unused values cannot edit or retarget a goal. Required active
+IDs, versions and objectives are never filled in automatically.
+Control replies and start receipts redact objectives and cut them to 1,000
+characters, with `objective_truncated` on each object. Reads retain the
+`read_task` current and prior objective-truncation flags. Stored argument
+binding and goal identity/version are unchanged; keep the original inputs for
+retries rather than copying a shortened or redacted response.
+Keep the ID and exact arguments for retries: after lost acknowledgement or restart,
+NAC returns the original immutable admission receipt, including its goal ID and
+original response. Reusing that ID with changed arguments conflicts. The receipt
+is evidence of admission, not a claim that the goal is currently active or has
+completed. Read the exact goal and retained evidence to establish its outcome.
+Exact receipt replay needs no new manual goal authorization: it returns only
+that already accepted action's original admission reply, after current ordinary
+permission evaluation. It cannot authorize a new action or changed arguments,
+and never attaches, wakes or changes a replacement objective. Once a fresh
+control invocation is admitted, the serving lifecycle retains its commit and
+existing wake path even if the caller loses the reply.
+
+Pause and resume require `goal_id` and `expected_version` from a fresh read.
+Pause leaves an already-running turn/tool running and preserves its accounting;
+it prevents later autonomous continuation. Stopping a run is a separate action.
+Resume accepts a paused, blocked or usage-limited goal with remaining budget
+after active accounting has settled, using the existing human update owner. It
+never replaces the objective or restarts a complete or budget-limited goal. Concurrent human changes, settlement, ownership or configuration
+changes return conflict/unavailable instead of overwriting newer state. A start
+while running requires the exact local accounting baseline. A fresh start waits
+for a previous terminal goal's accounting to settle before retiring it; idle mutations retain
+the cross-process operation lease.
+
+The target alone can declare complete or blocked. This peer surface offers no
+replacement, clear, budget edit, completion or blocked operation. Existing human
+controls retain their behavior. Current and retained goal evidence uses the same
+bounded persistence owner as `read_task`, so later goals cannot rewrite an earlier
+success claim. Goal reads are passive and never subscribe as interactive approvers.
