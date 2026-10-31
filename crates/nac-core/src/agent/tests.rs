@@ -188,7 +188,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
     )
     .unwrap();
 
-    let build = |session_id: &str| {
+    let build = |session_id: &str, ssh: Option<SshConnection>| {
         Agent::with_config(
             ModelClient::new_for_test(),
             AgentConfig {
@@ -207,7 +207,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
                 working_directory: root.display().to_string(),
                 worker_executable: None,
                 sandbox: None,
-                ssh: None,
+                ssh,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),
@@ -220,9 +220,17 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         .unwrap()
     };
 
-    let mut parent = build("parent");
-    let mut child = build("child");
-    let mut delegating = build("delegating");
+    let mut parent = build("parent", None);
+    let mut child = build("child", None);
+    let mut delegating = build("delegating", None);
+    let mut remote = build(
+        "parent",
+        Some(SshConnection {
+            host: "fixture.invalid".into(),
+            port: None,
+            identity_file: None,
+        }),
+    );
     let names = |agent: &Agent| {
         agent
             .tool_definitions_for_test()
@@ -262,6 +270,11 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         &parent_web[crate::tools::DIRECT_TOOL_NAMES.len()..],
         crate::tools::WEB_TOOL_NAMES
     );
+    let remote_names = capability_names(remote.model_request_capabilities_for_test(None));
+    for name in crate::tools::TASK_FOLLOWUP_TOOL_NAMES {
+        assert!(!remote_names.iter().any(|candidate| candidate == name));
+        assert!(!names(&delegating).iter().any(|candidate| candidate == name));
+    }
     let child_web =
         capability_names(child.model_request_capabilities_for_test(Some("child-exa-canary")));
     assert_eq!(
@@ -299,6 +312,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
     drop(parent);
     drop(child);
     drop(delegating);
+    drop(remote);
     let _ = std::fs::remove_dir_all(root);
 }
 

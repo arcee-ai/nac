@@ -318,6 +318,11 @@ impl Agent {
                 system_prompt.push_str(&light_model_prompt_guidance(light));
             }
         }
+        if config.ssh.is_some() || config.sandbox.is_some() {
+            tool_defs.retain(|definition| {
+                !tools::TASK_FOLLOWUP_TOOL_NAMES.contains(&definition.function.name.as_str())
+            });
+        }
         let base_tool_defs = tool_defs.clone();
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
@@ -1923,3 +1928,6 @@ impl Agent {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod task_followup_tests;

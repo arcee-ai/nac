@@ -606,6 +606,14 @@ impl SessionManager {
         if let Err(error) = mcp_api::synchronize_mcp_oauth_redirect_uris(&manager) {
             eprintln!("MCP OAuth redirect synchronization failed: {error}");
         }
+        nac_core::task_followups::register_controller(
+            store_path.clone(),
+            Arc::new(application::task_followups::ServerTaskFollowupController {
+                manager: Arc::downgrade(&manager.inner),
+                #[cfg(test)]
+                after_admission: None,
+            }),
+        );
         nac_core::traditional_children::register_controller(
             store_path.clone(),
             Arc::new(ServerTraditionalChildController {
