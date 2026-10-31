@@ -132,6 +132,63 @@ class PackageContract(unittest.TestCase):
             self.assertIn('/plan/developer-id-candidate/', command[-1])
             self.assertNotEqual(command[-1], str(self.app))
         self.assertIn('Qualified track identifiers', plan['required_gate'])
+        self.assertEqual(len(plan['signature_inspections']), 2)
+        for item in plan['signature_inspections']:
+            self.assertIn('--entitlements', item['entitlements_argv'])
+            self.assertIn('--verbose=4', item['details_argv'])
+        stages = plan['notarization']['stages']
+        gate = stages[0]
+        self.assertEqual(gate['name'], 'verify-developer-id-policy')
+        self.assertIn('verify-developer-id', gate['argv'])
+        self.assertEqual(gate['postconditions'], {
+            'kind': 'developer-id', 'team_id': 'TESTTEAM01', 'hardened_runtime': True,
+            'secure_timestamp': True, 'entitlements': {}})
+        self.assertLess([item['name'] for item in stages].index(gate['name']),
+                        [item['name'] for item in stages].index('notary-submit'))
+
+    def test_readonly_developer_gate_checks_both_objects_and_writes_only_verified_facts(self):
+        details = ('CodeDirectory v=20500 size=10 flags=0x10000(runtime) hashes=1\n'
+                   'TeamIdentifier=TESTTEAM01\nTimestamp=synthetic timestamp\n'
+                   'Authority=Developer ID Application: Synthetic Fixture\n')
+        empty = subprocess.CompletedProcess([], 0, stdout=plistlib.dumps({}), stderr=b'')
+        valid = subprocess.CompletedProcess([], 0, stdout='', stderr=details)
+        args = SimpleNamespace(app=str(self.app), certificate='a' * 40, team='TESTTEAM01',
+                               output=str(self.root / 'signature-verification'))
+        before = inventory(self.app)
+        with patch('package.require_mac'), patch('package.run') as crypto, \
+                patch('package.subprocess.run', side_effect=[empty, valid, empty, valid]) as inspect:
+            package.verify_developer_id(args)
+        self.assertEqual(inventory(self.app), before)
+        self.assertEqual(inspect.call_count, 4)
+        for call in crypto.call_args_list:
+            self.assertIn('--verify', call.args)
+            self.assertNotIn('--sign', call.args)
+        result = json.loads((self.root / 'signature-verification/signature-evidence.json').read_text())
+        self.assertEqual(set(result['signatures']), {'app', 'engine'})
+        self.assertTrue(all(item['secure_timestamp'] for item in result['signatures'].values()))
+        self.assertFalse(result['notary_submission_performed'])
+        self.assertFalse(result['consumer_qualification'])
+        self.assertNotIn('Synthetic Fixture', str(result))
+
+    def test_developer_gate_never_emits_evidence_when_app_policy_fails(self):
+        details = ('CodeDirectory v=20500 size=10 flags=0x10000(runtime) hashes=1\n'
+                   'TeamIdentifier=TESTTEAM01\nTimestamp=synthetic timestamp\n'
+                   'Authority=Developer ID Application: Synthetic Fixture\n')
+        empty = subprocess.CompletedProcess([], 0, stdout=plistlib.dumps({}), stderr=b'')
+        valid = subprocess.CompletedProcess([], 0, stdout='', stderr=details)
+        bad_entitlements = subprocess.CompletedProcess([], 0,
+            stdout=plistlib.dumps({'com.apple.security.get-task-allow': True}), stderr=b'')
+        missing_timestamp = subprocess.CompletedProcess([], 0, stdout='',
+            stderr=details.replace('Timestamp=synthetic timestamp\n', ''))
+        for index, responses in enumerate([[empty, valid, bad_entitlements, valid],
+                                           [empty, valid, empty, missing_timestamp]]):
+            output = self.root / f'failed-verification-{index}'
+            args = SimpleNamespace(app=str(self.app), certificate='a' * 40, team='TESTTEAM01', output=str(output))
+            with patch('package.require_mac'), patch('package.run'), \
+                    patch('package.subprocess.run', side_effect=responses):
+                with self.assertRaises(ValueError):
+                    package.verify_developer_id(args)
+            self.assertFalse(output.exists())
 
     def test_post_sign_receipt_binds_versions_track_metadata_identity_and_signed_bytes(self):
         engine_identity = {'product_version': '1.2.3', 'source_revision': 'a' * 40,
@@ -273,6 +330,15 @@ class SourceContract(unittest.TestCase):
             # Ignored inputs outside the actual compiler-owned asset tree remain allowed.
             (root / '.env').write_text('synthetic local configuration\n')
             self.assertEqual(clean_source(root)['product_version'], '1.2.3')
+            with tempfile.TemporaryDirectory(prefix='nac outside asset ') as outside:
+                target = Path(outside) / 'shared.txt'
+                target.write_text('synthetic external bytes, not a secret\n')
+                alias = root / ASSETS.parent / 'shared.txt'
+                alias.symlink_to(target)
+                git('add', str(alias.relative_to(root)))
+                git('commit', '-m', 'tracked outside-dist symlink fixture')
+                with self.assertRaisesRegex(ValueError, 'Symlink'):
+                    clean_source(root)
 
 
 if __name__ == '__main__':

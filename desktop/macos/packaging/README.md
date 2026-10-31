@@ -81,8 +81,8 @@ hashes and final signed hashes are both retained because signing changes bytes.
 Root LICENSE and existing embedded frontend notices are copied before sealing.
 Hashes establish integrity, not publisher authentication or human source review.
 The entire Rust `include_dir!` input tree (`crates/nac-server/assets/`) must
-exactly match tracked Git paths before compilation. Ignored files and empty
-extra directories in that tree are rejected; legitimate ignored dependencies,
+exactly match tracked Git paths before compilation. Ignored files, symlinks
+anywhere in the embedded root, and empty extra directories are rejected; legitimate ignored dependencies,
 build caches and unrelated local configuration outside it are unaffected.
 
 The outer manifest also contains a post-signing preparation receipt. It binds
@@ -155,7 +155,15 @@ Plans carry `execution_authorized: false`. They stage a separate Developer ID
 candidate so the ad-hoc preparation and its evidence remain intact. Before any
 credentialed execution, require qualified track identifiers, required normal-app
 native evidence and explicit authorization for the designated NAC identity and
-profile. Planned operation order:
+profile. The plan lists the exact detail/entitlement inspection argv and inserts
+`verify-developer-id` as the first notary stage. This read-only CLI runs the
+cryptographic/team checks and feeds both objects' actual detail/entitlement
+outputs into `signature_evidence`; hardened runtime, a secure timestamp and
+empty entitlements must all pass before it writes `signature-evidence.json`.
+The plan requires that successful gate before creating or submitting a notary
+archive. Verification neither signs nor accesses signing/notary credentials;
+synthetic positive parser tests are not real Developer ID qualification.
+Planned operation order:
 
 1. Sign leaves inside out with the authorized certificate and
    `--options runtime --timestamp`, then the outer app. Verify each object,

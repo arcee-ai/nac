@@ -74,7 +74,13 @@ def clean_source(root=ROOT):
     present = {embedded.as_posix(), *(path.relative_to(root).as_posix() for path in folder.rglob('*'))}
     if present != expected:
         raise ValueError('Embedded asset inputs must match the tracked source tree, including ignored entries')
-    assets = inventory(root / ASSETS)
+    # Validate types across the same complete tree the Rust macro reads. A
+    # tracked symlink outside dist is still not a reviewed regular-file input.
+    embedded_files = inventory(folder)
+    prefix = ASSETS.relative_to(embedded).as_posix() + '/'
+    assets = {name[len(prefix):]: row for name, row in embedded_files.items() if name.startswith(prefix)}
+    if not assets:
+        raise ValueError('Empty production embedded asset inventory')
     schema = (root / 'crates/nac-core/src/store/schema.rs').read_text()
     versions = re.findall(r'^const STORE_SCHEMA_VERSION: i64 = (\d+);$', schema, re.M)
     if len(versions) != 1:

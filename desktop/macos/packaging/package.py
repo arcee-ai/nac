@@ -12,7 +12,7 @@ import sys
 
 sys.dont_write_bytecode = True
 
-from signing import (SignaturePolicy, notarization_plan, signature_evidence,
+from signing import (SignaturePolicy, inspection_commands, notarization_plan, signature_evidence,
                      signing_commands, verification_commands)
 from native_receipt import (ENGINE as ENGINE_PATH, SHELL as SHELL_PATH,
                             expected_identity, validate_native_receipt)
@@ -87,16 +87,16 @@ def sign_adhoc(app, engine):
     return verify_signatures(app, engine)
 
 
-def verify_signatures(app, engine):
-    policy = SignaturePolicy('ad-hoc')
+def verify_signatures(app, engine, policy=None):
+    policy = policy or SignaturePolicy('ad-hoc')
     for command in verification_commands(app, [engine], policy):
         run(*command)
     results = {}
-    for label, target in [('engine', app / engine), ('app', app)]:
-        result = subprocess.run(['/usr/bin/codesign', '-d', '--entitlements', ':-', str(target)],
+    for label, inspection in zip(['engine', 'app'], inspection_commands(app, [engine])):
+        result = subprocess.run(inspection['entitlements_argv'],
                                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         entitlements = plistlib.loads(result.stdout) if result.stdout.strip() else {}
-        details = subprocess.run(['/usr/bin/codesign', '-d', '--verbose=4', str(target)],
+        details = subprocess.run(inspection['details_argv'],
                                  check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         results[label] = signature_evidence(details.stderr, entitlements, policy)
     return results
@@ -282,6 +282,16 @@ def distribution_plan(args):
     output = new_directory(args.output)
     app = path.parent / manifest['bundle']['name']
     candidate = output / 'developer-id-candidate' / app.name
+    notary = notarization_plan(candidate, output / 'submission.zip', args.notary_profile)
+    notary['stages'].insert(0, {
+        'name': 'verify-developer-id-policy',
+        'argv': [sys.executable, '-B', str(Path(__file__).resolve()), 'verify-developer-id',
+                 '--app', str(candidate), '--certificate', args.certificate, '--team', args.team,
+                 '--output', str(output / 'signature-verification')],
+        'postconditions': {'kind': 'developer-id', 'team_id': args.team, 'hardened_runtime': True,
+                           'secure_timestamp': True, 'entitlements': {}},
+        'gate': 'Require a successful verification and signature-evidence.json from signature_evidence '
+                'for BOTH engine and app before creating or submitting the notary archive; stop on failure'})
     plan = {'schema_version': 1, 'execution_authorized': False,
             'source_revision': identity['source']['revision'], 'input_manifest_sha256': digest(path),
             'input_bundle_sha256': manifest['bundle']['sha256'],
@@ -289,11 +299,29 @@ def distribution_plan(args):
                                  ['/usr/bin/ditto', str(app), str(candidate)]],
             'signing_commands': signing_commands(candidate, [ENGINE_PATH], policy),
             'verification_commands': verification_commands(candidate, [ENGINE_PATH], policy),
-            'notarization': notarization_plan(candidate, output / 'submission.zip', args.notary_profile),
+            'signature_inspections': inspection_commands(candidate, [ENGINE_PATH]),
+            'notarization': notary,
             'required_gate': 'Qualified track identifiers and required normal-app native evidence, then explicit authorization for the designated NAC identity/profile and this exact artifact; '
                              'no commands executed, no distribution qualification inferred'}
     write_json(output / 'distribution-plan.json', plan)
     print(output / 'distribution-plan.json')
+
+
+def verify_developer_id(args):
+    """Read-only verification; does not sign, select credentials, submit or staple."""
+    require_mac()
+    app = Path(args.app).resolve(strict=True)
+    before = inventory(app)
+    policy = SignaturePolicy('developer-id', args.certificate, args.team)
+    signatures = verify_signatures(app, ENGINE_PATH, policy)
+    if inventory(app) != before:
+        raise ValueError('Candidate changed while verifying Developer ID signature policy')
+    output = new_directory(args.output)
+    write_json(output / 'signature-evidence.json', {
+        'schema_version': 1, 'kind': 'developer-id-signature-policy',
+        'bundle_inventory_sha256': object_digest(before), 'signatures': signatures,
+        'notary_submission_performed': False, 'consumer_qualification': False})
+    print(output / 'signature-evidence.json')
 
 
 def main():
@@ -326,6 +354,12 @@ def main():
     plan.add_argument('--notary-profile', required=True)
     plan.add_argument('--output', required=True)
     plan.set_defaults(action=distribution_plan)
+    developer = commands.add_parser('verify-developer-id', help='Read-only signature/entitlement policy gate; no signing or submission')
+    developer.add_argument('--app', required=True)
+    developer.add_argument('--certificate', required=True)
+    developer.add_argument('--team', required=True)
+    developer.add_argument('--output', required=True)
+    developer.set_defaults(action=verify_developer_id)
     args = parser.parse_args()
     args.action(args)
 
