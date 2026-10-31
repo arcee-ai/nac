@@ -29,7 +29,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     #if INSTANCE_SMOKE
     private var instanceSmoke: InstanceSmoke?
     #elseif LOCAL_APP
+    #if NATIVE_AUTH_FIXTURE
+    var startupSmoke: DeviceAuthSmoke?
+    #else
     var startupSmoke: StartupSmoke?
+    #endif
     #else
     var smoke: PreviewSmoke?
     #endif
@@ -90,7 +94,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             failure: { [weak self] in self?.failure })
         instanceSmoke?.start()
         #elseif LOCAL_APP
+        #if NATIVE_AUTH_FIXTURE
+        startupSmoke = DeviceAuthSmoke(app: self)
+        #else
         startupSmoke = StartupSmoke(app: self)
+        #endif
         startupSmoke?.start()
         #else
         smoke = PreviewSmoke(app: self)
@@ -138,7 +146,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             #if INSTANCE_SMOKE
             arguments = InstanceSmoke.launchArguments(arguments)
             #else
+            #if NATIVE_AUTH_FIXTURE
+            arguments = DeviceAuthSmoke.launchArguments(arguments)
+            #else
             arguments = StartupSmoke.launchArguments(arguments)
+            #endif
             #endif
             #endif
             let configuration: EngineLaunchConfiguration

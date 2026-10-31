@@ -27,8 +27,16 @@ def main():
         separator = sys.argv.index('--', 5)
         flags, sources = sys.argv[5:separator], sys.argv[separator + 1:]
         identity = json.loads((app / 'Contents/Resources/engine-identity.json').read_text())
+        fixture_engine = identity['build_id'].startswith('native-auth-fixture-v1-')
+        fixture_mode = mode == 'auth-build'
+        if fixture_engine != fixture_mode:
+            raise SystemExit('Selected engine does not match normal/auth-fixture build mode.')
+        if fixture_mode and (identity['track'] != 'dev' or not {'LOCAL_APP', 'PREVIEW_SMOKE', 'NATIVE_AUTH_FIXTURE'} <= set(flags)):
+            raise SystemExit('Auth fixture mode requires its explicit dev engine and native test compiler flags.')
         source_head = head()
         bundle = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+        if fixture_mode and bundle['CFBundleIdentifier'] != 'ai.arcee.nac.native-auth-fixture':
+            raise SystemExit('Auth fixture mode requires its distinct fixture bundle identifier.')
         if identity['source_revision'] != source_head:
             raise SystemExit('Bundled engine source differs from the native checkout; rebuild from this exact source.')
         receipt = {

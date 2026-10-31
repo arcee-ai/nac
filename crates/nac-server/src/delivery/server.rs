@@ -606,12 +606,13 @@ pub fn router(manager: SessionManager) -> Router {
         .layer(middleware::from_fn(secure_docs));
     let presentation = PresentationBinding::capture();
     let document = presentation.embedded_document();
-    secure_public_router(
-        api.merge(docs)
-            .merge(embedded_frontend_router(document))
-            .layer(axum::Extension(presentation)),
-        manager,
-    )
+    let app = api
+        .merge(docs)
+        .merge(embedded_frontend_router(document))
+        .layer(axum::Extension(presentation));
+    #[cfg(feature = "native-auth-fixture")]
+    let app = crate::native_auth_fixture::restrict(app);
+    secure_public_router(app, manager)
 }
 
 fn secure_public_router(router: Router, manager: SessionManager) -> Router {
@@ -1504,6 +1505,20 @@ async fn provider_models_handler(
                 ),
             });
         }
+        #[cfg(feature = "native-auth-fixture")]
+        if crate::native_auth_fixture::service_origin().is_some() {
+            if provider != ManagedAuthProvider::Arcee {
+                return Err(ApiError::bad_request(
+                    "This fixture supports only the local Arcee model-read double".into(),
+                ));
+            }
+            return Ok(Json(ProviderModelList {
+                base_url: provider_default_base_url(backend)
+                    .unwrap_or_default()
+                    .to_string(),
+                models: crate::native_auth_fixture::models()?,
+            }));
+        }
         let models = list_managed_provider_models(provider)
             .await
             .map_err(|error| ApiError {
@@ -1516,6 +1531,12 @@ async fn provider_models_handler(
             .map(str::to_string)
             .unwrap_or_default();
         return Ok(Json(ProviderModelList { base_url, models }));
+    }
+    #[cfg(feature = "native-auth-fixture")]
+    if crate::native_auth_fixture::service_origin().is_some() {
+        return Err(ApiError::bad_request(
+            "This auth fixture admits no credential-bearing provider requests".into(),
+        ));
     }
     if api_key.trim().is_empty() && api_key_env.is_none() {
         let destination = request

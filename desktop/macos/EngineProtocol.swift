@@ -11,6 +11,15 @@ struct EngineIdentity: Codable, Equatable {
     let build_id: String
     let source_revision: String
     let track: String
+
+    var isNativeAuthFixture: Bool { build_id.hasPrefix("native-auth-fixture-v1-") }
+    var matchesShellBuild: Bool {
+        #if NATIVE_AUTH_FIXTURE
+        return isNativeAuthFixture && track == "dev"
+        #else
+        return !isNativeAuthFixture
+        #endif
+    }
 }
 
 struct EngineReceipt: Decodable {
@@ -38,6 +47,9 @@ final class EngineProtocol {
     private(set) var ready: EngineReceipt?
 
     init(identity: EngineIdentity, store: URL) throws {
+        guard identity.matchesShellBuild else {
+            throw PreviewError.message("The bundled engine does not match this app's normal or isolated auth-fixture build.")
+        }
         self.identity = identity
         guard let parent = realpath(store.deletingLastPathComponent().path, nil) else {
             throw PreviewError.message("Could not resolve the selected store directory.")

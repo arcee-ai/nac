@@ -72,15 +72,15 @@ export function ManagedAuthCallout({
       ) : (
         <span className="text-micro text-basic-muted">Waiting for the browser</span>
       )}
-      <Button
-        variant={ButtonVariant.Ghost}
-        size={ButtonSize.Medium}
-        content={ButtonContent.IconRight}
-        onClick={() => window.open(state.prompt.verification_uri, "_blank", "noopener,noreferrer")}
+      <a
+        className={cn("btn", ButtonSize.Medium, ButtonVariant.Ghost, ButtonContent.IconRight)}
+        href={state.prompt.verification_uri}
+        target="_blank"
+        rel="noopener noreferrer"
       >
         <span>Open {label}</span>
         <Icon iconName={IconName.External} />
-      </Button>
+      </a>
       <Button
         variant={ButtonVariant.Ghost}
         size={ButtonSize.Medium}

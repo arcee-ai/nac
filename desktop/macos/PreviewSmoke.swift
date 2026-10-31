@@ -17,6 +17,7 @@ final class PreviewSmoke {
         let args = CommandLine.arguments
         destination = URL(fileURLWithPath: args[args.firstIndex(of: "--smoke-output")! + 1])
         scenario = args[args.firstIndex(of: "--smoke-scenario")! + 1]
+        if scenario == "external-navigation-recording" { ExternalNavigationSmoke.installObserver(in: app.webView) }
         // Attribute decoy requests to this fixture on a shared interactive host.
         app.webView.customUserAgent = "NACPreviewSmoke/ALL-340 AppleWebKit/605.1.15"
         let observer = #"""
@@ -46,7 +47,11 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if ["commands", "commands-input"].contains(scenario) {
+                if scenario == "external-navigation-recording" {
+                    evidence["external_navigation_recording"] = try await ExternalNavigationSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
+                } else if scenario == "external-auth" {
+                    evidence["external_auth"] = try await ExternalAuthSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
+                } else if ["commands", "commands-input"].contains(scenario) {
                     evidence["commands"] = try await NativeCommandSmoke(app: app, commands: app.commands).run(
                         trustedInput: scenario == "commands-input", captures: destination.deletingLastPathComponent())
                 } else if ["normal", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {

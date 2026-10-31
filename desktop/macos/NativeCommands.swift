@@ -7,15 +7,21 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     private weak var webView: WKWebView?
     private let receipt: () -> EngineReceipt?
     private var bridge: NativeCommandBridge?
+    private var externalNavigation: ExternalNavigation?
     private var bound = false
     #if PREVIEW_SMOKE
     var smokeSnapshot: [String: Any] { bridge?.smokeSnapshot ?? ["installed": false] }
+    var smokeExternalNavigation: [String: Any] { externalNavigation?.smokeSnapshot ?? [:] }
+    private(set) var smokeDocumentInvalidations = 0
     #endif
 
     init(webView: WKWebView, receipt: @escaping () -> EngineReceipt?) {
         self.webView = webView
         self.receipt = receipt
         super.init()
+        // macOS defaults this preference to true. Disable it as defense in
+        // depth; external navigation still requires the linkActivated category.
+        webView.configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         webView.uiDelegate = self
     }
 
@@ -24,14 +30,36 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
         guard !bound, let webView, receipt() != nil else { return }
         bound = true
         bridge = NativeCommandBridge(webView: webView, receipt: receipt)
+        externalNavigation = ExternalNavigation(webView: webView, receipt: receipt)
     }
 
-    func navigationStarted(in view: WKWebView, navigation: WKNavigation?) { bridge?.navigationStarted(in: view, navigation: navigation) }
-    func navigationFinished(in view: WKWebView, navigation: WKNavigation?) { bridge?.navigationFinished(in: view, navigation: navigation) }
-    func allows(_ action: WKNavigationAction, in view: WKWebView) -> Bool {
-        bridge?.allows(action, in: view) ?? false
+    func navigationStarted(in view: WKWebView, navigation: WKNavigation?) {
+        bridge?.navigationStarted(in: view, navigation: navigation)
+        #if PREVIEW_SMOKE
+        if view === webView, bridge != nil, bridge?.currentDocument(in: view) == nil {
+            smokeDocumentInvalidations += 1
+        }
+        #endif
     }
-    func retire() { bridge?.retire(); bridge = nil }
+    func navigationFinished(in view: WKWebView, navigation: WKNavigation?) { bridge?.navigationFinished(in: view, navigation: navigation) }
+    func currentDocument(in view: WKWebView) -> NativeDocumentBinding? { bridge?.currentDocument(in: view) }
+    func allows(_ action: WKNavigationAction, in view: WKWebView) -> Bool {
+        if bridge?.allows(action, in: view) == true { return true }
+        guard bridge?.currentDocument(in: view) != nil else { return false }
+        if action.targetFrame == nil {
+            // An allowed popup reaches the UI delegate, which opens it once in
+            // the system browser and supplies no WKWebView for external content.
+            return externalNavigation?.allows(action, in: view, popup: true) ?? false
+        }
+        externalNavigation?.open(action, in: view, popup: false)
+        return false
+    }
+    func retire() {
+        externalNavigation?.retire()
+        externalNavigation = nil
+        bridge?.retire()
+        bridge = nil
+    }
 
     func installMenus(applicationName: String = "NAC") {
         let main = NSMenu()
@@ -71,9 +99,14 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     @objc private func settings(_ sender: Any?) { bridge?.send(.settings) }
     @objc private func projects(_ sender: Any?) { bridge?.send(.projects) }
 
-    // Popups, including target=_blank, cannot acquire another shell-owned view.
+    // External content never acquires a shell-owned view or the native bridge.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
-                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? { nil }
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if bridge?.currentDocument(in: webView) != nil {
+            externalNavigation?.open(navigationAction, in: webView, popup: true)
+        }
+        return nil
+    }
 
     private func submenu(_ title: String, in parent: NSMenu) -> NSMenu {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
