@@ -61,6 +61,19 @@ fn native_intent_retry_reopens_original_identity_and_distinguishes_new_requests(
         reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
             .unwrap()
     );
+    assert!(reserve_native_task_launch(
+        &path,
+        "caller",
+        "p",
+        Path::new("/other"),
+        false,
+        request.clone()
+    )
+    .is_err());
+    assert!(
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), true, request.clone())
+            .is_err()
+    );
     let mut changed = request.clone();
     changed.skill = Some("release".into());
     assert!(

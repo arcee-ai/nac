@@ -88,8 +88,10 @@ pub fn reserve_native_task_launch(path: &Path, caller: &str, project_id: &str, s
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     if let Some(existing) = load(&tx, &request.request_id)? {
-        anyhow::ensure!(existing.caller_session_id == caller && existing.request == request,
-            "conflict: native launch identity reused with different caller or arguments");
+        anyhow::ensure!(existing.caller_session_id == caller && existing.request == request
+            && existing.project_id == project_id && existing.source_cwd == source_cwd
+            && existing.retained == retained,
+            "conflict: native launch identity reused with different caller, arguments or source binding");
         return Ok(existing);
     }
     let occupied:bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM task_launches WHERE request_id=?1)",params![request.request_id],|r|r.get(0))?;

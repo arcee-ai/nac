@@ -345,7 +345,7 @@ async fn native_saved_symlink_projects_bind_canonical_targets_and_reject_retarge
         assert_eq!(ready.launch.phase, "ready", "{:?}", ready.launch.error);
         assert_eq!(ready.launch.session_id, first.launch.session_id);
         assert_eq!(ready.launch.source_cwd, original.cwd);
-        let mut changed = input;
+        let mut changed = input.clone();
         changed.request_id = uuid::Uuid::new_v4().to_string();
         let target = controller.resolve(&caller, &changed).await.unwrap();
         let other = root.join("other");
@@ -369,6 +369,30 @@ async fn native_saved_symlink_projects_bind_canonical_targets_and_reject_retarge
         )
         .unwrap()
         .is_none());
+        let rebound = controller.resolve(&caller, &input).await.unwrap();
+        let authorization =
+            nac_core::task_launch_control::NativeTaskAuthorization::for_local_fixture(
+                manager.inner.store_path.clone(),
+                caller.clone(),
+                rebound.cwd.clone(),
+            );
+        let rejected = controller
+            .launch(&caller, input.clone(), rebound, authorization)
+            .await
+            .unwrap_err();
+        assert!(rejected.to_string().contains("source binding"));
+        let unchanged = controller.status(&caller, &input.request_id).await.unwrap();
+        assert_eq!(unchanged.launch.phase, "ready");
+        assert_eq!(unchanged.launch.session_id, ready.launch.session_id);
+        assert_eq!(
+            nac_core::store::list_session_inbox(
+                &manager.inner.store_path,
+                &ready.launch.session_id
+            )
+            .unwrap()
+            .len(),
+            1
+        );
         stop(&manager).await;
         std::fs::remove_dir_all(root).unwrap();
     }
