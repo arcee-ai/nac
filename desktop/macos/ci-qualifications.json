@@ -6,7 +6,7 @@
     "scenario_count": 29
   },
   "all-343-macos26": {
-    "source_sha": "0d78ee389e98c0f157a8e8313446fc8006c38ec4",
+    "source_sha": "f4832ed44f948a88170f5d3bc25322852dbce347",
     "profile": "macos26",
     "suite": "instances",
     "scenario_count": 8

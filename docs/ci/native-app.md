@@ -197,8 +197,9 @@ publication/tag guards stay unchanged; a manual qualification does not authorize
 publication, a tag, merge or deployment.
 
 `all-343-macos26` adds the exact corrected instance fixture
-`0d78ee389e98c0f157a8e8313446fc8006c38ec4`, using the same strict macOS 26
-envelope. Its first hosted qualification failed, as detailed below. The source's
+`f4832ed44f948a88170f5d3bc25322852dbce347`, using the same strict macOS 26
+envelope. The earlier `0d78ee38` hosted qualification failed, as detailed below.
+The nominated source has no new native acceptance. The source's
 ordinary `app-build` and instrumented `instance-build` each run for exact-source
 dev and stable engines, copied privately before the next track rebuild. Actual
 source/mode/track, engine/native/plist hashes, normal bundle identities, excluded
@@ -252,6 +253,22 @@ unproved. Cleanup observed no private live process or crash, and retained the
 failure profile under the target's policy. The index's original summary hash
 precedes export redaction; the exported summary has a separate hash. A new
 source-owner diagnosis and explicit nomination are required before another run.
+
+The nominated `f4832ed4` fixture adds bounded semantic workspace observation
+and failure diagnostics. Read-only observations share a 45-second monotonic
+budget with one-second probes, immutable receipt/store/incarnation/origin
+fences, and a page-error latch. It does not retry input or infer readiness from
+elapsed time. Its sealed source packet has fourteen verified hashes; both
+tracks' nine ordinary Swift inputs and three build-support inputs match
+`9f215ec9`, with Rust and web source unchanged. Old private engine identities
+are historical evidence, never substitutes for new exact-source builds.
+
+The success contract remains eight cases and nineteen positive frames. A
+failure-only JSON/PNG is diagnostic evidence and cannot satisfy those frames;
+its 2 MiB PNG cap matches the unchanged exporter limit. The original zero-case
+failure remains unproved. The intermediate `bd6f174b` semantic log has missing
+original bytes; later source checks do not restore or replace that evidence.
+No hosted run is authorized by these source checks or catalog preparation.
 
 Root inspection of the committed harness SHA, immutable target/catalog and
 command policy is required before a manual instance run. The planned command
