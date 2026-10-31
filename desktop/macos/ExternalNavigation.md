@@ -61,3 +61,19 @@ WK callback ordering, popup rejection and document correlation; it cannot
 qualify an actual browser opening or an auth callback completing. The common
 builder/PreviewSmoke owner must integrate the source list and named dispatch
 before this fixture can run; a source typecheck alone is not a fixture pass.
+
+`ExternalAuthSmoke` is the separately named `external-auth` scenario. It uses
+production MCP controls and the actual NSWorkspace opener, preserving callback
+URLs inside the server/React/browser flow. `external_auth_fixture.py` provides
+the local authorization/token double and sanitized browser observations. Its
+unit tests establish the double's callback/PKCE/single-use/expiry behavior, not
+the app handoff. The scripted native scenario covers success, denial, wrong
+state and cancellation, while explicitly leaving timeout/restart, device-owner
+integration and offline qualification open until their evidence exists.
+
+`external_auth_smoke.py` refuses non-hosted execution and locked or unobserved
+consoles before any app/browser launch. An approved hosted Mac contract must
+also supply a disposable browser/profile and owned cleanup; CI environment
+variables alone do not establish isolation. The fixture does not change the
+default browser, close unrelated tabs or qualify a real vendor. Its common
+builder/PreviewSmoke hook and hosted execution remain integration gates.
