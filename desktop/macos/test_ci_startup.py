@@ -34,6 +34,7 @@ class StartupSupervisorTests(unittest.TestCase):
             witness.attachment_binding.return_value = {'scope': 'synthetic unit fixture'}
             witness.settle.side_effect = RuntimeError('unknown owner') if cleanup_failure else None
             witness.settle.return_value = {'root': str(fixture), 'owned_processes_settled': True, 'observed_processes': []}
+            witness.failure_receipt.return_value = {'scope': 'synthetic unit owner receipt'}
             audit = MagicMock(failure=None)
             audit.stop.return_value = {'scope': 'synthetic unit API'}
             provider = MagicMock()
