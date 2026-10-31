@@ -288,6 +288,7 @@ pub fn create_session_goal(
             params![session_id],
         )?;
     }
+    super::task_questions::invalidate_questions(&transaction,session_id,None)?;
     let goal_id = uuid::Uuid::new_v4().to_string();
     let now = now_utc();
     let (run_id, baseline, started_at, continuation) = match active_run {
@@ -441,9 +442,11 @@ pub fn update_session_goal_by_model(
             "the model may only mark a goal blocked or complete"
         ));
     }
-    let connection = open_runtime_connection(path)?;
-    require_direct_session(&connection, session_id)?;
-    let changed = connection.execute(
+    let mut connection = open_runtime_connection(path)?;
+    let transaction=connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    require_direct_session(&transaction, session_id)?;
+    anyhow::ensure!(super::task_questions::pending_with_connection(&transaction,session_id)?.is_none(),"answer the pending structured question before completing or blocking its goal");
+    let changed = transaction.execute(
         "UPDATE session_goals
          SET status = ?1, updated_at = ?2, version = version + 1
          WHERE session_id = ?3 AND goal_id = ?4 AND status != 'complete'",
@@ -452,8 +455,9 @@ pub fn update_session_goal_by_model(
     if changed != 1 {
         return Err(anyhow!("goal '{goal_id}' is no longer active"));
     }
-    let goal = load_with_connection(&connection, session_id)?
+    let goal = load_with_connection(&transaction, session_id)?
         .ok_or_else(|| anyhow!("goal disappeared"))?;
+    transaction.commit()?;
     committed(path, &goal, GoalChangeKind::Current);
     Ok(goal)
 }
@@ -491,6 +495,7 @@ pub fn clear_session_goal(
          WHERE session_id = ?1 AND goal_id = ?2 AND version = ?3",
         params![session_id, goal_id, expected_version],
     )?;
+    super::task_questions::invalidate_questions(&transaction,session_id,None)?;
     transaction.commit()?;
     committed(path, &current, GoalChangeKind::Cleared);
     Ok(())
