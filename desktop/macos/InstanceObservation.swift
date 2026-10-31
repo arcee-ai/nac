@@ -5,6 +5,33 @@ import AppKit
 /// controls require an exact live app incarnation and bundle URL.
 @main
 enum InstanceObservation {
+    @MainActor
+    static func console() -> [String: Any] {
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+        let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]]
+        var result: [String: Any] = [
+            "session_available": session != nil, "window_list_available": windows != nil,
+            "screen_count": NSScreen.screens.count,
+            "session": [
+                "uid": session?[kCGSessionUserIDKey as String] ?? NSNull(),
+                "on_console": session?[kCGSessionOnConsoleKey as String] ?? NSNull(),
+                "login_done": session?[kCGSessionLoginDoneKey as String] ?? NSNull(),
+                "screen_is_locked": session?["CGSSessionScreenIsLocked"] ?? NSNull()
+            ],
+            // Window metadata only; never read titles, pixels or input permissions.
+            "windows": windows?.map { window in [
+                "owner": window[kCGWindowOwnerName as String] ?? NSNull(),
+                "pid": window[kCGWindowOwnerPID as String] ?? NSNull(),
+                "on_screen": window[kCGWindowIsOnscreen as String] ?? NSNull(),
+                "layer": window[kCGWindowLayer as String] ?? NSNull()
+            ] } as Any? ?? NSNull()
+        ]
+        if let front = NSWorkspace.shared.frontmostApplication {
+            result["frontmost"] = identity(front).merging(["name": front.localizedName ?? ""]) { _, new in new }
+        } else { result["frontmost"] = NSNull() }
+        return result
+    }
+
     static func identity(_ app: NSRunningApplication) -> [String: Any] {
         ["pid": app.processIdentifier, "bundle": app.bundleIdentifier ?? "",
          "launch_time": app.launchDate?.timeIntervalSince1970 ?? -1]
@@ -21,6 +48,8 @@ enum InstanceObservation {
         let arguments = CommandLine.arguments
         var result: [String: Any] = [:]
         switch arguments[1] {
+        case "console":
+            result = console()
         case "state":
             let bundle = URL(fileURLWithPath: arguments[2]).resolvingSymlinksInPath()
             result["apps"] = NSWorkspace.shared.runningApplications.filter {
