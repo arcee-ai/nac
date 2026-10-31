@@ -709,3 +709,89 @@ async fn completing_run_provenance_is_stable_before_settlement_and_after_replace
     assert_eq!(retained["targets"][0]["proof"]["retained"], true);
     cleanup(&runtime);
 }
+
+#[tokio::test]
+async fn provider_shaped_nullable_fields_execute_each_exact_wait_mode() {
+    let runtime = runtime(Vec::new());
+    let connection = store::open_runtime_connection(&runtime.store_path).unwrap();
+    store::record_run_outcome_with_connection(
+        &connection,
+        "peer-a",
+        "provider-run",
+        store::RunOutcomeDisposition::Completed,
+        Some("retained provider result"),
+        None,
+    )
+    .unwrap();
+    let goal = store::create_session_goal(
+        &runtime.store_path,
+        "peer-a",
+        "human-created goal",
+        None,
+        None,
+    )
+    .unwrap();
+    store::update_session_goal_by_model(
+        &runtime.store_path,
+        "peer-a",
+        &goal.goal_id,
+        GoalStatus::Complete,
+    )
+    .unwrap();
+    for (mode, run_id, goal_id, expected, identity) in [
+        (
+            json!("run"),
+            json!("provider-run"),
+            Value::Null,
+            "result_available",
+            "provider-run",
+        ),
+        (
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            "result_available",
+            "provider-run",
+        ),
+        (
+            json!("goal"),
+            Value::Null,
+            json!(goal.goal_id),
+            "goal_complete",
+            goal.goal_id.as_str(),
+        ),
+        (
+            json!("goal"),
+            Value::Null,
+            Value::Null,
+            "goal_complete",
+            goal.goal_id.as_str(),
+        ),
+    ] {
+        let snapshot = value(
+            &runtime,
+            "wait_tasks",
+            json!({
+                "targets":[{"session_id":"peer-a","project_id":null,"mode":mode,
+                    "run_id":run_id,"goal_id":goal_id,"after_cursor":null}],
+                "timeout_ms":null,"_nac":null
+            }),
+        )
+        .await;
+        assert_eq!(snapshot["targets"][0]["status"], expected);
+        assert_eq!(snapshot["targets"][0]["resolved_identity"], identity);
+    }
+    // A named incompatible identity must still fail; the advertised disjoint
+    // branches also exclude this shape rather than silently dropping an ID.
+    assert!(
+        call(
+            &runtime,
+            "wait_tasks",
+            json!({"targets":[{"session_id":"peer-a",
+        "mode":"goal","run_id":"provider-run","goal_id":goal.goal_id}],"timeout_ms":null})
+        )
+        .await
+        .is_error
+    );
+    cleanup(&runtime);
+}

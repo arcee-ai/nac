@@ -67,7 +67,16 @@ test("native exact wait returns approval and human navigation revalidates it", a
         name: "wait_tasks",
         callId: "exact-wait",
         arguments: {
-          targets: [{ session_id: peer }],
+          targets: [
+            {
+              session_id: peer,
+              project_id: null,
+              mode: "run",
+              run_id: null,
+              goal_id: null,
+              after_cursor: null,
+            },
+          ],
           timeout_ms: 30_000,
         },
       },
@@ -177,7 +186,16 @@ test("ordinary coordinator input interrupts native wait and leaves the target ru
       name: "wait_tasks",
       callId: "long-wait",
       arguments: {
-        targets: [{ session_id: peer }],
+        targets: [
+          {
+            session_id: peer,
+            project_id: null,
+            mode: "run",
+            run_id: null,
+            goal_id: null,
+            after_cursor: null,
+          },
+        ],
         timeout_ms: 30_000,
       },
     },
