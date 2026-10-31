@@ -2,8 +2,8 @@
 //! one lock; the sink cannot call this service or persistence back.
 use super::*;
 use crate::events::{
-    AttentionGoal, AttentionOperation, AttentionServiceObserver, AttentionServiceSnapshot,
-    SettledWork, SettledWorkDisposition,
+    AttentionBrokerSnapshot, AttentionBrokerState, AttentionGoal, AttentionOperation,
+    AttentionServiceObserver, AttentionServiceSnapshot, SettledWork, SettledWorkDisposition,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +50,56 @@ pub(super) struct ServiceAttention {
     snapshot: AttentionServiceSnapshot,
     observer: Arc<dyn AttentionServiceObserver>,
     registration: Uuid,
+    session_id: String,
+    broker_registration: Option<(std::sync::Weak<crate::permissions::PermissionBroker>, Uuid)>,
+    _broker_observer: Option<Arc<dyn crate::permissions::attention::BrokerAttentionObserver>>,
+}
+
+impl Drop for ServiceAttention {
+    fn drop(&mut self) {
+        if let Some((broker, registration)) = &self.broker_registration {
+            if let Some(broker) = broker.upgrade() {
+                broker.remove_attention_observer(*registration);
+            }
+        }
+        self.observer
+            .service_retired(&self.session_id, self.snapshot.epoch);
+    }
+}
+
+struct BrokerBridge {
+    state: std::sync::Weak<StdMutex<Option<ServiceAttention>>>,
+}
+impl crate::permissions::attention::BrokerAttentionObserver for BrokerBridge {
+    fn broker_changed(&self, registration: Uuid, snapshot: AttentionBrokerSnapshot) {
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        let mut state = state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(state) = state.as_mut().filter(|state| {
+            state
+                .broker_registration
+                .as_ref()
+                .is_some_and(|(_, id)| *id == registration)
+        }) else {
+            return;
+        };
+        if let Some(old) = &state.snapshot.broker {
+            if old.owner != snapshot.owner
+                || old.revision > snapshot.revision
+                || (old.revision == snapshot.revision
+                    && (old == &snapshot
+                        || !matches!(snapshot.state, AttentionBrokerState::Unavailable(_))))
+            {
+                return;
+            }
+        }
+        state.snapshot.broker = Some(snapshot);
+        let id = state.session_id.clone();
+        publish(state, &id);
+    }
 }
 
 fn normalized(operation: Option<&ActiveSessionOperationSnapshot>) -> AttentionOperation {
@@ -118,7 +168,8 @@ impl SessionService {
             .attention
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let snapshot = state
+        let previous = state.take();
+        let mut snapshot = previous
             .as_ref()
             .map(|state| state.snapshot.clone())
             .unwrap_or_else(|| AttentionServiceSnapshot {
@@ -126,28 +177,60 @@ impl SessionService {
                 revision: 0,
                 operation: normalized(operation.as_ref()),
                 settled: None,
+                broker: None,
             });
-        observer.service_changed(id, snapshot.clone());
         let registration = Uuid::new_v4();
+        let mut broker_registration = None;
+        let mut broker_observer = None;
+        snapshot.broker = None;
+        if let Some(broker) = &self.permission_broker {
+            let bridge: Arc<dyn crate::permissions::attention::BrokerAttentionObserver> =
+                Arc::new(BrokerBridge {
+                    state: Arc::downgrade(&self.attention),
+                });
+            let expected = previous
+                .as_ref()
+                .and_then(|state| state.broker_registration.as_ref().map(|(_, id)| *id));
+            if let Some(installed) =
+                broker.replace_attention_observer(expected, Arc::downgrade(&bridge))
+            {
+                snapshot.broker = Some(installed.snapshot);
+                broker_registration = Some((Arc::downgrade(broker), installed.registration));
+                broker_observer = Some(bridge);
+            }
+        }
         *state = Some(ServiceAttention {
-            snapshot,
-            observer,
+            snapshot: snapshot.clone(),
+            observer: Arc::clone(&observer),
             registration,
+            session_id: id.to_owned(),
+            broker_registration,
+            _broker_observer: broker_observer,
         });
+        observer.service_changed(id, snapshot);
+        drop(state);
+        drop(operation);
+        drop(previous);
         Some(registration)
     }
 
     pub fn remove_attention_observer(&self, registration: Uuid) {
-        let mut state = self
-            .attention
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if state
-            .as_ref()
-            .is_some_and(|state| state.registration == registration)
-        {
-            *state = None;
-        }
+        let retired = {
+            let mut state = self
+                .attention
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state
+                .as_ref()
+                .is_some_and(|state| state.registration == registration)
+            {
+                state.take()
+            } else {
+                None
+            }
+        };
+        // Broker compare-remove and retirement callback run outside service locks.
+        drop(retired);
     }
 
     pub(super) fn attention_enabled(&self) -> bool {

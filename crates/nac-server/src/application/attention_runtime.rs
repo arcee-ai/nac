@@ -91,6 +91,7 @@ struct Source {
     service: Option<AttentionServiceSnapshot>,
     binding: Option<Binding>,
     published: Option<AttentionSourceSnapshot>,
+    published_broker: Option<Uuid>,
     retired: bool,
 }
 impl Source {
@@ -102,6 +103,7 @@ impl Source {
             service: None,
             binding: None,
             published: None,
+            published_broker: None,
             retired: false,
         }
     }
@@ -157,14 +159,50 @@ impl AttentionServiceObserver for Sink {
         if source.retired {
             return;
         }
-        if source
-            .service
+        if snapshot
+            .broker
             .as_ref()
-            .is_some_and(|old| old.epoch != snapshot.epoch)
+            .is_some_and(|broker| matches!(broker.state, AttentionBrokerState::Unavailable(_)))
         {
+            live.fail(&mut state);
+            return;
+        }
+        if source.service.as_ref().is_some_and(|old| {
+            old.epoch != snapshot.epoch
+                || old.broker.as_ref().map(|broker| broker.owner)
+                    != snapshot.broker.as_ref().map(|broker| broker.owner)
+        }) {
             source.epoch = Uuid::new_v4();
         }
         source.service = Some(snapshot);
+        live.dirty(&mut state, id);
+    }
+    fn service_retired(&self, id: &str, epoch: Uuid) {
+        let Some(live) = self.live.upgrade() else {
+            return;
+        };
+        let mut state = live
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.closed {
+            return;
+        }
+        let Some(source) = state.sources.get_mut(id).filter(|source| {
+            source
+                .binding
+                .as_ref()
+                .is_some_and(|binding| binding.token == self.token)
+                && source
+                    .service
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.epoch == epoch)
+        }) else {
+            return;
+        };
+        source.binding = None;
+        source.service = None;
+        source.epoch = Uuid::new_v4();
         live.dirty(&mut state, id);
     }
 }
@@ -506,6 +544,10 @@ impl Live {
                         };
                         operation
                             + 64
+                            + snapshot
+                                .broker
+                                .as_ref()
+                                .map_or(0, AttentionBrokerSnapshot::metadata_bytes)
                             + snapshot.settled.as_ref().map_or(0, |work| {
                                 work.run_id.len()
                                     + 32
