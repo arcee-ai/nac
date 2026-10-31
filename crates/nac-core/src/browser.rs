@@ -92,46 +92,46 @@ fn spawn_open(path: &Path) -> Result<()> {
 
 /// Reveal an already validated existing target in Finder without opening the
 /// file's registered application, a shell, a URL, or a missing parent.
+#[cfg(target_os = "macos")]
 pub(crate) async fn reveal_path(path: &Path) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        use std::{process::Stdio, time::Duration};
-        let mut command = tokio::process::Command::new("/usr/bin/open");
-        command
-            .arg("-R")
-            .arg(path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
-        let (mut child, mut tree) = nac_process::ProcessTreeGuard::spawn_supervised(&mut command)
-            .context("could not reveal workspace path in Finder")?;
-        let status = match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
-            Ok(Ok(status)) => {
-                tree.mark_leader_reaped();
-                tree.finish_checked().await?;
-                status
-            }
-            result => {
-                tree.terminate(&mut child)
-                    .await
-                    .context("Finder reveal process cleanup failed")?;
-                return match result {
-                    Ok(Err(error)) => Err(error).context("Finder reveal process failed"),
-                    _ => Err(anyhow::anyhow!(
-                        "Finder reveal timed out; no automatic retry"
-                    )),
-                };
-            }
-        };
-        if !status.success() {
-            bail!("Finder rejected the workspace reveal");
+    use std::{process::Stdio, time::Duration};
+    let mut command = tokio::process::Command::new("/usr/bin/open");
+    command
+        .arg("-R")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let (mut child, mut tree) = nac_process::ProcessTreeGuard::spawn_supervised(&mut command)
+        .context("could not reveal workspace path in Finder")?;
+    let status = match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
+        Ok(Ok(status)) => {
+            tree.mark_leader_reaped();
+            tree.finish_checked().await?;
+            status
         }
-        Ok(())
+        result => {
+            tree.terminate(&mut child)
+                .await
+                .context("Finder reveal process cleanup failed")?;
+            return match result {
+                Ok(Err(error)) => Err(error).context("Finder reveal process failed"),
+                _ => Err(anyhow::anyhow!(
+                    "Finder reveal timed out; no automatic retry"
+                )),
+            };
+        }
+    };
+    if !status.success() {
+        bail!("Finder rejected the workspace reveal");
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = path;
-        bail!("workspace Finder reveal is only supported on macOS")
-    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn reveal_path(_path: &Path) -> std::future::Ready<Result<()>> {
+    std::future::ready(Err(anyhow::anyhow!(
+        "workspace Finder reveal is only supported on macOS"
+    )))
 }
