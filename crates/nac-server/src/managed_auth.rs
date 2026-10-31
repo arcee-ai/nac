@@ -491,3 +491,7 @@ pub(crate) async fn logout_handler(
     managed_auth_logout(provider)?;
     Ok(Json(managed_auth_snapshot(provider)?.into()))
 }
+
+#[cfg(test)]
+#[path = "tests/local_device_login.rs"]
+mod local_device_login_tests;

@@ -622,6 +622,19 @@ pub(super) async fn begin_arcee_device_login() -> Result<ArceeDeviceLogin> {
     .await
 }
 
+#[cfg(feature = "test-support")]
+pub(super) async fn begin_local_arcee_device_login_for_test(
+    auth_service_base_url: &str,
+) -> Result<ArceeDeviceLogin> {
+    begin_arcee_device_login_with_service(
+        ArceeAuthService::for_test(auth_service_base_url),
+        LEGACY_CLIENT_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER.to_string(),
+        ArceeLoginDestination::Local,
+    )
+    .await
+}
+
 pub(super) async fn begin_managed_arcee_device_login(
     expected_managed_host_id: &str,
     expected_base_url: &str,
