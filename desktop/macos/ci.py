@@ -19,6 +19,7 @@ from ci_support import (console_state, export_evidence, qualify_toolchain, redac
                         require_console, require_terminal_evidence)
 from smoke import cleanup_failed_case
 from ci_qualifications import require_checkout, require_full_preview, require_workspace, select_target
+from ci_xctest import run_terminal
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DEADLINE = time.monotonic() + 30 * 60  # Leave ten job minutes for cleanup/upload.
@@ -237,8 +238,6 @@ def main():
         if any(name in symbols for name in ('PreviewSmoke', 'CITerminal')) or '--smoke-output' in command(['/usr/bin/strings', str(ordinary)]):
             raise RuntimeError('Ordinary app contains test instrumentation')
         os.environ['NAC_MAC_SKIP_ENGINE_BUILD'] = '1'
-        if not target:
-            os.environ['NAC_MAC_CI_TERMINAL'] = '1'
         if workspace:
             # The source owner requires a private exact-source binary; the
             # dedicated runner owns it throughout this complete job.
@@ -262,7 +261,8 @@ def main():
             report['target_suite'] = require_full_preview(json.loads((raw / 'evidence/summary.json').read_text()),
                 target, report['ordinary_build']['engine_sha256'])
         elif not target:
-            report['trusted_terminal'] = require_terminal_evidence(json.loads((raw / 'evidence/ci-terminal.json').read_text()))
+            report['xctest'] = run_terminal(raw, run, command)
+            report['trusted_terminal'] = require_terminal_evidence(json.loads((raw / 'evidence/ci-terminal-xctest.json').read_text()))
         helper = raw / 'native-image-reader'
         run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIEvidence.swift',
              '-o', str(helper)], raw / 'image-reader-build.log', 90)
