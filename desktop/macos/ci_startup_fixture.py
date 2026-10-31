@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 
 from ci_qualifications import require_checkout
+from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
 PRODUCT = 'd443a2aca506def2817b9afc0c9a20a75f5c4b5d'
@@ -142,11 +143,17 @@ def prepare_configuration(profile, app, manifest, product_root, test_root, harne
     relocated.parent.mkdir()
     shutil.copytree(app, relocated, symlinks=True)
     proof = contract.inspect_normal_package(str(manifest), str(relocated), str(product_root), product_sha=PRODUCT)
+    child_environment, environment_resolution = resolve_environment(product_root, profile)
+    environment_resolution.update(test_source_sha=TEST_SOURCE,
+        startup_source_sha256=TEST_FILES['StartupJourneys.swift'],
+        app_launch_arguments=['--directory', str(profile['home'])],
+        configuration_helper_arguments=['__desktop-configuration', '--directory', str(profile['home'])])
     config = {'schema': SCHEMA, 'scenario': profile['scenario'], 'contract_baseline': BASELINE,
               'source_sha': PRODUCT, 'test_source_sha': TEST_SOURCE, 'harness_sha': harness_sha,
               'bundle_id': proof['bundle_id'], 'fixture_root': str(profile['root']), 'app_path': str(relocated),
               'home': str(profile['home']), 'nac_home': str(profile['nac_home']), 'workspace': str(profile['workspace']),
               'expected_store': str(profile['store']), 'environment': profile['environment'],
+              'child_environment': child_environment, 'environment_resolution': environment_resolution,
               'startup_source_sha256': TEST_FILES['StartupJourneys.swift'], 'engine_identity': proof['engine_identity']}
     for key in ('manifest_sha256', 'package_identity_sha256', 'engine_identity_sha256', 'build_receipt_sha256'):
         config[key] = proof[key]
