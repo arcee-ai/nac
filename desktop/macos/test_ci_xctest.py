@@ -78,9 +78,31 @@ class XCTestPolicyTests(unittest.TestCase):
             return {'TestConfigurations': [{'TestTargets': targets}]}
         self.assertEqual(require_generated_runner(runner([target]), '/private/owned-fixture.json'), target)
         for data in [runner([]), runner([target, target]), runner([{**target, 'IsUITestBundle': False}]),
+                     runner([target, {**target, 'BlueprintName': 'ForeignUITests'}]),
                      runner([{**target, 'EnvironmentVariables': {'NAC_UI_FIXTURE': '$(NAC_UI_FIXTURE)'}}])]:
             with self.assertRaises(RuntimeError):
                 require_generated_runner(data, '/private/owned-fixture.json')
+
+    def test_performance_selection_requires_one_real_target_and_bound_source_environment(self):
+        selection = {'generated': True, 'expected_target': 'NACPerformanceUITests',
+                     'performance_source_path': '/private/owned-P/PerformanceJourneys.swift',
+                     'performance_source_sha256': 'a' * 64}
+        environment = {'NAC_UI_FIXTURE': '/private/fixture.json',
+                       'NAC_PERFORMANCE_SOURCE_PATH': selection['performance_source_path'],
+                       'NAC_PERFORMANCE_SOURCE_SHA256': selection['performance_source_sha256']}
+        target = {'IsUITestBundle': True, 'BlueprintName': 'NACPerformanceUITests',
+                  'EnvironmentVariables': environment, 'TestBundlePath': '__TESTROOT__/Debug/Performance.xctest'}
+        data = {'TestTargets': [target]}
+        self.assertEqual(require_generated_runner(data, '/private/fixture.json', 'NACPerformanceUITests',
+                                                  project_selection=selection), target)
+        for change in ({'performance_source_sha256': 'b' * 64}, {'performance_source_path': '/private/foreign.swift'},
+                       {'generated': False}, {'expected_target': 'NACNativeUITests'}):
+            with self.assertRaisesRegex(RuntimeError, 'materialized source'):
+                require_generated_runner(data, '/private/fixture.json', 'NACPerformanceUITests',
+                                         project_selection={**selection, **change})
+        for name in ('ForeignUITests', 'NACNativeUITests', 'NACPerformanceUITests'):
+            with self.assertRaises(RuntimeError):
+                require_generated_runner(data, '/private/fixture.json', name)
 
     def test_actual_result_binding_and_raw_diagnostic_exclusion(self):
         with tempfile.TemporaryDirectory() as temporary:
