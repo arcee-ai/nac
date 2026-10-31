@@ -115,7 +115,7 @@ test-stable-binary:
 	@version="$$(tr -d '[:space:]' < version.txt)"; \
 	source_revision="$$(git rev-parse HEAD)"; \
 	NAC_BUILD_TRACK=stable NAC_BUILD_ID="v$$version" NAC_SOURCE_REVISION="$$source_revision" \
-		$(CARGO) test --locked -p nac-server --test stable_binary_contract -- --nocapture
+		$(CARGO) test --locked -p nac-server --test stable_binary_contract --test bundled_upgrade_contract -- --nocapture
 
 ## Verify source command, installer, and dual-process supervision contracts
 test-source-workflow:

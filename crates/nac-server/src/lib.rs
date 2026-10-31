@@ -12,6 +12,7 @@ pub mod desktop_launch;
 #[doc(hidden)]
 pub mod desktop_startup;
 mod executable;
+mod executable_upgrade;
 mod filesystem;
 mod fork;
 mod light_model;
@@ -25,6 +26,7 @@ mod mcp_catalog_api;
 mod mcp_runtime_api;
 mod orchestration;
 mod revert;
+pub use executable_upgrade::current_upgrade_ownership;
 pub(crate) use managed_control::running_target as managed_running_target;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
