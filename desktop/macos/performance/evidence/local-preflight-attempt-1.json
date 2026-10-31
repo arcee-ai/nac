@@ -1,0 +1,144 @@
+{
+  "architecture": "arm64",
+  "blockers": [
+    "Unlocked active console not established; no active-window baseline",
+    "Selected developer tools cannot locate xctrace"
+  ],
+  "captured_utc": "2026-10-31T06:34:21.987862+00:00",
+  "decision": "NO-GO",
+  "measurement_samples": 0,
+  "observations": {
+    "developer_dir": "/Library/Developer/CommandLineTools",
+    "dirty": true,
+    "displays": [
+      {
+        "_spdisplays_pixels": "3024 x 1964",
+        "_spdisplays_resolution": "1512 x 982 @ 120.00Hz",
+        "spdisplays_ambient_brightness": "spdisplays_yes",
+        "spdisplays_main": "spdisplays_yes",
+        "spdisplays_mirror": "spdisplays_off",
+        "spdisplays_online": "spdisplays_yes"
+      }
+    ],
+    "hardware": {
+      "chip_type": "Apple M5 Max",
+      "machine_model": "Mac17,7",
+      "number_processors": "proc 18:6:12:0",
+      "physical_memory": "36 GB"
+    },
+    "os": "27.0.1",
+    "os_build": "26A434",
+    "power": "Now drawing from 'AC Power'",
+    "source": "f71515d14068592a161c17cbd53832ae1b295263",
+    "virtual_machine": "0",
+    "workloads_sha256": "e7d39782c2062b4610376d1dd11ed44f465c7a65f7302e6a437819b9dd41534f"
+  },
+  "operations": [
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/allison/.codex/worktrees/08e6/allison-demo",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "name": "source"
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/allison/.codex/worktrees/08e6/allison-demo",
+        "status",
+        "--porcelain"
+      ],
+      "exit_code": 0,
+      "name": "dirty"
+    },
+    {
+      "argv": [
+        "/usr/bin/sw_vers",
+        "-productVersion"
+      ],
+      "exit_code": 0,
+      "name": "os"
+    },
+    {
+      "argv": [
+        "/usr/bin/sw_vers",
+        "-buildVersion"
+      ],
+      "exit_code": 0,
+      "name": "os_build"
+    },
+    {
+      "argv": [
+        "/usr/sbin/system_profiler",
+        "SPHardwareDataType",
+        "-json"
+      ],
+      "exit_code": 0,
+      "name": "hardware"
+    },
+    {
+      "argv": [
+        "/usr/sbin/system_profiler",
+        "SPDisplaysDataType",
+        "-json"
+      ],
+      "exit_code": 0,
+      "name": "displays"
+    },
+    {
+      "argv": [
+        "/usr/sbin/ioreg",
+        "-n",
+        "Root",
+        "-d1",
+        "-a"
+      ],
+      "exit_code": 0,
+      "name": "console",
+      "parse_error": true
+    },
+    {
+      "argv": [
+        "/usr/bin/xcode-select",
+        "-p"
+      ],
+      "exit_code": 0,
+      "name": "developer_dir"
+    },
+    {
+      "argv": [
+        "/usr/bin/xcrun",
+        "--find",
+        "xctrace"
+      ],
+      "error": "xcrun: error: unable to find utility \"xctrace\", not a developer tool or in PATH",
+      "exit_code": 72,
+      "name": "xctrace"
+    },
+    {
+      "argv": [
+        "/usr/sbin/sysctl",
+        "-n",
+        "kern.hv_vmm_present"
+      ],
+      "exit_code": 0,
+      "name": "virtual_machine"
+    },
+    {
+      "argv": [
+        "/usr/bin/pmset",
+        "-g",
+        "batt"
+      ],
+      "exit_code": 0,
+      "name": "power"
+    }
+  ],
+  "qualification": "No renderer, trusted input, isolation, or performance qualification performed",
+  "schema": "nac-mac-performance-preflight-v1"
+}

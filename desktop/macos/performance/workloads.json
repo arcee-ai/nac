@@ -1,0 +1,19 @@
+{
+  "schema": "nac-mac-performance-workloads-v1",
+  "status": "protocol-only; execution requires qualified host and pinned fixture adapter",
+  "comparison": ["ordinary Safari browser plus nac-web", "AppKit/WKWebView plus same nac-web"],
+  "sessions": {"behavior": "direct", "counts": [1, 8], "ptys_per_session": 1},
+  "window": {"content_points": [1280, 800], "states": ["active", "hidden"]},
+  "repetitions": {"paired_blocks": 20, "order": "AB,BA alternating", "idle_seconds": 120},
+  "launch": ["cold first after reboot", "fresh profile with warm OS caches", "warm existing store", "window reopen without engine restart"],
+  "transcript": {
+    "turns": 64,
+    "user_template": "MAC_PERF_V1_TURN_{index:03d}",
+    "assistant_template": "## Turn {index:03d}\n\nDeterministic local performance fixture. **Bold** and *italic*.\n\n| n | value |\n|---|---|\n| {index} | fixture |\n\nInline math $x^2 + y^2$ and display math:\n\n$$\\sum_{k=1}^{32} k = 528$$\n\n```rust\nfn fixture_{index:03d}() -> usize { (0..32).sum() }\n```\n\n",
+    "assistant_repeats_per_turn": 16
+  },
+  "stream": {"deltas": 256, "interval_ms": 50, "delta_template": "MAC_PERF_V1_DELTA_{index:03d} ", "tail": "MAC_PERF_V1_DONE"},
+  "terminal": {"duration_seconds": 30, "batches_per_second": 20, "lines_per_batch": 32, "columns": 120, "rows": 36, "line_ascii_bytes_including_lf": 128},
+  "input": {"trusted_events_per_block": 100, "target": "composer typing and terminal echo separately", "timeout_ms": 5000},
+  "notifications": {"events_per_block": 1, "trigger": "local provider completion with hidden window", "requires": "nominated notification-capable candidate and existing permission"}
+}
