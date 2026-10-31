@@ -6,6 +6,7 @@ use axum::{
 use nac_core::ssh_configurations::SshConfigurationRecord;
 use serde::{Deserialize, Serialize};
 
+use crate::application::ssh_aliases::{AliasDiscovery, AliasDiscoveryWarning, SshAliasApplication};
 use crate::{application, ApiError, ApiErrorBody, RequestField, SessionManager};
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
@@ -35,6 +36,73 @@ pub struct SshConfigurationList {
     pub configurations: Vec<SshConfigurationRecord>,
 }
 
+/// Literal `Host` aliases from the NAC server user's `~/.ssh/config` and the
+/// Include files it names statically. Only alias names are returned; host
+/// names, users, keys and file contents never are.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct OpenSshAliasList {
+    /// Aliases in first-seen order, without duplicates.
+    pub aliases: Vec<String>,
+    /// Host patterns present but not listed: wildcards, negations and names
+    /// ssh cannot take as a destination. They still work through manual entry.
+    pub undiscoverable_patterns: u32,
+    /// Why the list may be incomplete. Never names a path or file contents.
+    pub warnings: Vec<OpenSshAliasWarning>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenSshAliasWarning {
+    HomeUnavailable,
+    UnreadableFile,
+    OversizedFile,
+    MissingInclude,
+    IncludeCycle,
+    IncludeDepthExceeded,
+    FileLimitReached,
+    AliasLimitReached,
+    UnsupportedInclude,
+    ConditionalIncludeSkipped,
+    MalformedLine,
+}
+
+impl From<AliasDiscovery> for OpenSshAliasList {
+    fn from(discovery: AliasDiscovery) -> Self {
+        Self {
+            aliases: discovery.aliases,
+            undiscoverable_patterns: u32::try_from(discovery.undiscoverable_patterns)
+                .unwrap_or(u32::MAX),
+            warnings: discovery
+                .warnings
+                .into_iter()
+                .map(|warning| match warning {
+                    AliasDiscoveryWarning::HomeUnavailable => OpenSshAliasWarning::HomeUnavailable,
+                    AliasDiscoveryWarning::UnreadableFile => OpenSshAliasWarning::UnreadableFile,
+                    AliasDiscoveryWarning::OversizedFile => OpenSshAliasWarning::OversizedFile,
+                    AliasDiscoveryWarning::MissingInclude => OpenSshAliasWarning::MissingInclude,
+                    AliasDiscoveryWarning::IncludeCycle => OpenSshAliasWarning::IncludeCycle,
+                    AliasDiscoveryWarning::IncludeDepthExceeded => {
+                        OpenSshAliasWarning::IncludeDepthExceeded
+                    }
+                    AliasDiscoveryWarning::FileLimitReached => {
+                        OpenSshAliasWarning::FileLimitReached
+                    }
+                    AliasDiscoveryWarning::AliasLimitReached => {
+                        OpenSshAliasWarning::AliasLimitReached
+                    }
+                    AliasDiscoveryWarning::UnsupportedInclude => {
+                        OpenSshAliasWarning::UnsupportedInclude
+                    }
+                    AliasDiscoveryWarning::ConditionalIncludeSkipped => {
+                        OpenSshAliasWarning::ConditionalIncludeSkipped
+                    }
+                    AliasDiscoveryWarning::MalformedLine => OpenSshAliasWarning::MalformedLine,
+                })
+                .collect(),
+        }
+    }
+}
+
 fn field<T>(field: RequestField<T>) -> application::Field<T> {
     match field {
         RequestField::Omitted => application::Field::Unchanged,
@@ -56,6 +124,25 @@ pub(crate) async fn list_handler(
     Ok(Json(SshConfigurationList {
         configurations: manager.ssh_configurations().list()?,
     }))
+}
+
+/// OpenSSH aliases the NAC server's own user has configured. This reads the
+/// server machine's `~/.ssh/config`, never the browser's. Discovery problems
+/// degrade to a partial list with warnings rather than an error.
+#[utoipa::path(
+    get,
+    path = "/ssh/aliases",
+    operation_id = "get_ssh_aliases",
+    tag = "ssh-configs",
+    responses((status = 200, description = "Success", body = OpenSshAliasList, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn aliases_handler() -> Result<Json<OpenSshAliasList>, ApiError> {
+    Ok(Json(
+        SshAliasApplication::for_server_user()
+            .discover()
+            .await?
+            .into(),
+    ))
 }
 
 #[utoipa::path(

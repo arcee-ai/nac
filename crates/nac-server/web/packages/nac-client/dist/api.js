@@ -108,6 +108,11 @@ export function createNacApi(nacClient) {
             body: payload,
         }),
         deleteSshConfig: (configId) => request("DELETE", `/ssh-configs/${encodeURIComponent(configId)}`),
+        /**
+         * Literal OpenSSH `Host` aliases from the NAC server's own `~/.ssh/config`
+         * (not the browser's machine). Names only; problems arrive as warnings.
+         */
+        listSshAliases: (signal) => request("GET", "/ssh/aliases", { signal }),
         // The MCP library is a curated catalog served by the binary; servers are
         // saved into config.toml, keyed by name, and parsed when a session starts.
         getMcpLibrary: (signal) => request("GET", "/mcp_library/library", { signal }),

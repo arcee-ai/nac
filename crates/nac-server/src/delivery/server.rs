@@ -715,6 +715,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::ssh_configurations::update_handler,
             delivery::ssh_configurations::delete_handler
         ))
+        .routes(routes!(delivery::ssh_configurations::aliases_handler))
         .routes(routes!(mcp_catalog_api::library_handler))
         .routes(routes!(
             mcp_api::list_servers_handler,

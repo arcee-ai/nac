@@ -395,6 +395,15 @@ export declare function createNacApi(nacClient: NacClient): {
         updated_at: string;
     }>;
     deleteSshConfig: (configId: string) => Promise<void>;
+    /**
+     * Literal OpenSSH `Host` aliases from the NAC server's own `~/.ssh/config`
+     * (not the browser's machine). Names only; problems arrive as warnings.
+     */
+    listSshAliases: (signal?: AbortSignal) => Promise<{
+        aliases: string[];
+        undiscoverable_patterns: number;
+        warnings: import("./openapi.generated.js").components["schemas"]["OpenSshAliasWarning"][];
+    }>;
     getMcpLibrary: (signal?: AbortSignal) => Promise<{
         entries: import("./openapi.generated.js").components["schemas"]["McpLibraryEntry"][];
     }>;

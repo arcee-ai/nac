@@ -41,6 +41,15 @@ export declare function useSshConnect(): import("@tanstack/react-query").UseMuta
 export declare function useSshConfigs(): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     configurations: import("../../types/openapi.generated").components["schemas"]["SshConfigurationRecord"][];
 }>, Error>;
+/**
+ * OpenSSH aliases from the NAC server's `~/.ssh/config`. Discovery degrades to
+ * a partial list instead of failing, so a refusal here only hides the group.
+ */
+export declare function useSshAliases(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
+    aliases: string[];
+    undiscoverable_patterns: number;
+    warnings: import("../../types/openapi.generated").components["schemas"]["OpenSshAliasWarning"][];
+}>, Error>;
 export declare function useCreateSshConfig(): import("@tanstack/react-query").UseMutationResult<{
     config_id: string;
     created_at: string;

@@ -185,6 +185,8 @@ export type SshBrowseRequest = ApiSchema<"SshBrowseRequest">;
 /** A named, reusable SSH connection offered by the launch and settings forms. */
 export type SshConfigurationRecord = ApiSchema<"SshConfigurationRecord">;
 export type SshConfigurationList = ApiSchema<"SshConfigurationList">;
+/** Literal OpenSSH aliases discovered on the NAC server machine, names only. */
+export type OpenSshAliasList = ApiSchema<"OpenSshAliasList">;
 export type CreateSshConfigurationRequest = ApiSchema<"CreateSshConfigurationRequest">;
 /** Tri-state fields: omit to keep, null to clear, value to replace. */
 export type UpdateSshConfigurationRequest = ApiSchema<"UpdateSshConfigurationRequest">;
