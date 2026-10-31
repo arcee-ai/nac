@@ -3,7 +3,7 @@ import AppKit
 import WebKit
 
 /// Actual app fixture. Programmatic NSMenu dispatch is recorded explicitly;
-/// it does not qualify physical keyboard or trusted Edit provenance.
+/// it does not qualify OS keyboard or trusted Edit provenance.
 @MainActor
 final class NativeCommandSmoke {
     private unowned let app: PreviewApp
@@ -17,9 +17,14 @@ final class NativeCommandSmoke {
         _ = try await js("document.querySelectorAll('button').forEach(b => { if (b.textContent.trim() === 'Create chat') b.click() }); return true")
         try await wait("session composer") { try await self.js("return !!document.querySelector('[role=combobox][aria-label=Message]')") as? Bool == true }
         _ = try await js("document.querySelector('[role=combobox][aria-label=Message]').focus(); return true")
+        try await wait("current document UI command owner") { self.commands.smokeSnapshot["ready"] as? Bool == true }
         try await wait("current menu focus owner") { self.commands.smokeSnapshot["available"] as? Bool == true }
         var inputEvidence: [String: Any]?
-        if trustedInput { inputEvidence = try await NativeCommandInput(app: app, commands: commands).run() }
+        if trustedInput {
+            let external = CommandLine.arguments.contains("--commands-external")
+            guard !external || captures != nil else { throw PreviewError.message("External driver requires a fixture output directory") }
+            inputEvidence = try await NativeCommandInput(app: app, commands: commands).run(externalDirectory: external ? captures : nil)
+        }
         let first = commands.smokeSnapshot
         try perform(menu: "NAC", title: "Settings…")
         try await dialog("Configurations", visible: true)
@@ -156,7 +161,7 @@ final class NativeCommandSmoke {
             if try await condition() { return }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        throw PreviewError.message("Timed out waiting for \(label)")
+        throw PreviewError.message("Timed out waiting for \(label); bridge snapshot: \(commands.smokeSnapshot)")
     }
 }
 #endif
