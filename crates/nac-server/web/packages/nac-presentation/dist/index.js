@@ -7992,64 +7992,63 @@ function tm({ open: e, sessionId: t, onClose: n }) {
 }
 // src/app/features/product-context/ProductNavigationProvider.tsx
 function nm({ children: e }) {
-	let t = I(), { pathname: n } = Pi(), r = Fi(), i = jr(n), { data: a } = Xe(i), { data: o } = Ce(i, { enabled: !1 }), s = C(), l = B(), [u, d] = q(null), f = G(() => ({
-		openMcp: () => d("mcp"),
-		openConfigurations: () => d("configurations"),
-		openSsh: () => d("ssh"),
-		inspect: () => d("context")
+	let t = I(), { pathname: n } = Pi(), r = Fi(), i = jr(n), { data: a } = Xe(i), { data: o } = Ce(i, { enabled: !1 }), s = C(), l = B(), u = !!i && !!o && !!a && c(s, a.summary.behavior, a.lineage), d = Va(a?.summary.behavior, o?.lineage?.kind), [f, p] = q(null), m = G(() => ({
+		openMcp: () => p("mcp"),
+		openConfigurations: () => p("configurations"),
+		openSsh: () => p("ssh"),
+		inspect: () => p("context")
 	}), []);
 	_i(() => t.productNavigation?.connect({
 		currentSession: () => i,
 		open: (e) => {
 			let n = e.target.destination;
 			switch (n) {
-				case "mcp-settings": return f.openMcp(), !0;
+				case "mcp-settings": return m.openMcp(), !0;
 				case "configurations":
-				case "model-authentication": return f.openConfigurations(), !0;
-				case "ssh-configurations": return f.openSsh(), !0;
-				case "projects": return d(null), r(Vn.list()), !0;
+				case "model-authentication": return m.openConfigurations(), !0;
+				case "ssh-configurations": return m.openSsh(), !0;
+				case "projects": return p(null), r(Vn.list()), !0;
 			}
-			if (!i || !o || !a || e.session_id !== i || !c(s, a.summary.behavior, a.lineage)) return !1;
-			let u = {
+			if (!u || !i || e.session_id !== i) return !1;
+			let a = {
 				"session-subagents": "delegated",
 				"session-files": "files",
 				"session-terminal": "terminal",
 				"session-history": "history"
-			}[n], p = Va(a.summary.behavior, o.lineage?.kind);
-			return !u || !(l ? p.mobilePanels : p.widePanels).includes(u) ? !1 : (d(null), t.stores.sessionLayoutStore.openSidePanelList(), r(Vn.session(i, u)), !0);
+			}[n];
+			return !a || !(l ? d.mobilePanels : d.widePanels).includes(a) ? !1 : (p(null), t.stores.sessionLayoutStore.openSidePanelList(), r(Vn.session(i, a)), !0);
 		}
 	}), [
 		t,
 		i,
-		a,
-		o,
-		s,
+		u,
+		d,
 		l,
-		f,
+		m,
 		r,
 		n
 	]);
-	let p = () => d(null);
+	let h = () => p(null);
 	return /* @__PURE__ */ X(Qp.Provider, {
-		value: f,
+		value: m,
 		children: [
 			e,
 			/* @__PURE__ */ Y(ip, {
-				open: u === "configurations",
-				onClose: p
+				open: f === "configurations",
+				onClose: h
 			}),
 			/* @__PURE__ */ Y(Pp, {
-				open: u === "mcp",
-				onClose: p
+				open: f === "mcp",
+				onClose: h
 			}),
 			/* @__PURE__ */ Y(Yp, {
-				open: u === "ssh",
-				onClose: p
+				open: f === "ssh",
+				onClose: h
 			}),
-			u === "context" ? /* @__PURE__ */ Y(tm, {
+			f === "context" ? /* @__PURE__ */ Y(tm, {
 				open: !0,
 				sessionId: i,
-				onClose: p
+				onClose: h
 			}) : null
 		]
 	});

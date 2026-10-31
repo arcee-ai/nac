@@ -24,6 +24,14 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
   const { data: snapshot } = useSessionSnapshot(sessionId, { enabled: false });
   const uiPolicy = useUiPolicy();
   const mobile = useIsMobile();
+  // Bind the adapter to meaningful visibility/panel changes. Passive snapshot
+  // refreshes must not replace an otherwise current navigation consumer.
+  const sessionVisible =
+    !!sessionId &&
+    !!snapshot &&
+    !!entry &&
+    sessionAvailable(uiPolicy, entry.summary.behavior, entry.lineage);
+  const panelPolicy = sessionPanelPolicy(entry?.summary.behavior, snapshot?.lineage?.kind);
   const [dialog, setDialog] = useState<"mcp" | "configurations" | "ssh" | "context" | null>(null);
   const owner = useMemo(
     () => ({
@@ -57,14 +65,7 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
               navigate(routes.list());
               return true;
           }
-          if (
-            !sessionId ||
-            !snapshot ||
-            !entry ||
-            resolution.session_id !== sessionId ||
-            !sessionAvailable(uiPolicy, entry.summary.behavior, entry.lineage)
-          )
-            return false;
+          if (!sessionVisible || !sessionId || resolution.session_id !== sessionId) return false;
           const panels: Partial<Record<typeof target, SessionPanel>> = {
             "session-subagents": "delegated",
             "session-files": "files",
@@ -72,8 +73,10 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
             "session-history": "history",
           };
           const panel = panels[target];
-          const policy = sessionPanelPolicy(entry.summary.behavior, snapshot.lineage?.kind);
-          if (!panel || !(mobile ? policy.mobilePanels : policy.widePanels).includes(panel))
+          if (
+            !panel ||
+            !(mobile ? panelPolicy.mobilePanels : panelPolicy.widePanels).includes(panel)
+          )
             return false;
           // Route remains in the already rendered session. Opening its presentation
           // does not attach another session or launch a terminal.
@@ -83,7 +86,7 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
           return true;
         },
       }),
-    [runtime, sessionId, entry, snapshot, uiPolicy, mobile, owner, navigate, pathname],
+    [runtime, sessionId, sessionVisible, panelPolicy, mobile, owner, navigate, pathname],
   );
 
   const close = () => setDialog(null);

@@ -161,7 +161,7 @@ function fixture() {
     client: createNacClient({ endpoint: "/runtime", fetch }),
   });
   opened.push(runtime);
-  const view = render(
+  const tree = () => (
     <RuntimeContext.Provider value={runtime}>
       <QueryClientProvider client={runtime.queryClient}>
         <MemoryRouter initialEntries={["/session/session/insights"]}>
@@ -170,8 +170,10 @@ function fixture() {
           </ProductNavigationProvider>
         </MemoryRouter>
       </QueryClientProvider>
-    </RuntimeContext.Provider>,
+    </RuntimeContext.Provider>
   );
+  const view = render(tree());
+  const refresh = () => view.rerender(tree());
   const open = async (destination: ProductDestination) => {
     let result!: ProductNavigationResolution;
     await act(async () => {
@@ -183,7 +185,7 @@ function fixture() {
     });
     return result;
   };
-  return { ...view, runtime, fetch, open };
+  return { ...view, runtime, fetch, open, refresh };
 }
 it("reads/renders facts without navigation, then opens the same MCP dialog as the sidebar", async () => {
   const { fetch } = fixture();
@@ -253,3 +255,45 @@ it("hides cached facts and destinations when a replacement serving incarnation r
   expect(screen.queryByText("installed-runtime")).toBeNull();
   expect(screen.queryByRole("button", { name: "Open MCP settings" })).toBeNull();
 });
+
+it.each([false, true])(
+  "keeps navigation scoped during passive snapshot refresh (hidden=%s)",
+  async (hidden) => {
+    const { runtime, fetch, refresh } = fixture();
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>((done) => {
+      release = done;
+    });
+    let arrived!: () => void;
+    const inspected = new Promise<void>((done) => {
+      arrived = done;
+    });
+    fetch.mockImplementation(async (url, init) => {
+      if (String(url).includes("product-context")) {
+        arrived();
+        return pending;
+      }
+      const request = JSON.parse(String(init?.body));
+      return Response.json({
+        build,
+        session_id: request.session_id,
+        target: context.destinations.find((target) => target.destination === request.destination),
+        opened: false,
+      });
+    });
+    const action = runtime.productNavigation.open({
+      destination: "mcp-settings",
+      session_id: "session",
+      expected_build_id: "build",
+    });
+    await inspected;
+    if (hidden) state.known = false;
+    refresh();
+    await act(async () => {
+      release(Response.json(context));
+      if (hidden) await expect(action).rejects.toThrow("view changed");
+      else expect((await action).opened).toBe(true);
+    });
+    expect(screen.queryByRole("dialog", { name: "MCP servers" }) !== null).toBe(!hidden);
+  },
+);

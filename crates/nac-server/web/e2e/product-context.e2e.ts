@@ -327,6 +327,7 @@ test("a delayed old navigation receipt cannot open UI after a same-origin servin
       context.getByRole("button", { name: "Open MCP settings", exact: true }),
     ).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toHaveCount(0);
+    await capture(page, "desktop-serving-replaced");
     expect(harness.provider.requests).toHaveLength(0);
   } finally {
     release();
