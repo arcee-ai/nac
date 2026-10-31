@@ -197,10 +197,14 @@ export function SubagentPreview({
           ref={scrollRef}
           className={cn("h-full overflow-y-auto", fade, !revealed && "invisible")}
         >
-          {/* A phone's header floats over the top 56px of the scroller. */}
+          {/* A phone's header floats over the top 56px of the scroller and the
+              composer over its foot, so the run-out clears however tall it grows. */}
           <div
             ref={contentRef}
-            className={cn("flex flex-col px-4 pb-6 [&>*]:shrink-0", isMobile ? "pt-16" : "pt-2")}
+            className={cn(
+              "flex flex-col px-4 pb-[calc(var(--composer-height,0px)_+_40px)] [&>*]:shrink-0",
+              isMobile ? "pt-16" : "pt-2",
+            )}
           >
             <ChildTranscriptScope sessionId={sessionId} turns={snapshotTurns}>
               {olderFailed && hasOlder ? (

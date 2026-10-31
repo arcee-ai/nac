@@ -1,13 +1,6 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 
-import {
-  ButtonVariant,
-  HorizontalTabsItem,
-  HorizontalTabsItemSize,
-  Icon,
-  IconName,
-  StickyButton,
-} from "@/app/atoms";
+import { Button, ButtonSize, ButtonVariant, Icon, IconName, StickyButton } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { CommitPopover } from "@/app/components/inspector/CommitPopover";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
@@ -67,16 +60,16 @@ export function FilesListToolbar({
   const tabs = (
     <div className="flex flex-1 min-w-0 items-center gap-1">
       {LISTINGS.map((item) => (
-        <HorizontalTabsItem
+        <Button
           key={item.listing}
-          size={HorizontalTabsItemSize.Small}
-          active={listing === item.listing}
+          size={ButtonSize.Small}
+          variant={listing === item.listing ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
           aria-pressed={listing === item.listing}
           aria-label={item.name}
           onClick={() => selectFileListing(item.listing)}
         >
           {item.label}
-        </HorizontalTabsItem>
+        </Button>
       ))}
     </div>
   );
