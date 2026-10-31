@@ -197,9 +197,11 @@ impl Target {
             .is_none_or(|previous| previous.fingerprint != fingerprint);
         let actionable = observation["status"] != "active" && changed;
         if !changed {
-            observation.as_object_mut().unwrap().remove("proof");
-            observation.as_object_mut().unwrap().remove("attention");
-            observation["unchanged"] = json!(true);
+            if let Some(object) = observation.as_object_mut() {
+                object.remove("proof");
+                object.remove("attention");
+                object.insert("unchanged".into(), json!(true));
+            }
         }
         let cursor = Cursor {
             caller: caller.to_owned(),
@@ -213,8 +215,7 @@ impl Target {
         observation["session_id"] = json!(self.session_id);
         observation["mode"] = json!(self.mode);
         observation["resolved_identity"] = json!(self.resolved);
-        observation["after_cursor"] =
-            json!(serde_json::to_string(&cursor).expect("cursor serializes"));
+        observation["after_cursor"] = json!(json!(cursor).to_string());
         observation["resync"] = json!(self.resync);
         observation["navigation"] = json!(super::task_discovery::navigation(&self.session_id));
         (observation, actionable)
