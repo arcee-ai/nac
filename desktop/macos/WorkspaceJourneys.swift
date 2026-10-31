@@ -25,7 +25,7 @@ extension WorkspaceSmoke {
         }
         await check("markdown-math") {
             try await self.waitJS("table, formula and highlighted code", "return !!document.querySelector('table') && !!document.querySelector('mjx-container') && !!document.querySelector('pre span[style]');")
-            try await self.snapshot("rich-chat.png")
+            try await self.snapshot("rich-chat.png", expecting: .transcript(id: self.sessionID, message: "WK_RICH_COMPLETE"))
             return "Actual Markdown table, MathJax and highlighted TypeScript in production transcript"
         }
         await check("transcript") {
@@ -106,7 +106,7 @@ extension WorkspaceSmoke {
             try await self.button("All files")
             _ = try await self.js("const e=[...document.querySelectorAll('button')].find(e => e.textContent.includes('workspace.ts')); if(!e)throw Error('Missing fixture source file'); e.click(); return true;")
             try await self.waitJS("highlighted source file", "return document.body.innerText.includes('export const workspaceFileFixture = 351;');")
-            try await self.snapshot("files.png")
+            try await self.snapshot("files.png", expecting: .transcript(id: self.sessionID, message: "WK_RICH_COMPLETE"))
             return "Production Files list opens actual isolated workspace.ts"
         }
         await check("git") {
@@ -118,7 +118,7 @@ extension WorkspaceSmoke {
         await check("approvals") {
             try await self.send("WK_APPROVAL")
             try await self.waitJS("real Rust approval request", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Allow once') && document.body.innerText.includes('approval.txt');")
-            try await self.snapshot("approval.png")
+            try await self.snapshot("approval.png", expecting: .transcript(id: self.sessionID, message: "WK_RICH_COMPLETE"))
             try await self.button("Allow once")
             try await self.waitJS("approval settlement", "return document.body.innerText.includes('WK_APPROVAL_COMPLETE');")
             try await self.idle()
@@ -140,9 +140,11 @@ extension WorkspaceSmoke {
             return "Literal production /goal creation and versioned Pause; scripted provider, no real vendor schema claim (ALL-422 supplier separate)"
         }
         await check("projects") {
+            guard let projectID = try await self.js("return (await (await fetch('/projects')).json()).projects.find(p => p.name === 'Disposable Mac preview')?.project_id;") as? String else {
+                throw PreviewError.message("Missing owned fixture project")
+            }
             try await self.button("All projects")
-            try await self.waitJS("project list", "return location.hash === '#/' && document.body.innerText.includes('Disposable Mac preview');")
-            try await self.snapshot("projects.png")
+            try await self.snapshot("projects.png", expecting: .project(id: projectID, title: "Disposable Mac preview"))
             return "Actual production projects route and seeded local project"
         }
         checks["links"] = ["status": "unavailable", "detail": "Markdown renders internal/source and safe external anchors; actual external native handoff not qualified by this preview. ALL-346/348 integration remains separate."]
@@ -179,7 +181,8 @@ extension WorkspaceSmoke {
             for zoom in [1.0, 1.25, 1.5] {
                 app.webView.pageZoom = zoom
                 try await waitJS("resized production layout", "return document.documentElement.scrollWidth <= innerWidth+1 && document.querySelector('[role=combobox][aria-label=Message]').getBoundingClientRect().width > 40;")
-                try await snapshot("resize-\(Int(size.0))-zoom-\(Int(zoom * 100)).png")
+                try await snapshot("resize-\(Int(size.0))-zoom-\(Int(zoom * 100)).png",
+                    expecting: .transcript(id: sessionID, message: "WK_RICH_COMPLETE"))
             }
         }
         return "Native window sizes 900/640/1280; WKWebView pageZoom 100/125/150%; snapshots and document bounds"

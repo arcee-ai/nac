@@ -69,6 +69,20 @@ it does not change the engine protocol, selected backend or ordinary app.
 
 ## Evidence boundaries
 
+Normal workspace captures wait for the exact requested project card or session
+and expected transcript text, no conversation loader, nonzero geometry and
+fully visible ancestor styles. They then observe fresh frames and use
+`afterScreenUpdates`, retaining before/after readiness and PNG hashes. A route
+hash, sidebar label or read-only chrome alone cannot qualify a capture. On the
+existing bounded deadline the diagnostic PNG and failure remain; styles and
+pass flags are never forced. This boundary was exposed by the first actual
+macOS 14 episode; its original failed qualification remains separate evidence.
+
+`python3 -B -m unittest discover -s desktop/macos -p 'test_*.py'` includes the
+exact JavaScript capture probe's negative/positive DOM checks, using the locked
+web JSDOM dependency. Their geometry is explicitly modeled; they do not replace
+the required actual WKWebView captures or operator observations.
+
 All automatic interactions are **scripted DOM in actual system WKWebView**.
 Synthetic composition/keyboard events qualify only their named characterization
 row. They never qualify physical keyboard input, real CJK composition, system

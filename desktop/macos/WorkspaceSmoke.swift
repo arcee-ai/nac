@@ -1,6 +1,7 @@
 #if PREVIEW_SMOKE
 import AppKit
 import WebKit
+import CryptoKit
 
 /// ALL-351 only: drives the existing production document in a real WKWebView.
 /// All keyboard/composition events below are synthetic and reported as such.
@@ -171,11 +172,97 @@ final class WorkspaceSmoke {
         try await waitJS("panel \(panel)", "return location.hash.endsWith('/' + \(quote(panel))) && !!document.querySelector('[role=combobox][aria-label=Message]');")
     }
 
-    func snapshot(_ name: String) async throws {
+    enum CaptureTarget {
+        case project(id: String, title: String)
+        case transcript(id: String, message: String, readOnly: Bool = false, identityText: String? = nil)
+
+        var payload: [String: Any] {
+            switch self {
+            case let .project(id, title): return ["kind": "project", "id": id, "text": title]
+            case let .transcript(id, message, readOnly, identityText):
+                var value: [String: Any] = ["kind": "transcript", "id": id, "text": message, "readOnly": readOnly]
+                if let identityText { value["identityText"] = identityText }
+                return value
+            }
+        }
+    }
+
+    // Exercised verbatim by test_workspace_capture.mjs. A URL/chrome update is
+    // not proof that React has committed and revealed the requested content.
+    static let captureReadinessScript = #"""
+    const hash = location.hash;
+    const loading = !!document.querySelector('[aria-label="Loading conversation"]');
+    const composer = !!document.querySelector('[role=combobox][aria-label=Message]');
+    const parent = !!document.querySelector('button[aria-label$=", parent chat"]');
+    const parts = hash.split('/');
+    const route = expected.kind === 'project' ? hash === '#/' : parts[1] === 'session' && parts[2] === expected.id;
+    function findText(text) {
+      const root = document.querySelector('[data-nac-content]') || document.body;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.textContent.includes(text) && node.parentElement.closest('.overflow-auto,.overflow-y-auto') &&
+            !node.parentElement.closest('button,[role=button],header,aside,nav,[inert],[role=dialog]')) {
+          return node.parentElement;
+        }
+      }
+      return null;
+    }
+    const element = expected.kind === 'project' ?
+      [...document.querySelectorAll('[data-item-kind="project"]')].find(e =>
+        e.dataset.itemId === expected.id && e.textContent.includes(expected.text)) : findText(expected.text);
+    function inspect(element) {
+      const ancestors = [];
+      for (let e = element; e; e = e.parentElement) {
+        const s = getComputedStyle(e);
+        ancestors.push({tag:e.tagName, display:s.display, visibility:s.visibility, opacity:s.opacity});
+      }
+      const rect = element?.getBoundingClientRect();
+      const geometry = rect ? {x:rect.x,y:rect.y,width:rect.width,height:rect.height} : null;
+      const visible = !!rect && rect.width > 0 && rect.height > 0 &&
+        ancestors.every(s => s.display !== 'none' && s.visibility === 'visible' && Number(s.opacity) === 1);
+      return {visible, geometry, ancestors, content:element?.textContent.slice(0,200) || null};
+    }
+    const observed = inspect(element);
+    const identity = expected.identityText ? inspect(findText(expected.identityText)) : null;
+    const chrome = expected.kind === 'project' ? !composer :
+      expected.readOnly ? !composer && parent : composer;
+    const reason = !route ? 'requested route not current' : !chrome ? 'requested view not mounted' :
+      loading ? 'conversation still loading' : !element ? 'expected content not mounted' :
+      !observed.visible || identity && !identity.visible ? 'expected content not fully visible' : document.visibilityState !== 'visible' ?
+      'document not visible' : 'ready';
+    return {ready:reason === 'ready', reason, expected, hash, loadingConversation:loading,
+      composer, parent, visibility:document.visibilityState, ...observed, identity};
+    """#
+
+    func captureReadiness(_ target: CaptureTarget) async throws -> [String: Any] {
+        guard let value = try await app.webView.callAsyncJavaScript(Self.captureReadinessScript,
+            arguments: ["expected": target.payload], in: nil, contentWorld: .page) as? [String: Any] else {
+            throw PreviewError.message("Capture readiness returned no observation")
+        }
+        return value
+    }
+
+    func snapshot(_ name: String, expecting target: CaptureTarget? = nil) async throws {
+        var readiness: [String: Any] = ["kind": "diagnostic-only"]
+        var initialReadiness: [String: Any] = [:]
+        let started = Date()
+        var ready = target == nil
+        if let target {
+            let deadline = Date().addingTimeInterval(20)
+            repeat {
+                readiness = try await captureReadiness(target)
+                if initialReadiness.isEmpty { initialReadiness = readiness }
+                ready = readiness["ready"] as? Bool == true
+                if ready || app.failure != nil { break }
+                try await Task.sleep(nanoseconds: 50_000_000)
+            } while Date() < deadline
+        }
         // Observe a real frame without an unbounded promise: an occluded view
-        // can suspend rAF. Never bring it in front of the user's focused app.
+        // can suspend rAF. After semantic readiness, two frames allow its last
+        // React/style commit to paint. Never alter styles or reactivate the app.
         let marker = "__wkFrame" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        _ = try await js("window[\(quote(marker))]=false;requestAnimationFrame(()=>window[\(quote(marker))]=true);return true;")
+        _ = try await js("window[\(quote(marker))]=false;requestAnimationFrame(()=>requestAnimationFrame(()=>window[\(quote(marker))]=true));return true;")
         let end = Date().addingTimeInterval(1)
         var frame = false
         repeat {
@@ -183,6 +270,10 @@ final class WorkspaceSmoke {
             if frame { break }
             try await Task.sleep(nanoseconds: 50_000_000)
         } while Date() < end
+        if let target {
+            readiness = try await captureReadiness(target)
+            ready = ready && readiness["ready"] as? Bool == true
+        }
         let diagnostic = try await js("""
         return {visibility:document.visibilityState, timeline:document.timeline.currentTime,
           loadingConversation:!!document.querySelector('[aria-label="Loading conversation"]'),
@@ -191,11 +282,16 @@ final class WorkspaceSmoke {
             ancestors:[e,e.parentElement,e.parentElement.parentElement].map(n=>({opacity:getComputedStyle(n).opacity,visibility:getComputedStyle(n).visibility}))}))};
         """) as! [String: Any]
         paintDiagnostics[name] = ["animation_frame_observed": frame, "document": diagnostic,
+            "readiness": readiness, "semantic_ready": ready,
+            "initial_readiness": initialReadiness, "readiness_elapsed_ms": Date().timeIntervalSince(started) * 1000,
             "window_visible": app.window.isVisible,
             "window_occlusion_visible": app.window.occlusionState.contains(.visible)]
-        if !frame || diagnostic["loadingConversation"] as? Bool == true {
-            checks["visible-paint"] = ["status": "unavailable", "detail": "A native snapshot lacks a fresh animation frame or still has a loading transcript; visual acceptance requires a visible, painting fixture"]
-        } else if checks["visible-paint"] == nil {
+        let painting = ready && frame && diagnostic["loadingConversation"] as? Bool == false &&
+            diagnostic["visibility"] as? String == "visible" && app.window.isVisible &&
+            app.window.occlusionState.contains(.visible)
+        if !painting {
+            checks["visible-paint"] = ["status": "unavailable", "detail": "Requested content is not ready/visible or lacks a fresh frame; inspect capture readiness and retained PNG"]
+        } else if target != nil && checks["visible-paint"] == nil {
             checks["visible-paint"] = ["status": "pass", "detail": "Fresh animation frame and revealed transcript before native snapshot; inspect retained PNGs"]
         }
         record(["paint_diagnostics": paintDiagnostics, "checks": checks])
@@ -207,6 +303,24 @@ final class WorkspaceSmoke {
             throw PreviewError.message("Unable to encode WKWebView snapshot")
         }
         try png.write(to: output.appendingPathComponent("\(scenario)-\(name)"))
+        var capture = paintDiagnostics[name] as! [String: Any]
+        capture["png_sha256"] = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
+        if let target {
+            let after = try await captureReadiness(target)
+            capture["after_snapshot_readiness"] = after
+            ready = ready && after["ready"] as? Bool == true
+        }
+        capture["semantic_ready"] = ready
+        let afterSurface = app.window.isVisible && app.window.occlusionState.contains(.visible)
+        capture["window_visible_after_snapshot"] = afterSurface
+        paintDiagnostics[name] = capture
+        if !ready || !afterSurface {
+            checks["visible-paint"] = ["status": "unavailable", "detail": "Semantic capture readiness did not hold; original diagnostic PNG retained"]
+        }
+        record(["paint_diagnostics": paintDiagnostics, "checks": checks])
+        if target != nil && (!ready || !painting || !afterSurface) {
+            throw PreviewError.message("Capture \(name) did not reach and retain requested visible content")
+        }
     }
 }
 #endif

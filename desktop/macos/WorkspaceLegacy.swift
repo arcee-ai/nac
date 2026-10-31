@@ -12,7 +12,7 @@ extension WorkspaceSmoke {
             try await self.send("WK_LEGACY")
             try await self.waitJS("legacy response", "return document.body.innerText.includes('Hello from the isolated NAC Mac preview.');")
             try await self.idle()
-            try await self.snapshot("legacy.png")
+            try await self.snapshot("legacy.png", expecting: .transcript(id: self.sessionID, message: FixtureProvider.answer))
             return "Explicit NAC_ORCHESTRATION=1; three choices, legacy default, production creation/send and persisted behavior"
         }
         await check("hybrid") {
@@ -24,7 +24,7 @@ extension WorkspaceSmoke {
             try await self.send("WK_HYBRID")
             try await self.waitJS("hybrid response", "return document.body.innerText.includes('Hello from the isolated NAC Mac preview.');")
             try await self.idle()
-            try await self.snapshot("hybrid.png")
+            try await self.snapshot("hybrid.png", expecting: .transcript(id: self.sessionID, message: FixtureProvider.answer))
             return "Production New Session popover creates and runs direct-with-orchestrator; immutable behavior readback"
         }
         await check("delegation") {
@@ -42,17 +42,23 @@ extension WorkspaceSmoke {
             return {child,managed};
             """)
             self.record(["delegation_fixture_receipts": result])
+            guard let receipts = result as? [String: Any],
+                  let child = receipts["child"] as? [String: Any], let childID = child["child_session_id"] as? String,
+                  let managed = receipts["managed"] as? [String: Any], let managedID = managed["orchestrator_session_id"] as? String else {
+                throw PreviewError.message("Delegation fixture returned no exact target identities")
+            }
             try await self.navigate("delegated")
             _ = try await self.js("window.__wkReloading = true; return true;")
             self.app.webView.reload()
             try await self.waitJS("fresh delegated projection after fixture setup", "return !window.__wkReloading && !!document.querySelector('[role=combobox][aria-label=Message]');")
             if (try? await self.js("return !!document.querySelector('button[aria-label=\"Show panel\"]');")) as? Bool == true { try await self.button("Show panel") }
-            for title in ["WK traditional child", "WK managed orchestrator"] {
+            for (title, targetID, prompt) in [("WK traditional child", childID, "WK_CHILD"), ("WK managed orchestrator", managedID, "WK_MANAGED")] {
                 try await self.button(title)
                 try await self.button("Open")
                 try await self.waitJS("read-only delegated transcript", "return !document.querySelector('[role=combobox][aria-label=Message]') && !!document.querySelector('button[aria-label$=\", parent chat\"]');")
                 try await self.require("Delegated transcript exposes mutation controls", "return !document.querySelector('[aria-label=\"Set durable goal\"]') && ![...document.querySelectorAll('button')].some(b => (b.getAttribute('aria-label') || '').startsWith('Branch:'));")
-                try await self.snapshot(title == "WK traditional child" ? "traditional-transcript.png" : "managed-transcript.png")
+                try await self.snapshot(title == "WK traditional child" ? "traditional-transcript.png" : "managed-transcript.png",
+                    expecting: .transcript(id: targetID, message: FixtureProvider.answer, readOnly: true, identityText: prompt))
                 _ = try await self.js("document.querySelector('button[aria-label$=\", parent chat\"]').click();return true;")
                 try await self.waitJS("parent composer", "return !!document.querySelector('[role=combobox][aria-label=Message]');")
             }
