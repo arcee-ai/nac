@@ -19,35 +19,56 @@ export const context = "Required PR checks";
 export const actionsApp = 15368;
 export const codeowners = `* ${owners.map(({ login }) => `@${login}`).join(" ")}\n`;
 
-export function proposal() {
+export const targetRuleset = 25983949;
+
+export function requiredCheckRule() {
   return {
-    name: "dev required CI and designated review",
-    target: "branch",
-    enforcement: "active",
-    conditions: { ref_name: { include: ["refs/heads/dev"], exclude: [] } },
-    bypass_actors: [{ actor_id: 20910163, actor_type: "User", bypass_mode: "pull_request" }],
-    rules: [
-      {
-        type: "pull_request",
-        parameters: {
-          required_approving_review_count: 1,
-          dismiss_stale_reviews_on_push: true,
-          require_code_owner_review: true,
-          require_last_push_approval: false,
-          required_review_thread_resolution: true,
-          allowed_merge_methods: ["merge", "squash", "rebase"],
-        },
-      },
-      {
-        type: "required_status_checks",
-        parameters: {
-          strict_required_status_checks_policy: true,
-          do_not_enforce_on_create: false,
-          required_status_checks: [{ context, integration_id: actionsApp }],
-        },
-      },
-    ],
+    type: "required_status_checks",
+    parameters: {
+      strict_required_status_checks_policy: true,
+      do_not_enforce_on_create: false,
+      required_status_checks: [{ context, integration_id: actionsApp }],
+    },
   };
+}
+
+function target(snapshot) {
+  validateSnapshot(snapshot);
+  const matches = snapshot.rulesets.filter((item) => item.id === targetRuleset);
+  const current = matches[0];
+  if (matches.length !== 1 || current.source_type !== "Repository" ||
+      current.source !== snapshot.repository || current.target !== "branch" ||
+      current.enforcement !== "active" ||
+      digest(current.conditions) !== digest({ ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } }) ||
+      !Array.isArray(current.bypass_actors) || current.bypass_actors.length !== 0 ||
+      !Array.isArray(current.rules)) {
+    throw new Error("current target ruleset differs: rebaseline with human review");
+  }
+  const reviews = current.rules.filter((rule) => rule.type === "pull_request");
+  const review = reviews[0]?.parameters;
+  if (reviews.length !== 1 || review.required_approving_review_count < 1 ||
+      !review.require_code_owner_review || !review.require_last_push_approval ||
+      !review.required_review_thread_resolution || !review.require_extra_approval_for_unattributed_changes) {
+    throw new Error("current review protections are missing");
+  }
+  return current;
+}
+
+function payload(ruleset) {
+  return Object.fromEntries(["name", "target", "enforcement", "conditions", "bypass_actors", "rules"]
+    .map((key) => [key, structuredClone(ruleset[key])]));
+}
+
+// All existing fields/rules remain byte-for-byte equivalent as JSON values.
+// Never use the historical ALL-450 review/bypass proposal against current settings.
+export function proposal(snapshot) {
+  const current = target(snapshot);
+  if (current.rules.some((rule) => rule.type === "required_status_checks")) {
+    throw new Error("target already has status checks: review a fresh baseline");
+  }
+  const proposed = payload(current);
+  proposed.rules.push(requiredCheckRule());
+  return proposed;
 }
 
 function canonical(value) {
@@ -93,7 +114,7 @@ export function capture(repository) {
   const prefix = `repos/${repository}`;
   const repositoryInfo = one(prefix);
   const branch = one(`${prefix}/branches/dev`);
-  const rulesets = pages(`${prefix}/rulesets?per_page=100`).map((item) =>
+  const rulesets = pages(`${prefix}/rulesets?includes_parents=true&per_page=100`).map((item) =>
     one(`${prefix}/rulesets/${item.id}`),
   );
   const ownerPermissions = owners.map(({ login }) =>
@@ -126,6 +147,7 @@ export function capture(repository) {
     checks: pages(`${prefix}/commits/${branch.commit.sha}/check-runs?per_page=100`)
       .flatMap((page) => page.check_runs)
       .map((item) => ({
+        id: item.id,
         name: item.name,
         head_sha: item.head_sha,
         status: item.status,
@@ -172,46 +194,27 @@ export function settingsIdentity(snapshot) {
 }
 
 export const qualificationCases = [
-  "rust-pass",
-  "web-pass",
-  "workflow-pass",
-  "docs-pass",
-  "managed-pass",
-  "api-drift-blocked",
-  "assets-drift-blocked",
-  "browser-failure-blocked",
-  "image-failure-blocked",
-  "failed-blocked",
-  "pending-blocked",
-  "cancelled-blocked",
-  "missing-blocked",
-  "stale-check-blocked",
-  "unexpected-skip-blocked",
-  "allison-approval",
-  "aleksiej-approval",
-  "eric-approval",
-  "self-approval-blocked",
-  "outside-only-blocked",
-  "author-excluded-requests",
-  "bot-owner-requests",
-  "stale-review-dismissed",
-  "unresolved-conversation-blocked",
-  "two-layer-stack-base-codeowners",
-  "allison-own-failed-pr-override",
-  "allison-own-pending-pr-override",
-  "ordinary-override-blocked",
-  "automation-override-blocked",
-  "direct-push-blocked",
+  "rust-pass", "web-pass", "workflow-pass", "docs-pass", "managed-pass",
+  "api-drift-blocked", "assets-drift-blocked", "browser-failure-blocked",
+  "image-failure-blocked", "image-unknown-blocked", "strict-image-baseline-qualified",
+  "failed-blocked", "pending-blocked", "cancelled-blocked", "missing-blocked",
+  "stale-check-blocked", "wrong-app-blocked", "unexpected-skip-blocked",
+  ...owners.map(({ login }) => `${login}-approval`), "self-approval-blocked",
+  "outside-only-blocked", "author-excluded-requests", "bot-owner-requests",
+  "last-push-self-approval-blocked", "unattributed-extra-approval-required",
+  "unresolved-conversation-blocked", "two-layer-stack-base-codeowners",
+  "ordinary-bypass-blocked", "automation-bypass-blocked", "direct-push-blocked",
   "inherited-protections-preserved",
 ];
 
-export function validateQualification(receipt, now = Date.now()) {
+export function validateQualification(receipt, baseline, now = Date.now()) {
   if (
     receipt.schema_version !== 1 ||
     receipt.kind !== "github-platform-qualification" ||
     receipt.fixture_repository === "arcee-ai/nac" ||
     !/^[\w.-]+\/[\w.-]+$/.test(receipt.fixture_repository ?? "") ||
-    receipt.payload_sha256 !== digest(proposal())
+    receipt.payload_sha256 !== digest(proposal(baseline)) ||
+    receipt.baseline_sha256 !== settingsIdentity(baseline)
   )
     throw new Error("qualification identity/payload mismatch");
   const age = now - Date.parse(receipt.completed_at);
@@ -237,33 +240,85 @@ export function validateQualification(receipt, now = Date.now()) {
 export function activationPlan(before, current, receipt, now = Date.now()) {
   validateSnapshot(before);
   validateSnapshot(current);
-  validateQualification(receipt, now);
+  validateQualification(receipt, before, now);
   if (settingsIdentity(before) !== settingsIdentity(current))
     throw new Error("settings drift: review a fresh baseline");
   const age = now - Date.parse(current.captured_at);
   if (!(age >= 0 && age < 60 * 60 * 1000))
     throw new Error("refresh current settings within one hour");
   if (current.codeowners !== codeowners) throw new Error("CODEOWNERS has not landed on dev");
-  const check = current.checks.find(
-    (item) =>
-      item.name === context &&
-      item.app?.id === actionsApp &&
-      item.head_sha === current.dev_sha &&
-      item.status === "completed" &&
-      item.conclusion === "success",
-  );
-  if (!check) throw new Error("required GitHub Actions context has not succeeded on current dev");
-  if (current.rulesets.some((item) => item.name === proposal().name))
-    throw new Error("existing target ruleset requires explicit reviewed update");
+  // The newest Actions run wins. A previous successful attempt cannot hide a
+  // pending, cancelled or failed replacement on the same head.
+  const checks = current.checks.filter((item) => item.name === context && item.app?.id === actionsApp);
+  if (checks.some((item) => !Number.isSafeInteger(item.id) || item.id < 1))
+    throw new Error("missing check-run identity");
+  const check = checks.sort((a, b) => b.id - a.id)[0];
+  if (!check || check.head_sha !== current.dev_sha || check.status !== "completed" ||
+      check.conclusion !== "success")
+    throw new Error("newest required Actions context has not succeeded on current dev");
+  const plan = dryRunPlan(before);
   return {
-    repository: current.repository,
+    ...plan,
     dev_sha: current.dev_sha,
-    baseline_sha256: settingsIdentity(current),
     qualification_sha256: digest(receipt),
-    proposed_ruleset: proposal(),
-    instruction:
-      "Review this payload and inherited rules; a separately authorized human may create this additional ruleset. Capture after settings and compare. No mutation was performed.",
+    activation: "separate human authorization required; no mutation performed",
   };
+}
+
+export function dryRunPlan(before) {
+  const proposed = proposal(before);
+  return {
+    mode: "dry-run-only",
+    repository: before.repository,
+    ruleset_id: targetRuleset,
+    baseline_sha256: settingsIdentity(before),
+    before_ruleset: payload(target(before)),
+    proposed_ruleset: proposed,
+    proposed_sha256: digest(proposed),
+    prerequisites: [
+      "ALL-505 fresh complete strict combined-image and unchanged-image qualification",
+      "Complete real safe-repository actor/stack matrix bound to this payload and baseline",
+      "Landed CODEOWNERS and newest successful exact Actions context on current dev",
+      "Fresh full settings comparison immediately before application; abort on drift",
+      "Explicit human activation authorization; no policy or bypass override",
+    ],
+  };
+}
+
+function rulesetIdentity(item) {
+  const result = { id: item.id, source_type: item.source_type, source: item.source, ...payload(item) };
+  // GitHub/UI may reorder rules; preserve exact rule values and multiplicity.
+  result.rules = [...result.rules].sort((a, b) => digest(a).localeCompare(digest(b)));
+  return result;
+}
+
+// Verify actual observed readback separately from the intended payload. This is
+// also the precondition for rolling back only our added rule, never later edits.
+export function verifyReadback(before, after, now = Date.now()) {
+  validateSnapshot(before);
+  validateSnapshot(after);
+  const age = now - Date.parse(after.captured_at);
+  if (!(age >= 0 && age < 60 * 60 * 1000))
+    throw new Error("refresh observed readback within one hour before requesting rollback");
+  const proposed = proposal(before);
+  const expectedRules = [...before.effective_dev_rules, {
+    ...requiredCheckRule(), ruleset_id: targetRuleset,
+    ruleset_source_type: "Repository", ruleset_source: before.repository,
+  }];
+  const expected = before.rulesets.map((item) => item.id === targetRuleset
+    ? rulesetIdentity({ ...item, ...proposed }) : rulesetIdentity(item));
+  const order = (items) => items.map((item) => digest(item)).sort();
+  if (digest(order(after.rulesets.map(rulesetIdentity))) !== digest(order(expected)) ||
+      digest(order(after.effective_dev_rules)) !== digest(order(expectedRules)) ||
+      digest(after.classic_protection) !== digest(before.classic_protection) ||
+      digest(after.merge_methods) !== digest(before.merge_methods) ||
+      digest(after.owners) !== digest(before.owners) || after.codeowners !== before.codeowners ||
+      after.default_branch !== before.default_branch) {
+    throw new Error("readback differs from the exact additive plan; do not roll back over drift");
+  }
+  return { verified: true, ruleset_id: targetRuleset, proposed_sha256: digest(proposed),
+    rollback_ruleset: payload(target(before)), instruction: "Rollback also requires separate human authorization and a fresh matching readback." };
+
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -273,34 +328,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     fs.writeFileSync(args[1], `${JSON.stringify(capture(args[0]), null, 2)}\n`, { flag: "wx" });
   } else if (command === "plan" && args.length === 1) {
     const baseline = read(args[0]);
-    validateSnapshot(baseline);
-    console.log(
-      JSON.stringify(
-        {
-          mode: "dry-run-only",
-          baseline_sha256: settingsIdentity(baseline),
-          preserved_rulesets: baseline.rulesets,
-          proposed_additional_ruleset: proposal(),
-          prerequisites: [
-            "Merged contexts emitted successfully on current dev",
-            "Current dev CODEOWNERS",
-            "Complete safe-fixture platform matrix",
-            "Fresh settings comparison",
-            "Explicit human activation authorization",
-          ],
-        },
-        null,
-        2,
-      ),
-    );
+    console.log(JSON.stringify(dryRunPlan(baseline), null, 2));
   } else if (command === "activation-plan" && args.length === 2) {
     const before = read(args[0]);
     console.log(
       JSON.stringify(activationPlan(before, capture(before.repository), read(args[1])), null, 2),
     );
+  } else if (command === "verify-readback" && args.length === 2) {
+    console.log(JSON.stringify(verifyReadback(read(args[0]), read(args[1])), null, 2));
   } else {
     throw new Error(
-      "usage: pr-ruleset.mjs snapshot <owner/repo> <new-file> | plan <before.json> | activation-plan <before.json> <qualification.json>; all commands are read-only",
+      "usage: pr-ruleset.mjs snapshot <owner/repo> <new-file> | plan <before.json> | activation-plan <before.json> <qualification.json> | verify-readback <before.json> <after.json>; all commands are read-only",
     );
   }
 }
