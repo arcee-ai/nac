@@ -306,13 +306,14 @@ async fn retained_creation_cancel_before_publication_rolls_back_session_and_inpu
 
 async fn native_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, String) {
     let (mut command, path) = command(label).await;
+    let source = std::fs::canonicalize(path.parent().unwrap()).unwrap();
     crate::store::insert_project(
         &path,
         crate::store::NewProject {
             project_id: "native-project".into(),
             name: None,
             description: None,
-            cwd: "/repo".into(),
+            cwd: source.clone(),
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
@@ -340,7 +341,7 @@ async fn native_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, Str
         &path,
         "baseline",
         "native-project",
-        Path::new("/repo"),
+        &source,
         false,
         request,
     )
@@ -419,7 +420,7 @@ async fn native_creation_lost_ack_commits_once_without_goal_or_human_intent() {
         &path,
         "baseline",
         "native-project",
-        Path::new("/repo"),
+        &receipt.source_cwd,
         false,
         receipt.request.clone(),
     )
