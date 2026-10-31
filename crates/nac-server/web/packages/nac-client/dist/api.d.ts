@@ -169,7 +169,7 @@ export declare function createNacApi(nacClient: NacClient): {
         organization?: string | null;
     }>;
     listManagedGitHubRepositories: (signal?: AbortSignal) => Promise<{
-        repositories: import("./openapi.generated.js").components["schemas"]["GitHubRepositoryResponse"][];
+        repositories: import("./openapi.generated.js").components["schemas"] /** Connects and lists tools without saving anything. */["GitHubRepositoryResponse"][];
     }>;
     listManagedGitHubBranches: (owner: string, repository: string, signal?: AbortSignal) => Promise<{
         branches: string[];
@@ -303,6 +303,18 @@ export declare function createNacApi(nacClient: NacClient): {
         parent?: string | null;
         path: string;
         truncated: boolean;
+    }>;
+    /**
+     * Creates one named folder inside a listed local directory. Never retried
+     * here: a lost answer leaves the outcome unknown, so the caller looks
+     * before it offers to try again.
+     */
+    createFolder: (parent: string, name: string) => Promise<{
+        path: string;
+    }>;
+    /** The same, on the SSH host the picker is browsing — never locally. */
+    createSshFolder: (target: SshTarget, parent: string, name: string) => Promise<{
+        path: string;
     }>;
     /** Validates the key as a side effect: a bad key cannot list models. */
     listProviderModels: (payload: ProviderModelsRequest, signal?: AbortSignal) => Promise<{
