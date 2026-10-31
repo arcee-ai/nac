@@ -1,0 +1,113 @@
+{
+  "mode": "dry-run-only",
+  "repository": "arcee-ai/nac",
+  "ruleset_id": 25983949,
+  "baseline_sha256": "88fc9563cec2fb1f84b916ad837c4b602580bf88b80eb7f0bc35ef62f9994f27",
+  "before_ruleset": {
+    "name": "main",
+    "target": "branch",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      }
+    },
+    "bypass_actors": [],
+    "rules": [
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "non_fast_forward"
+      },
+      {
+        "type": "pull_request",
+        "parameters": {
+          "required_approving_review_count": 1,
+          "dismiss_stale_reviews_on_push": false,
+          "required_reviewers": [],
+          "require_code_owner_review": true,
+          "dismissal_restriction": {
+            "enabled": false,
+            "allowed_actors": []
+          },
+          "require_last_push_approval": true,
+          "required_review_thread_resolution": true,
+          "require_extra_approval_for_unattributed_changes": true,
+          "allowed_merge_methods": [
+            "merge",
+            "squash",
+            "rebase"
+          ]
+        }
+      }
+    ]
+  },
+  "proposed_ruleset": {
+    "name": "main",
+    "target": "branch",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      }
+    },
+    "bypass_actors": [],
+    "rules": [
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "non_fast_forward"
+      },
+      {
+        "type": "pull_request",
+        "parameters": {
+          "required_approving_review_count": 1,
+          "dismiss_stale_reviews_on_push": false,
+          "required_reviewers": [],
+          "require_code_owner_review": true,
+          "dismissal_restriction": {
+            "enabled": false,
+            "allowed_actors": []
+          },
+          "require_last_push_approval": true,
+          "required_review_thread_resolution": true,
+          "require_extra_approval_for_unattributed_changes": true,
+          "allowed_merge_methods": [
+            "merge",
+            "squash",
+            "rebase"
+          ]
+        }
+      },
+      {
+        "type": "required_status_checks",
+        "parameters": {
+          "strict_required_status_checks_policy": true,
+          "do_not_enforce_on_create": false,
+          "required_status_checks": [
+            {
+              "context": "Required PR checks",
+              "integration_id": 15368
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "proposed_sha256": "dbdf31959bf6cead69d0d44e66c4100e8d49486faffda100207aa72dcbd660fa",
+  "prerequisites": [
+    "ALL-505 fresh complete strict combined-image and unchanged-image qualification",
+    "Complete real safe-repository actor/stack matrix bound to this payload and baseline",
+    "Landed CODEOWNERS and newest successful exact Actions context on current dev",
+    "Fresh full settings comparison immediately before application; abort on drift",
+    "Explicit human activation authorization; no policy or bypass override"
+  ]
+}

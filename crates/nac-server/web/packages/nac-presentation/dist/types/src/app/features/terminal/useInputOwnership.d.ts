@@ -30,3 +30,9 @@ export declare function useInputOwnership(session: string, source: ExecutionStat
         revision: string;
     }>, Error>>;
 };
+/**
+ * Who holds a live human shell's input, for chrome that only names it. The open
+ * terminal already polls its own ownership, so its readers pass `poll` off and
+ * share that cache.
+ */
+export declare function useShellController(session: string, source: ExecutionStatus | undefined, poll: boolean): "human" | "agent" | undefined;

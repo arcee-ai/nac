@@ -1,15 +1,13 @@
 import type React from "react";
 import { cn } from "../../lib/cn";
 
-interface CoverBackgroundProps {
+interface CoverBackgroundProps extends Omit<React.ComponentPropsWithRef<"div">, "children"> {
   open?: boolean;
   zIndex?: number;
   /** Alpha of the black scrim. */
   opacity?: number;
   /** Backdrop blur radius in pixels; 0 leaves what is behind sharp. */
   blur?: number;
-  className?: string;
-  onClick?: () => void;
 }
 
 /**
@@ -22,11 +20,12 @@ const CoverBackground: React.FC<CoverBackgroundProps> = ({
   opacity = 0.25,
   blur = 2,
   className = "",
-  onClick,
+  style,
+  ...props
 }) => (
   <div
     className={cn(
-      "fixed inset-0 transition-opacity duration-150 ease-out",
+      "fixed inset-0 transition-opacity duration-150 ease-out motion-reduce:transition-none",
       open ? "opacity-100" : "opacity-0 pointer-events-none",
       className,
     )}
@@ -34,8 +33,9 @@ const CoverBackground: React.FC<CoverBackgroundProps> = ({
       background: `rgba(0, 0, 0, ${opacity})`,
       zIndex,
       backdropFilter: blur ? `blur(${blur}px)` : undefined,
+      ...style,
     }}
-    onClick={onClick}
+    {...props}
   />
 );
 

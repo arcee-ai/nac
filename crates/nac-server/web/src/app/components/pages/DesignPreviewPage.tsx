@@ -13,6 +13,7 @@ import { ModelLoaderSection } from "@/app/components/pages/design-preview/ModelL
 import { NoticesSection } from "@/app/components/pages/design-preview/NoticesSection";
 import { NumericInputsSection } from "@/app/components/pages/design-preview/NumericInputsSection";
 import { PopoverSection } from "@/app/components/pages/design-preview/PopoverSection";
+import { ReasoningSection } from "@/app/components/pages/design-preview/ReasoningSection";
 import { SessionAvatarsSection } from "@/app/components/pages/design-preview/SessionAvatarsSection";
 import { SessionIdentitySection } from "@/app/components/pages/design-preview/SessionIdentitySection";
 import { SubagentCardSection } from "@/app/components/pages/design-preview/SubagentCardSection";
@@ -34,6 +35,7 @@ export default function DesignPreviewPage() {
       </header>
 
       <main className="p-6 flex flex-col gap-6 max-w-[1100px]">
+        <ReasoningSection />
         <ButtonsSection />
         <BadgesSection />
         <InputsSection onOpenModal={() => setModalOpen(true)} />

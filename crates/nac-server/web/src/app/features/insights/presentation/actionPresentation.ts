@@ -17,7 +17,7 @@ const ROW_ICONS: Record<ActionKind, IconName> = {
   "web-search": IconName.Search,
   "web-fetch": IconName.Globe,
   "create-goal": IconName.Flag,
-  "get-goal": IconName.Important,
+  "get-goal": IconName.Goal,
   "update-goal": IconName.Checklist,
   "spawn-agent": IconName.Plane,
   "spawn-orchestrator": IconName.Orchestrator,

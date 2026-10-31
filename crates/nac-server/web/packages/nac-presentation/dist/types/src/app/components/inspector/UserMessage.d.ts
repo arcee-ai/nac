@@ -11,11 +11,6 @@ interface UserMessageProps {
      */
     invokedSkills?: string[] | null;
     /**
-     * Shown when the transcript has no time of its own for the message. The
-     * transcript's time for `messageIndex` wins, in the chat's English format.
-     */
-    timestamp?: string | null;
-    /**
      * Raw snapshot index the actions address. Absent while the message is still
      * only in flight, which is what disables the revert affordance.
      */
@@ -35,9 +30,9 @@ interface UserMessageProps {
     onRevert?: ((messageIndex: number, text: string) => void) | null;
     /** Disable destructive / network actions while a run is in flight. */
     actionsDisabled?: boolean;
-    /** Parent-owned delegated transcripts expose copy/time but no mutation affordances. */
+    /** Parent-owned delegated transcripts expose copy but no mutation affordances. */
     readOnly?: boolean;
 }
 /** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
-export declare const UserMessage: import("react").MemoExoticComponent<({ timestamp, ...props }: UserMessageProps) => import("react").JSX.Element>;
+export declare const UserMessage: import("react").MemoExoticComponent<({ text, terminalSelection, sessionId, pending, invokedSkills, messageIndex, onRefresh, onRevert, actionsDisabled, readOnly, }: UserMessageProps) => import("react").JSX.Element>;
 export {};

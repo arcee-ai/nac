@@ -2,6 +2,7 @@ import React from "react";
 interface BottomSheetProps {
     open: boolean;
     onClose: () => void;
+    closeOnEscape?: boolean;
     zIndex?: number;
     className?: string;
     children?: React.ReactNode;

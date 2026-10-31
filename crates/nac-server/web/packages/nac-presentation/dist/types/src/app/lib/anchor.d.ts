@@ -17,43 +17,48 @@ export declare enum AnchorPlacement {
 }
 /** Offset between the trigger and the box, in pixels. */
 export declare const ANCHOR_GAP = 8;
-/** For a box positioned `absolute` inside a `relative` trigger wrapper. */
-export declare const anchorClasses: {
-    "top-right": string;
-    "top-center": string;
-    "top-left": string;
-    "center-left": string;
-    "bottom-left": string;
-    "bottom-center": string;
-    "bottom-right": string;
-    "center-right": string;
-    "right-top": string;
+/** The same placements as the side and alignment Radix positions a box by. */
+export declare const anchorSides: {
+    "top-right": {
+        side: "top";
+        align: "start";
+    };
+    "top-center": {
+        side: "top";
+        align: "center";
+    };
+    "top-left": {
+        side: "top";
+        align: "end";
+    };
+    "center-left": {
+        side: "left";
+        align: "center";
+    };
+    "bottom-left": {
+        side: "bottom";
+        align: "end";
+    };
+    "bottom-center": {
+        side: "bottom";
+        align: "center";
+    };
+    "bottom-right": {
+        side: "bottom";
+        align: "start";
+    };
+    "center-right": {
+        side: "right";
+        align: "center";
+    };
+    "right-top": {
+        side: "right";
+        align: "start";
+    };
 };
-/** Region a floating box is kept inside, in viewport coordinates. */
-export interface AnchorBounds {
-    left: number;
-    top: number;
-    right: number;
-    bottom: number;
-}
 /**
- * The ancestors that clip an element, nearest first. Collected once per opening
- * because reading the cascade is the expensive half of `visibleBounds`, while
- * the rects it needs go stale on every scroll.
+ * The ancestors that clip an element, nearest first. A portalled box escapes
+ * their clipping, but it still belongs inside the box its trigger lives in
+ * rather than over that box's chrome — or, worse, over nothing at all.
  */
 export declare function clippingAncestors(element: Element | null): HTMLElement[];
-/**
- * The region those ancestors leave visible, or null when nothing clips. A
- * portalled box escapes their clipping, but it still belongs inside the box its
- * trigger lives in rather than over that box's chrome — or, worse, over nothing
- * at all.
- */
-export declare function visibleBounds(clippers: HTMLElement[]): AnchorBounds | null;
-/**
- * Viewport coordinates for a portalled box, kept inside the window — which the
- * CSS-only variant cannot do — and inside `within` when one is given.
- */
-export declare function anchorCoords(placement: AnchorPlacement, trigger: DOMRect, box: DOMRect, within?: AnchorBounds | null): {
-    left: number;
-    top: number;
-};

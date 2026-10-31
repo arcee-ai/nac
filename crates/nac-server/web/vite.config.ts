@@ -38,6 +38,10 @@ export const API_PREFIXES = [
 ];
 const API_TARGET = process.env.NAC_API_URL ?? "http://127.0.0.1:3210";
 
+// Radix reaches these two packages only from its modal mode, which the
+// primitives never enter; the stub fails loudly if one ever does.
+const RADIX_MODAL_STUB = path.resolve(__dirname, "src/app/ui/radix-modal-stub.ts");
+
 export function apiProxy(target: string) {
   return Object.fromEntries(API_PREFIXES.map((prefix) => [prefix, { target, changeOrigin: true }]));
 }
@@ -169,7 +173,11 @@ export default defineConfig(({ command }) => {
       PACKAGE_VERSION: JSON.stringify(MATHJAX_VERSION),
     },
     resolve: {
-      alias: { "@": path.resolve(__dirname, "src") },
+      alias: {
+        "@": path.resolve(__dirname, "src"),
+        "react-remove-scroll": RADIX_MODAL_STUB,
+        "aria-hidden": RADIX_MODAL_STUB,
+      },
     },
     optimizeDeps: {
       // Keep Locator unbundled so `locatorCopyWithLine` can rewrite its

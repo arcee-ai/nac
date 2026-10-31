@@ -1,3 +1,4 @@
+import "./navigation.css";
 import { IconName } from "@/app/atoms";
 import { RowActionButton } from "@/app/components/projects/RowActionButton";
 
@@ -5,7 +6,7 @@ interface ChatSessionActionsProps {
   title: string;
   pinned?: boolean;
   /**
-   * Bare 20px glyphs for the mobile row. Desktop stays small: its 24px target
+   * 44px phone targets with a shared narrow-screen action layout. Desktop keeps a 24px target; it
    * is the WCAG 2.5.8 minimum.
    */
   isMobile?: boolean;
@@ -24,7 +25,7 @@ export function ChatSessionActions({
   onDelete,
 }: ChatSessionActionsProps) {
   return (
-    <>
+    <div className={isMobile ? "nac-session-actions flex items-center gap-0" : "contents"}>
       {onPin ? (
         <RowActionButton
           icon={pinned ? IconName.Unpin : IconName.Pin}
@@ -53,6 +54,6 @@ export function ChatSessionActions({
           onClick={onDelete}
         />
       ) : null}
-    </>
+    </div>
   );
 }

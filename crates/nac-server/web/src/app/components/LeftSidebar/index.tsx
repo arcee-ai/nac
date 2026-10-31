@@ -8,6 +8,7 @@ import { MOD } from "@/app/lib/shortcuts";
 
 import { LeftSidebarPanel } from "./LeftSidebarPanel";
 import { LeftSidebarRail } from "./LeftSidebarRail";
+import { MobileSearchModal } from "./MobileSearchModal";
 import { useSidebarCommands } from "./useSidebarCommands.tsx";
 
 /** Collapsed icon column, matching the Figma rail. */
@@ -40,6 +41,7 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
     });
   }, [isDesktop, storedOpen, storeOpen]);
   const commands = useSidebarCommands();
+  const [searching, setSearching] = useState(false);
 
   useLayoutEffect(() => {
     setSidebarOffset(isMobile ? 0 : isOpen ? SIDEBAR_PANEL_WIDTH : SIDEBAR_RAIL_WIDTH);
@@ -67,6 +69,7 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
           <LeftSidebarRail
             commands={commands}
             onToggle={toggle}
+            onSearch={() => setSearching(true)}
             toggleKeys={TOGGLE_KEYS}
             variant={variant}
           />
@@ -84,11 +87,19 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
           isOpen={isOpen}
           commands={commands}
           onToggle={toggle}
+          onSearch={() => setSearching(true)}
           toggleKeys={TOGGLE_KEYS}
           variant={variant}
         />
       </div>
       {commands.modals}
+      <MobileSearchModal
+        open={searching}
+        onClose={() => setSearching(false)}
+        kind={variant === "projects" ? "projects" : "chats"}
+        activeSessionId={commands.sessionId}
+        activeProjectId={commands.projectId}
+      />
     </div>
   );
 }

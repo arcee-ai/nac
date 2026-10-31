@@ -50,7 +50,7 @@ export function RightSidebarRail({
     >
       <div className="flex flex-col items-center gap-4 [&>*]:shrink-0">
         <RailButton label="Show panel" onClick={onOpen}>
-          <Icon iconName={IconName.SidebarChevronLeft} />
+          <Icon iconName={IconName.ShowSidePanel} />
         </RailButton>
         <div className="flex flex-col items-center gap-4">
           {panels.map((name) => {

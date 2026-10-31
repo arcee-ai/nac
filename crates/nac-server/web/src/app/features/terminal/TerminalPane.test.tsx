@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeContext } from "@/app/runtime/RuntimeContext";
 import { standaloneRuntime } from "@/app/runtime/nativeRuntime";
-import { TerminalPane, type TerminalPaneProps } from "./TerminalPane";
+import { TerminalPane } from "./TerminalPane";
 import type {
+  ExecutionHistoryEntry,
   UserTerminalFrameResponse,
   UserTerminalResponse,
   ExecutionStatus,
@@ -79,10 +80,14 @@ function pending(signal?: AbortSignal): Promise<never> {
 function fixture(
   status: UserTerminalResponse = terminal,
   sources?: ExecutionStatus[],
-  history?: TerminalPaneProps["history"],
+  history: ExecutionHistoryEntry[] = [],
 ) {
   const api = {
     ...standaloneRuntime.api,
+    listExecutionHistory: vi.fn(async () => ({
+      protocol_version: 1,
+      history: { entries: history, limit: 32, older_entries_omitted: false },
+    })),
     listExecutions: vi.fn(async () => ({
       protocol_version: 1,
       executions: sources ?? [
@@ -187,7 +192,7 @@ function fixture(
   const pane = () => (
     <RuntimeContext.Provider value={runtime}>
       <QueryClientProvider client={client}>
-        <TerminalPane sessionId="session" onReviewSelection={review} history={history} />
+        <TerminalPane sessionId="session" onReviewSelection={review} />
       </QueryClientProvider>
     </RuntimeContext.Provider>
   );
@@ -204,6 +209,15 @@ beforeEach(() => {
     configurable: true,
     value: { ready: Promise.resolve() },
   });
+  // No breakpoint matches, so the pane lays out for a desktop.
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -217,6 +231,25 @@ afterEach(() => {
   for (const client of clients.splice(0)) client.clear();
   vi.unstubAllGlobals();
 });
+
+/** A click anywhere around the grid focuses xterm, as a click inside it does. */
+function focusTerminal() {
+  fireEvent.click(screen.getByRole("region", { name: "Interactive terminal" }));
+}
+/** The trigger toggles, so an already open menu is left open. */
+function openOptions() {
+  const trigger = screen.getByRole("button", { name: "Terminal options" });
+  if (trigger.getAttribute("aria-expanded") !== "true") fireEvent.click(trigger);
+}
+function chooseOption(name: string) {
+  openOptions();
+  fireEvent.click(screen.getByRole("button", { name }));
+}
+/** An open menu reads its rows on every render, so it shows a change as it lands. */
+function findOption(name: string) {
+  openOptions();
+  return screen.findByRole("button", { name });
+}
 
 const readOnlySource: ExecutionStatus = {
   id: "opaque-shell",
@@ -244,7 +277,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     async (refresh) => {
       const f = fixture();
       await screen.findByText("Connected");
-      fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+      focusTerminal();
       const focused = document.activeElement;
       let written!: () => void;
       f.api.inputUserTerminal.mockImplementationOnce(async (_session, _id, _body, signal) => {
@@ -290,7 +323,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
   it("updates controller revision without replacing observation or the focused renderer", async () => {
     const f = fixture();
     await screen.findByText("Connected");
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     const focused = document.activeElement;
     await act(async () => {
       f.client.setQueryData(inputOwnershipKey("session", "opaque-shell"), {
@@ -323,9 +356,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     });
     f.refresh();
     if (change === "execution")
-      fireEvent.change(screen.getByRole("combobox", { name: "Shell" }), {
-        target: { value: source.id },
-      });
+      fireEvent.click(screen.getByRole("button", { name: "Shell 2, running" }));
     await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
     expect(renderer.dispose).toHaveBeenCalledOnce();
     expect(f.api.detachUserTerminal).toHaveBeenCalledOnce();
@@ -357,7 +388,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     f.api.pullUserTerminal.mockResolvedValueOnce(frame);
     await waitFor(() => expect(renderer.write).toHaveBeenCalledTimes(1));
     expect(f.api.pullUserTerminal).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => {
       renderer.keyboard?.("\u0003");
     });
@@ -428,7 +459,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Acknowledge failure and enable fresh input" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => renderer.keyboard?.("must not send\r"));
     expect(renderer.options.disableStdin).toBe(true);
     expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
@@ -449,17 +480,17 @@ describe("terminal pane lifetime and explicit user actions", () => {
     const f = fixture();
     await screen.findByText("Connected");
     f.api.inputUserTerminal.mockRejectedValueOnce(new Error("reply lost"));
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => {
       renderer.keyboard?.("old command\r");
     });
     await screen.findByRole("button", { name: "Acknowledge failure and enable fresh input" });
     expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(1);
     expect(renderer.options.disableStdin).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    chooseOption("Reconnect");
     await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
     await screen.findByText("Connected");
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => {
       renderer.keyboard?.("must not send\r");
     });
@@ -469,7 +500,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
       screen.getByRole("button", { name: "Acknowledge failure and enable fresh input" }),
     );
     await waitFor(() => expect(renderer.options.disableStdin).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => {
       renderer.keyboard?.("new\r");
     });
@@ -483,7 +514,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
   it("retains unconfirmed delivery across source-view remount without replay", async () => {
     const f = fixture();
     await screen.findByText("Connected");
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     f.api.inputUserTerminal.mockRejectedValueOnce(new Error("receipt lost"));
     await act(async () => renderer.keyboard?.("old\r"));
     await screen.findByRole("button", { name: "Acknowledge failure and enable fresh input" });
@@ -497,7 +528,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     );
     await screen.findByText("Connected");
     await screen.findByRole("button", { name: "Acknowledge failure and enable fresh input" });
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => renderer.keyboard?.("must not send\r"));
     expect(f.api.inputUserTerminal).toHaveBeenCalledOnce();
     expect(renderer.options.disableStdin).toBe(true);
@@ -517,17 +548,17 @@ describe("terminal pane lifetime and explicit user actions", () => {
     expect(renderer.options.disableStdin).toBe(false);
     expect(screen.queryByRole("button", { name: "Enable terminal input" })).toBeNull();
     expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => {
       renderer.keyboard?.("fresh\r");
     });
     expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    chooseOption("Reconnect");
     await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
     await screen.findByText("Connected");
     expect(renderer.options.disableStdin).toBe(false);
     expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => {
       renderer.keyboard?.("new\r");
     });
@@ -542,7 +573,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     await screen.findByText("Connected");
     await act(async () => renderer.generatedData?.("\u001b[9;1R"));
     expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => renderer.generatedData?.("\u001b[9;1R"));
     expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
     await act(async () => renderer.keyboard?.("fresh\r"));
@@ -554,7 +585,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     await screen.findByText("Connected");
     expect(f.review).not.toHaveBeenCalled();
     expect(renderer.selection).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Review selected text" }));
+    chooseOption("Review Selected text");
     expect(f.review).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "session",
@@ -579,7 +610,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     const f = fixture();
     await screen.findByText("Connected");
     renderer.selection.mockReturnValueOnce("");
-    fireEvent.click(screen.getByRole("button", { name: "Review selected text" }));
+    chooseOption("Review Selected text");
     await screen.findByText("Select text in the terminal before reviewing it.");
     expect(f.review).not.toHaveBeenCalled();
   });
@@ -589,7 +620,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     f.api.pullUserTerminal.mockRejectedValueOnce(new Error("observer expired"));
     await screen.findByText("Disconnected");
     expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    chooseOption("Reconnect");
     await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
     expect(f.api.detachUserTerminal).toHaveBeenCalledTimes(1);
     expect(f.api.terminateTerminal).not.toHaveBeenCalled();
@@ -609,17 +640,18 @@ describe("terminal pane lifetime and explicit user actions", () => {
   it("observes a retained agent PTY without input, process resize, retention or selection authority", async () => {
     const f = fixture(terminal, [readOnlySource]);
     await screen.findByText("Connected");
-    expect(screen.getByRole("option", { name: /Agent PTY/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "PTY 1, Agent, running" })).toBeTruthy();
     expect(screen.getByLabelText("Input controller").textContent).toBe("Input: Agent");
-    expect(screen.getByRole("button", { name: "Take control" })).toBeTruthy();
+    openOptions();
+    expect(screen.getByRole("button", { name: "Take Control" })).toBeTruthy();
     await act(async () => {
       renderer.keyboard?.("must not send\r");
     });
     expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
     expect(f.api.resizeUserTerminal).not.toHaveBeenCalled();
     expect(f.api.openUserTerminal).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: "Review selected text" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Stop execution" }));
+    expect(screen.queryByRole("button", { name: "Review Selected text" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop PTY 1" }));
     await waitFor(() =>
       expect(f.api.terminateTerminal).toHaveBeenCalledWith("session", "opaque-shell"),
     );
@@ -662,41 +694,48 @@ describe("terminal pane lifetime and explicit user actions", () => {
     const other = { ...readOnlySource, id: "other-shell" };
     const f = fixture(terminal, [human, other]);
     await screen.findByText("Connected");
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     f.api.inputUserTerminal.mockRejectedValueOnce(new Error("reply lost"));
     await act(async () => {
       renderer.keyboard?.("uncertain command\r");
     });
     await screen.findByRole("button", { name: "Acknowledge failure and enable fresh input" });
-    fireEvent.change(screen.getByRole("combobox", { name: "Shell" }), {
-      target: { value: other.id },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "PTY 2, Agent, running" }));
     await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
-    fireEvent.change(screen.getByRole("combobox", { name: "Shell" }), {
-      target: { value: human.id },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Shell 1, running" }));
     await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(3));
     await screen.findByText("Connected");
     expect(renderer.options.disableStdin).toBe(true);
     await screen.findByRole("button", { name: "Acknowledge failure and enable fresh input" });
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => {
       renderer.keyboard?.("fresh typing before acknowledgement\r");
     });
     expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(1);
   });
-  it("opens historical output without inheriting live controls for the same source", async () => {
+  it("opens recent output without inheriting live controls for the same source", async () => {
     const human = { ...readOnlySource, origin: "human" as const, input: true, resize: true };
-    const f = fixture(terminal, [human], (observe) => (
-      <button onClick={() => observe(human)}>Reopen historical source</button>
-    ));
+    const entry: ExecutionHistoryEntry = {
+      id: "recent-shell",
+      started_at_epoch_ms: "1000",
+      outcome: null,
+      command: null,
+      execution: human,
+      output: { availability: "retained", retained_start: "0", retained_end: "10" },
+    };
+    const f = fixture(terminal, [human], [entry]);
     await screen.findByText("Connected");
-    fireEvent.click(screen.getByRole("button", { name: "Reopen historical source" }));
+    const recent = screen.getByRole("region", { name: "Recent terminal activity" });
+    fireEvent.click(await within(recent).findByRole("button"));
     await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
     await screen.findByText("Connected");
     expect(renderer.options.disableStdin).toBe(true);
-    expect(screen.queryByRole("button", { name: "Close shell" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Review selected text" })).toBeNull();
+    // The live row keeps its own close; the recent one offers none.
+    expect(within(recent).getAllByRole("button")).toHaveLength(1);
+    openOptions();
+    expect(screen.getByRole("button", { name: "Reconnect" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Review Selected text" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Give Agent Control" })).toBeNull();
     expect(screen.queryByLabelText("Terminal input ownership")).toBeNull();
     expect(f.api.transferTerminalInputControl).not.toHaveBeenCalled();
     await act(async () => {
@@ -704,7 +743,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     });
     expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
     expect(f.api.terminateTerminal).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Return to live source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Shell 1, running" }));
     await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(3));
     await screen.findByText("Connected");
     expect(renderer.options.disableStdin).toBe(false);
@@ -713,9 +752,9 @@ describe("terminal pane lifetime and explicit user actions", () => {
     const f = fixture(terminal, [readOnlySource]);
     await screen.findByText("Connected");
     expect(renderer.options.disableStdin).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Take control" }));
+    chooseOption("Take Control");
     await waitFor(() => expect(renderer.options.disableStdin).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => renderer.keyboard?.("π<RET>\r"));
     expect(f.api.inputControlledTerminal).toHaveBeenCalledOnce();
     expect(f.api.inputControlledTerminal.mock.calls[0][2]).toEqual({
@@ -729,8 +768,8 @@ describe("terminal pane lifetime and explicit user actions", () => {
       controller: "human",
       acknowledge_uncertainty: false,
     });
-    fireEvent.click(screen.getByRole("button", { name: "Give agent control" }));
-    await screen.findByRole("button", { name: "Take control" });
+    chooseOption("Give Agent Control");
+    await findOption("Take Control");
     await act(async () => renderer.keyboard?.("stale\r"));
     expect(renderer.options.disableStdin).toBe(true);
     expect(f.api.inputControlledTerminal).toHaveBeenCalledOnce();
@@ -740,8 +779,8 @@ describe("terminal pane lifetime and explicit user actions", () => {
   it("reclaims a human shell and ignores late older control data", async () => {
     const f = fixture();
     await screen.findByText("Connected");
-    fireEvent.click(screen.getByRole("button", { name: "Give agent control" }));
-    await screen.findByRole("button", { name: "Reclaim input" });
+    chooseOption("Give Agent Control");
+    await findOption("Reclaim Input");
     expect(renderer.options.disableStdin).toBe(true);
     // GET still returns revision 1/Human after POST revision 2/Agent.
     await act(async () => {
@@ -750,18 +789,47 @@ describe("terminal pane lifetime and explicit user actions", () => {
       });
     });
     expect(screen.getByLabelText("Input controller").textContent).toBe("Input: Agent");
-    fireEvent.click(screen.getByRole("button", { name: "Reclaim input" }));
+    // The row and the header both tag the shell while the agent holds it.
+    expect(screen.getByRole("button", { name: "Shell 1, Agent, running" })).toBeTruthy();
+    expect(screen.getAllByText("Agent")).toHaveLength(2);
+    chooseOption("Reclaim Input");
     await waitFor(() => expect(renderer.options.disableStdin).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    expect(screen.getByRole("button", { name: "Shell 1, running" })).toBeTruthy();
+    expect(screen.queryByText("Agent")).toBeNull();
+    focusTerminal();
     await act(async () => renderer.keyboard?.("fresh\r"));
     expect(f.api.inputControlledTerminal.mock.calls[0][2].expected_revision).toBe("3");
     expect(f.api.attachUserTerminal).toHaveBeenCalledOnce();
+  });
+  it("tags a listed human shell whose input the agent holds", async () => {
+    const human = { ...readOnlySource, origin: "human" as const, input: true, resize: true };
+    const f = fixture(terminal, [human, { ...human, id: "handed-shell" }]);
+    await screen.findByText("Connected");
+    await waitFor(() =>
+      expect(f.api.getTerminalInputControl).toHaveBeenCalledWith(
+        "session",
+        "handed-shell",
+        expect.anything(),
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Shell 2, running" })).toBeTruthy();
+    f.api.getTerminalInputControl.mockImplementation(async (_session, id) => ({
+      controller: id === "handed-shell" ? "agent" : "human",
+      revision: "2",
+      in_flight: false,
+      frozen: false,
+    }));
+    await act(() =>
+      f.client.invalidateQueries({ queryKey: inputOwnershipKey("session", "handed-shell") }),
+    );
+    expect(await screen.findByRole("button", { name: "Shell 2, Agent, running" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Shell 1, running" })).toBeTruthy();
   });
   it("reconciles an unknown control transfer without retrying the action", async () => {
     const f = fixture(terminal, [readOnlySource]);
     await screen.findByText("Connected");
     f.api.transferTerminalInputControl.mockRejectedValueOnce(new Error("control reply lost"));
-    fireEvent.click(screen.getByRole("button", { name: "Take control" }));
+    chooseOption("Take Control");
     await screen.findByText(/control reply lost/);
     await waitFor(() => expect(f.api.getTerminalInputControl).toHaveBeenCalledTimes(2));
     expect(f.api.transferTerminalInputControl).toHaveBeenCalledOnce();
@@ -776,7 +844,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
       outcome: "rejected",
       error: "controller changed",
     });
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     await act(async () => renderer.keyboard?.("rejected\r"));
     expect(f.api.inputControlledTerminal).toHaveBeenCalledOnce();
     expect(
@@ -792,7 +860,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
   it("binds confirmed recovery revision and focuses only fresh input after asynchronous ACK", async () => {
     const f = fixture();
     await screen.findByText("Connected");
-    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    focusTerminal();
     f.api.inputUserTerminal.mockRejectedValueOnce(new Error("receipt lost"));
     await act(async () => renderer.keyboard?.("old\r"));
     const acknowledge = await screen.findByRole("button", {

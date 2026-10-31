@@ -8,9 +8,16 @@ import { extendTailwindMerge } from "tailwind-merge";
  * every `cn("text-micro", "text-basic-tertiary")` silently lost its size.
  * Declaring the sizes puts them in the font-size group, where they only ever
  * displace each other.
+ *
+ * `rounded-interaction` reads the `--interaction-rounded` token from
+ * `theme/setup.css`. Undeclared, it is not a radius to tailwind-merge, so a
+ * `rounded-*` passed after it would be kept beside it instead of replacing it.
  */
 const twMerge = extendTailwindMerge({
   extend: {
+    theme: {
+      radius: ["interaction"],
+    },
     classGroups: {
       "font-size": [{ text: ["big", "medium", "small", "micro"] }],
     },

@@ -83,18 +83,6 @@ export function createNacApi(nacClient) {
             body: { ...target, path, hidden },
             signal,
         }),
-        /**
-         * Creates one named folder inside a listed local directory. Never retried
-         * here: a lost answer leaves the outcome unknown, so the caller looks
-         * before it offers to try again.
-         */
-        createFolder: (parent, name) => request("POST", "/fs/folders", {
-            body: { parent, name },
-        }),
-        /** The same, on the SSH host the picker is browsing — never locally. */
-        createSshFolder: (target, parent, name) => request("POST", "/ssh/folders", {
-            body: { ...target, parent, name },
-        }),
         /** Validates the key as a side effect: a bad key cannot list models. */
         listProviderModels: (payload, signal) => request("POST", "/providers/models", { body: payload, signal }),
         /**
