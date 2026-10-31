@@ -1,3 +1,4 @@
+import { useSessionNameDisclosure } from "@/app/atoms/session-name-disclosure";
 import { useRef, useState } from "react";
 
 import {
@@ -247,6 +248,7 @@ export function ProjectCard({
 }: ProjectCardProps) {
   const sessionTitle = useSessionTitle();
   const facts = factsFor(item, sessionTitle);
+  const disclosure = useSessionNameDisclosure(facts.title);
   const configError = facts.representative?.model_config_error;
 
   const isDesktop = useIsDesktop();
@@ -275,7 +277,7 @@ export function ProjectCard({
     onOpen();
   };
 
-  return (
+  return disclosure.hint(
     <div
       ref={cardRef}
       data-item-id={facts.id}
@@ -290,6 +292,7 @@ export function ProjectCard({
       role="button"
       tabIndex={0}
       aria-pressed={selected}
+      aria-label={facts.orphan ? facts.title : undefined}
       onClick={activate}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return;
@@ -422,6 +425,7 @@ export function ProjectCard({
 
       <div className="relative flex flex-wrap items-center justify-between w-full min-h-6 gap-2">
         <Metrics facts={facts} />
+        {facts.orphan ? disclosure.action : null}
         {showActions ? (
           <ProjectCardActions
             orphan={facts.orphan}
@@ -445,6 +449,8 @@ export function ProjectCard({
           <Provenance facts={facts} />
         )}
       </div>
-    </div>
+      {facts.orphan ? disclosure.overlay : null}
+    </div>,
+    !facts.orphan,
   );
 }

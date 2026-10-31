@@ -1341,6 +1341,10 @@
     max-height: 520px;
   }
 
+[data-nac-runtime]:is(.max-h-\[calc\(100dvh-16px\)\]), [data-nac-runtime] .max-h-\[calc\(100dvh-16px\)\] {
+    max-height: calc(100dvh - 16px);
+  }
+
 [data-nac-runtime]:is(.max-h-\[calc\(100vh-2rem\)\]), [data-nac-runtime] .max-h-\[calc\(100vh-2rem\)\] {
     max-height: calc(100vh - 2rem);
   }
@@ -1707,6 +1711,10 @@
 
 [data-nac-runtime]:is(.max-w-\[calc\(100vw-32px\)\]), [data-nac-runtime] .max-w-\[calc\(100vw-32px\)\] {
     max-width: calc(100vw - 32px);
+  }
+
+[data-nac-runtime]:is(.max-w-\[min\(360px\,calc\(100vw-16px\)\)\]),[data-nac-runtime] .max-w-\[min\(360px\,calc\(100vw-16px\)\)\] {
+    max-width: min(360px, 100vw - 16px);
   }
 
 [data-nac-runtime]:is(.max-w-fit), [data-nac-runtime] .max-w-fit {
@@ -4092,6 +4100,11 @@
     user-select: none;
   }
 
+[data-nac-runtime]:is(.select-text), [data-nac-runtime] .select-text {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
 [data-nac-runtime]:is(.\[nac\:threads\]), [data-nac-runtime] .\[nac\:threads\] {
     nac: threads;
   }
@@ -4146,6 +4159,10 @@
 
     [data-nac-runtime]:is(.group-hover\:pr-8:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:pr-8:is(:where(.group):hover *) {
       padding-right: calc(var(--spacing) * 8);
+    }
+
+    [data-nac-runtime]:is(.group-hover\:pr-14:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:pr-14:is(:where(.group):hover *) {
+      padding-right: calc(var(--spacing) * 14);
     }
 
     [data-nac-runtime]:is(.group-hover\:text-btn-secondary-hovered:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:text-btn-secondary-hovered:is(:where(.group):hover *) {
@@ -4294,6 +4311,10 @@
 
 [data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:pr-8:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:pr-8:is(:where(.group):has(:focus-visible) *) {
     padding-right: calc(var(--spacing) * 8);
+  }
+
+[data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:pr-14:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:pr-14:is(:where(.group):has(:focus-visible) *) {
+    padding-right: calc(var(--spacing) * 14);
   }
 
 [data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:opacity-100:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:opacity-100:is(:where(.group):has(:focus-visible) *) {
@@ -4711,6 +4732,13 @@
 
     [data-nac-runtime]:is(.max-md\:py-14), [data-nac-runtime] .max-md\:py-14 {
       padding-block: calc(var(--spacing) * 14);
+    }
+  }
+
+@media not all and (min-width: 40rem) {
+    [data-nac-runtime]:is(.max-sm\:\!size-11), [data-nac-runtime] .max-sm\:\!size-11 {
+      width: calc(var(--spacing) * 11) !important;
+      height: calc(var(--spacing) * 11) !important;
     }
   }
 

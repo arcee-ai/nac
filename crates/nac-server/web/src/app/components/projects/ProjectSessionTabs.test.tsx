@@ -2,7 +2,7 @@
 
 import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
 import { ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -81,7 +81,7 @@ describe("project session tab behavior identity", () => {
 
     for (const [title, behavior, icon] of expected) {
       const tab = screen.getByRole("button", { name: `${title}, ${behavior}` });
-      expect(tab.getAttribute("title")).toBe(title);
+      expect(tab.getAttribute("title")).toBeNull();
       expect(tab.querySelector(`[data-session-behavior-icon="${icon}"]`)).toBeTruthy();
       expect(tab.querySelector("[data-session-tab-badge]")).toBeNull();
       expect(tab.closest(".chat-session-tab")?.className).toContain("w-full");
@@ -98,13 +98,13 @@ describe("project session tab behavior identity", () => {
     expect(active.getAttribute("aria-current")).toBe("page");
     expect(active.className).toContain("pl-2");
     expect(active.className).toContain("pr-2");
-    expect(active.className).toContain("group-hover:pr-8");
-    expect(active.className).toContain("group-has-[:focus-visible]:pr-8");
+    expect(active.className).toContain("group-hover:pr-14");
+    expect(active.className).toContain("group-has-[:focus-visible]:pr-14");
     const close = screen.getByRole("button", {
       name: "Close Implement connection status feedback",
     });
-    expect(close.className).toContain("absolute");
-    expect(close.className).toContain("right-1");
+    expect(close.parentElement?.className).toContain("absolute");
+    expect(close.parentElement?.className).toContain("right-1");
 
     expect(screen.queryByText("Orchestrator")).toBeNull();
     expect(screen.queryByText("Direct")).toBeNull();
@@ -117,10 +117,10 @@ describe("project session tab behavior identity", () => {
       '[data-session-behavior-icon="orchestrator"]',
     );
     fireEvent.mouseEnter(orchestratorIcon!);
-    expect(screen.getByText("NAC orchestrator").closest(".tooltip-box")).toBeTruthy();
-    fireEvent.mouseLeave(orchestratorIcon!);
+    expect(screen.getByRole("tooltip").textContent).toContain("NAC orchestrator");
+    fireEvent.keyDown(orchestrator, { key: "Escape" });
 
-    fireEvent.focus(active);
-    expect(screen.getByText("Direct coding agent").closest(".tooltip-box")).toBeTruthy();
+    act(() => active.focus());
+    expect(screen.getByRole("tooltip").textContent).toContain("Direct coding agent");
   });
 });

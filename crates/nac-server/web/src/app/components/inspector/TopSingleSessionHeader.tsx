@@ -1,3 +1,6 @@
+import SessionNameDisclosure, {
+  useSessionNameDisclosure,
+} from "@/app/atoms/session-name-disclosure";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect } from "react";
@@ -110,6 +113,7 @@ export function TopSingleSessionHeader({
     ? sessions.find((item) => item.summary.session_id === lineage.parent_session_id)
     : undefined;
   const parentTitle = parent ? sessionTitle(parent.summary) : "Parent session";
+  const parentDisclosure = useSessionNameDisclosure(parentTitle);
   const openParent = () => {
     if (lineage) navigate(routes.session(lineage.parent_session_id, "delegated"));
   };
@@ -133,28 +137,31 @@ export function TopSingleSessionHeader({
           <div className="flex min-w-0 flex-1 items-center gap-1">
             {lineage ? (
               <>
-                <Button
-                  variant={ButtonVariant.Tertiary}
-                  size={ButtonSize.Medium}
-                  className="min-w-0 max-w-[120px]"
-                  aria-label={`${parentTitle}, parent chat`}
-                  title={parentTitle}
-                  onClick={openParent}
-                >
-                  <span className="truncate underline">{parentTitle}</span>
-                </Button>
+                {parentDisclosure.hint(
+                  <Button
+                    variant={ButtonVariant.Tertiary}
+                    size={ButtonSize.Medium}
+                    className="min-w-0 max-w-[120px]"
+                    aria-label={`${parentTitle}, parent chat`}
+                    onClick={openParent}
+                  >
+                    <span className="truncate underline">{parentTitle}</span>
+                  </Button>,
+                )}
+                {parentDisclosure.action}
+                {parentDisclosure.overlay}
                 <Icon iconName={IconName.Right} size={16} className="shrink-0 text-btn-secondary" />
               </>
             ) : null}
             <div className="flex min-w-0 items-center gap-2">
-              <p
+              <SessionNameDisclosure
+                key={sessionId}
+                name={title}
                 className={cn(
-                  "header-sm min-w-0 truncate",
+                  "header-sm min-w-0 truncate text-left",
                   running ? "text-shimmer-basic" : "text-basic-primary",
                 )}
-              >
-                {title}
-              </p>
+              />
               {/* Beside the side panel the chat can drop to 200px, too narrow
                   for the title and a whole badge, so the badge truncates
                   rather than run under Usage. */}

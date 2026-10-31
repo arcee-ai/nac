@@ -1,3 +1,4 @@
+import SessionNameDisclosure from "@/app/atoms/session-name-disclosure";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -161,14 +162,14 @@ export function SubagentPreview({
           {showBehaviorIcon ? (
             <Icon iconName={icon} size={20} className="shrink-0 text-basic-secondary" />
           ) : null}
-          <p
+          <SessionNameDisclosure
+            key={sessionId}
+            name={title}
             className={cn(
-              "label-small min-w-0 flex-1 truncate",
+              "label-small min-w-0 flex-1 truncate text-left",
               running ? "text-shimmer-basic" : "text-basic-primary",
             )}
-          >
-            {title}
-          </p>
+          />
           <Button
             size={ButtonSize.Small}
             variant={ButtonVariant.Ghost}
