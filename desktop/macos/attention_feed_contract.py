@@ -523,7 +523,7 @@ def real_case(kind, binary, swift, root, artifact):
                 *([engine.stop] if engine else []), provider.close)
 
 
-def mock_frame(engine, sequence=0, decision=False):
+def mock_frame(engine, sequence=0, decision=False, silent_review=None):
     source = dict(session_id='mock-session', epoch='30000000-0000-0000-0000-000000000003')
     boundary = dict(engine=engine, epoch='20000000-0000-0000-0000-000000000002', sequence=sequence)
     if sequence == 0:
@@ -532,14 +532,15 @@ def mock_frame(engine, sequence=0, decision=False):
                                                              reviews='available', topology='available'))])
     else:
         frame = dict(kind='record', boundary=boundary, source=source, source_revision=sequence,
-                     change=dict(kind='decision_pending' if decision else 'decision_resolved',
-                                 decision=dict(kind='permission', request_id='mock-request')), new_attention=decision)
+                     change=dict(kind='decision_pending' if decision or silent_review else 'decision_resolved',
+                                 decision=(dict(kind='review', review_id=silent_review) if silent_review else
+                                           dict(kind='permission', request_id='mock-request'))), new_attention=decision)
     return ('event: attention\nid: '+engine+':'+boundary['epoch']+':'+str(sequence)+'\ndata: '+json.dumps(frame)+'\n\n').encode()
 
 
 def transport_cases(swift, artifact):
     results = []
-    for case in ('resolved-click', 'denied', 'muted', 'focused', 'malformed', 'oversized', 'redirect', 'late-owner', 'sink-failure', 'late-center', 'privacy'):
+    for case in ('resolved-click', 'denied', 'muted', 'focused', 'malformed', 'oversized', 'redirect', 'late-owner', 'sink-failure', 'late-center', 'privacy', 'silent-pending-capacity'):
         incarnation, release, ended = str(uuid.uuid4()), threading.Event(), threading.Event()
         calls, redirect_calls, consumer, second, result = [], [], None, None, None
         def handler(h):
@@ -549,6 +550,10 @@ def transport_cases(swift, artifact):
                 return
             payload = b'x' * (8*1024*1024+1) if case == 'oversized' else (
                 b'event: attention\ndata: {broken}\n\n' if case == 'malformed' else mock_frame(incarnation))
+            if case == 'silent-pending-capacity':
+                # Faulted/out-of-contract stream: the actual Rust producer
+                # independently enforces 1024 identities before serialization.
+                payload += b''.join(mock_frame(incarnation, n, silent_review=f'r{n:04d}') for n in range(1, 1026))
             if case == 'late-owner':
                 assert release.wait(10)
                 payload += mock_frame(incarnation, 1, True)
@@ -581,9 +586,15 @@ def transport_cases(swift, artifact):
                 release.set()
                 done = consumer.wait(lambda s: len(s['notices']) == 1)
                 assert done['notices'][0]['engine'].lower() == other
-            elif case in ('malformed', 'oversized', 'redirect'):
+            elif case in ('malformed', 'oversized', 'redirect', 'silent-pending-capacity'):
                 done = consumer.wait(lambda s: s['status']['phase'] == 'unavailable')
                 assert not done['notices'] and len(calls) == 1
+                if case == 'silent-pending-capacity':
+                    done = consumer.wait(lambda s: s['status']['phase'] == 'unavailable' and
+                                         s['status']['tasks'] == s['status']['retries'] == s['status']['draining_sessions'] == 0)
+                    assert all(done['status'][key] == 0 for key in ('sources', 'identities', 'pending', 'bytes'))
+                    assert done['active'] == done['pending_delivery_callbacks'] == 0
+                    assert not done['notices'] and len(calls) == 1
                 if case == 'redirect':
                     assert not redirect_calls and done['status']['retries'] == 0
             else:
@@ -623,6 +634,14 @@ def transport_cases(swift, artifact):
             closed = cleanup(*([consumer.stop] if consumer else []), server.close, *([second.close] if second else []))
             if result is not None:
                 result['cleanup'] = closed
+                if case == 'silent-pending-capacity':
+                    rows = [json.loads(line) for line in (artifact/(case+'-swift.jsonl')).read_text().splitlines()]
+                    states = [row['status'] for row in rows if 'status' in row]
+                    assert any(s['identities'] == s['pending'] == 1024 for s in states)
+                    assert max(s['identities'] for s in states) == max(s['pending'] for s in states) == 1024
+                    result['capacity_proof'] = dict(faulted_out_of_contract_stream=True, silent_accepted=1024,
+                                                  rejected_record=1025, effects=0, terminal_unavailable=True,
+                                                  drained_before_retirement=True)
     return results
 
 

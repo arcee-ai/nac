@@ -127,6 +127,13 @@ supported-OS qualification. These fixtures establish no actual app/WKWebView,
 signed OS delivery, trusted input, Focus behavior or measured idle CPU/wakeups.
 Every remaining full ALL-350 native acceptance gate below remains open.
 
+The 1,024 identity union includes silent current pending decisions as well as
+seen identities, candidates and current work. A labelled faulted-stream fixture
+accepts 1,024 silent review identities, rejects the 1,025th, and verifies terminal
+unavailable state with drained transport and empty retained evidence. The actual
+Rust producer independently enforces its own identity cap; this fixture tests
+the consumer's defensive bound rather than a conforming producer sequence.
+
 ## Historical fixture evidence
 
 - `crates/nac-core/src/events.rs`: `SessionEventEnvelope` carries session,

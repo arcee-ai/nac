@@ -50,6 +50,7 @@ struct AttentionFeedTests {
         do { try operation(); preconditionFailure("Invalid input was accepted") } catch { }
     }
     static func main() throws {
+        if !(try silentPendingCapacityF1()) { exit(1) }
         try arbitraryByteBoundaries()
         try exactIntegerAndNullableSchema()
         try semanticDecisionsAndReplay()
@@ -58,7 +59,60 @@ struct AttentionFeedTests {
         try boundsAndMalformedFrames()
         try maximumWriterEnvelope()
         disabledLifetime()
-        print("{\"suite\":\"attention-feed\",\"scenarios\":8,\"result\":\"passed\",\"actual_http\":false,\"native_os_delivery\":false}")
+        print("{\"suite\":\"attention-feed\",\"scenarios\":9,\"result\":\"passed\",\"actual_http\":false,\"native_os_delivery\":false}")
+    }
+    static func silentPendingCapacityF1() throws -> Bool {
+        var projection = AttentionProjection()
+        _ = try projection.accept(decode(baseline()), engine: engine)
+        for index in 1...AttentionWire.identities {
+            let review = ["kind": "review", "review_id": String(format: "r%04d", index)]
+            check(try projection.accept(decode(record(UInt64(index),
+                ["kind": "decision_pending", "decision": review], fresh: false)), engine: engine).isEmpty)
+        }
+        let countAtLimit = projection.identities
+        let pendingAtLimit = projection.pending
+        let metadataAtLimit = projection.metadataBytes
+        var rejected = false
+        do {
+            _ = try projection.accept(decode(record(1025,
+                ["kind": "decision_pending", "decision": ["kind": "review", "review_id": "r1025"]],
+                fresh: false)), engine: engine)
+        } catch AttentionFeedError.capacity { rejected = true }
+        // This is defensive projection coverage for faulted/out-of-contract
+        // input. The actual Rust producer independently caps these identities.
+        guard countAtLimit == 1024, pendingAtLimit == 1024, rejected else {
+            let message = "F1: identitiesAtLimit=\(countAtLimit), pendingAtLimit=\(pendingAtLimit), metadataAtLimit=\(metadataAtLimit), rejected1025=\(rejected), pendingAfter=\(projection.pending)\n"
+            FileHandle.standardError.write(Data(message.utf8))
+            return false
+        }
+        check(metadataAtLimit < AttentionWire.metadataBytes / 10)
+
+        var same = AttentionProjection()
+        _ = try same.accept(decode(baseline()), engine: engine)
+        let review = ["kind": "review", "review_id": "r0001"]
+        for sequence: UInt64 in 1...2 {
+            check(try same.accept(decode(record(sequence, ["kind": "decision_pending", "decision": review])), engine: engine).isEmpty)
+            check(same.identities == 1 && same.pending == 1)
+        }
+        check(try same.accept(decode(record(3, ["kind": "decision_resolved", "decision": review])), engine: engine).isEmpty)
+        check(same.identities == 1 && same.pending == 0)
+        check(try same.accept(decode(record(4, ["kind": "decision_pending", "decision": review])), engine: engine).isEmpty)
+        check(same.identities == 1 && same.pending == 1)
+        for revision: UInt64 in 1...2 {
+            check(try same.accept(decode(record(revision + 4,
+                ["kind": "decision_pending", "decision": question(revision)])), engine: engine).isEmpty)
+            check(same.identities == 2 && same.pending == 2)
+        }
+        let nextEpoch = "40000000-0000-0000-0000-000000000004"
+        var replacement = snapshot(pending: [review, question(2)], facets: availability("unknown", "unknown"))
+        replacement["source"] = source("session", nextEpoch)
+        check(try same.accept(decode(record(7, revision: 0, ["kind": "source_replaced", "snapshot": replacement],
+            from: source("session", nextEpoch))), engine: engine).isEmpty)
+        check(same.identities == 2 && same.pending == 2)
+        check(try same.accept(decode(record(8, revision: 1, ["kind": "decision_pending", "decision": review],
+            from: source("session", nextEpoch))), engine: engine).isEmpty)
+        check(same.identities == 2 && same.pending == 2)
+        return true
     }
     static func arbitraryByteBoundaries() throws {
         let first = baseline([snapshot("session-🌳")])

@@ -11,6 +11,8 @@ struct AttentionProjection {
     var identities: Int {
         seen.union(candidates.keys).union(sources.values.compactMap { snapshot in
             snapshot.work.map { workKey(snapshot.source.session_id, $0) }
+        }).union(sources.values.flatMap { snapshot in
+            snapshot.pending.map { Key(session: snapshot.source.session_id, identity: $0.key) }
         }).count
     }
     var metadataBytes: Int { sources.values.reduce(0) { $0 + $1.bytes } }
