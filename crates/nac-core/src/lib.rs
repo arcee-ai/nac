@@ -145,3 +145,5 @@ pub mod test_support {
 
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+pub mod product_context;
