@@ -1,0 +1,8 @@
+{
+  "all-341-macos26": {
+    "source_sha": "1a4f9c31f27b4656897673084f3440e05373393d",
+    "profile": "macos26",
+    "suite": "preview",
+    "scenario_count": 29
+  }
+}
