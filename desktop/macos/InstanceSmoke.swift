@@ -176,25 +176,46 @@ final class InstanceSmoke {
             throw InstanceFixtureError("Workspace lost its identified loopback origin")
         }
         var ready = false
+        var observationErrors: [String] = []
+        var observationErrorCount = 0
         while ProcessInfo.processInfo.systemUptime < deadline {
-            guard engine.receipt?.incarnation == receipt.incarnation,
-                  engine.receipt?.store == expectedStore, failure() == nil,
-                  workspaceOrigin(baseURL()) == origin else {
-                throw InstanceFixtureError("Workspace changed its serving incarnation or store while loading")
-            }
+            try requireWorkspaceBinding(incarnation: receipt.incarnation, origin: origin)
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
-            let observation = try await observeWorkspace(origin: origin, timeout: min(1, remaining))
-            evidence["workspace_observation"] = observation
-            write()
-            if observation["ready"] as? Bool == true, !webView.isHidden, !webView.isLoading,
-               window.isVisible, workspaceOrigin(webView.url) == origin, webView.url?.path == "/",
-               workspaceOrigin(baseURL()) == origin,
-               engine.receipt?.incarnation == receipt.incarnation,
-               engine.receipt?.store == expectedStore, failure() == nil {
-                ready = true
-                break
+            guard remaining > 0 else { break }
+            var observation: [String: Any]?
+            var decoded: InstanceWorkspaceObservation?
+            do {
+                let value = try await observeWorkspace(origin: origin, timeout: min(1, remaining))
+                guard let parsed = decodeInstanceWorkspaceObservation(value) else {
+                    evidence["workspace_observation"] = value
+                    throw InstanceFixtureError("Malformed workspace observation; readiness remains unknown")
+                }
+                observation = value
+                decoded = parsed
+            } catch {
+                observationErrorCount += 1
+                let cause = String(error.localizedDescription.prefix(1500))
+                if observationErrors.count < 16 { observationErrors.append(cause) }
+                evidence["workspace_observation_errors"] = observationErrors
+                evidence["workspace_observation_error_count"] = observationErrorCount
+                evidence["workspace_observation_last_error"] = cause
+                write()
             }
-            try await Task.sleep(nanoseconds: 50_000_000) // Poll semantics; elapsed time never grants readiness.
+            if let observation { evidence["workspace_observation"] = observation; write() }
+            // A failed read grants no authority to continue after native retirement.
+            try requireWorkspaceBinding(incarnation: receipt.incarnation, origin: origin)
+            if observation != nil {
+                if let errors = decoded?.errors, !errors.isEmpty {
+                    throw InstanceFixtureError("Production workspace reported JavaScript or resource errors")
+                }
+                if ProcessInfo.processInfo.systemUptime < deadline,
+                   readyWorkspaceObservation(decoded, origin: origin), !webView.isLoading {
+                    ready = true
+                    break
+                }
+            }
+            let pause = min(0.05, deadline - ProcessInfo.processInfo.systemUptime)
+            if pause > 0 { try await Task.sleep(nanoseconds: UInt64(pause * 1_000_000_000)) }
         }
         guard ready else {
             throw InstanceFixtureError("Timed out waiting for the identified production workspace semantics")
@@ -206,6 +227,27 @@ final class InstanceSmoke {
             evidence["engine_identity"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(identity))
         }
         evidence["workspace_activated"] = true
+    }
+
+    private func requireWorkspaceBinding(incarnation: String, origin: String) throws {
+        try Task.checkCancellation()
+        guard engine.pid > 0, engine.receipt?.incarnation == incarnation,
+              engine.receipt?.store == expectedStore, failure() == nil,
+              !webView.isHidden, window.isVisible,
+              workspaceOrigin(baseURL()) == origin, workspaceOrigin(webView.url) == origin,
+              webView.url?.path == "/" else {
+            throw InstanceFixtureError("Workspace lost its serving binding or native presentation while loading")
+        }
+    }
+
+    private func readyWorkspaceObservation(_ value: InstanceWorkspaceObservation?, origin: String) -> Bool {
+        guard let value, value.ready, value.diagnostics_installed, value.errors?.isEmpty == true,
+              value.ready_state == "complete", value.body_length > 80, value.body_text.utf16.count > 80,
+              !value.body_text.contains("Internal Server Error"), !value.root_html.isEmpty,
+              let semantic = value.semantic, ["empty-onboarding", "drain-fixture-project"].contains(semantic),
+              let url = URL(string: value.url), workspaceOrigin(url) == origin, url.path == "/",
+              ["", "/"].contains(url.fragment ?? "") else { return false }
+        return true
     }
 
     private func installWorkspaceDiagnostics() {
@@ -412,6 +454,24 @@ private func validateWorkspaceSnapshotSize(_ png: Data) throws {
     guard png.count <= 2 * 1024 * 1024 else {
         throw InstanceFixtureError("Failure WK snapshot exceeds the 2 MiB export limit; pixel evidence not retained")
     }
+}
+
+private struct InstanceWorkspaceObservation: Decodable {
+    struct PageError: Decodable { let kind: String; let message: String; let url: String }
+    let ready: Bool
+    let url: String
+    let ready_state: String
+    let semantic: String?
+    let body_length: Int
+    let body_text: String
+    let root_html: String
+    let diagnostics_installed: Bool
+    let errors: [PageError]?
+}
+
+private func decodeInstanceWorkspaceObservation(_ value: [String: Any]) -> InstanceWorkspaceObservation? {
+    guard let data = try? JSONSerialization.data(withJSONObject: value) else { return nil }
+    return try? JSONDecoder().decode(InstanceWorkspaceObservation.self, from: data)
 }
 
 private struct InstanceFixtureError: LocalizedError {
