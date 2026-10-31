@@ -61,7 +61,8 @@ if [[ "$mode" == startup-* ]]; then
     flags+=(-D PREVIEW_SMOKE)
 fi
 if [[ "$mode" == instance-* ]]; then
-    sources+=(desktop/macos/InstanceSmoke.swift)
+    sources+=(desktop/macos/InstanceSmoke.swift desktop/macos/InstanceCaptureFiles.swift
+              desktop/macos/InstanceCaptureProtocol.swift desktop/macos/InstanceCaptureNative.swift)
     flags+=(-D PREVIEW_SMOKE -D INSTANCE_SMOKE)
 fi
 receipt_inputs="$output/build-inputs-$mode.json"

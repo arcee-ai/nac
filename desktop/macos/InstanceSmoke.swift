@@ -19,6 +19,8 @@ final class InstanceSmoke {
     private let expectedStore: String
     private var evidence: [String: Any] = [:]
     private var reopenCount = 0
+    private var captureFixture: InstanceCaptureNative?
+    private let captureIncarnation = UUID().uuidString
 
     init(window: NSWindow, webView: WKWebView, engine: PreviewEngine, conflicts: StoreConflictRetry,
          retryButton: @escaping () -> NSButton?, baseURL: @escaping () -> URL?, failure: @escaping () -> String?) {
@@ -58,12 +60,14 @@ final class InstanceSmoke {
         publish("starting")
         Task {
             do {
+                captureFixture = try InstanceCaptureNative.configure(window: window, arguments: CommandLine.arguments)
                 if scenario == "conflict" { try await conflictJourney() }
                 else { try await workspaceJourney() }
                 try await command("finish")
                 evidence["passed"] = true
                 publish("finished")
             } catch {
+                captureFixture?.retire()
                 evidence["error"] = error.localizedDescription
                 await recordWorkspaceFailure()
                 publish("failed")
@@ -81,6 +85,7 @@ final class InstanceSmoke {
     }
 
     func didStop() {
+        captureFixture?.retire()
         evidence["stopped"] = engine.pid == 0 && engine.receipt == nil
         write()
     }
@@ -397,6 +402,7 @@ final class InstanceSmoke {
     }
 
     private func capture(_ name: String) async throws {
+        let before = try captureFixture.map { _ in try captureState(name) }
         let image: NSImage
         if webView.isHidden {
             let view = window.contentView!
@@ -419,6 +425,42 @@ final class InstanceSmoke {
             throw InstanceFixtureError("Snapshot encoding failed")
         }
         try png.write(to: output.deletingLastPathComponent().appendingPathComponent(name + ".png"))
+        if let captureFixture, let before {
+            try await captureFixture.hold(name: name, before: before) { try self.captureState(name) }
+        }
+    }
+
+    private func captureState(_ name: String) throws -> [String: String] {
+        let conflict = name == "conflict"
+        guard failure() == nil, window.isVisible, !window.isMiniaturized,
+              NSApp.isActive, window.isKeyWindow else { throw InstanceFixtureError("Capture lost its native presentation") }
+        if conflict {
+            guard conflicts.canRetry, engine.pid == 0, engine.receipt == nil, baseURL() == nil,
+                  webView.isHidden, conflicts.episode?.conflict.canonicalStore == expectedStore else {
+                throw InstanceFixtureError("Capture lost its retired conflict binding")
+            }
+        } else {
+            guard let receipt = engine.receipt, let origin = workspaceOrigin(baseURL()) else {
+                throw InstanceFixtureError("Capture lost its serving receipt")
+            }
+            try requireWorkspaceBinding(incarnation: receipt.incarnation, origin: origin)
+        }
+        let receipt = engine.receipt
+        let arguments = CommandLine.arguments
+        let directoryIndex = arguments.firstIndex(of: "--directory")
+        let directory = directoryIndex.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? ""
+        return ["store": expectedStore, "track": receipt?.identity?.track ?? conflicts.episode?.conflict.track ?? "",
+            "root": directory, "bundle": try capturePhysicalPath(Bundle.main.bundleURL.path), "app_pid": String(getpid()), "app_incarnation": captureIncarnation,
+            "app_launch_epoch": NSRunningApplication.current.launchDate.map { String($0.timeIntervalSince1970) } ?? "",
+            "window_number": String(window.windowNumber), "engine_pid": String(engine.pid),
+            "window_frame": NSStringFromRect(window.frame), "content_bounds": NSStringFromRect(webView.bounds),
+            "receipt_incarnation": receipt?.incarnation ?? "", "receipt_store": receipt?.store ?? "",
+            "receipt_schema": receipt?.schema.map(String.init) ?? "", "origin": workspaceOrigin(baseURL()) ?? "",
+            "receipt_kind": receipt?.kind ?? "", "receipt_version": receipt?.version.description ?? "",
+            "engine_build": receipt?.identity?.build_id ?? "", "engine_source": receipt?.identity?.source_revision ?? "",
+            "engine_version": receipt?.identity?.product_version ?? "", "endpoint": receipt?.endpoint ?? "",
+            "document_url": webView.url?.absoluteString ?? "", "conflict_episode": conflicts.episode?.id.uuidString ?? "",
+            "reopen_count": String(reopenCount), "loading": String(webView.isLoading)]
     }
 
     private func write() {

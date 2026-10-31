@@ -23,6 +23,7 @@ import urllib.request
 
 from instance_contract import OwnedEngine, digest, snapshot
 from instance_console import record_console, require_console
+from instance_capture import CaptureRun
 
 SCENARIOS = ('simultaneous', 'cli', 'symlink', 'directory-symlink', 'crash', 'shutdown', 'app-crash', 'coexist')
 
@@ -75,6 +76,10 @@ class AppJourney:
                         '--instance-output', str(output), '--instance-control', str(self.control),
                         '--instance-store', str(store.resolve())]
         self.command += options if options is not None else ['--directory', str(root), '--store-path', str(store)]
+        capture = CaptureRun.optional()
+        self.capture = capture.journey(output, bundle, root, store) if capture else None
+        if self.capture:
+            self.command += self.capture.arguments()
         self.log = output.with_suffix('.log').open('w')
 
     def observe(self):
@@ -102,7 +107,12 @@ class AppJourney:
         return value
 
     def stage(self, stage):
-        record = wait_for('Actual app stage ' + stage, lambda: (value if (value := self.read()).get('stage') == stage else None))
+        def observed():
+            if self.capture:
+                self.capture.forward(lambda: self.guard_console('capture-forward-' + stage))
+            value = self.read()
+            return value if value.get('stage') == stage else None
+        record = wait_for('Actual app stage ' + stage, observed)
         self.guard_console('observed-stage-' + stage)
         state = self.observe()
         assert len(state['apps']) == 1, state
@@ -150,6 +160,12 @@ class AppJourney:
         return record
 
     def cleanup(self):
+        retirement_error = None
+        try:
+            if self.capture:
+                self.capture.retire()
+        except BaseException as error:
+            retirement_error = error  # Metadata failure cannot skip owned app/engine cleanup.
         # Quit only the exact live application incarnation from this bundle.
         # Never look up or signal a store owner from a PID or discovery record.
         self.restore_prior()
@@ -168,6 +184,8 @@ class AppJourney:
             record = {}
         wait_for('Owned fixture engine cleanup', lambda: engine_settled(self.bundle, record.get('engine_pid')), timeout=25)
         self.log.close()
+        if retirement_error:
+            raise retirement_error
 
 
 def environment(root):
@@ -441,6 +459,7 @@ def main():
     scenarios = tuple(os.environ.get('NAC_INSTANCE_SCENARIOS', ','.join(SCENARIOS)).split(','))
     assert scenarios and set(scenarios) <= set(SCENARIOS) and len(set(scenarios)) == len(scenarios)
     console_checks = []
+    capture = CaptureRun.optional()
     metadata = dict(source_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
                     source_dirty=bool(subprocess.check_output(['git', 'status', '--porcelain'])),
                     fixture_sources={name: digest(Path(__file__).parent / name) for name in (
@@ -451,6 +470,10 @@ def main():
     receipt = destination / 'summary.json'
     root = None
     try:
+        if capture:
+            capture.require_source(metadata['source_head'], scenarios)
+            capture.admit()
+            metadata['fixture_sources']['instance_capture.py'] = digest(Path(__file__).parent / 'instance_capture.py')
         metadata['session'] = require_console(observer, console_checks, 'preflight')
         assert 'coexist' not in scenarios or stable, 'The coexist case requires the exact stable instance-smoke bundle'
         metadata.update(os=subprocess.check_output(['sw_vers'], text=True).strip(),
@@ -493,6 +516,8 @@ def main():
                 result = conflict_case(scenario, moved[0], case, profile, observer, console_checks)
             metadata['cases'].append(result)
         require_console(observer, console_checks, 'completed')
+        if capture:
+            metadata['capture_fixture'] = capture.final_receipt()
         metadata.update(runtime_passed=True, visible_paint_acceptance='captured_pending_image_review')
     except BaseException as error:
         metadata.update(runtime_passed=False, failure=str(error), fixture_retained=root is not None)
