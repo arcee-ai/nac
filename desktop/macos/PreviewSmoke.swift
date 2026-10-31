@@ -46,7 +46,11 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if ["commands", "commands-input"].contains(scenario) {
+                if scenario == "external-navigation-recording" {
+                    evidence["external_navigation_recording"] = try await ExternalNavigationSmoke(app: app).run()
+                } else if scenario == "external-auth" {
+                    evidence["external_auth"] = try await ExternalAuthSmoke(app: app).run()
+                } else if ["commands", "commands-input"].contains(scenario) {
                     evidence["commands"] = try await NativeCommandSmoke(app: app, commands: app.commands).run(
                         trustedInput: scenario == "commands-input", captures: destination.deletingLastPathComponent())
                 } else if ["normal", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
