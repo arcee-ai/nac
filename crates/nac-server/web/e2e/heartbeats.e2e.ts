@@ -173,6 +173,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   ]);
   const reopened = await context.newPage();
   await reopened.goto(`${harness.baseUrl}/#/session/${session}/heartbeats`);
+  await reopened.getByRole("button", { name: "Show panel", exact: true }).click();
   await reopened.getByRole("button", { name: "Local job check", exact: false }).click();
   await expect(reopened.getByRole("link", { name: `Run ${active.run_id}` })).toBeVisible();
   await expect(
@@ -203,6 +204,7 @@ test("human heartbeat UI reconciles lost create acknowledgement and controls an 
     await route.abort("failed");
   });
   await page.goto(`${harness.baseUrl}/#/session/${session}/heartbeats`);
+  await page.getByRole("button", { name: "Show panel", exact: true }).click();
   await page.getByRole("button", { name: "New heartbeat", exact: true }).click();
   await page.getByRole("textbox", { name: "Heartbeat name" }).fill("Human Local check");
   await page
@@ -292,7 +294,7 @@ test("heartbeat execution deadline cancels supervised descendants and suspends f
       name: "exec_command",
       callId: "deadline-child",
       arguments: {
-        cmd: "sh -c 'echo $$ > heartbeat-child.pid; sleep 30' & wait",
+        cmd: "sleep 30 & echo $! > heartbeat-child.pid; wait",
         yield_time_ms: 30000,
       },
     },
