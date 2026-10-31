@@ -53,6 +53,7 @@ starts at channel loss; the existing server owns run cancellation, descendant
 cleanup and persistence drain. Parent death can leave the disposable profile on
 disk because AppKit cannot run its deletion callback; the smoke runner removes
 only its own recorded fixture after checking engine settlement.
+Watchdog diagnostics are best effort and never gate the forced-exit callback.
 
 ## Acceptance checks
 
@@ -77,6 +78,11 @@ Unrelated shared-host connections are reported separately. Keep that port free
 before running this control. Fixture profiles and process termination are
 checked for every scenario. Evidence JSON, logs and
 PNG snapshots are written under `target/macos-preview/evidence/`.
+The runner records the console lock bit and keeps locked-session DOM/lifecycle
+results separate from visible-paint qualification. Fresh paint acceptance needs
+an unlocked Aqua session. For a focused repair run, set
+`NAC_MAC_SMOKE_SCENARIOS` to comma-separated scenario names; its summary records
+`full_scenario_run: false`, and it does not replace the complete candidate run.
 
 Smoke instrumentation exists only in builds compiled with `PREVIEW_SMOKE`.
 Every later native slice extends this checked-in actual-app/WKWebView journey

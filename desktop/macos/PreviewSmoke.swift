@@ -50,6 +50,9 @@ final class PreviewSmoke {
                     if scenario == "stale-launch" {
                         try await wait("first launch load barrier") { self.pausedFirstLoad }
                         let previous = app.engine.receipt!.incarnation
+                        // Suppress successor bootstrap only in this fixture.
+                        // The delayed old success must never load its document.
+                        app.engine.onReady = { _ in }
                         await withCheckedContinuation { continuation in
                             app.engine.stop { continuation.resume() }
                             evidence["identity_retired_before_reap"] = app.engine.pid > 0 && app.engine.receipt == nil
@@ -63,16 +66,28 @@ final class PreviewSmoke {
                         let successor = app.engine.pid
                         try await Task.sleep(nanoseconds: 31_000_000_000)
                         guard app.engine.pid == successor, app.failure == nil,
-                              app.baseURL?.absoluteString == app.engine.receipt?.endpoint else {
+                              app.baseURL == nil, app.webView.isHidden else {
                             throw PreviewError.message("Stale launch callback affected successor")
                         }
                         evidence["stale_callbacks_fenced"] = true
+                        evidence["stale_workspace_not_activated"] = true
+                        try captureNative()
                     }
-                    try await journey()
-                    if scenario != "normal" && scenario != "stale-launch" { try await lifecycle() }
+                    if scenario != "stale-launch" {
+                        try await journey()
+                        if scenario != "normal" { try await lifecycle() }
+                    }
                 }
                 else if ["parent-loss-startup", "channel-loss-startup", "parent-loss-initialization", "channel-loss-initialization"].contains(scenario) {
                     try await wait("engine awaiting hello") { self.app.engine.pid > 0 }
+                    if scenario.hasSuffix("initialization") {
+                        try await wait("post-adoption manager entry") {
+                            if let failure = self.app.failure { throw PreviewError.message(failure) }
+                            return self.app.engine.log.contains("project:")
+                        }
+                        evidence["post_adoption_verified"] = true
+                        evidence["startup_engine_log"] = app.engine.log
+                    }
                     if scenario.hasPrefix("parent-loss") { try await lifecycle() }
                     else {
                         if scenario == "channel-loss-initialization" {
@@ -113,6 +128,12 @@ final class PreviewSmoke {
                     }
                     evidence["workspace_not_activated"] = app.baseURL == nil
                     evidence["native_failure"] = message
+                    evidence["diagnostic_bytes_retained"] = app.engine.log.utf8.count
+                    if scenario == "malformed" {
+                        guard (60000...65536).contains(app.engine.log.utf8.count) else {
+                            throw PreviewError.message("Diagnostic retention exceeded its bound or pressure fixture did not drain")
+                        }
+                    }
                     try captureNative()
                 }
                 passed = true
@@ -200,6 +221,19 @@ final class PreviewSmoke {
             evidence["descendant_pid"] = Int(try String(contentsOf: file, encoding: .utf8))
         }
         if scenario.hasPrefix("parent-loss") {
+            if scenario != "parent-loss-active" {
+                evidence["workspace_not_activated"] = app.baseURL == nil && app.webView.isHidden
+                evidence["startup_stage"] = scenario == "parent-loss-startup" ? "awaiting_hello" : "initializing_store"
+                guard evidence["workspace_not_activated"] as? Bool == true else {
+                    throw PreviewError.message("Startup parent-loss fixture activated the workspace")
+                }
+                if scenario == "parent-loss-startup" {
+                    guard !FileManager.default.fileExists(atPath: app.profile!.store.path) else {
+                        throw PreviewError.message("Pre-adoption fixture performed store work")
+                    }
+                    evidence["store_work_absent"] = true
+                }
+            }
             // A shell helper must not inherit the parent side of the channel.
             let helper = Process()
             helper.executableURL = URL(fileURLWithPath: "/bin/sleep")
@@ -328,10 +362,12 @@ final class PreviewSmoke {
     }
 
     private func captureWeb(_ name: String) async throws {
+        evidence["frontmost_at_capture"] = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let image = try await app.webView.takeSnapshot(configuration: nil)
         try writePNG(image, name)
     }
     private func captureNative() throws {
+        evidence["frontmost_at_capture"] = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let view = app.window.contentView!
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
             throw PreviewError.message("Native failure capture unavailable")

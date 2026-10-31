@@ -6,6 +6,7 @@ from pathlib import Path
 import select
 import signal
 import socket
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -65,7 +66,8 @@ def run_contract(binary, destination):
             started = time.monotonic()
             with (profile / 'diagnostics').open('wb') as diagnostics:
                 process = subprocess.Popen(arguments, env=environment, pass_fds=(child.fileno(),),
-                                           stdin=subprocess.DEVNULL, stdout=diagnostics, stderr=diagnostics)
+                                           stdin=subprocess.DEVNULL, stdout=diagnostics, stderr=diagnostics,
+                                           start_new_session=True)
                 child.close()
                 try:
                     payload = json.dumps(hello).encode() + b'\n'
@@ -112,9 +114,29 @@ def run_contract(binary, destination):
                             parent.sendall(json.dumps(stop).encode() + b'\n')
                     code = process.wait(timeout=23)
                     assert time.monotonic() - started < 25
-                    if scenario in ('ready-stop', 'channel-loss', 'wrong-stop', 'duplicate-hello', 'startup-loss', 'cli'):
+                    if scenario == 'startup-loss':
+                        # Darwin can reject getpeername after the peer vanishes,
+                        # before channel adoption or any manager exists. Both
+                        # early startup failure and orderly settlement are safe.
+                        assert code in (0, 1), (scenario, code)
+                        if code == 1:
+                            assert (profile / 'diagnostics').read_text().strip() == 'Error: invalid private desktop launch channel'
+                            assert not list(profile.glob('*store*')), 'Pre-adoption failure performed store work'
+                            assert not (profile / 'nac').exists(), 'Pre-adoption failure constructed configuration'
+                        elif store.exists():
+                            with sqlite3.connect(store) as connection:
+                                assert connection.execute('PRAGMA quick_check').fetchone() == ('ok',)
+                        rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,pgid=,stat='], text=True)
+                        members = [line.split() for line in rows.splitlines()]
+                        assert not [row for row in members if len(row) == 3 and int(row[1]) == process.pid and not row[2].startswith('Z')]
+                    elif scenario in ('ready-stop', 'channel-loss', 'wrong-stop', 'duplicate-hello', 'cli'):
                         assert code == 0, (scenario, code, (profile / 'diagnostics').read_text())
                     results.append(dict(scenario=scenario, code=code, elapsed=round(time.monotonic()-started, 3)))
+                    if scenario == 'startup-loss':
+                        results[-1].update(failure_stage='pre_adoption' if code == 1 else None,
+                                           failure_code='invalid_private_desktop_launch_channel' if code == 1 else None,
+                                           store_work_absent=not store.exists() if code == 1 else None,
+                                           owned_descendants_absent=True, workspace_activated=False)
                 finally:
                     parent.close()
                     if process.poll() is None:
