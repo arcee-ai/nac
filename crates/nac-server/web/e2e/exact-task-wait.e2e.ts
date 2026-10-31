@@ -100,7 +100,7 @@ test("native exact wait returns approval and human navigation revalidates it", a
     await expect(
       page.getByRole("dialog", { name: "Permission required", exact: true }),
     ).toBeVisible();
-    await page.screenshot({ path: info.outputPath("exact-approval.png") });
+    await page.screenshot({ path: info.outputPath("exact-approval.png"), animations: "disabled" });
     await page.getByRole("button", { name: "Allow once", exact: true }).click();
     await waitForRunIdle(request, harness, peer);
     expect(
@@ -113,7 +113,11 @@ test("native exact wait returns approval and human navigation revalidates it", a
     await page.reload();
     await expect(page.getByText(/This permission request is no longer pending/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(0);
-    await page.screenshot({ path: info.outputPath("stale-exact-approval.png") });
+    await expect(page.getByText(/Loading permissions for/)).toHaveCount(0);
+    await page.screenshot({
+      path: info.outputPath("stale-exact-approval.png"),
+      animations: "disabled",
+    });
     const baselineAssets = process.env.NAC_WAIT_BASELINE_ASSETS;
     if (baselineAssets) {
       await page.route("**/assets/dist/**", async (route) => {
@@ -130,7 +134,11 @@ test("native exact wait returns approval and human navigation revalidates it", a
       await page.reload();
       await page.getByRole("button", { name: "Permissions", exact: true }).click();
       await expect(page.getByRole("dialog", { name: "Permissions", exact: true })).toBeVisible();
-      await page.screenshot({ path: info.outputPath("stale-exact-approval-before.png") });
+      await expect(page.getByText(/Loading permissions for/)).toHaveCount(0);
+      await page.screenshot({
+        path: info.outputPath("stale-exact-approval-before.png"),
+        animations: "disabled",
+      });
       await page.unroute("**/assets/dist/**");
       await page.unroute(harness.baseUrl + "/");
     }
