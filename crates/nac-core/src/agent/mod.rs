@@ -19,6 +19,9 @@ mod compaction;
 mod dag;
 mod failed_tool_round;
 mod heartbeat;
+mod mcp_refresh;
+#[cfg(test)]
+mod mcp_refresh_tests;
 pub(crate) mod preview;
 mod prompt_rendering;
 mod tool_exec;
@@ -154,6 +157,7 @@ pub struct Agent {
     event_sink: EventSink,
     thread_name: Option<String>,
     mcp_observation: Option<McpObservation>,
+    mcp_mounts: Arc<crate::mcp::SessionMcpMounts>,
     steering_dispatch_id: Option<String>,
     appended_steering_ids: HashSet<i64>,
     /// Top-level transcript log sink (DB-direct transcript workset, see
@@ -362,6 +366,10 @@ impl Agent {
         let mcp_observation = config.mcp.as_ref().map(|mcp| {
             mcp.register_event_sink(config.event_sink.clone(), config.thread_name.clone())
         });
+        let mcp_mounts = Arc::new(crate::mcp::SessionMcpMounts::new(
+            config.mcp.clone(),
+            mode == AgentMode::Orchestrator,
+        ));
         let workspace_lease_identity =
             crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
         let backend = crate::sandbox::select_execution_backend(
@@ -446,6 +454,7 @@ impl Agent {
             event_sink: config.event_sink,
             thread_name: config.thread_name,
             mcp_observation,
+            mcp_mounts,
             steering_dispatch_id: config.dispatch_id,
             appended_steering_ids: HashSet::new(),
             transcript_log,
@@ -595,7 +604,12 @@ impl Agent {
         self.tool_runtime.skills.clone()
     }
 
-    /// The immutable MCP capability registry captured for this session.
+    /// The registry used by the current model/tool round. A session refresh
+    /// replaces it only at the following model boundary.
+    #[allow(
+        dead_code,
+        reason = "supported runtime accessor retained for external callers"
+    )]
     pub fn mcp_registry(&self) -> Option<Arc<McpRegistry>> {
         self.tool_runtime.mcp.clone()
     }
@@ -605,6 +619,10 @@ impl Agent {
             let mut runtime = self.tool_runtime.clone();
             // Human shell ownership must not observe the model run's cancel token.
             runtime.command_cancellation = crate::tools::ThreadCancellation::default();
+            // Shell capabilities do not use imported tools. Keeping a registry
+            // here would pin replaced MCP connections for the terminal's lifetime.
+            runtime.mcp = None;
+            runtime.mcp_tools = Arc::new(HashMap::new());
             runtime
         })
     }
@@ -616,6 +634,8 @@ impl Agent {
         );
         let mut runtime = self.tool_runtime.clone();
         runtime.command_cancellation = crate::tools::ThreadCancellation::default();
+        runtime.mcp = None;
+        runtime.mcp_tools = Arc::new(HashMap::new());
         Ok((runtime, self.client.clone()))
     }
 
@@ -744,12 +764,14 @@ impl Agent {
         }
         loop {
             self.append_pending_guidance_checked().await?;
-            let request_tool_defs = self.refresh_model_request_capabilities()?;
+            self.admit_mcp_mount_refresh().await?;
+            let mut request_tool_defs = self.refresh_model_request_capabilities()?;
+            let mount_revision_before_compaction = self.mcp_mounts.revision();
             let needs_compaction_view = self
                 .compaction
                 .as_mut()
                 .is_some_and(|compaction| !compaction.is_passthrough(&self.messages));
-            let provider_view = if needs_compaction_view {
+            let mut provider_view = if needs_compaction_view {
                 match self
                     .prepare_provider_view(&mut accumulated_usage, &request_tool_defs)
                     .await
@@ -773,6 +795,16 @@ impl Agent {
                     checkpoint_id: None,
                 }
             };
+            if needs_compaction_view {
+                // A summary is its own model request. A refresh requested
+                // while it was in flight belongs to the ordinary request that
+                // follows, not to another turn after that request's tool round.
+                self.admit_mcp_mount_refresh().await?;
+                if self.mcp_mounts.revision() != mount_revision_before_compaction {
+                    request_tool_defs = self.refresh_model_request_capabilities()?;
+                }
+            }
+            self.project_mcp_instructions(&mut provider_view.messages);
             iteration = iteration.saturating_add(1);
             self.emit(AgentEvent::ModelCallStarted {
                 thread_name: self.thread_name.clone(),

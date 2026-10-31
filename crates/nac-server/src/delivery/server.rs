@@ -734,6 +734,8 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(mcp_runtime_api::connect_handler))
         .routes(routes!(mcp_runtime_api::disconnect_handler))
         .routes(routes!(mcp_runtime_api::reload_handler))
+        .routes(routes!(delivery::session_integrations::status))
+        .routes(routes!(delivery::session_integrations::refresh))
         .routes(routes!(managed_auth::list_handler))
         .routes(routes!(managed_auth::logout_handler))
         .routes(routes!(managed_auth::start_login_handler))

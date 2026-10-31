@@ -1050,6 +1050,8 @@ mod presentation;
 mod project_routes;
 #[path = "tests/recovery.rs"]
 mod recovery;
+#[path = "tests/session_integrations.rs"]
+mod session_integrations;
 #[path = "tests/terminals.rs"]
 mod terminals;
 

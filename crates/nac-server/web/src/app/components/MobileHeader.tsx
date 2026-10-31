@@ -14,6 +14,7 @@ import {
   StickyButton,
 } from "@/app/atoms";
 import { MobileMenu } from "@/app/components/LeftSidebar/MobileMenu";
+import { SessionIntegrations } from "@/app/features/session-integrations/SessionIntegrations";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
@@ -143,7 +144,10 @@ function SessionHeading({ sessionId }: { sessionId: string }) {
           {title}
         </div>
       ) : (
-        <div className="flex w-full">{title}</div>
+        <div className="@container flex w-full min-w-0 items-center gap-1">
+          {title}
+          <SessionIntegrations key={sessionId} sessionId={sessionId} />
+        </div>
       )}
       {repo || additions || deletions ? (
         <div className="flex w-full min-w-0 items-center gap-4 overflow-clip rounded-[4px]">

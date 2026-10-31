@@ -1,6 +1,9 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "GET /sessions/{session_id}/integrations": "private:standalone session integration status",
+  "POST /sessions/{session_id}/integrations/refresh":
+    "private:standalone explicit session integration refresh",
   "GET /heartbeats": "private:standalone Local heartbeat inventory",
   "GET /sessions/{session_id}/heartbeats/{schedule_id}":
     "private:standalone passive heartbeat history",

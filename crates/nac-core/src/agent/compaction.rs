@@ -298,6 +298,20 @@ impl super::Agent {
         event_sink: EventSink,
         commit: CompactionCommitMarker,
     ) -> CompactionCompletion {
+        // Manual compaction is a separate admitted operation. A cancelled
+        // earlier run must not cancel its pending mount preparation.
+        self.begin_run_cancellation();
+        self.admit_mcp_mount_refresh().await.map_err(|error| {
+            CompactionError::failed(
+                compaction_id,
+                if self.command_cancellation().is_cancelled() {
+                    CompactionFailure::Cancelled
+                } else {
+                    CompactionFailure::SummaryRequestFailed
+                },
+                Some(error),
+            )
+        })?;
         self.refresh_compaction_tool_definitions();
         let Some(compaction) = self.compaction.as_mut() else {
             return Err(CompactionError::Unavailable);
@@ -414,7 +428,8 @@ impl super::Agent {
             Ok(None) => {},
             Err(()) => return (prepared,Err(CompactionError::failed(compaction_id,CompactionFailure::SummaryRejected,None))),
         }
-        let summary_messages = std::mem::take(&mut candidate.summary_messages);
+        let mut summary_messages = std::mem::take(&mut candidate.summary_messages);
+        self.project_mcp_instructions(&mut summary_messages);
         let response = match self.client.send_turn(summary_messages, Vec::new()).await {
             Ok(response) => response,
             Err(error) => {

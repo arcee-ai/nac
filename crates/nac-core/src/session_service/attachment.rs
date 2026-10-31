@@ -80,7 +80,7 @@ impl SessionService {
         let transcript_log = run_config.agent.transcript_log_writer();
         let has_sandbox = run_config.agent.sandbox_session().is_some();
         let skills = run_config.agent.skills();
-        let mcp = run_config.agent.mcp_registry();
+        let mcp = run_config.agent.mcp_mounts();
         let terminal_manager = run_config.agent.terminal_manager();
         let user_terminal_context = run_config.agent.user_terminal_runtime().map(|runtime| {
             Arc::new(user_terminals::UserTerminalContext::new(

@@ -800,6 +800,8 @@ function Fe(e) {
 	let t = e.transport.request.bind(e.transport);
 	return {
 		...Pe(e),
+		sessionIntegrations: (e, n) => t("GET", `/sessions/${encodeURIComponent(e)}/integrations`, { signal: n }),
+		refreshSessionIntegrations: (e, n) => t("POST", `/sessions/${encodeURIComponent(e)}/integrations/refresh`, { body: { expected_revision: n } }),
 		heartbeatInventory: (e, n) => t("GET", `/heartbeats${e ? `?session_id=${encodeURIComponent(e)}` : ""}`, { signal: n }),
 		heartbeatInspection: (e, n, r) => t("GET", `/sessions/${encodeURIComponent(e)}/heartbeats/${encodeURIComponent(n)}`, { signal: r }),
 		controlHeartbeat: (e, n) => t("POST", `/sessions/${encodeURIComponent(e)}/heartbeats/control`, { body: n }),

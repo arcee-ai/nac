@@ -6136,6 +6136,116 @@
         }
       }
     },
+    "/sessions/{session_id}/integrations": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_integrations",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Durable requested revision and process-local application status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionMcpRefreshStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/integrations/refresh": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_integrations_refresh",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshSessionIntegrationsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Refresh scheduled at each affected agent's next model boundary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionMcpRefreshStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/messages": {
       "get": {
         "tags": [
@@ -16304,6 +16414,19 @@
           "none"
         ]
       },
+      "RefreshSessionIntegrationsRequest": {
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
       "RegenerateSessionRequest": {
         "type": "object",
         "required": [
@@ -17964,6 +18087,63 @@
           },
           "root_session_id": {
             "type": "string"
+          }
+        }
+      },
+      "SessionMcpRefreshState": {
+        "type": "string",
+        "enum": [
+          "not_requested",
+          "current",
+          "pending",
+          "degraded",
+          "failed",
+          "scheduled_for_workers"
+        ]
+      },
+      "SessionMcpRefreshStatus": {
+        "type": "object",
+        "required": [
+          "revision",
+          "requested_at",
+          "applied_revision",
+          "incarnation_id",
+          "state",
+          "message"
+        ],
+        "properties": {
+          "applied_revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Process-local acknowledgement for this direct agent incarnation. An\norchestrator has independent workers and does not claim an aggregate acknowledgement."
+          },
+          "incarnation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requested_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SessionMcpRefreshState"
           }
         }
       },

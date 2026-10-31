@@ -1,4 +1,6 @@
 export declare const NAC_API_SURFACE: {
+    readonly "GET /sessions/{session_id}/integrations": "private:standalone session integration status";
+    readonly "POST /sessions/{session_id}/integrations/refresh": "private:standalone explicit session integration refresh";
     readonly "GET /heartbeats": "private:standalone Local heartbeat inventory";
     readonly "GET /sessions/{session_id}/heartbeats/{schedule_id}": "private:standalone passive heartbeat history";
     readonly "POST /sessions/{session_id}/heartbeats/control": "private:standalone human heartbeat control";

@@ -1088,6 +1088,7 @@ export interface components {
       | "regenerate_with_rewind"
       | "settings"
       | "none";
+    RefreshSessionIntegrationsRequest: { expected_revision: number };
     RegenerateSessionRequest: { message_idx: number };
     ReorderProjectsRequest: {
       expected_versions: Record<string, number>;
@@ -1330,6 +1331,21 @@ export interface components {
       kind: components["schemas"]["SessionLineageKind"];
       parent_session_id: string;
       root_session_id: string;
+    };
+    SessionMcpRefreshState:
+      | "not_requested"
+      | "current"
+      | "pending"
+      | "degraded"
+      | "failed"
+      | "scheduled_for_workers";
+    SessionMcpRefreshStatus: {
+      applied_revision: number | null;
+      incarnation_id: string | null;
+      message: string | null;
+      requested_at: string | null;
+      revision: number;
+      state: components["schemas"]["SessionMcpRefreshState"];
     };
     SessionMetadata: {
       agents_md_status: string;
