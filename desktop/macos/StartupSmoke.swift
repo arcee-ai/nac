@@ -89,7 +89,9 @@ final class StartupSmoke {
             }
             write()
             RunLoop.main.perform(inModes: [.common]) { [self] in
-                MainActor.assumeIsolated { app.window.performClose(nil) }
+                // ALL-344 close now preserves normal work. Fixture cleanup
+                // explicitly selects Stop on the real native Quit sheet.
+                MainActor.assumeIsolated { app.quit.stopFixture() }
             }
         }
     }

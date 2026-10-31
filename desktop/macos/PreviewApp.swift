@@ -20,13 +20,16 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private var navigationIncarnations: [WKNavigation: String] = [:]
     private var status: NSTextField!
     #if LOCAL_APP
+    private(set) lazy var quit = AppQuit(app: self)
     private let appInstance = AppInstance()
     private let storeConflictRetry = StoreConflictRetry()
     private var storeRetryButton: NSButton?
     private var launchIdentity: EngineIdentity?
     #endif
     #if PREVIEW_SMOKE
-    #if INSTANCE_SMOKE
+    #if LIFECYCLE_SMOKE
+    private var lifecycleSmoke: LifecycleSmoke?
+    #elseif INSTANCE_SMOKE
     private var instanceSmoke: InstanceSmoke?
     #elseif LOCAL_APP
     var startupSmoke: StartupSmoke?
@@ -84,10 +87,13 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         #if PREVIEW_SMOKE
-        #if INSTANCE_SMOKE
+        #if LIFECYCLE_SMOKE
+        lifecycleSmoke = LifecycleSmoke(app: self)
+        lifecycleSmoke?.start()
+        #elseif INSTANCE_SMOKE
         instanceSmoke = InstanceSmoke(window: window, webView: webView, engine: engine, conflicts: storeConflictRetry,
             retryButton: { [weak self] in self?.storeRetryButton }, baseURL: { [weak self] in self?.baseURL },
-            failure: { [weak self] in self?.failure })
+            failure: { [weak self] in self?.failure }, requestQuit: { [weak self] in self?.quit.stopFixture() })
         instanceSmoke?.start()
         #elseif LOCAL_APP
         startupSmoke = StartupSmoke(app: self)
@@ -115,6 +121,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             #endif
             #endif
             guard !stopping else { return }
+            #if LOCAL_APP
+            guard let launch = quit.beginLaunch() else { return }
+            #endif
             let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/nac-web")
             engine.onReady = { [weak self] url in
                 guard let self, !self.stopping, self.failure == nil,
@@ -123,7 +132,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             }
             engine.onExit = { [weak self] status in
                 #if LOCAL_APP
-                self?.fail("The bundled engine stopped (status \(status)). Close this window and relaunch NAC.")
+                self?.quit.childExited(launch)
+                self?.fail("The bundled engine stopped (status \(status)). Quit NAC and relaunch.")
                 #else
                 self?.fail("The bundled engine stopped (status \(status)). Close this window and relaunch the preview.")
                 #endif
@@ -135,7 +145,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             launchIdentity = identity
             var arguments = Array(CommandLine.arguments.dropFirst())
             #if PREVIEW_SMOKE
-            #if INSTANCE_SMOKE
+            #if LIFECYCLE_SMOKE
+            arguments = LifecycleSmoke.launchArguments(arguments)
+            #elseif INSTANCE_SMOKE
             arguments = InstanceSmoke.launchArguments(arguments)
             #else
             arguments = StartupSmoke.launchArguments(arguments)
@@ -221,7 +233,13 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard webView === self.webView else { return }
-        if !stopping { fail("The workspace renderer stopped. Close this window and relaunch the preview.") }
+        if !stopping {
+            #if LOCAL_APP
+            fail("The workspace renderer stopped. Quit NAC and relaunch.")
+            #else
+            fail("The workspace renderer stopped. Close this window and relaunch the preview.")
+            #endif
+        }
     }
 
     private func engineFailed(_ reason: EngineFailure) {
@@ -280,20 +298,51 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         storeRetryButton?.isHidden = true
         storeRetryButton?.isEnabled = false
         let store = launchConfiguration.map { "\n\nSelected store: \($0.store.path)" } ?? ""
-        status.stringValue = "NAC could not continue\n\n\(message)\(store)\n\nClose this window and relaunch after correcting the problem. A store written by a newer NAC version requires a compatible version; keep the existing database. Check directory access and whether another NAC process owns this store."
+        status.stringValue = "NAC could not continue\n\n\(message)\(store)\n\nQuit NAC and relaunch after correcting the problem. A store written by a newer NAC version requires a compatible version; keep the existing database. Check directory access and whether another NAC process owns this store."
         #else
         status.stringValue = "NAC preview could not continue\n\n\(message)\n\nClose this window to clean up the disposable fixture.\n\n\(engine.log.suffix(4000))"
         #endif
         #if !LOCAL_APP
         provider.stop()
         #endif
+        #if LOCAL_APP
+        let launch = quit.launch
+        engine.stop { [weak self] in
+            if let launch { self?.quit.childExited(launch) }
+        }
+        #else
         engine.stop {}
+        #endif
     }
 
-    func windowShouldClose(_ sender: NSWindow) -> Bool { NSApp.terminate(nil); return false }
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        #if LOCAL_APP
+        return quit.canCloseWindow
+        #else
+        NSApp.terminate(nil)
+        return false
+        #endif
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        #if LOCAL_APP
+        return quit.shouldTerminate()
+        #else
         guard !stopping else { return .terminateLater }
+        beginShutdown { NSApp.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
+        #endif
+    }
+
+    func showShutdownStatus(_ message: String) {
+        status.isHidden = false
+        status.stringValue = message
+    }
+
+    func beginShutdown(completion: @escaping () -> Void) {
+        guard !stopping else { return }
         stopping = true
         commands.retire()
         #if LOCAL_APP
@@ -301,8 +350,19 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         storeRetryButton?.isEnabled = false
         #endif
         startup?.cancel()
+        #if INSTANCE_SMOKE
+        instanceSmoke?.prepareForStop()
+        #endif
+        // Closing a window retains the document. Actual Stop releases the
+        // document itself; stopLoading alone does not release its ownership.
+        workspaceIncarnation = nil
+        navigationIncarnations.removeAll()
+        window.makeFirstResponder(nil)
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
         webView.stopLoading()
-        webView.isHidden = true
+        webView.removeFromSuperview()
+        webView = nil
         status.isHidden = false
         #if LOCAL_APP
         status.stringValue = "Stopping NAC…"
@@ -325,7 +385,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             }
             #endif
             #if PREVIEW_SMOKE
-            #if INSTANCE_SMOKE
+            #if LIFECYCLE_SMOKE
+            self.lifecycleSmoke?.didStop()
+            #elseif INSTANCE_SMOKE
             self.instanceSmoke?.didStop()
             #elseif LOCAL_APP
             self.startupSmoke?.didStop()
@@ -333,8 +395,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             self.smoke?.didCleanUp()
             #endif
             #endif
-            NSApp.reply(toApplicationShouldTerminate: true)
+            completion()
         }
-        return .terminateLater
     }
 }

@@ -35,6 +35,7 @@ def main():
             'version': 1, 'phase': 'unsigned-build', 'mode': mode,
             'normal_startup': 'LOCAL_APP' in flags, 'smoke_instrumentation': 'PREVIEW_SMOKE' in flags,
             'instance_smoke_instrumentation': 'INSTANCE_SMOKE' in flags,
+            'lifecycle_smoke_instrumentation': 'LIFECYCLE_SMOKE' in flags,
             'bundle_identifier': bundle['CFBundleIdentifier'], 'bundle_name': bundle['CFBundleName'],
             'source_head': source_head,
             'source_dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], text=True)),
@@ -68,10 +69,11 @@ def main():
             receipt['preview_definitions_excluded'] = True
             if not receipt['smoke_instrumentation']:
                 if any(Path(path).name.endswith(('Smoke.swift', 'Tests.swift')) or
-                       Path(path).name in {'InstanceObservation.swift', 'NativeCommandInput.swift'} for path in receipt['native_source_files']):
+                       Path(path).name in {'InstanceObservation.swift', 'NativeCommandInput.swift', 'QuitWebViewFixture.swift'} for path in receipt['native_source_files']):
                     raise SystemExit('Ordinary app compiler inputs contain smoke/test instrumentation.')
                 markers = ['preview-dummy-only', 'nac-mac-preview-', 'FixtureProvider', 'FixtureBootstrap',
-                           'NativeCommandSmoke', 'NativeCommandInput', '__commandInputEvidence']
+                           'NativeCommandSmoke', 'NativeCommandInput', '__commandInputEvidence',
+                           'LifecycleSmoke', 'QuitWebViewFixture', '__quitLifecycleObserver']
                 binary = (app / 'Contents/MacOS/NACPreview').read_bytes()
                 if any(marker.encode() in binary for marker in markers):
                     raise SystemExit('Ordinary app binary contains disposable fixture markers.')

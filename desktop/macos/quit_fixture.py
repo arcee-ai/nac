@@ -58,6 +58,7 @@ class QuitProvider:
         self.goal_accepted = threading.Event()
         self.requests = []
         self.errors = []
+        self.denied_outputs = []
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -76,10 +77,34 @@ class QuitProvider:
                 body = json.loads(self.rfile.read(length))
                 serialized = json.dumps(body.get('input'))
                 if APPROVAL in serialized:
-                    scenario = 'approval'
-                    item = dict(id='fc-quit', type='function_call', status='completed',
-                                call_id='quit-unapproved-command', name='exec_command',
-                                arguments=json.dumps(dict(cmd='sleep 120', tty=True, yield_time_ms=20)))
+                    outputs = [entry.get('output') for entry in body.get('input', [])
+                               if isinstance(entry, dict) and entry.get('type') == 'function_call_output'
+                               and entry.get('call_id') == 'quit-unapproved-command']
+                    if outputs:
+                        # Last-client disconnect may deny an existing ask and
+                        # continue its SAME run. It must never execute the tool
+                        # or manufacture a new user admission. Settle that
+                        # supported denial path without asking for another tool.
+                        denied = all('permission' in str(output).lower() and
+                                     any(word in str(output).lower() for word in ('denied', 'cancelled', 'not executed'))
+                                     for output in outputs)
+                        if not denied or 'approval-denied' in owner.requests:
+                            owner.errors.append('Unexpected approval result or repeated denial continuation')
+                            self.send_error(400)
+                            return
+                        owner.denied_outputs.extend(outputs)
+                        scenario = 'approval-denied'
+                        item = dict(id='msg-denied', type='message', status='completed', role='assistant',
+                                    content=[dict(type='output_text', text='Approval denied; no tool executed.', annotations=[])])
+                    else:
+                        if 'approval' in owner.requests:
+                            owner.errors.append('Repeated approval tool request without its result')
+                            self.send_error(400)
+                            return
+                        scenario = 'approval'
+                        item = dict(id='fc-quit', type='function_call', status='completed',
+                                    call_id='quit-unapproved-command', name='exec_command',
+                                    arguments=json.dumps(dict(cmd='sleep 120', tty=True, yield_time_ms=20)))
                 elif GOAL in serialized:
                     scenario = 'goal'
                     item = None
@@ -203,6 +228,9 @@ class QuitWorkspaceFixture:
         pending = until('Real pending approval', lambda: request(endpoint, approval_base + '/permissions')['requests'])
         assert len(pending) == 1
         self.assert_unapproved()
+        self.inbox_identity = sorted((item['id'], session)
+            for session in (self.session, self.approval_session)
+            for item in request(endpoint, '/sessions/' + session + '/inbox'))
         return dict(session_id=self.session, approval_session_id=self.approval_session,
                     descendant_pid=self.descendant, goal_id=self.goal['goal_id'],
                     goal_status=self.goal['status'], terminal_id=self.terminal_id,
@@ -214,12 +242,14 @@ class QuitWorkspaceFixture:
         executions = request(self.endpoint, '/sessions/' + self.approval_session + '/executions')
         assert executions['executions'] == [], executions
         assert not self.provider.errors, self.provider.errors
-        assert sorted(self.provider.requests) == ['approval', 'goal', 'transcript'], self.provider.requests
+        assert self.provider.requests in (['transcript', 'goal', 'approval'],
+                                         ['transcript', 'goal', 'approval', 'approval-denied']), self.provider.requests
 
     def verify_store(self, store):
         """Read-only evidence after the engine has actually released its store."""
         assert not self.provider.errors, self.provider.errors
-        assert sorted(self.provider.requests) == ['approval', 'goal', 'transcript'], self.provider.requests
+        assert self.provider.requests in (['transcript', 'goal', 'approval'],
+                                         ['transcript', 'goal', 'approval', 'approval-denied']), self.provider.requests
         with closing(sqlite3.connect(Path(store).as_uri() + '?mode=ro', uri=True)) as connection:
             assert connection.execute('PRAGMA quick_check').fetchone() == ('ok',)
             goal = connection.execute('SELECT goal_id,objective,status FROM session_goals WHERE session_id=?',
@@ -228,10 +258,15 @@ class QuitWorkspaceFixture:
             assert connection.execute('SELECT count(*) FROM permission_grants').fetchone() == (0,)
             modes = connection.execute('SELECT permission_approval_mode FROM sessions').fetchall()
             assert modes and all(mode == ('manual',) for mode in modes), modes
+            runs = dict(connection.execute('SELECT session_id,run_count FROM sessions').fetchall())
+            assert runs == {self.session: 2, self.approval_session: 1}, runs
+            inbox = connection.execute('SELECT id,session_id FROM session_inbox ORDER BY id').fetchall()
+            assert inbox == self.inbox_identity, 'Shutdown/restart changed admitted input identities'
         wait_dead(self.descendant, timeout=3)
         return dict(durable_goal_preserved=True, no_remembered_grants=True,
                     approval_mode_preserved=True,
-                    terminal_descendant_stopped=True, no_model_or_mutation_replay=True, integrity='ok')
+                    terminal_descendant_stopped=True, no_input_or_mutation_replay=True,
+                    denied_approval_followups=len(self.provider.denied_outputs), integrity='ok')
 
     def close(self):
         self.retire_streams()
