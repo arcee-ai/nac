@@ -26,6 +26,7 @@ mod resource_projection;
 mod review;
 mod review_failure;
 mod shell_parser;
+pub(crate) mod task_observation;
 
 use command_classification::*;
 pub use evaluation::wildcard_match;

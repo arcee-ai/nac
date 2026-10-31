@@ -74,3 +74,103 @@ checked, so one Ask covers the call.
 Sessions whose `session:<id>` is not allowed without a prompt are skipped before
 matching and never count toward the 500-row scan, so they affect no
 candidate, count, flag or cursor.
+
+## Waiting on exact work
+
+`wait_tasks` observes one or more independent sessions without starting or
+steering them. A zero-time call takes a snapshot; a positive timeout waits for
+new actionable evidence, any selected result or stopped goal, or pending input
+to this coordinator. For example:
+
+```json
+{"targets":[{"session_id":"task-session","mode":"run","run_id":"exact-run"},{"session_id":"other-session","mode":"goal","goal_id":"exact-goal"}],"timeout_ms":30000}
+```
+
+Optional fields accept null: `mode: null` uses the documented `run` default,
+and `timeout_ms: null` requests a zero-time snapshot. The provider-facing run
+and goal shapes list every field explicitly and require the other mode's
+identity to be null. Compact native calls may omit these fields. Supplying a
+non-null identity for the wrong mode remains an error; it is never ignored.
+
+Omit the identity to resolve the current run or goal once. Run mode uses the
+current durable run, or the most recent retained result if no run is current.
+Save each returned `resolved_identity` and `after_cursor`. Reuse that cursor
+with the same caller, session, mode and project scope, or name the exact ID.
+A cursor never switches to a later run or replacement goal. If there was no
+identity when the selector resolved, it stays unavailable. Explicit identities
+that conflict with a cursor are rejected. Cursors are bounded, untrusted
+observation hints: editing one grants no authority and cannot change stored
+facts. They survive restart; an epoch change sets `resync` and re-reads truth.
+
+The response separates its wake reason (`snapshot`, `target_changed`, `timeout`,
+`coordinator_input`, or cancellation) from each target's state:
+
+- `active` means the exact durable work is still active, not a claim of process
+  liveness or an interactive human connection.
+- `result_available`, `failed` and `cancelled` are distinct run outcomes. A
+  result never asserts objective completion.
+- `goal_complete`, `goal_paused`, `goal_blocked`, `goal_usage_limited` and
+  `goal_budget_limited` describe that exact goal. Retired active goals return
+  `replaced` or `cleared`; retained stopped goals carry their original proof.
+- `not_found` cannot distinguish deletion from never-created sessions.
+  `unavailable` also covers unretained, interrupted or aged-out exact evidence;
+  a later identity never substitutes for it. Scope and topology errors keep
+  `read_task`'s distinct statuses.
+- `approval_attention` carries one exact, existing request ID and an app route
+  ending in `/insights?permission_request=<id>`. This only observes a local
+  live broker. Other owners remain `unknown`. The human page revalidates the
+  exact request; an expired link never selects another request for approval.
+
+A repeated cursor suppresses already delivered proof and attention details,
+marking `unchanged`. Status/commentary and active-goal accounting updates do not
+wake a wait. The result stays inspectable through `read_task`; observation
+never marks it read, acknowledges it, or deletes it. Proof retention remains
+ALL-469's last eight run outcomes and eight retired goals per session.
+
+Waiters subscribe before their first durable read. Goal-owner post-commit
+hints include session/goal identity, version, status and current/replaced/cleared
+kind. Hints are lossy process-local notifications, not completion evidence or
+a second history store. A ring gap sets `resync`; periodic authoritative reads
+cover missed hints, other owners, reconnects and restart. Delayed or reordered
+hints can only cause another read. No delta subscription is added, so observing
+cannot keep headless approval alive. Cancelling or timing out the wait never
+cancels a target, pauses its goal, or consumes coordinator input.
+
+Calls reject more than eight targets, a timeout over 60,000 ms, identifiers over
+160 bytes, cursors over 4,096 bytes, or a response over 131,072 bytes. Result
+excerpts in waits are capped at 500 characters; `read_task` keeps the longer
+retained excerpt. Authoritative fallback revalidation runs every 250 ms, plus
+relevant stopped-goal notifications. The timeout bounds the observation phase;
+finishing its last authoritative read adds a small amount of elapsed time.
+
+### Measured bounds
+
+Measured on 2026-10-30 (America/Los_Angeles), source
+`6288b969a5b25c99b834e071f4f7f2eb75e3dc26`, Darwin arm64, Rust 1.98.0,
+Node 26.12.0, using the unoptimized test profile and a warm SQLite store.
+The shared exclusive gate held both Rust slots and the browser slot; other
+heavy web work was deferred. Snapshot columns are the median and maximum of
+ten native calls per fanout. Fixtures use active goals with 10,000-character
+objectives and retained UTF-8 run results of 2,000 characters, cut to 500 in
+wait responses. Compilation is excluded from the operation timings.
+
+| Targets | Snapshot median (ms) | Snapshot max (ms) | Active reply (bytes) | Result reply (bytes) | 500 ms wait elapsed (ms) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 5.47 | 17.83 | 802 | 2,796 | 516 |
+| 2 | 8.89 | 14.76 | 1,391 | 5,373 | 519 |
+| 4 | 14.51 | 21.19 | 2,569 | 10,527 | 533 |
+| 8 | 25.51 | 33.88 | 4,925 | 20,835 | 553 |
+
+The eight-target result snapshot took 36.80 ms. The separate eight-target
+60,000 ms upper-bound test returned `timeout` at 60,048 ms, with a 4,900-byte
+reply. These are measured local fixture costs, not a cross-host latency promise.
+
+Eight targets is the largest qualified fanout. The 60-second request bound
+limits one observation call to about 240 fallback intervals per target while
+allowing coordinator input to interrupt between reads. The 128 KiB response
+ceiling leaves over six times the largest measured reply for identifiers and
+failure evidence while keeping aggregate output finite. Larger fanouts or
+longer waits require fresh qualification; argument and output overflow are
+explicit errors. Reproduce with the owning tests
+`representative_snapshots_and_bounded_wait_cost` and the explicitly ignored
+`maximum_timeout_measurement` in an exclusive performance window.
