@@ -30,6 +30,8 @@ interface InputProps extends Omit<React.ComponentPropsWithRef<"input">, "size"> 
     required?: boolean;
     rounded?: boolean;
     isDisabled?: boolean;
+    /** The value is being submitted: the field reads as busy and stops taking edits. */
+    loading?: boolean;
     validation?: boolean;
     validationText?: string;
     hintText?: string;

@@ -1,3 +1,4 @@
+import "@/app/components/projects/navigation.css";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useMemo } from "react";
@@ -64,7 +65,9 @@ export function ChatSessionList({
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div
+      className={`nac-navigation flex flex-col gap-5 ${isMobile ? "nac-navigation-mobile" : ""}`}
+    >
       {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-2">
           <GroupLabel className="px-2">{group.label}</GroupLabel>

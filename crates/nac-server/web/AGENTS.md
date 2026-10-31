@@ -36,6 +36,12 @@ server remains the source of business truth and wire schemas.
   Historical output preserves factual retention while suppressing all controls.
   Consume cached session availability for passive terminal/history views; do not
   trigger recovering session reads merely to render them.
+- `src/app/ui/` owns the pinned shadcn/Radix primitives and each presentation
+  instance's overlay layer stack. Product code keeps importing atoms. Overlays
+  register with `useLayer` instead of adding their own Escape, outside-press,
+  inertness or focus-return handling, and Radix stays non-modal. The Popover
+  atom's opt-in `focusScope` owns only initial focus and Tab navigation; see
+  [ADR 0007](../../../docs/architecture/0007-scoped-ui-primitives.md).
 - Generic providers are for genuinely cross-feature browser state. Do not use
   them as a home for one feature's workflow.
 - `src/app/runtime/` owns one immutable consumer binding, private query cache,

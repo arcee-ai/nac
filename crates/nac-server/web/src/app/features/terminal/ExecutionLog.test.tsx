@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeContext } from "@/app/runtime/RuntimeContext";
 import { standaloneRuntime } from "@/app/runtime/nativeRuntime";
 import type {
@@ -8,6 +8,7 @@ import type {
   ExecutionStatus,
 } from "../../../../packages/nac-client/src/index";
 import { ExecutionLog } from "./ExecutionLog";
+import { executionHeading } from "./terminalLabels";
 
 const source: ExecutionStatus = {
   id: "opaque-pipe",
@@ -35,7 +36,28 @@ const terminal = {
 };
 const truncatedNotice =
   "Display limit reached. Showing the latest output; earlier text is hidden in this view.";
-afterEach(cleanup);
+beforeEach(() => {
+  // No breakpoint matches, so the log draws its desktop header and menu.
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 function fixture() {
   let cursor = 0;
@@ -70,7 +92,12 @@ function fixture() {
   };
   const view = render(
     <RuntimeContext.Provider value={{ ...standaloneRuntime, api }}>
-      <ExecutionLog sessionId="session" source={source} />
+      <ExecutionLog
+        sessionId="session"
+        source={source}
+        heading={executionHeading(source, "Command 1")}
+        menuSlot={null}
+      />
     </RuntimeContext.Provider>,
   );
   const page = async (text: string, options: { gap?: boolean; complete?: boolean } = {}) => {
@@ -142,6 +169,7 @@ describe("execution log display loss", () => {
     await screen.findByText("Disconnected");
     expect(screen.getByRole("alert").textContent).toBe("Observation unavailable");
     expect(screen.getByText(truncatedNotice)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Terminal options" }));
     fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
     await waitFor(() => expect(f.api.attachExecution).toHaveBeenCalledTimes(2));
     expect(screen.queryByText(truncatedNotice)).toBeNull();
