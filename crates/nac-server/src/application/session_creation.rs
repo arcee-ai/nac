@@ -388,6 +388,16 @@ impl<'a> SessionCreationApplication<'a> {
             ));
         }
         apply_managed_model_defaults(&mut request, self.manager.managed_model());
+        if let Some(launch) = &native {
+            anyhow::ensure!(
+                location.ssh.host().is_none()
+                    && !sandbox_requested(&request.sandbox)
+                    && std::fs::canonicalize(&location.workspace_cwd)? == launch.source_cwd,
+                "conflict: native task source binding changed"
+            );
+            location.workspace_cwd.clone_from(&launch.source_cwd);
+            location.config_cwd.clone_from(&launch.source_cwd);
+        }
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
         if let Some(launch) = &retained {
             anyhow::ensure!(
