@@ -229,3 +229,59 @@ async fn pinned_git_preparation_uses_agent_ask_deny_and_exact_targets() {
         std::fs::remove_dir_all(runtime.store_path.parent().unwrap()).unwrap();
     }
 }
+
+#[test]
+fn native_launch_wire_inputs_match_nullable_fields_and_each_workspace_choice() {
+    let schema = LaunchTaskTool.definition().function.parameters;
+    let nullable = [
+        "project_id",
+        "skill",
+        "model",
+        "reasoning_effort",
+        "git_ref",
+        "default_ref",
+    ];
+    for name in nullable {
+        assert_eq!(
+            schema["properties"][name]["type"],
+            json!(["string", "null"])
+        );
+    }
+    for workspace in ["auto", "clean_ref", "existing_checkout"] {
+        let mut input = request();
+        for name in nullable {
+            input[name] = Value::Null;
+        }
+        input["workspace"] = json!(workspace);
+        let decoded = LaunchTaskTool.decode(input).unwrap();
+        assert_eq!(
+            serde_json::to_value(decoded.workspace).unwrap(),
+            json!(workspace)
+        );
+        assert!(decoded.project_id.is_none());
+        assert!(decoded.model.is_none());
+        assert!(decoded.reasoning_effort.is_none());
+    }
+    let mut minimal = request();
+    minimal.as_object_mut().unwrap().remove("skill");
+    assert_eq!(
+        LaunchTaskTool.decode(minimal.clone()).unwrap().workspace,
+        crate::task_launch_control::TaskWorkspace::Auto
+    );
+    // Null is not advertised for workspace; the decoder rejects that shape.
+    assert_eq!(schema["properties"]["workspace"]["type"], "string");
+    minimal["workspace"] = Value::Null;
+    assert!(LaunchTaskTool.decode(minimal).is_err());
+    assert!(ListProjectsTool
+        .decode(json!({"query":null}))
+        .unwrap()
+        .query
+        .is_none());
+    assert!(ListProjectsTool.decode(json!({})).unwrap().query.is_none());
+    assert!(TaskLaunchStatusTool
+        .decode(json!({"request_id":uuid::Uuid::new_v4().to_string()}))
+        .is_ok());
+    assert!(TaskLaunchStatusTool
+        .decode(json!({"request_id":null}))
+        .is_err());
+}

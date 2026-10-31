@@ -1182,3 +1182,22 @@ async fn codex_without_delta_sink_finishes_before_sse_body_closes() {
     assert_eq!(response["output"][0]["type"], "function_call");
     assert_eq!(response["output"][0]["call_id"], "call_1");
 }
+
+#[test]
+fn codex_native_task_launch_wire_schema_preserves_the_native_decoder_contract() {
+    let definitions = crate::tools::direct_tool_definitions(false);
+    let levels =
+        catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol").thinking_level_map;
+    let request = codex_responses_request("gpt-5.6-sol", None, &[], &definitions, &levels, None);
+    let tools = request["tools"].as_array().unwrap();
+    for name in ["list_projects", "launch_task", "task_launch_status"] {
+        let definition = definitions
+            .iter()
+            .find(|tool| tool.function.name == name)
+            .unwrap();
+        let wire = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        assert_eq!(wire["parameters"], definition.function.parameters);
+        assert_eq!(wire["parameters"]["additionalProperties"], false);
+        assert!(wire["parameters"]["properties"]["operation"].is_null());
+    }
+}
