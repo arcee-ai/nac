@@ -220,6 +220,180 @@ class AttachmentPolicyTests(unittest.TestCase):
                     if file.is_file():
                         self.assertNotIn(b'FOREIGN-PAYLOAD-MUST-NOT-BE-RETAINED', file.read_bytes())
 
+    def test_production_collector_selection_failures_preserve_only_unambiguous_prefix(self):
+        cases = {'gap': 2, 'order': 2, 'reverse': 0, 'duplicate': 2, 'duplicate-stage': 2,
+                 'duplicate-earlier-file': 0, 'symlink': 2, 'oversize': 2, 'escaped-name': 2,
+                 'foreign-protocol': 2, 'malformed-entry': 2, 'foreign-test': 0, 'foreign-url': 0,
+                 'duplicate-unsafe-file': 0, 'duplicate-escaped-file': 0}
+        marker = 'FOREIGN-MANIFEST-MUST-NOT-BE-RETAINED'
+        for failure, expected in cases.items():
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary) / 'raw'
+                raw.mkdir()
+
+                def command(argv):
+                    if argv[1:4] == ['get', 'test-results', 'tests']:
+                        return json.dumps({'testNodes': [self.test]})
+                    export = Path(argv[argv.index('--output-path') + 1])
+                    manifest = self.export(export, self.snapshots()[:4])
+                    entries = manifest[0]['attachments']
+                    if failure == 'gap':
+                        entries.pop(2)
+                    elif failure == 'order':
+                        entries[2], entries[3] = entries[3], entries[2]
+                    elif failure == 'reverse':
+                        entries.reverse()
+                    elif failure == 'duplicate':
+                        entries.append(copy.deepcopy(entries[2]))
+                    elif failure == 'duplicate-stage':
+                        entries.append({'exportedFileName': 'automatic.png',
+                                        'suggestedHumanReadableName': PROTOCOL + '-03-after'})
+                    elif failure == 'duplicate-earlier-file':
+                        entries.append({'exportedFileName': 'payload-01.json',
+                                        'suggestedHumanReadableName': PROTOCOL + '-05-before'})
+                    elif failure == 'symlink':
+                        (export / 'payload-03.json').unlink()
+                        (export / 'payload-03.json').symlink_to(export / 'payload-04.json')
+                    elif failure == 'oversize':
+                        (export / 'payload-03.json').write_bytes(b'x' * (MAX_SNAPSHOT + 1))
+                    elif failure == 'escaped-name':
+                        entries[2]['exportedFileName'] = '../' + marker
+                    elif failure == 'foreign-protocol':
+                        entries[2]['suggestedHumanReadableName'] = 'nac352-dispatch-' + marker
+                    elif failure == 'malformed-entry':
+                        entries[2] = [marker]
+                    elif failure == 'foreign-test':
+                        manifest[0]['testIdentifier'] = marker
+                    elif failure == 'foreign-url':
+                        manifest[0]['testIdentifierURL'] = 'test://' + marker
+                    elif failure == 'duplicate-unsafe-file':
+                        (export / 'alias').symlink_to(export / 'payload-01.json')
+                        entries.append({'exportedFileName': 'alias',
+                                        'suggestedHumanReadableName': PROTOCOL + '-01-before'})
+                    elif failure == 'duplicate-escaped-file':
+                        entries.append({'exportedFileName': '../' + marker,
+                                        'suggestedHumanReadableName': PROTOCOL + '-01-before'})
+                    (export / 'manifest.json').write_text(json.dumps(manifest))
+                    return 'Exported'
+
+                tool = AttachmentTool(raw, command)
+                tool.path = '/unit/xcresulttool'
+                with self.assertRaises(RuntimeError):
+                    tool.collect(raw / 'unit.xcresult', self.binding, self.operations)
+                folder = raw / 'xctest-dispatch-observations'
+                index = json.loads((folder / 'index.json').read_text())
+                self.assertEqual(len(index['snapshots']), expected)
+                self.assertEqual(len(list(folder.glob(PROTOCOL + '-*.json'))), expected)
+                self.assertFalse(index['complete'])
+                self.assertFalse((raw / 'xctest-driver.json').exists())
+                self.assertIn('reason', index['selection_metadata'])
+                self.assertLess(len(json.dumps(index['selection_metadata']).encode()), 64 * 1024)
+                for file in raw.rglob('*'):
+                    if file.is_file():
+                        self.assertNotIn(marker.encode(), file.read_bytes())
+
+    def test_production_collector_projection_is_bounded_and_automatic_data_omitted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            raw = Path(temporary) / 'raw'
+            raw.mkdir()
+            marker = 'AUTOMATIC-DATA-MUST-NOT-BE-RETAINED'
+
+            def command(argv):
+                if argv[1:4] == ['get', 'test-results', 'tests']:
+                    return json.dumps({'testNodes': [self.test]})
+                export = Path(argv[argv.index('--output-path') + 1])
+                manifest = self.export(export, self.snapshots())
+                for number in range(70):
+                    filename = f'{marker}-{number}.png'
+                    (export / filename).write_text(marker)
+                    manifest[0]['attachments'].append({'exportedFileName': filename,
+                                                      'suggestedHumanReadableName': marker})
+                (export / 'manifest.json').write_text(json.dumps(manifest))
+                return 'Exported'
+
+            tool = AttachmentTool(raw, command)
+            tool.path = '/unit/xcresulttool'
+            index = tool.collect(raw / 'unit.xcresult', self.binding, self.operations)
+            metadata = index['selection_metadata']
+            self.assertTrue(index['complete'])
+            self.assertEqual(len(index['rows']), 6)
+            self.assertEqual(metadata['entry_count'], 83)
+            self.assertEqual(metadata['automatic_entries'], 71)
+            self.assertEqual(len(metadata['entries']), 64)
+            self.assertEqual(metadata['metadata_entries_omitted'], 19)
+            self.assertLess(len(json.dumps(metadata).encode()), 64 * 1024)
+            self.assertEqual(metadata['entries'][0]['protocol'], PROTOCOL)
+            self.assertEqual(metadata['entries'][0]['filename']['type'], 'string')
+            self.assertEqual(len(metadata['entries'][0]['filename']['sha256']), 64)
+            for file in raw.rglob('*'):
+                if file.is_file():
+                    self.assertNotIn(marker.encode(), file.read_bytes())
+                    self.assertNotIn(b'payload-01.json', file.read_bytes())
+
+    def test_production_collector_rechecks_total_before_copy_and_never_promotes_unsafe_inventory(self):
+        for failure in ('total-bound', 'unlisted-symlink', 'count'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary) / 'raw'
+                raw.mkdir()
+                snapshots = self.snapshots()
+                first_two = sum(len(json.dumps(row).encode()) for row in snapshots[:2])
+
+                def command(argv):
+                    if argv[1:4] == ['get', 'test-results', 'tests']:
+                        return json.dumps({'testNodes': [self.test]})
+                    export = Path(argv[argv.index('--output-path') + 1])
+                    manifest = self.export(export, snapshots)
+                    if failure == 'unlisted-symlink':
+                        (export / 'unlisted').symlink_to(export / 'payload-01.json')
+                    if failure == 'count':
+                        manifest[0]['attachments'] = [None] * 4097
+                    (export / 'manifest.json').write_text(json.dumps(manifest))
+                    return 'Exported'
+
+                tool = AttachmentTool(raw, command)
+                tool.path = '/unit/xcresulttool'
+                limit = first_two if failure == 'total-bound' else MAX_SNAPSHOT * 12
+                with patch('ci_xctest_attachments.MAX_SNAPSHOT_TOTAL', limit), self.assertRaises(RuntimeError):
+                    tool.collect(raw / 'unit.xcresult', self.binding, self.operations)
+                index = json.loads((raw / 'xctest-dispatch-observations/index.json').read_text())
+                self.assertEqual(len(index['snapshots']), {'total-bound': 2, 'unlisted-symlink': 12, 'count': 0}[failure])
+                self.assertFalse(index['complete'])
+                self.assertFalse((raw / 'xctest-driver.json').exists())
+
+    def test_production_collector_rechecks_growing_prefix_before_decode_or_copy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            raw = Path(temporary) / 'raw'
+            raw.mkdir()
+            snapshots = self.snapshots()[:4]
+            first_three = sum(len(json.dumps(row).encode()) for row in snapshots[:3])
+
+            def command(argv):
+                if argv[1:4] == ['get', 'test-results', 'tests']:
+                    return json.dumps({'testNodes': [self.test]})
+                export = Path(argv[argv.index('--output-path') + 1])
+                self.export(export, snapshots)
+                return 'Exported'
+
+            def growing_file(path, limit):
+                if path.name == 'payload-03.json':
+                    path.write_bytes(path.read_bytes() + b' ')
+                return bounded_file(path, limit)
+
+            tool = AttachmentTool(raw, command)
+            tool.path = '/unit/xcresulttool'
+            with patch('ci_xctest_attachments.MAX_SNAPSHOT_TOTAL', first_three), \
+                    patch('ci_xctest_attachments.bounded_file', side_effect=growing_file), \
+                    patch('ci_xctest_attachments.json_data', wraps=json_data) as decode:
+                with self.assertRaisesRegex(RuntimeError, 'total bound before copying'):
+                    tool.collect(raw / 'unit.xcresult', self.binding, self.operations)
+                self.assertEqual(decode.call_count, 4)  # Actual-tests tree, manifest, valid first two only.
+            folder = raw / 'xctest-dispatch-observations'
+            index = json.loads((folder / 'index.json').read_text())
+            self.assertEqual(len(index['snapshots']), 2)
+            self.assertEqual(len(list(folder.glob(PROTOCOL + '-*.json'))), 2)
+            self.assertFalse(index['complete'])
+            self.assertFalse((raw / 'xctest-driver.json').exists())
+
     def launch_adapter(self, raw, *, fail=False):
         # Portable orchestration fixture, never an actual Xcode/native qualification.
         app = raw / 'NAC Development Preview Smoke.app/Contents/MacOS'
