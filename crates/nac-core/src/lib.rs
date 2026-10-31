@@ -13,6 +13,7 @@ pub mod managed_fault_fixture;
 mod mcp;
 pub mod model;
 pub mod orchestration_control;
+pub mod peer_goal_control;
 
 /// Named, reusable model setups the launch UI offers instead of asking for a
 /// backend, model and base URL every time.

@@ -101,7 +101,14 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 154);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 158);
+for (const resource of [
+  "GET /sessions/{session_id}/questions",
+  "GET /sessions/{session_id}/questions/{request_id}",
+  "POST /sessions/{session_id}/questions/{request_id}/answer",
+  "POST /sessions/{session_id}/questions/{request_id}/cancel",
+]) assert.match(NAC_API_SURFACE[resource], /^private:/);
+
 for (const owner of Object.values(NAC_API_SURFACE)) {
   if (owner.startsWith("api.")) assert.equal(typeof api[owner.slice(4)], "function", owner);
   if (owner.startsWith("client.")) assert.equal(typeof client[owner.slice(7)], "function", owner);

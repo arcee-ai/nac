@@ -6,6 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 mod blocking_caller;
 pub(crate) mod coordinator;
+pub(crate) mod goal_changes;
 pub(crate) use blocking_caller::call_legacy_store;
 pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 #[macro_use]
@@ -15,6 +16,7 @@ mod managed_orchestrators;
 mod managed_probe;
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
+pub(crate) mod peer_goals;
 mod permission_grants;
 mod projects;
 mod render;
@@ -23,7 +25,9 @@ mod run_recovery;
 mod schema;
 mod session_forks;
 mod session_goals;
+pub use peer_goals::{PeerGoalStart, PeerGoalStartReceipt};
 mod session_inbox;
+mod session_mcp_refresh;
 mod shell_commands;
 pub use shell_commands::recent_shell_commands;
 pub(crate) use shell_commands::{
@@ -33,6 +37,17 @@ mod ssh_configurations;
 mod steering;
 mod task_discovery;
 mod task_evidence;
+pub(crate) mod task_questions;
+#[cfg(test)]
+pub(crate) use task_questions::create_task_question;
+pub(crate) use task_questions::{
+    answer_task_question_bound, cancel_task_question, create_task_question_bound,
+    pending_task_question, question_continuation_run, QuestionAgentScope,
+};
+pub use task_questions::{
+    list_task_questions, load_task_question, QuestionAnswer, QuestionAnswerReceipt, QuestionError,
+    QuestionRecord, QuestionRequest, QuestionResponder,
+};
 pub(crate) mod task_launches;
 mod terminal_cleanups;
 mod terminal_selection;
@@ -84,6 +99,7 @@ pub use session_forks::{
 pub(crate) use session_forks::{fork_origin_from_parts, list_session_forks_with_connection};
 pub use session_goals::*;
 pub use session_inbox::*;
+pub use session_mcp_refresh::*;
 pub use ssh_configurations::*;
 pub use steering::*;
 pub use task_discovery::*;

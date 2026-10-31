@@ -781,6 +781,10 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::sessions::list_handler,
             delivery::session_lifecycle::create_session
         ))
+        .routes(routes!(delivery::task_questions::list_questions))
+        .routes(routes!(delivery::task_questions::read_question))
+        .routes(routes!(delivery::task_questions::answer_question))
+        .routes(routes!(delivery::task_questions::cancel_question))
         .routes(routes!(delivery::task_launches::start))
         .routes(routes!(delivery::task_launches::status))
         .routes(routes!(delivery::task_launches::cancel))
