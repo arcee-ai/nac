@@ -11902,31 +11902,32 @@ hx.Size = cx, hx.Variant = lx, hx.Content = ux;
 // src/app/hooks/useCopyToClipboard.ts
 var gx = 2e3;
 function _x(e) {
-	let t = document.createElement("textarea");
-	t.value = e, t.style.position = "fixed", t.style.top = "-9999px", document.body.appendChild(t);
+	let t = document.activeElement instanceof HTMLElement ? document.activeElement : null, n = document.createElement("textarea");
+	n.value = e, n.style.position = "fixed", n.style.top = "-9999px", document.body.appendChild(n);
 	try {
-		return t.focus(), t.select(), document.execCommand("copy");
+		return n.focus(), n.select(), document.execCommand("copy");
 	} catch {
 		return !1;
 	} finally {
-		document.body.removeChild(t);
+		document.body.removeChild(n), t?.focus();
 	}
 }
 function vx() {
-	let [e, t] = p(!1), n = f(null);
+	let [e, t] = p("idle"), n = f(null);
 	c(() => () => {
 		n.current && clearTimeout(n.current);
 	}, []);
-	let r = o(() => {
-		n.current && clearTimeout(n.current), t(!0), n.current = setTimeout(() => t(!1), gx);
-	}, []);
+	let r = o((e) => {
+		n.current && clearTimeout(n.current), t(e), n.current = e === "copied" ? setTimeout(() => t("idle"), gx) : null;
+	}, []), i = o((e) => {
+		if (!e) return;
+		let t = () => r(_x(e) ? "copied" : "failed");
+		navigator.clipboard?.writeText ? navigator.clipboard.writeText(e).then(() => r("copied")).catch(t) : t();
+	}, [r]);
 	return {
-		copied: e,
-		copy: o((e) => {
-			e && (navigator.clipboard?.writeText ? navigator.clipboard.writeText(e).then(r).catch(() => {
-				_x(e) && r();
-			}) : _x(e) && r());
-		}, [r])
+		copied: e === "copied",
+		outcome: e,
+		copy: i
 	};
 }
 // src/app/atoms/button/CopyButton.tsx

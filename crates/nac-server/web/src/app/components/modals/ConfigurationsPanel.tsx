@@ -310,7 +310,7 @@ export function ConfigurationsPanel({
       ? catalogProvider?.auth_status === "ready"
       : signedIn;
   // Only an API-key provider can be fixed from here; a managed one needs its
-  // browser login, which the sign-in callout below the box owns.
+  // browser login, which the sign-in callout beside the provider owns.
   const catalogNeedsKey =
     source.kind === "catalog" &&
     Boolean(catalogPick) &&
@@ -1014,6 +1014,10 @@ export function ConfigurationsPanel({
             />
           ) : null}
 
+          {/* The account answers for the provider picked above, so it sits with
+              that choice rather than after the execution settings below it. */}
+          {authBackend ? <ManagedAuthCallout backend={authBackend} /> : null}
+
           {children && credentialReady ? (
             <>
               <Separator />
@@ -1022,8 +1026,6 @@ export function ConfigurationsPanel({
           ) : null}
         </div>
       </div>
-
-      {authBackend ? <ManagedAuthCallout backend={authBackend} className="mt-1" /> : null}
 
       {message ? (
         <div className="flex items-start gap-2">

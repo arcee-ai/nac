@@ -460,12 +460,15 @@ function ConfigurationForm({
     updateConfig.isPending,
   ]);
 
+  // The provider and its account sit above the scrolling fields: signing in is
+  // what makes the rest of the form answerable, so it is never below them.
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0">
-      <div
-        className={cn("flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0", isMobile && "pb-[88px]")}
+      <section
+        aria-label="Provider account"
+        className="shrink-0 flex flex-col gap-2 px-4 pt-4 pb-2 border-b border-muted"
       >
-        <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2">
+        <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3">
           <ConfigRow
             label="Model Provider"
             required
@@ -484,7 +487,13 @@ function ConfigurationForm({
               />
             }
           />
-          <Separator />
+        </div>
+        <ManagedAuthCallout backend={backend} />
+      </section>
+      <div
+        className={cn("flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0", isMobile && "pb-[88px]")}
+      >
+        <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2">
           <ConfigRow
             label="Name"
             required
@@ -646,7 +655,6 @@ function ConfigurationForm({
             textAreaClassName="h-[92px] resize-none"
           />
         </div>
-        <ManagedAuthCallout backend={backend} className="mt-2" />
         {error ? <p className="label-micro text-error-primary pt-2">{error}</p> : null}
         <p className="text-micro text-basic-muted pt-2">* Required fields</p>
       </div>
