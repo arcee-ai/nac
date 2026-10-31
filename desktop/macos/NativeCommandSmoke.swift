@@ -18,6 +18,7 @@ final class NativeCommandSmoke {
         try await wait("session composer") { try await self.js("return !!document.querySelector('[role=combobox][aria-label=Message]')") as? Bool == true }
         _ = try await js("document.querySelector('[role=combobox][aria-label=Message]').focus(); return true")
         try await wait("current document UI command owner") { self.commands.smokeSnapshot["ready"] as? Bool == true }
+        try await retirementBoundary(captures: captures)
         let boundary = try await receiptBoundary(captures: captures)
         let beforeBad = boundary.before
         let base = boundary.record
@@ -83,6 +84,88 @@ final class NativeCommandSmoke {
                 "shared_focus_restored": true, "projects_once_same_document": true, "foreign_window_rejected": true, "negative_WK_receipts": rejected, "initial_bridge": first, "final_bridge": final,
                 "navigation_popup_restricted": true, "document_replaced": true, "retired": true,
                 "trusted_keyboard_edit_qualified": trustedInput, "input": inputEvidence ?? [:]]
+    }
+
+    /// A separate owned document runs the exact production user script. Removing
+    /// its handler cannot affect the workspace's controller or command owner.
+    private func retirementBoundary(captures: URL?) async throws {
+        let probe = NativeCommandReceiptProbe()
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let controller = configuration.userContentController
+        controller.add(probe, contentWorld: .page, name: NativeCommandScript.handler)
+        controller.addUserScript(NativeCommandScript.userScript)
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        defer {
+            controller.removeScriptMessageHandler(forName: NativeCommandScript.handler, contentWorld: .page)
+            controller.removeAllUserScripts()
+            view.stopLoading()
+        }
+        view.loadHTMLString("<!doctype html><title>Owned command retirement fixture</title>", baseURL: app.baseURL)
+        try await wait("owned WK retirement document") {
+            (try? await view.callAsyncJavaScript("return !!window.__nacDesktop", arguments: [:], in: nil, contentWorld: .page)) as? Bool == true
+        }
+        let control = try await view.callAsyncJavaScript(#"""
+        const port = window.__nacDesktop;
+        const f = window.__nativeRetirementFixture = {
+          binding: {launch:'fixture-launch',view:'fixture-view',document:'fixture-document'}, calls:0
+        };
+        const check = (value, label) => { if (!value) throw new Error(label); };
+        f.callback = () => { f.calls++; return true; };
+        f.oldCleanup = port.connect(f.callback);
+        check(port.activate(f.binding), 'activate');
+        f.oldCleanup(); f.oldCleanup();
+        check(!port.dispatch(f.binding,{request:1}), 'unregistered dispatch');
+        f.cleanup = port.connect(f.callback);
+        f.oldCleanup();
+        check(port.dispatch(f.binding,{request:2}) && f.calls === 1, 'same callback stale cleanup');
+        f.calls = 0;
+        return {same_callback_reconnect:true,positive_control_calls:1};
+        """#, arguments: [:], in: nil, contentWorld: .page) as! [String: Any]
+        try await wait("actual WK unregister receipt") { probe.kinds == ["ready", "retired", "ready", "settled"] }
+        controller.removeScriptMessageHandler(forName: NativeCommandScript.handler, contentWorld: .page)
+        let unregister = try await view.callAsyncJavaScript(#"""
+        const f = window.__nativeRetirementFixture, port = window.__nacDesktop;
+        let threw = false;
+        try { f.cleanup(); } catch { threw = true; }
+        f.cleanup();
+        const delivered = port.dispatch(f.binding,{request:3});
+        if (!threw || delivered || f.calls !== 0) throw new Error('removed-handler cleanup retained owner');
+        return {unregister_threw:threw,late_dispatch:delivered,owner_calls:f.calls};
+        """#, arguments: [:], in: nil, contentWorld: .page) as! [String: Any]
+        controller.add(probe, contentWorld: .page, name: NativeCommandScript.handler)
+        _ = try await view.callAsyncJavaScript("const f = window.__nativeRetirementFixture; f.cleanup = window.__nacDesktop.connect(f.callback); f.oldCleanup(); return true", arguments: [:], in: nil, contentWorld: .page)
+        try await wait("actual WK replacement ready receipt") { probe.kinds == ["ready", "retired", "ready", "settled", "ready"] }
+        controller.removeScriptMessageHandler(forName: NativeCommandScript.handler, contentWorld: .page)
+        let retirement = try await view.callAsyncJavaScript(#"""
+        const f = window.__nativeRetirementFixture, port = window.__nacDesktop;
+        port.retire({...f.binding,document:'stale'});
+        let settlementThrew = false;
+        try { port.dispatch(f.binding,{request:4}); } catch { settlementThrew = true; }
+        const stillOwned = f.calls === 1 && settlementThrew;
+        if (!stillOwned) throw new Error('stale retirement removed owner');
+        f.calls = 0;
+        port.retire(f.binding); port.retire(f.binding); f.cleanup(); f.oldCleanup();
+        const delivered = port.dispatch(f.binding,{request:5});
+        let terminal = false;
+        try { port.connect(f.callback); } catch { terminal = true; }
+        if (delivered || f.calls !== 0 || !terminal || port.activate(f.binding))
+          throw new Error('matching retirement retained owner');
+        return {stale_retire_preserved_owner:stillOwned,repeat_cleanup_safe:true,
+                late_dispatch:delivered,owner_calls:f.calls,terminal};
+        """#, arguments: [:], in: nil, contentWorld: .page) as! [String: Any]
+        if let captures {
+            let receiptURL = Bundle.main.resourceURL!.appendingPathComponent("build-receipt.json")
+            let receipt = try JSONSerialization.jsonObject(with: Data(contentsOf: receiptURL)) as! [String: Any]
+            let hashes = receipt["native_source_files"] as! [String: String]
+            let evidence: [String: Any] = ["scope": "actual-WK-page-retirement-only", "control": control,
+                "removed_handler_unregister": unregister, "removed_handler_retirement": retirement,
+                "receipt_kinds": probe.kinds, "source_head": receipt["source_head"]!,
+                "source_dirty": receipt["source_dirty"]!, "script_file_sha256": hashes["desktop/macos/NativeCommandScript.swift"]!,
+                "native_sha256": receipt["native_sha256"]!, "native_menu_qualified": false, "OS_input_qualified": false]
+            let data = try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: captures.appendingPathComponent("commands-WK-retirement.json"), options: .atomic)
+        }
     }
 
     /// Runs on the real system WebView before any foreground-only operation.
@@ -188,6 +271,17 @@ final class NativeCommandSmoke {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         throw PreviewError.message("Timed out waiting for \(label); bridge snapshot: \(commands.smokeSnapshot)")
+    }
+}
+
+@MainActor
+private final class NativeCommandReceiptProbe: NSObject, WKScriptMessageHandler {
+    var kinds: [String] = []
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? String, let data = body.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let kind = object["kind"] as? String else { return }
+        kinds.append(kind)
     }
 }
 #endif
