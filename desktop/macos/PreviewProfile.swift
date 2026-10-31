@@ -49,8 +49,3 @@ final class PreviewProfile {
 
     func remove() throws { try FileManager.default.removeItem(at: root) }
 }
-
-enum PreviewError: LocalizedError {
-    case message(String)
-    var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
-}

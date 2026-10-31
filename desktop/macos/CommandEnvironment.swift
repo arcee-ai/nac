@@ -5,6 +5,11 @@ import Foundation
 enum CommandEnvironment {
     static let systemPath = "/usr/bin:/bin:/usr/sbin:/sbin"
     static let additions = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"]
+    #if PREVIEW_SMOKE
+    // Model a machine without package-manager installations using only this
+    // disposable app's command directories. Never changes system paths.
+    static var isolatedFixturePaths = false
+    #endif
 
     static func resolve(_ inherited: [String: String], cwd: URL, extraPaths: [String] = []) throws -> [String: String] {
         let path = inherited["PATH"] ?? systemPath
@@ -15,7 +20,11 @@ enum CommandEnvironment {
         var entries: [String] = []
         // Explicit app arguments win, then the launch environment, then known
         // package-manager locations. Never substitute a different backend.
-        for entry in extraPaths + original + additions {
+        var automatic = additions
+        #if PREVIEW_SMOKE
+        if isolatedFixturePaths { automatic = [] }
+        #endif
+        for entry in extraPaths + original + automatic {
             guard !entry.contains("\0"), !entry.contains(":"), entry.utf8.count <= 4096 else { throw invalidPath() }
             let absolute = entry.hasPrefix("/") ? entry : cwd.appendingPathComponent(entry).path
             if seen.insert(absolute).inserted { entries.append(absolute) }

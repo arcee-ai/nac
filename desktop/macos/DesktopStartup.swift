@@ -60,6 +60,9 @@ enum DesktopStartup {
             throw DesktopStartupError.message("The bootstrap directory is unavailable. Pass --directory with an existing directory and relaunch NAC.")
         }
         let environment = try CommandEnvironment.resolve(inherited, cwd: cwd, extraPaths: options.commandPaths)
+        guard CommandEnvironment.executable("git", in: environment) != nil else {
+            throw DesktopStartupError.message("Git was not found in NAC's command search path. Install or configure Git yourself, or pass --command-path with its executable directory, then relaunch NAC. Nothing has been installed automatically.")
+        }
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw DesktopStartupError.message("The bundled NAC engine is missing or not executable. Replace the complete app bundle and relaunch.")
         }
