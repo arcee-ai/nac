@@ -1,3 +1,4 @@
+import { ProductNavigation } from "../features/product-context/navigation";
 import { hashKey, QueryClient } from "@tanstack/react-query";
 
 import { NacClient, nacClient } from "../services/nacClient";
@@ -53,6 +54,7 @@ export class NativeRuntime {
   readonly client: NacClient;
   readonly assets: Readonly<NativePresentationAssets> | undefined;
   readonly api: ReturnType<typeof createNativeApi>;
+  readonly productNavigation: ProductNavigation;
   readonly stores: ReturnType<typeof createPresentationStores>;
   readonly queryClient: QueryClient;
   readonly terminalInputRecovery = new TerminalInputRecovery();
@@ -85,6 +87,10 @@ export class NativeRuntime {
       new LifetimeTransport(options.client.transport, this.controller.signal),
     );
     this.api = createNativeApi(this.client);
+    this.productNavigation = new ProductNavigation(
+      this.api.resolveProductDestination,
+      this.isClosed,
+    );
     this.eventSource = options.eventSource;
     runtimes.set(this.queryClient, this);
   }
@@ -130,6 +136,7 @@ export class NativeRuntime {
     if (this.isClosed()) return;
     this.controller.abort(new DOMException("Native runtime was closed.", "AbortError"));
     this.terminalInputRecovery.close();
+    this.productNavigation.close();
     for (const dispose of this.disposers) dispose();
     this.disposers.clear();
     void this.queryClient.cancelQueries();
@@ -151,7 +158,7 @@ export const standaloneRuntime: RuntimeDependencies = {
   events: (id: string, handlers: SessionStreamHandlers) => subscribeToSessionEvents(id, handlers),
 };
 export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> &
-  Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery">>;
+  Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "productNavigation">>;
 export function runtimeForQueryClient(client: QueryClient): RuntimeDependencies {
   return runtimes.get(client) ?? standaloneRuntime;
 }

@@ -413,6 +413,7 @@ impl Agent {
             native_web_capabilities,
             compaction,
             tool_runtime: ToolRuntime {
+                product_context: None,
                 workspace_cwd: config.workspace_cwd,
                 config_cwd: config.config_cwd,
                 store_path: config.store_path,
@@ -471,6 +472,41 @@ impl Agent {
             broker.set_command_environment(provider.clone());
         }
         self.tool_runtime.command_environment = provider;
+    }
+
+    pub(crate) fn runtime_tool_count(&self) -> Option<usize> {
+        self.tool_runtime
+            .allowed_tools
+            .as_ref()
+            .map(|names| names.len())
+    }
+
+    /// Host composition binds this port to one serving owner and exact session.
+    /// Worker/child capability sets stay unchanged.
+    pub fn bind_product_context(
+        &mut self,
+        port: Arc<dyn crate::product_context::ProductContextPort>,
+    ) -> Result<()> {
+        if !(self.direct_primary || self.mode == AgentMode::Orchestrator) {
+            return Ok(());
+        }
+        let definitions = crate::tools::product_context_tool_definitions();
+        if self.tool_defs.iter().any(|definition| {
+            crate::tools::PRODUCT_CONTEXT_TOOL_NAMES.contains(&definition.function.name.as_str())
+        }) {
+            anyhow::bail!("product-context capability name collision");
+        }
+        self.base_tool_defs.extend(definitions.clone());
+        self.fallback_tool_defs.extend(definitions.clone());
+        self.tool_defs.extend(definitions);
+        self.tool_runtime.product_context = Some(port);
+        self.tool_runtime.allowed_tools = Some(Arc::new(
+            self.tool_defs
+                .iter()
+                .map(|definition| definition.function.name.clone())
+                .collect(),
+        ));
+        Ok(())
     }
 
     pub(crate) fn set_worker_web_credential(&mut self, credential: Option<String>) {

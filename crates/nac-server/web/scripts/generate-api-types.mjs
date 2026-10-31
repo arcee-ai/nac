@@ -19,6 +19,12 @@ const clientOutputPath = path.join(webDir, "packages/nac-client/src/openapi.gene
 const check = process.argv.slice(2).includes("--check");
 
 const clientSchemaRoots = [
+  "ProductContext",
+  "ProductDestination",
+  "ProductDestinationInfo",
+  "ProductNavigationRequest",
+  "ProductNavigationResolution",
+
   "GitIdentityResponse",
   "UpdateGitIdentityRequest",
   "McpOAuthStatusResponse",

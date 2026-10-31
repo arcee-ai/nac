@@ -674,6 +674,8 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
     let mut documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
         .routes(routes!(ui_configuration::get_ui_configuration))
+        .routes(routes!(delivery::product_context::read))
+        .routes(routes!(delivery::product_context::resolve))
         .routes(routes!(managed_status::healthz_handler))
         .routes(routes!(managed_status::readyz_handler))
         .routes(routes!(managed_status::managed_status_handler))

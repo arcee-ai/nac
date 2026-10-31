@@ -1,3 +1,4 @@
+import type { ProductNavigationRequest } from "./types.js";
 import { ApiError, type NacClient } from "./nacClient.js";
 import type { UpdateGitIdentityRequest, AuthenticateMcpOAuthRequest, ConfigureMcpOAuthRequest, AssignSessionRequest, CommitWorkspaceRequest, CreateModelConfigurationRequest, CreateGoalRequest, CreateProjectRequest, CreateSessionRequest, DeleteProjectSessions, LaunchModelDefaultsRequest, InboxDelivery, ManagedAuthProvider, StartManagedCloneRequest, CreateMcpServerRequest, UpdateMcpServerRequest, TestMcpServerRequest, PermissionApprovalMode, PermissionReply, StartTraditionalChildRequest, StartManagedOrchestratorRequest, ProviderModelsRequest, ReorderProjectsRequest, ReorderSessionsRequest, SessionEventBoundary, CreateSshConfigurationRequest, UpdateSshConfigurationRequest, SshTarget, ShellCommandRequest, SwitchBranchRequest, UpdateConfigRequest, UpdateGoalRequest, UpdateModelConfigurationRequest, UpdateProjectRequest, UpdateSessionPresentationRequest, WorkspaceDiffStage } from "./types.js";
 export { ApiError };
@@ -1273,5 +1274,21 @@ export declare function createNacApi(nacClient: NacClient): {
     detachUserTerminal: (session: string, terminal: string, observer: string, signal?: AbortSignal) => Promise<void>;
     inputUserTerminal: (session: string, terminal: string, body: import("./types.js").UserTerminalInputRequest, signal?: AbortSignal) => Promise<void>;
     resizeUserTerminal: (session: string, terminal: string, body: import("./types.js").ResizeUserTerminalRequest, signal?: AbortSignal) => Promise<void>;
+    getProductContext: (sessionId?: string | null, signal?: AbortSignal) => Promise<{
+        build: import("./openapi.generated.js").components["schemas"]["ProductBuild"];
+        destinations: import("./openapi.generated.js").components["schemas"]["ProductDestinationInfo"][];
+        features: import("./openapi.generated.js").components["schemas"]["ProductFeature"][];
+        managed: boolean;
+        mcp: import("./openapi.generated.js").components["schemas"]["ProductCapability"];
+        schema_version: number;
+        session: import("./openapi.generated.js").components["schemas"]["ProductSessionContext"] | null;
+        source: string;
+    }>;
+    resolveProductDestination: (body: ProductNavigationRequest, signal?: AbortSignal) => Promise<{
+        build: import("./openapi.generated.js").components["schemas"]["ProductBuild"];
+        opened: boolean;
+        session_id: string | null;
+        target: import("./openapi.generated.js").components["schemas"]["ProductDestinationInfo"];
+    }>;
 };
 export type NacApi = ReturnType<typeof createNacApi>;

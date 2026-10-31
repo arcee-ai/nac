@@ -1,3 +1,4 @@
+import { ProductNavigation } from "../features/product-context/navigation";
 import { QueryClient } from "@tanstack/react-query";
 import { NacClient } from "../services/nacClient";
 import { createNativeApi } from "../services/api";
@@ -36,6 +37,7 @@ export declare class NativeRuntime {
     readonly client: NacClient;
     readonly assets: Readonly<NativePresentationAssets> | undefined;
     readonly api: ReturnType<typeof createNativeApi>;
+    readonly productNavigation: ProductNavigation;
     readonly stores: ReturnType<typeof createPresentationStores>;
     readonly queryClient: QueryClient;
     readonly terminalInputRecovery: TerminalInputRecovery;
@@ -56,5 +58,5 @@ export declare class NativeRuntime {
 }
 export declare function createNativeRuntime(options: NativeRuntimeOptions): NativeRuntime;
 export declare const standaloneRuntime: RuntimeDependencies;
-export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery">>;
+export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "productNavigation">>;
 export declare function runtimeForQueryClient(client: QueryClient): RuntimeDependencies;

@@ -296,6 +296,45 @@ fn direct_topologies_expose_exact_capability_boundaries() {
                 && content.contains("separate durable NAC orchestrator sessions")
     ));
 
+    struct ProductPort;
+    impl crate::product_context::ProductContextPort for ProductPort {
+        fn read(
+            &self,
+        ) -> crate::product_context::ProductContextFuture<'_, crate::product_context::ProductContext>
+        {
+            Box::pin(async { Err(anyhow!("test-only unavailable context")) })
+        }
+        fn resolve(
+            &self,
+            _: crate::product_context::ProductDestination,
+            _: String,
+        ) -> crate::product_context::ProductContextFuture<
+            '_,
+            crate::product_context::ProductNavigationResolution,
+        > {
+            Box::pin(async { Err(anyhow!("test-only unavailable destination")) })
+        }
+    }
+    let mut worker = Agent::default(ModelClient::new_for_test());
+    worker.bind_product_context(Arc::new(ProductPort)).unwrap();
+    child.bind_product_context(Arc::new(ProductPort)).unwrap();
+    for unbound in [&worker, &child] {
+        assert!(unbound.tool_runtime.product_context.is_none());
+        assert!(!names(unbound)
+            .iter()
+            .any(|name| crate::tools::PRODUCT_CONTEXT_TOOL_NAMES.contains(&name.as_str())));
+    }
+    for primary in [&mut parent, &mut delegating] {
+        primary.bind_product_context(Arc::new(ProductPort)).unwrap();
+        let refreshed = capability_names(primary.model_request_capabilities_for_test(None));
+        assert!(crate::tools::PRODUCT_CONTEXT_TOOL_NAMES
+            .iter()
+            .all(|name| refreshed.iter().any(|found| found == name)));
+        let before = names(primary);
+        assert!(primary.bind_product_context(Arc::new(ProductPort)).is_err());
+        assert_eq!(names(primary), before);
+    }
+
     drop(parent);
     drop(child);
     drop(delegating);

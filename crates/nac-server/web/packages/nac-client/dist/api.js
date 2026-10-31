@@ -9,6 +9,11 @@ export function createNacApi(nacClient) {
         return nacClient.transport.request(method, path, { body, headers, signal });
     }
     return {
+        getProductContext: (sessionId = null, signal) => request("GET", `/product-context${sessionId == null ? "" : `?session_id=${encodeURIComponent(sessionId)}`}`, { signal }),
+        resolveProductDestination: (body, signal) => request("POST", "/product-destinations/resolve", {
+            body,
+            signal,
+        }),
         ...createUserTerminalApi(nacClient),
         ...createExecutionApi(nacClient),
         ...createTerminalControlApi(nacClient),

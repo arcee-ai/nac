@@ -151,3 +151,9 @@ export type InputControlStatus = ApiSchema<"InputControlStatus">;
 export type InputDeliveryReceipt = ApiSchema<"InputDeliveryReceipt">;
 export type TransferTerminalControlRequest = ApiSchema<"TransferTerminalControlRequest">;
 export type ControlledTerminalInputRequest = ApiSchema<"ControlledTerminalInputRequest">;
+
+export type ProductContext = ApiSchema<"ProductContext">;
+export type ProductDestination = ApiSchema<"ProductDestination">;
+export type ProductDestinationInfo = ApiSchema<"ProductDestinationInfo">;
+export type ProductNavigationRequest = ApiSchema<"ProductNavigationRequest">;
+export type ProductNavigationResolution = ApiSchema<"ProductNavigationResolution">;
