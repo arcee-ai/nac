@@ -37,4 +37,5 @@ pub(crate) mod terminal_control;
 pub(crate) mod task_launches;
 pub(crate) mod task_preparations;
 
+pub(crate) mod native_task_launches;
 pub(crate) mod task_followups;

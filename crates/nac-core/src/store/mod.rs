@@ -29,12 +29,17 @@ pub use shell_commands::recent_shell_commands;
 pub(crate) use shell_commands::{
     accept_shell_command, list_shell_commands, lookup_shell_command, start_shell_command,
 };
+pub(crate) mod native_task_launches;
 mod ssh_configurations;
 mod steering;
 mod task_discovery;
 mod task_evidence;
 pub(crate) mod task_followups;
 pub(crate) mod task_launches;
+pub use native_task_launches::{
+    load_native_task_launch, reconcile_native_task_launches, reserve_native_task_launch,
+    update_native_task_admission_error, update_native_task_launch,
+};
 mod terminal_cleanups;
 mod terminal_selection;
 mod thread_events;

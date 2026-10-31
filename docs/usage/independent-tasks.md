@@ -75,6 +75,65 @@ Sessions whose `session:<id>` is not allowed without a prompt are skipped before
 matching and never count toward the 500-row scan, so they affect no
 candidate, count, flag or cursor.
 
+## Launching separate tasks from a direct chat
+
+Ask a persistent Local direct chat to start a separate task for a specific brief.
+The new chat has its own title, session identity and initial input. Both chats
+remain independently steerable. A launch starts no goal and copies no transcript.
+Traditional children and managed orchestrators keep their existing semantics.
+
+The native tools are:
+
+- `list_projects`: read saved project IDs, names, locations, configured model
+  defaults and backend eligibility. A query filters candidates without selecting
+  one. This operation does not scan or initialize directories.
+- `launch_task`: launch a goal-free direct chat in a saved project. An explicit
+  `project_id` wins; omission uses the caller's bound saved project. If the caller
+  has no project, choose an ID from discovery. Names and paths are not guessed.
+- `task_launch_status`: read the caller's request receipt and committed task/run
+  state. It never attaches, wakes, recovers, subscribes to or controls a target.
+  Process-local approval queues remain unknown; open the task to see them.
+
+Provide a canonical UUID `request_id` for each intentional new task. Retrying
+the exact same key and arguments returns the original task, including after
+response loss or restart. Changed arguments or a different caller conflict.
+Two intentional tasks need different keys even when their briefs are identical.
+The durable receipt reports preparation, errors, session/project identity and
+the exact `/session/<id>` route. The transcript opens a receipt link only after
+the passive session inventory confirms the independent direct task and project.
+Markdown URL policy is unchanged.
+
+`workspace: "auto"` starts Git projects in a retained isolated worktree through
+the shared clean-ref launch service. Same-project launches default to the
+invoking checkout's committed `HEAD`; cross-project launches use the
+destination's configured default branch. `git_ref` selects an explicit ref or
+predecessor. When a project has no saved Git binding yet, `default_ref` must
+name its intended default branch. Resolve once and retry the original receipt;
+moving or deleting a selected ref does not repin an accepted request.
+Clean-ref launches exclude source edits; the receipt explicitly reports that
+policy. They preserve the source checkout, index and files.
+
+Ordinary non-Git Local projects use their saved directory. An explicit
+`workspace: "existing_checkout"` also keeps the established shared-checkout
+behavior for Git projects; it cannot select a ref. `workspace: "clean_ref"`
+requires a Git source and never falls back after a source error. Current-contents
+capture, remote task launch, automatic cleanup and peer control are separate work.
+
+The initial `prompt` must contain the necessary handoff facts. `skill` adds the
+requested named skill to that fresh brief; it does not install skills or copy
+their contents. Explicit `model` and `reasoning_effort` values are preserved;
+otherwise the destination's existing launch defaults apply. The new task keeps
+its own normal agent permissions and default manual answer policy. Human product
+invocation authority and the caller's approval mode or remembered grants do not
+transfer. Hard/configured denials, canonical project/source ownership and backend
+admission still apply. Native launches currently require an unmanaged Local
+caller and destination; unsupported backends fail without substitution.
+
+After acceptance, preparation belongs to the serving lifetime even if the
+tool response is lost. Interrupted preparation is reported as failed and can be
+reconciled by an exact retry. A cancelled publication cannot insert a session
+or initial input. Published tasks retain their workspace under the existing
+retention contract; cancelling a run is independent of steering the caller.
 ## Authorized follow-up
 
 `send_task_followup` submits guidance to an exact independent plain-direct Local

@@ -1088,5 +1088,7 @@ mod openapi_contract;
 #[path = "tests/task_launch_shutdown.rs"]
 mod task_launch_shutdown;
 
+#[path = "tests/native_task_launches.rs"]
+mod native_task_launches;
 #[path = "tests/task_followups.rs"]
 mod task_followups;

@@ -48,7 +48,8 @@ pub use review::{
     REVIEW_DEADLINE,
 };
 pub use review_failure::{PermissionReviewFailureReason, ReviewUnavailable};
-use shell_parser::{canonical_command, command_grant_candidate, parse_shell, ParsedShell};
+pub(crate) use shell_parser::canonical_command;
+use shell_parser::{command_grant_candidate, parse_shell, ParsedShell};
 
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const APPROVAL_SUBSCRIBER_POLL_INTERVAL: Duration = Duration::from_millis(25);
