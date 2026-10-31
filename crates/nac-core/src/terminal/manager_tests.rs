@@ -1696,12 +1696,14 @@ async fn direct_cancellation_stops_foreground_and_preserves_retained_terminal() 
     manager.retain(&retained).await.unwrap();
     let cancellation = ThreadCancellation::default();
     cancellation.cancel();
-    assert!(manager
+    let error = manager
         .write_stdin(&foreground, "", 10, 100, Some(&cancellation))
         .await
-        .unwrap_err()
-        .to_string()
-        .contains("cancelled"));
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("cancelled"),
+        "expected cancellation error, got: {error:#}"
+    );
     assert!(manager.get(&foreground).await.is_none());
     assert!(manager.get(&retained).await.is_some());
     manager.remove_all().await.unwrap();
