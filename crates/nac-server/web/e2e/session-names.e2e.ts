@@ -193,6 +193,7 @@ for (const width of [1440, 768, 390])
             mutations.push(req.url());
         });
         if (baseline) {
+          await expect(page.getByText("Explore this repository", { exact: true })).toBeVisible();
           if (width >= 768) {
             const show = page.getByRole("button", { name: "Show sidebar", exact: true });
             if (await show.isVisible()) await show.click();
@@ -212,6 +213,9 @@ for (const width of [1440, 768, 390])
         if (width < 768) {
           await capture(page, info, `${width}-${theme}`);
           await heading.tap();
+          await expect(
+            page.getByRole("dialog", { name: "Full session name", exact: true }),
+          ).toBeInViewport({ ratio: 1 });
           await capture(page, info, `full-name-${width}-${theme}`);
           await page.keyboard.press("Escape");
         }
@@ -538,6 +542,9 @@ test("full names at real 200 percent browser zoom", async ({ harness, request },
         });
         await viewName(page, heading, names[0]);
         await heading.click();
+        await expect(
+          page.getByRole("dialog", { name: "Full session name", exact: true }),
+        ).toBeInViewport({ ratio: 1 });
         await capture(page, info, `zoom200-${width}-${theme}`);
         await page.keyboard.press("Escape");
         await page.getByRole("button", { name: "Open the menu", exact: true }).click();
