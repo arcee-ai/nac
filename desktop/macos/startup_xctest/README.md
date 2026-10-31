@@ -14,6 +14,15 @@ explicitly nominated by root; do not consume a moving branch. Existing
 real-vendor evidence remains consumed. These four cases use only a disposable
 dummy provider, with no live inference or credential copying.
 
+Root's product nomination is now P
+`d443a2aca506def2817b9afc0c9a20a75f5c4b5d`, with an available normal ad-hoc
+package. The earlier helper Q was `57b16ef4`; this corrective candidate must
+receive its own exact Q nomination before inclusion. H
+`a4ec6b17a92dabd28501fa427992528cd3729100` remains an interface reference.
+Keep P, Q and eventual H identities distinct; only the four files in this
+directory may be supplied from Q, and only the Swift file is a test input.
+No Q provider, vendor qualification or app/runtime source is consumed.
+
 ## Four states
 
 | Case | Public UI and image | Independent owner assertions |
@@ -23,8 +32,8 @@ dummy provider, with no live inference or credential copying.
 | `invalidConfig` | Native `config.toml`, repair and relaunch guidance; no hittable shared workspace | Invalid owned config; no DB opened or substitute store |
 | `futureStore` | Exact root-nominated356 unique native recovery message and ordinary window image; old generic footer fails | Owned SQLite user_version999 main DB and config hashes unchanged, no WAL/SHM, no activation or alternate store; typed serving-startup failure, producer inclusion and cleanup |
 
-Root nominated ALL-356's exact source contract (implementation in progress,
-not qualified): private v1 `kind: failed`, `code: store_schema_incompatible`,
+Root nominated ALL-356's exact source contract (present in P; actual ordinary
+UI remains unqualified): private v1 `kind: failed`, `code: store_schema_incompatible`,
 `stage: startup`, with this exact shell-owned visible guidance:
 
 > The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.
@@ -55,13 +64,57 @@ runner execution and actual ordinary images remain gates even when this
 assertion is syntactically present.
 
 The helper has fixed public XCTest actions, exact URL/hash/receipt and app
-incarnation checks, unique foreground/on-screen window checks, and explicit
-observed unlocked console checks at input and screenshot boundaries. Missing
-lock bits fail closed. Public `typeText`, `typeKey`, clicks and a window
+incarnation checks, unique foreground/on-screen window checks, and fresh
+console checks at input and screenshot boundaries. Console admission ports
+H's settled policy: positive root IOConsoleLocked=false, a unique matching
+logged-in console UID, Quartz session/on-console/login, at least one display
+and a known foreground bundle other than loginwindow. Optional session lock
+flags may be absent/null or strictly Boolean false; true, strings, numbers and
+other malformed values fail. Absence is retained as null in observations,
+never changed to false. Swift uses CFBoolean identity, so NSNumber(0) cannot
+masquerade as false. The app PID/incarnation/window/foreground guards remain.
+Public `typeText`, `typeKey`, clicks and a window
 screenshot establish only the actions actually executed. They do not establish
 physical keyboard/IME behavior. Selectors still require actual SDK/AX validation;
 absence/ambiguity must fail, with no DOM, private WebKit, coordinate or guessed
 element fallback. Blank images require rejection by the actual image reviewer.
+
+## Separate unsigned and post-sign admission
+
+`validate(config, receipt)` retains the original unsigned-declaration behavior
+and its eight original regression controls. It must not admit a signed app.
+For a normal packaged candidate use:
+
+```python
+validate_normal_package(config, manifest_path, clean_product_root,
+                        product_sha=P, test_sha=Q, harness_sha=H)
+```
+
+This read-only adapter invokes P's existing `package.verify_files`, inventory
+and post-sign record validation in an isolated Python process, using `-B` and
+the explicitly nominated clean same-repository P checkout. It never launches
+the app, engine, native observer, signing command or profile. It requires the
+explicit `manifest.post_sign_receipt.phase == ad-hoc-preparation`, full actual
+relocated inventory equal to the owner manifest, exact P source/asset identity,
+the unchanged embedded unsigned build receipt equal to sealed
+`PackageIdentity.native_build_receipt`, the nominated owner compiler/source
+rosters and flags, fixture exclusion, all four engine identity fields, and dev
+bundle identity. Original owner code/receipt/marker are not rewritten. This
+establishes integrity and provenance admission, not signature authenticity or
+runtime acceptance.
+
+Config `native_sha256`, `engine_sha256`, and `info_plist_sha256` bind final
+post-sign fields. Add separate `manifest_sha256`, `package_identity_sha256`,
+`engine_identity_sha256`, `build_receipt_sha256`, full four-field
+`engine_identity`, `test_source_sha` (Q) and `harness_sha` (H). `source_sha`
+continues to mean P. These digests identify different records/phases and must
+not be substituted for one another. H freezes and validates the external
+manifest before SDK execution. The public Swift actor checks actual bundle
+bytes/config hashes, sealed marker/receipt equality and engine identities;
+the external manifest hash is an H-validated binding, not a claim that the UI
+actor read an external manifest. Pure inspection without fixture creation is
+available as `inspect_normal_package(manifest_path, relocated_app, P_root,
+product_sha=P)`.
 
 ## Exact integration requirements for ALL-354 after its current freeze
 
@@ -77,23 +130,26 @@ None is edited here. No H/T job is requested by these files.
    supports performance source selection only. Extend maintained ownership
    deliberately after the freeze; do not fabricate a project receipt or
    `.xctestrun`. Record exact H, helper source commit/hash and candidate source.
-2. Build the exact ordinary relocated `NAC.app` through `app-build`, with only
+2. Consume P's owner-built ordinary relocated `NAC.app`, with only
    `LOCAL_APP`, no PREVIEW_SMOKE/INSTANCE_SMOKE or fixture definitions. Record
    full build receipt and actual native/engine/plist/receipt hashes. This helper
    uses the existing `compiler_flags` receipt field and verifies Info.plist's
-   actual bundle identifier; ec4 has no receipt `bundle_identifier` field.
+   actual bundle identifier. Keep unsigned and post-sign admission separate as
+   above; the normal P package does have a bundle identifier in its receipt.
 3. A host-side fixture owner prepares one unique canonical
    `nac342-xctest-*` root per case, containing `Moved app folder with spaces/NAC.app`,
    `home with spaces/selected nac`, and `workspace with spaces`. Prepare the
    configured dummy model through existing hardened Rust settings owners and
    stop the preparation engine before app launch. Seed no project. Queue the
-   existing `startup_provider.mjs` scenario `startup-home`; expected prompt is
-   `FINDER_CONFIGURED_LOCAL_startup-home`. Keep catalog/provider listening only
+   H-owned wrapper around H's existing shared ScriptedProvider with step
+   `startup-home`; expected prompt is `FINDER_CONFIGURED_LOCAL_startup-home`
+   and response `Finder configured local response.`. Consume no Q runtime
+   payload outside these four files. Keep catalog/provider listening only
    on owned ephemeral loopback ports. Never infer API authority from a port.
-4. Use `contract.validate(config, build_receipt)` for pure declaration admission.
-   It performs no file or process access. Supply the exact config fields shown
+4. Use `contract.validate_normal_package` for packaged admission. Supply fields shown
    in `test_contract.fixture()`, with real paths/hashes. These examples are
-   synthetic unit data, not a runnable config. `startup_source_sha256` binds
+   synthetic unit data, not a runnable config, plus the distinct package/source
+   fields documented above. `startup_source_sha256` binds
    this helper's source and must match actual source inclusion in the generated
    runner receipt. Bind configuration bytes/hash to that runner and test ID
    `StartupJourneys/testOrdinaryStartup`; never mutate the config after build.
@@ -113,9 +169,10 @@ None is edited here. No H/T job is requested by these files.
    are not proof of effective child isolation.
 7. Capture before/after persistent authorization policy using354's existing
    observations; never provision permission. Observe usable unlocked Aqua
-   before/after and at each guarded action. A missing session lock bit is a
-   gate, even if another source reports false. Do not weaken it or attempt a
-   local GUI run on this locked host.
+   before/after and at each guarded action using the established positive
+   policy above. Preserve optional absent lock observations as null; missing
+   positive root/session/display/foreground observations remain gates. Do not
+   attempt a local GUI run on this locked host.
 8. Use `xcodebuild build-for-testing` and its single real generated runner,
    then `test-without-building`, serialized on an admitted Mac runner. Verify
    source inclusion, real result bundle and test success/failure. Swift parse
@@ -144,9 +201,20 @@ Public attachment names are `nac342-dispatch-v1-NN-before/after`,
 ## Local preparation checks
 
 ```sh
-python3 -B -m unittest discover -s desktop/macos/startup_xctest -p 'test_*.py' -v
+NAC342_PRODUCT_SOURCE_ROOT=<clean-exact-P-checkout> NAC342_SWIFT_POLICY_PROOF=1 \
+  python3 -B -m unittest discover -s desktop/macos/startup_xctest -p 'test_*.py' -v
 swiftc -frontend -parse desktop/macos/startup_xctest/StartupJourneys.swift
 ```
+
+On the shared host run the unit command under the existing browser/build lease
+because the opt-in Swift proof compiles a tiny Foundation-only CLI. It extracts
+the exact production `StartupConsolePolicy` source block from this helper and
+runs the same31 supplied fixture observations as Python and immutable H's
+existing policy, including omitted/false/true/malformed flags and missing
+positive observations. It performs no live console observation or GUI action.
+The normal package tests use tiny synthetic non-executable artifacts and P's
+real owner validator; they require the separate nominated P checkout. Missing
+P or no Swift opt-in is an explicit skipped proof, not a passing substitute.
 
 No new dependency, workflow, SDK install, app/engine change, project generation,
 PR publication, actual UI execution, or live-provider request is performed by

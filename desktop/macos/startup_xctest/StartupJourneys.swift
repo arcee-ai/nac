@@ -1,9 +1,55 @@
 import AppKit
 import CoreGraphics
 import CryptoKit
+import CoreFoundation
 import IOKit
 import XCTest
 import XCUIAutomation
+
+// BEGIN CONSOLE POLICY (also compiled as a Foundation-only fixture proof)
+enum StartupConsolePolicy {
+    static func boolean(_ value: Any?) -> Bool? {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
+    static func integer(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              "cCsSiIlLqQ".contains(String(cString: number.objCType)) else { return nil }
+        return number.intValue
+    }
+
+    static func optionalUnlocked(_ value: Any?) -> Bool {
+        if value == nil || value is NSNull { return true }
+        return boolean(value) == false
+    }
+
+    static func evaluate(root: [String: Any], uid: Int, quartz: [String: Any]) throws -> [String: Any] {
+        let users = root["IOConsoleUsers"] as? [[String: Any]] ?? []
+        let matches = users.filter {
+            integer($0["kCGSSessionUserIDKey"]) == uid && boolean($0["kCGSSessionOnConsoleKey"]) == true
+        }
+        guard matches.count == 1, boolean(matches[0]["kCGSessionLoginDoneKey"]) == true,
+              boolean(root["IOConsoleLocked"]) == false,
+              boolean(quartz["quartz_session_available"]) == true,
+              boolean(quartz["on_console"]) == true, boolean(quartz["login_done"]) == true,
+              let screens = integer(quartz["screen_count"]), screens >= 1,
+              let frontmost = quartz["frontmost_bundle"] as? String,
+              !["", "unavailable", "com.apple.loginwindow"].contains(frontmost),
+              optionalUnlocked(matches[0]["CGSSessionScreenIsLocked"]),
+              optionalUnlocked(quartz["screen_is_locked"]) else {
+            throw NSError(domain: "NAC342Console", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Positive console observations missing, locked or malformed"])
+        }
+        // Preserve absent/null lock observations; never fabricate false.
+        return ["on_console": true, "login_done": true, "root_locked": false,
+                "session_lock_flag": matches[0]["CGSSessionScreenIsLocked"] ?? NSNull(),
+                "quartz_lock_flag": quartz["screen_is_locked"] ?? NSNull(),
+                "rendered_app_qualification_required": true]
+    }
+}
+// END CONSOLE POLICY
 
 /// Proposed external public-XCTest actor. ALL-354 must include this source in
 /// an actual generated runner before it is runnable. No app bridge or file IPC.
@@ -13,7 +59,13 @@ final class StartupJourneys: XCTestCase {
         let fixture_root, app_path, home, nac_home, workspace, expected_store: String
         let native_sha256, engine_sha256, info_plist_sha256, build_receipt_sha256: String
         let startup_source_sha256: String
+        let test_source_sha, harness_sha: String
+        let manifest_sha256, package_identity_sha256, engine_identity_sha256: String
+        let engine_identity: Identity
         let environment: [String: String]
+    }
+    struct Identity: Decodable, Equatable {
+        let product_version, source_revision, track, build_id: String
     }
     private var observations: [[String: Any]] = []
     // Root-nominated356 contract. The actor observes the unique UI message;
@@ -65,13 +117,38 @@ final class StartupJourneys: XCTestCase {
             ("Contents/MacOS/NACPreview", fixture.native_sha256),
             ("Contents/Resources/nac-web", fixture.engine_sha256),
             ("Contents/Info.plist", fixture.info_plist_sha256),
-            ("Contents/Resources/build-receipt.json", fixture.build_receipt_sha256)
+            ("Contents/Resources/build-receipt.json", fixture.build_receipt_sha256),
+            ("Contents/Resources/PackageIdentity.json", fixture.package_identity_sha256),
+            ("Contents/Resources/engine-identity.json", fixture.engine_identity_sha256)
         ] {
             let bytes = try Data(contentsOf: app.appendingPathComponent(member))
             try require(digest(bytes) == expected,
                         "Exact ordinary bundle bytes differ")
         }
         let receipt = try json(Data(contentsOf: app.appendingPathComponent("Contents/Resources/build-receipt.json")))
+        let marker = try json(Data(contentsOf: app.appendingPathComponent("Contents/Resources/PackageIdentity.json")))
+        let embedded = try JSONDecoder().decode(Identity.self,
+            from: Data(contentsOf: app.appendingPathComponent("Contents/Resources/engine-identity.json")))
+        let markerSource = try XCTUnwrap(marker["source"] as? [String: Any])
+        let sealedReceipt = try XCTUnwrap(marker["native_build_receipt"] as? [String: Any])
+        try require(NSDictionary(dictionary: receipt).isEqual(NSDictionary(dictionary: sealedReceipt))
+            && receipt["phase"] as? String == "unsigned-build"
+            && marker["schema_version"] as? Int == 1 && marker["purpose"] as? String == "normal-app-preparation"
+            && marker["consumer_distribution"] as? Bool == false && markerSource["revision"] as? String == fixture.source_sha,
+            "Sealed PackageIdentity or original unsigned receipt differs")
+        for value in [fixture.test_source_sha, fixture.harness_sha] {
+            try require(value.range(of: "^[0-9a-f]{40}$", options: .regularExpression) != nil, "Invalid Q/H source binding")
+        }
+        try require(fixture.manifest_sha256.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+                    "Missing external owner-admitted manifest hash")
+        for value in [receipt["engine_identity"], marker["engine_identity"]] {
+            let data = try JSONSerialization.data(withJSONObject: try XCTUnwrap(value))
+            let decoded = try JSONDecoder().decode(Identity.self, from: data)
+            try require(decoded == embedded, "Full four-field embedded engine identities differ")
+        }
+        try require(embedded == fixture.engine_identity && embedded.source_revision == fixture.source_sha
+            && embedded.track == "dev" && embedded.build_id == "dev-" + fixture.source_sha,
+            "Configured product identity differs")
         let identity = try XCTUnwrap(receipt["engine_identity"] as? [String: Any])
         let flags = try XCTUnwrap(receipt["compiler_flags"] as? [String])
         let definitions = flags.indices.filter { flags[$0] == "-D" }.compactMap {
@@ -119,29 +196,24 @@ final class StartupJourneys: XCTestCase {
             "Catalog is not the owned loopback fixture")
     }
 
+    @MainActor
     private func console() throws -> [String: Any] {
-        let session = try XCTUnwrap(CGSessionCopyCurrentDictionary() as? [String: Any])
-        try require(session[kCGSessionOnConsoleKey as String] as? Bool == true
-            && session[kCGSessionLoginDoneKey as String] as? Bool == true
-            && session["CGSSessionScreenIsLocked"] as? Bool == false,
-            "Session lock observation is missing, locked, or not on console")
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
         let root = IORegistryGetRootEntry(kIOMainPortDefault)
         try require(root != 0, "Console registry observation missing")
         defer { IOObjectRelease(root) }
         func property(_ name: String) -> Any? {
             IORegistryEntryCreateCFProperty(root, name as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
         }
-        try require(property("IOConsoleLocked") as? Bool == false, "Console lock is true or unknown")
-        let users = property("IOConsoleUsers") as? [[String: Any]] ?? []
-        let matches = users.filter {
-            ($0["kCGSSessionUserIDKey"] as? NSNumber)?.uint32Value == getuid()
-                && $0["kCGSSessionOnConsoleKey"] as? Bool == true
-        }
-        try require(matches.count == 1, "Console user is ambiguous")
-        try require(matches[0]["kCGSessionLoginDoneKey"] as? Bool == true
-            && matches[0]["CGSSessionScreenIsLocked"] as? Bool == false, "User lock observation missing or unsafe")
-        return ["session_lock_observed": true, "session_locked": false,
-                "console_lock_observed": true, "console_locked": false, "on_console": true]
+        return try StartupConsolePolicy.evaluate(root: [
+            "IOConsoleLocked": property("IOConsoleLocked") ?? NSNull(),
+            "IOConsoleUsers": property("IOConsoleUsers") ?? []], uid: Int(getuid()), quartz: [
+            "quartz_session_available": session != nil,
+            "on_console": session?[kCGSessionOnConsoleKey as String] ?? NSNull(),
+            "login_done": session?[kCGSessionLoginDoneKey as String] ?? NSNull(),
+            "screen_is_locked": session?["CGSSessionScreenIsLocked"] ?? NSNull(),
+            "screen_count": NSScreen.screens.count,
+            "frontmost_bundle": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unavailable"])
     }
 
     @MainActor
@@ -318,6 +390,9 @@ final class StartupJourneys: XCTestCase {
             ? ["kind": "failed", "version": 1, "code": "store_schema_incompatible", "stage": "startup"] : [:]
         try attachment(["schema": fixture.schema, "scenario": fixture.scenario,
             "configuration_sha256": digest(bytes), "source_sha": fixture.source_sha,
+            "test_source_sha": fixture.test_source_sha, "harness_sha": fixture.harness_sha,
+            "manifest_sha256": fixture.manifest_sha256, "package_identity_sha256": fixture.package_identity_sha256,
+            "engine_identity_sha256": fixture.engine_identity_sha256, "build_receipt_sha256": fixture.build_receipt_sha256,
             "startup_source_sha256": fixture.startup_source_sha256,
             "native_sha256": fixture.native_sha256, "engine_sha256": fixture.engine_sha256,
             "app_path": appURL.path, "bundle_id": fixture.bundle_id,
