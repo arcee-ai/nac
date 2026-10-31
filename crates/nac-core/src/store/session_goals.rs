@@ -280,7 +280,7 @@ pub fn create_session_goal(
         }
         super::task_evidence::retain_goal_outcome_with_connection(
             &transaction,
-            &existing,
+            existing,
             super::task_evidence::GoalRetirement::Replaced,
         )?;
         transaction.execute(

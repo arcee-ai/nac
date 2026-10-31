@@ -3,6 +3,7 @@
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::kernel::{
@@ -160,7 +161,7 @@ impl NativeTool for WaitTasksTool {
                         "wait_tasks",
                         services,
                         context,
-                        (caller.clone(), broker.clone()),
+                        (caller.clone(), Arc::clone(&broker)),
                         target.session_id.clone(),
                         (
                             target.project_id.clone(),
@@ -203,7 +204,7 @@ impl NativeTool for WaitTasksTool {
                                     "wait_tasks",
                                     services,
                                     context,
-                                    (caller.clone(), broker.clone()),
+                                    (caller.clone(), Arc::clone(&broker)),
                                     target.session_id.clone(),
                                     (target.project_id.clone(), target.authorized_project.clone()),
                                 )
