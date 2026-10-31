@@ -25,5 +25,16 @@ enum InstanceWorkspaceCompletionTests {
         late?.finish(.failure(InstanceFixtureError("late duplicate")))
         late = nil
         print("Workspace callback success, timeout and late/duplicate completion controls passed")
+
+        let atLimit = Data(repeating: 0, count: 2 * 1024 * 1024)
+        try validateWorkspaceSnapshotSize(atLimit)
+        do {
+            try validateWorkspaceSnapshotSize(atLimit + Data([0]))
+            preconditionFailure("Oversized diagnostic PNG must not reach the exporter")
+        } catch {
+            precondition(error.localizedDescription ==
+                "Failure WK snapshot exceeds the 2 MiB export limit; pixel evidence not retained")
+        }
+        print("Exact 2 MiB snapshot boundary and explicit oversized coverage-gap controls passed")
     }
 }

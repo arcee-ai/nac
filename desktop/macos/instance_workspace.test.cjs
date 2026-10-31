@@ -138,6 +138,58 @@ test('body, HTML, event and resource diagnostics remain bounded', async () => {
   });
 });
 
+test('late document-start registration leaves current-document earlier errors unknown', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.route(origin + '/**', route => route.fulfill({ status: 200, contentType: 'text/html',
+      body: html(empty, 'throw new Error("EARLIER_DOCUMENT_ERROR");') }));
+    await page.goto(origin + '/', { waitUntil: 'load' });
+    await page.addInitScript(diagnostics); // Registration does not execute in the current document.
+    const late = await observe(page);
+    assert.equal(late.semantic, 'empty-onboarding');
+    assert.equal(late.diagnostics_installed, false);
+    assert.equal(late.ready, false);
+    assert.equal(late.errors, null, 'Earlier errors are unobserved, not an observed empty list');
+    await page.reload({ waitUntil: 'load' });
+    const fresh = await observe(page);
+    assert.equal(fresh.diagnostics_installed, true);
+    assert.ok(fresh.errors.some(event => event.message.includes('EARLIER_DOCUMENT_ERROR')));
+    assert.equal(fresh.ready, false);
+  } finally { await page.close(); }
+});
+
+for (const attribute of ['style="opacity:0"', 'style="opacity:0.5"', 'inert', 'aria-hidden="true"']) {
+  test('ancestor prevents semantic visibility: ' + attribute, async () => {
+    for (const content of [empty, project]) {
+      await withPage(`<section ${attribute}>${content}</section>`, async page => {
+        assert.equal((await observe(page)).ready, false, attribute);
+        await page.evaluate(() => {
+          const ancestor = document.querySelector('section');
+          for (const name of ['style', 'inert', 'aria-hidden']) ancestor.removeAttribute(name);
+        });
+        assert.equal((await observe(page)).ready, true, 'Readiness resumes only after the actual ancestor state clears');
+      });
+    }
+  });
+}
+
+test('actual production project fade must finish before semantic visibility', async () => {
+  const css = fs.readFileSync(path.resolve(__dirname, '../../crates/nac-server/web/src/app/theme/animations.css'), 'utf8');
+  await withPage(project.replace('<div role=', '<div class="fade" role='), async page => {
+    await page.evaluate(css => {
+      const style = document.createElement('style'); style.textContent = css; document.head.append(style);
+      const animation = document.querySelector('[role=button]').getAnimations()[0];
+      animation.pause(); animation.currentTime = 0; window.fixtureFade = animation;
+    }, css);
+    assert.equal((await observe(page)).ready, false, 'Fully transparent first animation frame');
+    await page.evaluate(() => { window.fixtureFade.currentTime = 75; });
+    assert.equal((await observe(page)).ready, false, 'Partially faded target is not settled');
+    await page.evaluate(() => { window.fixtureFade.finish(); });
+    await page.waitForFunction(readyPredicate, origin, { timeout: 2000 });
+    assert.equal((await observe(page)).ready, true);
+  });
+});
+
 test('exact production empty UI waits for its real configuration query, then passes semantics', {
   skip: !process.env.NAC_INSTANCE_WORKSPACE_EMPTY_URL,
 }, async () => {

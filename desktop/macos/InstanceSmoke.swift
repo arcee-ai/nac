@@ -51,6 +51,8 @@ final class InstanceSmoke {
     }
 
     func start() {
+        // Synchronous: PreviewApp calls this before creating its engine startup Task.
+        installWorkspaceDiagnostics()
         evidence = ["scenario": scenario, "app_pid": getpid(), "passed": false,
                     "instrumentation": "INSTANCE_SMOKE", "expected_store": expectedStore]
         publish("starting")
@@ -165,11 +167,6 @@ final class InstanceSmoke {
     }
 
     private func readyWorkspace() async throws {
-        // Install before the first await/navigation; no page bridge or API mutation.
-        if !webView.configuration.userContentController.userScripts.contains(where: { $0.source == Self.workspaceDiagnosticsScript }) {
-            webView.configuration.userContentController.addUserScript(WKUserScript(
-                source: Self.workspaceDiagnosticsScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        }
         let deadline = ProcessInfo.processInfo.systemUptime + 45
         try await wait("identified system WKWebView workspace", timeout: 45) {
             guard !self.webView.isHidden, let receipt = self.engine.receipt else { return false }
@@ -209,6 +206,13 @@ final class InstanceSmoke {
             evidence["engine_identity"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(identity))
         }
         evidence["workspace_activated"] = true
+    }
+
+    private func installWorkspaceDiagnostics() {
+        if !webView.configuration.userContentController.userScripts.contains(where: { $0.source == Self.workspaceDiagnosticsScript }) {
+            webView.configuration.userContentController.addUserScript(WKUserScript(
+                source: Self.workspaceDiagnosticsScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
     }
 
     private func workspaceOrigin(_ url: URL?) -> String? {
@@ -251,9 +255,10 @@ final class InstanceSmoke {
                 }
             }
             guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
-                  let png = bitmap.representation(using: .png, properties: [:]), png.count <= 8 * 1024 * 1024 else {
-                throw InstanceFixtureError("Failure WK snapshot encoding unavailable or oversized")
+                  let png = bitmap.representation(using: .png, properties: [:]) else {
+                throw InstanceFixtureError("Failure WK snapshot encoding unavailable")
             }
+            try validateWorkspaceSnapshotSize(png)
             let name = "workspace-failure.png"
             try png.write(to: output.deletingLastPathComponent().appendingPathComponent(name), options: .atomic)
             evidence["workspace_failure_snapshot"] = ["file": name, "kind": "actual WKWebView snapshot"]
@@ -279,8 +284,16 @@ final class InstanceSmoke {
 
     private static let workspaceObservationScript = #"""
     const text = document.body?.innerText || '';
-    const visible = element => !!element && element.getClientRects().length > 0 &&
-      getComputedStyle(element).visibility !== 'hidden' && getComputedStyle(element).display !== 'none';
+    const visible = element => {
+      if (!element || ![...element.getClientRects()].some(rect => rect.width > 0 && rect.height > 0)) return false;
+      for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor);
+        if (ancestor.hasAttribute('hidden') || ancestor.hasAttribute('inert') ||
+            ancestor.getAttribute('aria-hidden')?.trim().toLowerCase() === 'true' ||
+            style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) !== 1) return false;
+      }
+      return true;
+    };
     const buttons = [...document.querySelectorAll('button')];
     const empty = text.includes('No projects yet') && buttons.some(button =>
       button.innerText.trim() === 'Get Started' && !button.disabled && visible(button));
@@ -296,7 +309,8 @@ final class InstanceSmoke {
         !text.includes('Internal Server Error') && events.length === 0 && semantic !== null,
       url: location.href, ready_state: document.readyState, semantic, body_length: text.length,
       body_text: text.slice(0, 8000), root_html: (document.getElementById('root')?.outerHTML || '').slice(0, 4000),
-      diagnostics_installed: !!window.__nacInstanceWorkspace, errors: events.slice(0, 16),
+      diagnostics_installed: !!window.__nacInstanceWorkspace,
+      errors: window.__nacInstanceWorkspace ? events.slice(0, 16) : null,
       buttons: buttons.slice(0, 16).map(button => ({text: button.innerText.slice(0, 100),
         label: button.getAttribute('aria-label'), disabled: button.disabled, visible: visible(button)})),
       resources: performance.getEntriesByType('resource').slice(-24).map(resource => ({
@@ -391,6 +405,12 @@ private final class InstanceWorkspaceCompletion<Value> {
         timer?.cancel()
         timer = nil
         continuation.resume(with: result)
+    }
+}
+
+private func validateWorkspaceSnapshotSize(_ png: Data) throws {
+    guard png.count <= 2 * 1024 * 1024 else {
+        throw InstanceFixtureError("Failure WK snapshot exceeds the 2 MiB export limit; pixel evidence not retained")
     }
 }
 
