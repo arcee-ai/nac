@@ -4,11 +4,17 @@ import json
 import hashlib
 import os
 from pathlib import Path
+import sys
 import tempfile
+import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
-from ci_startup import run_case, runner_environment
+from ci import run as owned_run
+from ci_startup import audit_diagnostic, run_case, runner_environment
+from ci_startup_api import FixtureFailure
+from ci_startup_audit import LiveAudit
 
 
 class StartupSupervisorTests(unittest.TestCase):
@@ -17,7 +23,8 @@ class StartupSupervisorTests(unittest.TestCase):
                                      'FIXTURE_API_KEY': 'test-only', 'NAC_MANAGED_CONFIG': 'test-only'}, clear=True):
             self.assertEqual(runner_environment(), {'DEVELOPER_DIR': '/Selected/Xcode'})
 
-    def exercise(self, *, sdk_failure=False, cleanup_failure=False, test_failure=False, integrity_failure=False):
+    def exercise(self, *, sdk_failure=False, cleanup_failure=False, test_failure=False, integrity_failure=False,
+                 diagnostic_error=None, witness_rejection=False):
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
             root = Path(temporary).resolve()
             profiles, folder = root / 'profiles', root / 'case'
@@ -37,6 +44,20 @@ class StartupSupervisorTests(unittest.TestCase):
             witness.failure_receipt.return_value = {'scope': 'synthetic unit owner receipt'}
             audit = MagicMock(failure=None)
             audit.stop.return_value = {'scope': 'synthetic unit API'}
+            audit.failure_snapshot.return_value = {'schema': 'nac-startup-api-diagnostic-v1', 'rejected': False}
+            begun = threading.Event()
+            child_pid = root / 'owned-test-child.pid'
+            if diagnostic_error is not None:
+                audit = LiveAudit(SimpleNamespace(), {'scenario': 'onboarding'}, root)
+                audit.phase = 'entry_assets'
+                def rejected_sample():
+                    if not begun.wait(timeout=2):
+                        raise AssertionError('Controlled child did not start')
+                    raise diagnostic_error
+                audit.sample = rejected_sample
+            if witness_rejection:
+                witness.failure = 'ownership_observation_unavailable'
+                audit.failure = 'ordinary_api_audit_rejected'
             provider = MagicMock()
             provider.start.return_value = 'http://127.0.0.1:4321'
             provider.stop.return_value = {'scope': 'synthetic provider'}
@@ -51,10 +72,24 @@ class StartupSupervisorTests(unittest.TestCase):
                 self.assertIn('preinstalled', calls)
                 calls.append('test-request')
                 (folder / 'ordinary-startup.xcresult').mkdir()
+                if diagnostic_error is not None:
+                    def abort():
+                        if child_pid.exists():
+                            begun.set()
+                        return options['abort']()
+                    # This actual child only writes its PID and waits. The CI
+                    # runner owns its process group; no NAC, Xcode or UI runs.
+                    owned_run([sys.executable, '-B', '-c',
+                        'import os,pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)',
+                        str(child_pid)], folder / 'controlled-child.log', 3, abort=abort)
+                if witness_rejection:
+                    self.assertEqual(options['abort'](), witness.failure)
                 if test_failure:
                     raise RuntimeError('synthetic test failure')
             def collect(*args):
                 calls.append('collect')
+                if diagnostic_error is not None:
+                    raise RuntimeError('Interrupted test has no complete dispatch receipt')
                 attachments = folder / 'attachments'
                 attachments.mkdir()
                 (attachments / 'nac342-ordinary-onboarding.png').write_bytes(b'unit-placeholder-never-decoded')
@@ -72,7 +107,7 @@ class StartupSupervisorTests(unittest.TestCase):
                 replacements['require_integrity'].side_effect = RuntimeError('protected bytes changed')
             for name, replacement in replacements.items():
                 stack.enter_context(patch('ci_startup.' + name, replacement))
-            if sdk_failure or cleanup_failure or test_failure or integrity_failure:
+            if sdk_failure or cleanup_failure or test_failure or integrity_failure or diagnostic_error is not None:
                 with self.assertRaises(RuntimeError):
                     run_case(folder, profiles, 'onboarding', root, root, root, root, 'a' * 40, {}, root, root,
                              run, MagicMock(), MagicMock(return_value={'scope': 'synthetic OCR'}))
@@ -98,7 +133,27 @@ class StartupSupervisorTests(unittest.TestCase):
             if test_failure:
                 self.assertFalse(result['passed'])
                 self.assertEqual(result['errors']['test']['type'], 'RuntimeError')
-                self.assertIsNone(result['errors']['collector'])
+                if diagnostic_error is None:
+                    self.assertIsNone(result['errors']['collector'])
+            if diagnostic_error is not None:
+                metadata = json.loads((folder / 'live-api-diagnostic.json').read_text())
+                self.assertEqual(metadata['caller_abort'], {'observed': True, 'origin': 'audit'})
+                self.assertEqual(metadata['phase'], 'entry_assets')
+                self.assertTrue(metadata['rejected'])
+                self.assertLessEqual((folder / 'live-api-diagnostic.json').stat().st_size, 8192)
+                self.assertTrue(result['input_completion_unknown'])
+                self.assertFalse(result['passed'])
+                self.assertNotIn('private-marker', json.dumps(result))
+                if type(diagnostic_error) is FixtureFailure:
+                    self.assertEqual(metadata['failure']['guard_code'], 'served_entry_asset_bytes')
+                    self.assertEqual(metadata['failure']['operands']['asset_ordinal'], 0)
+                else:
+                    self.assertEqual(metadata['failure']['exception_type'], 'unknown')
+                self.assertFalse(audit.thread.is_alive())
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(int(child_pid.read_text()), 0)  # Observation only; never signal an adopted PID.
+            if witness_rejection:
+                self.assertEqual(result['api_audit_diagnostic']['caller_abort'], {'observed': True, 'origin': 'witness'})
             self.assertFalse(result['rendered_UI_reload_observed'])
             if integrity_failure:
                 retained = json.loads((folder / 'retained-fixture.json').read_text())
@@ -121,6 +176,33 @@ class StartupSupervisorTests(unittest.TestCase):
 
     def test_success_requires_build_witness_collection_policy_integrity_and_cleanup(self):
         self.exercise()
+
+    def test_real_audit_thread_aborts_owned_helper_and_preserves_safe_failure_before_stop(self):
+        error = FixtureFailure('served_entry_asset_bytes', {'asset_ordinal': 0, 'actual_bytes': 1384,
+                               'expected_bytes': 941, 'actual_sha256': 'a' * 64, 'body': 'private-marker'})
+        self.exercise(test_failure=True, diagnostic_error=error)
+
+    def test_unknown_thread_exception_content_is_never_formatted_or_retained(self):
+        class PrivateError(Exception):
+            def __str__(self):
+                raise AssertionError('private-marker')
+        self.exercise(test_failure=True, diagnostic_error=PrivateError())
+
+    def test_witness_rejection_preserves_original_or_order_when_audit_also_rejects(self):
+        self.exercise(test_failure=True, witness_rejection=True)
+
+    def test_diagnostic_bound_and_sink_failure_do_not_change_fixture_control_flow(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            audit = MagicMock()
+            audit.failure_snapshot.return_value = {'oversize': 'private-marker' * 8192}
+            value = audit_diagnostic(audit, {'observed': True, 'origin': 'audit'}, folder)
+            self.assertTrue(value['unavailable'])
+            self.assertNotIn('private-marker', (folder / 'live-api-diagnostic.json').read_text())
+            audit.failure_snapshot.side_effect = ValueError('private-marker')
+            for error in (OSError('private-marker'), RuntimeError('private-marker'), KeyboardInterrupt()):
+                with patch.object(Path, 'write_bytes', side_effect=error):
+                    self.assertTrue(audit_diagnostic(audit, {}, folder)['unavailable'])
 
 
 if __name__ == '__main__':
