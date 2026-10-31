@@ -21,7 +21,9 @@ cp desktop/macos/Info.plist "$app/Contents/Info.plist"
 if [[ ! "$engine" -ef "$app/Contents/Resources/nac-web" ]]; then
     cp "$engine" "$app/Contents/Resources/nac-web"
 fi
+"$app/Contents/Resources/nac-web" __desktop-identity > "$app/Contents/Resources/engine-identity.json"
 sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/PreviewEngine.swift
+         desktop/macos/EngineProtocol.swift
          desktop/macos/PreviewProfile.swift desktop/macos/FixtureProvider.swift desktop/macos/FixtureBootstrap.swift)
 flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O)
 if [[ "$mode" == smoke ]]; then
@@ -34,6 +36,10 @@ printf '%s\n' "$app"
 case "$mode" in
     run) exec /usr/bin/open -n -W "$app" ;;
     smoke)
+        xcrun swiftc -swift-version 5 -target arm64-apple-macosx14.0 -O \
+            desktop/macos/EngineProtocol.swift desktop/macos/PreviewProfile.swift desktop/macos/ProtocolTests.swift \
+            -o "$output/EngineProtocolTests"
+        "$output/EngineProtocolTests"
         python3 -B -m unittest discover -s desktop/macos -p 'test_*.py'
         exec python3 desktop/macos/smoke.py "$app" "$output/evidence"
         ;;

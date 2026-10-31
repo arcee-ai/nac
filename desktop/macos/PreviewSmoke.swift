@@ -45,7 +45,33 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if scenario == "normal" { try await journey() }
+                if ["normal", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
+                    if scenario == "stale-launch" {
+                        try await waitJS("first workspace", "return !!document.querySelector('[role=dialog]');")
+                        let previous = app.engine.receipt!.incarnation
+                        await withCheckedContinuation { continuation in app.engine.stop { continuation.resume() } }
+                        try app.engine.launch(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/nac-web"),
+                                              profile: app.profile!, provider: app.provider)
+                        try await wait("new launch receipt") { self.app.engine.receipt?.incarnation != nil && self.app.engine.receipt?.incarnation != previous }
+                        let successor = app.engine.pid
+                        try await Task.sleep(nanoseconds: 31_000_000_000)
+                        guard app.engine.pid == successor, app.failure == nil else { throw PreviewError.message("Stale launch callback affected successor") }
+                        evidence["stale_callbacks_fenced"] = true
+                    }
+                    try await journey()
+                    if scenario != "normal" && scenario != "stale-launch" { try await lifecycle() }
+                }
+                else if ["parent-loss-startup", "channel-loss-startup"].contains(scenario) {
+                    try await wait("engine awaiting hello") { self.app.engine.pid > 0 }
+                    if scenario == "parent-loss-startup" { try await lifecycle() }
+                    else {
+                        app.engine.loseChannel()
+                        try await wait("startup channel loss") { self.app.failure != nil }
+                        evidence["workspace_not_activated"] = app.baseURL == nil
+                        guard app.baseURL == nil else { throw PreviewError.message("Startup channel loss activated workspace") }
+                        try captureNative()
+                    }
+                }
                 else if scenario == "close-startup" {
                     try await wait("engine starting") { self.app.engine.pid > 0 }
                 } else {
@@ -55,9 +81,20 @@ final class PreviewSmoke {
                     }
                     try await wait("native failure state", timeout: 65) { self.app.failure != nil }
                     let message = app.failure!
-                    let expected = scenario == "missing" ? "missing or not executable" :
-                        scenario == "timeout" ? "within 30 seconds" : "engine stopped"
+                    let expected: String
+                    switch scenario {
+                    case "missing": expected = "missing or not executable"
+                    case "timeout", "missing-receipt": expected = "within 30 seconds"
+                    case "exit", "engine-exit": expected = "engine"
+                    case "migration-failure": expected = "could not initialize"
+                    case "truncated": expected = "channel closed"
+                    default: expected = "invalid launch receipt"
+                    }
                     guard message.contains(expected) else { throw PreviewError.message("Unexpected failure: \(message)") }
+                    guard app.baseURL == nil || scenario == "engine-exit" else {
+                        throw PreviewError.message("Unverified engine activated the workspace")
+                    }
+                    evidence["workspace_not_activated"] = app.baseURL == nil
                     evidence["native_failure"] = message
                     try captureNative()
                 }
@@ -73,12 +110,91 @@ final class PreviewSmoke {
             evidence["provider_url"] = app.provider.baseURL?.absoluteString
             evidence["provider_responses"] = app.provider.responseCount
             evidence["scenario"] = scenario
+            if let receipt = app.engine.receipt {
+                evidence["launch_incarnation"] = receipt.incarnation
+                evidence["ready_store"] = receipt.store
+                evidence["ready_endpoint"] = receipt.endpoint
+                evidence["ready_source"] = receipt.identity?.source_revision
+                evidence["ready_build"] = receipt.identity?.build_id
+                evidence["ready_track"] = receipt.identity?.track
+                evidence["ready_schema"] = receipt.schema
+            }
             write()
             // Exercise the actual NSWindow close delegate and termination reply.
             // AppKit's terminateLater spins a native loop. Leave the Swift task
             // first so that loop can drain the main dispatch queue during shutdown.
             RunLoop.main.perform(inModes: [.common]) { [self] in
                 MainActor.assumeIsolated { app.window.performClose(nil) }
+            }
+        }
+    }
+
+    func configure(_ profile: PreviewProfile) throws {
+        if scenario == "migration-failure" {
+            try Data("not a SQLite store".utf8).write(to: profile.store)
+        }
+    }
+
+    func configure(_ engine: PreviewEngine) {
+        engine.holdHello = ["parent-loss-startup", "channel-loss-startup"].contains(scenario)
+    }
+
+    private func lifecycle() async throws {
+        if scenario.hasSuffix("active") {
+            // Exercise the existing revision-fenced human terminal API from the
+            // actual shared WebView. This is lifecycle evidence, not OS input QA.
+            _ = try await js(#"""
+            const session = location.hash.split('/')[2];
+            const post = async (path, body) => {
+              const response = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+              if (!response.ok) throw new Error(await response.text());
+              return response.json();
+            };
+            const terminal = await post(`/sessions/${session}/user-terminals`, {protocol_version:1, launch_id:crypto.randomUUID(), cols:80, rows:24});
+            const path = `/sessions/${session}/executions/${terminal.terminal_id}`;
+            const control = await (await fetch(path + '/input-control')).json();
+            const command = "set +H\r/bin/sleep 90 & child=$!; printf '%s' $child > descendant-pid\r";
+            const receipt = await post(path + '/input', {protocol_version:1, expected_revision:control.revision, bytes:[...new TextEncoder().encode(command)]});
+            if (receipt.outcome !== 'written') throw new Error('fixture input was not written');
+            return true;
+            """#)
+            let file = app.profile!.workspace.appendingPathComponent("descendant-pid")
+            try await wait("real terminal descendant") { FileManager.default.fileExists(atPath: file.path) }
+            evidence["descendant_pid"] = Int(try String(contentsOf: file, encoding: .utf8))
+        }
+        if scenario.hasPrefix("parent-loss") {
+            // A shell helper must not inherit the parent side of the channel.
+            let helper = Process()
+            helper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            let argument = "90.\(UInt32.random(in: 100000000...999999999))"
+            helper.arguments = [argument]
+            try helper.run()
+            evidence["app_helper_pid"] = helper.processIdentifier
+            evidence["app_helper_argument"] = argument
+        }
+        evidence["engine_pid"] = app.engine.pid
+        evidence["profile"] = app.profile!.root.path
+        evidence["base_url"] = app.baseURL?.absoluteString
+        if let receipt = app.engine.receipt {
+            evidence["launch_incarnation"] = receipt.incarnation
+            evidence["ready_endpoint"] = receipt.endpoint
+            evidence["ready_store"] = receipt.store
+            evidence["ready_build"] = receipt.identity?.build_id
+            evidence["ready_source"] = receipt.identity?.source_revision
+            evidence["ready_track"] = receipt.identity?.track
+            evidence["ready_schema"] = receipt.schema
+        }
+        evidence["lifecycle_ready"] = true
+        write()
+        if scenario.hasPrefix("parent-loss") {
+            try await wait("runner kills owning app", timeout: 70) { false }
+        } else if scenario == "channel-loss-active" {
+            app.engine.loseChannel()
+            try await wait("runtime channel loss") { self.app.failure != nil }
+            try captureNative()
+        } else {
+            try await wait("runner owns store write barrier") {
+                FileManager.default.fileExists(atPath: self.app.profile!.root.appendingPathComponent("shutdown-go").path)
             }
         }
     }
@@ -197,6 +313,7 @@ final class PreviewSmoke {
     }
     func cleanupFailed(_ error: Error) { cleanupError = String(describing: error) }
     func didCleanUp() {
+        evidence["engine_log_after_shutdown"] = app.engine.log
         evidence["profile_removed"] = app.profile.map { !FileManager.default.fileExists(atPath: $0.root.path) } ?? true
         evidence["engine_reaped"] = app.engine.pid == 0
         evidence["cleanup_error"] = cleanupError

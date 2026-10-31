@@ -9,6 +9,9 @@ mod build_identity;
 mod compaction;
 mod delegation_runtime;
 mod delivery;
+#[cfg(unix)]
+#[doc(hidden)]
+pub mod desktop_launch;
 mod executable;
 mod filesystem;
 mod fork;
