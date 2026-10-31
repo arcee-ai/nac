@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "terminal_source_head": "dd87b0e97f7e5f5bfcbfcbf5b2bee2fe30b88b3a",
+  "scenario": "terminal-xctest",
+  "total_seconds_limit": 240,
+  "source_files": {
+    "desktop/macos/TerminalFixture.swift": "ac8d7e3958b183ed2eb331324194e93d8db27b1cae5b5283ac8382d91665fcdb",
+    "desktop/macos/TerminalJourneys.swift": "a553e3885ae6339de396a49d34e4a0efb3faaef4fdbdb880d646f4cf997a12c8",
+    "desktop/macos/TerminalSmoke.swift": "8a06a3fb6a2c50a3c895f6242c7d07096be9b0cdd77918780d20203191553f52",
+    "desktop/macos/terminal/xctest.md": "2be24b6628abca9d7fa5261c223feae35fffa921b65372d4a2d88ae96ba59403"
+  },
+  "phases": [
+    {
+      "name": "unicode",
+      "operation": {
+        "kind": "type-text-and-return",
+        "text": "printf '%s' 'Ω中🙂' > wk-xctest-unicode.txt; printf 'WK-XCTEST-%s: ' UNICODE; cat wk-xctest-unicode.txt; printf '\\n'"
+      },
+      "sequence": 1,
+      "seconds_limit": 60,
+      "expected_input_bytes": 121
+    },
+    {
+      "name": "interrupt-arm",
+      "operation": {
+        "kind": "type-text-and-return",
+        "text": "trap 'printf INT > wk-xctest-int.txt; printf \"WK-XCTEST-%s\\n\" INTERRUPTED' INT; printf RUNNING > wk-xctest-running.txt; printf 'WK-XCTEST-%s\\n' RUNNING; /bin/sleep 30; printf '%s' \"$?\" > wk-xctest-status.txt"
+      },
+      "sequence": 2,
+      "seconds_limit": 60,
+      "expected_input_bytes": 208
+    },
+    {
+      "name": "interrupt",
+      "operation": {
+        "key": "c",
+        "kind": "key",
+        "modifiers": [
+          "control"
+        ]
+      },
+      "sequence": 3,
+      "seconds_limit": 10,
+      "expected_input_bytes": 1
+    },
+    {
+      "name": "recovery",
+      "operation": {
+        "kind": "type-text-and-return",
+        "text": "trap - INT; printf RECOVERED > wk-xctest-recovered.txt; printf 'WK-XCTEST-%s\\n' RECOVERED"
+      },
+      "sequence": 4,
+      "seconds_limit": 60,
+      "expected_input_bytes": 90
+    },
+    {
+      "name": "resize",
+      "operation": {
+        "height_delta": -80,
+        "kind": "resize-window",
+        "width_delta": -160
+      },
+      "sequence": 5,
+      "seconds_limit": 60,
+      "expected_input_bytes": 0
+    },
+    {
+      "name": "size-readback",
+      "operation": {
+        "kind": "type-text-and-return",
+        "text": "/bin/stty size > wk-xctest-size.txt; printf 'WK-XCTEST-%s\\n' SIZE"
+      },
+      "sequence": 6,
+      "seconds_limit": 60,
+      "expected_input_bytes": 66
+    }
+  ]
+}

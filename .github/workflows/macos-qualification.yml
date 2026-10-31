@@ -1,0 +1,83 @@
+name: Exact native supplier qualification
+
+on:
+  workflow_call:
+    inputs:
+      harness-sha:
+        required: true
+        type: string
+      target:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.target.outputs.source_sha }}
+      runner: ${{ steps.target.outputs.runner }}
+      developer_directory: ${{ steps.target.outputs.developer_directory }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.harness-sha }}
+          persist-credentials: false
+      - name: Resolve one approved immutable supplier and standard runner
+        id: target
+        env:
+          QUALIFICATION: ${{ inputs.target }}
+        run: python3 -B desktop/macos/ci_qualifications.py "$QUALIFICATION" >> "$GITHUB_OUTPUT"
+  native:
+    needs: resolve
+    name: Exact supplier AppKit and WKWebView
+    runs-on: ${{ needs.resolve.outputs.runner }}
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: ${{ needs.resolve.outputs.developer_directory }}
+      CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - name: Check out external CI harness
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.harness-sha }}
+          path: ci-harness
+          persist-credentials: false
+      - name: Check out exact unchanged app source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          path: qualification-target
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: qualification-target -> target
+          shared-key: native-exact-qualification
+          prefix-key: nac-ci-v1
+          save-if: false
+      - name: Qualify the exact supplier without copying or changing its sources
+        working-directory: ci-harness
+        env:
+          HARNESS_SHA: ${{ inputs.harness-sha }}
+          QUALIFICATION: ${{ inputs.target }}
+        run: >-
+          python3 -B desktop/macos/ci.py --expected-sha "$HARNESS_SHA"
+          --qualification "$QUALIFICATION" --source-root "$GITHUB_WORKSPACE/qualification-target"
+          --output "$RUNNER_TEMP/native-exact-evidence"
+      - name: Retain bounded source, binary, runtime and raw image evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-exact-${{ inputs.target }}-${{ needs.resolve.outputs.source_sha }}-harness-${{ inputs.harness-sha }}
+          path: ${{ runner.temp }}/native-exact-evidence
+          if-no-files-found: error
+          retention-days: 7

@@ -11,6 +11,48 @@ permissions:
   contents: read
 
 jobs:
+  app:
+    name: ARM AppKit and system WKWebView app
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: native-app
+          prefix-key: nac-ci-v1
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - name: Build and launch actual relocated app with local scripted provider
+        env:
+          EXPECTED_SHA: ${{ inputs.source-sha }}
+        run: >-
+          python3 -B desktop/macos/ci.py --expected-sha "$EXPECTED_SHA"
+          --output "$RUNNER_TEMP/native-app-evidence"
+      - name: Retain bounded redacted native images, logs and identities
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-app-${{ inputs.source-sha }}
+          path: ${{ runner.temp }}/native-app-evidence
+          if-no-files-found: error
+          retention-days: 7
+
   native:
     name: ARM macOS process and credentials
     runs-on: macos-26
