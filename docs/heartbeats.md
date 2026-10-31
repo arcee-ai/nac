@@ -49,6 +49,9 @@ The initial finite operating limits are:
 | Deadline per check | 300 seconds by default; 1 second to 1 hour |
 | Command receipts | 4,096, plus a bounded reserve for remaining pause/stop/delete transitions |
 
+Within the same history allowance, recent admitted starts take precedence over
+newer withdrawn requests so trimming cannot erase the start-rate fences.
+
 Deleting a schedule retains its tombstone and original command responses so a
 lost acknowledgement can be retried safely. Capacity exhaustion requires human
 review; deletion does not erase those identities. The panel freezes an uncertain

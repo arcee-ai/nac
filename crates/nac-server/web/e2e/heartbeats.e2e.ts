@@ -40,11 +40,13 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   const session = await createSession(request, harness, "direct", project);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
+  // UI subscriptions can change between requests; honor each request transport.
   harness.provider.enqueue(
     "native-schedule",
     { token: "SAME_CHAT_CONTEXT_TOKEN", requiredTools: ["heartbeat_control"] },
     {
       kind: "function_call",
+      stream: "request",
       name: "heartbeat_control",
       callId: "schedule",
       arguments: {
@@ -61,7 +63,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   harness.provider.enqueue(
     "schedule-ended",
     { functionOutputCallId: "schedule" },
-    { kind: "text", text: "The recurring job check is scheduled in this chat." },
+    { kind: "text", stream: "request", text: "The recurring job check is scheduled in this chat." },
   );
   await page.goto(`${harness.baseUrl}/#/session/${session}/heartbeats`);
   const run = await request.post(`${harness.baseUrl}/sessions/${session}/runs`, {
@@ -100,6 +102,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
     { token: "Durable heartbeat occurrence", requiredTools: ["read", "report_heartbeat"] },
     {
       kind: "function_call",
+      stream: "request",
       name: "read",
       callId: "job-read",
       arguments: { path: path.join(workspace, "job-result.txt") },
@@ -123,6 +126,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
     { functionOutputCallId: "job-read" },
     {
       kind: "function_call",
+      stream: "request",
       name: "report_heartbeat",
       callId: "job-report",
       arguments: {
@@ -137,7 +141,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   harness.provider.enqueue(
     "automatic-ended",
     { functionOutputCallId: "job-report" },
-    { kind: "text", text: "JOB_READY verified; this heartbeat is finished." },
+    { kind: "text", stream: "request", text: "JOB_READY verified; this heartbeat is finished." },
   );
   gate.release();
   await expect

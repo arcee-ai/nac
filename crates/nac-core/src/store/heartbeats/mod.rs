@@ -135,8 +135,11 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
-fn prune_history(conn: &Connection, schedule_id: &str) -> Result<()> {
-    conn.execute("DELETE FROM heartbeat_occurrences WHERE schedule_id=?1 AND state IN ('settled','withdrawn') AND occurrence_id NOT IN (SELECT occurrence_id FROM heartbeat_occurrences WHERE schedule_id=?1 AND state IN ('settled','withdrawn') ORDER BY settlement_sequence DESC LIMIT ?2)",params![schedule_id,HEARTBEAT_HISTORY_LIMIT])?;
+fn prune_history(conn: &Connection, schedule_id: &str, now_ms: i64) -> Result<()> {
+    // Preserve admission facts independently of newer withdrawn requests. The
+    // most recent start also fences clock regression; normal spacing bounds
+    // all recent starts within the same 32-row history allowance.
+    conn.execute("DELETE FROM heartbeat_occurrences WHERE schedule_id=?1 AND state IN ('settled','withdrawn') AND occurrence_id NOT IN (SELECT occurrence_id FROM heartbeat_occurrences WHERE schedule_id=?1 AND state IN ('settled','withdrawn') ORDER BY CASE WHEN started_at_ms IS NOT NULL AND (started_at_ms>?3 OR started_at_ms=(SELECT max(started_at_ms) FROM heartbeat_occurrences WHERE schedule_id=?1)) THEN 0 ELSE 1 END,settlement_sequence DESC LIMIT ?2)",params![schedule_id,HEARTBEAT_HISTORY_LIMIT,now_ms.saturating_sub(60_000)])?;
     Ok(())
 }
 

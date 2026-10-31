@@ -7,7 +7,7 @@ fn occurrence(conn: &Connection, session: &str, id: &str) -> Result<HeartbeatOcc
 fn suspend(conn: &Connection, id: &str, reason: &str, now: i64) -> Result<()> {
     conn.execute("UPDATE heartbeat_schedules SET state='suspended',reason=?2,updated_at_ms=?3 WHERE schedule_id=?1 AND state='active'",params![id,reason,now])?;
     conn.execute("UPDATE heartbeat_occurrences SET state='withdrawn',outcome='needs_human_action',evidence=?2,settled_at_ms=?3,expected_revision=expected_revision+1,settlement_sequence=?4 WHERE schedule_id=?1 AND state='pending'",params![id,reason,now,next_settlement_sequence(conn)?])?;
-    prune_history(conn, id)
+    prune_history(conn, id, now)
 }
 
 coordinated_command! {
@@ -24,7 +24,7 @@ pub fn heartbeat_admission_unavailable(path:&Path,session_id:&str,occurrence_id:
     if needs_human_action || attempts>=3 {
         suspend(&tx,&pending.schedule_id,reason,now_ms)?;
         tx.execute("UPDATE heartbeat_occurrences SET outcome=?2 WHERE occurrence_id=?1",params![occurrence_id,if needs_human_action{"needs_human_action"}else{"failed"}])?;
-        prune_history(&tx,&pending.schedule_id)?;
+        prune_history(&tx,&pending.schedule_id,now_ms)?;
     }
     tx.commit()?;
     Ok(())
@@ -213,7 +213,7 @@ pub(crate) fn settle_heartbeat_with_connection(
             now,
         )?;
     }
-    prune_history(conn, &active.schedule_id)?;
+    prune_history(conn, &active.schedule_id, now)?;
     Ok(())
 }
 

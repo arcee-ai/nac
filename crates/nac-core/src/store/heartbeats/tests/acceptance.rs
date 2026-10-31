@@ -694,6 +694,8 @@ fn heartbeat_host_start_rate_defers_the_same_receipt_until_capacity_returns() {
         report(&f, &active, HeartbeatOutcome::Unchanged);
         f.settle(&active, HeartbeatOutcome::Unknown, Some(1));
     }
+    let churned = read_heartbeat(&f.path, "direct", &pending[0].schedule_id).unwrap();
+    heartbeat_withdraw_many_unadmitted_requests(&f, churned, 62_000);
     let last = &pending[60];
     let attempt = |now| {
         admit_heartbeat(
@@ -837,5 +839,93 @@ fn heartbeat_controls_preserve_quiet_metadata_before_and_after_active_settlement
             .unwrap()
             .quiet_updated_at
             .contains_key("direct"));
+    }
+}
+
+fn heartbeat_withdraw_many_unadmitted_requests(
+    f: &Fixture,
+    mut current: HeartbeatSchedule,
+    time: i64,
+) -> HeartbeatSchedule {
+    for index in 0..33 {
+        f.control(
+            HeartbeatAction::RunNow {
+                schedule_id: current.schedule_id.clone(),
+                expected_version: current.version,
+            },
+            time + index * 3,
+        )
+        .occurrence
+        .unwrap();
+        current = f
+            .control(
+                HeartbeatAction::Pause {
+                    schedule_id: current.schedule_id.clone(),
+                    expected_version: current.version,
+                },
+                time + index * 3 + 1,
+            )
+            .schedule;
+        current = f
+            .control(
+                HeartbeatAction::Resume {
+                    schedule_id: current.schedule_id.clone(),
+                    expected_version: current.version,
+                },
+                time + index * 3 + 2,
+            )
+            .schedule;
+    }
+    current
+}
+
+#[test]
+fn heartbeat_history_churn_cannot_erase_start_spacing_or_exceed_retention() {
+    for churn_time in [62_000, 1_000_000] {
+        let f = Fixture::new();
+        let schedule = f.create();
+        let pending = materialize_heartbeats(&f.path, 61_000).unwrap().remove(0);
+        let first = f.admit(&pending, 61_000);
+        committed(&f, &first);
+        report(&f, &first, HeartbeatOutcome::Unchanged);
+        f.settle(&first, HeartbeatOutcome::Unknown, Some(1));
+        // While a chat is busy, Run now can be withdrawn before admission many
+        // times. Those legitimate control receipts must not reset rate authority.
+        let current = heartbeat_withdraw_many_unadmitted_requests(&f, schedule, churn_time);
+        let manual = f
+            .control(
+                HeartbeatAction::RunNow {
+                    schedule_id: current.schedule_id.clone(),
+                    expected_version: current.version,
+                },
+                churn_time + 1_000,
+            )
+            .occurrence
+            .unwrap();
+        let attempt = |now| {
+            admit_heartbeat(
+                &f.path,
+                "direct",
+                &manual.occurrence_id,
+                manual.revision,
+                &uuid::Uuid::new_v4().to_string(),
+                &uuid::Uuid::new_v4().to_string(),
+                "same pending check",
+                "/tmp/project",
+                now,
+            )
+            .unwrap()
+        };
+        // Includes a backward clock jump after pruning outside the minute window.
+        assert!(attempt(60_000).is_none());
+        assert!(attempt(63_001).is_none());
+        let history = heartbeat_history(&f.path, "direct", &current.schedule_id).unwrap();
+        assert_eq!(history.len(), HEARTBEAT_HISTORY_LIMIT as usize + 1);
+        assert!(history.iter().any(|item| item.run_id == first.run_id));
+        let second = attempt(76_000).unwrap();
+        assert_eq!(
+            (second.occurrence_id, second.receipt_id),
+            (manual.occurrence_id, manual.receipt_id)
+        );
     }
 }

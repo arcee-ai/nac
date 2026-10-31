@@ -112,7 +112,7 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
     };
     let receipt=HeartbeatReceipt{request_id:request_id.to_owned(),schedule:load_schedule(&tx,session_id,&schedule_id)?,occurrence,active_occurrence:active_occurrence(&tx,&schedule_id)?};
     tx.execute("INSERT INTO heartbeat_commands(session_id,request_id,canonical_digest,schedule_id,response_json,created_at_ms) VALUES(?1,?2,?3,?4,?5,?6)",params![session_id,request_id,digest,schedule_id,encode(&receipt)?,now_ms])?;
-    prune_history(&tx,&schedule_id)?;
+    prune_history(&tx,&schedule_id,now_ms)?;
     tx.commit()?;
     Ok(receipt)
 }
