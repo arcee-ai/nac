@@ -83,7 +83,13 @@ document-start observer schedules a page-owned timer, records public
 only after observing inactive state. Missing public activation support fails
 coverage. Delegate deltas and a subsequent main-link control establish whether
 that page-owned attempt escaped; elapsed time alone establishes nothing. A
-rendered shared header anchor supplies the target-blank positive control.
+rendered shared MCP catalog Docs anchor supplies the target-blank positive
+control: the existing embedded `exa` entry in `nac-core::mcp::library` has
+`docs_url=https://docs.exa.ai/reference/exa-mcp`. The fixture opens the real MCP
+picker and selects that template to render `EntryDetails`; it never saves,
+connects or authenticates the template. Catalog/thumbnail fixture isolation
+and independent Rust catalog warmup must be settled before running this lane;
+selecting a local template alone does not establish offline operation.
 These revised source expectations require new source-qualified WK evidence;
 the failed original run is not superseded by unit tests or compilation.
 

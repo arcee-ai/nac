@@ -43,9 +43,8 @@ final class ExternalNavigationSmoke {
             try await self.js("return [...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Create chat'&&!b.disabled)") as? Bool == true
         }
         _ = try await js("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Create chat').click();return true")
-        _ = try await js("document.querySelector('[role=dialog] button[aria-label=Close]')?.click();return true")
-        try await wait("closed initial create-chat dialog") {
-            try await self.js("return !document.querySelector('[role=dialog]')") as? Bool == true
+        try await wait("production session composer") {
+            try await self.js("return !!document.querySelector('[role=combobox][aria-label=Message]')") as? Bool == true
         }
         try await wait("current live document") { self.app.commands.currentDocument(in: self.app.webView) != nil }
         let expected = app.commands.currentDocument(in: app.webView)!
@@ -127,14 +126,22 @@ final class ExternalNavigationSmoke {
         guard app.webView.url?.scheme == origin.scheme, app.webView.url?.host == origin.host,
               app.webView.url?.port == origin.port else { throw PreviewError.message("Post-negative origin differed") }
 
-        // Exercise the real shared header anchor. DOM driving establishes a
-        // navigation category, never trusted physical input.
+        // Exercise the existing embedded Exa catalog entry through the shared
+        // MCP picker/form. Selecting a template neither saves nor connects it.
+        // DOM driving establishes a category, never trusted physical input.
         let beforeBlank = actions.count
-        _ = try await js("document.querySelector('button[aria-label=\"Open the menu\"]')?.click();return true")
-        try await wait("rendered shared external anchor") {
-            try await self.js("const a=[...document.querySelectorAll('a')].find(a=>a.textContent.trim()==='See docs');return !!a&&a.target==='_blank'&&a.getBoundingClientRect().width>0&&a.getBoundingClientRect().height>0") as? Bool == true
+        try await wait("shared MCP navigation") {
+            try await self.js("return !!document.querySelector('button[aria-label^=\"MCP servers\"]')") as? Bool == true
         }
-        _ = try await js("[...document.querySelectorAll('a')].find(a=>a.textContent.trim()==='See docs').click();return true")
+        _ = try await js("document.querySelector('button[aria-label^=\"MCP servers\"]').click();return true")
+        try await wait("embedded Exa catalog entry") {
+            try await self.js("return [...document.querySelectorAll('[role=dialog][aria-label=\"MCP servers\"] button')].some(b=>!b.disabled&&[...b.querySelectorAll('span')].some(s=>s.textContent.trim()==='exa'))") as? Bool == true
+        }
+        _ = try await js("[...document.querySelectorAll('[role=dialog][aria-label=\"MCP servers\"] button')].find(b=>!b.disabled&&[...b.querySelectorAll('span')].some(s=>s.textContent.trim()==='exa')).click();return true")
+        try await wait("rendered shared MCP Docs anchor") {
+            try await self.js("const a=[...document.querySelectorAll('[role=dialog][aria-label=\"MCP servers\"] a')].find(a=>a.textContent.trim()==='Docs');return !!a&&a.href==='https://docs.exa.ai/reference/exa-mcp'&&a.target==='_blank'&&a.getBoundingClientRect().width>0&&a.getBoundingClientRect().height>0") as? Bool == true
+        }
+        _ = try await js("[...document.querySelectorAll('[role=dialog][aria-label=\"MCP servers\"] a')].find(a=>a.textContent.trim()==='Docs').click();return true")
         try await wait("one rendered target-blank link action") { self.actions.count > beforeBlank }
         try record("rendered-target-blank-link", expected: expected, origin: origin)
         guard actions.count == beforeBlank + 1, actions.last?["popup"] as? Bool == true,
@@ -167,6 +174,7 @@ final class ExternalNavigationSmoke {
         return ["scope": "actual-app/system-WK; recording-opener-only", "system_browser_qualified": false,
                 "physical_input_qualified": false, "page_owned_nonactivated_popup_blocked": true,
                 "native_api_other_popup_delivered_and_blocked": true, "rendered_target_blank_link_recorded": true,
+                "rendered_link_source": "embedded-mcp-exa-docs",
                 "main_frame_link_recorded": true, "subframe_and_script_rejected": true,
                 "synthetic_popup_observations": popupCount, "reload_rebound_document": true,
                 "foreign_view_rejected": true, "retirement_current_document_nil": true, "navigation": final]
