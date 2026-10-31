@@ -20,7 +20,9 @@ func inspect(_ path: String, kind: String) throws -> [String: Any] {
                    "workspace": ["WK_RICH_COMPLETE"], "approval": ["Permission required"],
                    "instance-empty": ["No projects yet", "Get Started"],
                    "instance-conflict": ["Another NAC process", "Retry", "store-path"],
-                   "instance-drain": ["Native instance", "drain"]]
+                   "instance-drain": ["Native instance", "drain"],
+                   "terminal-unicode": ["WK-XCTEST-UNICODE"],
+                   "terminal-completed": ["WK-XCTEST-RECOVERED", "WK-XCTEST-SIZE"]]
     let expected = markers[kind]!
     func normalized(_ value: String) -> String { value.lowercased().filter { $0.isLetter || $0.isNumber } }
     guard expected.allSatisfy({ normalized(text).contains(normalized($0)) }) else {
@@ -35,7 +37,8 @@ func inspect(_ path: String, kind: String) throws -> [String: Any] {
 do {
     var paths = Array(CommandLine.arguments.dropFirst())
     let modes = ["--terminal": "terminal", "--workspace": "workspace", "--approval": "approval",
-                 "--instance-empty": "instance-empty", "--instance-conflict": "instance-conflict", "--instance-drain": "instance-drain"]
+                 "--instance-empty": "instance-empty", "--instance-conflict": "instance-conflict", "--instance-drain": "instance-drain",
+                 "--terminal-unicode": "terminal-unicode", "--terminal-completed": "terminal-completed"]
     let kind = paths.first.flatMap { modes[$0] } ?? "chat"
     if kind != "chat" { paths.removeFirst() }
     guard !paths.isEmpty else { throw NSError(domain: "NACCI", code: 3) }

@@ -21,6 +21,7 @@ from smoke import cleanup_failed_case
 from ci_qualifications import require_checkout, require_full_preview, require_workspace, select_target
 from ci_xctest import run_terminal
 from ci_instances import audit_cleanup as audit_instances, qualify as qualify_instances, retain_receipt as retain_instances
+from ci_terminal import qualify as qualify_terminal
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DEADLINE = time.monotonic() + 30 * 60  # Leave ten job minutes for cleanup/upload.
@@ -151,6 +152,7 @@ def main():
     target_module = None
     workspace = False
     instances = False
+    terminal = False
     def interrupt(signum, _frame):
         raise RuntimeError(f'CI interrupted by signal {signum}')
     for signum in (signal.SIGTERM, signal.SIGINT):
@@ -162,6 +164,7 @@ def main():
             target = select_target(args.qualification)
             workspace = target['suite'] == 'workspace'
             instances = target['suite'] == 'instances'
+            terminal = target['suite'] == 'terminal'
             if not args.source_root or args.source_root.is_symlink():
                 raise RuntimeError('Qualification requires an explicit non-symlink source root')
             source_root = args.source_root.resolve()
@@ -224,6 +227,9 @@ def main():
                 sys.path.pop(0)
         if instances:
             report.update(qualify_instances(raw, source_root, target, run, command, native_report))
+        elif terminal:
+            report.update(qualify_terminal(raw, source_root, target, run, command, native_report,
+                                          target_module.cleanup_failed_case))
         else:
             run(['bash', 'desktop/macos/preview.sh', 'build'], raw / 'ordinary-build.log', 900, cwd=source_root)
             ordinary = raw / 'NAC Development Preview.app/Contents/MacOS/NACPreview'
@@ -302,7 +308,7 @@ def main():
                 finally:
                     report['instance_receipt_index'] = retain_instances(raw / 'instances')
             report['cleanup'] = settle_apps(raw, cleanup=target_module.cleanup_failed_case if target_module else None,
-                                            extra_alive=getattr(target_module, 'alive', None), workspace=workspace)
+                                            extra_alive=getattr(target_module, 'alive', None), workspace=workspace or terminal)
         except Exception as error:
             report['cleanup_error'] = str(error)
             report['result'] = 'failed'

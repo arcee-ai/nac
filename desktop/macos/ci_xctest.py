@@ -1,15 +1,52 @@
-"""One supported XCTest keyboard journey; never provisions host permissions."""
+"""Shared public XCTest launcher; never provisions host permissions."""
 import hashlib
 import json
+from contextlib import contextmanager
 from pathlib import Path
 import plistlib
 import shutil
+import subprocess
 import tempfile
 
 from ci_support import require_terminal_evidence
 from smoke import cleanup_failed_case
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@contextmanager
+def relocation_directory(raw):
+    """Never remove an input-launched bundle before ownership cleanup settles."""
+    path = Path(tempfile.mkdtemp(prefix='nac-mac-relocation-'))
+    lease = {'path': path, 'safe_to_remove': True}
+    try:
+        yield lease
+    finally:
+        if lease['safe_to_remove']:
+            shutil.rmtree(path)
+        (raw / 'xctest-relocation.json').write_text(json.dumps({
+            'path': str(path), 'bundle_retained_for_unresolved_cleanup': not lease['safe_to_remove']}, indent=2) + '\n')
+
+
+def require_settled(record, process_status=None):
+    if type(record.get('app_pid')) is not int or record['app_pid'] <= 0:
+        raise RuntimeError('No exact app ownership record; preserve relocated bundle for diagnosis')
+    def status(pid):
+        result = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='], capture_output=True, text=True)
+        if result.returncode not in (0, 1):
+            raise RuntimeError('Cannot observe owned fixture process settlement')
+        return result.stdout.strip()
+    for key in ('app_pid', 'engine_pid'):
+        pid = record.get(key, 0)
+        if type(pid) is not int or pid < 0:
+            raise RuntimeError('Invalid exact fixture process identity')
+        if pid:
+            state = (process_status or status)(pid)
+            if state and not state.startswith('Z'):
+                raise RuntimeError('Owned XCTest fixture process survived cleanup: ' + key)
+    profile = record.get('profile')
+    if not profile or Path(profile).is_symlink() or Path(profile).exists():
+        raise RuntimeError('Owned XCTest fixture profile removal unavailable/incomplete')
 
 
 def require_prerequisites(helper_auth, developer_status, automation_status):
@@ -89,24 +126,29 @@ def result_receipt(path):
             'retention': 'Sanitized xcresulttool export only; raw result may contain host diagnostics'}
 
 
-def run_terminal(raw, run, command):
+def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.app',
+                 scenario='ci-terminal-xctest', test_name='testTrustedLocalTerminal',
+                 operations=None, validate=require_terminal_evidence, cleanup=cleanup_failed_case):
     # Every command here is an observation. Missing prerequisites stop before
     # XCTest launch; enabling automation or requesting Accessibility is forbidden.
     status = observe_prerequisites(command)
     (raw / 'xctest-prerequisites.json').write_text(json.dumps(status, indent=2) + '\n')
     initial_policy = authorization_policy(status)
-    evidence = raw / 'evidence/ci-terminal-xctest.json'
-    app = raw / 'NAC Development Preview Smoke.app'
+    evidence = raw / 'evidence' / (scenario + '.json')
+    evidence.parent.mkdir(exist_ok=True)
+    app = raw / app_name
     result = raw / 'native-input.xcresult'
-    with tempfile.TemporaryDirectory(prefix='nac-mac-relocation-') as temporary, \
+    with relocation_directory(raw) as relocation, \
             tempfile.TemporaryDirectory(prefix='nac-xctest-build-') as derived:
-        relocated = Path(temporary) / 'Moved folder with spaces' / app.name
+        relocated = relocation['path'] / 'Moved folder with spaces' / app.name
         shutil.copytree(app, relocated)
         executable = relocated / 'Contents/MacOS/NACPreview'
         native_hash = hashlib.sha256(executable.read_bytes()).hexdigest()
         config = raw / 'xctest-fixture.json'
         config.write_text(json.dumps({'app_path': str(relocated), 'evidence': str(evidence),
-                                      'native_sha256': native_hash}, indent=2) + '\n')
+                                      'native_sha256': native_hash, 'scenario': scenario,
+                                      'operations': operations,
+                                      'driver_evidence': str(raw / 'xctest-driver.json')}, indent=2) + '\n')
         run(['xcodebuild', 'build-for-testing', '-project',
              'desktop/macos/NativeUITests/NACNativeUITests.xcodeproj', '-scheme', 'NACNativeUITests',
              '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', derived,
@@ -120,6 +162,7 @@ def run_terminal(raw, run, command):
         target = require_generated_runner(generated, config)
         metadata = {'generator': 'xcodebuild build-for-testing',
                     'xctestrun_sha256': hashlib.sha256(runner_bytes).hexdigest(),
+                    'fixture_sha256': hashlib.sha256(config.read_bytes()).hexdigest(),
                     'native_sha256': native_hash, 'generated_target': target}
         (raw / 'xctest-runner.json').write_text(json.dumps(metadata, indent=2) + '\n')
         before = None
@@ -128,13 +171,19 @@ def run_terminal(raw, run, command):
             (raw / 'xctest-prerequisites-before.json').write_text(json.dumps(before, indent=2) + '\n')
             if authorization_policy(before) != initial_policy:
                 raise RuntimeError('Existing XCTest authorization policy changed during build; stopping before input')
+            if hashlib.sha256(config.read_bytes()).hexdigest() != metadata['fixture_sha256']:
+                raise RuntimeError('XCTest fixed fixture configuration changed during build')
+            relocation['safe_to_remove'] = False
             run(['xcodebuild', 'test-without-building', '-xctestrun', str(runners[0]),
                  '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
                  '-maximum-concurrent-test-device-destinations', '1', '-resultBundlePath', str(result),
-                 '-only-testing:NACNativeUITests/NativeJourneys/testTrustedLocalTerminal'],
-                raw / 'xctest-input.log', 240)
+                 '-only-testing:NACNativeUITests/NativeJourneys/' + test_name],
+                raw / 'xctest-input.log', 420 if operations else 240)
             record = json.loads(evidence.read_text())
-            terminal = require_terminal_evidence(record)
+            if operations and (record.get('terminal_xctest_identity', {}).get('bundle_path') != str(relocated.resolve())
+                               or hashlib.sha256(executable.read_bytes()).hexdigest() != native_hash):
+                raise RuntimeError('Terminal XCTest runtime bundle/executable binding differs')
+            terminal = validate(record)
             if record.get('engine_reaped') is not True or record.get('profile_removed') is not True:
                 raise RuntimeError('Native XCTest fixture cleanup incomplete')
             return {'prerequisites': status, 'runner': metadata, 'terminal': terminal}
@@ -147,7 +196,11 @@ def run_terminal(raw, run, command):
                     # Existing exact-bundle cleanup while the bundle exists,
                     # including failed XCTest assertions or a timeout.
                     if not record.get('engine_reaped') or not record.get('profile_removed'):
-                        cleanup_failed_case(evidence, relocated)
+                        cleanup(evidence, relocated)
+                    require_settled(record)
+                    relocation['safe_to_remove'] = True
+                elif not relocation['safe_to_remove']:
+                    raise RuntimeError('Input launch produced no ownership receipt; preserving exact relocated bundle')
             finally:
                 try:
                     after = observe_prerequisites(command)
