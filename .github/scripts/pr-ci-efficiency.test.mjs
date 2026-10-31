@@ -41,7 +41,7 @@ test("exact native supplier qualification is explicit, bounded and separate from
   const catalog = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"));
   assert.equal(catalog["all-341-macos26"].source_sha, "1a4f9c31f27b4656897673084f3440e05373393d");
   assert.equal(catalog["all-341-macos26"].profile, "macos26");
-  assert.equal(catalog["all-343-macos26"].source_sha, "0d78ee389e98c0f157a8e8313446fc8006c38ec4");
+  assert.equal(catalog["all-343-macos26"].source_sha, "f4832ed44f948a88170f5d3bc25322852dbce347");
   assert.equal(catalog["all-343-macos26"].scenario_count, 8);
   assert.equal(catalog["all-351-macos14"].source_sha, "fa94a859b648cb36fbdcb251bfe4bc9541de3f48");
   assert.equal(catalog["all-351-macos14"].profile, "macos14");
