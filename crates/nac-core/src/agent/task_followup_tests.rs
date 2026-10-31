@@ -40,14 +40,23 @@ async fn native_agent_followup_lost_tool_ack_replay_and_passive_receipt_deliver_
         "target",
         ModelClient::new_for_test_server(target_server.base_url.clone()),
     );
-    crate::store::insert_test_session(&path, "caller");
-    let conn = crate::store::open_runtime_connection(&path).unwrap();
-    conn.execute(
-        "UPDATE sessions SET behavior='direct' WHERE session_id='caller'",
-        [],
-    )
-    .unwrap();
-    drop(conn);
+    let (issuer, _) = crate::session_service::tests::test_direct_active_service_at(
+        "caller",
+        ModelClient::new_for_test(),
+        path.clone(),
+    );
+    let delegation = issuer
+        .service
+        .issue_task_followup_delegation(crate::store::TaskFollowupDelegationRequest {
+            request_id: "human-delegation".into(),
+            target_session_id: "target".into(),
+            action: crate::store::TaskFollowupAction::Auto,
+            project_id: None,
+        })
+        .await
+        .unwrap();
+    // Issuing human service ends before the headless native journey begins.
+    drop(issuer);
     crate::task_followups::register_controller(
         path.clone(),
         Arc::new(Controller {
@@ -105,6 +114,10 @@ async fn native_agent_followup_lost_tool_ack_replay_and_passive_receipt_deliver_
         .unwrap()
         .unwrap();
     assert_eq!(receipt.delivered_run_id, inbox[0].delivered_run_id);
+    assert_eq!(
+        receipt.delegation_id.as_deref(),
+        Some(delegation.id.as_str())
+    );
     let intent = crate::sessions::reviewable_intent(path.clone(), "target".into()).await;
     assert_eq!(intent, crate::sessions::ReviewIntent::NeverRecorded);
     assert_eq!(target_server.finish().len(), 1);

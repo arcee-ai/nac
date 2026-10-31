@@ -37,7 +37,15 @@ mod ssh_configurations;
 mod steering;
 mod task_discovery;
 mod task_evidence;
+mod task_followup_delegations;
 pub(crate) mod task_followups;
+pub(crate) use task_followup_delegations::issue_task_followup_delegation;
+#[cfg(test)]
+pub(crate) use task_followup_delegations::issue_test_task_followup_delegation;
+pub use task_followup_delegations::{
+    load_task_followup_delegation, revoke_task_followup_delegation, TaskFollowupDelegation,
+    TaskFollowupDelegationRequest,
+};
 pub(crate) mod task_questions;
 #[cfg(test)]
 pub(crate) use task_questions::create_task_question;

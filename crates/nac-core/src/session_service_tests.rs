@@ -318,7 +318,7 @@ pub(crate) fn test_direct_active_service(
     test_direct_active_service_at(session_id, client, test_store_path(label))
 }
 
-pub(super) fn test_direct_active_service_at(
+pub(crate) fn test_direct_active_service_at(
     session_id: &str,
     client: ModelClient,
     store_path: PathBuf,

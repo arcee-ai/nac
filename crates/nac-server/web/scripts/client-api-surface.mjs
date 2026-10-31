@@ -1,6 +1,12 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "POST /sessions/{session_id}/task-followup-delegations":
+    "private:human task follow-up delegation issuance",
+  "GET /sessions/{session_id}/task-followup-delegations/{delegation_id}":
+    "private:passive human delegation inspection",
+  "DELETE /sessions/{session_id}/task-followup-delegations/{delegation_id}":
+    "private:human task follow-up delegation revocation",
   "GET /sessions/{session_id}/questions": "private:standalone exact structured questions",
   "GET /sessions/{session_id}/questions/{request_id}":
     "private:standalone exact structured question read",

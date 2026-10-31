@@ -197,7 +197,8 @@ fn direct_registries_preserve_exact_topology_capabilities() {
         .iter()
         .filter(|name| {
             !super::TASK_FOLLOWUP_TOOL_NAMES.contains(&name.as_str())
-                && !["request_question", "read_question", "answer_question"].contains(&name.as_str())
+                && !["request_question", "read_question", "answer_question"]
+                    .contains(&name.as_str())
         })
         .cloned()
         .collect::<Vec<_>>();

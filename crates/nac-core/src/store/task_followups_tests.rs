@@ -11,6 +11,15 @@ fn fixture() -> PathBuf {
         let conn = open_runtime_connection(&path).unwrap();
         conn.execute("UPDATE sessions SET behavior='direct', sandbox_json=NULL, host_id=NULL WHERE session_id=?1", [id]).unwrap();
     }
+    for caller in ["caller", "caller-two"] {
+        for action in [
+            TaskFollowupAction::Queue,
+            TaskFollowupAction::Steer,
+            TaskFollowupAction::Auto,
+        ] {
+            issue_test_task_followup_delegation(&path, caller, "target", action);
+        }
+    }
     path
 }
 
@@ -325,6 +334,13 @@ fn followup_scope_is_transactional_and_opaque_before_target_topology() {
     )
     .unwrap();
     drop(conn);
+    assert_eq!(
+        admit_task_followup(&path, &input)
+            .unwrap_err()
+            .downcast_ref(),
+        Some(&TaskFollowupError::AuthorizationRequired)
+    );
+    issue_test_task_followup_delegation(&path, "caller", "target", input.action);
     assert!(!admit_task_followup(&path, &input).unwrap().replayed);
     let mut changed = input;
     changed.project_id = None;

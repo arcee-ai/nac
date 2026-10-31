@@ -86,6 +86,44 @@ evaluation with an invocation-only Ask default and the selected target resource
 `task_followup_auto`; configured Deny remains effective, and a headless Ask fails
 closed. An admitted peer message never becomes human review intent in the target.
 
+New admission also requires a retained delegation issued by the human product
+service for the exact caller session, target session and requested action.
+Wildcard Allow and Auto-approve cannot create this intent. The delegation
+survives an ended coordinator turn and server restart, while every native call
+still passes ordinary permission evaluation. A delegation never changes approval
+mode or creates a remembered permission grant.
+
+The human operator issues it through the existing trusted product ingress:
+
+```http
+POST /sessions/<caller-session-id>/task-followup-delegations
+Content-Type: application/json
+
+{"request_id":"human-delegation-1","target_session_id":"target-session-id","action":"auto","project_id":null}
+```
+
+Use `queue`, `steer` or `auto` explicitly. Use the target saved project's ID when
+crossing projects. Issuance needs the caller's current service open in this NAC
+instance; an unavailable owner returns conflict without attaching or waking
+either task. The route inherits the normal Host/Origin/Fetch Metadata and
+operator-controlled ingress boundary; it adds no model or public-MCP issuance
+surface. An agent must never call this human product route itself.
+
+Keep the returned delegation `id` and the human `request_id`. Retrying the same
+human request reconciles its record; changing its target, action or project
+conflicts. A new explicit human request replaces the prior delegation for that
+caller/target/action, retaining its audit record. `GET` or `DELETE` on
+`/sessions/<caller>/task-followup-delegations/<id>` passively reads or revokes
+that exact record, including after restart. Retrying an old revoked request
+does not reactivate it. Issuance and use revalidate topology, project scope and
+session incarnation; a record cannot transfer to a replacement session.
+
+Revocation and fresh inbox admission serialize in the same durable writer.
+Revocation blocks subsequent admissions; accepted input and its immutable
+delegation link remain inspectable and replayable. It does not cancel a target
+or erase delivered input. Historical receipts from before schema 47 retain a
+null delegation link, without inferred human authorization for new work.
+
 Supply the target `session_id`, a stable `request_id`, `action` and `prompt`.
 Crossing saved projects requires the target's `project_id` explicitly.
 
@@ -106,7 +144,7 @@ wake another turn, even after delivery or cancellation. If an initial wake fails
 the input remains durable for the target's normal attachment/recovery path.
 
 The receipt includes `requested_action`, `resolved_delivery`, immutable
-`admitted_run_id`, `inbox_item_id`, eventual `delivered_run_id`, and task
+`admitted_run_id`, `inbox_item_id`, eventual `delivered_run_id`, `delegation_id`, and task
 navigation. `accepted_pending` means the input is admitted but has not entered
 the model transcript; `delivered` means transcript delivery, not completed work
 or exactly-once provider execution. `cancelled` is terminal for that item.

@@ -4,10 +4,29 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum TaskFollowupAction {
     Queue,
     Steer,
     Auto,
+}
+
+impl TaskFollowupAction {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Queue => "queue",
+            Self::Steer => "steer",
+            Self::Auto => "auto",
+        }
+    }
+
+    pub(crate) const fn permission_action(self) -> &'static str {
+        match self {
+            Self::Queue => "task_followup_queue",
+            Self::Steer => "task_followup_steer",
+            Self::Auto => "task_followup_auto",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,6 +52,8 @@ pub enum TaskFollowupError {
     Unavailable,
     Stopping,
     CommitUncertain,
+    AuthorizationRequired,
+    Denied,
 }
 impl std::fmt::Display for TaskFollowupError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -46,6 +67,10 @@ impl std::fmt::Display for TaskFollowupError {
             Self::CommitUncertain => {
                 "follow-up commit outcome is unknown; inspect or retry the same request key"
             }
+            Self::AuthorizationRequired => {
+                "retained human delegation is required for this caller, target and action"
+            }
+            Self::Denied => "configured permission policy denies task follow-up delegation",
         })
     }
 }
@@ -59,6 +84,8 @@ impl TaskFollowupError {
             Self::Unavailable => "unavailable",
             Self::Stopping => "stopping",
             Self::CommitUncertain => "unknown",
+            Self::AuthorizationRequired => "authorization_required",
+            Self::Denied => "denied",
         }
     }
 }
@@ -74,6 +101,9 @@ pub struct TaskFollowupReceipt {
     pub admitted_run_id: Option<String>,
     pub inbox_item_id: i64,
     pub created_at: String,
+    /// The service-issued delegation used at admission; historical receipts
+    /// predate this evidence and must never acquire it retroactively.
+    pub delegation_id: Option<String>,
     /// None means the durable inbox item is no longer available, never delivered.
     pub disposition: Option<InboxStatus>,
     pub delivered_run_id: Option<String>,
@@ -117,7 +147,7 @@ fn receipt(
     let row = conn
         .query_row(
             "SELECT target_session_id, request_json, resolved_delivery, admitted_run_id,
-                inbox_item_id, created_at FROM task_followups
+                inbox_item_id, created_at, delegation_id FROM task_followups
          WHERE caller_session_id=?1 AND request_id=?2",
             params![request.caller_session_id, request.request_id],
             |row| {
@@ -128,11 +158,12 @@ fn receipt(
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, i64>(4)?,
                     row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                 ))
             },
         )
         .optional()?;
-    let Some((target, json, delivery, run, id, created_at)) = row else {
+    let Some((target, json, delivery, run, id, created_at, delegation_id)) = row else {
         return Ok(None);
     };
     if json != serde_json::to_string(request)? || target != request.target_session_id {
@@ -158,6 +189,7 @@ fn receipt(
         admitted_run_id: run,
         inbox_item_id: id,
         created_at,
+        delegation_id,
         disposition,
         delivered_run_id,
         replayed: true,
@@ -166,25 +198,31 @@ fn receipt(
 
 /// Both caller and target must remain independent Local direct sessions. Scope
 /// validation and insertion share the same transaction as the receipt.
-fn validate_scope(conn: &Connection, request: &TaskFollowupRequest) -> Result<()> {
-    if request.caller_session_id == request.target_session_id {
+pub(super) fn validate_scope(
+    conn: &Connection,
+    caller: &str,
+    target: &str,
+    project_id: Option<&str>,
+) -> Result<TaskFollowupScope> {
+    if caller == target {
         return Err(TaskFollowupError::Invalid.into());
     }
     let mut states = Vec::new();
-    for id in [&request.caller_session_id, &request.target_session_id] {
+    for id in [caller, target] {
         let state = conn.query_row(
             "SELECT s.behavior, (s.host_id IS NOT NULL OR s.sandbox_json IS NOT NULL), sp.project_id,
                     EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=s.session_id),
-                    EXISTS(SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=s.session_id)
+                    EXISTS(SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=s.session_id),
+                    s.created_at
              FROM sessions s LEFT JOIN session_projects sp ON sp.session_id=s.session_id
              WHERE s.session_id=?1",
             params![id], |row| Ok((row.get::<_,String>(0)?,row.get::<_,bool>(1)?,
-                row.get::<_,Option<String>>(2)?,row.get::<_,bool>(3)?,row.get::<_,bool>(4)?)),
+                row.get::<_,Option<String>>(2)?,row.get::<_,bool>(3)?,row.get::<_,bool>(4)?,row.get::<_,String>(5)?)),
         ).optional()?.ok_or(TaskFollowupError::Unavailable)?;
         states.push(state);
     }
-    let scope = request.project_id.as_ref().or(states[0].2.as_ref());
-    if states[1].2.as_ref() != scope {
+    let scope = project_id.or(states[0].2.as_deref());
+    if states[1].2.as_deref() != scope {
         return Err(TaskFollowupError::OutsideScope.into());
     }
     if states
@@ -193,7 +231,20 @@ fn validate_scope(conn: &Connection, request: &TaskFollowupRequest) -> Result<()
     {
         return Err(TaskFollowupError::Unavailable.into());
     }
-    Ok(())
+    Ok(TaskFollowupScope {
+        caller_project_id: states[0].2.clone(),
+        target_project_id: states[1].2.clone(),
+        caller_created_at: states[0].5.clone(),
+        target_created_at: states[1].5.clone(),
+    })
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct TaskFollowupScope {
+    caller_project_id: Option<String>,
+    target_project_id: Option<String>,
+    caller_created_at: String,
+    target_created_at: String,
 }
 
 coordinated_command! {
@@ -238,7 +289,9 @@ pub fn admit_task_followup(path: &Path, request: &TaskFollowupRequest) -> Result
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     if let Some(found) = receipt(&tx, request)? { return Ok(found); }
-    validate_scope(&tx, request)?;
+    let scope = validate_scope(&tx, &request.caller_session_id,
+        &request.target_session_id, request.project_id.as_deref())?;
+    let delegation_id = super::task_followup_delegations::require_delegation(&tx, request, &scope)?;
     let active: Option<String> = tx.query_row(
         "SELECT run_id FROM session_run_recovery WHERE session_id=?1 AND status='active'",
         params![request.target_session_id], |row| row.get(0),
@@ -262,10 +315,10 @@ pub fn admit_task_followup(path: &Path, request: &TaskFollowupRequest) -> Result
     let id = tx.last_insert_rowid();
     tx.execute(
         "INSERT INTO task_followups(caller_session_id,request_id,target_session_id,request_json,
-            resolved_delivery,admitted_run_id,inbox_item_id,created_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            resolved_delivery,admitted_run_id,inbox_item_id,created_at,delegation_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![request.caller_session_id,request.request_id,request.target_session_id,
-            serde_json::to_string(request)?,delivery.as_str(),admitted_run,id,now],
+            serde_json::to_string(request)?,delivery.as_str(),admitted_run,id,now,delegation_id],
     )?;
     #[cfg(test)]
     if ROLLBACK_UNCERTAIN.with(|fault| fault.replace(false)) {

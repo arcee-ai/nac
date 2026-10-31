@@ -26,6 +26,10 @@ fn caller(path: &Path) {
         [],
     )
     .unwrap();
+    drop(conn);
+    for action in [Action::Queue, Action::Steer, Action::Auto] {
+        crate::store::issue_test_task_followup_delegation(path, "caller", "session", action);
+    }
 }
 
 async fn settled(service: &SessionService, path: &Path, count: usize) {

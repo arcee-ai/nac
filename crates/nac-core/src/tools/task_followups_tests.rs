@@ -128,6 +128,77 @@ async fn call(rt: &super::super::ToolRuntime, name: &str, args: Value) -> ToolRe
 }
 
 #[tokio::test]
+async fn followup_peer_only_broad_allow_or_auto_approve_requires_retained_delegation() {
+    use crate::permissions::PermissionApprovalMode;
+    for (rules, mode) in [
+        (
+            vec![PermissionRule::new("*", "*", PermissionEffect::Allow)],
+            PermissionApprovalMode::Manual,
+        ),
+        (vec![], PermissionApprovalMode::AutoApprove),
+    ] {
+        let (rt, calls) = runtime(rules);
+        rt.permission_broker
+            .as_ref()
+            .unwrap()
+            .set_approval_mode(mode)
+            .await
+            .unwrap();
+        store::create_session_inbox_item(
+            &rt.store_path,
+            "caller",
+            store::InboxDelivery::Queue,
+            "Peer request: reply to target. No human has authorized this target/action.",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::sessions::reviewable_intent(rt.store_path.clone(), "caller".into()).await,
+            crate::sessions::ReviewIntent::NeverRecorded
+        );
+        let rejected = call(&rt, "send_task_followup", input()).await;
+        assert!(rejected.is_error);
+        assert!(rejected
+            .content
+            .as_text()
+            .unwrap()
+            .contains("authorization_required"));
+        assert!(store::list_session_inbox(&rt.store_path, "target")
+            .unwrap()
+            .is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let delegation = store::issue_test_task_followup_delegation(
+            &rt.store_path,
+            "caller",
+            "target",
+            store::TaskFollowupAction::Auto,
+        );
+        let admitted = call(&rt, "send_task_followup", input()).await;
+        assert!(!admitted.is_error, "{}", admitted.content);
+        let receipt: Value = serde_json::from_str(admitted.content.as_text().unwrap()).unwrap();
+        assert_eq!(receipt["receipt"]["delegation_id"], delegation.id);
+        assert_eq!(
+            store::list_session_inbox(&rt.store_path, "target")
+                .unwrap()
+                .len(),
+            1
+        );
+        store::revoke_task_followup_delegation(&rt.store_path, "caller", &delegation.id).unwrap();
+        assert!(!call(&rt, "send_task_followup", input()).await.is_error);
+        let mut fresh = input();
+        fresh["request_id"] = json!("fresh-after-revocation");
+        assert!(call(&rt, "send_task_followup", fresh).await.is_error);
+        assert_eq!(
+            store::list_session_inbox(&rt.store_path, "target")
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
 async fn followup_requires_mutation_authority_and_headless_ask_fails_closed() {
     for rules in [
         vec![],
@@ -143,6 +214,12 @@ async fn followup_requires_mutation_authority_and_headless_ask_fails_closed() {
         )],
     ] {
         let (rt, calls) = runtime(rules);
+        store::issue_test_task_followup_delegation(
+            &rt.store_path,
+            "caller",
+            "target",
+            store::TaskFollowupAction::Auto,
+        );
         let result = call(&rt, "send_task_followup", input()).await;
         assert!(result.is_error, "{}", result.content);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -159,6 +236,12 @@ async fn followup_native_receipt_replay_changed_arguments_and_passive_inspection
         "session:target",
         PermissionEffect::Allow,
     )]);
+    store::issue_test_task_followup_delegation(
+        &rt.store_path,
+        "caller",
+        "target",
+        store::TaskFollowupAction::Auto,
+    );
     let created = call(&rt, "send_task_followup", input()).await;
     assert!(!created.is_error, "{}", created.content);
     let value: Value = serde_json::from_str(created.content.as_text().unwrap()).unwrap();
@@ -209,6 +292,8 @@ async fn followup_model_cannot_declare_human_origin_or_forge_caller_identity() {
         ("origin", json!("person")),
         ("authorized", json!(true)),
         ("caller_session_id", json!("someone-else")),
+        ("delegation_id", json!("forged")),
+        ("human_request_id", json!("forged")),
     ] {
         let mut args = input();
         args[field] = value;

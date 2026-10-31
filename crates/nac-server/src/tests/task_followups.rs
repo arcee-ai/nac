@@ -15,6 +15,21 @@ fn followup(key: &str) -> TaskFollowupRequest {
     }
 }
 
+async fn delegate(manager: &SessionManager, action: Action) {
+    manager
+        .attach_session("caller")
+        .await
+        .unwrap()
+        .issue_task_followup_delegation(nac_core::store::TaskFollowupDelegationRequest {
+            request_id: format!("human-{action:?}"),
+            target_session_id: "target".into(),
+            action,
+            project_id: None,
+        })
+        .await
+        .unwrap();
+}
+
 async fn delivered(manager: &SessionManager) -> nac_core::store::TaskFollowupReceipt {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -53,6 +68,7 @@ async fn task_followup_owner_outlives_cancelled_caller_and_restart_replay_is_pas
     seed_direct_session_with_base_url(&root, "target", base);
     seed_direct_session(&root, "caller");
     let manager = test_manager(&root);
+    delegate(&manager, Action::Auto).await;
     let gate = Arc::new(AdmissionGate::default());
     let controller = Arc::new(ServerTaskFollowupController {
         manager: Arc::downgrade(&manager.inner),
@@ -62,7 +78,12 @@ async fn task_followup_owner_outlives_cancelled_caller_and_restart_replay_is_pas
     tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
         .await
         .unwrap();
-    assert!(manager.inner.active_sessions.read().await.is_empty());
+    assert!(!manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("target"));
     let pending =
         nac_core::store::inspect_task_followup_receipt(&manager.inner.store_path, "caller", "one")
             .unwrap()
@@ -111,6 +132,8 @@ async fn task_followup_invalid_binding_does_not_attach_and_shutdown_keeps_receip
     seed_direct_session(&root, "caller");
     seed_direct_session(&root, "target");
     let manager = test_manager(&root);
+    delegate(&manager, Action::Auto).await;
+    delegate(&manager, Action::Steer).await;
     let controller = ServerTaskFollowupController {
         manager: Arc::downgrade(&manager.inner),
         after_admission: None,
@@ -126,7 +149,12 @@ async fn task_followup_invalid_binding_does_not_attach_and_shutdown_keeps_receip
             .downcast_ref(),
         Some(&nac_core::store::TaskFollowupError::RunConflict)
     );
-    assert!(manager.inner.active_sessions.read().await.is_empty());
+    assert!(!manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("target"));
     assert!(
         nac_core::store::list_session_inbox(&manager.inner.store_path, "target")
             .unwrap()
@@ -146,5 +174,10 @@ async fn task_followup_invalid_binding_does_not_attach_and_shutdown_keeps_receip
             .downcast_ref(),
         Some(&nac_core::store::TaskFollowupError::Stopping)
     );
-    assert!(manager.inner.active_sessions.read().await.is_empty());
+    assert!(!manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("target"));
 }
