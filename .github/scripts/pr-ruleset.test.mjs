@@ -9,12 +9,14 @@ import {
 
 // An observed server response, not a reconstruction of the old ALL-450 proposal.
 const observed = JSON.parse(fs.readFileSync(new URL(
-  "../../docs/ci/evidence/2026-10-30-required-check-before-eight-owners-landed.json", import.meta.url), "utf8"));
+  "../../docs/ci/evidence/2026-10-30-required-check-before-nine-owners.json", import.meta.url), "utf8"));
 const now = Date.parse(observed.captured_at);
-// Preserve the actual landed eight-owner CODEOWNERS. Only the successful
-// exact-head check below is synthetic local activation-model data.
+// The observed receipt retains dev's actual eight-owner CODEOWNERS. Positive
+// activation cases model a hypothetical nine-owner landing and passing check;
+// both overrides are synthetic, never evidence of landing or activation.
 const snapshot = () => {
   const result = structuredClone(observed);
+  result.codeowners = codeowners;
   result.checks = [{ id: 100, name: context, head_sha: result.dev_sha,
     app: { id: actionsApp }, status: "completed", conclusion: "success" }];
   return result;
@@ -65,17 +67,19 @@ test("plan adds only strict exact Actions checks to the observed current ruleset
   assert.equal(plan.proposed_sha256, digest(payload));
 });
 
-test("historical prelanding six-owner CODEOWNERS cannot activate the landed eight-owner plan", () => {
+test("observed eight-owner and historical six-owner CODEOWNERS cannot activate the nine-owner plan", () => {
   const prelanding = JSON.parse(fs.readFileSync(new URL(
     "../../docs/ci/evidence/2026-10-30-required-check-before-eight-owners.json", import.meta.url), "utf8"));
   assert.equal(prelanding.codeowners.includes("@adalundhe"), false);
   assert.equal(prelanding.codeowners.includes("@ScottZembsch"), false);
-  assert.equal(observed.codeowners, codeowners);
-  const current = snapshot();
-  current.codeowners = prelanding.codeowners;
+  assert.equal(observed.codeowners.includes("@Crystalcareai"), false);
   // Even a synthetic passing check and complete receipt cannot replace landed
   // CODEOWNERS; no observed data is rewritten to manufacture activation.
-  assert.throws(() => activationPlan(observed, current, receipt(), now), /CODEOWNERS has not landed/);
+  for (const codeowners of [observed.codeowners, prelanding.codeowners]) {
+    const current = snapshot();
+    current.codeowners = codeowners;
+    assert.throws(() => activationPlan(observed, current, receipt(), now), /CODEOWNERS has not landed/);
+  }
   assert.equal(snapshot().codeowners, codeowners);
 });
 
@@ -184,7 +188,7 @@ test("model tests, stale/foreign/incomplete receipts and old override payload ca
 
 test("current handoff template matches the plan/matrix but cannot certify unperformed platform work", () => {
   const plan = JSON.parse(fs.readFileSync(new URL(
-    "../../docs/ci/evidence/2026-10-30-required-check-plan-eight-owners-landed.json", import.meta.url), "utf8"));
+    "../../docs/ci/evidence/2026-10-30-required-check-plan-nine-owners.json", import.meta.url), "utf8"));
   assert.deepEqual(plan, dryRunPlan(observed));
   const template = JSON.parse(fs.readFileSync(new URL(
     "../../docs/ci/evidence/qualification-template.json", import.meta.url), "utf8"));
@@ -198,19 +202,24 @@ test("current handoff template matches the plan/matrix but cannot certify unperf
   assert.match(guide, /retarget the upper PR to `dev`/);
 });
 
-test("eight-owner baseline cannot reuse historical three-, six- or seven-owner evidence", () => {
+test("nine-owner baseline cannot reuse historical three-, six-, seven- or eight-owner evidence", () => {
   for (const name of ["2026-10-27-required-check-before.json", "2026-10-27-required-check-before-six-owners.json",
-    "2026-10-30-required-check-before-seven-owners.json"]) {
+    "2026-10-30-required-check-before-seven-owners.json", "2026-10-30-required-check-before-eight-owners.json",
+    "2026-10-30-required-check-before-eight-owners-landed.json"]) {
     const historical = JSON.parse(fs.readFileSync(new URL(
       `../../docs/ci/evidence/${name}`, import.meta.url), "utf8"));
     assert.throws(() => dryRunPlan(historical), /lacks verified write access/);
   }
 });
 
-for (const owner of [{ login: "adalundhe", id: 23642200 }, { login: "ScottZembsch", id: 109129358 }]) {
-  test(`${owner.login} must retain verified identity and write access in the eight-owner baseline`, () => {
+for (const owner of [
+  { login: "adalundhe", id: 23642200, permission: "write" },
+  { login: "ScottZembsch", id: 109129358, permission: "write" },
+  { login: "Crystalcareai", id: 162942000, permission: "admin" },
+]) {
+  test(`${owner.login} must retain verified identity and write access in the nine-owner baseline`, () => {
     assert.deepEqual(observed.owners.find(({ login }) => login === owner.login),
-      { ...owner, permission: "write" });
+      owner);
     for (const mutate of [
       (s) => { s.owners = s.owners.filter(({ login }) => login !== owner.login); },
       (s) => { s.owners.find(({ login }) => login === owner.login).permission = "read"; },

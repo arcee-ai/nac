@@ -4,23 +4,21 @@
 NAC's **observed** ruleset 25983949. Live activation requires separate human
 authorization. No settings are changed by the tooling or this PR.
 
-The October 30 [landed before snapshot](evidence/2026-10-30-required-check-before-eight-owners-landed.json)
+The October 30 [nine-owner before snapshot](evidence/2026-10-30-required-check-before-nine-owners.json)
 shows active `main` on `~DEFAULT_BRANCH` (currently `dev`), no bypass actors,
 one approval, CODEOWNERS, last-push approval, resolved threads, and extra approval
 for unattributed changes. Stale-review dismissal is currently false. Existing
 merge methods, deletion/force-push protections, and inherited enterprise rules
-remain unchanged. [The intended plan](evidence/2026-10-30-required-check-plan-eight-owners-landed.json)
+remain unchanged. [The intended plan](evidence/2026-10-30-required-check-plan-nine-owners.json)
 appends exactly one required-status-check rule: `Required PR checks`, GitHub
 Actions integration **15368**, strict current-base checks, enforced on creation.
 It updates that existing ruleset; it does not introduce a second review policy.
 
-This snapshot records all eight designated owners' actual live permissions,
-including Ada (`adalundhe`, ID `23642200`, write) and Scott (`ScottZembsch`, ID
-`109129358`, write), and the **eight-owner CODEOWNERS actually served by dev** at
-`298ca094ce1826ab6a47d0505cd066c5d5660f4d`, after a human merged the separate
-[Ada/Scott roster PR #470](https://github.com/arcee-ai/nac/pull/470).
-The positive local model now uses that actual landed ownership data. Capturing
-permission to write alone is not proof of landed ownership or required-check activation.
+This snapshot records all nine designated owners' actual live permissions,
+including Crystalcareai (ID `162942000`, admin). It retains the **eight-owner
+CODEOWNERS actually served by dev** at `91fde731b6e5bf4097a37fbee854804859f22f95`.
+Crystalcareai's roster addition has not landed in that receipt. Permission to
+write alone is not proof of landed ownership or required-check activation.
 
 The original [three-owner snapshot](evidence/2026-10-27-required-check-before.json)
 and [plan](evidence/2026-10-27-required-check-plan.json), plus the
@@ -28,15 +26,15 @@ and [plan](evidence/2026-10-27-required-check-plan.json), plus the
 and [plan](evidence/2026-10-27-required-check-plan-six-owners.json), plus the
 [seven-owner snapshot](evidence/2026-10-30-required-check-before-seven-owners.json)
 and [plan](evidence/2026-10-30-required-check-plan-seven-owners.json), remain unchanged
-historical receipts. They lack one or both newly designated owners' verified
-identities and cannot qualify the eight-owner baseline. This planner layer does
-not change reviewer membership.
-
-The earlier [prelanding eight-permission snapshot](evidence/2026-10-30-required-check-before-eight-owners.json)
-and [plan](evidence/2026-10-30-required-check-plan-eight-owners.json) also remain
-unchanged historical evidence. That snapshot truthfully retains the six-owner
-CODEOWNERS observed before #470 landed. A regression keeps that prelanding
-ownership state from satisfying the landed eight-owner activation prerequisite.
+historical receipts. The [prelanding eight-permission snapshot](evidence/2026-10-30-required-check-before-eight-owners.json)
+and [plan](evidence/2026-10-30-required-check-plan-eight-owners.json), and the
+[landed eight-owner snapshot](evidence/2026-10-30-required-check-before-eight-owners-landed.json)
+and [plan](evidence/2026-10-30-required-check-plan-eight-owners-landed.json), also
+remain unchanged. The latter records the actual landing of the
+[Ada/Scott roster PR #470](https://github.com/arcee-ai/nac/pull/470).
+These older receipts lack Crystalcareai's verified identity and cannot qualify
+the nine-owner baseline. Refresh the nine-owner snapshot after this roster
+lands before qualification or activation.
 
 ALL-450's earlier bypass/review proposal is historical and must not be applied
 to current settings. ALL-450 remains a completed foundation milestone; ALL-506
@@ -81,6 +79,8 @@ Ada (`adalundhe`, immutable account ID `23642200`) was verified with repository
 write access on October 30, 2026.
 Scott (`ScottZembsch`, immutable account ID `109129358`) was also verified with
 repository write access on October 30, 2026.
+Crystalcareai (immutable account ID `162942000`) was verified with repository
+admin access on October 30, 2026.
 
 Run from the intended repository with authenticated read access:
 
@@ -102,12 +102,13 @@ activation receipts. Refresh them before qualification. A real fixture receipt
 must bind both the exact proposed payload digest and full settings identity.
 Never fill its fields with local model output or copy an old successful receipt.
 
-Planner tests preserve the actual landed eight-owner CODEOWNERS in the observed
-fixture and positive helper. Successful checks and qualification receipts remain
-explicitly synthetic local model data. A negative uses the unchanged prelanding
-snapshot to prove six-owner CODEOWNERS cannot activate, even with a synthetic
-complete receipt and passing check. These local models do not certify platform
-qualification or required-check activation; the roster's landing is separately observed.
+Planner tests preserve the actual eight-owner CODEOWNERS in the observed
+nine-permission fixture. Positive activation cases explicitly model hypothetical
+nine-owner CODEOWNERS, a passing check, and qualification receipts as synthetic
+local data. Negatives prove that both the observed eight-owner and historical
+six-owner CODEOWNERS cannot activate, even with a synthetic complete receipt and
+passing check. These models do not certify roster landing, platform qualification,
+or required-check activation.
 
 ## Real safe-repository and actor matrix — unperformed
 
@@ -131,7 +132,7 @@ or success, and durable evidence URLs. Do not grant any bypass to run the matrix
 | Failed/pending/cancelled/missing/unexpected skip | Actual state at attempted ordinary merge rejects it; pending attempt time precedes completion |
 | Stale check/base; wrong App | Old-head/base success and same-name foreign-App success cannot authorize merge |
 | ALL-505 strict baseline | Fresh complete combined native amd64 image scan and unchanged-image rescan, fresh DB, zero unresolved/unapproved blockers; link full reports, not advisory historical green |
-| Each of the eight designated non-author approvals | Eligible approval works when all other protections pass |
+| Each of the nine designated non-author approvals | Eligible approval works when all other protections pass |
 | Self/outside-only/last-pusher approval | Cannot satisfy the preserved CODEOWNERS and last-push approval requirements |
 | Unattributed changes and threads | Required extra approval remains effective; unresolved conversation blocks |
 | Requests/bot PRs | Author excluded; eligible owner requests preserved |
@@ -178,7 +179,7 @@ verify that a linked claim actually occurred.
 
 ## Administrator application, readback and rollback
 
-Only proceed after ALL-505 qualification, the real matrix, landed eight-owner CODEOWNERS,
+Only proceed after ALL-505 qualification, the real matrix, landed nine-owner CODEOWNERS,
 current-head/current-base aggregate success, and separate human activation
 authorization. Confirm the current aggregate actually uses strict image logic.
 Generate a fresh read-only activation handoff:
