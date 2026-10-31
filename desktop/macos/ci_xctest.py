@@ -85,9 +85,10 @@ def authorization_policy(observation):
             'developer_mode_enabled': True, 'automation_authentication_required': False}
 
 
-def require_generated_runner(data, config_path, expected_target='NACNativeUITests', *, project_selection=None):
+def require_generated_runner(data, config_path, expected_target='NACNativeUITests', *, project_selection=None,
+                             startup_binding=None):
     """Inspect Xcode's actual generated runner without manufacturing metadata."""
-    if expected_target not in ('NACNativeUITests', 'NACPerformanceUITests'):
+    if expected_target not in ('NACNativeUITests', 'NACPerformanceUITests', 'NACStartupUITests'):
         raise RuntimeError('Unknown generated XCTest target selection')
     def dictionaries(value):
         if isinstance(value, dict):
@@ -104,17 +105,29 @@ def require_generated_runner(data, config_path, expected_target='NACNativeUITest
     if (target.get('EnvironmentVariables', {}).get('NAC_UI_FIXTURE') != str(config_path)
             or not target.get('TestBundlePath', '').endswith('.xctest')):
         raise RuntimeError('Generated XCTest runner did not bind the exact fixture configuration')
-    if expected_target == 'NACPerformanceUITests':
+    if expected_target != 'NACNativeUITests':
+        prefix = 'startup' if expected_target == 'NACStartupUITests' else 'performance'
         selection = project_selection or {}
-        source = selection.get('performance_source_path', '')
-        source_hash = selection.get('performance_source_sha256', '')
+        source = selection.get(prefix + '_source_path', '')
+        source_hash = selection.get(prefix + '_source_sha256', '')
         environment = target.get('EnvironmentVariables', {})
         if (selection.get('generated') is not True or selection.get('expected_target') != expected_target
                 or not isinstance(source, str) or not Path(source).is_absolute()
                 or not isinstance(source_hash, str) or not re.fullmatch('[0-9a-f]{64}', source_hash)
-                or environment.get('NAC_PERFORMANCE_SOURCE_PATH') != source
-                or environment.get('NAC_PERFORMANCE_SOURCE_SHA256') != source_hash):
-            raise RuntimeError('Generated performance runner did not bind the exact materialized source')
+                or environment.get('NAC_' + prefix.upper() + '_SOURCE_PATH') != source
+                or environment.get('NAC_' + prefix.upper() + '_SOURCE_SHA256') != source_hash):
+            raise RuntimeError('Generated external runner did not bind the exact materialized source')
+        if prefix == 'startup':
+            if Path(target['TestBundlePath']).name != 'NACStartupUITests.xctest':
+                raise RuntimeError('Generated startup bundle path differs')
+            binding = startup_binding or {}
+            for name, width in (('product_sha', 40), ('test_sha', 40), ('harness_sha', 40), ('configuration_sha256', 64)):
+                value = binding.get(name)
+                if (not isinstance(value, str) or not re.fullmatch('[0-9a-f]{' + str(width) + '}', value)
+                        or environment.get('NAC_STARTUP_' + name.upper()) != value):
+                    raise RuntimeError('Generated startup runner P/Q/H/config binding differs')
+            if binding['test_sha'] != selection.get('startup_sha') or binding['harness_sha'] != selection.get('harness_sha'):
+                raise RuntimeError('Generated startup runner source selection identity differs')
     return target
 
 
