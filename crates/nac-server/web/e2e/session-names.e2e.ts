@@ -795,7 +795,7 @@ for (const width of [768, 390])
     await fits(page, heading);
     if (width >= 768) {
       await heading.hover();
-      await expect(page.getByRole("tooltip")).toContainText(names[1]);
+      await expect(page.getByRole("tooltip", { name: names[1], exact: true })).toBeVisible();
       await page.keyboard.press("Escape");
     }
     const url = page.url();
