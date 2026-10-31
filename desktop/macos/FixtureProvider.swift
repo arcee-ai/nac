@@ -94,6 +94,12 @@ final class FixtureProvider {
             return
         }
         responseCount += 1
+        #if PREVIEW_SMOKE
+        if let response = WorkspaceFixture.wireResponse(request) {
+            send(connection, response, final: true)
+            return
+        }
+        #endif
         let item: [String: Any] = ["id": "msg-preview", "type": "message", "status": "completed",
             "role": "assistant", "content": [["type": "output_text", "text": Self.answer, "annotations": []]]]
         let response: [String: Any] = ["id": "resp-preview", "object": "response", "status": "completed",
