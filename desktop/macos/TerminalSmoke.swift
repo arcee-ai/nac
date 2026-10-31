@@ -18,6 +18,17 @@ final class TerminalSmoke: NSObject {
     var lockedPaintUnavailable = false
     var manualFinished = false
 
+    // Match the production responsive terminal owner: the narrow detail hides
+    // its launch control behind Open list, and labels it New Shell.
+    static let shellControls = #"""
+    const panel=document.querySelector('section[aria-label="Session terminal"]');
+    const available=b=>!b.disabled && b.getClientRects().length>0 && !b.closest('[inert]');
+    const name=b=>b.textContent.trim().toLowerCase();
+    const buttons=panel?[...panel.querySelectorAll('button')].filter(available):[];
+    const openList=buttons.find(b=>b.getAttribute('aria-label')==='Open list');
+    const newShell=buttons.find(b=>name(b)==='new shell');
+    """#
+
     init(app: PreviewApp, scenario: String, output: URL, record: @escaping ([String: Any]) -> Void) {
         self.app = app
         self.scenario = scenario
@@ -60,11 +71,20 @@ final class TerminalSmoke: NSObject {
         try await require("Expected direct fixture", "return (await (await fetch('/sessions/'+location.hash.split('/')[2])).json()).metadata.behavior==='direct';")
         _ = try await js(TerminalFixture.observer)
         try await navigate("terminal")
+        try await waitJS("terminal panel controls", "return !!document.querySelector('button[aria-label=\"Show panel\"]') || !!document.querySelector('section[aria-label=\"Session terminal\"]');")
         if try await js("return !!document.querySelector('button[aria-label=\"Show panel\"]');") as? Bool == true {
             try await button("Show panel")
         }
-        try await button("New shell")
-        try await waitJS("connected shell", "return document.body.innerText.includes('Connected') && !!document.querySelector('.xterm-helper-textarea');")
+        try await waitJS("responsive terminal list control", Self.shellControls + "return !!openList || !!newShell;")
+        let openedList = try await js(Self.shellControls + "if(openList) { openList.click(); return true; } return false;")
+        try await waitJS("responsive New shell", Self.shellControls + "return !!newShell;")
+        let selection = try await js(Self.shellControls + """
+        if(!newShell) throw Error('Responsive terminal launch control changed');
+        const selectedName=name(newShell); newShell.click();
+        return {panel:'Session terminal', name:selectedName, viewport:[innerWidth,innerHeight]};
+        """)
+        record(["terminal_shell_selection": selection, "terminal_list_opened": openedList])
+        try await waitJS("connected shell", "const panel=document.querySelector('section[aria-label=\"Session terminal\"]'); return !!panel?.querySelector('.xterm-helper-textarea') && panel.innerText.includes('Connected');")
         let terminals = try await js("return (await (await fetch('/sessions/'+location.hash.split('/')[2]+'/user-terminals')).json()).terminals;") as! [[String: Any]]
         guard terminals.count == 1, let id = terminals[0]["terminal_id"] as? String else {
             throw PreviewError.message("Expected exactly one owned shell")

@@ -6,6 +6,61 @@ import unittest
 
 
 class TerminalObserverTests(unittest.TestCase):
+    def test_responsive_shell_selection_is_scoped_visible_and_once_only(self):
+        source = Path(__file__).with_name('TerminalSmoke.swift').read_text()
+        controls = source.split('static let shellControls = #"""', 1)[1].split('"""#', 1)[0]
+        module = Path(__file__).resolve().parents[2] / 'crates/nac-server/web/node_modules/jsdom'
+        script = r"""
+const data=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
+const {JSDOM}=require(data.module);
+const rows=[];
+for(const narrow of [false,true]) {
+ const dom=new JSDOM(`<button id="outside">New shell</button>
+   <section aria-label="Other terminal"><button id="other">New shell</button></section>
+   <section aria-label="Session terminal">
+     <button hidden>New shell</button><button disabled>New shell</button>
+     <div inert><button>New shell</button></div>
+     <button title="New shell"></button><button>Retry opening same shell</button>
+   </section>`,{runScripts:'outside-only'});
+ const w=dom.window, panel=w.document.querySelector('section[aria-label="Session terminal"]');
+ w.HTMLElement.prototype.getClientRects=function(){return this.closest('[hidden]')?[]:[{}];};
+ let launches=0, opens=0, decoys=0;
+ for(const b of w.document.querySelectorAll('button')) b.onclick=()=>{decoys++;};
+ const addLaunch=()=>{
+   const b=w.document.createElement('button');b.textContent=narrow?'New Shell':'New shell';
+   b.onclick=()=>{launches++;};panel.append(b);
+ };
+ if(narrow) {
+   const b=w.document.createElement('button');b.setAttribute('aria-label','Open list');
+   b.onclick=()=>{opens++;b.remove();addLaunch();};panel.append(b);
+ } else addLaunch();
+ const select=extra=>w.Function(data.controls+extra)();
+ const before={open:select('return !!openList;'),launch:select('return !!newShell;')};
+ const opened=select('if(openList){openList.click();return true;}return false;');
+ if(!select('return !!newShell;')) throw Error('Responsive launch unavailable');
+ select('newShell.click();return true;');
+ rows.push({narrow,before,opened,opens,launches,decoys});
+ dom.window.close();
+}
+const negative=new JSDOM('<button>New shell</button><section aria-label="Session terminal"><button title="New shell"></button><button disabled>New shell</button></section>',{runScripts:'outside-only'});
+negative.window.HTMLElement.prototype.getClientRects=()=>[{}];
+const unavailable=negative.window.Function(data.controls+'return !openList && !newShell;')();
+negative.window.close();
+console.log(JSON.stringify({rows,unavailable}));
+"""
+        result = subprocess.run(['node', '-e', script],
+            input=json.dumps({'controls': controls, 'module': str(module)}),
+            capture_output=True, text=True, check=True, timeout=15)
+        evidence = json.loads(result.stdout)
+        self.assertTrue(evidence['unavailable'])
+        for row in evidence['rows']:
+            self.assertEqual(row['launches'], 1)
+            self.assertEqual(row['opens'], int(row['narrow']))
+            self.assertEqual(row['opened'], row['narrow'])
+            self.assertEqual(row['before']['launch'], not row['narrow'])
+            self.assertEqual(row['before']['open'], row['narrow'])
+            self.assertEqual(row['decoys'], 0)
+
     def test_split_unicode_ack_and_written_receipt_keep_original_fetch_and_bound_metadata(self):
         source = Path(__file__).with_name('TerminalFixture.swift').read_text()
         observer = source.split('static let observer = #"""', 1)[1].split('"""#', 1)[0]
