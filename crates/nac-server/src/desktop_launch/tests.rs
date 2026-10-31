@@ -261,6 +261,9 @@ fn desktop_watchdog_diagnostic_probe() {
     let Some(marker) = std::env::var_os("NAC_TEST_DESKTOP_WATCHDOG_MARKER") else {
         return;
     };
+    // Keep the marker off FD 2 before closing stderr; reopening it in the
+    // callback could otherwise let concurrent diagnostics write into the marker.
+    let mut marker = std::fs::File::create(marker).unwrap();
     let mode = std::env::var("NAC_TEST_DESKTOP_WATCHDOG_MODE").unwrap();
     let (held, acquired) = std::sync::mpsc::channel();
     let (release, released) = std::sync::mpsc::channel();
@@ -281,7 +284,7 @@ fn desktop_watchdog_diagnostic_probe() {
         Some(holder)
     };
     server::forced_shutdown_after_timeout(crate::COMPLETE_SHUTDOWN_TIMEOUT, || {
-        std::fs::write(marker, "forced").unwrap();
+        marker.write_all(b"forced").unwrap();
     });
     if let Some(holder) = holder {
         release.send(()).unwrap();
