@@ -200,6 +200,15 @@ directories only in that smoke bundle. Dummy provider results do not establish
 real-vendor authentication; locked-session DOM results do not establish visible
 paint or trusted OS input.
 
+`node desktop/macos/startup_lifecycle.mjs NAC.app OUTPUT` exercises the ordinary
+uninstrumented app under a native/browser lease. It identifies the unique
+relocated app and exact bundled child before observing that child's loopback
+listener, then verifies an actual bundled worker consumes a dummy credential
+through the Rust owner. A second case holds the configuration publication lock
+while the app exits and checks that its preflight child exits without creating a
+database. Termination and cleanup require matching this fixture's bundle paths;
+unknown ownership retains the disposable profile for inspection.
+
 Every builder mode emits `Contents/Resources/build-receipt.json` with source,
 compiler flags, native source hashes, engine identity and both executable
 hashes. It rejects an engine from another source revision or source changes
