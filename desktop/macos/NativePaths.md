@@ -60,54 +60,96 @@ single dispatch and stale reveal settlement. Rust tests cover current backend
 and root binding, traversal, symlinks, missing/moved/replaced paths and HTTP
 Origin denial. They do not establish native acceptance.
 
-`NativePathJourney.swift` supplies the owned public XCTest folder-selection
-journey for the ALL-354 runner to compose under `NATIVE_UI_TESTS`. It requires
-the runner's exact app/binary/console/window checks before every input. Its
-owned ASCII parent must contain a fresh directory whose name has spaces and
-Unicode, with an existing saved fixture model available in the shared form.
-It drives actual NSOpenPanel cancellation and document replacement while a
-sheet is pending, verifies a successor form retains its own folder, and selects
-the Unicode/spaces folder. It moves that owned folder before normal submission,
-observes server rejection, restores/reselects it, and explicitly retries normal
-project/first-chat creation. It then invokes Reveal in Finder and observes the
-selected file through Finder accessibility. Every run creates a fresh UUID in
-both the spaces/Unicode folder name and extensionless reveal leaf. Immediately
-before the explicit reveal, public XCTest records all Finder windows' public
-identifiers, frames and counts matching this unique title/leaf. The unique
-target must be absent. After the action exactly one newly titled window must
-expose the exact selected leaf. Before/after observations are retained as
-public XCTest attachments in the result bundle, without sidecar writes. The
-helper never activates Finder or sends NAC input after Finder takes focus.
-These content observations do not establish stable OS window identity or
-guarded close authority. The newly revealed Finder window is left open and
-recorded as a desktop cleanup residual; engine/profile cleanup is separate.
-`NativePathSmoke` observes the real
-panel/document callbacks and verifies stale/outside/missing/symlink/file-URL
-reveal denials through the actual WKWebView and shared server. It has no
-standalone launch or hosted dispatch, does not provision permissions, and does
-not qualify physical IME or paste.
-It also verifies the unconnected SSH form exposes no Local picker and the
-Podman working-folder action retains the shared API browser. A real SSH
-connection or container execution is separate infrastructure coverage.
+`NativePathJourney.swift` supplies two owned public XCTest journeys for ALL-354
+under `NATIVE_UI_TESTS`. It requires exact app/binary/console/window checks before
+every input, plus a mandatory H-owned `observePhase` closure with no fallback.
+The helper creates no sidecars, reads no app-profile files and performs no
+filesystem move or restore. The closure reads only H's already-bound, observed
+app evidence JSON. H must independently bind that known file to the exact
+source, app binary/PID, window, engine launch and run; it must not discover an
+alternate writable/readable location or merely echo an unverified record.
+The existing app publisher atomically writes the JSON from the app process;
+app write authority never transfers to XCTest.
 
-The separately named `paths-failure-xctest` case uses
-`NativePathJourney.pendingEngineFailure`. With an actual NSOpenPanel open, its
-private fixture receipt asks `NativePathSmoke` to use the existing owned-engine
-channel-loss seam. The observer requires real app failure, invalidated launch
-identity, a retired path handler and no attached native sheet, then returns
-through the existing bounded engine/profile cleanup. Both cases require the
-ALL-354 runner's actual XCTest result and exact artifact identities; these
-receipts are synchronization, not independent acceptance assertions.
-The helper's separate synchronization-file writes, reads and app-owned folder
-moves have not been qualified inside the hosted XCTest sandbox. ALL-354 has
-observed a real denied runner sidecar write in another journey; no broader
-filesystem access follows from a build or syntax check. These operations remain
-an explicit runtime gate pending exact-harness feasibility. No permission,
-sandbox, ownership or mode changes are authorized to make the fixtures pass.
+The `paths_phase` record has `version: 1`, `name`, `sequence`, `run`, `source`,
+`app_pid`, `window`, `engine_pid`, `operation`, `launch`, `view`, and `document`.
+H supplies the corresponding `NativePathJourney.Scope` from its verified initial
+binding and decodes each `NativePathJourney.Phase` from the same known file.
+The helper rejects identity mismatches, unknown operations, skipped/backward
+phases, changes within a sequence, and unexpected document replacement.
+Re-reading an unchanged atomic record is allowed. Normal order is `ready` (0),
+`document-reloaded` (1), `folder-moved` (2), `folder-restored` (3), then
+`reveal-observed` (4). Only phase 1 changes the document, retaining its launch
+and view; later phases must retain that exact successor. The failure case is
+`ready` (0), then `failure-panel-observed` (1) on its initial document.
+Readiness and phase 0 are published in one atomic app record.
 
-Full acceptance additionally requires integration of the separately owned common
-shell wiring and frozen ALL-354 XCTest harness, plus actual `.app`/system
-WKWebView runs of these journeys, SSH/Podman exclusion, engine failure with a
-pending native sheet, bounded cleanup and supplier ALL-342/346 gates. These remain
-explicit gates until recorded against the exact joined source and binaries;
-Chromium, pure fixtures and this checked-in driver are not substitutes.
+The normal journey uses existing Create chat/New Project/Local/SSH/Sandbox and
+Files controls. It proves the unconnected SSH form has no Local picker and
+Podman retains the API browser; live SSH/container execution is separate
+infrastructure coverage. After real NSOpenPanel Cancel, XCTest navigates inside
+the second actual panel through an ASCII parent and visible unique Unicode
+folder, without selecting. The app fixture observes its own pending panel's
+`directoryURL`, exact bridge choice/cancel counts and current document, then
+reloads the actual view once. It publishes phase 1 only after the old sheet is
+gone and a distinct current document is ready. XCTest verifies the replacement
+form retained its original path.
+
+After the first actual completed folder selection reaches the normal enabled
+form, the app moves only its freshly created fixture directory to a fixed
+unique sibling and publishes phase 2. XCTest waits for that record, then submits
+the real form. The app observes an actual visible error containing this folder
+and `does not exist`, restores its own directory, and publishes phase 3.
+XCTest independently verifies the error, waits for restoration, reselects via
+NSOpenPanel and explicitly retries normal project/first-chat creation. No
+form values, errors or server responses are synthesized by the fixture.
+
+Every run creates a fresh UUID in both the spaces/Unicode folder and
+extensionless reveal leaf. Before explicit reveal, public XCTest records all
+Finder windows' public identifiers, frames and counts matching this unique
+title/leaf; the target must be absent. Afterward exactly one matching titled
+window must expose the exact selected leaf. Observations include the run,
+folder and leaf as public XCTest result-bundle attachments. The helper never
+activates Finder or sends later NAC input. These content observations do not
+establish stable OS window identity or guarded close authority. The revealed
+window is left open and explicitly recorded as a desktop cleanup residual.
+
+A fixture-only observer is installed in the verified initial and successor
+page documents. It records only trusted clicks on the existing enabled Reveal
+button. It exposes a read closure, has no command or fetch replacement, and
+cannot change UI, invoke product operations or accept caller control verbs.
+Installation/current-document identities are retained. Missing, duplicate,
+stale, wrong-route or replayed observations fail. App code verifies the same
+launch/document both before and after each script observation. A real click
+starts a fixed 45-second observation grace and the existing six actual HTTP
+reveal-denial checks. The app then uses ordinary bounded engine/profile cleanup
+without waiting for an XCTest control write. The grace and app receipt grant
+no Finder success: the actual successful XCTest result and selection attachments
+are independently required, along with engine reaping and profile removal.
+H must allow up to 90 seconds for app settlement after the helper returns.
+Fixture input phases have a shared 240-second bound; the grace is separate.
+
+For `paths-failure-xctest`, XCTest opens and navigates inside the first actual
+panel to the run's unique folder without selecting. The app observes that
+specific pending panel and current document, publishes its phase, then uses the
+existing owned-engine channel-loss seam exactly once. It requires actual app
+failure, invalidated launch identity, retired path handler and no attached
+sheet before the existing cleanup. No timer alone infers that XCTest saw the
+panel; its real navigation causes the predeclared transition.
+
+`test_native_path_fixture.py` executes the actual extracted observer in Node
+and Foundation-only scope/phase implementation in Swift, covering trusted
+input filtering, duplicate/stale/replayed events and finite phase/identity
+controls. Its static no-write and source/mode audits are audits only. These
+controls do not qualify XCTest sandbox reads, NSOpenPanel directory transitions,
+trusted WKWebView events, native input, Finder selection or cleanup.
+
+Full acceptance still requires root-inspected coherent source/build exclusions,
+the exact frozen ALL-354 runner and actual `.app`/system WKWebView executions,
+plus supplier ALL-342/346 qualification and the final independent ticket review.
+The read-only H adapter, helper's actual XCTest compilation and both native
+journeys remain unqualified until recorded against exact joined source and
+binaries. Physical IME/paste, VoiceOver, minimum-OS/signing/vendor-auth coverage
+remain separate. Chromium, parsed source, pure fixtures and app receipts are
+not substitutes. No permission, sandbox, TCC, entitlement or ownership change
+is authorized to make a fixture pass.

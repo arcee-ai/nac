@@ -7,13 +7,127 @@ import XCUIAutomation
 /// The caller owns exact-bundle launch/hash/console checks and engine/profile
 /// cleanup. Each input requires its existing exact-target authorization check;
 /// there is deliberately no default check or standalone dispatch entrypoint.
-/// Marker-file writes and app-profile moves below remain UNQUALIFIED in the
-/// hosted XCTest sandbox; source parsing does not establish filesystem access.
+/// All coordination reads use the mandatory H-owned observer of its known app
+/// evidence file. This helper writes no sidecars and never reads/moves profiles.
 @MainActor
 enum NativePathJourney {
+    /// H must build this from its exact source/app/launch and known evidence-file
+    /// binding, not trust a newly discovered path or merely echo an unverified record.
+    struct Scope: Decodable {
+        let run: String
+        let source: String
+        let app_pid: Int
+        let window: Int
+        let engine_pid: Int
+        let operation: String
+        let launch: String
+        let view: String
+        let document: String
+    }
+    enum PhaseName: String, Decodable {
+        case ready
+        case documentReloaded = "document-reloaded"
+        case folderMoved = "folder-moved"
+        case folderRestored = "folder-restored"
+        case revealObserved = "reveal-observed"
+        case failurePanelObserved = "failure-panel-observed"
+    }
+    struct Phase: Decodable, Equatable {
+        let version: Int
+        let name: PhaseName
+        let sequence: Int
+        let run: String
+        let source: String
+        let app_pid: Int
+        let window: Int
+        let engine_pid: Int
+        let operation: String
+        let launch: String
+        let view: String
+        let document: String
+    }
+    private final class PhaseCursor {
+        let scope: Scope
+        private var latest: Phase?
+        init(_ scope: Scope) { self.scope = scope }
+        func accept(_ phase: Phase) throws -> PhaseName {
+            let order: [PhaseName]
+            switch scope.operation {
+            case "pending-engine-failure": order = [.ready, .failurePanelObserved]
+            case "select-reload-create-reveal": order = [.ready, .documentReloaded, .folderMoved, .folderRestored, .revealObserved]
+            default: throw error("Unknown fixture operation")
+            }
+            guard phase.version == 1, phase.run == scope.run, phase.source == scope.source,
+                  phase.app_pid == scope.app_pid, phase.window == scope.window, phase.engine_pid == scope.engine_pid,
+                  phase.operation == scope.operation, phase.launch == scope.launch, phase.view == scope.view,
+                  order.indices.contains(phase.sequence), order[phase.sequence] == phase.name else {
+                throw error("Fixture phase source/app/launch binding or finite order mismatch")
+            }
+            if let latest, phase.sequence == latest.sequence {
+                guard phase == latest else { throw error("Fixture phase changed without advancing") }
+                return phase.name // Re-reading one atomic record is not another transition.
+            }
+            guard phase.sequence == (latest?.sequence ?? -1) + 1 else {
+                throw error("Stale or skipped fixture phase")
+            }
+            if phase.name == .documentReloaded {
+                guard UUID(uuidString: phase.document) != nil, phase.document != scope.document else {
+                    throw error("Reload did not replace the exact initial document")
+                }
+            } else {
+                guard phase.document == (latest?.document ?? scope.document) else {
+                    throw error("Fixture phase belongs to another document")
+                }
+            }
+            latest = phase
+            return phase.name
+        }
+        func wait(_ expected: PhaseName, observe: @escaping () throws -> Phase) throws {
+            var failure: Error?
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                do { return try self.accept(observe()) == expected }
+                catch { failure = error; return true }
+            }, object: nil)
+            let result = XCTWaiter.wait(for: [ready], timeout: 30)
+            if let failure { throw failure }
+            guard result == .completed else { throw error("Missing app-owned phase: \(expected.rawValue)") }
+        }
+        private func error(_ text: String) -> Error {
+            NSError(domain: "NAC347Phase", code: 1, userInfo: [NSLocalizedDescriptionKey: text])
+        }
+    }
+    private static func validate(_ scope: Scope, initialPath: String, folder: URL, operation: String) throws {
+        guard scope.operation == operation, scope.source.count == 40,
+              scope.source.allSatisfy({ "0123456789abcdef".contains($0) }),
+              scope.app_pid > 0, scope.window > 0, scope.engine_pid > 0,
+              [scope.run, scope.launch, scope.view, scope.document].allSatisfy({ UUID(uuidString: $0) != nil }),
+              scope.run == scope.run.lowercased(), initialPath.unicodeScalars.allSatisfy(\.isASCII),
+              folder.deletingLastPathComponent().path == initialPath,
+              folder.lastPathComponent == "Folder with spaces 日本語 \(scope.run)" else {
+            throw NSError(domain: "NAC347Scope", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unverified fixture scope/path contract"])
+        }
+    }
+    private static func navigatePanel(app: XCUIApplication, sheet: XCUIElement, initialPath: String, folder: URL,
+                                      authorize: () throws -> Void) throws {
+        try authorize()
+        sheet.typeKey("g", modifierFlags: [.command, .shift])
+        let goTo = app.textFields.matching(NSPredicate(format: "label == %@", "Go to the folder:")).firstMatch
+        guard goTo.waitForExistence(timeout: 10) else { throw NSError(domain: "NAC347UI", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "System Go to Folder field unavailable"]) }
+        try authorize()
+        goTo.typeText(initialPath)
+        try authorize()
+        goTo.typeKey(.return, modifierFlags: [])
+        let unicodeFolder = sheet.descendants(matching: .staticText)
+            .matching(NSPredicate(format: "label == %@", folder.lastPathComponent)).firstMatch
+        guard unicodeFolder.waitForExistence(timeout: 10) else { throw NSError(domain: "NAC347UI", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Unique Unicode fixture folder unavailable in NSOpenPanel"]) }
+        try authorize()
+        unicodeFolder.doubleClick()
+    }
     static func folderSelection(app: XCUIApplication, initialPath: String, folder: URL,
-                                runID: String, revealLeaf: String,
-                                authorize: () throws -> Void) throws {
+                                scope: Scope, revealLeaf: String,
+                                observePhase: @escaping () throws -> Phase, authorize: () throws -> Void) throws {
         func require(_ condition: Bool, _ message: String) throws {
             guard condition else { throw NSError(domain: "NAC347UI", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: message]) }
@@ -25,33 +139,20 @@ enum NativePathJourney {
             try authorize()
             element.click()
         }
-        try require(initialPath.unicodeScalars.allSatisfy(\.isASCII), "Fixture parent must be ASCII for the qualified driver")
-        try require(folder.deletingLastPathComponent().path == initialPath,
-                    "Selection must be an immediate child of the owned fixture directory")
-        try require(UUID(uuidString: runID) != nil && runID == runID.lowercased() &&
-                    folder.lastPathComponent == "Folder with spaces 日本語 \(runID)" &&
-                    revealLeaf == "reveal me 日本語 \(runID)",
-                    "Folder and reveal leaf must carry the same fresh fixture identity")
+        try validate(scope, initialPath: initialPath, folder: folder, operation: "select-reload-create-reveal")
+        let runID = scope.run
+        try require(revealLeaf == "reveal me 日本語 \(runID)", "Reveal leaf does not belong to this run")
+        let phases = PhaseCursor(scope)
+        try phases.wait(.ready, observe: observePhase)
         let folderButton = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose Working Folder")).firstMatch
         let sheet = app.sheets.firstMatch
         let selected = app.webViews.buttons["Choose Working Folder: \(folder.path)"]
         func chooseFolder() throws {
             try click(folderButton)
             try require(sheet.waitForExistence(timeout: 10), "Actual NSOpenPanel did not appear")
-            // Public ASCII navigation followed by visible Unicode selection;
-            // this does not qualify physical IME composition or paste.
-            try authorize()
-            sheet.typeKey("g", modifierFlags: [.command, .shift])
-            let goTo = app.textFields.matching(NSPredicate(format: "label == %@", "Go to the folder:")).firstMatch
-            try require(goTo.waitForExistence(timeout: 10), "System Go to Folder field unavailable")
-            try authorize()
-            goTo.typeText(initialPath)
-            try authorize()
-            goTo.typeKey(.return, modifierFlags: [])
-            let unicodeFolder = sheet.descendants(matching: .staticText).matching(NSPredicate(format: "label == %@", folder.lastPathComponent)).firstMatch
-            try require(unicodeFolder.waitForExistence(timeout: 10), "Unicode fixture folder unavailable in NSOpenPanel")
-            try authorize()
-            unicodeFolder.doubleClick()
+            // ASCII navigation followed by visible Unicode selection does not
+            // qualify physical IME composition or paste.
+            try navigatePanel(app: app, sheet: sheet, initialPath: initialPath, folder: folder, authorize: authorize)
             try click(sheet.buttons["Select"])
             try require(sheet.waitForNonExistence(timeout: 10), "Selected native panel survived")
             try require(selected.waitForExistence(timeout: 10), "Selected path did not reach the normal create-project form")
@@ -83,13 +184,9 @@ enum NativePathJourney {
         try require(folderButton.label == original, "Panel cancellation changed the form's folder")
         try click(folderButton)
         try require(sheet.waitForExistence(timeout: 10), "Second NSOpenPanel did not appear")
-        try Data("ALL347_RELOAD_REQUEST".utf8).write(to: folder.deletingLastPathComponent()
-            .appendingPathComponent("all347-reload-request"), options: .atomic)
+        try navigatePanel(app: app, sheet: sheet, initialPath: initialPath, folder: folder, authorize: authorize)
         try require(sheet.waitForNonExistence(timeout: 15), "Document replacement retained the old native panel")
-        let reloaded = folder.deletingLastPathComponent().appendingPathComponent("all347-reloaded")
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in FileManager.default.fileExists(atPath: reloaded.path) }, object: nil)
-        try require(XCTWaiter.wait(for: [ready], timeout: 15) == .completed, "Successor document never activated")
-        try require(try String(contentsOf: reloaded, encoding: .utf8) == "ALL347_DOCUMENT_RELOADED", "Unexpected reload receipt")
+        try phases.wait(.documentReloaded, observe: observePhase)
         try click(project)
         try require(folderButton.waitForExistence(timeout: 10) && folderButton.label == original,
                     "A retired native panel filled the replacement form")
@@ -97,15 +194,11 @@ enum NativePathJourney {
         let create = app.webViews.buttons["Create Project"]
         try require(create.waitForExistence(timeout: 10) && create.isEnabled,
                     "Fixture must resolve its existing saved model through the normal shared form")
-        let moved = folder.deletingLastPathComponent().appendingPathComponent(folder.lastPathComponent + ".moved")
-        try FileManager.default.moveItem(at: folder, to: moved)
-        var restore = true
-        defer { if restore { try? FileManager.default.moveItem(at: moved, to: folder) } }
+        try phases.wait(.folderMoved, observe: observePhase)
         try click(create)
         let missing = app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", folder.lastPathComponent, "does not exist")).firstMatch
         try require(missing.waitForExistence(timeout: 15), "Moved folder was not rejected by normal server admission")
-        try FileManager.default.moveItem(at: moved, to: folder)
-        restore = false
+        try phases.wait(.folderRestored, observe: observePhase)
         try chooseFolder()
         try click(create)
         try require(composer.waitForExistence(timeout: 30), "Normal project/first-chat creation did not finish")
@@ -118,6 +211,7 @@ enum NativePathJourney {
         try require(baseline.allSatisfy { !$0.ownedTitle && $0.leafCount == 0 },
                     "Fresh Finder target already existed before this action")
         try click(app.webViews.buttons["Reveal in Finder"])
+        try phases.wait(.revealObserved, observe: observePhase) // Read-only; never restores NAC focus.
         // Read-only public XCTest observation. The fresh nonce was absent from
         // every baseline window; exactly one newly titled window must now
         // expose this action's exact unique selected leaf. No later NAC input
@@ -141,10 +235,6 @@ enum NativePathJourney {
             evidence.lifetime = .keepAlways
             activity.add(evidence)
         }
-        // This is a filesystem handshake, not NAC input or cleanup evidence.
-        // Its sandbox feasibility remains a separate actual-run gate.
-        try Data("ALL347_XCTEST_COMPLETE".utf8).write(to: folder.deletingLastPathComponent()
-            .appendingPathComponent("all347-xctest-complete"), options: .atomic)
     }
 
     private struct FinderWindow: Codable {
@@ -192,8 +282,8 @@ enum NativePathJourney {
         }
     }
 
-    static func pendingEngineFailure(app: XCUIApplication, initialPath: String, folder: URL,
-                                     authorize: () throws -> Void) throws {
+    static func pendingEngineFailure(app: XCUIApplication, initialPath: String, folder: URL, scope: Scope,
+                                     observePhase: @escaping () throws -> Phase, authorize: () throws -> Void) throws {
         func require(_ condition: Bool, _ message: String) throws {
             guard condition else { throw NSError(domain: "NAC347UI", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: message]) }
@@ -205,8 +295,9 @@ enum NativePathJourney {
             try authorize()
             element.click()
         }
-        try require(folder.deletingLastPathComponent().path == initialPath,
-                    "Failure receipt must belong to the exact disposable fixture directory")
+        try validate(scope, initialPath: initialPath, folder: folder, operation: "pending-engine-failure")
+        let phases = PhaseCursor(scope)
+        try phases.wait(.ready, observe: observePhase)
         try click(app.webViews.buttons["Create chat"])
         let composer = app.webViews.descendants(matching: .any).matching(identifier: "Message").firstMatch
         try require(composer.waitForExistence(timeout: 30), "Initial failure fixture chat did not open")
@@ -214,9 +305,8 @@ enum NativePathJourney {
         try click(app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose Working Folder")).firstMatch)
         let sheet = app.sheets.firstMatch
         try require(sheet.waitForExistence(timeout: 10), "Failure test did not open an actual NSOpenPanel")
-        try authorize()
-        try Data("ALL347_ENGINE_FAILURE".utf8).write(to: folder.deletingLastPathComponent()
-            .appendingPathComponent("all347-engine-failure-request"), options: .atomic)
+        try navigatePanel(app: app, sheet: sheet, initialPath: initialPath, folder: folder, authorize: authorize)
+        try phases.wait(.failurePanelObserved, observe: observePhase)
         try require(sheet.waitForNonExistence(timeout: 15), "Engine failure retained its native sheet")
         // The caller waits for the app's standard shutdown and verifies the
         // real failure/retirement/engine-reaped/profile-removed evidence.
