@@ -95,6 +95,38 @@ enum StartupProcessProbe {
 }
 // END STARTUP PROCESS PROBES
 
+// BEGIN STARTUP ENVIRONMENT CHECKS (pure Foundation production controls)
+enum StartupEnvironmentCheck {
+    static func record(executable: String, nativePath: String, enginePath: String,
+                       argv: [String], environment: [String: String],
+                       launcher: [String: String], child: [String: String]) throws -> [String: Any] {
+        guard Set(launcher.keys) == Set(child.keys), !launcher.isEmpty,
+              launcher.allSatisfy({ $0.key == "PATH" || child[$0.key] == $0.value }),
+              !environment.keys.contains(where: {
+                  $0.hasSuffix("_TOKEN") || $0.hasSuffix("_API_KEY") || $0 == "NAC_MANAGED_CONFIG"
+              }) else { throw OwnershipError.invalid }
+        let kind: String, role: String
+        let helper = argv.contains("__desktop-configuration"), serving = argv.contains("--bind")
+        if executable == nativePath {
+            guard argv.first == executable, !helper, !serving else { throw OwnershipError.invalid }
+            kind = "app"; role = "launcher"
+        } else if executable == enginePath {
+            guard argv.first == executable, helper != serving else { throw OwnershipError.invalid }
+            kind = "engine"; role = helper ? "configuration_helper" : "engine"
+        } else {
+            kind = "descendant"; role = "descendant"
+        }
+        let expected = kind == "app" ? launcher : child
+        guard expected.allSatisfy({ environment[$0.key] == $0.value }) else { throw OwnershipError.invalid }
+        // Emit the actual allowlisted projection after comparison, never
+        // ambient variables or merely a copy of the declared expectation.
+        let observed = environment.filter { expected[$0.key] != nil }
+        return ["kind": kind, "environment_role": role, "environment": observed,
+                "configuration_helper": kind == "engine" && helper, "serving": kind == "engine" && serving]
+    }
+}
+// END STARTUP ENVIRONMENT CHECKS
+
 @main
 enum StartupObserver {
     static func need(_ condition: Bool) throws {
@@ -151,7 +183,8 @@ enum StartupObserver {
     static func snapshot(_ config: [String: Any], known: inout [Int32: StartupProcessIdentity]) throws -> [String: Any] {
         let path = config["app_path"] as! String
         let identifier = config["bundle_id"] as! String
-        let expectedEnvironment = config["environment"] as! [String: String]
+        let launcherEnvironment = config["environment"] as! [String: String]
+        let childEnvironment = config["child_environment"] as! [String: String]
         let candidates = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).filter { !$0.isTerminated }
         try need(candidates.count <= 1 && candidates.allSatisfy { $0.bundleURL?.resolvingSymlinksInPath().path == path })
         let app = candidates.first
@@ -195,9 +228,9 @@ enum StartupObserver {
         for (pid, identity) in identities {
             let actual = identity.executable
             let (argv, environment) = try arguments(pid)
-            if actual == nativePath || actual == enginePath { try need(argv.first == actual) }
-            try need(!environment.keys.contains { $0.hasSuffix("_TOKEN") || $0.hasSuffix("_API_KEY") || $0 == "NAC_MANAGED_CONFIG" })
-            try need(expectedEnvironment.allSatisfy { environment[$0.key] == $0.value })
+            let environmentRecord = try StartupEnvironmentCheck.record(executable: actual,
+                nativePath: nativePath, enginePath: enginePath, argv: argv, environment: environment,
+                launcher: launcherEnvironment, child: childEnvironment)
             guard let after = try StartupProcessProbe.observe(pid, previous: identity, scope: "detail", uid: getuid()) else {
                 if let old = known[pid] { retired.append(old.retirement) }
                 else { enumeratedExits.append(["pid": Int(pid), "parent": Int(identity.parent), "proof": "kill_zero_ESRCH"]) }
@@ -205,10 +238,9 @@ enum StartupObserver {
             }
             observed[pid] = after
             var node = after.record
-            node.merge(["kind": actual == nativePath ? "app" : (actual == enginePath ? "engine" : "descendant"),
-                "environment": expectedEnvironment,
-                "arguments_sha256": SHA256.hash(data: try JSONSerialization.data(withJSONObject: argv)).map { String(format: "%02x", $0) }.joined(),
-                "configuration_helper": argv.contains("__desktop-configuration"), "serving": argv.contains("--bind")]) { _, new in new }
+            node.merge(environmentRecord) { _, new in new }
+            node["arguments_sha256"] = SHA256.hash(data: try JSONSerialization.data(withJSONObject: argv))
+                .map { String(format: "%02x", $0) }.joined()
             if actual == nativePath {
                 try need(app?.processIdentifier == pid)
                 node["app_launch_epoch"] = try app?.launchDate?.timeIntervalSince1970 ?? { throw OwnershipError.invalid }()
@@ -286,7 +318,7 @@ enum StartupObserver {
             let config = try JSONSerialization.jsonObject(with: data) as! [String: Any]
             try need(config["schema"] as? String == "nac342-startup-xctest-v1")
             try need(config["app_path"] is String && config["bundle_id"] as? String == "ai.arcee.nac.dev"
-                && config["environment"] is [String: String])
+                && config["environment"] is [String: String] && config["child_environment"] is [String: String])
             let initial = try snapshot(config, known: &known)
             try need((initial["nodes"] as! [[String: Any]]).isEmpty)
             try emit(readyRecord(SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()))
