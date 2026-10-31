@@ -174,6 +174,18 @@ The hosted runner invokes `python3 -B desktop/macos/ci.py --expected-sha <SHA>
 and job-local `CARGO_BUILD_JOBS=4`. Shared local machines must use their supplied
 admission gate; that temporary gate is not a CI dependency.
 
+The trusted ASCII milestone passed at PR head `d1154138`, clean merge
+`1d3d77f73c4620e69ead8a525f9950efbb57cd9f`, whose tree equals that head.
+Run `41182519978`, native job `124482718942`, artifact `13035643282` records all
+six baseline cases and one real XCTest case passing: 126 trusted keydowns,
+zero synthetic keydowns, exact file bytes, readable terminal output, negative
+focus control and terminal/app/engine/profile settlement. Actual before/after
+helper authorization and tooling authentication policy were identical. App-owned
+CG event-post access remained false. The coordinator independently checked the
+raw terminal/chat images, image hash, result/runner and cleanup receipts. This
+is one automated OS ASCII capability, not physical keyboard/IME/paste/VoiceOver
+or full ALL-354 acceptance. All ordinary CI checks passed on that head.
+
 ## Exact supplier source qualification
 
 The existing Stable release manual CI entry has an explicit `native_qualification`
@@ -183,6 +195,58 @@ contract and the existing strict macOS 26 toolchain envelope. The optional job
 runs only for manual `codex/` branch CI. Ordinary PR required jobs and all
 publication/tag guards stay unchanged; a manual qualification does not authorize
 publication, a tag, merge or deployment.
+
+`all-343-macos26` adds the exact corrected instance fixture
+`0d78ee389e98c0f157a8e8313446fc8006c38ec4`, using the same strict macOS 26
+envelope. It is a prepared qualification entry, not a hosted pass. The source's
+ordinary `app-build` and instrumented `instance-build` each run for exact-source
+dev and stable engines, copied privately before the next track rebuild. Actual
+source/mode/track, engine/native/plist hashes, normal bundle identities, excluded
+preview definitions and absent ordinary smoke symbols must agree. Compiled
+stable metadata is a disposable fixture; no release/publication job is enabled.
+
+Its existing eight cases are simultaneous opens, CLI conflict, file symlink,
+directory symlink, owner crash, shutdown drain, app crash/relaunch and dev/stable
+coexistence. The unchanged target driver owns launches, native controls and
+cleanup. A harness wrapper translates its own termination signal into a Python
+interruption so the target's existing `finally` blocks can retire its exact
+app incarnations and unreaped CLI handles. That phase allows 150 seconds for
+cleanup within the job's remaining reserve. The outer audit only observes
+matching private bundle/process identities; it never signals an evidence PID.
+Failure profiles retained by the target remain explicitly reported; a passing
+driver must have removed its complete private fixture tree.
+
+Before any app launch, the exact target-built observer and source-owned console
+predicate must confirm current runner/console/frontmost UID, logged-in IOKit
+and Quartz sessions, explicitly unlocked root, display and non-lockscreen window
+metadata. Raw absent optional lock fields remain null. The target repeats this
+check at its action boundaries; every recorded state is revalidated by the exact
+target predicate. Missing/locked/unknown facts fail with the raw receipt and no
+fallback. The rejected `9f215ec9` observation assumption is not overridden.
+
+All eight exact case names, source/fixture/helper hashes, ownership/reopen/store
+assertions and cleanup must pass. App-crash intentionally does not repeat asset
+requests; its actual replacement assertions remain required, while the exact
+same dev bundle's asset bytes are checked by the other cases. Coexistence binds
+each episode by track and canonical store, including its reverse episode order.
+All nineteen expected frames must exist and pass case-specific on-device OCR:
+fresh workspace controls, the seeded shutdown project, or native conflict and
+Retry guidance. These are instrumented LOCAL_APP frames; pure ordinary builds
+are not relabeled as OS paint. Human image inspection remains required.
+
+`instance-receipts/index.json` retains complete metadata plus one structured file
+per actual case/console observation and the original summary hash. This preserves
+all semantic receipt fields within the existing per-file limit when the source's
+monolithic summary is capped; no observation is dropped or rewritten as safe.
+The total 12 MiB export limit and redaction policy remain unchanged.
+
+Root inspection of the committed harness SHA, immutable target/catalog and
+command policy is required before a manual instance run. The planned command
+uses the existing `stable-release.yml` manual entry, non-tag
+`codex/all-354-native-mac-ci` ref and `native_qualification=all-343-macos26`.
+The dispatcher must first verify that ref still names the inspected harness SHA,
+then check the run's actual SHA; freeze it through the run. No instance run is
+dispatched by catalog preparation or ordinary PR CI.
 
 One standard Mac job checks out the CI harness and supplier into separate sibling
 directories. It verifies both exact clean Git roots, sets up both fresh checkouts,
