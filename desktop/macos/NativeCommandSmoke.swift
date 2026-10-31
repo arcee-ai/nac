@@ -34,6 +34,30 @@ final class NativeCommandSmoke {
         guard delta("dispatches", beforeNew) == 1 else { throw PreviewError.message("New Session was not dispatched once") }
         try await closeDialog()
         try await wait("second composer focus restoration") { try await self.js("return document.activeElement?.getAttribute('aria-label') === 'Message'") as? Bool == true }
+        let sessionHash = try await js("return location.hash") as! String
+        let beforeProjects = commands.smokeSnapshot
+        try perform(menu: "View", title: "Projects")
+        try await wait("shared Projects navigation") { try await self.js("return location.hash === '#/'") as? Bool == true }
+        guard delta("dispatches", beforeProjects) == 1, commands.smokeSnapshot["ready"] as? Bool == true else {
+            throw PreviewError.message("Projects navigation duplicated dispatch or retired a same-document bridge")
+        }
+        _ = try await js("history.back(); return true")
+        try await wait("session route restored") {
+            try await self.js("return location.hash === expected && !!document.querySelector('[role=combobox][aria-label=Message]')", arguments: ["expected": sessionHash]) as? Bool == true
+        }
+        guard NSApp.isActive, app.window.isKeyWindow else { throw PreviewError.message("Fixture lost its foreground window") }
+        let otherWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 120), styleMask: [.titled], backing: .buffered, defer: false)
+        otherWindow.isReleasedWhenClosed = false
+        otherWindow.makeKeyAndOrderFront(nil)
+        let beforeForeignWindow = commands.smokeSnapshot
+        try perform(menu: "NAC", title: "Settings…")
+        guard delta("dispatches", beforeForeignWindow) == 0 else { throw PreviewError.message("A foreign key window dispatched a workspace command") }
+        let stillOwnsFocus = NSApp.isActive && otherWindow.isKeyWindow && NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid()
+        otherWindow.close()
+        guard stillOwnsFocus else { throw PreviewError.message("User changed focus; refusing fixture focus restoration") }
+        // Closing our own key window restores AppKit's previous responder.
+        try await wait("owned main window restored") { self.app.window.isKeyWindow }
+        _ = try await js("document.querySelector('[role=combobox][aria-label=Message]').focus(); return true")
         let beforeBad = commands.smokeSnapshot
         let binding = beforeBad["binding"] as! [String: Any]
         let request = beforeBad["request"] as! Int
@@ -85,7 +109,7 @@ final class NativeCommandSmoke {
         commands.retire()
         guard commands.smokeSnapshot["installed"] as? Bool == false else { throw PreviewError.message("Retired bridge remained installed") }
         return ["menu_dispatch": "programmatic-NSMenu", "settings_once": true, "new_session_once": true,
-                "shared_focus_restored": true, "negative_WK_receipts": rejected, "initial_bridge": first, "final_bridge": final,
+                "shared_focus_restored": true, "projects_once_same_document": true, "foreign_window_rejected": true, "negative_WK_receipts": rejected, "initial_bridge": first, "final_bridge": final,
                 "navigation_popup_restricted": true, "document_replaced": true, "retired": true,
                 "trusted_keyboard_edit_qualified": trustedInput, "input": inputEvidence ?? [:]]
     }
