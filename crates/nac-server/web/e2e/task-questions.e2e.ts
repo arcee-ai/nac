@@ -199,6 +199,13 @@ test("exact human question survives restart, gates a goal, and resumes its reser
   await expect(
     page.getByText("Which export format should this task use?", { exact: true }),
   ).toBeVisible();
+  const readyTranscript = () =>
+    expect(
+      page.getByText("Waiting for an answer: Which export format should this task use?", {
+        exact: true,
+      }),
+    ).toBeVisible();
+  await readyTranscript();
   const desktop = page.viewportSize() ?? { width: 1280, height: 720 };
   const baselineAssets = process.env.NAC_QUESTION_BASELINE_ASSETS;
   if (baselineAssets) {
@@ -212,7 +219,8 @@ test("exact human question survives restart, gates a goal, and resumes its reser
     );
     await page.reload();
     await expect(page.getByRole("button", { name: "Permissions", exact: true })).toBeVisible();
-    await page.evaluate(() => document.fonts.ready);
+    await readyTranscript();
+    await page.evaluate("document.fonts.ready");
     await page.screenshot({
       path: info.outputPath("human-question-before-desktop.png"),
       animations: "disabled",
@@ -227,8 +235,9 @@ test("exact human question survives restart, gates a goal, and resumes its reser
     await page.setViewportSize(desktop);
     await page.reload();
     await expect(page.getByRole("region", { name: "Task question", exact: true })).toBeVisible();
+    await readyTranscript();
   }
-  await page.evaluate(() => document.fonts.ready);
+  await page.evaluate("document.fonts.ready");
   await page.screenshot({
     path: info.outputPath("human-question-pending.png"),
     animations: "disabled",

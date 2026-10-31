@@ -11,6 +11,7 @@ pub enum QuestionError {
     NotFound,
     Conflict,
     HumanRequired,
+    Denied,
     Unavailable,
 }
 impl std::fmt::Display for QuestionError {
@@ -19,6 +20,7 @@ impl std::fmt::Display for QuestionError {
             Self::Invalid => "invalid question: IDs, text or choices exceed the compact question contract",
             Self::NotFound => "question was not found",
             Self::Conflict => "question identity, revision, owner binding or continuation changed; read the exact request",
+            Self::Denied => "configured permission rules deny this question response",
             Self::HumanRequired => "this question requires a human decision; agent answers are forbidden",
             Self::Unavailable => "questions require an existing plain direct Local owner",
         })
