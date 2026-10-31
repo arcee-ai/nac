@@ -129,7 +129,8 @@ final class NativeCommandSmoke {
         (commands.smokeSnapshot[key] as? Int ?? 0) - (before[key] as? Int ?? 0)
     }
     private func perform(menu title: String, title itemTitle: String) throws {
-        guard let menu = NSApp.mainMenu?.items.first(where: { $0.title == title })?.submenu,
+        let selected = title == "NAC" ? NSApp.mainMenu?.items.first : NSApp.mainMenu?.items.first(where: { $0.title == title })
+        guard let menu = selected?.submenu,
               let index = menu.items.firstIndex(where: { $0.title == itemTitle }) else {
             throw PreviewError.message("Native command menu is missing")
         }

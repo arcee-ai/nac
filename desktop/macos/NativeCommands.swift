@@ -33,19 +33,19 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     }
     func retire() { bridge?.retire(); bridge = nil }
 
-    func installMenus() {
+    func installMenus(applicationName: String = "NAC") {
         let main = NSMenu()
-        let app = submenu("NAC", in: main)
-        app.addItem(withTitle: "About NAC", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let app = submenu(applicationName, in: main)
+        app.addItem(withTitle: "About \(applicationName)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         app.addItem(.separator())
         item("Settings…", #selector(settings(_:)), ",", in: app, target: self)
         app.addItem(.separator())
-        app.addItem(withTitle: "Hide NAC", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        app.addItem(withTitle: "Hide \(applicationName)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let others = app.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         others.keyEquivalentModifierMask = [.command, .option]
         app.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         app.addItem(.separator())
-        app.addItem(withTitle: "Quit NAC", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        app.addItem(withTitle: "Quit \(applicationName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let file = submenu("File", in: main)
         item("New Session", #selector(newSession(_:)), "n", in: file, target: self)
         let edit = submenu("Edit", in: main)
