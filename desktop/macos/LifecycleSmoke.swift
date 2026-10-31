@@ -56,6 +56,12 @@ final class LifecycleSmoke {
             return
         }
         if let failure = app.failure, !app.stopping { fail(failure); return }
+        for name in ["work-ready", "reopened", "confirming", "cancelled"] where take("capture-" + name) {
+            Task {
+                do { try await capture(name); publish(stage) }
+                catch { fail(error.localizedDescription) }
+            }
+        }
         if stage == "starting", app.baseURL != nil, !app.webView.isHidden, let receipt = app.engine.receipt {
             originalView = app.webView
             originalPID = app.engine.pid
@@ -89,7 +95,19 @@ final class LifecycleSmoke {
         }
         for command in ["quit", "quit-again", "duplicate-quit"] where take(command) {
             if command != "duplicate-quit" { publish(command + "-requested") }
-            RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { NSApp.terminate(nil) } }
+            RunLoop.main.perform(inModes: [.common]) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let before = self.app.quit.smokeQuitRequests
+                    NSApp.terminate(nil)
+                    if command == "duplicate-quit" {
+                        self.evidence["native_duplicate_delegate_before"] = before
+                        self.evidence["native_duplicate_delegate_after"] = self.app.quit.smokeQuitRequests
+                        self.evidence["native_duplicate_returned"] = true
+                        self.publish(self.stage)
+                    }
+                }
+            }
         }
         if case .confirming = app.quit.lifecycle.phase, let sheet = app.window.attachedSheet {
             if stage.hasSuffix("-requested") || stage == "work-ready" || stage == "reopened" {
@@ -98,8 +116,7 @@ final class LifecycleSmoke {
                 publish(seen.contains("quit-again") ? "reconfirming" : "confirming")
             }
             if seen.contains("duplicate-quit"), !seen.contains("cancel"),
-               (((NSApp as? NACApplication)?.smokeSuppressedEntries ?? 0) > 0 ||
-                app.quit.smokeQuitRequests > app.quit.smokeAcceptedQuitRequests),
+               evidence["native_duplicate_returned"] as? Bool == true,
                stage != "duplicate-confirming" { publish("duplicate-confirming") }
             if take("cancel") { app.window.endSheet(sheet, returnCode: .alertFirstButtonReturn) }
             if take("stop") { app.window.endSheet(sheet, returnCode: .alertSecondButtonReturn) }
@@ -145,6 +162,39 @@ final class LifecycleSmoke {
             app.commands.smokeSnapshot["installed"] as? Bool == true
     }
 
+    private func capture(_ name: String) async throws {
+        guard let view = app.webView, intact(), app.window.isVisible else {
+            throw DesktopStartupError.message("Lifecycle workspace unavailable for capture")
+        }
+        let image = try await withCheckedThrowingContinuation { (reply: CheckedContinuation<NSImage, Error>) in
+            view.takeSnapshot(with: nil) { image, error in
+                if let image { reply.resume(returning: image) }
+                else { reply.resume(throwing: error ?? DesktopStartupError.message("Lifecycle WK snapshot unavailable")) }
+            }
+        }
+        func write(_ image: NSImage, _ suffix: String) throws {
+            guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+                  let png = bitmap.representation(using: .png, properties: [:]) else {
+                throw DesktopStartupError.message("Lifecycle snapshot encoding failed")
+            }
+            try png.write(to: output.deletingLastPathComponent().appendingPathComponent(name + suffix + ".png"))
+        }
+        try write(image, "-workspace")
+        if let sheet = app.window.attachedSheet, let content = sheet.contentView {
+            guard let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else {
+                throw DesktopStartupError.message("Native Quit sheet snapshot unavailable")
+            }
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            let native = NSImage(size: content.bounds.size)
+            native.addRepresentation(bitmap)
+            try write(native, "-sheet")
+        }
+        var captures = evidence["render_captures"] as? [String] ?? []
+        captures.append(name)
+        evidence["render_captures"] = captures
+        evidence["render_capture_method"] = "actual WK snapshot and owned AppKit view cacheDisplay; pending image review"
+    }
+
     func didStop() {
         timer?.invalidate()
         evidence["document_released"] = originalView == nil && app.webView == nil
@@ -178,13 +228,11 @@ final class LifecycleSmoke {
             "workspace_window_count": NSApp.windows.filter { $0 === app.window }.count,
             "owned_engine_pid": originalPID, "base_url": app.baseURL?.absoluteString ?? "",
             "quit_delegate_requests": app.quit.smokeQuitRequests,
-            "quit_accepted_delegate_requests": app.quit.smokeAcceptedQuitRequests,
+            "quit_confirmation_decisions": app.quit.smokeConfirmationDecisions,
             "quit_sheet_presentations": app.quit.smokeSheetPresentations,
-            "quit_cancel_replies": app.quit.smokeCancelReplies,
-            "quit_stop_replies": app.quit.smokeStopReplies,
-            "application_class": (NSApp as? NACApplication).map { NSStringFromClass(type(of: $0)) } ?? "unexpected",
-            "termination_entries": (NSApp as? NACApplication)?.smokeTerminationEntries ?? 0,
-            "suppressed_termination_entries": (NSApp as? NACApplication)?.smokeSuppressedEntries ?? 0,
+            "quit_cancel_choices": app.quit.smokeCancelChoices,
+            "quit_stop_completions": app.quit.smokeStopCompletions,
+            "application_class": NSStringFromClass(type(of: NSApp!)),
             "visible_paint_acceptance": false, "trusted_input_acceptance": false,
             "instrumentation": "LIFECYCLE_SMOKE", "sheet_completion": "programmatic AppKit, no OS input events"]) { _, new in new }
         if let receipt = app.engine.receipt {

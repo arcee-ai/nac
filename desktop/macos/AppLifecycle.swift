@@ -41,8 +41,8 @@ final class AppLifecycle {
         case running
         case confirming(Confirmation)
         case stopping(Wait)
-        /// The AppKit termination request has been cancelled, but the original
-        /// engine stop is still owned and may complete. Never send another stop.
+        /// The UI wait expired, but the original engine stop is still owned
+        /// and may complete. Never send another stop.
         case shutdownFailed(Stop)
         case finished(Stop)
     }
@@ -120,8 +120,8 @@ final class AppLifecycle {
     }
 
     /// A UI deadline does not establish process exit or persistence drain and
-    /// must not signal anything. Cancel the pending AppKit request and retain
-    /// the original stop callback until the existing engine owner settles it.
+    /// must not signal anything. Retain the original stop callback until the
+    /// existing engine owner settles it; no AppKit handshake is outstanding.
     @discardableResult
     func shutdownTimedOut(_ wait: Wait) -> Bool {
         guard phase == .stopping(wait) else { return false }

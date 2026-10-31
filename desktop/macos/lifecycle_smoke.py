@@ -69,6 +69,16 @@ def run_contract(bundle, destination, observer):
                 (journey.control / 'fixture.json').write_text(json.dumps(prepared))
                 journey.command_file('prepare')
                 journey.stage('work-ready')
+                def capture(name):
+                    if session_lock_state() == dict(observed=True, locked=False):
+                        journey.guard_focus()
+                        journey.command_file('capture-' + name)
+                        wait_for('Lifecycle render capture ' + name,
+                                 lambda: name in journey.read().get('render_captures', []), timeout=10)
+                        return True
+                    return False
+
+                capture('work-ready')
                 fixture.retire_streams() # The real WK document now owns the interactive observer.
                 fixture.assert_work_running()
                 journey.command_file('close')
@@ -81,6 +91,7 @@ def run_contract(bundle, destination, observer):
                 journey.launch()
                 reopened = journey.stage('reopened')
                 assert reopened['reopen_retained_usable_workspace']
+                capture('reopened')
                 fixture.assert_work_running()
                 def os_quit():
                     result = json.loads(subprocess.check_output([str(observer), 'terminate', str(moved),
@@ -93,9 +104,8 @@ def run_contract(bundle, destination, observer):
                 else:
                     journey.command_file('quit')
                 confirming = journey.stage('confirming')
-                assert confirming['quit_delegate_requests'] == confirming['quit_accepted_delegate_requests'] == 1, confirming
-                if scenario != 'terminal':
-                    assert confirming['termination_entries'] == 1, confirming
+                assert confirming['quit_delegate_requests'] == confirming['quit_confirmation_decisions'] == 1, confirming
+                capture('confirming')
                 fixture.assert_work_running()
                 if scenario == 'terminal':
                     os_quit() # Reentrant requests may coalesce before reaching native entry.
@@ -108,6 +118,7 @@ def run_contract(bundle, destination, observer):
                 journey.command_file('cancel')
                 cancelled = journey.stage('cancelled')
                 assert cancelled['cancel_retained_owners']
+                capture('cancelled')
                 fixture.assert_work_running()
                 journey.command_file('quit-again')
                 journey.stage('reconfirming')
@@ -117,14 +128,15 @@ def run_contract(bundle, destination, observer):
                                    lambda: (value if (value := journey.read()).get('stopped') else None), timeout=30)
                 assert stopped['passed'] and stopped['document_released'] and stopped['commands_retired'], stopped
                 wait_for('App exited after Stop and Quit', lambda: not journey.observe()['apps'], timeout=6)
-                stopped = journey.read() # Includes the final willTerminate snapshot/reply counters.
-                assert stopped['application_class'] == 'NACApplication', stopped
-                assert stopped['quit_accepted_delegate_requests'] == stopped['quit_sheet_presentations'] == 2, stopped
-                assert stopped['quit_cancel_replies'] == stopped['quit_stop_replies'] == 1, stopped
-                rejected = stopped['quit_delegate_requests'] - stopped['quit_accepted_delegate_requests']
-                assert stopped['suppressed_termination_entries'] + rejected >= 1, stopped
-                if scenario != 'terminal':
-                    assert stopped['termination_entries'] >= 3, stopped
+                stopped = journey.read() # Includes the final settled-termination snapshot.
+                assert stopped['application_class'] == 'NSApplication', stopped
+                assert stopped['quit_confirmation_decisions'] == stopped['quit_sheet_presentations'] == 2, stopped
+                assert stopped['quit_cancel_choices'] == stopped['quit_stop_completions'] == 1, stopped
+                assert stopped['native_duplicate_returned'], stopped
+                assert stopped['native_duplicate_delegate_after'] == stopped['native_duplicate_delegate_before'] + 1, stopped
+                # Initial, duplicate, genuine later Quit, then settled final Quit.
+                # An extra OS request may coalesce or add another declined call.
+                assert stopped['quit_delegate_requests'] >= 4, stopped
                 assert engine_settled(moved, ready_pid)
                 after = fixture.verify_store(store)
                 replacement = OwnedEngine(moved / 'Contents/Resources/nac-web', profile, store, environment, desktop=True)

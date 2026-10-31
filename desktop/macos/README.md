@@ -293,12 +293,14 @@ commands with uncertain outcomes may remain. Cancel preserves the workspace.
 Stop retires the bridge, cancels pending startup/navigation and releases the
 WebView before requesting the existing private engine shutdown. Rust owns run,
 descendant and store cleanup under its existing 20-second watchdog. The existing
-owned-engine fallback remains 23 seconds. A later 26-second UI wait can cancel a
-stuck app termination request, but cannot claim cleanup, restart the retired
+owned-engine fallback remains 23 seconds. A later 26-second UI wait can report
+pending cleanup, but cannot claim cleanup, restart the retired
 workspace or send another stop. Quit again waits on that original shutdown.
-The normal application also rejects nested native Quit entry while its original
-modal confirmation/drain call is pending; after Cancel unwinds, a later genuine
-Quit follows the normal delegate path again.
+Unsettled AppKit termination requests return Cancel immediately while one
+asynchronous confirmation/cleanup episode stays owned by the app. Reentrant
+native and OS requests share that episode. Only settled Stop requests ordinary
+termination again; no terminateLater modal handshake or public-entry guard spans
+the confirmation or engine drain.
 
 `preview.sh lifecycle-build` builds separate test instrumentation around the
 normal app owner. Run `python3 -B desktop/macos/lifecycle_smoke.py APP OUTPUT
@@ -309,8 +311,9 @@ Cancel, duplicate Quit and Stop; document/bridge release; durable transcript and
 goal retention; descendant cleanup and ordinary same-store reacquisition.
 The terminal case starts Quit through the exact-owned OS application helper and
 observes the real delegate confirmation before issuing a reentrant OS request.
-Repeated OS requests can coalesce before native entry; the fixture records
-observed entry counts. Evidence binds the actual OS and system WebKit versions.
+Repeated OS requests can coalesce; the fixture records actual delegate decisions
+and the native duplicate's delegate entry and return. Evidence binds the actual
+OS and system WebKit versions.
 Sheet completion is programmatic AppKit, with no OS input events. Evidence
 records locked-console provenance and keeps visible paint and trusted input
 acceptance false. This is not a substitute for full native acceptance.

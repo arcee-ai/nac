@@ -1,33 +1,6 @@
 import AppKit
 
-/// NSApplication can terminate immediately on a nested terminate call without
-/// asking the delegate again. Own the complete original call, including its
-/// terminateLater modal wait and Cancel unwind, before accepting another Quit.
-@objc(NACApplication)
-final class NACApplication: NSApplication {
-    private var handlingTerminationCall = false
-    #if PREVIEW_SMOKE
-    private(set) var smokeTerminationEntries = 0
-    private(set) var smokeSuppressedEntries = 0
-    #endif
-
-    override func terminate(_ sender: Any?) {
-        #if PREVIEW_SMOKE
-        smokeTerminationEntries += 1
-        #endif
-        guard !handlingTerminationCall else {
-            #if PREVIEW_SMOKE
-            smokeSuppressedEntries += 1
-            #endif
-            return
-        }
-        handlingTerminationCall = true
-        defer { handlingTerminationCall = false }
-        super.terminate(sender)
-    }
-}
-
-/// AppKit's asynchronous Quit request and its native confirmation UI. The app
+/// Asynchronous Quit owner; every unsettled request returns Cancel. The app
 /// retires its own document; PreviewEngine alone controls and reaps the child.
 @MainActor
 final class AppQuit {
@@ -35,14 +8,13 @@ final class AppQuit {
     let lifecycle = AppLifecycle()
     private var confirmation: NSAlert?
     private var scheduledWait: AppLifecycle.Wait?
-    private var terminationPending = false
     #if PREVIEW_SMOKE
     private var fixtureStopTimer: Timer?
     private(set) var smokeQuitRequests = 0
-    private(set) var smokeAcceptedQuitRequests = 0
+    private(set) var smokeConfirmationDecisions = 0
     private(set) var smokeSheetPresentations = 0
-    private(set) var smokeCancelReplies = 0
-    private(set) var smokeStopReplies = 0
+    private(set) var smokeCancelChoices = 0
+    private(set) var smokeStopCompletions = 0
 
     /// Legacy startup/instance fixtures explicitly finish by choosing the real
     /// owned Quit sheet. This never ships or answers an agent permission ask.
@@ -81,37 +53,31 @@ final class AppQuit {
         #if PREVIEW_SMOKE
         smokeQuitRequests += 1
         #endif
-        // There is one outstanding AppKit terminateLater handshake. A second
-        // request must not enter another modal termination wait. Only the
-        // original request owns the sheet and its eventual reply.
-        guard !terminationPending else { return .terminateCancel }
-        #if PREVIEW_SMOKE
-        smokeAcceptedQuitRequests += 1
-        #endif
-        // No complete cross-owner idle projection exists here. Do not infer
-        // idle from a parent run: approvals, terminals and uncertain commands
-        // remain possible, including while a native startup task is pending.
+        // Return from AppKit's request immediately; this owner retains the
+        // confirmation/cleanup episode, never an outstanding terminateLater.
+        // Unknown activity remains conservative across every work owner.
         let decision = lifecycle.requestQuit(activity: AppLifecycle.Activity())
-        if decision == .terminateNow { return .terminateNow }
-        terminationPending = true
         switch decision {
         case .confirm(let episode):
-            // AppKit must receive terminateLater before the sheet can settle.
+            #if PREVIEW_SMOKE
+            smokeConfirmationDecisions += 1
+            #endif
+            // Let the original delegate return Cancel before presenting UI.
             RunLoop.main.perform(inModes: [.common]) { [weak self] in
                 MainActor.assumeIsolated { self?.present(episode) }
             }
         case .stop(let wait): beginStop(wait)
         case .wait(let wait): waitForStop(wait)
-        case .pendingConfirmation, .terminateNow: break
+        case .pendingConfirmation: break
+        case .terminateNow: return .terminateNow
         }
-        return .terminateLater
+        return .terminateCancel
     }
 
     private func present(_ episode: AppLifecycle.Confirmation) {
         guard lifecycle.phase == .confirming(episode), confirmation == nil else { return }
         guard let window = app.window else {
             _ = lifecycle.answer(episode, stop: false)
-            reply(false)
             return
         }
         let alert = NSAlert()
@@ -129,7 +95,10 @@ final class AppQuit {
             guard let self, self.confirmation === alert else { return }
             self.confirmation = nil
             switch self.lifecycle.answer(episode, stop: response == .alertSecondButtonReturn) {
-            case .cancel: self.reply(false)
+            case .cancel:
+                #if PREVIEW_SMOKE
+                self.smokeCancelChoices += 1
+                #endif
             case .stop(let wait): self.beginStop(wait)
             case .ignored: break
             }
@@ -143,7 +112,13 @@ final class AppQuit {
             switch self.lifecycle.stopped(wait.stop, ownedChildHasExited: self.app.engine.pid == 0) {
             case .terminate:
                 self.scheduledWait = nil
-                self.reply(true)
+                #if PREVIEW_SMOKE
+                self.smokeStopCompletions += 1
+                #endif
+                // Acknowledge cleanup only after the original engine owner
+                // has reaped its exact child. Enter ordinary termination anew
+                // after the current callback/delegate stack has returned.
+                RunLoop.main.perform(inModes: [.common]) { NSApp.terminate(nil) }
             case .settledAfterTimeout:
                 self.scheduledWait = nil
                 self.app.showShutdownStatus("NAC has stopped. Quit again to exit the application.")
@@ -162,16 +137,6 @@ final class AppQuit {
             guard let self, self.lifecycle.shutdownTimedOut(wait) else { return }
             self.app.showShutdownStatus("NAC could not finish stopping within the shutdown wait. The workspace has been closed and cannot accept commands. The original engine shutdown is still pending. Quit again to continue waiting.")
             self.app.window.makeKeyAndOrderFront(nil)
-            self.reply(false)
         }
-    }
-
-    private func reply(_ terminate: Bool) {
-        guard terminationPending else { return }
-        terminationPending = false
-        #if PREVIEW_SMOKE
-        if terminate { smokeStopReplies += 1 } else { smokeCancelReplies += 1 }
-        #endif
-        NSApp.reply(toApplicationShouldTerminate: terminate)
     }
 }
