@@ -374,13 +374,20 @@ function ya(e, t) {
 }
 function ba({ name: e, className: t }) {
 	let n = ya(e);
-	return /* @__PURE__ */ X(J, { children: [n.hint(/* @__PURE__ */ Y("button", {
+	return /* @__PURE__ */ X(J, { children: [n.hint(/* @__PURE__ */ X("button", {
 		type: "button",
 		className: `flex items-center gap-1 text-left ${t ?? ""}`,
 		"aria-label": `View full name: ${e}`,
 		"aria-haspopup": "dialog",
 		onClick: n.view,
-		children: e
+		children: [/* @__PURE__ */ Y("span", {
+			className: "min-w-0 flex-1 truncate",
+			children: e
+		}), /* @__PURE__ */ Y(B, {
+			iconName: R.Info,
+			size: 16,
+			className: "shrink-0 text-basic-tertiary"
+		})]
 	})), n.overlay] });
 }
 // src/app/atoms/chat-session-fork-mark/index.tsx

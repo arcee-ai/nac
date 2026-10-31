@@ -135,7 +135,8 @@ export default function SessionNameDisclosure({
           aria-haspopup="dialog"
           onClick={disclosure.view}
         >
-          {name}
+          <span className="min-w-0 flex-1 truncate">{name}</span>
+          <Icon iconName={IconName.Info} size={16} className="shrink-0 text-basic-tertiary" />
         </button>,
       )}
       {disclosure.overlay}

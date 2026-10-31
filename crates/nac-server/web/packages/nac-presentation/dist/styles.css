@@ -4133,10 +4133,6 @@
       overflow: visible;
     }
 
-    [data-nac-runtime]:is(.group-hover\:flex:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:flex:is(:where(.group):hover *) {
-      display: flex;
-    }
-
     [data-nac-runtime]:is(.group-hover\:hidden:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:hidden:is(:where(.group):hover *) {
       display: none;
     }
@@ -4155,10 +4151,6 @@
 
     [data-nac-runtime]:is(.group-hover\:bg-none:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:bg-none:is(:where(.group):hover *) {
       background-image: none;
-    }
-
-    [data-nac-runtime]:is(.group-hover\:pr-8:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:pr-8:is(:where(.group):hover *) {
-      padding-right: calc(var(--spacing) * 8);
     }
 
     [data-nac-runtime]:is(.group-hover\:pr-14:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:pr-14:is(:where(.group):hover *) {
@@ -4301,16 +4293,8 @@
     overflow: visible;
   }
 
-[data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:flex:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:flex:is(:where(.group):has(:focus-visible) *) {
-    display: flex;
-  }
-
 [data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:hidden:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:hidden:is(:where(.group):has(:focus-visible) *) {
     display: none;
-  }
-
-[data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:pr-8:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:pr-8:is(:where(.group):has(:focus-visible) *) {
-    padding-right: calc(var(--spacing) * 8);
   }
 
 [data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:pr-14:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:pr-14:is(:where(.group):has(:focus-visible) *) {

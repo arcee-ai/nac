@@ -83,6 +83,15 @@ async function viewName(page: Page, trigger: Locator, name: string) {
   ).toBe("text");
   expect(await text.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
   await fits(page, dialog);
+  await text.dblclick();
+  expect(
+    await page.evaluate(
+      () =>
+        (globalThis as unknown as { getSelection(): { toString(): string } | null })
+          .getSelection()
+          ?.toString().length ?? 0,
+    ),
+  ).toBeGreaterThan(0);
   await dialog.getByRole("button", { name: "Copy name", exact: true }).click();
   await expect(dialog.getByRole("status")).toHaveText("Name copied");
   expect(
@@ -170,6 +179,12 @@ for (const width of [1440, 768, 390])
         exact: true,
       });
       await viewName(page, heading, names[0]);
+      if (width < 768) {
+        await capture(page, info, `${width}-${theme}`);
+        await heading.tap();
+        await capture(page, info, `full-name-${width}-${theme}`);
+        await page.keyboard.press("Escape");
+      }
       if (width >= 768) {
         const show = page.getByRole("button", { name: "Show sidebar", exact: true });
         if (await show.isVisible()) await show.click();
@@ -268,21 +283,24 @@ test("extreme current name, rename, navigation and deletion lifetimes", async ({
   // The API caps newly edited titles at 120 code points; a read-only response
   // fixture exercises oversized legacy/consumer input without changing that contract.
   const extreme = "Extreme 雪🙂 " + "Unbroken".repeat(1800);
-  await page.route("**/sessions**", async (route) => {
-    if (route.request().method() !== "GET") return route.fallback();
-    const response = await route.fetch();
-    if (!response.headers()["content-type"]?.includes("application/json"))
-      return route.fulfill({ response });
-    const body = await response.json();
-    const rewrite = (value: unknown): void => {
-      if (value == null || typeof value !== "object") return;
-      const record = value as Record<string, unknown>;
-      if (record.session_id === id && "title" in record) record.title = extreme;
-      for (const child of Object.values(record)) rewrite(child);
-    };
-    rewrite(body);
-    return route.fulfill({ response, json: body });
-  });
+  await page.route(
+    (url) => url.pathname === "/sessions" || url.pathname === `/sessions/${id}`,
+    async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const response = await route.fetch();
+      if (!response.headers()["content-type"]?.includes("application/json"))
+        return route.fulfill({ response });
+      const body = await response.json();
+      const rewrite = (value: unknown): void => {
+        if (value == null || typeof value !== "object") return;
+        const record = value as Record<string, unknown>;
+        if (record.session_id === id && "title" in record) record.title = extreme;
+        for (const child of Object.values(record)) rewrite(child);
+      };
+      rewrite(body);
+      return route.fulfill({ response, json: body });
+    },
+  );
   await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -425,8 +443,7 @@ for (const width of [1440, 768, 390])
             name,
           );
           const row = collection.getByRole("button", {
-            name: `${name}, Direct coding agent`,
-            exact: true,
+            name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")},`),
           });
           if (width >= 768) await row.hover();
           await viewName(
