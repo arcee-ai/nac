@@ -104,6 +104,8 @@ for (const mobile of [false, true]) {
         (await request.post(`${harness.baseUrl}/mcp_library/servers/refresh_fixture/connect`)).ok(),
       ).toBe(true);
       await page.goto(`${harness.baseUrl}/#/session/${session}/threads`);
+      await expect(page.getByText("Chat predates integration", { exact: true })).toBeVisible();
+      await page.evaluate("document.fonts.ready");
       await page.getByRole("button", { name: "Chat integrations", exact: true }).click();
       const panel = page.getByRole("dialog", { name: "Chat integrations", exact: true });
       await expect(panel).toBeVisible();
@@ -113,6 +115,8 @@ for (const mobile of [false, true]) {
       );
       await page.screenshot({
         path: testInfo.outputPath(`integrations-pending-${mobile ? "phone" : "desktop"}.png`),
+        animations: "disabled",
+        caret: "hide",
       });
       expect(fixture.calls()).toBe(0);
       await page.keyboard.press("Escape");
