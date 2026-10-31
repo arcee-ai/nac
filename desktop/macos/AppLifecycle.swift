@@ -80,8 +80,9 @@ final class AppLifecycle {
     /// Hiding a window never retires its WebView, bridge, streams or engine.
     var canHideWorkspace: Bool {
         switch phase {
-        case .running, .confirming: return true
-        case .stopping, .shutdownFailed, .finished: return false
+        case .running: return true
+        // Keep a pending native Quit sheet reachable on its owning window.
+        case .confirming, .stopping, .shutdownFailed, .finished: return false
         }
     }
 

@@ -86,6 +86,7 @@ enum AppLifecycleTests {
             fixture.closeAndReopen()
             guard case .confirm(let episode) = fixture.quit() else { preconditionFailure() }
             precondition(episode.activity == .active)
+            precondition(!fixture.lifecycle.canHideWorkspace, "Quit sheet lost its owning window")
             precondition(fixture.quit() == .pendingConfirmation)
             fixture.answer(stop: false)
             precondition(fixture.lifecycle.phase == .running)
