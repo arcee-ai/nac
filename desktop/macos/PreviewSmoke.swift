@@ -17,6 +17,7 @@ final class PreviewSmoke {
         let args = CommandLine.arguments
         destination = URL(fileURLWithPath: args[args.firstIndex(of: "--smoke-output")! + 1])
         scenario = args[args.firstIndex(of: "--smoke-scenario")! + 1]
+        if scenario == "external-navigation-recording" { ExternalNavigationSmoke.installObserver(in: app.webView) }
         // Attribute decoy requests to this fixture on a shared interactive host.
         app.webView.customUserAgent = "NACPreviewSmoke/ALL-340 AppleWebKit/605.1.15"
         let observer = #"""

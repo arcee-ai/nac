@@ -11,6 +11,32 @@ final class ExternalNavigationSmoke {
     private var diagnostics: [[String: Any]] = []
     init(app: PreviewApp, checkpoint: @escaping () -> Void) { self.app = app; self.checkpoint = checkpoint }
 
+    static func installObserver(in view: WKWebView) {
+        let source = #"""
+        (()=>{
+          const state=window.__nacPagePopupObservation={installed:true,requested:false,done:false,calls:0,
+            supported:!!navigator.userActivation,activeAtFire:null,stickyAtFire:null,returnedNull:null};
+          addEventListener('nac-recording-page-popup',()=>{
+            if(state.requested)return;state.requested=true;
+            let observations=0;
+            const attempt=()=>{
+              const activation=navigator.userActivation;
+              if(!activation || observations++>=200){state.done=true;return}
+              if(activation.isActive){setTimeout(attempt,25);return}
+              state.activeAtFire=activation.isActive;state.stickyAtFire=activation.hasBeenActive;
+              state.calls++;state.returnedNull=window.open('https://example.invalid/page-owned-popup')===null;
+              state.done=true;
+            };
+            // The popup executes on a page-owned timer, outside the native API
+            // evaluation stack. Inactivity is observed, never assumed from time.
+            setTimeout(attempt,0);
+          });
+        })();
+        """#
+        view.configuration.userContentController.addUserScript(WKUserScript(
+            source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+    }
+
     func run() async throws -> [String: Any] {
         try await wait("verified loaded workspace") { self.app.commands.currentDocument(in: self.app.webView) != nil }
         try await wait("production create-chat control") {
@@ -37,8 +63,25 @@ final class ExternalNavigationSmoke {
             throw PreviewError.message("Activated external link did not retain its WK navigation classification")
         }
         try record("first-main-link", expected: expected, origin: origin)
-        let blocked = try await js("return window.open('https://example.invalid/automatic') === null") as? Bool
-        guard blocked == true else { throw PreviewError.message("Automatic JavaScript popup was not blocked") }
+        let beforeNativePopup = actions.count
+        let nativeContext = try await js("const a=navigator.userActivation;return {supported:!!a,isActive:a?.isActive??null,hasBeenActive:a?.hasBeenActive??null,returnedNull:window.open('https://example.invalid/native-api-popup')===null}") as? [String: Any] ?? [:]
+        try await wait("native API-context popup control") { self.actions.count > beforeNativePopup }
+        guard actions.count == beforeNativePopup + 1, actions.last?["popup"] as? Bool == true,
+              actions.last?["navigation_type"] as? Int == WKNavigationType.other.rawValue else {
+            throw PreviewError.message("Native API-context popup counterexample was not observed once")
+        }
+        try record("native-api-popup-context", expected: expected, origin: origin, activation: nativeContext)
+        let beforePagePopup = actions.count
+        _ = try await js("if(!window.__nacPagePopupObservation?.installed)throw new Error('observer');dispatchEvent(new Event('nac-recording-page-popup'));return true")
+        try await wait("page-owned popup observation") {
+            try await self.js("return window.__nacPagePopupObservation.done") as? Bool == true
+        }
+        let pageContext = try await js("const s=window.__nacPagePopupObservation;return {supported:s.supported,isActive:s.activeAtFire,hasBeenActive:s.stickyAtFire,calls:s.calls,returnedNull:s.returnedNull}") as? [String: Any] ?? [:]
+        try record("page-owned-popup-context", expected: expected, origin: origin, activation: pageContext)
+        guard pageContext["supported"] as? Bool == true, pageContext["isActive"] as? Bool == false,
+              pageContext["calls"] as? Int == 1 else {
+            throw PreviewError.message("Page-owned nonactivated popup negative coverage unavailable")
+        }
         _ = try await js("location.assign('https://example.invalid/script');return true")
         _ = try await js(#"""
         const frame=document.createElement('iframe');frame.id='external-navigation-child-fixture';
@@ -47,8 +90,11 @@ final class ExternalNavigationSmoke {
         frame.contentWindow.eval("const a=document.createElement('a');a.href='https://example.invalid/subframe';a.target='_top';document.body.append(a);a.click()");
         return true;
         """#)
+        let mainLinks = actions.filter { $0["popup"] as? Bool == false }.count
         try await link(target: "_self")
-        try await wait("positive control after script and subframe negatives") { self.actions.count >= 2 }
+        try await wait("positive control after script and subframe negatives") {
+            self.actions.filter { $0["popup"] as? Bool == false }.count > mainLinks
+        }
         let evaluations = app.commands.smokeExternalNavigation["evaluations"] as? [[String: Any]] ?? []
         guard evaluations.contains(where: { $0["source_main_frame"] as? Bool == false &&
             $0["navigation_type"] as? Int == WKNavigationType.linkActivated.rawValue && $0["admitted"] as? Bool == false }) else {
@@ -56,7 +102,9 @@ final class ExternalNavigationSmoke {
         }
         _ = try await js("document.getElementById('external-navigation-child-fixture').remove();return true")
         try record("post-negative", expected: expected, origin: origin)
-        guard actions.count == 2 else { throw PreviewError.message("Post-negative external-action count differed") }
+        guard actions.count == beforePagePopup + 1 else {
+            throw PreviewError.message("Page-owned/script/subframe negative admitted an extra external action")
+        }
         guard app.commands.currentDocument(in: app.webView) == expected else {
             throw PreviewError.message("Post-negative current-document correlation differed")
         }
@@ -91,7 +139,8 @@ final class ExternalNavigationSmoke {
         app.commands.retire()
         guard app.commands.currentDocument(in: app.webView) == nil else { throw PreviewError.message("Retirement retained current document") }
         return ["scope": "actual-app/system-WK; recording-opener-only", "system_browser_qualified": false,
-                "physical_input_qualified": false, "automatic_popup_blocked": true,
+                "physical_input_qualified": false, "page_owned_nonactivated_popup_blocked": true,
+                "native_api_popup_context_observed": true,
                 "main_frame_link_recorded": true, "subframe_and_script_rejected": true,
                 "synthetic_popup_observations": popupCount, "reload_rebound_document": true,
                 "foreign_view_rejected": true, "retirement_current_document_nil": true, "navigation": final]
@@ -101,7 +150,7 @@ final class ExternalNavigationSmoke {
 
     /// Only fixed labels, bounded native classifications and booleans leave
     /// this fixture. No document contents, destinations or callback values.
-    private func record(_ phase: String, expected: NativeDocumentBinding, origin: URL) throws {
+    private func record(_ phase: String, expected: NativeDocumentBinding, origin: URL, activation: [String: Any] = [:]) throws {
         let binding = app.commands.currentDocument(in: app.webView)
         let value: [String: Any] = ["phase": phase, "action_count": actions.count,
             "current_document_present": binding != nil, "same_document": binding == expected,
@@ -110,7 +159,7 @@ final class ExternalNavigationSmoke {
             "application_active": NSApp.isActive, "window_key": app.window.isKeyWindow,
             "window_visible": app.window.isVisible, "window_minimized": app.window.isMiniaturized,
             "webview_hidden": app.webView.isHidden, "navigation": app.commands.smokeExternalNavigation,
-            "system_browser_qualified": false, "physical_input_qualified": false]
+            "system_browser_qualified": false, "physical_input_qualified": false, "public_activation": activation]
         guard diagnostics.count < 16 else { throw PreviewError.message("Recording fixture diagnostic bound exceeded") }
         diagnostics.append(value)
         let args = CommandLine.arguments
