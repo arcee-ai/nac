@@ -92,9 +92,9 @@ impl NativeTool for SendTaskFollowupTool {
             json!({"type":"object","additionalProperties":false,"required":["session_id","request_id","action","prompt"],"properties":{
                 "session_id":{"type":"string","minLength":1,"maxLength":160},
                 "request_id":{"type":"string","minLength":1,"maxLength":160},
-                "project_id":{"type":"string","minLength":1,"maxLength":160,"description":"Required to cross saved projects"},
+                "project_id":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"Use null within this chat's saved project; name the target project explicitly to cross projects"},
                 "action":{"type":"string","enum":["queue","steer","auto"]},
-                "run_id":{"type":"string","minLength":1,"maxLength":160},
+                "run_id":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"Use null for an unbound task-level queue/auto request; steer requires the exact active run"},
                 "prompt":{"type":"string","minLength":1,"maxLength":32768}
             }}))
     }

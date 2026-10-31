@@ -185,14 +185,14 @@ fn direct_registries_preserve_exact_topology_capabilities() {
     assert_eq!(worker, super::WORKER_TOOL_NAMES);
     assert_eq!(direct, super::DIRECT_TOOL_NAMES);
     assert_eq!(delegating, super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES);
-    let shared_direct = direct
+    let shared = direct
         .iter()
         .filter(|name| !super::TASK_FOLLOWUP_TOOL_NAMES.contains(&name.as_str()))
         .cloned()
         .collect::<Vec<_>>();
-    assert_eq!(&delegating[..shared_direct.len()], &shared_direct);
+    assert_eq!(&delegating[..shared.len()], &shared);
     assert_eq!(
-        &delegating[shared_direct.len()..],
+        &delegating[shared.len()..],
         super::ORCHESTRATOR_CONTROL_TOOL_NAMES
     );
     assert_eq!(&direct_web[..super::DIRECT_TOOL_NAMES.len()], &direct);
