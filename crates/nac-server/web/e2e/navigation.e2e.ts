@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { chromium, type Page } from "@playwright/test";
 import path from "node:path";
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
 import { ScriptGate } from "./scripted-provider";
@@ -7,6 +8,36 @@ test.use({ orchestration: "0" });
 
 const LONG_TITLE =
   "Investigate the repository cache and preserve the complete deployment history across repeated runs";
+
+async function serveNavigationVersion(page: Page, baseUrl: string, before: () => boolean) {
+  const baseline = process.env.NAC_NAVIGATION_BASELINE_DIST;
+  if (baseline) {
+    await page.route(`${baseUrl}/assets/dist/**`, async (route) => {
+      if (!before()) return route.continue();
+      const relative = new URL(route.request().url()).pathname.slice("/assets/dist/".length);
+      const file = path.resolve(baseline, relative);
+      if (!file.startsWith(path.resolve(baseline) + path.sep)) return route.abort();
+      return route.fulfill({
+        body: await fs.readFile(file),
+        contentType: file.endsWith(".js")
+          ? "application/javascript"
+          : file.endsWith(".css")
+            ? "text/css"
+            : "application/octet-stream",
+      });
+    });
+    await page.route(
+      (url) => url.origin === new URL(baseUrl).origin && url.pathname === "/",
+      async (route) => {
+        if (!before()) return route.continue();
+        return route.fulfill({
+          body: await fs.readFile(path.join(baseline, "index.html")),
+          contentType: "text/html",
+        });
+      },
+    );
+  }
+}
 
 test("project navigation, overflow, phone actions and notification feedback", async ({
   harness,
@@ -50,32 +81,7 @@ test("project navigation, overflow, phone actions and notification feedback", as
   // No source checkout or running service is shared with another task.
   let before = false;
   const baseline = process.env.NAC_NAVIGATION_BASELINE_DIST;
-  if (baseline) {
-    await page.route(`${harness.baseUrl}/assets/dist/**`, async (route) => {
-      if (!before) return route.continue();
-      const relative = new URL(route.request().url()).pathname.slice("/assets/dist/".length);
-      const file = path.resolve(baseline, relative);
-      if (!file.startsWith(path.resolve(baseline) + path.sep)) return route.abort();
-      return route.fulfill({
-        body: await fs.readFile(file),
-        contentType: file.endsWith(".js")
-          ? "application/javascript"
-          : file.endsWith(".css")
-            ? "text/css"
-            : "application/octet-stream",
-      });
-    });
-    await page.route(
-      (url) => url.origin === new URL(harness.baseUrl).origin && url.pathname === "/",
-      async (route) => {
-        if (!before) return route.continue();
-        return route.fulfill({
-          body: await fs.readFile(path.join(baseline, "index.html")),
-          contentType: "text/html",
-        });
-      },
-    );
-  }
+  await serveNavigationVersion(page, harness.baseUrl, () => before);
   const capture = async (name: string) => {
     await page.evaluate(() =>
       (
@@ -85,8 +91,23 @@ test("project navigation, overflow, phone actions and notification feedback", as
     const file = info.outputPath(`${name}.png`);
     await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
     await info.attach(name, { path: file, contentType: "image/png" });
-    if (process.env.NAC_NAVIGATION_CAPTURE_DIR)
+    if (process.env.NAC_NAVIGATION_CAPTURE_DIR) {
+      await fs.mkdir(process.env.NAC_NAVIGATION_CAPTURE_DIR, { recursive: true });
       await fs.copyFile(file, path.join(process.env.NAC_NAVIGATION_CAPTURE_DIR, `${name}.png`));
+    }
+  };
+  const notify = async () => {
+    await page.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
+    await dialog.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Session presentation saved", { exact: true })).toBeVisible();
+    const endpoint = `${harness.baseUrl}/sessions/${ids[0]}/presentation`;
+    await page.route(endpoint, async (route) =>
+      route.fulfill({ status: 503, json: { error: "Navigation fixture could not update pin" } }),
+    );
+    await page.getByRole("button", { name: `Unpin ${LONG_TITLE}`, exact: true }).click();
+    await expect(page.getByText(/Failed to update pin: Navigation fixture/)).toBeVisible();
+    await page.unroute(endpoint);
   };
   try {
     for (const width of [1440, 768, 390]) {
@@ -112,6 +133,7 @@ test("project navigation, overflow, phone actions and notification feedback", as
           page.getByRole("button", { name: "Review cache inputs 1", exact: true }),
         ).toBeVisible();
         await selected.focus();
+        await page.mouse.move(0, 0);
         await capture(`${version}-${width}-navigation-dark`);
         const rename = page.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true });
         await rename.focus();
@@ -128,7 +150,12 @@ test("project navigation, overflow, phone actions and notification feedback", as
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
         await expect(rename).toBeFocused();
         await capture(`${version}-${width}-keyboard-focus`);
+        const runningRow = page.getByRole("button", { name: "Review cache inputs 1", exact: true });
+        await runningRow.focus();
+        await capture(`${version}-${width}-running-navigation`);
         if (width < 768) {
+          await notify();
+          await capture(`${version}-${width}-notification-stack`);
           await page
             .getByRole("dialog", { name: "Menu", exact: true })
             .getByRole("button", { name: LONG_TITLE, exact: true })
@@ -148,6 +175,7 @@ test("project navigation, overflow, phone actions and notification feedback", as
         await expect(
           page.getByText("Navigation verification — repository maintenance", { exact: true }),
         ).toBeVisible();
+        await expect(page.getByText("9 Sessions", { exact: true })).toBeVisible();
         await capture(`${version}-${width}-projects-dark`);
       }
     }
@@ -185,5 +213,125 @@ test("project navigation, overflow, phone actions and notification feedback", as
   } finally {
     gate.release();
     await waitForRunIdle(request, harness, ids[1]);
+  }
+});
+
+test("phone navigation and project actions remain reachable at real 200 percent browser zoom", async ({
+  harness,
+  request,
+}, info) => {
+  test.setTimeout(120_000);
+  const project = await createProject(request, harness, { name: "Navigation zoom verification" });
+  const id = await createSession(request, harness, "direct", project);
+  expect(
+    (
+      await request.put(`${harness.baseUrl}/sessions/${id}/presentation`, {
+        data: { title: LONG_TITLE, pinned: false, expected_version: 0 },
+      })
+    ).ok(),
+  ).toBe(true);
+  const extension = info.outputPath("zoom-extension");
+  await fs.mkdir(extension, { recursive: true });
+  await fs.writeFile(
+    path.join(extension, "manifest.json"),
+    JSON.stringify({
+      manifest_version: 3,
+      name: "Disposable NAC navigation zoom",
+      version: "1.0",
+      permissions: ["tabs"],
+      background: { service_worker: "worker.js" },
+    }),
+  );
+  await fs.writeFile(
+    path.join(extension, "worker.js"),
+    "chrome.runtime.onInstalled.addListener(() => {});",
+  );
+  const context = await chromium.launchPersistentContext(info.outputPath("zoom-profile"), {
+    channel: "chromium",
+    headless: true,
+    viewport: { width: 1440, height: 900 },
+    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+  });
+  try {
+    const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+    const page = await context.newPage();
+    let before = false;
+    await serveNavigationVersion(page, harness.baseUrl, () => before);
+    await page.goto(harness.baseUrl);
+    const zoom = await worker.evaluate(async (url) => {
+      const { chrome } = globalThis as unknown as {
+        chrome: {
+          tabs: {
+            query: (options: object) => Promise<{ id: number; url: string }[]>;
+            setZoom: (id: number, value: number) => Promise<void>;
+            getZoom: (id: number) => Promise<number>;
+          };
+        };
+      };
+      const tab = (await chrome.tabs.query({})).find((tab) => tab.url.startsWith(url));
+      if (!tab) throw new Error("NAC tab not found");
+      await chrome.tabs.setZoom(tab.id, 2);
+      return chrome.tabs.getZoom(tab.id);
+    }, harness.baseUrl);
+    expect(zoom).toBe(2);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (globalThis as unknown as { devicePixelRatio: number }).devicePixelRatio,
+        ),
+      )
+      .toBe(2);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    for (const width of [1440, 768, 390]) {
+      await page.setViewportSize({ width, height: 1024 });
+      for (const version of process.env.NAC_NAVIGATION_BASELINE_DIST
+        ? ["before", "after"]
+        : ["after"]) {
+        before = version === "before";
+        await page.goto(
+          `${harness.baseUrl}/?navigationZoom=${width}-${version}#/session/${id}/insights`,
+        );
+        await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+        const menu = page.getByRole("dialog", { name: "Menu", exact: true });
+        const row = menu.getByRole("button", { name: LONG_TITLE, exact: true });
+        await row.focus();
+        const rename = menu.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true });
+        await rename.focus();
+        await page.evaluate(() =>
+          (
+            globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
+          ).document.fonts.ready.then(() => undefined),
+        );
+        const file = info.outputPath(`${version}-${width}-zoom200-navigation.png`);
+        await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
+        await info.attach(`${version}-${width}-zoom200`, { path: file, contentType: "image/png" });
+        if (process.env.NAC_NAVIGATION_CAPTURE_DIR) {
+          await fs.mkdir(process.env.NAC_NAVIGATION_CAPTURE_DIR, { recursive: true });
+          await fs.copyFile(
+            file,
+            path.join(process.env.NAC_NAVIGATION_CAPTURE_DIR, path.basename(file)),
+          );
+        }
+        const box = await rename.boundingBox();
+        const innerWidth = await page.evaluate(
+          () => (globalThis as unknown as { innerWidth: number }).innerWidth,
+        );
+        expect(box!.x).toBeGreaterThanOrEqual(0);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(innerWidth + 1);
+        if (!before) {
+          expect(box!.width).toBeGreaterThanOrEqual(44);
+          expect(box!.height).toBeGreaterThanOrEqual(44);
+        }
+        await page.keyboard.press("Enter");
+        const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
+        await expect(dialog.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+          LONG_TITLE,
+        );
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+        await expect(rename).toBeFocused();
+      }
+    }
+  } finally {
+    await context.close();
   }
 });
