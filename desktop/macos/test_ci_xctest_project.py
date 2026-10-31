@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
-from ci_xctest_project import (NATIVE, PERFORMANCE, PROJECT, PROJECT_HASH, SCHEME, SCHEME_HASH,
+from ci_xctest_project import (NATIVE, PERFORMANCE, STARTUP, PROJECT, PROJECT_HASH, SCHEME, SCHEME_HASH,
                                materialize_project)
 
 
@@ -149,6 +149,33 @@ class ProjectSelectionTests(unittest.TestCase):
                        self.directory / 'absent-parent/generated'):
             with self.subTest(output=output), self.assertRaisesRegex(RuntimeError, 'destination'):
                 self.materialize(output=output)
+
+    def test_startup_source_is_a_real_distinct_target_and_conflicts_with_performance(self):
+        root = self.directory / 'Startup Q with spaces'
+        source = root / STARTUP
+        source.parent.mkdir(parents=True)
+        source.write_text('// Synthetic external startup test, never app/runtime evidence.\n')
+        revision = self.initialize(root)
+        arguments = {'startup_root': root, 'startup_sha': revision,
+                     'startup_source_sha256': hashlib.sha256(source.read_bytes()).hexdigest()}
+        with self.assertRaisesRegex(RuntimeError, 'mutually exclusive'):
+            self.materialize(**arguments)
+        result = materialize_project(self.harness, self.harness_sha, output=self.output, **arguments)
+        text = (Path(result['project']) / 'project.pbxproj').read_text()
+        self.assertIn('path = "' + str(source) + '";', text)
+        self.assertIn('name = NACStartupUITests;', text)
+        self.assertNotIn('NACPerformanceUITests', text)
+        self.assertEqual(result['receipt']['startup_sha'], revision)
+        self.assertEqual(result['receipt']['startup_source_path'], str(source))
+        scheme = ET.parse(Path(result['project']) / SCHEME.parent / 'NACStartupUITests.xcscheme')
+        self.assertEqual(scheme.find('.//TestableReference/BuildableReference').attrib['BlueprintName'], 'NACStartupUITests')
+        names = {node.attrib['key'] for node in scheme.findall('.//EnvironmentVariable')}
+        self.assertEqual(names, {'NAC_UI_FIXTURE', 'NAC_STARTUP_SOURCE_PATH', 'NAC_STARTUP_SOURCE_SHA256',
+                                 'NAC_STARTUP_PRODUCT_SHA', 'NAC_STARTUP_TEST_SHA', 'NAC_STARTUP_HARNESS_SHA',
+                                 'NAC_STARTUP_CONFIGURATION_SHA256'})
+        self.assertEqual((Path(result['project']) / SCHEME).read_bytes(), (self.harness / PROJECT / SCHEME).read_bytes())
+        self.assertFalse(list(self.output.rglob('*.swift')))
+        self.assertEqual(self.git(root, 'status', '--porcelain'), '')
 
 
 if __name__ == '__main__':

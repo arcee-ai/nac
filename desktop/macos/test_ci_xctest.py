@@ -104,6 +104,31 @@ class XCTestPolicyTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 require_generated_runner(data, '/private/fixture.json', name)
 
+    def test_startup_runner_requires_separate_source_and_configuration_bindings(self):
+        selection = {'generated': True, 'expected_target': 'NACStartupUITests', 'harness_sha': 'a' * 40,
+                     'startup_sha': 'b' * 40, 'startup_source_path': '/private/Q/StartupJourneys.swift',
+                     'startup_source_sha256': 'c' * 64}
+        binding = {'product_sha': 'd' * 40, 'test_sha': 'b' * 40, 'harness_sha': 'a' * 40,
+                   'configuration_sha256': 'e' * 64}
+        environment = {'NAC_UI_FIXTURE': '/private/config.json',
+                       'NAC_STARTUP_SOURCE_PATH': selection['startup_source_path'],
+                       'NAC_STARTUP_SOURCE_SHA256': selection['startup_source_sha256'],
+                       **{'NAC_STARTUP_' + key.upper(): value for key, value in binding.items()}}
+        target = {'IsUITestBundle': True, 'BlueprintName': 'NACStartupUITests',
+                  'EnvironmentVariables': environment, 'TestBundlePath': '__TESTROOT__/NACStartupUITests.xctest'}
+        data = {'TestTargets': [target]}
+        self.assertEqual(require_generated_runner(data, '/private/config.json', 'NACStartupUITests',
+                         project_selection=selection, startup_binding=binding), target)
+        for key in environment:
+            changed = {**target, 'EnvironmentVariables': {**environment, key: 'foreign'}}
+            with self.subTest(key=key), self.assertRaises(RuntimeError):
+                require_generated_runner({'TestTargets': [changed]}, '/private/config.json', 'NACStartupUITests',
+                                         project_selection=selection, startup_binding=binding)
+        for changed in ({**binding, 'test_sha': 'f' * 40}, {**binding, 'harness_sha': 'f' * 40}, {}):
+            with self.assertRaises(RuntimeError):
+                require_generated_runner(data, '/private/config.json', 'NACStartupUITests',
+                                         project_selection=selection, startup_binding=changed)
+
     def test_actual_result_binding_and_raw_diagnostic_exclusion(self):
         with tempfile.TemporaryDirectory() as temporary:
             raw = Path(temporary) / 'raw'
