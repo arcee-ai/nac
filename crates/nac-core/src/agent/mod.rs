@@ -20,6 +20,7 @@ mod dag;
 mod failed_tool_round;
 pub(crate) mod preview;
 mod prompt_rendering;
+mod questions;
 mod tool_exec;
 mod transcript_commit;
 mod transcript_state;
@@ -434,6 +435,7 @@ impl Agent {
                 permission_reviewer: None,
                 permission_rules: Arc::new(config.permission_rules.clone()),
                 goal_runtime,
+                task_question_answers: None,
                 command_environment: None,
                 web_credential: None,
                 command_redactions: Arc::new(StdMutex::new(HashMap::new())),
@@ -471,6 +473,13 @@ impl Agent {
             broker.set_command_environment(provider.clone());
         }
         self.tool_runtime.command_environment = provider;
+    }
+
+    pub(crate) fn set_task_question_answer_port(
+        &mut self,
+        port: Arc<dyn crate::session_service::TaskQuestionAnswerPort>,
+    ) {
+        self.tool_runtime.task_question_answers = Some(port);
     }
 
     pub(crate) fn set_worker_web_credential(&mut self, credential: Option<String>) {
@@ -1060,6 +1069,9 @@ impl Agent {
                 .await;
                 self.record_terminal_cleanup_error().await;
                 return Err(error);
+            }
+            if let Some(content) = self.yield_for_question(&accumulated_usage).await? {
+                return Ok(content);
             }
             if let Some(reason) = self
                 .tool_runtime

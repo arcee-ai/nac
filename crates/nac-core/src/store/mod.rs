@@ -35,6 +35,17 @@ mod ssh_configurations;
 mod steering;
 mod task_discovery;
 mod task_evidence;
+pub(crate) mod task_questions;
+#[cfg(test)]
+pub(crate) use task_questions::create_task_question;
+pub(crate) use task_questions::{
+    answer_task_question_bound, cancel_task_question, create_task_question_bound,
+    pending_task_question, question_continuation_run, QuestionAgentScope,
+};
+pub use task_questions::{
+    list_task_questions, load_task_question, QuestionAnswer, QuestionAnswerReceipt, QuestionError,
+    QuestionRecord, QuestionRequest, QuestionResponder,
+};
 pub(crate) mod task_launches;
 mod terminal_cleanups;
 mod terminal_selection;

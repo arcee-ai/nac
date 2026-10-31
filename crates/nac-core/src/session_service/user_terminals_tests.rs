@@ -328,13 +328,18 @@ async fn configured_denial_still_rejects_human_launch_without_spawn_or_ask() {
 #[tokio::test]
 async fn selected_unsupported_backend_rejects_human_launch_without_local_fallback() {
     let (mut parts, directory) = fixture();
-    let context = Arc::get_mut(parts.service.user_terminal_context.as_mut().unwrap()).unwrap();
-    context.runtime.backend = Arc::new(crate::sandbox::ExecutionBackend::Ssh(
+    let context = parts.service.user_terminal_context.as_ref().unwrap();
+    let mut runtime = context.runtime.clone();
+    runtime.backend = Arc::new(crate::sandbox::ExecutionBackend::Ssh(
         crate::sandbox::SshBackend::new(
             "unreachable-terminal-host.invalid".into(),
             directory.clone(),
         ),
     ));
+    parts.service.user_terminal_context = Some(Arc::new(user_terminals::UserTerminalContext::new(
+        runtime,
+        context.client.clone(),
+    )));
     let error = parts
         .service
         .open_user_terminal(Uuid::new_v4(), 80, 24)

@@ -112,9 +112,10 @@ impl SessionService {
             .shell_execution_context()
             .ok()
             .map(|(runtime, _)| runtime);
-        let service = Self {
+        let mut service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
             goal_runtime,
+            question_owner: None,
             metadata: Arc::new(metadata.clone()),
             workspace_git,
             config_version,
@@ -161,6 +162,7 @@ impl SessionService {
                 }),
             );
         }
+        questions::bind(&mut service);
         let init = SessionServiceInit {
             metadata,
             restored_messages,

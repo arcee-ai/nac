@@ -284,6 +284,16 @@ impl From<anyhow::Error> for ApiError {
             return Self::new(mapped.status, error.to_string());
         }
 
+        if let Some(question) = error.downcast_ref::<nac_core::store::QuestionError>() {
+            use nac_core::store::QuestionError;
+            let status = match question {
+                QuestionError::Invalid => StatusCode::BAD_REQUEST,
+                QuestionError::NotFound => StatusCode::NOT_FOUND,
+                QuestionError::HumanRequired => StatusCode::FORBIDDEN,
+                QuestionError::Conflict | QuestionError::Unavailable => StatusCode::CONFLICT,
+            };
+            return Self::new(status, error.to_string());
+        }
         let message = error.to_string();
         // A typed uncertain admission remains a reconciliation failure even when
         // its retained SQLite cause is BUSY/LOCKED. Only precommit contention is 409.

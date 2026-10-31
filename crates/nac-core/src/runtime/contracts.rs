@@ -311,6 +311,13 @@ impl OrchestratorRunConfig {
         &self.resume_base_cwd
     }
 
+    pub fn set_task_question_answer_port(
+        &mut self,
+        port: std::sync::Arc<dyn crate::session_service::TaskQuestionAnswerPort>,
+    ) {
+        self.agent.set_task_question_answer_port(port);
+    }
+
     pub fn set_command_environment_provider(
         &mut self,
         provider: Option<std::sync::Arc<dyn nac_contracts::CommandEnvironmentProvider>>,

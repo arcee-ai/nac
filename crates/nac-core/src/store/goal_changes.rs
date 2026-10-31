@@ -1,4 +1,4 @@
-//! Lossy post-commit hints, never a goal history or an authority for outcomes.
+//! Lossy post-commit goal/question hints, never history or outcome authority.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
@@ -24,12 +24,37 @@ pub(crate) struct GoalChange {
     pub kind: GoalChangeKind,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) enum TaskChange {
+    Goal(GoalChange),
+    Question {
+        store_path: PathBuf,
+        session_id: String,
+        run_id: String,
+        goal_id: Option<String>,
+    },
+}
+
+pub(crate) fn question_committed(path: &Path, question: &super::QuestionRecord) {
+    let changes = CHANGES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(sender) = changes.get(path) {
+        let _ = sender.send(TaskChange::Question {
+            store_path: path.to_path_buf(),
+            session_id: question.request.session_id.clone(),
+            run_id: question.request.run_id.clone(),
+            goal_id: question.goal_id.clone(),
+        });
+    }
+}
+
 // Bounded process-local delivery only. A lagged receiver, foreign owner or
 // restart must re-read the store; none of these hints prove completion.
-static CHANGES: LazyLock<Mutex<HashMap<PathBuf, broadcast::Sender<GoalChange>>>> =
+static CHANGES: LazyLock<Mutex<HashMap<PathBuf, broadcast::Sender<TaskChange>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub(crate) fn subscribe(path: &Path) -> broadcast::Receiver<GoalChange> {
+pub(crate) fn subscribe(path: &Path) -> broadcast::Receiver<TaskChange> {
     let mut changes = CHANGES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -56,14 +81,14 @@ pub(crate) fn committed(path: &Path, goal: &SessionGoalRecord, kind: GoalChangeK
     let Some(sender) = changes.get(path) else {
         return;
     };
-    let _ = sender.send(GoalChange {
+    let _ = sender.send(TaskChange::Goal(GoalChange {
         store_path: path.to_path_buf(),
         session_id: goal.session_id.clone(),
         goal_id: goal.goal_id.clone(),
         version: goal.version,
         status: goal.status,
         kind,
-    });
+    }));
 }
 
 #[cfg(test)]
@@ -86,10 +111,11 @@ mod tests {
         .unwrap();
         let mut hints = subscribe(&path);
         let goal = store::create_session_goal(&path, "direct", "first", None, None).unwrap();
-        let next = async |hints: &mut broadcast::Receiver<GoalChange>| loop {
-            let hint = hints.recv().await.unwrap();
-            if hint.store_path == path {
-                break hint;
+        let next = async |hints: &mut broadcast::Receiver<TaskChange>| loop {
+            if let TaskChange::Goal(hint) = hints.recv().await.unwrap() {
+                if hint.store_path == path {
+                    break hint;
+                }
             }
         };
         let created = next(&mut hints).await;

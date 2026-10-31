@@ -400,6 +400,7 @@ pub fn update_pending_session_inbox_item(
         return Err(anyhow!("queued inbox input cannot target an active run"));
     }
     let connection = open_runtime_connection(path)?;
+    super::task_questions::require_question_queue(&connection,session_id,item_id,delivery)?;
     let changed = connection.execute(
         "UPDATE session_inbox
          SET delivery = ?1, target_run_id = ?2, updated_at = ?3,
@@ -447,9 +448,10 @@ pub fn cancel_pending_session_inbox_item(
     if expected_version < 0 {
         return Err(anyhow!("inbox item version must not be negative"));
     }
-    let connection = open_runtime_connection(path)?;
+    let mut connection = open_runtime_connection(path)?;
+    let transaction=connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let now = now_utc();
-    let changed = connection.execute(
+    let changed = transaction.execute(
         "UPDATE session_inbox
          SET status = 'cancelled', cancelled_at = ?1, updated_at = ?1,
              target_run_id = NULL, version = version + 1
@@ -459,13 +461,16 @@ pub fn cancel_pending_session_inbox_item(
     )?;
     if changed != 1 {
         return Err(pending_update_error(
-            &connection,
+            &transaction,
             session_id,
             item_id,
             expected_version,
         ));
     }
-    load_session_inbox_item_with_connection(&connection, session_id, item_id)
+    super::task_questions::cancel_question_inbox(&transaction,session_id,item_id)?;
+    let item=load_session_inbox_item_with_connection(&transaction,session_id,item_id)?;
+    transaction.commit()?;
+    Ok(item)
 }
 command CancelPendingSessionInboxItemCommand {
     session_id: String = session_id.to_owned(),

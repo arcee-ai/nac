@@ -42,6 +42,19 @@ impl<'a> SessionAttachmentApplication<'a> {
     }
 
     pub(crate) async fn attach_session(&self, session_id: &str) -> Result<Arc<SessionService>> {
+        self.attach_with_wake(session_id, true).await
+    }
+
+    /// Question admission decides whether its exact accepted obligation may
+    /// wake. Resolving a stale answer must never start unrelated successor work.
+    pub(crate) async fn attach_question_target(
+        &self,
+        session_id: &str,
+    ) -> Result<Arc<SessionService>> {
+        self.attach_with_wake(session_id, false).await
+    }
+
+    async fn attach_with_wake(&self, session_id: &str, wake: bool) -> Result<Arc<SessionService>> {
         const MAX_ATTEMPTS: usize = 2;
 
         self.manager.sweep_idle_sessions(Some(session_id)).await;
@@ -64,7 +77,9 @@ impl<'a> SessionAttachmentApplication<'a> {
                         .has_unreconciled_durable_run_recovery_async()
                         .await?;
                     if !has_recovery || service.has_active_operation() {
-                        self.manager.wake_direct_inbox(&service).await?;
+                        if wake {
+                            self.manager.wake_direct_inbox(&service).await?;
+                        }
                         return Ok(service);
                     }
                     match sessions::SessionOperationLease::try_acquire(
@@ -74,7 +89,9 @@ impl<'a> SessionAttachmentApplication<'a> {
                         Ok(lease) => {
                             service.reconcile_durable_run_recovery(&lease).await?;
                             drop(lease);
-                            self.manager.wake_direct_inbox(&service).await?;
+                            if wake {
+                                self.manager.wake_direct_inbox(&service).await?;
+                            }
                             return Ok(service);
                         }
                         Err(sessions::SessionOperationLeaseError::Busy(_)) => {
@@ -114,7 +131,9 @@ impl<'a> SessionAttachmentApplication<'a> {
                 .write()
                 .await
                 .insert(session_id.to_string(), Arc::clone(&service));
-            self.manager.wake_direct_inbox(&service).await?;
+            if wake {
+                self.manager.wake_direct_inbox(&service).await?;
+            }
             return Ok(service);
         }
         Err(anyhow!(
@@ -407,6 +426,7 @@ impl<'a> SessionAttachmentApplication<'a> {
         };
         self.manager
             .attach_managed_command_environment(&mut run_config)?;
+        super::task_questions::bind_native(self.manager, &mut run_config);
         let mut service = SessionService::from_orchestrator_run_config(run_config).service;
         if self.manager.managed_host().is_some() {
             service.enable_managed_admission(self.manager.managed_identity().cloned());
@@ -467,6 +487,7 @@ impl<'a> SessionAttachmentApplication<'a> {
             .await?;
         self.manager
             .attach_managed_command_environment(&mut run_config)?;
+        super::task_questions::bind_native(self.manager, &mut run_config);
         let mut service = SessionService::from_orchestrator_run_config(run_config).service;
         if self.manager.managed_host().is_some() {
             service.enable_managed_admission(self.manager.managed_identity().cloned());

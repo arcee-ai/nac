@@ -32,19 +32,38 @@ pub(crate) struct WaitInput {
 pub(crate) struct WaitTasksTool;
 
 fn relevant_goal_hint(
-    hint: &store::goal_changes::GoalChange,
+    hint: &store::goal_changes::TaskChange,
     path: &std::path::Path,
     targets: &[Target],
 ) -> bool {
-    hint.store_path == path
-        && hint.version >= 0
-        && (hint.status != store::GoalStatus::Active
-            || hint.kind != store::goal_changes::GoalChangeKind::Current)
-        && targets.iter().any(|target| {
-            target.session_id == hint.session_id
-                && target.mode == Mode::Goal
-                && target.resolved.as_ref() == Some(&hint.goal_id)
-        })
+    match hint {
+        store::goal_changes::TaskChange::Goal(hint) => {
+            hint.store_path == path
+                && hint.version >= 0
+                && (hint.status != store::GoalStatus::Active
+                    || hint.kind != store::goal_changes::GoalChangeKind::Current)
+                && targets.iter().any(|target| {
+                    target.session_id == hint.session_id
+                        && target.mode == Mode::Goal
+                        && target.resolved.as_ref() == Some(&hint.goal_id)
+                })
+        }
+        store::goal_changes::TaskChange::Question {
+            store_path,
+            session_id,
+            run_id,
+            goal_id,
+        } => {
+            store_path == path
+                && targets.iter().any(|target| {
+                    target.session_id == *session_id
+                        && match target.mode {
+                            Mode::Run => target.resolved.as_ref() == Some(run_id),
+                            Mode::Goal => target.resolved.as_ref() == goal_id.as_ref(),
+                        }
+                })
+        }
+    }
 }
 
 impl NativeTool for WaitTasksTool {
@@ -308,13 +327,12 @@ impl NativeTool for WaitTasksTool {
                         _ = tokio::time::sleep_until(next_read.min(deadline)) => { break; }
                         hint = goals.recv() => {
                             match hint {
-                                Ok(hint) if hint.store_path == services.runtime.store_path => {
+                                Ok(hint) => {
                                     let relevant = relevant_goal_hint(&hint,&services.runtime.store_path,&input.targets);
                                     if !relevant { continue; }
                                         break;
                                 }
                                 Err(_) => { for target in &mut input.targets { target.resync = true; } break; }
-                                _ => continue,
                             }
                         }
                     }

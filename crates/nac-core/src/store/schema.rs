@@ -16,6 +16,8 @@ mod peer_goal_starts;
 #[cfg(test)]
 mod session_mcp_refresh_migration_tests;
 mod task_followups;
+#[cfg(test)]
+mod task_question_migration_tests;
 
 #[cfg(test)]
 mod task_followup_migration_tests;
@@ -71,6 +73,7 @@ mod permission_reviewer_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 46 retains exact structured questions and identified answer continuations.
 // 45 adds session-scoped, revision-checked MCP mount refresh intent.
 // 44 adds same-chat heartbeat schedules, occurrences and control receipts.
 // 42 retains caller-bound native independent task launch receipts.
@@ -110,7 +113,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 45;
+const STORE_SCHEMA_VERSION: i64 = 46;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -804,7 +807,7 @@ fn open_connection_with_hooks(
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
         | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-        | 38 | 39 | 40 | 41 | 42 | 43 | 44 | STORE_SCHEMA_VERSION => {}
+        | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -1032,6 +1035,7 @@ fn open_connection_with_hooks(
     peer_goal_starts::create_tables(&transaction)?;
     heartbeat_tables::create_heartbeat_tables(&transaction)?;
     super::session_mcp_refresh::create_table(&transaction)?;
+    super::task_questions::create_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;

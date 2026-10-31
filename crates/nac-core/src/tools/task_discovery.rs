@@ -125,8 +125,12 @@ pub(super) fn check_id(label: &str, value: &str) -> Result<(), ToolResult> {
 }
 
 pub(super) fn navigation(session_id: &str) -> String {
-    let mut route = String::from("/session/");
-    for byte in session_id.bytes() {
+    format!("/session/{}", url_component(session_id))
+}
+
+pub(super) fn url_component(value: &str) -> String {
+    let mut route = String::new();
+    for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
             route.push(char::from(byte));
         } else {
@@ -225,6 +229,7 @@ fn found_task(snapshot: store::DirectTaskSnapshot) -> Value {
             "visible_message_count": snapshot.visible_message_count,
             "current_run": snapshot.current_run,
             "pending_inbox_items": snapshot.pending_inbox_items,
+            "pending_question": snapshot.pending_question,
             "goal": snapshot.goal,
             "goal_objective_truncated": snapshot.goal_objective_truncated,
             "goal_last_run_id": snapshot.goal_last_run_id,

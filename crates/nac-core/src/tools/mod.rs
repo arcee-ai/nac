@@ -34,6 +34,7 @@ pub mod read;
 mod runtime_context;
 pub(crate) mod subagent;
 mod task_discovery;
+mod task_questions;
 mod task_wait;
 mod task_wait_state;
 mod terminal_tools;
@@ -165,7 +166,7 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
 ];
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 18] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 21] = [
     "read",
     "write",
     "edit",
@@ -178,6 +179,9 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 18] = [
     "find_tasks",
     "read_task",
     "wait_tasks",
+    "request_question",
+    "read_question",
+    "answer_question",
     "create_goal",
     "get_goal",
     "update_goal",
@@ -237,6 +241,9 @@ fn worker_tool_registry(
         .register(task_discovery::FindTasksTool)
         .register(task_discovery::ReadTaskTool)
         .register(task_wait::WaitTasksTool)
+        .register(task_questions::CreateQuestionTool)
+        .register(task_questions::ReadQuestionTool)
+        .register(task_questions::AnswerQuestionTool)
         .register(goal::CreateGoalTool)
         .register(goal::GetGoalTool)
         .register(goal::UpdateGoalTool)
@@ -327,7 +334,9 @@ pub(crate) fn direct_with_orchestrator_tool_definitions_with_web(
 }
 
 fn is_complete_direct_capability(name: &str) -> bool {
-    DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name) || WEB_TOOL_NAMES.contains(&name)
+    DIRECT_TOOL_NAMES.contains(&name)
+        || DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name)
+        || WEB_TOOL_NAMES.contains(&name)
 }
 
 #[expect(
@@ -524,6 +533,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         permission_reviewer: None,
         permission_rules: Arc::new(Vec::new()),
         goal_runtime: None,
+        task_question_answers: None,
         command_environment: None,
         web_credential: None,
         command_redactions: Arc::new(StdMutex::new(HashMap::new())),
