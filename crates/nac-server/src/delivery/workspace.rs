@@ -42,6 +42,15 @@ pub struct OpenWorkspacePathRequest {
     pub path: String,
 }
 
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RevealWorkspacePathRequest {
+    /// Existing path relative to the current Local workspace.
+    pub path: String,
+    /// Root observed in the initiating session snapshot; never a target override.
+    pub expected_workspace_root: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct WorkspaceRevisionQuery {
@@ -138,6 +147,29 @@ pub(crate) async fn open_workspace_path(
         manager
             .workspace()
             .open_workspace_path(&session_id, request.path)
+            .await?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/workspace/reveal",
+    operation_id = "post_sessions_session_id_workspace_reveal",
+    tag = "workspace",
+    params(("session_id" = String, Path)),
+    request_body(content = RevealWorkspacePathRequest, content_type = "application/json"),
+    responses((status = 200, description = "Existing Local path revealed in Finder", body = view::OpenLocalPathResult), (status = 400, description = "Invalid or stale workspace path", body = ApiErrorBody), (status = 404, description = "Session or target unavailable", body = ApiErrorBody), (status = 500, description = "Reveal rejected or unavailable", body = ApiErrorBody))
+)]
+pub(crate) async fn reveal_workspace_path(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<RevealWorkspacePathRequest>, JsonRejection>,
+) -> std::result::Result<Json<view::OpenLocalPathResult>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(
+        manager
+            .workspace()
+            .reveal_workspace_path(&session_id, request.path, request.expected_workspace_root)
             .await?,
     ))
 }

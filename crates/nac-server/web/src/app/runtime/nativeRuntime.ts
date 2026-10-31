@@ -16,6 +16,7 @@ import {
 import { LifetimeTransport } from "./requestLifetime";
 import type { PromptDraftStorage } from "../store/promptDraftStore";
 import { TerminalInputRecovery } from "../features/terminal/inputRecovery";
+import { bindNativeDirectoryPort, type NativeDirectoryPort } from "../features/setup/localFolder";
 
 /** Opaque consumer bindings, never credentials or native admission authority. */
 export interface NativeRuntimeScope {
@@ -45,6 +46,8 @@ export interface NativeRuntimeOptions {
   eventSource?: SessionStreamOptions["eventSource"];
   /** Hosted reads default to no replay; standalone retains its one retry. */
   queryRetry?: false | 1;
+  /** Host-local folder information only; Rust retains project admission. */
+  nativeDirectory?: NativeDirectoryPort;
 }
 
 const runtimes = new WeakMap<QueryClient, NativeRuntime>();
@@ -60,6 +63,7 @@ export class NativeRuntime {
   readonly stores: ReturnType<typeof createPresentationStores>;
   readonly queryClient: QueryClient;
   readonly terminalInputRecovery = new TerminalInputRecovery();
+  readonly nativeDirectory: NativeDirectoryPort | undefined;
   private readonly controller = new AbortController();
   private readonly disposers = new Set<() => void>();
   private readonly listeners = new Set<() => void>();
@@ -83,6 +87,7 @@ export class NativeRuntime {
       },
     });
     this.assets = options.assets ? Object.freeze({ ...options.assets }) : undefined;
+    this.nativeDirectory = bindNativeDirectoryPort(options.nativeDirectory, this.controller.signal);
     this.stores = createPresentationStores(options.storage, options.scope, options.draftStorage);
     this.scope = Object.freeze({ ...options.scope });
     this.client = new NacClient(
@@ -167,7 +172,12 @@ export const standaloneRuntime: RuntimeDependencies = {
   events: (id: string, handlers: SessionStreamHandlers) => subscribeToSessionEvents(id, handlers),
 };
 export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> &
-  Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "productNavigation">>;
+  Partial<
+    Pick<
+      NativeRuntime,
+      "id" | "assets" | "terminalInputRecovery" | "productNavigation" | "nativeDirectory"
+    >
+  >;
 export function runtimeForQueryClient(client: QueryClient): RuntimeDependencies {
   return runtimes.get(client) ?? standaloneRuntime;
 }
