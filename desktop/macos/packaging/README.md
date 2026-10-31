@@ -45,22 +45,27 @@ with a different output directory. Both can reuse the same private engine.
 
 `normal` invokes the sole native builder's `app-build` mode and consumes its
 `Contents/Resources/build-receipt.json`. Admission is pinned to ALL-342's normal
-contract nominated at `701fb685edee702bbf60046b7bade67c76ea9672`: six selected
+contract nominated at `9f215ec9ac4de198715843564ab0fa923efb217d`: nine selected
 Swift sources and actual compiler flags, clean full source revision, LOCAL_APP
 and no smoke instrumentation. Every selected source hash must match the current
 clean checkout. The original engine, native executable and plist digests must
 match the producer receipt; the bundled and executable-reported engine identity
 must both match source/product/track/build. Preview definitions must be excluded,
 producer marker proof must exist and the actual binary must pass that check.
-Unexpected files in the unsigned native bundle are rejected.
+The exact three build-support files, including `BundleIdentity.sh`, must also
+match their recorded hashes. Packaging reuses that producer's read-only track
+factory and verifies both the actual plist and producer metadata; it does not
+maintain another stable/beta/dev mapping. Unexpected files in the unsigned
+native bundle are rejected.
 
 This validates the existing producer JSON format rather than generating another
 native build receipt or reconstructing the producer's source selection. Future
 qualified native suppliers explicitly extend the admission policy with their
-normal sources and flags. ALL-343 owns the pending track-derived bundle IDs and
-app-instance contract. The current normal package retains the supplier's
-transitional identifier and records `track_bundle_identity: false` and
-`consumer_ready: false`; it cannot be promoted to a consumer artifact by a label.
+normal sources and flags. ALL-343 supplies the track-derived bundle IDs and app-instance code in the
+nominated source. Its actual eight-case AppKit acceptance is separately held.
+Package metadata checks do not certify that behavior: `track_bundle_identity`
+and `consumer_ready` qualification remain false pending the required integrated
+evidence. A label cannot promote preparation into a consumer artifact.
 ALL-354 owns full-Xcode actual AppKit/WKWebView evidence. Later lifecycle and
 joined normal-app acceptance remain prerequisites for distribution claims.
 
@@ -75,6 +80,18 @@ file, executable mode, shell/engine and ZIP digest. Original unsigned/input
 hashes and final signed hashes are both retained because signing changes bytes.
 Root LICENSE and existing embedded frontend notices are copied before sealing.
 Hashes establish integrity, not publisher authentication or human source review.
+The entire Rust `include_dir!` input tree (`crates/nac-server/assets/`) must
+exactly match tracked Git paths before compilation. Ignored files, symlinks
+anywhere in the embedded root, and empty extra directories are rejected; legitimate ignored dependencies,
+build caches and unrelated local configuration outside it are unaffected.
+
+The outer manifest also contains a post-signing preparation receipt. It binds
+the actual post-sign engine identity, root versions, producer track/name metadata
+and final engine/native/plist digests to the signature evidence. It remains
+outside the sealed app; the existing `PackageIdentity.json` schema-1 marker and
+its `engine_identity` interface are unchanged for ALL-356. Its `engine_input`
+digest describes the pre-sign engine, while the outer receipt records signed
+bytes. File inventories retain all Unix permission mode bits.
 
 The nested engine is signed before the outer app, with hardened runtime and no
 entitlements. Each object is individually verified; recursive verification is
@@ -138,7 +155,15 @@ Plans carry `execution_authorized: false`. They stage a separate Developer ID
 candidate so the ad-hoc preparation and its evidence remain intact. Before any
 credentialed execution, require qualified track identifiers, required normal-app
 native evidence and explicit authorization for the designated NAC identity and
-profile. Planned operation order:
+profile. The plan lists the exact detail/entitlement inspection argv and inserts
+`verify-developer-id` as the first notary stage. This read-only CLI runs the
+cryptographic/team checks and feeds both objects' actual detail/entitlement
+outputs into `signature_evidence`; hardened runtime, a secure timestamp and
+empty entitlements must all pass before it writes `signature-evidence.json`.
+The plan requires that successful gate before creating or submitting a notary
+archive. Verification neither signs nor accesses signing/notary credentials;
+synthetic positive parser tests are not real Developer ID qualification.
+Planned operation order:
 
 1. Sign leaves inside out with the authorized certificate and
    `--options runtime --timestamp`, then the outer app. Verify each object,

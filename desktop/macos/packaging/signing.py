@@ -72,6 +72,13 @@ def verification_commands(app, relative_paths, policy):
     return commands
 
 
+def inspection_commands(app, relative_paths):
+    return [{'target': str(target),
+             'entitlements_argv': ['/usr/bin/codesign', '-d', '--entitlements', ':-', str(target)],
+             'details_argv': ['/usr/bin/codesign', '-d', '--verbose=4', str(target)]}
+            for target in [*nested_targets(app, relative_paths), app]]
+
+
 def signature_evidence(details, entitlements, policy):
     """Parse facts after successful codesign verification; never retain personal CNs."""
     if entitlements:

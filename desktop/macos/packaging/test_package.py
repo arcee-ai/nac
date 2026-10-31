@@ -132,6 +132,110 @@ class PackageContract(unittest.TestCase):
             self.assertIn('/plan/developer-id-candidate/', command[-1])
             self.assertNotEqual(command[-1], str(self.app))
         self.assertIn('Qualified track identifiers', plan['required_gate'])
+        self.assertEqual(len(plan['signature_inspections']), 2)
+        for item in plan['signature_inspections']:
+            self.assertIn('--entitlements', item['entitlements_argv'])
+            self.assertIn('--verbose=4', item['details_argv'])
+        stages = plan['notarization']['stages']
+        gate = stages[0]
+        self.assertEqual(gate['name'], 'verify-developer-id-policy')
+        self.assertIn('verify-developer-id', gate['argv'])
+        self.assertEqual(gate['postconditions'], {
+            'kind': 'developer-id', 'team_id': 'TESTTEAM01', 'hardened_runtime': True,
+            'secure_timestamp': True, 'entitlements': {}})
+        self.assertLess([item['name'] for item in stages].index(gate['name']),
+                        [item['name'] for item in stages].index('notary-submit'))
+
+    def test_readonly_developer_gate_checks_both_objects_and_writes_only_verified_facts(self):
+        details = ('CodeDirectory v=20500 size=10 flags=0x10000(runtime) hashes=1\n'
+                   'TeamIdentifier=TESTTEAM01\nTimestamp=synthetic timestamp\n'
+                   'Authority=Developer ID Application: Synthetic Fixture\n')
+        empty = subprocess.CompletedProcess([], 0, stdout=plistlib.dumps({}), stderr=b'')
+        valid = subprocess.CompletedProcess([], 0, stdout='', stderr=details)
+        args = SimpleNamespace(app=str(self.app), certificate='a' * 40, team='TESTTEAM01',
+                               output=str(self.root / 'signature-verification'))
+        before = inventory(self.app)
+        with patch('package.require_mac'), patch('package.run') as crypto, \
+                patch('package.subprocess.run', side_effect=[empty, valid, empty, valid]) as inspect:
+            package.verify_developer_id(args)
+        self.assertEqual(inventory(self.app), before)
+        self.assertEqual(inspect.call_count, 4)
+        for call in crypto.call_args_list:
+            self.assertIn('--verify', call.args)
+            self.assertNotIn('--sign', call.args)
+        result = json.loads((self.root / 'signature-verification/signature-evidence.json').read_text())
+        self.assertEqual(set(result['signatures']), {'app', 'engine'})
+        self.assertTrue(all(item['secure_timestamp'] for item in result['signatures'].values()))
+        self.assertFalse(result['notary_submission_performed'])
+        self.assertFalse(result['consumer_qualification'])
+        self.assertNotIn('Synthetic Fixture', str(result))
+
+    def test_developer_gate_never_emits_evidence_when_app_policy_fails(self):
+        details = ('CodeDirectory v=20500 size=10 flags=0x10000(runtime) hashes=1\n'
+                   'TeamIdentifier=TESTTEAM01\nTimestamp=synthetic timestamp\n'
+                   'Authority=Developer ID Application: Synthetic Fixture\n')
+        empty = subprocess.CompletedProcess([], 0, stdout=plistlib.dumps({}), stderr=b'')
+        valid = subprocess.CompletedProcess([], 0, stdout='', stderr=details)
+        bad_entitlements = subprocess.CompletedProcess([], 0,
+            stdout=plistlib.dumps({'com.apple.security.get-task-allow': True}), stderr=b'')
+        missing_timestamp = subprocess.CompletedProcess([], 0, stdout='',
+            stderr=details.replace('Timestamp=synthetic timestamp\n', ''))
+        for index, responses in enumerate([[empty, valid, bad_entitlements, valid],
+                                           [empty, valid, empty, missing_timestamp]]):
+            output = self.root / f'failed-verification-{index}'
+            args = SimpleNamespace(app=str(self.app), certificate='a' * 40, team='TESTTEAM01', output=str(output))
+            with patch('package.require_mac'), patch('package.run'), \
+                    patch('package.subprocess.run', side_effect=responses):
+                with self.assertRaises(ValueError):
+                    package.verify_developer_id(args)
+            self.assertFalse(output.exists())
+
+    def test_post_sign_receipt_binds_versions_track_metadata_identity_and_signed_bytes(self):
+        engine_identity = {'product_version': '1.2.3', 'source_revision': 'a' * 40,
+                           'track': 'stable', 'build_id': 'stable-' + 'a' * 40}
+        identity = {'source': {'product_version': '1.2.3', 'revision': 'a' * 40},
+                    'engine_identity': engine_identity,
+                    'native_build_receipt': {'bundle_identifier': 'ai.arcee.nac', 'bundle_name': 'NAC'}}
+        info = {'CFBundleIdentifier': 'ai.arcee.nac', 'CFBundleName': 'NAC',
+                'CFBundleShortVersionString': '1.2.3', 'CFBundleVersion': '1.2.3'}
+        files = {package.ENGINE_PATH: {'sha256': 'e' * 64},
+                 package.SHELL_PATH: {'sha256': 'a' * 64}, 'Contents/Info.plist': {'sha256': 'f' * 64}}
+        signatures = {name: {'kind': 'ad-hoc', 'hardened_runtime': True, 'entitlements': {}}
+                      for name in ['app', 'engine']}
+        record = package.post_sign_record(identity, info, files, signatures, engine_identity)
+        self.assertEqual(record['engine_sha256'], 'e' * 64)
+        self.assertFalse(record['qualified_consumer'])
+        self.assertEqual(record['phase'], 'ad-hoc-preparation')
+        for key in ['CFBundleIdentifier', 'CFBundleName', 'CFBundleShortVersionString', 'CFBundleVersion']:
+            with self.assertRaises(ValueError):
+                package.post_sign_record(identity, {**info, key: 'changed'}, files, signatures, engine_identity)
+        with self.assertRaisesRegex(ValueError, 'engine identity'):
+            package.post_sign_record(identity, info, files, signatures, {**engine_identity, 'track': 'dev'})
+        with self.assertRaisesRegex(ValueError, 'ad-hoc signatures'):
+            package.post_sign_record(identity, info, files, {}, engine_identity)
+
+    def test_post_sign_receipt_tampering_fails_with_unchanged_bundle(self):
+        identity = {**self.identity, 'source': {'product_version': '1.2.3', 'revision': 'a' * 40},
+                    'engine_identity': {'source_revision': 'a' * 40}}
+        info = {'CFBundleIdentifier': 'fixture', 'CFBundleName': 'Fixture',
+                'CFBundleShortVersionString': '1.2.3', 'CFBundleVersion': '1.2.3'}
+        write_json(self.app / 'Contents/Resources/PackageIdentity.json', identity)
+        write_json(self.app / 'Contents/Resources/engine-identity.json', identity['engine_identity'])
+        (self.app / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
+        shell = self.app / package.SHELL_PATH
+        shell.parent.mkdir(parents=True)
+        shell.write_bytes(b'synthetic native code')
+        files = inventory(self.app)
+        signatures = {name: {'kind': 'ad-hoc', 'hardened_runtime': True, 'entitlements': {}}
+                      for name in ['app', 'engine']}
+        record = package.post_sign_record(identity, info, files, signatures, identity['engine_identity'])
+        manifest = {**self.manifest, 'identity': identity, 'signatures': signatures,
+                    'post_sign_receipt': record,
+                    'bundle': {**self.manifest['bundle'], 'files': files, 'sha256': object_digest(files)}}
+        package.verify_files(manifest, self.root)
+        manifest['post_sign_receipt'] = {**record, 'engine_sha256': 'b' * 64}
+        with self.assertRaisesRegex(ValueError, 'Post-sign preparation receipt'):
+            package.verify_files(manifest, self.root)
 
     def test_engine_receipt_binds_source_assets_schema_bytes_and_track(self):
         source = {'revision': 'a' * 40, 'assets': {'sha256': 'b' * 64}, 'store_schema': 40}
@@ -208,6 +312,33 @@ class SourceContract(unittest.TestCase):
             (root / 'untracked').touch()
             with self.assertRaisesRegex(ValueError, 'clean committed'):
                 clean_source(root)
+            (root / 'untracked').unlink()
+            (root / '.gitignore').write_text('.env\nempty-ignored/\n')
+            git('add', '.gitignore')
+            git('commit', '-m', 'ignore fixture metadata')
+            for relative in [ASSETS / '.env', ASSETS.parent / '.env']:
+                ignored = root / relative
+                ignored.write_text('synthetic ignored input, not a secret\n')
+                with self.assertRaisesRegex(ValueError, 'tracked source tree'):
+                    clean_source(root)
+                ignored.unlink()
+            empty = root / ASSETS / 'empty-ignored'
+            empty.mkdir()
+            with self.assertRaisesRegex(ValueError, 'tracked source tree'):
+                clean_source(root)
+            empty.rmdir()
+            # Ignored inputs outside the actual compiler-owned asset tree remain allowed.
+            (root / '.env').write_text('synthetic local configuration\n')
+            self.assertEqual(clean_source(root)['product_version'], '1.2.3')
+            with tempfile.TemporaryDirectory(prefix='nac outside asset ') as outside:
+                target = Path(outside) / 'shared.txt'
+                target.write_text('synthetic external bytes, not a secret\n')
+                alias = root / ASSETS.parent / 'shared.txt'
+                alias.symlink_to(target)
+                git('add', str(alias.relative_to(root)))
+                git('commit', '-m', 'tracked outside-dist symlink fixture')
+                with self.assertRaisesRegex(ValueError, 'Symlink'):
+                    clean_source(root)
 
 
 if __name__ == '__main__':

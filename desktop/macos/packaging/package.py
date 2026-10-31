@@ -12,7 +12,7 @@ import sys
 
 sys.dont_write_bytecode = True
 
-from signing import (SignaturePolicy, notarization_plan, signature_evidence,
+from signing import (SignaturePolicy, inspection_commands, notarization_plan, signature_evidence,
                      signing_commands, verification_commands)
 from native_receipt import (ENGINE as ENGINE_PATH, SHELL as SHELL_PATH,
                             expected_identity, validate_native_receipt)
@@ -87,19 +87,43 @@ def sign_adhoc(app, engine):
     return verify_signatures(app, engine)
 
 
-def verify_signatures(app, engine):
-    policy = SignaturePolicy('ad-hoc')
+def verify_signatures(app, engine, policy=None):
+    policy = policy or SignaturePolicy('ad-hoc')
     for command in verification_commands(app, [engine], policy):
         run(*command)
     results = {}
-    for label, target in [('engine', app / engine), ('app', app)]:
-        result = subprocess.run(['/usr/bin/codesign', '-d', '--entitlements', ':-', str(target)],
+    for label, inspection in zip(['engine', 'app'], inspection_commands(app, [engine])):
+        result = subprocess.run(inspection['entitlements_argv'],
                                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         entitlements = plistlib.loads(result.stdout) if result.stdout.strip() else {}
-        details = subprocess.run(['/usr/bin/codesign', '-d', '--verbose=4', str(target)],
+        details = subprocess.run(inspection['details_argv'],
                                  check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         results[label] = signature_evidence(details.stderr, entitlements, policy)
     return results
+
+
+def post_sign_record(identity, info, files, signatures, observed_engine):
+    """Outer preparation receipt; never change the already sealed identity marker."""
+    if observed_engine != identity['engine_identity']:
+        raise ValueError('Post-sign engine identity differs from the compiled source/build')
+    version = identity['source']['product_version']
+    if info.get('CFBundleShortVersionString') != version or info.get('CFBundleVersion') != version:
+        raise ValueError('Post-sign bundle version differs from root product version')
+    native = identity.get('native_build_receipt')
+    if native is not None and (info.get('CFBundleIdentifier') != native['bundle_identifier']
+                               or info.get('CFBundleName') != native['bundle_name']):
+        raise ValueError('Post-sign bundle metadata differs from the track factory receipt')
+    if set(signatures) != {'app', 'engine'} or any(
+            value != {'kind': 'ad-hoc', 'hardened_runtime': True, 'entitlements': {}}
+            for value in signatures.values()):
+        raise ValueError('Post-sign preparation requires verified ad-hoc signatures')
+    return {'schema_version': 1, 'phase': 'ad-hoc-preparation',
+            'source_revision': identity['source']['revision'], 'engine_identity': observed_engine,
+            'bundle_identifier': info['CFBundleIdentifier'], 'bundle_name': info['CFBundleName'],
+            'product_version': version, 'bundle_version': info['CFBundleVersion'],
+            'engine_sha256': files[ENGINE_PATH]['sha256'], 'native_sha256': files[SHELL_PATH]['sha256'],
+            'info_plist_sha256': files['Contents/Info.plist']['sha256'],
+            'signatures': signatures, 'qualified_consumer': False}
 
 
 def build_package(args):
@@ -160,11 +184,14 @@ def build_package(args):
     container = output / f'NAC-{purpose}-arm64.zip'
     run('/usr/bin/ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', app, container)
     files = inventory(app)
+    post_sign = post_sign_record(identity, plistlib.loads(plist_path.read_bytes()), files, signatures,
+                                json.loads(run(app / ENGINE_PATH, '__desktop-identity')))
     manifest = {'schema_version': 1, 'identity': identity, 'bundle': {
         'name': app.name, 'identifier': info['CFBundleIdentifier'], 'files': files,
         'sha256': object_digest(files), 'executables': executables},
         'container': {'name': container.name, 'sha256': digest(container), 'size': container.stat().st_size},
-        'signatures': signatures, 'qualification': {'developer_id': False, 'notarized': False,
+        'signatures': signatures, 'post_sign_receipt': post_sign,
+        'qualification': {'developer_id': False, 'notarized': False,
         'stapled': False, 'gatekeeper': False, 'quarantined_download': False,
         'applications_install': False, 'app_translocation': False, 'actual_app_runtime': False}}
     if args.normal:
@@ -192,6 +219,15 @@ def verify_files(manifest, directory):
     embedded = json.loads((directory / bundle['name'] / 'Contents/Resources/PackageIdentity.json').read_text())
     if embedded != manifest['identity']:
         raise ValueError('Embedded identity differs from outer manifest')
+    # Older preparation manifests remain readable. New manifests bind their own
+    # post-sign metadata to the exact bytes without asserting runtime qualification.
+    if 'post_sign_receipt' in manifest:
+        app = directory / bundle['name']
+        expected = post_sign_record(embedded, plistlib.loads((app / 'Contents/Info.plist').read_bytes()),
+                                   files, manifest['signatures'],
+                                   json.loads((app / 'Contents/Resources/engine-identity.json').read_text()))
+        if manifest['post_sign_receipt'] != expected:
+            raise ValueError('Post-sign preparation receipt differs from sealed bundle facts')
     if embedded.get('consumer_distribution') is not False or any(manifest['qualification'].values()):
         raise ValueError('Preparation format cannot establish consumer/distribution qualification')
 
@@ -246,6 +282,16 @@ def distribution_plan(args):
     output = new_directory(args.output)
     app = path.parent / manifest['bundle']['name']
     candidate = output / 'developer-id-candidate' / app.name
+    notary = notarization_plan(candidate, output / 'submission.zip', args.notary_profile)
+    notary['stages'].insert(0, {
+        'name': 'verify-developer-id-policy',
+        'argv': [sys.executable, '-B', str(Path(__file__).resolve()), 'verify-developer-id',
+                 '--app', str(candidate), '--certificate', args.certificate, '--team', args.team,
+                 '--output', str(output / 'signature-verification')],
+        'postconditions': {'kind': 'developer-id', 'team_id': args.team, 'hardened_runtime': True,
+                           'secure_timestamp': True, 'entitlements': {}},
+        'gate': 'Require a successful verification and signature-evidence.json from signature_evidence '
+                'for BOTH engine and app before creating or submitting the notary archive; stop on failure'})
     plan = {'schema_version': 1, 'execution_authorized': False,
             'source_revision': identity['source']['revision'], 'input_manifest_sha256': digest(path),
             'input_bundle_sha256': manifest['bundle']['sha256'],
@@ -253,11 +299,29 @@ def distribution_plan(args):
                                  ['/usr/bin/ditto', str(app), str(candidate)]],
             'signing_commands': signing_commands(candidate, [ENGINE_PATH], policy),
             'verification_commands': verification_commands(candidate, [ENGINE_PATH], policy),
-            'notarization': notarization_plan(candidate, output / 'submission.zip', args.notary_profile),
+            'signature_inspections': inspection_commands(candidate, [ENGINE_PATH]),
+            'notarization': notary,
             'required_gate': 'Qualified track identifiers and required normal-app native evidence, then explicit authorization for the designated NAC identity/profile and this exact artifact; '
                              'no commands executed, no distribution qualification inferred'}
     write_json(output / 'distribution-plan.json', plan)
     print(output / 'distribution-plan.json')
+
+
+def verify_developer_id(args):
+    """Read-only verification; does not sign, select credentials, submit or staple."""
+    require_mac()
+    app = Path(args.app).resolve(strict=True)
+    before = inventory(app)
+    policy = SignaturePolicy('developer-id', args.certificate, args.team)
+    signatures = verify_signatures(app, ENGINE_PATH, policy)
+    if inventory(app) != before:
+        raise ValueError('Candidate changed while verifying Developer ID signature policy')
+    output = new_directory(args.output)
+    write_json(output / 'signature-evidence.json', {
+        'schema_version': 1, 'kind': 'developer-id-signature-policy',
+        'bundle_inventory_sha256': object_digest(before), 'signatures': signatures,
+        'notary_submission_performed': False, 'consumer_qualification': False})
+    print(output / 'signature-evidence.json')
 
 
 def main():
@@ -290,6 +354,12 @@ def main():
     plan.add_argument('--notary-profile', required=True)
     plan.add_argument('--output', required=True)
     plan.set_defaults(action=distribution_plan)
+    developer = commands.add_parser('verify-developer-id', help='Read-only signature/entitlement policy gate; no signing or submission')
+    developer.add_argument('--app', required=True)
+    developer.add_argument('--certificate', required=True)
+    developer.add_argument('--team', required=True)
+    developer.add_argument('--output', required=True)
+    developer.set_defaults(action=verify_developer_id)
     args = parser.parse_args()
     args.action(args)
 

@@ -541,8 +541,8 @@ async fn run() -> Result<()> {
             #[cfg(unix)]
             if let Some(desktop) = desktop {
                 let result = run_server_inner(cli.server, &invocation_name, Some(&desktop)).await;
-                if result.is_err() {
-                    desktop.failed();
+                if let Err(error) = &result {
+                    desktop.failed(error);
                     return Err(anyhow!("bundled desktop engine startup failed"));
                 }
                 return result;

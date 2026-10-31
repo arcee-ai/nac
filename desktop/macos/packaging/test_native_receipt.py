@@ -1,11 +1,13 @@
 """Synthetic producer-output admission tests, separate from actual app evidence."""
 import copy
 import json
+import plistlib
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from native_receipt import (ENGINE, ENGINE_IDENTITY, FIXTURE_MARKERS, NORMAL_FLAGS,
+from native_receipt import (BUILD_SUPPORT, ENGINE, ENGINE_IDENTITY, FIXTURE_MARKERS, NORMAL_FLAGS,
                             NORMAL_SOURCES, RECEIPT, SHELL, expected_identity,
                             validate_native_receipt)
 from provenance import digest, write_json
@@ -25,6 +27,15 @@ class NativeReceiptContract(unittest.TestCase):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('// synthetic compiler input\n')
+        for name in BUILD_SUPPORT:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('# synthetic build support\n')
+        (self.app / 'Contents/Info.plist').write_bytes(plistlib.dumps({
+            'CFBundleIdentifier': 'ai.arcee.nac.dev', 'CFBundleName': 'NAC Development'}))
+        factory = patch('native_receipt.run', return_value='ai.arcee.nac.dev\nNAC Development')
+        self.factory = factory.start()
+        self.addCleanup(factory.stop)
         self.source = {'revision': 'a' * 40, 'product_version': '1.2.3'}
         self.engine_receipt = {'build': {'id': 'dev-' + 'a' * 40, 'track': 'dev'},
                                'engine': {'sha256': digest(self.app / ENGINE)}}
@@ -32,6 +43,9 @@ class NativeReceiptContract(unittest.TestCase):
         write_json(self.app / ENGINE_IDENTITY, self.identity)
         self.receipt = {'version': 1, 'phase': 'unsigned-build', 'mode': 'app-build',
                         'normal_startup': True, 'smoke_instrumentation': False, 'source_dirty': False,
+                        'instance_smoke_instrumentation': False, 'bundle_identifier': 'ai.arcee.nac.dev',
+                        'bundle_name': 'NAC Development',
+                        'build_support_files': {name: digest(self.root / name) for name in BUILD_SUPPORT},
                         'preview_definitions_excluded': True, 'source_head': self.source['revision'],
                         'compiler_flags': NORMAL_FLAGS.copy(),
                         'native_source_files': {name: digest(self.root / name) for name in NORMAL_SOURCES},
@@ -57,6 +71,7 @@ class NativeReceiptContract(unittest.TestCase):
     def test_dirty_preview_smoke_wrong_mode_and_missing_proof_fail(self):
         for key, value in [('mode', 'build'), ('mode', 'startup-build'), ('source_dirty', True),
                            ('normal_startup', False), ('smoke_instrumentation', True),
+                           ('instance_smoke_instrumentation', True),
                            ('preview_definitions_excluded', False), ('phase', 'signed'), ('version', 2)]:
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
                 self.validate({**self.receipt, key: value})
@@ -77,6 +92,42 @@ class NativeReceiptContract(unittest.TestCase):
             sources = {**self.receipt['native_source_files'], name: 'b' * 64}
             with self.assertRaisesRegex(ValueError, 'source list'):
                 self.validate({**self.receipt, 'native_source_files': sources})
+
+    def test_build_support_is_exact_and_verified_before_readonly_factory(self):
+        missing = copy.deepcopy(self.receipt)
+        del missing['build_support_files']['desktop/macos/BundleIdentity.sh']
+        with self.assertRaisesRegex(ValueError, 'build support'):
+            self.validate(missing)
+        (self.root / 'desktop/macos/BundleIdentity.sh').write_text('# changed factory\n')
+        with self.assertRaisesRegex(ValueError, 'support hash'):
+            self.validate()
+        self.factory.assert_not_called()
+
+    def test_bundle_metadata_must_match_factory_receipt_and_actual_plist(self):
+        for field in ['bundle_identifier', 'bundle_name']:
+            with self.assertRaisesRegex(ValueError, 'bundle metadata'):
+                self.validate({**self.receipt, field: 'wrong track metadata'})
+        self.factory.return_value = 'ai.arcee.nac\nNAC'
+        with self.assertRaisesRegex(ValueError, 'bundle metadata'):
+            self.validate()
+        self.factory.return_value = 'malformed factory response'
+        with self.assertRaisesRegex(ValueError, 'factory output'):
+            self.validate()
+
+    def test_factory_is_reused_for_stable_engine_instead_of_ambient_track(self):
+        self.engine_receipt['build'] = {'track': 'stable', 'id': 'stable-' + 'a' * 40}
+        self.identity = expected_identity(self.source, self.engine_receipt['build'])
+        write_json(self.app / ENGINE_IDENTITY, self.identity)
+        (self.app / 'Contents/Info.plist').write_bytes(plistlib.dumps({
+            'CFBundleIdentifier': 'ai.arcee.nac', 'CFBundleName': 'NAC'}))
+        self.receipt.update(engine_identity=self.identity, bundle_identifier='ai.arcee.nac',
+                            bundle_name='NAC', info_plist_sha256=digest(self.app / 'Contents/Info.plist'))
+        self.factory.return_value = 'ai.arcee.nac\nNAC'
+        self.validate()
+        args = self.factory.call_args.args
+        self.assertEqual(args[1], self.root / 'desktop/macos/BundleIdentity.sh')
+        self.assertEqual(args[2], self.app / ENGINE_IDENTITY)
+        self.assertEqual(args[3], 'normal')
 
     def test_hash_binds_actual_compiler_inputs(self):
         name = sorted(NORMAL_SOURCES)[0]
