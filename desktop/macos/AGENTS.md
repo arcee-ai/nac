@@ -2,7 +2,7 @@
 
 This owner contains the ALL-340 disposable AppKit/WKWebView preview and the
 ALL-341 private identified engine launch/control seam, and ALL-342 normal local
-startup. Read the
+startup, plus ALL-343 app reopen and safe store-conflict retry. Read the
 root guide before changes. Swift owns only the window, isolated fixture, and
 its exact bundled child. Rust remains the execution/persistence/permission
 authority; the production React UI and HTTP/SSE client remain shared.
@@ -27,6 +27,17 @@ authority; the production React UI and HTTP/SSE client remain shared.
   its profile. Consumer close/reopen/Quit, persistent preferences, signing, and distribution
   belong to later tickets. EngineProtocol/PreviewEngine own the private bounded
   launch channel; it conveys identity, never API/permission authority.
+- `AppInstance` owns existing-window presentation, not singleton/store authority.
+  Ordinary normal-app launches use LaunchServices reopening. `StoreConflictRetry`
+  fences each failed child's retirement; only explicit native Retry restarts the
+  pinned selected configuration through the ordinary Rust serving lease.
+  Preserve PreviewApp's common private `fail(String)` funnel and the engine's
+  receipt invalidation before callbacks. Menus/bridge remain the separate346 owner.
+- `BundleIdentity.sh` maps the exact bundled engine identity's track to approved
+  normal bundle IDs. Preview and instance-smoke identities stay separate. Normal
+  source lists and binaries exclude all preview providers and smoke definitions;
+  `build-receipt.json` records the selected source list and hashes. The existing
+  builder is the single app writer; packaging consumes its output.
 - Keep smoke instrumentation behind `PREVIEW_SMOKE`; it may inspect/drive the
   DOM but must not become an app bridge or replace production workflows.
 - Run `./desktop/macos/preview.sh smoke` on an actual Aqua macOS session and the
