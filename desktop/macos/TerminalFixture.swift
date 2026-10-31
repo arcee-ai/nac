@@ -90,10 +90,14 @@ enum TerminalFixture {
                     "syntheticEvents", "trustedKeys", "syntheticKeys", "phase_sequence", "root_token", "textarea_token",
                     "js_now_ms", "performance_origin_ms", "observed_bytes", "expected_bytes", "prefix_bytes",
                     "mismatch_offset", "inflight", "written", "rejected", "uncertain", "unknown", "errors",
-                    "dropped_events", "dropped_requests", "handler_calls", "handler_total_ms", "handler_max_ms",
-                    "request_first_ms", "request_last_ms", "response_first_ms", "response_last_ms"]
+                    "dropped_events", "dropped_requests", "handler_calls", "handler_total_ms", "handler_max_ms"]
                 for key in numbers {
                     if let value = source[key] as? NSNumber, value.doubleValue.isFinite { safe[key] = value }
+                }
+                // Null means unobserved; zero remains a valid document-clock timestamp.
+                for key in ["request_first_ms", "request_last_ms", "response_first_ms", "response_last_ms"] {
+                    if let value = source[key] as? NSNumber, value.doubleValue.isFinite { safe[key] = value }
+                    else { safe[key] = NSNull() }
                 }
                 for key in ["capture_complete", "retired", "reference_exact", "measurement_degraded"] {
                     if let value = source[key] as? Bool { safe[key] = value }
@@ -384,8 +388,8 @@ enum TerminalFixture {
           const result={};
           for(const key of ['document_id','runtime_id','root_token','textarea_token','phase_sequence',
             'observed_bytes','prefix_bytes','mismatch_offset','inflight','written','rejected','uncertain','unknown',
-            'errors','dropped_events','dropped_requests','handler_calls','handler_total_ms','handler_max_ms',
-            'request_first_ms','request_last_ms','response_first_ms','response_last_ms']) result[key]=p[key] ?? 0;
+            'errors','dropped_events','dropped_requests','handler_calls','handler_total_ms','handler_max_ms']) result[key]=p[key] ?? 0;
+          for(const key of ['request_first_ms','request_last_ms','response_first_ms','response_last_ms']) result[key]=p[key] ?? null;
           for(const key of ['inputPosts','inputBytes','inputSettled','inputWritten','trustedEvents','syntheticEvents','trustedKeys','syntheticKeys']) result[key]=p[key] || 0;
           const rows=includeRows || stamp()-lastRows>=1000;
           if(rows) lastRows=stamp();

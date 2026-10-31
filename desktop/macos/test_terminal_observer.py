@@ -39,16 +39,18 @@ function fixture() {
    implementation:run=>{implementation=run;},install:()=>w.Function(observer)()};
 }
 (async()=>{const AsyncFunction=Object.getPrototypeOf(async()=>{}).constructor;
- await new AsyncFunction('fixture','assert','flush','Response','TextEncoder',body)(fixture,assert,flush,Response,TextEncoder);
- console.log(JSON.stringify({passed:true}));})().catch(error=>{console.error(error);process.exitCode=1;});
+ const result=await new AsyncFunction('fixture','assert','flush','Response','TextEncoder',body)(fixture,assert,flush,Response,TextEncoder);
+ console.log(JSON.stringify({passed:true,result:result??null}));})().catch(error=>{console.error(error);process.exitCode=1;});
 """
         result = subprocess.run(['node', '-e', script], input=json.dumps({
             'observer': observer, 'module': str(module), 'body': body}),
             capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), {'passed': True})
+        value = json.loads(result.stdout)
+        self.assertTrue(value['passed'])
+        return value['result']
 
-    def native_evidence(self):
+    def native_evidence(self, diagnostic_samples=None):
         source = Path(__file__).with_name('TerminalFixture.swift')
         main = r'''
 import Foundation
@@ -77,7 +79,7 @@ var other=sample;other["runtime_id"]="2";other["inputPosts"]=999
 retired.observe(other,begin:250,end:260)
 let mismatch=model();mismatch.file("unicode",Data("PRIVATE-WRONG-FILE".utf8))
 let oversized=model(60,["oversized":String(repeating:"x",count:70000)])
-let output: [String:Any] = ["failure":failure,"stillFailed":stillFailed,
+var output: [String:Any] = ["failure":failure,"stillFailed":stillFailed,
  "retired":retired.snapshot(state:"failed",stage:"target",now:300),
  "mismatch":mismatch.snapshot(state:"failed",stage:"proof",now:300),
  "interrupt":model(10).snapshot(state:"ready",stage:"ready-emission",now:230),
@@ -85,6 +87,12 @@ let output: [String:Any] = ["failure":failure,"stillFailed":stillFailed,
  "unicode_reference":TerminalFixture.inputReference(command:TerminalFixture.unicodeCommand,expectedBytes:121),
  "interrupt_reference":TerminalFixture.inputReference(command:nil,expectedBytes:1),
  "resize_reference":TerminalFixture.inputReference(command:nil,expectedBytes:0)]
+let samples = try JSONSerialization.jsonObject(with:FileHandle.standardInput.readDataToEndOfFile()) as! [[String:Any]]
+output["timing_samples"] = samples.map { sample -> [String:Any] in
+    let observation=model()
+    observation.observe(sample,begin:210,end:220,baseline:true)
+    return observation.snapshot(state:"ready",stage:"ready-emission",now:230,seal:true)
+}
 print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self))
 '''
         with tempfile.TemporaryDirectory(prefix='nac352-source-test-') as temp:
@@ -96,7 +104,8 @@ print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[
                 str(directory / 'main.swift'), '-o', str(executable)],
                 capture_output=True, text=True, timeout=90)
             self.assertEqual(build.returncode, 0, build.stderr)
-            result = subprocess.run([str(executable)], capture_output=True, text=True, check=True, timeout=10)
+            result = subprocess.run([str(executable)], input=json.dumps(diagnostic_samples or []),
+                capture_output=True, text=True, check=True, timeout=10)
             self.assertNotIn('PRIVATE', result.stdout)
             for flags in ([], ['-D', 'PREVIEW_SMOKE']):
                 (directory / 'main.swift').write_text('import Foundation\n')
@@ -164,6 +173,45 @@ g.dom.window.close();
 const h=fixture();h.begin();h.textarea.replaceWith(h.textarea.cloneNode());
 assert.equal(h.begin(2),false);assert.equal(h.snapshot().capture_complete,false);h.dom.window.close();
 ''')
+
+    def test_request_response_timing_availability_and_zero_clock_projection(self):
+        samples = self.diagnostic_case(r'''
+const samples=[];
+const requestKeys=['request_first_ms','request_last_ms'];
+const responseKeys=['response_first_ms','response_last_ms'];
+for(const start of [0,125]) {
+ const f=fixture();let now=start;
+ Object.defineProperty(f.w.performance,'now',{value:()=>now});
+ assert.equal(f.begin(),true);
+ const capture=(request,response)=>{
+  const value=JSON.parse(JSON.stringify(f.snapshot()));
+  for(const key of requestKeys) assert.equal(value[key],request,key);
+  for(const key of responseKeys) assert.equal(value[key],response,key);
+  samples.push(value);
+ };
+ capture(null,null); // Ready before any request or response.
+ let resolve;f.implementation(()=>new Promise(done=>{resolve=done;}));
+ const pending=f.w.fetch(f.path,f.options([65]));
+ capture(start,null); // A pending request does not invent a response time.
+ resolve(Response.json({outcome:'written'}));await pending;await flush();
+ capture(start,start); // Zero is also a valid observed response timestamp.
+ now=start+25;
+ f.implementation(()=>Promise.resolve(Response.json({outcome:'written'})));
+ await f.w.fetch(f.path,f.options([65]));await flush();
+ const value=JSON.parse(JSON.stringify(f.snapshot()));
+ for(const key of ['request_first_ms','response_first_ms']) assert.equal(value[key],start,key);
+ for(const key of ['request_last_ms','response_last_ms']) assert.equal(value[key],now,key);
+ samples.push(value);f.dom.window.close();
+}
+return samples;
+''')
+        projected = self.native_evidence(samples)['timing_samples']
+        keys = ('request_first_ms', 'request_last_ms', 'response_first_ms', 'response_last_ms')
+        for source, report in zip(samples, projected, strict=True):
+            for stage in ('before', 'last'):
+                for key in keys:
+                    self.assertIn(key, report[stage])
+                    self.assertEqual(report[stage][key], source[key])
 
     def test_fetch_identity_error_and_trust_noninterference(self):
         self.diagnostic_case(r'''
