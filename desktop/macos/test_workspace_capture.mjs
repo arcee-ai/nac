@@ -27,7 +27,7 @@ function fixture(html, hash = '#/session/owned-child/insights') {
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
     return new dom.window.DOMRect(0, 0, this.closest('[data-zero]') ? 0 : 100, 24);
   };
-  return { window: dom.window, probe: (expected) => dom.window.Function('expected', script)(expected),
+  return { window: dom.window, probe: (expected, permissionState = null, sessionState = null) => dom.window.Function('expected', 'permissionState', 'sessionState', script)(expected, permissionState, sessionState),
     close: () => dom.window.close() };
 }
 
@@ -155,3 +155,106 @@ test('probe waits for revealed content without modifying styles or loading flags
     assert.equal(f.probe(child).ready, true);
   } finally { f.close(); }
 });
+
+
+// Approval observations read a modeled broker snapshot; no reply or live HTTP.
+const approval = {kind:'approval',id:'owned-direct',requestID:'owned-request',text:'/private/owned-fixture/approval.txt'};
+const pending = {requests:[{id:'owned-request',session_id:'owned-direct',tool:'read',call_id:'wk-approval',
+  resources:[{action:'read',resource:approval.text,display:approval.text}]}]};
+const approvalHTML = '<div data-nac-content inert>' + composer + message + '</div><div data-nac-overlays>' +
+  '<div role="dialog" aria-labelledby="permission-title"><h2 id="permission-title">Permission required</h2>' +
+  '<section aria-label="Pending permission requests"><button aria-pressed="true">this session (owned-direct): read</button></section>' +
+  '<section aria-label="Requested access">Requested by this session (owned-direct). ' + approval.text + '</section>' +
+  '<button id="allow-once">Allow once</button></div></div>';
+
+function approvalObservation(html = approvalHTML, state = pending, hash = '#/session/owned-direct/insights') {
+  const f = fixture(html, hash);
+  try {
+    const before = f.window.document.querySelector('[data-nac-content]').outerHTML;
+    const result = f.probe(approval, state);
+    assert.equal(f.window.document.querySelector('[data-nac-content]').outerHTML, before);
+    assert.equal(f.window.document.querySelector('[data-nac-content]').inert ||
+      f.window.document.querySelector('[data-nac-content]').hasAttribute('inert'), true);
+    return result;
+  } finally { f.close(); }
+}
+
+test('active owned approval dialog qualifies while background stays inert', () => {
+  assert.equal(approvalObservation().ready, true);
+});
+for (const [name, field, value] of [
+  ['wrong request','id','another-request'], ['wrong owner','session_id','another-session'],
+  ['wrong call','call_id','another-call'],
+]) {
+  test(name + ' cannot qualify approval', () => {
+    const state = structuredClone(pending); state.requests[0][field] = value;
+    assert.equal(approvalObservation(approvalHTML, state).ready, false);
+  });
+}
+test('wrong requested file cannot qualify approval', () => {
+  const state = structuredClone(pending); state.requests[0].resources[0].resource = '/another/approval.txt';
+  assert.equal(approvalObservation(approvalHTML, state).ready, false);
+});
+test('retired broker request cannot qualify stale visible controls', () => {
+  assert.equal(approvalObservation(approvalHTML, {requests:[]}).ready, false);
+});
+test('wrong modal selection cannot qualify approval', () => {
+  assert.equal(approvalObservation(approvalHTML.replaceAll('(owned-direct)', '(another-session)')).ready, false);
+});
+test('hidden modal or hidden Allow once cannot qualify approval', () => {
+  assert.equal(approvalObservation(approvalHTML.replace('role="dialog"', 'role="dialog" style="opacity:0"')).ready, false);
+  assert.equal(approvalObservation(approvalHTML.replace('id="allow-once"', 'id="allow-once" style="visibility:hidden"')).ready, false);
+});
+test('retired disabled controls cannot qualify approval', () => {
+  assert.equal(approvalObservation(approvalHTML.replace('id="allow-once"', 'id="allow-once" disabled')).ready, false);
+});
+test('wrong current route cannot qualify approval', () => {
+  assert.equal(approvalObservation(approvalHTML, pending, '#/session/another-session/insights').ready, false);
+});
+
+const richMarkdown = "WK_RICH_COMPLETE\n\n| Engine | Workspace |\n| --- | --- |\n| System WebKit | shared React |\n\nA formula: $x^2 + y^2 = z^2$.\n\n```typescript\nexport const webkitFixture = 351;\n```\n\n[Fixture source](workspace.ts) and [NAC documentation](https://github.com/arcee-ai/nac).";
+
+const richTarget = {kind:'rich',id:'owned-rich',markdown:richMarkdown};
+const richState = {metadata:{session_id:'owned-rich'},messages:[{role:'user',content:'WK_RICH'},{role:'assistant',content:richMarkdown}],message_created_at:[null,'fixture-timestamp']};
+const richHTML = '<div data-nac-content><div class="overflow-auto"><div class="markdown-content"><p>WK_RICH_COMPLETE</p><table><tr><th>Engine</th><th>Workspace</th></tr><tr><td>System WebKit</td><td>shared React</td></tr></table><p>A formula <mjx-container jax="CHTML"><mjx-math><mjx-mi><mjx-c>x</mjx-c></mjx-mi></mjx-math></mjx-container></p><pre><code><span style="color:teal">export const webkitFixture = 351;</span></code></pre></div></div></div>' + composer;
+function richObservation(html=richHTML,state=richState,options={}) {
+ const f=fixture(html,options.hash||'#/session/owned-rich/insights');
+ try {
+  Object.defineProperty(f.window.document,'fonts',{value:{status:options.fonts===false?'loading':'loaded',check:()=>options.fonts!==false}});
+  f.window.performance.getEntriesByType=()=>options.resources===false?[]:[{name:'http://127.0.0.1/mathjax-fixture.woff'}];
+  if(options.offscreen) f.window.HTMLElement.prototype.getBoundingClientRect=function(){return new f.window.DOMRect(1100,0,100,24);};
+  if(options.clipped) {f.window.document.querySelector('.overflow-auto').style.overflowX='auto';f.window.HTMLElement.prototype.getBoundingClientRect=function(){return new f.window.DOMRect(this.classList.contains('overflow-auto')?20:0,0,100,24);};}
+  const prior=f.window.document.body.innerHTML;
+  const result=f.probe(richTarget,null,state);
+  assert.equal(f.window.document.body.innerHTML,prior);
+  return result;
+ } finally {f.close();}
+}
+test('rich capture binds full settled owned answer to all actual rich targets',()=>{
+ const r=richObservation();assert.equal(r.ready,true);assert.equal(r.full_answer,richMarkdown);assert.equal(r.message_identity.visible_index,1);assert.equal(r.surfaces.length,5);
+});
+for(const [name,html] of [
+ ['marker only',richHTML.replace(/<table>[\s\S]*?<\/pre>/,'')],
+ ['missing table',richHTML.replace(/<table>[\s\S]*?<\/table>/,'')],
+ ['wrong table',richHTML.replace('shared React','another workspace')],
+ ['missing code',richHTML.replace(/<pre>[\s\S]*?<\/pre>/,'')],
+ ['wrong code',richHTML.replace('351;','352;')],
+ ['unhighlighted code',richHTML.replace(' style="color:teal"','')],
+ ['missing MathJax',richHTML.replace(/<mjx-container[\s\S]*?<\/mjx-container>/,'')],
+ ['empty MathJax wrapper',richHTML.replace(/<mjx-math>[\s\S]*?<\/mjx-math>/,'')],
+ ['hidden descendant',richHTML.replace('<table>','<table style="visibility:hidden">')],
+ ['transparent ancestor',richHTML.replace('class="markdown-content"','class="markdown-content" style="opacity:0"')],
+ ['unfinished fade',richHTML.replace('class="markdown-content"','class="markdown-content" style="opacity:0.5"')],
+ ['aria hidden',richHTML.replace('data-nac-content','data-nac-content aria-hidden="true"')],
+ ['inert background',richHTML.replace('data-nac-content','data-nac-content inert')],
+ ['zero geometry',richHTML.replace('<table>','<table data-zero>')],
+ ['loading',richHTML+loader],['error view',richHTML+'<div role="alert">failed</div>'],
+ ['duplicate rich answer',richHTML+richHTML],
+])test(name+' cannot qualify rich capture',()=>assert.equal(richObservation(html).ready,false));
+for(const [name,mutate] of [
+ ['wrong owner',s=>s.metadata.session_id='other'],['stale full answer',s=>s.messages[1].content+=' stale'],
+ ['wrong prompt',s=>s.messages[0].content='other'],['active run',s=>s.active_run={generation:1}],
+ ['active compaction',s=>s.active_compaction={}],['durable failure',s=>s.run_failure={}],
+ ['extra transcript message',s=>s.messages.push(s.messages[1])],['paged old transcript',s=>s.message_page={start:2,total:4}],
+])test(name+' cannot bind rich answer',()=>{const state=structuredClone(richState);mutate(state);assert.equal(richObservation(richHTML,state).ready,false);});
+for(const [name,options] of [['fonts loading',{fonts:false}],['math font absent',{resources:false}],['offscreen',{offscreen:true}],['clipped',{clipped:true}],['wrong route',{hash:'#/session/other/insights'}]])test(name+' cannot qualify rich capture',()=>assert.equal(richObservation(richHTML,richState,options).ready,false));

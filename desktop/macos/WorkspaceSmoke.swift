@@ -174,11 +174,16 @@ final class WorkspaceSmoke {
 
     enum CaptureTarget {
         case project(id: String, title: String)
+        case approval(id: String, requestID: String, path: String)
+        case rich(id: String, markdown: String)
         case transcript(id: String, message: String, readOnly: Bool = false, identityText: String? = nil)
 
         var payload: [String: Any] {
             switch self {
             case let .project(id, title): return ["kind": "project", "id": id, "text": title]
+            case let .rich(id, markdown): return ["kind": "rich", "id": id, "markdown": markdown]
+            case let .approval(id, requestID, path):
+                return ["kind": "approval", "id": id, "requestID": requestID, "text": path]
             case let .transcript(id, message, readOnly, identityText):
                 var value: [String: Any] = ["kind": "transcript", "id": id, "text": message, "readOnly": readOnly]
                 if let identityText { value["identityText"] = identityText }
@@ -207,6 +212,80 @@ final class WorkspaceSmoke {
         }
       }
       return null;
+    }
+    if (expected.kind === 'approval') {
+      const requests = permissionState?.requests || [];
+      const request = requests.length === 1 ? requests[0] : null;
+      const owned = request?.id === expected.requestID && request?.session_id === expected.id &&
+        request?.tool === 'read' && request?.call_id === 'wk-approval' &&
+        request.resources.some(r => r.action === 'read' && r.resource === expected.text && r.display === expected.text);
+      const dialogs = [...document.querySelectorAll('[data-nac-overlays] [role="dialog"]')];
+      const dialog = dialogs.length === 1 ? dialogs[0] : null;
+      const heading = dialog && document.getElementById(dialog.getAttribute('aria-labelledby'));
+      const queue = dialog?.querySelector('[aria-label="Pending permission requests"]');
+      const entries = [...(queue?.querySelectorAll('button') || [])];
+      const selected = entries.length === 1 && entries[0].getAttribute('aria-pressed') === 'true' ? entries[0] : null;
+      const access = dialog?.querySelector('[aria-label="Requested access"]');
+      const allow = [...(dialog?.querySelectorAll('button') || [])].find(b => b.textContent.trim() === 'Allow once');
+      const selection = heading?.textContent.trim() === 'Permission required' &&
+        selected?.textContent.includes('(' + expected.id + '): read') &&
+        access?.textContent.includes('(' + expected.id + ')') && access?.textContent.includes(expected.text);
+      const enabled = allow && !allow.disabled && !allow.closest('[inert]') && selected && !selected.disabled;
+      const surfaces = [dialog, heading, selected, access, allow].map(inspect);
+      const visible = surfaces.every(s => s.visible);
+      const reason = !route ? 'requested route not current' : !owned ? 'owned pending read no longer current' :
+        !selection ? 'approval dialog does not match owned request' : !enabled ? 'approval control unavailable' :
+        !visible ? 'approval dialog not fully visible' : document.visibilityState !== 'visible' ? 'document not visible' : 'ready';
+      return {ready:reason === 'ready', reason, expected, hash, visibility:document.visibilityState,
+        loadingConversation:loading, permission_request_id:request?.id || null, surfaces};
+    }
+    if (expected.kind === 'rich') {
+      // One freshly created owned fixture, one WK_RICH prompt and one settled
+      // exact answer. The public snapshot has ordinals, not durable message IDs.
+      const messages = sessionState?.messages || [];
+      const index = messages.findIndex(m => m.role === 'assistant' && m.content === expected.markdown);
+      const fullAnswer = index >= 0 ? messages[index].content : null;
+      const settled = sessionState?.metadata?.session_id === expected.id && !sessionState.active_run &&
+        !sessionState.active_compaction && !sessionState.run_failure && !sessionState.transcript_recovery_warning &&
+        messages.length === 2 && index === 1 && messages[0].role === 'user' && messages[0].content === 'WK_RICH' &&
+        (!sessionState.message_page || sessionState.message_page.start === 0 && sessionState.message_page.total === 2);
+      const candidates = [...document.querySelectorAll('[data-nac-content] .markdown-content')].filter(e =>
+        !e.closest('[inert],[role=dialog]') && !e.classList.contains('streaming') && e.textContent.includes('WK_RICH_COMPLETE'));
+      const rich = candidates.length === 1 ? candidates[0] : null;
+      function richInspect(element) {
+        const value = inspect(element);
+        const r = element?.getBoundingClientRect();
+        let bounded = !!r && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+        for (let a = element?.parentElement; a && bounded; a = a.parentElement) {
+          if (a.hasAttribute('inert') || a.getAttribute('aria-hidden') === 'true') bounded = false;
+          const style = getComputedStyle(a), clip = a.getBoundingClientRect();
+          if (/(auto|scroll|hidden|clip)/.test(style.overflowX) && (r.left < clip.left || r.right > clip.right)) bounded = false;
+          if (/(auto|scroll|hidden|clip)/.test(style.overflowY) && (r.top < clip.top || r.bottom > clip.bottom)) bounded = false;
+        }
+        return {...value, within_frame:bounded, visible:value.visible && bounded &&
+          !element?.closest('[inert],[aria-hidden="true"]')};
+      }
+      const table = rich?.querySelector('table');
+      const code = rich?.querySelector('pre code');
+      const highlight = code?.querySelector('span[style]');
+      const math = rich?.querySelector('mjx-container[jax="CHTML"]');
+      const glyph = math?.querySelector('mjx-math mjx-c');
+      const tableText = table && [...table.querySelectorAll('th,td')].map(e=>e.textContent.trim());
+      const literal = JSON.stringify(tableText) === JSON.stringify(['Engine','Workspace','System WebKit','shared React']) &&
+        code?.textContent.trim() === 'export const webkitFixture = 351;' && math?.parentElement?.textContent.includes('A formula');
+      const fonts = document.fonts?.status === 'loaded' && document.fonts.check('16px Inter') &&
+        performance.getEntriesByType('resource').some(e=>/mathjax.*woff/i.test(e.name));
+      const surfaces = [table,code,highlight,math,glyph].map(richInspect);
+      const sentinel = rich ? [...rich.querySelectorAll('p')].find(e=>e.textContent.trim()==='WK_RICH_COMPLETE') : null;
+      const reason = !route ? 'requested route not current' : !settled ? 'owned full answer not settled' :
+        loading || !composer || document.querySelector('button[aria-label="Stop run"],[role="alert"]') ? 'transcript loading or error' :
+        !rich || !literal ? 'owned actual rich content missing' : !fonts ? 'rich fonts not ready' :
+        !surfaces.every(s=>s.visible) ? 'rich targets outside visible frame' : document.visibilityState !== 'visible' ? 'document not visible' : 'ready';
+      return {ready:reason==='ready',reason,expected,hash,loadingConversation:loading,visibility:document.visibilityState,
+        full_answer:fullAnswer, message_identity:{session_id:expected.id,visible_index:index,
+          created_at:sessionState?.message_created_at?.[index] ?? null,message_count:messages.length},
+        viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},fonts_ready:!!fonts,surfaces,
+        sentinel_observation:richInspect(sentinel)};
     }
     let element = expected.kind === 'project' ? null : findText(expected.text);
     if (expected.kind === 'project') {
@@ -249,8 +328,15 @@ final class WorkspaceSmoke {
     """#
 
     func captureReadiness(_ target: CaptureTarget) async throws -> [String: Any] {
+        var arguments: [String: Any] = ["expected": target.payload, "permissionState": NSNull(), "sessionState": NSNull()]
+        if case let .rich(id, _) = target {
+            arguments["sessionState"] = try await js("const r=await fetch('/sessions/' + \(quote(id)),{cache:'no-store'}); if(!r.ok)throw Error('Owned snapshot unavailable'); return await r.json();")
+        }
+        if case let .approval(id, _, _) = target {
+            arguments["permissionState"] = try await js("const r=await fetch('/sessions/' + \(quote(id)) + '/permissions',{cache:'no-store'}); if(!r.ok)throw Error('Permission state unavailable'); return await r.json();")
+        }
         guard let value = try await app.webView.callAsyncJavaScript(Self.captureReadinessScript,
-            arguments: ["expected": target.payload], in: nil, contentWorld: .page) as? [String: Any] else {
+            arguments: arguments, in: nil, contentWorld: .page) as? [String: Any] else {
             throw PreviewError.message("Capture readiness returned no observation")
         }
         return value
@@ -322,6 +408,27 @@ final class WorkspaceSmoke {
             let after = try await captureReadiness(target)
             capture["after_snapshot_readiness"] = after
             ready = ready && after["ready"] as? Bool == true
+        }
+        if let target, case let .rich(_, markdown) = target {
+            let before = readiness["message_identity"] as? NSDictionary
+            let after = (capture["after_snapshot_readiness"] as? [String: Any])?["message_identity"] as? NSDictionary
+            ready = ready && before != nil && after != nil && before!.isEqual(after!)
+            let file = Bundle.main.resourceURL!.appendingPathComponent("workspace-build.json")
+            guard let source = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any],
+                  source["source_status"] as? String == "" else {
+                throw PreviewError.message("Missing clean exact-source rich fixture identity")
+            }
+            capture["source_identity"] = ["source_head": source["source_head"]!,
+                "engine_sha256": source["engine_sha256"]!, "native_sha256": source["native_sha256"]!]
+            capture["expected_answer_sha256"] = SHA256.hash(data: Data(markdown.utf8)).map { String(format: "%02x", $0) }.joined()
+            for (key, observation) in [("before", readiness), ("after", capture["after_snapshot_readiness"] as? [String: Any] ?? [:])] {
+                guard let answer = observation["full_answer"] as? String, answer == markdown else {
+                    throw PreviewError.message("Owned settled answer changed around rich capture")
+                }
+                capture["settled_answer_sha256_" + key] = SHA256.hash(data: Data(answer.utf8)).map { String(format: "%02x", $0) }.joined()
+            }
+            capture["png_width"] = bitmap.pixelsWide
+            capture["png_height"] = bitmap.pixelsHigh
         }
         capture["semantic_ready"] = ready
         let afterSurface = app.window.isVisible && app.window.occlusionState.contains(.visible)

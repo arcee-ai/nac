@@ -25,7 +25,7 @@ extension WorkspaceSmoke {
         }
         await check("markdown-math") {
             try await self.waitJS("table, formula and highlighted code", "return !!document.querySelector('table') && !!document.querySelector('mjx-container') && !!document.querySelector('pre span[style]');")
-            try await self.snapshot("rich-chat.png", expecting: .transcript(id: self.sessionID, message: "WK_RICH_COMPLETE"))
+            try await self.snapshot("rich-chat.png", expecting: .rich(id: self.sessionID, markdown: WorkspaceFixture.rich))
             return "Actual Markdown table, MathJax and highlighted TypeScript in production transcript"
         }
         await check("transcript") {
@@ -118,7 +118,11 @@ extension WorkspaceSmoke {
         await check("approvals") {
             try await self.send("WK_APPROVAL")
             try await self.waitJS("real Rust approval request", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Allow once') && document.body.innerText.includes('approval.txt');")
-            try await self.snapshot("approval.png", expecting: .transcript(id: self.sessionID, message: "WK_RICH_COMPLETE"))
+            let path = URL(fileURLWithPath: WorkspaceFixture.externalPath).resolvingSymlinksInPath().path
+            guard let requestID = try await self.js("const r=await fetch('/sessions/' + \(self.quote(self.sessionID)) + '/permissions',{cache:'no-store'}); if(!r.ok)return null; const state=await r.json(); return state.requests.length === 1 ? state.requests[0].id : null;") as? String else {
+                throw PreviewError.message("Expected one owned pending approval request")
+            }
+            try await self.snapshot("approval.png", expecting: .approval(id: self.sessionID, requestID: requestID, path: path))
             try await self.button("Allow once")
             try await self.waitJS("approval settlement", "return document.body.innerText.includes('WK_APPROVAL_COMPLETE');")
             try await self.idle()
