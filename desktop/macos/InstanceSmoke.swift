@@ -191,6 +191,7 @@ final class InstanceSmoke {
             write()
             if observation["ready"] as? Bool == true, !webView.isHidden, !webView.isLoading,
                window.isVisible, workspaceOrigin(webView.url) == origin, webView.url?.path == "/",
+               workspaceOrigin(baseURL()) == origin,
                engine.receipt?.incarnation == receipt.incarnation,
                engine.receipt?.store == expectedStore, failure() == nil {
                 ready = true
