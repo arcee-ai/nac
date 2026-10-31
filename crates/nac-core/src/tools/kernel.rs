@@ -689,11 +689,12 @@ pub struct ToolSnapshot {
     entries: Vec<Arc<dyn ErasedTool>>,
 }
 
-// Private routing for the two service-issued human capabilities. Ordinary
-// model/native JSON invocation cannot select either authority.
+// Private routing for service-issued human capabilities. Ordinary
+// model/native JSON invocation cannot select this authority.
 enum HumanSubmission<'a> {
     Shell(&'a crate::session_service::SubmittedShell),
     UserTerminal(&'a crate::session_service::SubmittedUserTerminal),
+    Heartbeat(&'a crate::session_service::SubmittedHeartbeat),
 }
 
 impl ToolSnapshot {
@@ -797,6 +798,22 @@ impl ToolSnapshot {
         .await
     }
 
+    pub(crate) async fn invoke_submitted_heartbeat(
+        &self,
+        submission: &crate::session_service::SubmittedHeartbeat,
+        services: ToolServices<'_>,
+        context: &ToolCallContext,
+    ) -> ToolResult {
+        self.invoke_with_submission(
+            super::heartbeat::CONTROL_HEARTBEAT,
+            submission.tool_input(),
+            services,
+            context,
+            Some(HumanSubmission::Heartbeat(submission)),
+        )
+        .await
+    }
+
     async fn invoke_with_submission(
         &self,
         name: &str,
@@ -813,6 +830,9 @@ impl ToolSnapshot {
                     .iter()
                     .find_map(|resource| resource.hard_denial.as_deref())
                 {
+                    if submission.is_none() {
+                        super::heartbeat::record_denial(services).await;
+                    }
                     return ToolResult::text(
                         format!("Error: permission denied for {name}: {reason}"),
                         true,
@@ -839,12 +859,16 @@ impl ToolSnapshot {
                     .iter()
                     .find_map(|resource| resource.hard_denial.as_deref())
                 {
+                    if submission.is_none() {
+                        super::heartbeat::record_denial(services).await;
+                    }
                     return ToolResult::text(
                         format!("Error: permission denied for {name}: {reason}"),
                         true,
                     );
                 }
                 if let Some(broker) = &services.runtime.permission_broker {
+                    let agent_invocation = submission.is_none();
                     let outcome = match submission {
                         Some(HumanSubmission::Shell(submission)) => {
                             broker
@@ -866,6 +890,16 @@ impl ToolSnapshot {
                                 )
                                 .await
                         }
+                        Some(HumanSubmission::Heartbeat(submission)) => {
+                            broker
+                                .authorize_submitted_heartbeat(
+                                    &resources,
+                                    context,
+                                    context.cancellation(services.runtime),
+                                    submission,
+                                )
+                                .await
+                        }
                         None => {
                             broker
                                 .authorize(
@@ -880,6 +914,9 @@ impl ToolSnapshot {
                     match outcome {
                         crate::permissions::AuthorizationOutcome::Allowed => {}
                         crate::permissions::AuthorizationOutcome::Denied(reason) => {
+                            if agent_invocation {
+                                super::heartbeat::record_denial(services).await;
+                            }
                             return ToolResult::text(
                                 format!("Error: permission denied for {name}: {reason}"),
                                 true,

@@ -41,6 +41,8 @@ mod delegated_input;
 mod delegated_input_test_support;
 mod direct_interaction;
 mod frontend_projection;
+mod heartbeats;
+pub(crate) use heartbeats::SubmittedHeartbeat;
 mod manual_compaction;
 mod operation_state;
 mod recovery;
@@ -658,6 +660,7 @@ pub struct SessionService {
     mcp: Option<Arc<crate::mcp::McpRegistry>>,
     terminal_manager: crate::terminal::TerminalManager,
     user_terminal_context: Option<Arc<user_terminals::UserTerminalContext>>,
+    heartbeat_context: Option<Arc<heartbeats::HeartbeatContext>>,
     shell_runtime: Option<crate::tools::ToolRuntime>,
     permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
     /// A sandbox service owns container-local state even while it has no run
@@ -719,6 +722,7 @@ impl ActiveSessionOperation {
 }
 
 struct ActiveRunState {
+    heartbeat: bool,
     snapshot: ActiveRunSnapshot,
     started_at: Instant,
     finishing: bool,
@@ -740,6 +744,7 @@ struct ActiveRunState {
 
 #[derive(Default)]
 struct RunAdmissionKind {
+    heartbeat_occurrence: Option<Box<crate::store::HeartbeatOccurrence>>,
     terminal_selection: Option<crate::store::TerminalSelectionEvidence>,
     inbox_item_id: Option<i64>,
     /// What a person typed for a prompt submitted on a human-facing route.

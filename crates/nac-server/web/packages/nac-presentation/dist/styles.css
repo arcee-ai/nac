@@ -2004,6 +2004,10 @@
     grid-template-columns: repeat(1, minmax(0, 1fr));
   }
 
+[data-nac-runtime]:is(.grid-cols-2), [data-nac-runtime] .grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
 [data-nac-runtime]:is(.grid-cols-3), [data-nac-runtime] .grid-cols-3 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -4944,6 +4948,10 @@
 
     [data-nac-runtime]:is(.md\:pt-0), [data-nac-runtime] .md\:pt-0 {
       padding-top: 0;
+    }
+
+    [data-nac-runtime]:is(.md\:pt-4), [data-nac-runtime] .md\:pt-4 {
+      padding-top: calc(var(--spacing) * 4);
     }
 
     [data-nac-runtime]:is(.md\:pt-6), [data-nac-runtime] .md\:pt-6 {

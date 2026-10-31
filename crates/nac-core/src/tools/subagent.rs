@@ -114,11 +114,15 @@ impl NativeTool for SubagentTool {
     fn permission_resources(
         &self,
         input: &Self::Input,
-        _services: ToolServices<'_>,
+        services: ToolServices<'_>,
     ) -> Result<Vec<PermissionResource>, ToolResult> {
-        Ok(vec![
-            PermissionResource::new("subagent", &input.profile).with_save_resource(&input.profile)
-        ])
+        let mut resource =
+            PermissionResource::new("subagent", &input.profile).with_save_resource(&input.profile);
+        if services.runtime.heartbeat_execution && input.child_session_id.is_none() {
+            resource = resource
+                .with_hard_denial("an existing-chat heartbeat cannot create a new conversation");
+        }
+        Ok(vec![resource])
     }
 
     #[expect(

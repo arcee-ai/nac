@@ -661,6 +661,52 @@
         }
       }
     },
+    "/heartbeats": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "get_heartbeats",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HeartbeatSchedule"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/managed/github": {
       "get": {
         "tags": [
@@ -5611,6 +5657,157 @@
           },
           "500": {
             "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/heartbeats/attention": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "acknowledge",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatAttentionAcknowledgement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/heartbeats/control": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "control",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/heartbeats/{schedule_id}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "inspect",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatInspection"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
@@ -12466,6 +12663,632 @@
           }
         }
       },
+      "HeartbeatAction": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "spec",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "create"
+                ]
+              },
+              "spec": {
+                "$ref": "#/components/schemas/HeartbeatSpec"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "spec",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "edit"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/components/schemas/HeartbeatSpec"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "pause"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "resume"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "stop"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "delete"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "run_now"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "HeartbeatAttentionAcknowledgement": {
+        "type": "object",
+        "required": [
+          "through_sequence"
+        ],
+        "properties": {
+          "through_sequence": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HeartbeatAttentionResult": {
+        "type": "object",
+        "required": [
+          "occurrence_id",
+          "schedule_id",
+          "outcome",
+          "sequence",
+          "seen"
+        ],
+        "properties": {
+          "occurrence_id": {
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/HeartbeatOutcome"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "seen": {
+            "type": "boolean"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "HeartbeatBinding": {
+        "type": "object",
+        "description": "An authenticated Local store is one owning user's host boundary. The exact\npersisted session/configuration is pinned; a later change requires review.",
+        "required": [
+          "config_version",
+          "cwd",
+          "backend"
+        ],
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "config_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "execution_cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Construction-time canonical Local workspace, checked again after\nrestore. Persisted display/relative paths alone are not an identity."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scheduling_request": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Actual person input or service-issued human configuration intent. It\ngrants only this saved scheduling purpose, never human tool authority."
+          },
+          "seen_through_sequence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Human attention metadata only; excluded from canonical target binding."
+          }
+        }
+      },
+      "HeartbeatControlRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/HeartbeatAction"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HeartbeatInspection": {
+        "type": "object",
+        "required": [
+          "schedule",
+          "history"
+        ],
+        "properties": {
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeartbeatOccurrence"
+            }
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/HeartbeatSchedule"
+          }
+        }
+      },
+      "HeartbeatOccurrence": {
+        "type": "object",
+        "required": [
+          "occurrence_id",
+          "schedule_id",
+          "session_id",
+          "schedule_version",
+          "due_first_ms",
+          "due_last_ms",
+          "coalesced_count",
+          "run_now",
+          "state",
+          "spec",
+          "receipt_id",
+          "revision",
+          "attempt_count"
+        ],
+        "properties": {
+          "attempt_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "coalesced_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "due_first_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "due_last_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "evidence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "generation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inbox_item_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "occurrence_id": {
+            "type": "string"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provisional_outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "receipt_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_now": {
+            "type": "boolean"
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "schedule_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "settled_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "settlement_sequence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/HeartbeatSpec"
+          },
+          "started_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "state": {
+            "$ref": "#/components/schemas/HeartbeatOccurrenceState"
+          },
+          "tokens_used": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "HeartbeatOccurrenceState": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "admitted",
+          "settled",
+          "withdrawn"
+        ]
+      },
+      "HeartbeatOutcome": {
+        "type": "string",
+        "enum": [
+          "unchanged",
+          "meaningful",
+          "finished",
+          "needs_human_action",
+          "failed",
+          "interrupted",
+          "unknown"
+        ]
+      },
+      "HeartbeatReceipt": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "schedule"
+        ],
+        "properties": {
+          "active_occurrence": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatOccurrence",
+                "description": "Exact already-admitted work. Delete alone never claims cancellation."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurrence": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatOccurrence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/HeartbeatSchedule"
+          }
+        }
+      },
+      "HeartbeatSchedule": {
+        "type": "object",
+        "required": [
+          "schedule_id",
+          "session_id",
+          "version",
+          "state",
+          "binding",
+          "spec",
+          "anchor_ms",
+          "next_due_ms",
+          "starts",
+          "tokens_used",
+          "time_used_ms",
+          "usage_unknown",
+          "created_at_ms",
+          "updated_at_ms"
+        ],
+        "properties": {
+          "anchor_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/HeartbeatBinding"
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_due_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/HeartbeatSpec"
+          },
+          "starts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "$ref": "#/components/schemas/HeartbeatState"
+          },
+          "time_used_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tokens_used": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "updated_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "usage_unknown": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "HeartbeatSpec": {
+        "type": "object",
+        "required": [
+          "name",
+          "instructions",
+          "interval_ms",
+          "end_condition"
+        ],
+        "properties": {
+          "end_condition": {
+            "type": "string"
+          },
+          "execution_timeout_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "goal_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "interval_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "max_occurrences": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_allowance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HeartbeatState": {
+        "type": "string",
+        "enum": [
+          "active",
+          "paused",
+          "suspended",
+          "stopped",
+          "finished",
+          "deleted"
+        ]
+      },
       "InboxDelivery": {
         "type": "string",
         "enum": [
@@ -13295,6 +14118,22 @@
                 "type": "null"
               }
             ]
+          },
+          "attention_revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "attention_updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "heartbeat_results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeartbeatAttentionResult"
+            }
           },
           "lineage": {
             "oneOf": [

@@ -445,14 +445,16 @@ impl<'a> SessionCatalogApplication<'a> {
 
         let store_path = self.manager.inner.store_path.clone();
         let manager = SessionManager::clone(self.manager);
-        let summaries = nac_core::store::spawn_blocking_store_caller(move || {
-            view::list_sessions(&store_path)?
+        let (summaries, mut attention) = nac_core::store::spawn_blocking_store_caller(move || {
+            let (summaries, attention) = view::list_sessions_with_heartbeat_attention(&store_path)?;
+            let summaries = summaries
                 .into_iter()
                 .map(|summary| {
                     let lineage = manager.session_state().lineage(&summary.session_id)?;
                     Ok((summary, lineage))
                 })
-                .collect::<Result<Vec<_>>>()
+                .collect::<Result<Vec<_>>>()?;
+            Ok::<_, anyhow::Error>((summaries, attention))
         })
         .await
         .context("session list task failed")??;
@@ -467,6 +469,18 @@ impl<'a> SessionCatalogApplication<'a> {
                 .map(|(summary, lineage)| {
                     let active_service = active.get(&summary.session_id);
                     Ok(ManagedSessionSummary {
+                        attention_updated_at: attention
+                            .quiet_updated_at
+                            .remove(&summary.session_id),
+                        attention_revision: attention
+                            .run_revisions
+                            .get(&summary.session_id)
+                            .copied()
+                            .unwrap_or_default(),
+                        heartbeat_results: attention
+                            .results
+                            .remove(&summary.session_id)
+                            .unwrap_or_default(),
                         lineage,
                         active: active_service.is_some(),
                         active_run: active_service.and_then(|service| service.active_run()),

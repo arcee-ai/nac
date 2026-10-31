@@ -782,6 +782,10 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::session_lifecycle::create_session
         ))
         .routes(routes!(delivery::task_launches::start))
+        .routes(routes!(delivery::heartbeats::inventory))
+        .routes(routes!(delivery::heartbeats::inspect))
+        .routes(routes!(delivery::heartbeats::control))
+        .routes(routes!(delivery::heartbeats::acknowledge))
         .routes(routes!(delivery::task_launches::status))
         .routes(routes!(delivery::task_launches::cancel))
         .routes(routes!(delivery::task_launches::inventory))
@@ -1123,6 +1127,9 @@ where
 {
     let mut force_shutdown = Some(force_shutdown);
     let shutdown_manager = manager.clone();
+    let mut heartbeat_scheduler = Some(
+        application::heartbeat_scheduler::HeartbeatScheduler::start(&manager),
+    );
     let (graceful_tx, graceful_rx) = tokio::sync::oneshot::channel();
     let (control_graceful_tx, control_graceful_rx) = tokio::sync::oneshot::channel();
     let mut control_server = control.map(|(listener, app)| {
@@ -1170,6 +1177,8 @@ where
                 })
                 .context("failed to start shutdown watchdog")?;
 
+            shutdown_manager.inner.task_preparations.stop();
+            if let Some(scheduler)=heartbeat_scheduler.take() {scheduler.stop().await;}
             shutdown_manager.stop_local_run_admission().await;
             shutdown_manager.cancel_local_active_runs_for_shutdown().await;
             let result = (&mut server)
@@ -1193,6 +1202,9 @@ where
             result
         }
     };
+    if let Some(scheduler) = heartbeat_scheduler.take() {
+        scheduler.stop().await;
+    }
     if let Some(control_server) = control_server {
         control_server.abort();
         let _ = control_server.await;

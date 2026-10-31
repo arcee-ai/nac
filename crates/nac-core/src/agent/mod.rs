@@ -18,6 +18,7 @@ use crate::types::{Message, ToolCall, ToolDefinition};
 mod compaction;
 mod dag;
 mod failed_tool_round;
+mod heartbeat;
 pub(crate) mod preview;
 mod prompt_rendering;
 mod tool_exec;
@@ -434,6 +435,10 @@ impl Agent {
                 permission_reviewer: None,
                 permission_rules: Arc::new(config.permission_rules.clone()),
                 goal_runtime,
+                heartbeat_human_request: None,
+                heartbeat_execution: false,
+                heartbeat_goal_id: None,
+                heartbeat_needs_human_action: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 command_environment: None,
                 web_credential: None,
                 command_redactions: Arc::new(StdMutex::new(HashMap::new())),
@@ -635,6 +640,8 @@ impl Agent {
         inbox_item_id: Option<i64>,
         review_intent: Option<String>,
     ) -> Result<String> {
+        self.capture_heartbeat_request(inbox_item_id, review_intent.as_deref())
+            .await;
         if let Some(goals) = &self.tool_runtime.goal_runtime {
             goals.begin_run(run_id.as_str());
         }
@@ -655,6 +662,10 @@ impl Agent {
         prompt: &str,
         session_run: Option<SessionRunPrompt<'_>>,
     ) -> Result<String> {
+        if session_run.is_none() {
+            self.tool_runtime.heartbeat_human_request = None;
+            self.bind_heartbeat_execution(None);
+        }
         let correlation =
             crate::telemetry::Correlation::session(self.tool_runtime.session_id.as_deref())
                 .with_run(session_run.as_ref().map(|run| run.run_id.as_str()));
@@ -1890,7 +1901,12 @@ impl Agent {
     async fn append_pending_guidance_checked(&mut self) -> Result<usize> {
         if self.direct_primary {
             match self.append_pending_direct_inbox().await {
-                Ok(count) => Ok(count),
+                Ok(count) => {
+                    if count > 0 {
+                        self.refresh_heartbeat_request_from_guidance().await;
+                    }
+                    Ok(count)
+                }
                 Err(error) => {
                     self.emit(AgentEvent::Error {
                         thread_name: self.thread_name.clone(),

@@ -68,6 +68,9 @@ listed responsibility closed; a new concern requires a real submodule/port:
   together. These fields share the same incarnation and reaping gate. Controller
   algorithms, cached process observation, output policy and tests live in focused
   sibling owners; do not add provider, transport or durable-session policy here.
+- `commands.rs` keeps the command parser, prompt expansion and matching display
+  projection together so stored user/automation text and skill/MCP envelopes
+  round-trip consistently. Schedule admission and execution stay in their owners.
 - `view.rs` is the typed read-projection facade over session/thread/workset and
   workspace owners; `terminal/output.rs` is the bounded output registry,
   paging/UTF-8 boundary, preview, eviction, and lease owner. Neither may acquire

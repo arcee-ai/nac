@@ -673,6 +673,7 @@ impl TranscriptLogWriter {
                 let submitted_message_id = transaction.last_insert_rowid();
                 replace_with_active_run(transaction, session_id, run_id, submitted_message_id)?;
                 if let Some(item_id) = inbox_item_id {
+                    super::heartbeat_prompt_committed(transaction, session_id, item_id, run_id)?;
                     super::transcript_selection::stamp_inbox_attribution(
                         transaction,
                         session_id,
