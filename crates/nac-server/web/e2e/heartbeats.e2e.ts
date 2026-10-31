@@ -151,7 +151,10 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
     state: "settled",
   });
   expect(finished.schedule.starts).toBe(1);
-  expect(await api.getGoal(session)).toBeNull();
+  const restartedApi = createNacApi(
+    new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }),
+  );
+  expect(await restartedApi.getGoal(session)).toBeNull();
   const automated = harness.provider.requests.find(
     (entry) => entry.matchedStep === "automatic-job-read",
   )!;

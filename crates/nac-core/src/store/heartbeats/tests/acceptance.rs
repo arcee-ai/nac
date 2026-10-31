@@ -205,7 +205,7 @@ fn heartbeat_unknown_and_overrun_usage_suspend_before_another_admission() {
                 expected_version: current.version
             },
             "Review and resume",
-            "/tmp/project",
+            f.binding(),
             121_000
         )
         .is_err());
@@ -483,7 +483,7 @@ fn heartbeat_receipt_capacity_preserves_finite_relinquishing_controls() {
         &uuid::Uuid::new_v4().to_string(),
         &HeartbeatAction::Create { spec: spec() },
         "New scheduling",
-        "/tmp/project",
+        f.binding(),
         62_000
     )
     .is_err());
@@ -506,7 +506,7 @@ fn heartbeat_receipt_capacity_preserves_finite_relinquishing_controls() {
             expected_version: paused.version
         },
         "Resume",
-        "/tmp/project",
+        f.binding(),
         63_000
     )
     .is_err());
@@ -530,4 +530,101 @@ fn heartbeat_receipt_capacity_preserves_finite_relinquishing_controls() {
         )
         .schedule;
     assert_eq!(deleted.state, HeartbeatState::Deleted);
+}
+
+#[test]
+fn heartbeat_control_revalidates_captured_runtime_binding_at_commit_but_replays_original_receipt() {
+    for mutation in [
+        "UPDATE sessions SET config_version=config_version+1 WHERE session_id='direct'",
+        "UPDATE sessions SET cwd='/changed-workspace' WHERE session_id='direct'",
+    ] {
+        let f = Fixture::new();
+        let request = uuid::Uuid::new_v4().to_string();
+        let action = HeartbeatAction::Create { spec: spec() };
+        open_runtime_connection(&f.path)
+            .unwrap()
+            .execute(mutation, [])
+            .unwrap();
+        assert!(control_heartbeat(
+            &f.path,
+            "direct",
+            &request,
+            &action,
+            "Captured human scheduling request",
+            f.binding(),
+            61_000
+        )
+        .is_err());
+        assert!(list_heartbeats(&f.path, None).unwrap().is_empty());
+        let mut current = heartbeat_binding(&f.path, "direct").unwrap();
+        current.execution_cwd = Some("/reviewed/workspace".into());
+        let accepted = control_heartbeat(
+            &f.path,
+            "direct",
+            &request,
+            &action,
+            "Reviewed current scheduling request",
+            &current,
+            62_000,
+        )
+        .unwrap();
+        open_runtime_connection(&f.path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET config_version=config_version+1 WHERE session_id='direct'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            control_heartbeat(
+                &f.path,
+                "direct",
+                &request,
+                &action,
+                "Retry original command",
+                &current,
+                63_000
+            )
+            .unwrap(),
+            accepted
+        );
+        assert!(control_heartbeat(
+            &f.path,
+            "direct",
+            &uuid::Uuid::new_v4().to_string(),
+            &HeartbeatAction::Pause {
+                schedule_id: accepted.schedule.schedule_id.clone(),
+                expected_version: accepted.schedule.version
+            },
+            "Stale control request",
+            &current,
+            63_000
+        )
+        .is_err());
+        assert_eq!(
+            read_heartbeat(&f.path, "direct", &accepted.schedule.schedule_id)
+                .unwrap()
+                .state,
+            HeartbeatState::Active
+        );
+    }
+}
+
+#[test]
+fn heartbeat_restart_after_prompt_commit_retains_delivery_and_never_withdraws_or_replays_it() {
+    let f = Fixture::new();
+    let schedule = f.create();
+    let pending = materialize_heartbeats(&f.path, 61_000).unwrap().remove(0);
+    let active = f.admit(&pending, 61_000);
+    committed(&f, &active);
+    reconcile_heartbeat_occurrences(&f.path, "direct", 65_000).unwrap();
+    let history = heartbeat_history(&f.path, "direct", &schedule.schedule_id).unwrap();
+    assert_eq!(history[0].state, HeartbeatOccurrenceState::Settled);
+    assert_eq!(history[0].outcome, Some(HeartbeatOutcome::Interrupted));
+    let inbox = list_session_inbox(&f.path, "direct").unwrap();
+    assert_eq!(inbox[0].status, InboxStatus::Delivered);
+    assert_eq!(inbox[0].delivered_run_id, active.run_id);
+    assert!(materialize_heartbeats(&f.path, 1_000_000)
+        .unwrap()
+        .is_empty());
 }

@@ -518,7 +518,7 @@ pub(crate) fn bind_session_goal_run_with_connection(
     session_id: &str,
     baseline: &GoalRunBaseline,
 ) -> Result<Option<SessionGoalRecord>> {
-    require_direct_session(&connection, session_id)?;
+    require_direct_session(connection, session_id)?;
     let baseline_tokens = checked_integer(baseline.billable_tokens, "run token baseline")?;
     let started_at = checked_integer(baseline.started_at_epoch_ms, "run start time")?;
     let continuation = baseline.continuation.then_some(baseline.run_id.as_str());
@@ -541,7 +541,7 @@ pub(crate) fn bind_session_goal_run_with_connection(
     if changed == 0 {
         return Ok(None);
     }
-    load_with_connection(&connection, session_id)
+    load_with_connection(connection, session_id)
 }
 
 coordinated_command! {

@@ -228,6 +228,27 @@ impl NativeTool for HeartbeatControlTool {
                 .default_terminal_cwd()
                 .to_string_lossy()
                 .into_owned();
+            let expected_version = services
+                .runtime
+                .permission_broker
+                .as_ref()
+                .map(|broker| broker.heartbeat_control_config_version())
+                .unwrap_or(-1);
+            let session_id = id.clone();
+            let expected_binding = match store_call(services, move |path| {
+                let mut binding = store::heartbeat_binding(path, &session_id)?;
+                anyhow::ensure!(
+                    binding.config_version == expected_version,
+                    "heartbeat control runtime configuration changed"
+                );
+                binding.execution_cwd = Some(execution_cwd);
+                Ok(binding)
+            })
+            .await
+            {
+                Ok(binding) => binding,
+                Err(error) => return error,
+            };
             match store_call(services, move |path| {
                 store::control_heartbeat(
                     path,
@@ -235,7 +256,7 @@ impl NativeTool for HeartbeatControlTool {
                     &input.request_id,
                     &input.operation,
                     &saved,
-                    &execution_cwd,
+                    &expected_binding,
                     epoch_ms(),
                 )
             })

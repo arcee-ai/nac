@@ -4,6 +4,7 @@ use std::sync::Arc;
 struct Fixture {
     root: PathBuf,
     path: PathBuf,
+    binding: HeartbeatBinding,
 }
 impl Fixture {
     fn new() -> Self {
@@ -20,7 +21,16 @@ impl Fixture {
                 )
                 .unwrap();
         }
-        Self { root, path }
+        let mut binding = heartbeat_binding(&path, "direct").unwrap();
+        binding.execution_cwd = Some("/tmp/project".into());
+        Self {
+            root,
+            path,
+            binding,
+        }
+    }
+    fn binding(&self) -> &HeartbeatBinding {
+        &self.binding
     }
     fn control(&self, action: HeartbeatAction, time: i64) -> HeartbeatReceipt {
         control_heartbeat(
@@ -29,7 +39,7 @@ impl Fixture {
             &uuid::Uuid::new_v4().to_string(),
             &action,
             "Check the job every minute until ready.",
-            "/tmp/project",
+            self.binding(),
             time,
         )
         .unwrap()
@@ -97,7 +107,7 @@ fn heartbeat_controls_replay_original_response_and_conflict_after_deletion() {
         &key,
         &action,
         "Check the job every minute until ready.",
-        "/tmp/project",
+        f.binding(),
         1_000,
     )
     .unwrap();
@@ -109,7 +119,7 @@ fn heartbeat_controls_replay_original_response_and_conflict_after_deletion() {
             &key,
             &action,
             "Check the job every minute until ready.",
-            "/tmp/project",
+            f.binding(),
             50_000
         )
         .unwrap(),
@@ -130,7 +140,7 @@ fn heartbeat_controls_replay_original_response_and_conflict_after_deletion() {
             &key,
             &action,
             "Check the job every minute until ready.",
-            "/tmp/project",
+            f.binding(),
             90_000
         )
         .unwrap(),
@@ -144,7 +154,7 @@ fn heartbeat_controls_replay_original_response_and_conflict_after_deletion() {
         &key,
         &HeartbeatAction::Create { spec: changed },
         "Check the job every minute until ready.",
-        "/tmp/project",
+        f.binding(),
         90_000
     )
     .is_err());
@@ -236,7 +246,7 @@ fn heartbeat_pause_edit_resume_withdraw_unstarted_and_never_replay_paused_time()
             expected_version: paused.version
         },
         "Check the job every minute until ready.",
-        "/tmp/project",
+        f.binding(),
         600_000
     )
     .is_err());
@@ -292,7 +302,7 @@ fn heartbeat_validation_rejects_overflow_and_nonlocal_or_child_targets() {
             &uuid::Uuid::new_v4().to_string(),
             &HeartbeatAction::Create { spec: invalid },
             "Check the job every minute until ready.",
-            "/tmp/project",
+            f.binding(),
             1_000
         )
         .is_err());
@@ -303,7 +313,7 @@ fn heartbeat_validation_rejects_overflow_and_nonlocal_or_child_targets() {
         &uuid::Uuid::new_v4().to_string(),
         &HeartbeatAction::Create { spec: spec() },
         "Check the job every minute until ready.",
-        "/tmp/project",
+        f.binding(),
         i64::MAX
     )
     .is_err());
@@ -319,7 +329,7 @@ fn heartbeat_validation_rejects_overflow_and_nonlocal_or_child_targets() {
         &uuid::Uuid::new_v4().to_string(),
         &HeartbeatAction::Create { spec: spec() },
         "Check the job every minute until ready.",
-        "/tmp/project",
+        f.binding(),
         1_000
     )
     .is_err());

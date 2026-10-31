@@ -8,7 +8,7 @@ fn withdraw_pending(conn: &Connection, id: &str, now: i64) -> Result<()> {
 coordinated_command! {
 /// A control command and its original response commit together. Replay is
 /// receipt-first, including after deletion, configuration change or stop.
-pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&HeartbeatAction,scheduling_request:&str,execution_cwd:&str,now_ms:i64) -> Result<HeartbeatReceipt> {
+pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&HeartbeatAction,scheduling_request:&str,expected_binding:&HeartbeatBinding,now_ms:i64) -> Result<HeartbeatReceipt> {
     ensure!(uuid::Uuid::parse_str(request_id).is_ok_and(|id| id.to_string()==request_id),"heartbeat request identity must be a canonical UUID");
     ensure!(now_ms>=0,"invalid heartbeat time");
     let digest=format!("{:x}",Sha256::digest(encode(action)?.as_bytes()));
@@ -19,6 +19,9 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
         ensure!(prior_digest==digest,"heartbeat request identity conflicts with its original arguments");
         return Ok(serde_json::from_str(&response)?);
     }
+    let current=current_binding(&tx,session_id)?;
+    ensure!(expected_binding.same_target(&current),"heartbeat control target configuration/ownership changed before commit");
+    let execution_cwd=expected_binding.execution_cwd.as_deref().context("heartbeat control selected workspace is unavailable")?;
     let commands:i64=tx.query_row("SELECT count(*) FROM heartbeat_commands",[],|row| row.get(0))?;
     if commands>=HEARTBEAT_COMMAND_LIMIT {
         // Reserve a finite three relinquishing transitions per retained
@@ -111,8 +114,8 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
     tx.commit()?;
     Ok(receipt)
 }
-command ControlHeartbeatCommand {session_id:String=session_id.to_owned(),request_id:String=request_id.to_owned(),action:HeartbeatAction=action.clone(),scheduling_request:String=scheduling_request.to_owned(),execution_cwd:String=execution_cwd.to_owned(),now_ms:i64=now_ms}
-call |command| (&command.session_id,&command.request_id,&command.action,&command.scheduling_request,&command.execution_cwd,command.now_ms)
+command ControlHeartbeatCommand {session_id:String=session_id.to_owned(),request_id:String=request_id.to_owned(),action:HeartbeatAction=action.clone(),scheduling_request:String=scheduling_request.to_owned(),expected_binding:HeartbeatBinding=expected_binding.clone(),now_ms:i64=now_ms}
+call |command| (&command.session_id,&command.request_id,&command.action,&command.scheduling_request,&command.expected_binding,command.now_ms)
 correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
 port public;
 }
