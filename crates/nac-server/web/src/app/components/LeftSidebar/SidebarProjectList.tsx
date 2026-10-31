@@ -1,3 +1,4 @@
+import "@/app/components/projects/navigation.css";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { Fragment, useMemo, useState } from "react";
@@ -117,8 +118,13 @@ export function SidebarProjectList({
   }
 
   return (
-    <div className={cn("flex flex-col [&>*]:shrink-0", mobile && "gap-2 px-2 py-4")}>
-      {visibleEntries.map((entry, index) => {
+    <div
+      className={cn(
+        "nac-navigation flex flex-col gap-1 px-2 py-3 [&>*]:shrink-0",
+        mobile && "nac-navigation-mobile",
+      )}
+    >
+      {visibleEntries.map((entry) => {
         const projectId = entry.project.project_id;
         const open = isExpanded(projectId);
         const projectMatches = entry.project.name.toLowerCase().includes(needle);
@@ -135,20 +141,23 @@ export function SidebarProjectList({
             running={entry.running > 0}
             isMobile={mobile}
             actions={mobile ? <ProjectRowActions project={entry.project} /> : undefined}
+            title={entry.project.name}
+            trailing={
+              <span aria-label={`${entry.sessions.length} sessions`}>{entry.sessions.length}</span>
+            }
             aria-expanded={open}
             onClick={() => toggle(projectId)}
           />
         );
         return (
           <Fragment key={projectId}>
-            {mobile && index > 0 ? <Separator /> : null}
-            <section className={mobile ? "flex flex-col" : "border-b border-muted py-4"}>
-              {mobile ? button : <div className="px-2 py-1">{button}</div>}
+            <section className="flex flex-col">
+              {button}
               <DropdownContent
                 isOpen={open}
                 inert={!open}
                 aria-hidden={!open}
-                className="w-full duration-500 ease-in-out"
+                className="w-full duration-150 ease-out motion-reduce:duration-0"
               >
                 <ProjectSessions
                   sessions={sessionsForProject}
@@ -172,8 +181,8 @@ export function SidebarProjectList({
       })}
       {visibleOrphans.length > 0 ? (
         <>
-          {mobile && visibleEntries.length > 0 ? <Separator /> : null}
-          <section className={cn("flex flex-col", mobile ? "gap-1" : "px-2 py-1")}>
+          {visibleEntries.length > 0 ? <Separator /> : null}
+          <section className={cn("flex flex-col gap-1", !mobile && "p-2")}>
             {visibleOrphans.map((entry) => (
               <ProjectButton
                 key={entry.summary.session_id}
@@ -281,18 +290,11 @@ function ProjectSessions({
   const hidden = Math.max(0, sessions.length - shownCount);
 
   return (
-    <div className={cn("flex flex-col", mobile ? "gap-0.5 pt-1 pb-4" : "gap-1 px-2 pb-2")}>
+    <div className="flex flex-col gap-1 pb-2 pl-2">
       {shown.map((group) => (
-        <div key={group.label} className={cn("flex flex-col", mobile && "gap-2 pt-4")}>
-          <p
-            className={cn(
-              "tag-label text-basic-tertiary uppercase px-2",
-              mobile ? null : "pt-4 pb-4",
-            )}
-          >
-            {group.label}
-          </p>
-          <div className={cn("flex flex-col", mobile ? "gap-1" : "gap-0.5")}>
+        <div key={group.label} className="flex flex-col gap-1 pt-3">
+          <p className="text-xs leading-5 text-basic-tertiary px-2">{group.label}</p>
+          <div className="flex flex-col gap-1">
             {group.items.map((entry) => {
               const title = sessionTitle(entry.summary);
               const behavior = sessionBehaviorPresentation(entry.summary.behavior);

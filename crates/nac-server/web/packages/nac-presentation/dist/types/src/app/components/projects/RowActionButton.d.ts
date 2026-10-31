@@ -1,8 +1,7 @@
 import { type IconName } from "../../atoms";
 /**
- * One control at the end of a list row. A phone row draws a bare 20px glyph
- * 12px from its neighbour; the box keeps that size, and an invisible margin
- * around it takes the target to 32px without reaching the next one.
+ * One control at the end of a list row. Phone controls keep a 44px target;
+ * desktop controls retain the compact row's existing size.
  */
 export declare function RowActionButton({ icon, label, title, isMobile, destructive, onClick, }: {
     icon: IconName;

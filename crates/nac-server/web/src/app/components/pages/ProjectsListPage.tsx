@@ -66,7 +66,7 @@ function DropSlot() {
   return (
     <div
       aria-hidden
-      className="min-h-[112px] rounded-[8px] border-2"
+      className="min-h-[112px] rounded-[16px] border-2"
       style={{ borderColor: "var(--blue-500)" }}
     />
   );
@@ -205,7 +205,7 @@ function pinnedGroup(projects: ProjectRecord[], pinned: boolean): ProjectRecord[
 }
 
 export default function ProjectsListPage() {
-  const { useVisibleProjectItems, useIsDefaultSort, useFilterQuery, setQuery } =
+  const { useVisibleProjectItems, useIsDefaultSort } =
     useNativeRuntime().stores.sessionFiltersStore;
 
   const { trackAttention, clearAttentionAll } = useNativeRuntime().stores.attentionStore;
@@ -215,7 +215,6 @@ export default function ProjectsListPage() {
   const projectActions = useProjectActions();
   const managed = useManagedHost();
   const toast = useToast();
-  const query = useFilterQuery();
   const isDefaultSort = useIsDefaultSort();
   const moveOrder = useMoveProjectOrder();
   const moveSessionOrder = useMoveSessionOrder();
@@ -237,12 +236,6 @@ export default function ProjectsListPage() {
   useEffect(() => {
     if (data) trackAttention(data, null);
   }, [data, trackAttention]);
-
-  // A phone has no field to show the query in (its menu searches on a screen
-  // of its own), so text typed in the wide sidebar must not keep hiding cards.
-  useEffect(() => {
-    if (isMobile && query) setQuery("");
-  }, [isMobile, query, setQuery]);
 
   const open = (item: ProjectListItem) => {
     const id = projectListItemId(item);
@@ -600,7 +593,7 @@ export default function ProjectsListPage() {
                 <div
                   data-pin-drop-zone="true"
                   className={cn(
-                    "min-h-[112px] rounded-[8px] border-2 border-dashed",
+                    "min-h-[112px] rounded-[16px] border-2 border-dashed",
                     pinZoneActive && "bg-info-primary/10",
                   )}
                   style={{ borderColor: "var(--blue-500)" }}

@@ -1,6 +1,6 @@
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/app/atoms";
 import { ChatSessionActions } from "@/app/components/projects/ChatSessionActions";
 import { ProjectRowActions } from "@/app/components/projects/ProjectRowActions";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun, parseStoreTime } from "@/app/lib/format";
 import { projectEntries, primarySessions } from "@/app/lib/projects";
@@ -21,9 +22,13 @@ import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useProjects, useVisibleSessions } from "@/app/services/queries";
 
 /**
- * The phone menu's search screen: one field over a flat list of the chats or
- * the projects it matches. Picking a row closes this screen and the menu, then
- * navigates; the row on screen changes no route, which alone would close them.
+ * Search over the chats or the projects: one field above a flat list of what
+ * it matches. The phone menu opens it as a screen of its own, with a clear
+ * button in the field and 48px rows whose controls are always shown. The
+ * desktop sidebar opens it as a card with neither: bare 36px rows that only
+ * navigate.
+ * Picking a row closes it, and the menu under it, then navigates; the row on
+ * screen changes no route, which alone would close them.
  */
 export function MobileSearchModal({
   open,
@@ -35,12 +40,14 @@ export function MobileSearchModal({
 }: {
   open: boolean;
   onClose: () => void;
-  /** Closes the menu under this screen once a row is picked. */
-  onNavigate: () => void;
+  /** Closes the phone menu under this screen once a row is picked. */
+  onNavigate?: () => void;
   kind: "chats" | "projects";
   activeSessionId: string | null;
   activeProjectId: string | null;
 }) {
+  const isMobile = useIsMobile();
+  const field = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const close = () => {
     setQuery("");
@@ -48,34 +55,52 @@ export function MobileSearchModal({
   };
   const picked = () => {
     close();
-    onNavigate();
+    onNavigate?.();
   };
   const needle = query.trim().toLowerCase();
   const chats = kind === "chats";
+
+  // The dialog focuses its own card so a phone keeps the keyboard down. On a
+  // desktop nothing pops up, and the card only opens to be typed into.
+  useEffect(() => {
+    if (open && !isMobile) field.current?.focus();
+  }, [open, isMobile]);
 
   return (
     <Modal
       open={open}
       onClose={close}
       title={chats ? "Search Chats" : "Search Projects"}
+      className="max-w-[380px] h-[700px]"
       bodyClassName="p-0 [&>*]:shrink-0"
     >
       <div className="sticky top-0 z-10 flex p-3">
         <StickyInput
+          ref={field}
           className="flex-1 min-w-0"
           variant={StickyInputVariant.Search}
           placeholder={chats ? "Search chats…" : "Search projects…"}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          onClear={() => setQuery("")}
+          onClear={isMobile ? () => setQuery("") : undefined}
           aria-label={chats ? "Search chats" : "Search projects"}
         />
       </div>
       <div className="flex flex-col gap-2 px-2 py-8 [&>*]:shrink-0">
         {chats ? (
-          <ChatResults needle={needle} activeSessionId={activeSessionId} onPicked={picked} />
+          <ChatResults
+            needle={needle}
+            activeSessionId={activeSessionId}
+            isMobile={isMobile}
+            onPicked={picked}
+          />
         ) : (
-          <ProjectResults needle={needle} activeProjectId={activeProjectId} onPicked={picked} />
+          <ProjectResults
+            needle={needle}
+            activeProjectId={activeProjectId}
+            isMobile={isMobile}
+            onPicked={picked}
+          />
         )}
       </div>
     </Modal>
@@ -85,10 +110,12 @@ export function MobileSearchModal({
 function ChatResults({
   needle,
   activeSessionId,
+  isMobile,
   onPicked,
 }: {
   needle: string;
   activeSessionId: string | null;
+  isMobile: boolean;
   onPicked: () => void;
 }) {
   const navigate = useNavigate();
@@ -123,20 +150,22 @@ function ChatResults({
         active={entry.summary.session_id === activeSessionId}
         running={isActiveRun(entry.active_run)}
         forkedFromTitle={entry.summary.forked_from?.title}
-        isMobile
+        isMobile={isMobile}
         onClick={() => {
           onPicked();
           navigate(routes.session(entry.summary.session_id));
         }}
         actions={
-          <ChatSessionActions
-            title={title}
-            pinned={entry.summary.pinned}
-            isMobile
-            onPin={() => void sessionActions.togglePin(entry.summary)}
-            onRename={() => sessionActions.rename(entry.summary)}
-            onDelete={() => sessionActions.remove(entry.summary)}
-          />
+          isMobile ? (
+            <ChatSessionActions
+              title={title}
+              pinned={entry.summary.pinned}
+              isMobile
+              onPin={() => void sessionActions.togglePin(entry.summary)}
+              onRename={() => sessionActions.rename(entry.summary)}
+              onDelete={() => sessionActions.remove(entry.summary)}
+            />
+          ) : undefined
         }
       />
     );
@@ -146,10 +175,12 @@ function ChatResults({
 function ProjectResults({
   needle,
   activeProjectId,
+  isMobile,
   onPicked,
 }: {
   needle: string;
   activeProjectId: string | null;
+  isMobile: boolean;
   onPicked: () => void;
 }) {
   const navigate = useNavigate();
@@ -172,8 +203,8 @@ function ProjectResults({
       name={entry.project.name}
       active={entry.project.project_id === activeProjectId}
       running={entry.running > 0}
-      isMobile
-      actions={<ProjectRowActions project={entry.project} />}
+      isMobile={isMobile}
+      actions={isMobile ? <ProjectRowActions project={entry.project} /> : undefined}
       onClick={() => {
         onPicked();
         navigate(routes.project(entry.project.project_id));

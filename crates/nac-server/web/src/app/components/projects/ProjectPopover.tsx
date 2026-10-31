@@ -12,6 +12,7 @@ import {
   InputLeading,
   InputSize,
   Separator,
+  Tooltip,
 } from "@/app/atoms";
 import { ProjectsList } from "@/app/components/projects/ProjectsList";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -40,16 +41,17 @@ function RowAction({
   variant?: ButtonVariant;
 }) {
   return (
-    <Button
-      variant={variant}
-      size={ButtonSize.Small}
-      content={ButtonContent.Icon}
-      title={tooltip}
-      aria-label={label}
-      onClick={onClick}
-    >
-      <Icon iconName={icon} />
-    </Button>
+    <Tooltip title={tooltip} sticky>
+      <Button
+        variant={variant}
+        size={ButtonSize.Small}
+        content={ButtonContent.Icon}
+        aria-label={label}
+        onClick={onClick}
+      >
+        <Icon iconName={icon} />
+      </Button>
+    </Tooltip>
   );
 }
 

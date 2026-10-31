@@ -1,7 +1,13 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 
 export type ScriptedResponse =
-  | { kind: "text"; text: string; stream?: boolean | "request" }
+  | {
+      kind: "text";
+      text: string;
+      stream?: boolean | "request";
+      reasoning?: string;
+      failAfterReasoning?: boolean;
+    }
   | {
       kind: "function_call";
       name: string;
@@ -190,6 +196,12 @@ export class ScriptedProvider {
       });
       response.flushHeaders();
     }
+    if (scripted.kind === "text" && scripted.reasoning && scripted.stream === true) {
+      if (!response.headersSent) response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(
+        `data: ${JSON.stringify({ type: "response.reasoning_summary_text.delta", delta: scripted.reasoning })}\n\n`,
+      );
+    }
     if (step.gate != null) await step.gate.waitForRelease();
     this.respond(response, scripted);
   }
@@ -239,6 +251,12 @@ export class ScriptedProvider {
       this.writeJson(response, scripted.status, { error: scripted.body });
       return;
     }
+    if (scripted.kind === "text" && scripted.failAfterReasoning) {
+      response.end(
+        `data: ${JSON.stringify({ type: "response.failed", error: { message: "Fixture stream interrupted", code: "fixture_failure" } })}\n\n`,
+      );
+      return;
+    }
     const item =
       scripted.kind === "text"
         ? {
@@ -261,7 +279,17 @@ export class ScriptedProvider {
       object: "response",
       status: "completed",
       model: "gpt-5.6-sol",
-      output: [item],
+      output:
+        scripted.kind === "text" && scripted.reasoning
+          ? [
+              {
+                id: "rs-e2e",
+                type: "reasoning",
+                summary: [{ type: "summary_text", text: scripted.reasoning }],
+              },
+              item,
+            ]
+          : [item],
       usage: { input_tokens: 7, output_tokens: 3, total_tokens: 10 },
     };
     if (scripted.stream === true) {
