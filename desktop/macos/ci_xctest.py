@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 
 from ci_support import require_terminal_evidence
+from ci_xctest_attachments import AttachmentTool, json_data, require_source_binding
 from smoke import cleanup_failed_case
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -128,12 +129,15 @@ def result_receipt(path):
 
 def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.app',
                  scenario='ci-terminal-xctest', test_name='testTrustedLocalTerminal',
-                 operations=None, validate=require_terminal_evidence, cleanup=cleanup_failed_case):
+                 operations=None, validate=require_terminal_evidence, cleanup=cleanup_failed_case,
+                 observer_binding=None):
     # Every command here is an observation. Missing prerequisites stop before
     # XCTest launch; enabling automation or requesting Accessibility is forbidden.
     status = observe_prerequisites(command)
     (raw / 'xctest-prerequisites.json').write_text(json.dumps(status, indent=2) + '\n')
     initial_policy = authorization_policy(status)
+    if operations:
+        require_source_binding(observer_binding)
     evidence = raw / 'evidence' / (scenario + '.json')
     evidence.parent.mkdir(exist_ok=True)
     app = raw / app_name
@@ -148,7 +152,7 @@ def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.a
         config.write_text(json.dumps({'app_path': str(relocated), 'evidence': str(evidence),
                                       'native_sha256': native_hash, 'scenario': scenario,
                                       'operations': operations,
-                                      'driver_evidence': str(raw / 'xctest-driver.json')}, indent=2) + '\n')
+                                      'observer_binding': observer_binding}, indent=2) + '\n')
         run(['xcodebuild', 'build-for-testing', '-project',
              'desktop/macos/NativeUITests/NACNativeUITests.xcodeproj', '-scheme', 'NACNativeUITests',
              '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', derived,
@@ -165,7 +169,11 @@ def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.a
                     'fixture_sha256': hashlib.sha256(config.read_bytes()).hexdigest(),
                     'native_sha256': native_hash, 'generated_target': target}
         (raw / 'xctest-runner.json').write_text(json.dumps(metadata, indent=2) + '\n')
-        before = None
+        before = terminal = collection = None
+        errors = {key: None for key in ('admission', 'test', 'cleanup', 'policy', 'collector', 'result')}
+        observer = AttachmentTool(raw, command) if operations else None
+        stage = 'admission'
+        input_requested = False
         try:
             before = observe_prerequisites(command)
             (raw / 'xctest-prerequisites-before.json').write_text(json.dumps(before, indent=2) + '\n')
@@ -173,20 +181,29 @@ def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.a
                 raise RuntimeError('Existing XCTest authorization policy changed during build; stopping before input')
             if hashlib.sha256(config.read_bytes()).hexdigest() != metadata['fixture_sha256']:
                 raise RuntimeError('XCTest fixed fixture configuration changed during build')
+            if observer:
+                stage = 'collector'
+                observer.prepare()
+            stage = 'test'
             relocation['safe_to_remove'] = False
+            input_requested = True
             run(['xcodebuild', 'test-without-building', '-xctestrun', str(runners[0]),
                  '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
                  '-maximum-concurrent-test-device-destinations', '1', '-resultBundlePath', str(result),
                  '-only-testing:NACNativeUITests/NativeJourneys/' + test_name],
                 raw / 'xctest-input.log', 420 if operations else 240)
             record = json.loads(evidence.read_text())
-            if operations and (record.get('terminal_xctest_identity', {}).get('bundle_path') != str(relocated.resolve())
-                               or hashlib.sha256(executable.read_bytes()).hexdigest() != native_hash):
-                raise RuntimeError('Terminal XCTest runtime bundle/executable binding differs')
+            if operations:
+                runtime_path = record.get('terminal_xctest_identity', {}).get('bundle_path')
+                if (not isinstance(runtime_path, str) or not Path(runtime_path).is_absolute()
+                        or Path(runtime_path).is_symlink() or Path(runtime_path).resolve() != relocated.resolve()
+                        or hashlib.sha256(executable.read_bytes()).hexdigest() != native_hash):
+                    raise RuntimeError('Terminal XCTest runtime bundle/executable binding differs')
             terminal = validate(record)
             if record.get('engine_reaped') is not True or record.get('profile_removed') is not True:
                 raise RuntimeError('Native XCTest fixture cleanup incomplete')
-            return {'prerequisites': status, 'runner': metadata, 'terminal': terminal}
+        except BaseException as error:
+            errors[stage] = error
         finally:
             try:
                 if evidence.exists():
@@ -201,18 +218,54 @@ def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.a
                     relocation['safe_to_remove'] = True
                 elif not relocation['safe_to_remove']:
                     raise RuntimeError('Input launch produced no ownership receipt; preserving exact relocated bundle')
-            finally:
+            except BaseException as error:
+                errors['cleanup'] = error
+            try:
+                after = observe_prerequisites(command)
+                (raw / 'xctest-prerequisites-after.json').write_text(json.dumps(after, indent=2) + '\n')
+                unchanged = before is not None and authorization_policy(after) == authorization_policy(before)
+                (raw / 'xctest-policy-comparison.json').write_text(json.dumps({
+                    'persistent_authorization_policy_unchanged': unchanged,
+                    'transient_active_mode_compared': False}, indent=2) + '\n')
+                if not unchanged:
+                    raise RuntimeError('Persistent XCTest authorization policy changed; qualification stopped')
+            except BaseException as error:
+                errors['policy'] = error
+            if result.exists():
+                if observer and observer.path:
+                    try:
+                        case = json.loads(evidence.read_text()) if evidence.exists() else {}
+                        binding = {**observer_binding, 'configuration_sha256': metadata['fixture_sha256'],
+                                   'native_sha256': native_hash, 'app': case.get('terminal_xctest_identity')}
+                        collection = observer.collect(result, binding, operations)
+                        if errors['test'] is None and not collection['complete']:
+                            raise RuntimeError('Passing XCTest lacks the complete twelve-snapshot driver proof')
+                    except BaseException as error:
+                        errors['collector'] = errors['collector'] or error
                 try:
-                    after = observe_prerequisites(command)
-                    (raw / 'xctest-prerequisites-after.json').write_text(json.dumps(after, indent=2) + '\n')
-                    unchanged = before is not None and authorization_policy(after) == authorization_policy(before)
-                    (raw / 'xctest-policy-comparison.json').write_text(json.dumps({
-                        'persistent_authorization_policy_unchanged': unchanged,
-                        'transient_active_mode_compared': False}, indent=2) + '\n')
-                    if not unchanged:
-                        raise RuntimeError('Persistent XCTest authorization policy changed; qualification stopped')
-                finally:
-                    if result.exists():
-                        (raw / 'xctest-result.json').write_text(json.dumps(result_receipt(result), indent=2) + '\n')
-                        summary = command(['xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', str(result)])
-                        (raw / 'xctest-summary.json').write_text(json.dumps(json.loads(summary), indent=2) + '\n')
+                    summary = command(['xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', str(result)])
+                    (raw / 'xctest-summary.json').write_text(json.dumps(json_data(summary.encode()), indent=2) + '\n')
+                except BaseException as error:
+                    errors['result'] = error
+                try:
+                    receipt = result_receipt(result)
+                    (raw / 'xctest-result.json').write_text(json.dumps(receipt, indent=2) + '\n')
+                    index = raw / 'xctest-dispatch-observations/index.json'
+                    if index.exists():
+                        value = json.loads(index.read_text())
+                        value['actual_result'] = receipt
+                        value['generated_runner_sha256'] = metadata['xctestrun_sha256']
+                        index.write_text(json.dumps(value, indent=2) + '\n')
+                except BaseException as error:
+                    errors['result'] = errors['result'] or error
+            elif input_requested:
+                errors['result'] = RuntimeError('Xcode did not generate its required real result bundle')
+            (raw / 'xctest-outcomes.json').write_text(json.dumps({
+                'input_launch_requested': input_requested,
+                'observer_complete': collection.get('complete') if collection else None,
+                'errors': {key: {'type': type(error).__name__, 'message': str(error)[:4096]} if error else None
+                           for key, error in errors.items()}}, indent=2) + '\n')
+        for error in errors.values():
+            if error is not None:
+                raise error
+        return {'prerequisites': status, 'runner': metadata, 'terminal': terminal, 'observer': collection}
