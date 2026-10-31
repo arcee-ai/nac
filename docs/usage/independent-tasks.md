@@ -134,5 +134,37 @@ Calls reject more than eight targets, a timeout over 60,000 ms, identifiers over
 160 bytes, cursors over 4,096 bytes, or a response over 131,072 bytes. Result
 excerpts in waits are capped at 500 characters; `read_task` keeps the longer
 retained excerpt. Authoritative fallback revalidation runs every 250 ms, plus
-relevant stopped-goal notifications. Representative measurements and the final
-bound rationale are recorded with this change's acceptance evidence.
+relevant stopped-goal notifications. The timeout bounds the observation phase;
+finishing its last authoritative read adds a small amount of elapsed time.
+
+### Measured bounds
+
+Measured on 2026-10-30 (America/Los_Angeles), source
+`6288b969a5b25c99b834e071f4f7f2eb75e3dc26`, Darwin arm64, Rust 1.98.0,
+Node 26.12.0, using the unoptimized test profile and a warm SQLite store.
+The shared exclusive gate held both Rust slots and the browser slot; other
+heavy web work was deferred. Snapshot columns are the median and maximum of
+ten native calls per fanout. Fixtures use active goals with 10,000-character
+objectives and retained UTF-8 run results of 2,000 characters, cut to 500 in
+wait responses. Compilation is excluded from the operation timings.
+
+| Targets | Snapshot median (ms) | Snapshot max (ms) | Active reply (bytes) | Result reply (bytes) | 500 ms wait elapsed (ms) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 5.47 | 17.83 | 802 | 2,796 | 516 |
+| 2 | 8.89 | 14.76 | 1,391 | 5,373 | 519 |
+| 4 | 14.51 | 21.19 | 2,569 | 10,527 | 533 |
+| 8 | 25.51 | 33.88 | 4,925 | 20,835 | 553 |
+
+The eight-target result snapshot took 36.80 ms. The separate eight-target
+60,000 ms upper-bound test returned `timeout` at 60,048 ms, with a 4,900-byte
+reply. These are measured local fixture costs, not a cross-host latency promise.
+
+Eight targets is the largest qualified fanout. The 60-second request bound
+limits one observation call to about 240 fallback intervals per target while
+allowing coordinator input to interrupt between reads. The 128 KiB response
+ceiling leaves over six times the largest measured reply for identifiers and
+failure evidence while keeping aggregate output finite. Larger fanouts or
+longer waits require fresh qualification; argument and output overflow are
+explicit errors. Reproduce with the owning tests
+`representative_snapshots_and_bounded_wait_cost` and the explicitly ignored
+`maximum_timeout_measurement` in an exclusive performance window.
