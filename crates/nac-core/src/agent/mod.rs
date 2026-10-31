@@ -324,7 +324,9 @@ impl Agent {
         };
         if config.mode != AgentMode::Worker && traditional_child.is_none() {
             system_prompt.push_str(&crate::guide::primary_prompt());
-        } else if guide_selected {
+        } else if guide_selected || traditional_child.is_some() {
+            // Traditional children retain explicit skill expansion. Keep the
+            // bundled router usable without adding primary self-help routing.
             tool_defs.push(tools::guide::definition());
         }
         if config.mode == AgentMode::Orchestrator {
