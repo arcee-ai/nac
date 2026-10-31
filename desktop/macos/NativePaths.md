@@ -70,7 +70,18 @@ sheet is pending, verifies a successor form retains its own folder, and selects
 the Unicode/spaces folder. It moves that owned folder before normal submission,
 observes server rejection, restores/reselects it, and explicitly retries normal
 project/first-chat creation. It then invokes Reveal in Finder and observes the
-selected file through Finder accessibility. `NativePathSmoke` observes the real
+selected file through Finder accessibility. Every run creates a fresh UUID in
+both the spaces/Unicode folder name and extensionless reveal leaf. Immediately
+before the explicit reveal, public XCTest records all Finder windows' public
+identifiers, frames and counts matching this unique title/leaf. The unique
+target must be absent. After the action exactly one newly titled window must
+expose the exact selected leaf. Before/after observations are retained as
+public XCTest attachments in the result bundle, without sidecar writes. The
+helper never activates Finder or sends NAC input after Finder takes focus.
+These content observations do not establish stable OS window identity or
+guarded close authority. The newly revealed Finder window is left open and
+recorded as a desktop cleanup residual; engine/profile cleanup is separate.
+`NativePathSmoke` observes the real
 panel/document callbacks and verifies stale/outside/missing/symlink/file-URL
 reveal denials through the actual WKWebView and shared server. It has no
 standalone launch or hosted dispatch, does not provision permissions, and does
@@ -87,6 +98,12 @@ identity, a retired path handler and no attached native sheet, then returns
 through the existing bounded engine/profile cleanup. Both cases require the
 ALL-354 runner's actual XCTest result and exact artifact identities; these
 receipts are synchronization, not independent acceptance assertions.
+The helper's separate synchronization-file writes, reads and app-owned folder
+moves have not been qualified inside the hosted XCTest sandbox. ALL-354 has
+observed a real denied runner sidecar write in another journey; no broader
+filesystem access follows from a build or syntax check. These operations remain
+an explicit runtime gate pending exact-harness feasibility. No permission,
+sandbox, ownership or mode changes are authorized to make the fixtures pass.
 
 Full acceptance additionally requires integration of the separately owned common
 shell wiring and frozen ALL-354 XCTest harness, plus actual `.app`/system

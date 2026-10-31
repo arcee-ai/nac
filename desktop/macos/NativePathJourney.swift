@@ -7,9 +7,12 @@ import XCUIAutomation
 /// The caller owns exact-bundle launch/hash/console checks and engine/profile
 /// cleanup. Each input requires its existing exact-target authorization check;
 /// there is deliberately no default check or standalone dispatch entrypoint.
+/// Marker-file writes and app-profile moves below remain UNQUALIFIED in the
+/// hosted XCTest sandbox; source parsing does not establish filesystem access.
 @MainActor
 enum NativePathJourney {
     static func folderSelection(app: XCUIApplication, initialPath: String, folder: URL,
+                                runID: String, revealLeaf: String,
                                 authorize: () throws -> Void) throws {
         func require(_ condition: Bool, _ message: String) throws {
             guard condition else { throw NSError(domain: "NAC347UI", code: 1,
@@ -25,6 +28,10 @@ enum NativePathJourney {
         try require(initialPath.unicodeScalars.allSatisfy(\.isASCII), "Fixture parent must be ASCII for the qualified driver")
         try require(folder.deletingLastPathComponent().path == initialPath,
                     "Selection must be an immediate child of the owned fixture directory")
+        try require(UUID(uuidString: runID) != nil && runID == runID.lowercased() &&
+                    folder.lastPathComponent == "Folder with spaces 日本語 \(runID)" &&
+                    revealLeaf == "reveal me 日本語 \(runID)",
+                    "Folder and reveal leaf must carry the same fresh fixture identity")
         let folderButton = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose Working Folder")).firstMatch
         let sheet = app.sheets.firstMatch
         let selected = app.webViews.buttons["Choose Working Folder: \(folder.path)"]
@@ -103,21 +110,86 @@ enum NativePathJourney {
         try click(create)
         try require(composer.waitForExistence(timeout: 30), "Normal project/first-chat creation did not finish")
         try click(app.webViews.buttons["Files"])
-        let file = app.webViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", "reveal me.txt")).firstMatch
+        let file = app.webViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", revealLeaf)).firstMatch
         try click(file)
-        try click(app.webViews.buttons["Reveal in Finder"])
-        // Observe the Finder selection caused by the explicit product action.
-        // Never activate or type into another application's windows.
         let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
-        let revealed = finder.windows[folder.lastPathComponent].descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "reveal me.txt"))
+        let baseline = finderWindows(finder, folder: folder.lastPathComponent, leaf: revealLeaf)
+        attachFinder("Finder before explicit reveal", runID: runID, folder: folder.path, leaf: revealLeaf, windows: baseline)
+        try require(baseline.allSatisfy { !$0.ownedTitle && $0.leafCount == 0 },
+                    "Fresh Finder target already existed before this action")
+        try click(app.webViews.buttons["Reveal in Finder"])
+        // Read-only public XCTest observation. The fresh nonce was absent from
+        // every baseline window; exactly one newly titled window must now
+        // expose this action's exact unique selected leaf. No later NAC input
+        // is sent after Finder can take focus.
         let selection = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            revealed.allElementsBoundByIndex.contains { $0.isSelected }
+            let observed = finderWindows(finder, folder: folder.lastPathComponent, leaf: revealLeaf)
+            return observed.filter { $0.ownedTitle }.count == 1 &&
+                observed.filter { $0.ownedTitle && $0.selectedLeafCount > 0 }.count == 1 &&
+                observed.filter { $0.leafCount > 0 }.count == 1
         }, object: nil)
-        try require(XCTWaiter.wait(for: [selection], timeout: 15) == .completed,
-                    "Finder did not expose the selected workspace file")
+        let result = XCTWaiter.wait(for: [selection], timeout: 15)
+        let after = finderWindows(finder, folder: folder.lastPathComponent, leaf: revealLeaf)
+        attachFinder("Finder after explicit reveal", runID: runID, folder: folder.path, leaf: revealLeaf, windows: after)
+        try require(result == .completed, "Finder did not expose this action's unique selected workspace file")
+        // These public attributes bind the newly observed content to this
+        // action, but do not establish a stable OS window identity or closing
+        // authority. Preserve the residual instead of closing personal windows
+        // or claiming complete desktop cleanup.
+        XCTContext.runActivity(named: "Finder cleanup residual") { activity in
+            let evidence = XCTAttachment(string: "Unique revealed Finder window left open; exact OS window identity and guarded close authority are unqualified. Engine/profile cleanup is separate. No Finder activation, input or preference changes performed.")
+            evidence.lifetime = .keepAlways
+            activity.add(evidence)
+        }
+        // This is a filesystem handshake, not NAC input or cleanup evidence.
+        // Its sandbox feasibility remains a separate actual-run gate.
         try Data("ALL347_XCTEST_COMPLETE".utf8).write(to: folder.deletingLastPathComponent()
             .appendingPathComponent("all347-xctest-complete"), options: .atomic)
+    }
+
+    private struct FinderWindow: Codable {
+        let index: Int
+        let identifier: String
+        let ownedTitle: Bool
+        let leafCount: Int
+        let selectedLeafCount: Int
+        let x: Double
+        let y: Double
+        let width: Double
+        let height: Double
+    }
+
+    private struct FinderObservation: Codable {
+        let runID: String
+        let folder: String
+        let leaf: String
+        let windows: [FinderWindow]
+    }
+
+    private static func finderWindows(_ finder: XCUIApplication, folder: String, leaf: String) -> [FinderWindow] {
+        finder.windows.allElementsBoundByIndex.enumerated().map { index, window in
+            let leaves = window.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@", leaf)).allElementsBoundByIndex
+            let frame = window.frame
+            return FinderWindow(index: index, identifier: window.identifier,
+                                ownedTitle: window.label == folder,
+                                leafCount: leaves.count, selectedLeafCount: leaves.filter(\.isSelected).count,
+                                x: Double(frame.origin.x), y: Double(frame.origin.y),
+                                width: Double(frame.width), height: Double(frame.height))
+        }
+    }
+
+    private static func attachFinder(_ name: String, runID: String, folder: String, leaf: String, windows: [FinderWindow]) {
+        XCTContext.runActivity(named: name) { activity in
+            do {
+                let data = try JSONEncoder().encode(FinderObservation(runID: runID, folder: folder, leaf: leaf, windows: windows))
+                let evidence = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+                evidence.lifetime = .keepAlways
+                activity.add(evidence)
+            } catch {
+                XCTFail("Could not encode Finder ownership observation: \(error)")
+            }
+        }
     }
 
     static func pendingEngineFailure(app: XCUIApplication, initialPath: String, folder: URL,

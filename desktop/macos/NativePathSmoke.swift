@@ -17,11 +17,13 @@ final class NativePathSmoke {
                 (self.paths.smokeSnapshot["documents"] as? Int ?? 0) > 0
         }
         guard let profile = app.profile else { throw PreviewError.message("Disposable path profile unavailable") }
-        let folder = profile.root.appendingPathComponent("Folder with spaces 日本語")
+        let runID = UUID().uuidString.lowercased()
+        let revealLeaf = "reveal me 日本語 \(runID)"
+        let folder = profile.root.appendingPathComponent("Folder with spaces 日本語 \(runID)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
-        try Data("ALL347_REVEAL_FIXTURE\n".utf8).write(to: folder.appendingPathComponent("reveal me.txt"))
+        try Data("ALL347_REVEAL_FIXTURE\n".utf8).write(to: folder.appendingPathComponent(revealLeaf))
         try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent("outside-link"), withDestinationURL: profile.workspace)
-        for arguments in [["init", "--quiet", "--initial-branch=main"], ["add", "reveal me.txt"],
+        for arguments in [["init", "--quiet", "--initial-branch=main"], ["add", revealLeaf],
                           ["-c", "user.name=NAC disposable preview", "-c", "user.email=preview@example.test",
                            "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "path fixture"]] {
             let process = Process()
@@ -37,6 +39,7 @@ final class NativePathSmoke {
         publish(["paths_xctest_ready": true, "app_pid": getpid(),
                  "target_window_number": app.window.windowNumber, "initial_parent": profile.root.path,
                  "selection_path": folder.path, "engine_pid": app.engine.pid, "profile": profile.root.path,
+                 "path_fixture_run": runID, "reveal_leaf": revealLeaf,
                  "paths_operation": failure ? "pending-engine-failure" : "select-reload-create-reveal"])
         if failure {
             let request = profile.root.appendingPathComponent("all347-engine-failure-request")
@@ -100,7 +103,7 @@ final class NativePathSmoke {
         const denials = [];
         for (const [path, expected] of [
           ['../outside', root], ['/tmp/absolute', root], ['missing/child', root],
-          ['outside-link', root], ['reveal me.txt', root + '/stale'],
+          ['outside-link', root], [revealLeaf, root + '/stale'],
           ['file:///tmp/not-a-target', root]
         ]) {
           const result = await fetch('/sessions/' + encodeURIComponent(id) + '/workspace/reveal', {
@@ -114,7 +117,7 @@ final class NativePathSmoke {
         const matching = projects.projects.filter(project => project.cwd === root);
         if (matching.length !== 1) throw new Error('Missing-folder retry duplicated or lost the project');
         return {session: id, root, sandbox: snapshot.metadata.sandbox_status, denials, matching_projects:matching.length};
-        """#, arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
+        """#, arguments: ["revealLeaf": revealLeaf], in: nil, contentWorld: .page) as? [String: Any]
         guard let root = target?["root"] as? String, canonical(root) == expectedRoot,
               target?["sandbox"] as? String == "off" else {
             throw PreviewError.message("Created chat did not retain the selected Local workspace")
