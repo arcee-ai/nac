@@ -860,6 +860,12 @@ impl SessionManager {
         application::projects::ProjectApplication::new(self)
     }
 
+    pub(crate) fn project_folders(
+        &self,
+    ) -> application::project_folders::ProjectFolderApplication<'_> {
+        application::project_folders::ProjectFolderApplication::new(self)
+    }
+
     pub(crate) fn model_configurations(
         &self,
     ) -> application::model_configurations::ModelConfigurationApplication<'_> {

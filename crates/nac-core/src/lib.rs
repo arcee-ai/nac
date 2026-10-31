@@ -78,6 +78,7 @@ pub mod skill_catalog {
 mod paths;
 pub mod permissions;
 mod process;
+pub mod project_folders;
 pub mod run_failure;
 pub mod runtime;
 mod sandbox;

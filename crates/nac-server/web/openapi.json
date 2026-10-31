@@ -611,6 +611,88 @@
         }
       }
     },
+    "/fs/folders": {
+      "post": {
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Create one named folder inside a listed local directory.",
+        "description": "Nothing is created recursively and nothing is replaced: an existing name is\na conflict. Hard and configured Deny apply; this human request never asks\nfor agent approval.",
+        "operationId": "post_fs_folders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedFolder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid folder name or parent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied by permission policy or by the filesystem",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Parent folder no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name already exists, or the parent moved since it was listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Outcome could not be confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -9691,6 +9773,97 @@
         }
       }
     },
+    "/ssh/folders": {
+      "post": {
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Create one named folder inside a listed directory on an SSH host, never on\nthis machine.",
+        "operationId": "post_ssh_folders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSshFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedFolder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid folder name, parent or connection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied by permission policy or by the host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Parent folder no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name already exists, or the parent moved since it was listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Outcome could not be confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Host unreachable; the outcome is unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/store": {
       "get": {
         "tags": [
@@ -11166,6 +11339,24 @@
           }
         }
       },
+      "CreateFolderRequest": {
+        "type": "object",
+        "description": "One folder to create inside the directory the picker is listing.",
+        "required": [
+          "parent",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "One folder name: no separators, no `.`/`..`, no surrounding spaces."
+          },
+          "parent": {
+            "type": "string",
+            "description": "The listed directory, exactly as the listing reported it."
+          }
+        }
+      },
       "CreateGoalRequest": {
         "type": "object",
         "required": [
@@ -11610,6 +11801,54 @@
             ],
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "CreateSshFolderRequest": {
+        "type": "object",
+        "description": "The same, on the SSH host the picker is browsing.",
+        "required": [
+          "parent",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "parent": {
+            "type": "string"
+          },
+          "ssh_host": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ssh_identity_file": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ssh_port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "CreatedFolder": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path of the folder that was created."
           }
         }
       },

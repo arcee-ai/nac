@@ -24,6 +24,25 @@ pub async fn browse_ssh_directory(
     browse_remote_directory(&connection, path, hidden, &paths).await
 }
 
+/// Creates one authorized folder on the host these options describe, never on
+/// this machine, and returns its path there. `config_cwd` plays the same local
+/// role as for [`browse_ssh_directory`].
+pub async fn create_ssh_folder(
+    options: &SshOptions,
+    folder: &crate::project_folders::AuthorizedRemoteFolder,
+    config_cwd: &Path,
+) -> std::result::Result<String, crate::project_folders::NewFolderError> {
+    use crate::project_folders::NewFolderError;
+    let paths = PathContext::new(config_cwd);
+    options
+        .validate(&paths)
+        .map_err(|error| NewFolderError::InvalidRequest(error.to_string()))?;
+    let connection = options.connection(&paths).ok_or_else(|| {
+        NewFolderError::InvalidRequest("an ssh host is required to create a remote folder".into())
+    })?;
+    crate::sandbox::create_remote_folder(&connection, folder, &paths).await
+}
+
 pub(super) fn trim_ssh_host(ssh_host: Option<String>) -> Option<String> {
     ssh_host
         .map(|value| value.trim().to_string())

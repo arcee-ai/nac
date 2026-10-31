@@ -682,6 +682,8 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(sandbox_activity_handler))
         .routes(routes!(browse_filesystem_handler))
         .routes(routes!(browse_ssh_handler))
+        .routes(routes!(delivery::project_folders::create_local_handler))
+        .routes(routes!(delivery::project_folders::create_ssh_handler))
         .routes(routes!(provider_models_handler))
         .routes(routes!(
             delivery::model_configurations::list_handler,

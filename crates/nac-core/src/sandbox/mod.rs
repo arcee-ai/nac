@@ -12,6 +12,7 @@ pub(crate) mod session_worktree;
 mod ssh;
 mod ssh_browse;
 pub(crate) mod ssh_command;
+mod ssh_new_folder;
 
 #[cfg(test)]
 pub use backend::execution_backend_from_sandbox;
@@ -19,6 +20,7 @@ pub use backend::{select_execution_backend, ExecutionBackend, FileIoMode};
 pub use ssh::SshBackend;
 pub use ssh_browse::{browse_remote_directory, RemoteBrowseError, RemoteEntry, RemoteListing};
 pub use ssh_command::SshConnection;
+pub use ssh_new_folder::create_remote_folder;
 
 pub const DEFAULT_SANDBOX_IMAGE: &str = "python:3.13-bookworm";
 pub const DEFAULT_SANDBOX_WORKDIR: &str = "/workspace";
