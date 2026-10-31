@@ -8,7 +8,7 @@ pub struct PeerGoalStart {
     pub caller_session_id: String,
     pub request_id: String,
     pub target_session_id: String,
-    pub project_id: String,
+    pub project_id: Option<String>,
     pub objective: String,
     pub token_budget: Option<u64>,
 }
@@ -64,7 +64,7 @@ pub(crate) fn start_peer_goal(path: &Path, request: &PeerGoalStart, active_run: 
     let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     if let Some(receipt) = receipt(&tx, request)? { return Ok(receipt); }
     require_configuration(&tx, &request.target_session_id, config_version)?;
-    require_project(&tx, &request.target_session_id, &request.project_id)?;
+    require_project(&tx, &request.target_session_id, request.project_id.as_deref())?;
     // Revalidate topology in the write transaction, not just at discovery.
     require_peer(&tx, &request.target_session_id)?;
     if let Some(current) = super::session_goals::load_with_connection(&tx, &request.target_session_id)? {
@@ -109,7 +109,7 @@ pub(crate) struct PeerGoalTransition {
     pub expected_version: i64,
     pub resume: bool,
     pub active_run_id: Option<String>,
-    pub project_id: String,
+    pub project_id: Option<String>,
     pub config_version: i64,
 }
 
@@ -122,7 +122,7 @@ pub(crate) fn transition_peer_goal(path: &Path, transition: &PeerGoalTransition)
     let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     require_configuration(&tx, session_id, *config_version)?;
     require_peer(&tx, session_id)?;
-    require_project(&tx, session_id, project_id)?;
+    require_project(&tx, session_id, project_id.as_deref())?;
     let goal = super::session_goals::load_with_connection(&tx, session_id)?.ok_or_else(|| anyhow!(PeerGoalError::Conflict("target has no current goal")))?;
     anyhow::ensure!(goal.goal_id == *goal_id && goal.version == expected_version, PeerGoalError::Conflict("goal identity/version changed"));
     anyhow::ensure!(if resume { matches!(goal.status, GoalStatus::Paused | GoalStatus::Blocked | GoalStatus::UsageLimited) } else { goal.status == GoalStatus::Active }, PeerGoalError::Conflict("goal status cannot make this transition"));
@@ -144,13 +144,22 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.trans
 port internal;
 }
 
-fn require_project(connection: &Connection, session_id: &str, project_id: &str) -> Result<()> {
-    let matches: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM session_projects WHERE session_id = ?1 AND project_id = ?2)",
-        params![session_id, project_id],
-        |row| row.get(0),
-    )?;
-    anyhow::ensure!(matches, PeerGoalError::Conflict("target project changed"));
+fn require_project(
+    connection: &Connection,
+    session_id: &str,
+    project_id: Option<&str>,
+) -> Result<()> {
+    let actual: Option<String> = connection
+        .query_row(
+            "SELECT project_id FROM session_projects WHERE session_id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    anyhow::ensure!(
+        actual.as_deref() == project_id,
+        PeerGoalError::Conflict("target project changed")
+    );
     Ok(())
 }
 

@@ -31,7 +31,7 @@ fn request(action: PeerGoalAction) -> AuthorizedPeerGoal {
     AuthorizedPeerGoal {
         caller: "caller".into(),
         target: "target".into(),
-        project: "project".into(),
+        project: Some("project".into()),
         action,
     }
 }
@@ -344,4 +344,43 @@ async fn native_with_human_reply(
         .reply(&request.id, crate::permissions::PermissionReply::Once)
         .unwrap();
     running.await.unwrap()
+}
+
+#[tokio::test]
+async fn peer_goals_projectless_target_uses_same_active_run_accounting_owner() {
+    let (service, path) = fixture();
+    store::open_runtime_connection(&path)
+        .unwrap()
+        .execute("DELETE FROM session_projects WHERE session_id='target'", [])
+        .unwrap();
+    let active = service
+        .try_begin_run(None, "running projectless task")
+        .unwrap();
+    service
+        .goal_runtime
+        .as_ref()
+        .unwrap()
+        .begin_run(active.run_id.as_str());
+    let mut start = start();
+    start.project = None;
+    let PeerGoalOutcome::Started { receipt } =
+        service.control_peer_goal(start, None).await.unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(receipt.request.project_id, None);
+    let mut pause = request(PeerGoalAction::Pause {
+        goal_id: receipt.admitted_goal.goal_id,
+        expected_version: receipt.admitted_goal.version,
+    });
+    pause.project = None;
+    let PeerGoalOutcome::Paused { goal } = service.control_peer_goal(pause, None).await.unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(
+        goal.accounting_run_id.as_deref(),
+        Some(active.run_id.as_str())
+    );
+    assert_eq!(service.active_run().unwrap().run_id, active.run_id);
 }

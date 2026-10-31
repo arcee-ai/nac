@@ -1214,7 +1214,7 @@ fn codex_peer_goal_wire_schema_preserves_null_unused_arguments_and_no_implicit_b
         .collect();
     assert_eq!(required, properties.keys().map(String::as_str).collect());
     assert_eq!(parameters["additionalProperties"], false);
-    for field in ["request_id", "objective", "goal_id"] {
+    for field in ["project_id", "request_id", "objective", "goal_id"] {
         assert_eq!(properties[field]["type"], json!(["string", "null"]));
     }
     for field in ["token_budget", "expected_version"] {

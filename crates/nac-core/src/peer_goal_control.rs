@@ -44,7 +44,7 @@ pub(crate) enum PeerGoalAction {
 pub struct AuthorizedPeerGoal {
     pub(crate) caller: String,
     pub(crate) target: String,
-    pub(crate) project: String,
+    pub(crate) project: Option<String>,
     pub(crate) action: PeerGoalAction,
 }
 impl AuthorizedPeerGoal {
@@ -54,8 +54,8 @@ impl AuthorizedPeerGoal {
     pub fn target(&self) -> &str {
         &self.target
     }
-    pub fn project(&self) -> &str {
-        &self.project
+    pub fn project(&self) -> Option<&str> {
+        self.project.as_deref()
     }
     pub(crate) fn start_request(&self) -> Option<crate::store::PeerGoalStart> {
         match &self.action {

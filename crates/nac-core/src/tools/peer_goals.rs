@@ -25,7 +25,8 @@ enum Operation {
 struct WireInput {
     action: Operation,
     session_id: String,
-    project_id: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    project_id: Option<String>,
     request_id: Option<String>,
     objective: Option<String>,
     token_budget: Option<u64>,
@@ -37,50 +38,50 @@ struct WireInput {
 pub(crate) enum Input {
     Read {
         session_id: String,
-        project_id: String,
+        project_id: Option<String>,
     },
     Start {
         session_id: String,
-        project_id: String,
+        project_id: Option<String>,
         request_id: String,
         objective: String,
         token_budget: Option<u64>,
     },
     Pause {
         session_id: String,
-        project_id: String,
+        project_id: Option<String>,
         goal_id: String,
         expected_version: i64,
     },
     Resume {
         session_id: String,
-        project_id: String,
+        project_id: Option<String>,
         goal_id: String,
         expected_version: i64,
     },
 }
 impl Input {
-    fn scope(&self) -> (&str, &str, &str) {
+    fn scope(&self) -> (&str, &str, Option<&str>) {
         match self {
             Self::Read {
                 session_id,
                 project_id,
-            } => ("read", session_id, project_id),
+            } => ("read", session_id, project_id.as_deref()),
             Self::Start {
                 session_id,
                 project_id,
                 ..
-            } => ("start", session_id, project_id),
+            } => ("start", session_id, project_id.as_deref()),
             Self::Pause {
                 session_id,
                 project_id,
                 ..
-            } => ("pause", session_id, project_id),
+            } => ("pause", session_id, project_id.as_deref()),
             Self::Resume {
                 session_id,
                 project_id,
                 ..
-            } => ("resume", session_id, project_id),
+            } => ("resume", session_id, project_id.as_deref()),
         }
     }
     fn resources(&self) -> Vec<PermissionResource> {
@@ -94,21 +95,33 @@ impl Input {
             Self::Resume {goal_id, expected_version, ..} => format!("Resume goal {goal_id} at version {expected_version} using its remaining budget."),
             Self::Read {..} => "Read current and retained goal identity/evidence without waking the task.".into(),
         };
-        let mut resources = vec![
-            PermissionResource::new(format!("task_goal_{action}"), format!("session:{session}"))
-                .with_display(format!("Task {session} in project {project}: {detail}")),
-            PermissionResource::new(format!("task_goal_{action}"), format!("project:{project}")),
-        ];
+        let scope = project.map_or_else(
+            || "no saved project".to_owned(),
+            |project| format!("project {project}"),
+        );
+        let mut resources = vec![PermissionResource::new(
+            format!("task_goal_{action}"),
+            format!("session:{session}"),
+        )
+        .with_display(format!("Task {session} in {scope}: {detail}"))];
+        if let Some(project) = project {
+            resources.push(PermissionResource::new(
+                format!("task_goal_{action}"),
+                format!("project:{project}"),
+            ));
+        }
         // Mutations also return goal state; goal authority must not bypass a
         // configured read denial on the same target/project.
         resources.push(PermissionResource::new(
             "task_read",
             format!("session:{session}"),
         ));
-        resources.push(PermissionResource::new(
-            "task_read",
-            format!("project:{project}"),
-        ));
+        if let Some(project) = project {
+            resources.push(PermissionResource::new(
+                "task_read",
+                format!("project:{project}"),
+            ));
+        }
         resources
     }
 }
@@ -132,7 +145,7 @@ impl NativeTool for PeerGoalTool {
             description:"Read, start, pause or resume a finite goal on an exact independent plain direct Local task. Each new goal action requires ordinary permission evaluation AND an explicit human reply for this exact action/target/arguments. An exact previously admitted start request replays its immutable receipt under ordinary policy without a fresh mutation or approval. General coordination intent, read access, auto-approval and peer messages grant no goal authority. Start only for explicitly requested finite objective/budget intent; omit token_budget unless supplied. Persist request_id and reuse identical arguments after lost acknowledgement; the immutable receipt describes original admission, never current completion. Pause/resume require current goal_id and expected_version. Pause prevents future continuation without cancelling active tools/turns. Resume preserves remaining budget and cannot restart terminal/exhausted goals. Only the target can mark complete/blocked. No replacement, clear or budget editing. Pass null for arguments that do not apply to this action and for an unrequested start token budget. Unused fields are ignored and can never change the chosen action, target, objective or budget.".into(),
             parameters:json!({"type":"object","additionalProperties":false,"properties":{
                 "action":{"type":"string","enum":["read","start","pause","resume"]},
-                "session_id":{"type":"string","maxLength":160},"project_id":{"type":"string","maxLength":160},
+                "session_id":{"type":"string","maxLength":160},"project_id":{"type":["string","null"],"maxLength":160,"description":"Exact target saved project, or explicit null for a projectless task; never inferred"},
                 "request_id":{"type":["string","null"],"maxLength":160,"description":"Used only for start; durable caller-scoped idempotency key"},
                 "objective":{"type":["string","null"],"maxLength":8000,"description":"Finite objective required for start; ignored by other actions"},"token_budget":{"type":["integer","null"],"minimum":1,"description":"Only start uses this optional budget; null unless the human supplied one"},
                 "goal_id":{"type":["string","null"],"maxLength":160,"description":"Required only for pause/resume; exact current goal identity"},"expected_version":{"type":["integer","null"],"minimum":0,"description":"Required only for pause/resume; exact current goal version"}
@@ -192,9 +205,9 @@ impl NativeTool for PeerGoalTool {
         };
         let (_, target, project) = input.scope();
         let valid_id = |s: &str| !s.trim().is_empty() && s.len() <= 160;
-        if !valid_id(target) || !valid_id(project) {
+        if !valid_id(target) || project.is_some_and(|project| !valid_id(project)) {
             return Err(argument_error(
-                "exact session_id and project_id are required",
+                "exact session_id and a valid saved project or explicit null are required",
             ));
         }
         match &input {
@@ -332,7 +345,7 @@ impl NativeTool for PeerGoalTool {
             let (_, target, project) = input.scope();
             let path = services.runtime.store_path.clone();
             let target = target.to_owned();
-            let project = project.to_owned();
+            let project = project.map(str::to_owned);
             // Passive exact revalidation after the approval wait, including caller
             // binding; authenticated-human tool contexts cannot skip the reply.
             let is_read = matches!(&input, Input::Read { .. });
@@ -340,11 +353,6 @@ impl NativeTool for PeerGoalTool {
             let check_project = project.clone();
             let checked =
                 crate::store::spawn_blocking_store_caller(move || -> anyhow::Result<_> {
-                    anyhow::ensure!(
-                        crate::store::load_session_project_id(&path, &check_target)?.as_deref()
-                            == Some(&check_project),
-                        "target is unavailable in the named project"
-                    );
                     if is_read {
                         let summary = crate::sessions::load_session_summary(&path, &check_target)?
                             .ok_or_else(|| anyhow::anyhow!("target is unavailable"))?;
@@ -357,6 +365,12 @@ impl NativeTool for PeerGoalTool {
                         crate::store::TaskLookup::Found(snapshot)
                             if snapshot.behavior == "direct" =>
                         {
+                            // Scope and goal data come from the same read transaction;
+                            // an earlier membership query cannot authorize this snapshot.
+                            anyhow::ensure!(
+                                snapshot.project_id == check_project,
+                                "target is unavailable in the named project scope"
+                            );
                             Ok(snapshot)
                         }
                         _ => anyhow::bail!(

@@ -144,7 +144,7 @@ impl crate::peer_goal_control::PeerGoalController for Controller {
         Box::pin(async move {
             assert_eq!(request.target(), "target");
             assert_eq!(request.caller(), "caller");
-            assert_eq!(request.project(), "project");
+            assert_eq!(request.project(), Some("project"));
             self.0.fetch_add(1, Ordering::SeqCst);
             let receipt = crate::store::peer_goals::start_peer_goal(
                 &self.1,
@@ -353,7 +353,7 @@ fn every_peer_action_accepts_full_strict_wire_arguments_with_null_unused_fields(
             _ => (),
         }
         let decoded = PeerGoalTool.decode(wire.clone()).unwrap();
-        assert_eq!(decoded.scope(), (action, "target", "project"));
+        assert_eq!(decoded.scope(), (action, "target", Some("project")));
         if action == "start" {
             assert!(matches!(
                 decoded,
@@ -380,7 +380,7 @@ async fn lost_ack_restart_reconciliation_is_headless_and_passive_but_changed_arg
         caller_session_id: "caller".into(),
         request_id: "r".into(),
         target_session_id: "target".into(),
-        project_id: "project".into(),
+        project_id: Some("project".into()),
         objective: "finish the finite task".into(),
         token_budget: None,
     };
@@ -431,7 +431,7 @@ fn flat_provider_fields_are_projected_without_fabricating_required_identity_or_b
     for action in ["read", "start", "pause", "resume"] {
         let wire = json!({"action":action,"session_id":"target","project_id":"project","request_id":"provider-request","objective":"provider objective","token_budget":37,"goal_id":"current-goal","expected_version":7});
         let projected = PeerGoalTool.decode(wire).unwrap();
-        assert_eq!(projected.scope(), (action, "target", "project"));
+        assert_eq!(projected.scope(), (action, "target", Some("project")));
         match projected {
             Input::Read { .. } => (),
             Input::Start {
@@ -461,5 +461,81 @@ fn flat_provider_fields_are_projected_without_fabricating_required_identity_or_b
     }
     for action in ["pause", "resume"] {
         assert!(PeerGoalTool.decode(json!({"action":action,"session_id":"target","project_id":"project","goal_id":null,"expected_version":null,"request_id":"unused","objective":"unused","token_budget":37})).is_err());
+    }
+}
+
+#[test]
+fn explicit_projectless_scope_is_required_and_bound_for_every_action() {
+    let schema = PeerGoalTool.definition().function.parameters;
+    assert_eq!(
+        schema["properties"]["project_id"]["type"],
+        json!(["string", "null"])
+    );
+    for action in ["read", "start", "pause", "resume"] {
+        let mut wire = json!({"action":action,"session_id":"target","project_id":null,"request_id":"r","objective":"finite task","token_budget":37,"goal_id":"g","expected_version":7});
+        let decoded = PeerGoalTool.decode(wire.clone()).unwrap();
+        assert_eq!(decoded.scope(), (action, "target", None));
+        let resources = decoded.resources();
+        assert!(resources
+            .iter()
+            .all(|resource| resource.resource == "session:target"));
+        assert!(resources[0].display.contains("no saved project"));
+        wire.as_object_mut().unwrap().remove("project_id");
+        assert!(
+            PeerGoalTool.decode(wire).is_err(),
+            "projectless scope cannot be inferred"
+        );
+    }
+}
+
+#[tokio::test]
+async fn explicit_projectless_goal_read_requires_human_reply_and_rechecks_snapshot_scope() {
+    for reassign_during_wait in [false, true] {
+        let runtime = runtime(Vec::new());
+        crate::store::open_runtime_connection(&runtime.store_path)
+            .unwrap()
+            .execute("DELETE FROM session_projects WHERE session_id='target'", [])
+            .unwrap();
+        let broker = runtime.permission_broker.as_ref().unwrap().clone();
+        let bus = crate::events::SessionEventBus::new(Some("caller".into()));
+        let _interactive = bus.subscribe_assistant_deltas();
+        let mut events = bus.subscribe();
+        broker.attach_event_bus(bus);
+        let running = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move {
+                call(
+                    &runtime,
+                    json!({"action":"read","session_id":"target","project_id":null}),
+                )
+                .await
+            })
+        };
+        let request = asked(&mut events).await;
+        assert!(request
+            .resources
+            .iter()
+            .all(|resource| resource.resource == "session:target"));
+        assert!(!running.is_finished());
+        if reassign_during_wait {
+            crate::store::assign_session_to_project(&runtime.store_path, "project", "target")
+                .unwrap();
+            crate::store::create_session_goal(
+                &runtime.store_path,
+                "target",
+                "new-project-secret",
+                None,
+                None,
+            )
+            .unwrap();
+        }
+        broker.reply(&request.id, PermissionReply::Once).unwrap();
+        let result = running.await.unwrap();
+        assert_eq!(result.is_error, reassign_during_wait, "{}", result.content);
+        assert!(!result
+            .content
+            .as_text()
+            .unwrap()
+            .contains("new-project-secret"));
     }
 }

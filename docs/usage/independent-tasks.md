@@ -80,10 +80,12 @@ candidate, count, flag or cursor.
 
 `task_goal` provides `read`, `start`, `pause` and `resume` for an exact independent
 plain `direct` task on an unmanaged Local host. Pass its `session_id` and saved
-`project_id` explicitly. Ordinary task launch remains goal-free.
+`project_id` explicitly, or pass `project_id: null` for a projectless target. The
+project scope is never inferred. Ordinary task launch remains goal-free.
 
 Every call first passes ordinary `task_goal_<action>` permission evaluation on
-`session:<id>` and `project:<id>`. A new goal action then requires a separate manual human reply
+`session:<id>` and, for a saved project, `project:<id>`. A new goal action then
+requires a separate manual human reply
 for this invocation's exact action, target and arguments. Broad coordination
 instructions, read permission, a peer message, remembered grants, Auto-approve,
 Approve for me and authenticated human product invocation markers do not supply

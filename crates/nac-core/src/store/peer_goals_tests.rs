@@ -34,7 +34,7 @@ fn fixture() -> (PathBuf, PeerGoalStart) {
         caller_session_id: "caller".into(),
         request_id: "request".into(),
         target_session_id: "target".into(),
-        project_id: "project".into(),
+        project_id: Some("project".into()),
         objective: "finite objective".into(),
         token_budget: Some(100),
     };
@@ -239,9 +239,9 @@ fn stale_human_mutation_terminal_budget_and_accounting_are_fenced() {
 #[test]
 fn start_rolls_back_receipt_and_goal_when_scope_or_topology_is_unsupported() {
     let (path, mut request) = fixture();
-    request.project_id = "wrong".into();
+    request.project_id = Some("wrong".into());
     assert!(start_peer_goal(&path, &request, None, 0).is_err());
-    request.project_id = "project".into();
+    request.project_id = Some("project".into());
     open_runtime_connection(&path)
         .unwrap()
         .execute(
@@ -313,7 +313,7 @@ fn transition_peer_goal(
             expected_version,
             resume,
             active_run_id: active_run_id.map(str::to_owned),
-            project_id: project_id.to_owned(),
+            project_id: Some(project_id.to_owned()),
             config_version: 0,
         },
     )
@@ -566,5 +566,47 @@ fn fresh_start_waits_for_terminal_accounting_but_original_receipt_still_replays(
     assert_eq!(
         lookup_peer_goal_start(&path, &request).unwrap().unwrap(),
         original
+    );
+}
+
+#[test]
+fn projectless_goal_receipt_and_transitions_bind_null_scope_and_preserve_budget() {
+    let (path, mut request) = fixture();
+    open_runtime_connection(&path)
+        .unwrap()
+        .execute("DELETE FROM session_projects WHERE session_id='target'", [])
+        .unwrap();
+    assert!(start_peer_goal(&path, &request, None, 0).is_err());
+    request.project_id = None;
+    let receipt = start_peer_goal(&path, &request, None, 0).unwrap();
+    let mut transition = PeerGoalTransition {
+        session_id: "target".into(),
+        goal_id: receipt.admitted_goal.goal_id.clone(),
+        expected_version: receipt.admitted_goal.version,
+        resume: false,
+        active_run_id: None,
+        project_id: None,
+        config_version: 0,
+    };
+    let paused = super::transition_peer_goal(&path, &transition).unwrap();
+    transition.resume = true;
+    transition.expected_version = paused.version;
+    let resumed = super::transition_peer_goal(&path, &transition).unwrap();
+    assert_eq!(resumed.status, GoalStatus::Active);
+    assert_eq!(resumed.remaining_tokens(), Some(100));
+    assert_eq!(
+        lookup_peer_goal_start(&path, &request).unwrap(),
+        Some(receipt)
+    );
+    let mut changed = request.clone();
+    changed.project_id = Some("project".into());
+    assert!(lookup_peer_goal_start(&path, &changed).is_err());
+    assign_session_to_project(&path, "project", "target").unwrap();
+    transition.resume = false;
+    transition.expected_version = resumed.version;
+    assert!(super::transition_peer_goal(&path, &transition).is_err());
+    assert_eq!(
+        load_session_goal(&path, "target").unwrap().unwrap(),
+        resumed
     );
 }

@@ -44,7 +44,7 @@ impl SessionService {
                         target_session_id: request.target().to_owned(),
                         objective: objective.clone(),
                         token_budget: *token_budget,
-                        project_id: request.project().to_owned(),
+                        project_id: request.project().map(str::to_owned),
                     }),
                     _ => None,
                 };
@@ -148,7 +148,7 @@ impl SessionService {
                             expected_version: version,
                             resume,
                             active_run_id: run.map(str::to_owned),
-                            project_id: request.project().to_owned(),
+                            project_id: request.project().map(str::to_owned),
                             config_version: service.config_version.ok_or_else(|| {
                                 anyhow::anyhow!("target configuration is unavailable")
                             })?,
@@ -185,7 +185,7 @@ impl SessionService {
         let path = &self.metadata.store_path;
         let target_project = crate::store::load_session_project_id(path, request.target())?;
         anyhow::ensure!(
-            target_project.as_deref() == Some(request.project()),
+            target_project.as_deref() == request.project(),
             PeerGoalError::Conflict("target project changed")
         );
         anyhow::ensure!(
