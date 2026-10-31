@@ -149,20 +149,26 @@ extension WorkspaceSmoke {
     }
 
     func overlayJourney() async throws -> String {
-        try await button("Configurations")
-        _ = try await js("window.__wkModalOpener=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Configurations' && b.getClientRects().length);return true;")
-        try await waitJS("instance inert background", "return !!document.querySelector('[data-nac-runtime] [inert]') && !!document.querySelector('[role=dialog]');")
-        try await require("Dialog overflows viewport", "const r=document.querySelector('[role=dialog]').getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
-        _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
-        try await waitJS("Escape closes layer", "return !document.querySelector('[role=dialog]');")
-        try await waitJS("modal focus return", "return document.activeElement === window.__wkModalOpener;")
-        _ = try await js("window.__wkPopoverOpener=document.querySelector('button[aria-label=Model]');return true;")
-        try await button("Model")
-        try await waitJS("production model popover", "return !!document.querySelector('input[placeholder=\"Search models…\"]') && document.querySelector('button[aria-label=Model]').getAttribute('aria-expanded') === 'true';")
-        try await require("Popover overflows viewport", "const input=document.querySelector('input[placeholder=\"Search models…\"]');const panel=input.closest('[data-radix-popper-content-wrapper]');if(!panel)return false;const r=panel.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
-        _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
-        try await waitJS("popover dismissed and focus restored", "return !document.querySelector('input[placeholder=\"Search models…\"]') && document.activeElement === window.__wkPopoverOpener && window.__wkPopoverOpener.getAttribute('aria-expanded') === 'false';")
-        return "Production modal + model-popover bounds, inertness, synthetic Escape and focus return; real keyboard/VoiceOver remain separate"
+        var layouts: [[String: Any]] = []
+        for collapsed in [false, true] {
+            if collapsed { try await button("Hide sidebar") }
+            record(["overlay_layout_in_progress": collapsed ? "collapsed" : "expanded"])
+            try await button("Configurations", rememberAs: "__wkModalOpener")
+            try await waitJS("instance inert background", "return !!document.querySelector('[data-nac-runtime] [inert]') && !!document.querySelector('[role=dialog]');")
+            try await require("Dialog overflows viewport", "const r=document.querySelector('[role=dialog]').getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
+            _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
+            try await waitJS("Escape closes layer", "return !document.querySelector('[role=dialog]');")
+            try await waitJS("modal focus return", "return document.activeElement === window.__wkModalOpener;")
+            try await button("Model", rememberAs: "__wkPopoverOpener")
+            try await waitJS("production model popover", "return !!document.querySelector('input[placeholder=\"Search models…\"]') && document.querySelector('button[aria-label=Model]').getAttribute('aria-expanded') === 'true';")
+            try await require("Popover overflows viewport", "const input=document.querySelector('input[placeholder=\"Search models…\"]');const panel=input.closest('[data-radix-popper-content-wrapper]');if(!panel)return false;const r=panel.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
+            _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
+            try await waitJS("popover dismissed and focus restored", "return !document.querySelector('input[placeholder=\"Search models…\"]') && document.activeElement === window.__wkPopoverOpener && window.__wkPopoverOpener.getAttribute('aria-expanded') === 'false';")
+            layouts.append(["sidebar": collapsed ? "collapsed" : "expanded", "modal_focus_return": true, "popover_focus_return": true])
+            record(["overlay_layouts": layouts])
+            if collapsed { try await button("Show sidebar") }
+        }
+        return "Expanded sidebar + collapsed rail: modal/model-popover bounds, inertness, synthetic Escape and exact focus return; real keyboard/VoiceOver separate"
     }
 
     func resizeJourney() async throws -> String {

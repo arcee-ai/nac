@@ -122,10 +122,13 @@ final class WorkspaceSmoke {
         return String(decoding: data, as: UTF8.self).dropFirst().dropLast().description
     }
 
-    func button(_ name: String) async throws {
+    func button(_ name: String, rememberAs: String? = nil) async throws {
         let predicate = "b => (b.getAttribute('aria-label') || b.textContent.trim()) === \(quote(name)) && !b.disabled && b.getClientRects().length && !b.closest('[inert]')"
         try await waitJS("button \(name)", "return [...document.querySelectorAll('button')].some(\(predicate));")
-        _ = try await js("const b=[...document.querySelectorAll('button')].find(\(predicate)); b.focus(); b.click(); return true;")
+        // A focus assertion must retain the exact chosen opener before its
+        // activation changes inertness or mounts another matching control.
+        let remember = rememberAs.map { "window[\(self.quote($0))]=b;" } ?? ""
+        _ = try await js("const b=[...document.querySelectorAll('button')].find(\(predicate)); \(remember) b.focus(); b.click(); return true;")
     }
 
     func fill(_ selector: String, _ value: String) async throws {
