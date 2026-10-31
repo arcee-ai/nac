@@ -4,6 +4,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 mod delegation_receipts;
+mod task_followups;
+
+#[cfg(test)]
+mod task_followup_migration_tests;
 
 #[cfg(test)]
 #[path = "schema/child_input_migration_tests.rs"]
@@ -56,6 +60,7 @@ mod permission_reviewer_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 41 retains retry-safe agent follow-up receipts independently of delivery.
 // 40 composes automatic permission review with the retained-task/child-input schema.
 // 39 adds retained task launch receipts and saved Git source bindings.
 // 38 retains bounded run and replaced/cleared goal outcomes for task reads.
@@ -91,7 +96,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 40;
+const STORE_SCHEMA_VERSION: i64 = 41;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -785,7 +790,7 @@ fn open_connection_with_hooks(
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
         | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-        | 38 | 39 | STORE_SCHEMA_VERSION => {}
+        | 38 | 39 | 40 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -1008,6 +1013,7 @@ fn open_connection_with_hooks(
     ensure_column(&transaction, "session_goals", "last_run_id", "TEXT")?;
     super::task_evidence::create_task_evidence_tables(&transaction)?;
     super::task_launches::create_tables(&transaction)?;
+    task_followups::create_tables(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
