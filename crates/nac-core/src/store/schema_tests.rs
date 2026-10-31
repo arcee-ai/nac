@@ -227,6 +227,9 @@ fn assert_current_schema(conn: &Connection) {
             "child_execution_mode",
             "child_wait_id",
             "review_intent",
+            "completion_source",
+            "completion_session_id",
+            "completion_generation",
         ]
     );
     assert_eq!(
@@ -531,7 +534,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 40);
+    assert_eq!(STORE_SCHEMA_VERSION, 41);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -690,6 +693,9 @@ fn v17_store_adds_the_durable_session_inbox() {
             "child_execution_mode",
             "child_wait_id",
             "review_intent",
+            "completion_source",
+            "completion_session_id",
+            "completion_generation",
         ]
     );
     assert_eq!(

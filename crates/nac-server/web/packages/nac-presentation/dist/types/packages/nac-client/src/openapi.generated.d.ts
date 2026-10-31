@@ -491,6 +491,7 @@ export interface components {
             status: string;
         };
         InboxDelivery: "steer" | "queue";
+        InboxItemOrigin: "input" | "traditional_child" | "managed_orchestrator";
         InboxItemResponse: {
             cancelled_at?: string | null;
             client_id?: string | null;
@@ -499,6 +500,7 @@ export interface components {
             delivered_run_id?: string | null;
             delivery: components["schemas"]["InboxDelivery"];
             id: number;
+            origin: components["schemas"]["InboxItemOrigin"];
             prompt: string;
             session_id: string;
             status: components["schemas"]["InboxStatus"];

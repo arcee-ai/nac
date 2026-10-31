@@ -38,9 +38,12 @@ transcript before restoring and sending it again. Recovery never sends
 automatically or replaces a newer draft.
 
 A foreground launch waits for the generation's final report. A background
-launch returns immediately, then atomically queues one completion for the
+launch returns immediately, then atomically records one completion for the
 parent when the run completes, fails, is cancelled, or is reconciled after a
-restart. The queue is durable and exactly-once. Continuing a terminal session
+restart. Delivery is durable and exactly-once and follows the traditional child
+rules: a running parent sees it at its next model boundary, otherwise it starts
+one follow-up run. It is a delegated result, not a pending message, so the
+parent's **Pending messages** controls never edit or cancel it. Continuing a terminal session
 starts its next generation; sending a prompt while it is running steers the
 current orchestrator generation. At most four managed orchestrators may run
 for one parent, and deleting the parent deletes its managed sessions.

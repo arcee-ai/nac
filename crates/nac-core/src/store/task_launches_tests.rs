@@ -353,7 +353,7 @@ fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        40
+        41
     );
     drop(conn);
     drop(waiter);
