@@ -1,16 +1,26 @@
-# macOS development preview
+# macOS local startup and development preview
 
 This owner contains the ALL-340 disposable AppKit/WKWebView preview and the
-ALL-341 private identified engine launch/control seam. Read the
+ALL-341 private identified engine launch/control seam, and ALL-342 normal local
+startup. Read the
 root guide before changes. Swift owns only the window, isolated fixture, and
 its exact bundled child. Rust remains the execution/persistence/permission
 authority; the production React UI and HTTP/SSE client remain shared.
 
 - Bundle `nac-web` and its existing embedded assets. No second frontend build,
   native chat client, privileged script message handler, or production bridge.
-- Every launch creates a private temporary HOME/NAC_HOME/workspace/store and a
-  nonpersistent WebKit data store. Never consume personal configuration or
-  attach to a fixed/default port. Read readiness only from the launched child.
+- Preview builds create a private temporary HOME/NAC_HOME/workspace/store.
+  `LOCAL_APP` builds use DesktopStartup and the bundled Rust preflight to reuse
+  normal configuration, credential and track owners. Never seed/delete a normal
+  profile. All qualification uses externally owned disposable profiles; never
+  open/migrate a personal store for evidence. Read readiness only from the exact
+  launched child, never attach to a fixed/default port. WebKit remains
+  nonpersistent until the separately owned preference/storage slice.
+- PreviewEngine accepts EngineLaunchConfiguration(cwd, store, environment).
+  The PreviewProfile/provider adapter retains isolated fixture semantics.
+  DesktopStartup never parses TOML, copies credential stores or executes a shell.
+  Config preflight retains normal publication recovery and prepares selected
+  parent directories through the Rust owner; it opens no DB or serving lease.
 - The loopback provider and two configuration-seeding requests are disposable
   test infrastructure. They never operate on user stores or expose real keys.
 - Window close quits this preview, with bounded child cleanup before deleting
