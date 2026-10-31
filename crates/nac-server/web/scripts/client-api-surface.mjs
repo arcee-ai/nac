@@ -1,6 +1,12 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "GET /heartbeats": "private:standalone Local heartbeat inventory",
+  "GET /sessions/{session_id}/heartbeats/{schedule_id}":
+    "private:standalone passive heartbeat history",
+  "POST /sessions/{session_id}/heartbeats/control": "private:standalone human heartbeat control",
+  "POST /sessions/{session_id}/heartbeats/attention":
+    "private:standalone human result acknowledgement",
   "POST /task-launches": "private:standalone Local retained task launch",
   "GET /task-launches/{request_id}": "private:standalone passive launch status",
   "POST /task-launches/{request_id}/cancel": "private:standalone launch cancellation",

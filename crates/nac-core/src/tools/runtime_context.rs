@@ -45,6 +45,12 @@ pub struct ToolRuntime {
     pub(crate) permission_rules: Arc<Vec<crate::permissions::PermissionRule>>,
     /// Direct-only bridge for exact mid-run durable-goal baselines.
     pub(crate) goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
+    /// Actual person input for this run, captured by the lifecycle before its
+    /// prompt commits. Automation/goal continuations cannot mint this source.
+    pub(crate) heartbeat_human_request: Option<String>,
+    pub(crate) heartbeat_execution: bool,
+    pub(crate) heartbeat_goal_id: Option<String>,
+    pub(crate) heartbeat_needs_human_action: Arc<std::sync::atomic::AtomicBool>,
     /// Optional process-environment capability, read immediately before each
     /// command spawn so replacements affect new processes while existing
     /// processes keep their immutable snapshot.

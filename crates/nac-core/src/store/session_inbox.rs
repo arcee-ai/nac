@@ -369,6 +369,7 @@ pub fn next_pending_session_inbox_item(
             &format!(
                 "SELECT {INBOX_RECORD_COLUMNS} FROM session_inbox
                  WHERE session_id = ?1 AND status = 'pending'
+                   AND NOT EXISTS (SELECT 1 FROM heartbeat_occurrences h WHERE h.inbox_item_id = session_inbox.id)
                  ORDER BY id ASC LIMIT 1"
             ),
             params![session_id],
@@ -405,7 +406,8 @@ pub fn update_pending_session_inbox_item(
          SET delivery = ?1, target_run_id = ?2, updated_at = ?3,
              version = version + 1
          WHERE session_id = ?4 AND id = ?5 AND status = 'pending'
-           AND version = ?6",
+           AND version = ?6
+           AND NOT EXISTS (SELECT 1 FROM heartbeat_occurrences h WHERE h.inbox_item_id = session_inbox.id)",
         params![
             delivery.as_str(),
             target_run_id,
@@ -454,7 +456,8 @@ pub fn cancel_pending_session_inbox_item(
          SET status = 'cancelled', cancelled_at = ?1, updated_at = ?1,
              target_run_id = NULL, version = version + 1
          WHERE session_id = ?2 AND id = ?3 AND status = 'pending'
-           AND version = ?4",
+           AND version = ?4
+           AND NOT EXISTS (SELECT 1 FROM heartbeat_occurrences h WHERE h.inbox_item_id = session_inbox.id)",
         params![now, session_id, item_id, expected_version],
     )?;
     if changed != 1 {
@@ -483,6 +486,9 @@ fn pending_update_error(
     item_id: i64,
     expected_version: i64,
 ) -> anyhow::Error {
+    if connection.query_row("SELECT EXISTS(SELECT 1 FROM heartbeat_occurrences WHERE session_id=?1 AND inbox_item_id=?2)",params![session_id,item_id],|row|row.get::<_,bool>(0)).unwrap_or(true) {
+        return anyhow!("admitted heartbeat input is immutable; control its schedule or stop its exact occurrence");
+    }
     match load_session_inbox_item_with_connection(connection, session_id, item_id) {
         Err(error) => error,
         Ok(item) if item.status != InboxStatus::Pending => {

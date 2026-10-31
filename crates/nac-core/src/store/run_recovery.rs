@@ -700,6 +700,7 @@ mod tests {
             failed_run_id: None,
             failed_run_failure: None,
             goal_settlement: None,
+            heartbeat_settlement: None,
             finished_run_result: None,
             updated_at: now_utc(),
         }

@@ -1,6 +1,27 @@
 use super::*;
 
 impl PermissionBroker {
+    /// Automatic admission is not an interactive approver. Ask/Deny retain a
+    /// schedule-specific attention reason; executing tools still use their
+    /// ordinary prepared authorization on the selected backend.
+    pub(crate) fn heartbeat_admission_allowed(&self) -> bool {
+        self.policy
+            .evaluate(
+                &[
+                    PermissionResource::new(
+                        "heartbeat_manage",
+                        format!("session:{}", self.session_id),
+                    ),
+                    PermissionResource::new(
+                        "heartbeat_run",
+                        format!("session:{}", self.session_id),
+                    ),
+                ],
+                &[],
+            )
+            .effect
+            == PermissionEffect::Allow
+    }
     /// Read-only fencing for the additive execution observation capability.
     /// This neither authorizes an operation nor changes ordinary broker policy.
     pub(crate) async fn validate_execution_observation_binding(
@@ -347,6 +368,23 @@ impl PermissionBroker {
     ) -> AuthorizationOutcome {
         self.authorize_invocation(
             crate::tools::user_terminal::OPEN_USER_TERMINAL,
+            resources,
+            context,
+            cancellation,
+            true,
+        )
+        .await
+    }
+
+    pub(crate) async fn authorize_submitted_heartbeat(
+        self: &Arc<Self>,
+        resources: &[PermissionResource],
+        context: &crate::tools::kernel::ToolCallContext,
+        cancellation: &crate::tools::ThreadCancellation,
+        _submission: &crate::session_service::SubmittedHeartbeat,
+    ) -> AuthorizationOutcome {
+        self.authorize_invocation(
+            crate::tools::heartbeat::CONTROL_HEARTBEAT,
             resources,
             context,
             cancellation,

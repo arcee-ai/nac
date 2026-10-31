@@ -3,6 +3,9 @@ import type { ManagedSessionSummary, SessionSnapshotResponse, SessionSummarySnap
 export declare function useSessions(pollMs?: number): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     active: boolean;
     active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+    attention_revision?: number;
+    attention_updated_at?: string | null;
+    heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
     lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
     summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
     workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -15,6 +18,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -44,6 +50,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -52,6 +61,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -60,6 +72,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -89,6 +104,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -97,6 +115,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -105,6 +126,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -134,6 +158,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -142,6 +169,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -150,6 +180,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -179,6 +212,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -187,6 +223,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -195,6 +234,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -224,6 +266,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -232,6 +277,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -240,6 +288,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -269,6 +320,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -277,6 +331,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -292,6 +349,9 @@ export declare function useSessionsWithWorkspaceStats(cadence?: {
 export declare function useSessionSummary(id: string | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     active: boolean;
     active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+    attention_revision?: number;
+    attention_updated_at?: string | null;
+    heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
     lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
     summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
     workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -916,6 +976,9 @@ export declare function useVisibleSessions(): {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -945,6 +1008,9 @@ export declare function useVisibleSessions(): {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -953,6 +1019,9 @@ export declare function useVisibleSessions(): {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -961,6 +1030,9 @@ export declare function useVisibleSessions(): {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -990,6 +1062,9 @@ export declare function useVisibleSessions(): {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -998,6 +1073,9 @@ export declare function useVisibleSessions(): {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1006,6 +1084,9 @@ export declare function useVisibleSessions(): {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1035,6 +1116,9 @@ export declare function useVisibleSessions(): {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1043,6 +1127,9 @@ export declare function useVisibleSessions(): {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1051,6 +1138,9 @@ export declare function useVisibleSessions(): {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1080,6 +1170,9 @@ export declare function useVisibleSessions(): {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1088,6 +1181,9 @@ export declare function useVisibleSessions(): {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1096,6 +1192,9 @@ export declare function useVisibleSessions(): {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1125,6 +1224,9 @@ export declare function useVisibleSessions(): {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1133,6 +1235,9 @@ export declare function useVisibleSessions(): {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1141,6 +1246,9 @@ export declare function useVisibleSessions(): {
     data: {
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1170,6 +1278,9 @@ export declare function useVisibleSessions(): {
     refetch: (options?: import("@tanstack/query-core").RefetchOptions) => Promise<import("@tanstack/query-core").QueryObserverResult<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1178,6 +1289,9 @@ export declare function useVisibleSessions(): {
     promise: Promise<NoInfer<{
         active: boolean;
         active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("../../types/openapi.generated").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("../../types/openapi.generated").components["schemas"]["WorkspaceDiffTotals"] | null;
