@@ -51,12 +51,22 @@ impl std::error::Error for StoreProcessLeaseError {
 }
 
 impl StoreProcessLease {
+    /// Prepare the physical selected path before an identified serving launch.
+    ///
+    /// This creates missing parent directories using the same path rules as
+    /// ownership acquisition. It does not open/migrate the database, create a
+    /// lock or acquire authority. `try_acquire` remains the admission boundary
+    /// and revalidates the path when the serving process starts.
+    pub fn prepare_path(store_path: &Path) -> Result<PathBuf, StoreProcessLeaseError> {
+        canonical_store_identity(store_path).map_err(store_error)
+    }
+
     /// Acquire store ownership without waiting for an existing owner.
     ///
     /// The parent directory is created before the database so ownership also
     /// serializes first startup and migration of a previously absent store.
     pub fn try_acquire(store_path: &Path) -> Result<Self, StoreProcessLeaseError> {
-        let canonical_store = canonical_store_identity(store_path).map_err(store_error)?;
+        let canonical_store = Self::prepare_path(store_path)?;
         let lock_path = secure_lock_path_with_suffix(&canonical_store, "store-owner", ".lock")
             .map_err(store_error)?;
         let file = secure_open_lock_file(&lock_path).map_err(store_error)?;
@@ -174,6 +184,59 @@ mod tests {
         drop((first, second));
         let _ = fs::remove_dir_all(first_path.parent().unwrap());
         let _ = fs::remove_dir_all(second_path.parent().unwrap());
+    }
+
+    #[test]
+    fn path_preparation_creates_only_the_missing_parent_and_grants_no_ownership() {
+        let store_path = test_store("path_preparation");
+        assert!(!store_path.parent().unwrap().exists());
+        let prepared = StoreProcessLease::prepare_path(&store_path).unwrap();
+        assert_eq!(
+            prepared,
+            fs::canonicalize(store_path.parent().unwrap())
+                .unwrap()
+                .join("store.db")
+        );
+        assert!(!prepared.exists());
+        assert_eq!(fs::read_dir(prepared.parent().unwrap()).unwrap().count(), 0);
+        let owner = StoreProcessLease::try_acquire(&store_path).unwrap();
+        assert_eq!(owner.store_path(), prepared);
+        assert_eq!(
+            StoreProcessLease::prepare_path(&store_path).unwrap(),
+            prepared
+        );
+        assert!(matches!(
+            StoreProcessLease::try_acquire(&store_path),
+            Err(StoreProcessLeaseError::Busy)
+        ));
+        drop(owner);
+        let _ = fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_preparation_retains_dangling_alias_target_and_selected_ownership() {
+        let store_path = test_store("prepared_alias");
+        let root = store_path.parent().unwrap();
+        fs::create_dir_all(root).unwrap();
+        let target = root.join("missing parent/selected.db");
+        std::os::unix::fs::symlink("missing parent/selected.db", &store_path).unwrap();
+        let prepared = StoreProcessLease::prepare_path(&store_path).unwrap();
+        assert_eq!(
+            prepared,
+            fs::canonicalize(target.parent().unwrap())
+                .unwrap()
+                .join("selected.db")
+        );
+        assert!(!target.exists());
+        let owner = StoreProcessLease::try_acquire(&store_path).unwrap();
+        assert_eq!(owner.store_path(), prepared);
+        assert!(matches!(
+            StoreProcessLease::try_acquire(&target),
+            Err(StoreProcessLeaseError::Busy)
+        ));
+        drop(owner);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(any(unix, windows))]

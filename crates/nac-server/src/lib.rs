@@ -12,6 +12,9 @@ mod delivery;
 #[cfg(unix)]
 #[doc(hidden)]
 pub mod desktop_launch;
+#[cfg(unix)]
+#[doc(hidden)]
+pub mod desktop_startup;
 mod executable;
 mod filesystem;
 mod fork;
