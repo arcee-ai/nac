@@ -121,6 +121,37 @@ struct StartupPaths {
 }
 // END PATH POLICY
 
+// BEGIN ONBOARDING TITLE (compiled verbatim; no AX access in this decision)
+private enum StartupOnboardingTitle {
+    static let text = "No projects yet"
+
+    struct Candidate {
+        let elementType: Int
+        let exists, enabled, hittable: Bool
+        let value: Any?
+        let frame: CGRect
+    }
+
+    static func visible<Element>(wait: () -> Bool, elements: () -> [Element],
+                                 staticTextType: Int, project: (Element) -> Candidate,
+                                 window: () -> CGRect, verify: () -> Bool) -> Bool {
+        guard wait() else { return false }
+        let matches = elements()
+        // Reject ambiguity before reading any candidate attributes.
+        guard matches.count == 1 else { return false }
+        let title = project(matches[0])
+        guard title.elementType == staticTextType, title.exists, title.enabled, title.hittable,
+              let value = title.value as? String, value == text else { return false }
+        let frame = title.frame, bounds = window()
+        let finite = [frame.minX, frame.minY, frame.width, frame.height,
+                      bounds.minX, bounds.minY, bounds.width, bounds.height].allSatisfy { $0.isFinite }
+        // CGRect.infinite uses finite sentinel components on CoreGraphics.
+        return finite && !frame.isInfinite && !bounds.isInfinite
+            && !frame.isEmpty && !bounds.isEmpty && frame.intersects(bounds) && verify()
+    }
+}
+// END ONBOARDING TITLE
+
 // BEGIN QUERY DIAGNOSTIC (compiled verbatim; no AX access in this projection)
 private enum StartupQueryDiagnostic {
     static let queries = ["app_webviews", "window_webviews", "legacy_title", "app_static_title",
@@ -621,20 +652,24 @@ final class StartupJourneys: XCTestCase {
             try require(ui.webViews.allElementsBoundByIndex.allSatisfy { !$0.isHittable },
                         "Recovery unexpectedly activated shared workspace")
         } else {
+            let window = ui.windows.firstMatch
+            let onboarding = window.descendants(matching: .staticText)
+                .matching(NSPredicate(format: "value == %@", StartupOnboardingTitle.text))
             try StartupQueryDiagnostic.requireOnboarding(wait: {
-                text("No projects yet").waitForExistence(timeout: 45)
+                StartupOnboardingTitle.visible(wait: {
+                    onboarding.firstMatch.waitForExistence(timeout: 45)
+                }, elements: { onboarding.allElementsBoundByAccessibilityElement },
+                staticTextType: Int(XCUIElement.ElementType.staticText.rawValue), project: { title in
+                    StartupOnboardingTitle.Candidate(elementType: Int(title.elementType.rawValue),
+                        exists: title.exists, enabled: title.isEnabled, hittable: title.isHittable,
+                        value: title.value, frame: title.frame)
+                }, window: { window.frame }, verify: {
+                    (try? guardTarget()) != nil
+                        && (try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes
+                })
             }, diagnose: {
-                // Diagnostics never change the observed legacy result or
-                // mask its original failure. Missing evidence stays missing.
-                try? queryDiagnostic(ui, guardTarget: {
-                    try guardTarget()
-                    let current = try Data(contentsOf: URL(fileURLWithPath: path))
-                    try require(current == bytes, "Fixture configuration changed during query diagnostics")
-                }, binding: ["source_sha": fixture.source_sha, "test_source_sha": fixture.test_source_sha,
-                    "harness_sha": fixture.harness_sha, "startup_source_sha256": fixture.startup_source_sha256,
-                    "configuration_sha256": digest(bytes), "app_path": paths.emittedPath,
-                    "native_sha256": fixture.native_sha256, "app_pid": Int(running.processIdentifier),
-                    "app_launch_epoch": launch.timeIntervalSince1970, "window_number": number], scenario: fixture.scenario)
+                // Historical v1 certifies the original label wait failed.
+                // A value-assertion failure cannot emit that unchanged record.
             })
             if fixture.scenario == "configuredLocal" {
                 try click(ui.webViews.buttons, "Get Started")

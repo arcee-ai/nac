@@ -232,7 +232,10 @@ qualification; launch/input/PNG remain uncaptured and input completion unknown.
 This repair is local source preparation pending the same bounded affected
 review, root nomination and H's matching observer/source-hash update.
 
-## Failure-only onboarding query diagnostics
+## Historical Q55 failure-only onboarding query diagnostics
+
+This section describes the original label assertion through Q55cb. The
+successor assertion below does not emit this unchanged v1 diagnostic.
 
 The Qddb/Hd7b actual onboarding attempt reached the full45s legacy text wait
 and failed `Shared onboarding absent`; its guarded failure PNG painted the
@@ -284,10 +287,61 @@ these caps do not bound an individual public framework call. No second wait,
 retry, refocus, input, timeout increase, DOM/private API, OCR-based pass or
 alternate-element fallback is introduced.
 
+## Exact-value onboarding title assertion successor
+
+Root authorized one test-owned source repair after the fourth failed ordinary
+startup episode: run41246104964/job124669877870, Q55cb/H14e/Pd443/R25046.
+The retained complete749ms diagnostic SHA256
+`1a2bc4759bf2c450833eeb53dc2f6afd643b44498f5756e942f8f673232397f6`
+reported zero legacy label matches but exactly one owned-window value-title
+match: StaticText48, existing/enabled/hittable/intersecting, exact String value.
+The subtitle independently had the same value-only result. The original PNG
+was visibly onboarding; the original45s assertion still failed. This evidence
+supports this episode's attribute/query mismatch, not every host or earlier
+failure's cause, and does not qualify a passing startup case.
+
+Only the onboarding title assertion changes. It queries StaticText descendants
+of the already uniquely guarded window with exact `value == "No projects yet"`.
+One45s existence wait precedes one result-set materialization. Exactly one
+candidate is required before reading attributes; its actual SDK type, exact
+String value, existence, enabled/hittable state and finite, nonempty window
+intersection must pass; CoreGraphics infinite sentinel rectangles are refused
+even though their components can be finite. Frame geometry is only a visibility guard, never an
+input coordinate. The final original App/window/console/resource guard and
+unchanged configuration bytes must pass before success. No OR-label fallback,
+contains/trim/case folding, second wait, refocus, retry or global helper change
+is added. Public framework call latency is not given a new hard wall-clock bound.
+
+The unchanged pure wrapper still throws NAC342/code1/`Shared onboarding absent`
+on false. Its diagnostic callback is deliberately empty for the new assertion:
+historical v1 `legacy_exists:false` certifies the original label wait's result,
+which a failed value assertion cannot certify. The frozen c871/fa7 contracts,
+historical producer/policy code and H optional collector are unchanged. A new
+failure may lack that optional census; missing evidence cannot pass acceptance.
+Any future census requires a separately frozen, honest assertion contract.
+
+Get Started and all later-flow/native recovery selectors remain unchanged.
+The current click helper uses `matching(identifier:)`, which Apple defines to
+also match title, label, value and placeholderValue; zero sampled label-button
+matches do not prove that helper fails. Button and later-flow AX attributes
+remain unqualified. The full four-state matrix and existing launch, dispatch,
+observation, source/resource binding and cleanup contracts remain required.
+B1/B2/B3 and no-argument Finder coverage are separate, unallocated work.
+
+`test_title_assertion.py` compiles the exact pure title decision plus original
+error wrapper. Its H14e old-RED/new-model-GREEN fixture uses retained comparison
+facts and explicitly synthetic rectangles, never invented actual raw labels or
+geometry. Negatives reject ambiguity before attribute reads, wrong types/values,
+unavailable interaction state, invalid geometry and failed final bindings.
+These controls establish no XCUI query, actual visibility or input behavior.
+The previous Q55 actor built under Xcode26.6/SDK26.5/Swift5 language mode on H14e;
+the changed actor requires fresh exact-source full SDK build-for-testing and
+separate root runtime allocation. Neither is established by these local controls.
+
 ## Local preparation checks
 
 ```sh
-NAC342_PRODUCT_SOURCE_ROOT=<clean-exact-P-checkout> NAC342_SWIFT_POLICY_PROOF=1 NAC342_SWIFT_PATH_PROOF=1 NAC342_SWIFT_QUERY_PROOF=1 \
+NAC342_PRODUCT_SOURCE_ROOT=<clean-exact-P-checkout> NAC342_SWIFT_POLICY_PROOF=1 NAC342_SWIFT_PATH_PROOF=1 NAC342_SWIFT_QUERY_PROOF=1 NAC342_SWIFT_TITLE_PROOF=1 \
   python3 -B -m unittest discover -s desktop/macos/startup_xctest -p 'test_*.py' -v
 swiftc -frontend -parse desktop/macos/startup_xctest/StartupJourneys.swift
 ```
