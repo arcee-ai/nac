@@ -18,9 +18,10 @@ final class NativePathBridge: NSObject, WKScriptMessageHandler {
     private var choices = 0
     private var cancellations = 0
     private var selections: [String] = []
+    private var documents = 0
     var smokeSnapshot: [String: Any] {
         ["installed": installed, "pending": pending != nil, "choices": choices,
-         "cancellations": cancellations, "selections": selections]
+         "cancellations": cancellations, "selections": selections, "documents": documents]
     }
     #endif
 
@@ -48,8 +49,13 @@ final class NativePathBridge: NSObject, WKScriptMessageHandler {
               state.allows(candidate.url), let binding = state.beginDocument(receipt: receipt()) else { return }
         candidate.callAsyncJavaScript("return window.__nacLocalPaths?.activate(binding) === true",
                                       arguments: ["binding": object(binding)], in: nil, in: .page) { [weak self] result in
-            guard let self, self.state.binding == binding else { return }
-            if case .success(let value) = result, (value as? Bool) == true { return }
+            guard let self, self.installed, self.state.binding == binding, self.state.matches(self.receipt()) else { return }
+            if case .success(let value) = result, (value as? Bool) == true {
+                #if PREVIEW_SMOKE
+                self.documents += 1
+                #endif
+                return
+            }
             self.endDocument()
         }
     }

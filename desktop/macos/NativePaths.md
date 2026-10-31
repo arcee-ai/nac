@@ -65,15 +65,20 @@ journey for the ALL-354 runner to compose under `NATIVE_UI_TESTS`. It requires
 the runner's exact app/binary/console/window checks before every input. Its
 owned ASCII parent must contain a fresh directory whose name has spaces and
 Unicode, with an existing saved fixture model available in the shared form.
-It drives actual NSOpenPanel cancel and selection, verifies the exact path in
-the ordinary form, and submits normal project/first-chat creation. It has no
+It drives actual NSOpenPanel cancellation and document replacement while a
+sheet is pending, verifies a successor form retains its own folder, and selects
+the Unicode/spaces folder. It moves that owned folder before normal submission,
+observes server rejection, restores/reselects it, and explicitly retries normal
+project/first-chat creation. It then invokes Reveal in Finder and observes the
+selected file through Finder accessibility. `NativePathSmoke` observes the real
+panel/document callbacks and verifies stale/outside/missing/symlink/file-URL
+reveal denials through the actual WKWebView and shared server. It has no
 standalone launch or hosted dispatch, does not provision permissions, and does
 not qualify physical IME or paste.
 
 Full acceptance additionally requires integration of the separately owned common
 shell wiring and frozen ALL-354 XCTest harness, plus actual `.app`/system
-WKWebView runs for missing/moved selection, superseded/retired panel/document,
-SSH/Podman exclusion, current-workspace Finder selection and denial cases,
-engine failure, bounded cleanup and supplier ALL-342/346 gates. These remain
+WKWebView runs of these journeys, SSH/Podman exclusion, engine failure with a
+pending native sheet, bounded cleanup and supplier ALL-342/346 gates. These remain
 explicit gates until recorded against the exact joined source and binaries;
 Chromium, pure fixtures and this checked-in driver are not substitutes.

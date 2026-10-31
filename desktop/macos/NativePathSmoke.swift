@@ -13,12 +13,14 @@ final class NativePathSmoke {
     func run(publish: @escaping ([String: Any]) -> Void) async throws -> [String: Any] {
         try await wait("current shared workspace and path bridge") {
             self.app.baseURL != nil && self.paths.smokeSnapshot["installed"] as? Bool == true &&
-                self.app.commands.smokeSnapshot["ready"] as? Bool == true
+                self.app.commands.smokeSnapshot["ready"] as? Bool == true &&
+                (self.paths.smokeSnapshot["documents"] as? Int ?? 0) > 0
         }
         guard let profile = app.profile else { throw PreviewError.message("Disposable path profile unavailable") }
         let folder = profile.root.appendingPathComponent("Folder with spaces 日本語")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         try Data("ALL347_REVEAL_FIXTURE\n".utf8).write(to: folder.appendingPathComponent("reveal me.txt"))
+        try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent("outside-link"), withDestinationURL: profile.workspace)
         for arguments in [["init", "--quiet", "--initial-branch=main"], ["add", "reveal me.txt"],
                           ["-c", "user.name=NAC disposable preview", "-c", "user.email=preview@example.test",
                            "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "path fixture"]] {
@@ -35,6 +37,20 @@ final class NativePathSmoke {
         publish(["paths_xctest_ready": true, "app_pid": getpid(),
                  "target_window_number": app.window.windowNumber, "initial_parent": profile.root.path,
                  "selection_path": folder.path, "engine_pid": app.engine.pid, "profile": profile.root.path])
+        try await wait("external reload request while the actual panel is open", timeout: 90) {
+            FileManager.default.fileExists(atPath: profile.root.appendingPathComponent("all347-reload-request").path)
+        }
+        guard paths.smokeSnapshot["pending"] as? Bool == true else {
+            throw PreviewError.message("External document replacement did not start with an actual pending panel")
+        }
+        let before = paths.smokeSnapshot["documents"] as? Int ?? 0
+        app.webView.reload()
+        try await wait("successor document with the old sheet cancelled") {
+            (self.paths.smokeSnapshot["documents"] as? Int ?? 0) > before &&
+                self.paths.smokeSnapshot["pending"] as? Bool == false &&
+                self.app.commands.smokeSnapshot["ready"] as? Bool == true
+        }
+        try Data("ALL347_DOCUMENT_RELOADED".utf8).write(to: profile.root.appendingPathComponent("all347-reloaded"), options: .atomic)
         try await wait("external native folder/create/Finder journey", timeout: 150) {
             FileManager.default.fileExists(atPath: complete.path)
         }
@@ -55,12 +71,31 @@ final class NativePathSmoke {
         const response = await fetch('/sessions/' + encodeURIComponent(id));
         if (!response.ok) throw new Error('Current session unavailable');
         const snapshot = await response.json();
-        return {session: id, root: snapshot.metadata.workspace_host_path,
-                sandbox: snapshot.metadata.sandbox_status};
+        const root = snapshot.metadata.workspace_host_path;
+        const denials = [];
+        for (const [path, expected] of [
+          ['../outside', root], ['/tmp/absolute', root], ['missing/child', root],
+          ['outside-link', root], ['reveal me.txt', root + '/stale'],
+          ['file:///tmp/not-a-target', root]
+        ]) {
+          const result = await fetch('/sessions/' + encodeURIComponent(id) + '/workspace/reveal', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({path, expected_workspace_root:expected})
+          });
+          if (result.status !== 400) throw new Error('Unsafe Finder target was not rejected: ' + path);
+          denials.push({path, status:result.status});
+        }
+        const projects = await (await fetch('/projects')).json();
+        const matching = projects.projects.filter(project => project.cwd === root);
+        if (matching.length !== 1) throw new Error('Missing-folder retry duplicated or lost the project');
+        return {session: id, root, sandbox: snapshot.metadata.sandbox_status, denials, matching_projects:matching.length};
         """#, arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
         guard let root = target?["root"] as? String, canonical(root) == expectedRoot,
               target?["sandbox"] as? String == "off" else {
             throw PreviewError.message("Created chat did not retain the selected Local workspace")
+        }
+        guard !FileManager.default.fileExists(atPath: folder.appendingPathComponent("missing").path) else {
+            throw PreviewError.message("Rejected Finder path created a missing directory")
         }
         return ["native_panel": state, "created_session": target ?? [:],
                 "external_xctest_receipt": complete.lastPathComponent,
