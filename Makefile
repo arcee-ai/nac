@@ -189,6 +189,8 @@ test-durability:
 	$(CARGO) test --locked -p nac-core invalid_wal_cannot_mask_future_main_schema_or_mutate_any_file
 	$(CARGO) test --locked -p nac-core killed_migrator_rolls_back_and_waiting_process_migrates_exactly_once
 	$(CARGO) test --locked -p nac-core cancellation_adopts_a_committed_single_direct_steer_after_async_abort
+	$(CARGO) test --locked -p nac-core followup
+	$(CARGO) test --locked -p nac-server task_followup
 	$(CARGO) test --locked -p nac-core canonical_terminal_recovery_is_retained_until_relationship_settlement
 	$(CARGO) test --locked -p nac-core child_terminal_crash_window_recovers_report_and_delivers_once
 	$(CARGO) test --locked -p nac-core child_pre_prompt_crash_is_interrupted_and_delivered_once_after_restart

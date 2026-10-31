@@ -34,6 +34,7 @@ pub mod read;
 mod runtime_context;
 pub(crate) mod subagent;
 mod task_discovery;
+mod task_followups;
 mod terminal_tools;
 pub mod thread;
 mod thread_lifecycle;
@@ -163,7 +164,7 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
 ];
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 17] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 19] = [
     "read",
     "write",
     "edit",
@@ -175,6 +176,8 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 17] = [
     "list_executions",
     "find_tasks",
     "read_task",
+    "send_task_followup",
+    "read_task_followup",
     "create_goal",
     "get_goal",
     "update_goal",
@@ -191,7 +194,7 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 23] = [
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 25] = [
     "read",
     "write",
     "edit",
@@ -203,6 +206,8 @@ pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 23] = [
     "list_executions",
     "find_tasks",
     "read_task",
+    "send_task_followup",
+    "read_task_followup",
     "create_goal",
     "get_goal",
     "update_goal",
@@ -232,6 +237,8 @@ fn worker_tool_registry(
         .register(execution_observation::ListExecutionsTool)
         .register(task_discovery::FindTasksTool)
         .register(task_discovery::ReadTaskTool)
+        .register(task_followups::SendTaskFollowupTool)
+        .register(task_followups::ReadTaskFollowupTool)
         .register(goal::CreateGoalTool)
         .register(goal::GetGoalTool)
         .register(goal::UpdateGoalTool)
