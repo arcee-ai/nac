@@ -11,6 +11,12 @@ SCHEMA = 'nac342-startup-xctest-v1'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 TEST_ID = 'StartupJourneys/testOrdinaryStartup'
+FUTURE_FAILURE_CODE = 'store_schema_incompatible'
+FUTURE_FAILURE_STAGE = 'startup'
+FUTURE_RECOVERY_MESSAGE = (
+    'The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. '
+    'Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.'
+)
 ENVIRONMENT = {'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY',
                'NAC_ORCHESTRATION', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL',
                'BROWSER', 'MODELS_DEV_URL'}
@@ -19,6 +25,21 @@ ENVIRONMENT = {'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY',
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def require_future_recovery(failure, visible_message):
+    """Assert356's nominated typed v1 record and unique shell-owned message.
+
+    Caller must independently bind authentic producer/UI observations to the
+    exact candidate. This never classifies logs, observes a process, or proves
+    source inclusion, profile integrity, no activation, cleanup, or paint.
+    """
+    require(failure.get('kind') == 'failed' and type(failure.get('version')) is int
+            and failure['version'] == 1 and failure.get('code') == FUTURE_FAILURE_CODE
+            and failure.get('stage') == FUTURE_FAILURE_STAGE,
+            'Missing nominated serving-startup typed future-schema failure')
+    require(visible_message == FUTURE_RECOVERY_MESSAGE,
+            'Missing exact unique future-schema recovery message')
 
 
 def path(value):

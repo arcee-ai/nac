@@ -16,6 +16,9 @@ final class StartupJourneys: XCTestCase {
         let environment: [String: String]
     }
     private var observations: [[String: Any]] = []
+    // Root-nominated356 contract. The actor observes the unique UI message;
+    // actual typed receipt/source inclusion is independently bound by354.
+    private let futureRecovery = "The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected."
 
     private func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
         if !condition() { throw NSError(domain: "NAC342", code: 1,
@@ -258,10 +261,18 @@ final class StartupJourneys: XCTestCase {
         }
         try guardTarget()
         if ["invalidConfig", "futureStore"].contains(fixture.scenario) {
-            let expected = fixture.scenario == "invalidConfig"
-                ? ["config.toml", "repair", "relaunch"] : ["compatible version", "keep the existing database", "relaunch"]
-            for phrase in expected {
-                try require(text(phrase, native: true).waitForExistence(timeout: 35), "Actionable recovery missing: " + phrase)
+            if fixture.scenario == "futureStore" {
+                // Match the complete nominated sentence sequence verbatim,
+                // even when a native label wraps it in shell presentation.
+                // The old generic compatible-version footer must fail here.
+                let recovery = ui.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", futureRecovery))
+                try require(recovery.firstMatch.waitForExistence(timeout: 35)
+                    && recovery.count == 1 && recovery.firstMatch.isHittable,
+                    "Unique typed future-schema recovery guidance missing")
+            } else {
+                for phrase in ["config.toml", "repair", "relaunch"] {
+                    try require(text(phrase, native: true).waitForExistence(timeout: 35), "Actionable recovery missing: " + phrase)
+                }
             }
             try require(ui.webViews.allElementsBoundByIndex.allSatisfy { !$0.isHittable },
                         "Recovery unexpectedly activated shared workspace")
@@ -303,6 +314,8 @@ final class StartupJourneys: XCTestCase {
         add(imageAttachment)
         captured = true
         try guardTarget()
+        let expectedPrivateFailure: [String: Any] = fixture.scenario == "futureStore"
+            ? ["kind": "failed", "version": 1, "code": "store_schema_incompatible", "stage": "startup"] : [:]
         try attachment(["schema": fixture.schema, "scenario": fixture.scenario,
             "configuration_sha256": digest(bytes), "source_sha": fixture.source_sha,
             "startup_source_sha256": fixture.startup_source_sha256,
@@ -315,14 +328,11 @@ final class StartupJourneys: XCTestCase {
             "visible_paint": "requires_actual_image_review", "input_method": "public-XCTest",
             "physical_keyboard_or_ime_claim": false, "external_cleanup_required": true,
             "future_schema_G2_assertion": fixture.scenario == "futureStore"
-                ? "pending_ALL356_public_recovery_contract" : "not_applicable"],
+                ? "exact_unique_message_observed_producer_binding_required" : "not_applicable",
+            "expected_private_failure": expectedPrivateFailure,
+            "private_failure_observation": "not_read_by_public_UI_actor",
+            "four_case_acceptance": "requires_producer_source_binding_SDK_run_and_external_integrity_audits"],
             name: "nac342-ordinary-v1-" + fixture.scenario)
-        // Existing generic compatible-version guidance can be captured for
-        // diagnosis. It cannot satisfy the separately identified G2 gap. Root
-        // must nominate356's concrete public recovery contract, then this
-        // assertion must be implemented before futureStore can pass.
-        try require(fixture.scenario != "futureStore",
-                    "ALL-356 G2 recovery assertion pending; generic future-store guidance does not qualify")
     }
 }
 

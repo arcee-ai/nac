@@ -21,22 +21,38 @@ dummy provider, with no live inference or credential copying.
 | `onboarding` | Empty shared `No projects yet` workspace | Selected fresh disposable store, no seeded project |
 | `configuredLocal` | Get Started, shared project/folder controls, Create Project, Message and Send, visible `Finder configured local response.` | Correct configured dummy preset through Rust owner; project created by UI; exact selected store; Local backend; settled run and persisted reload |
 | `invalidConfig` | Native `config.toml`, repair and relaunch guidance; no hittable shared workspace | Invalid owned config; no DB opened or substitute store |
-| `futureStore` | Native compatible-version/keep-database guidance and ordinary window image; G2 remains a separate failing gate | Owned SQLite user_version999 byte hash and config hash unchanged, no WAL/SHM, no fallback store; typed future-schema failure and unique actionable recovery message |
+| `futureStore` | Exact root-nominated356 unique native recovery message and ordinary window image; old generic footer fails | Owned SQLite user_version999 main DB and config hashes unchanged, no WAL/SHM, no activation or alternate store; typed serving-startup failure, producer inclusion and cleanup |
 
-Future-store generic guidance is diagnostic evidence only. The current shell
-appends generic compatible-version advice to every initialization failure.
-Root is coordinating ALL-356's unimplemented G2. This helper captures that
-diagnostic state, records `pending_ALL356_public_recovery_contract`, then
-**fails** `futureStore` deliberately. Replace this explicit gate with concrete
-public UI assertions only after root nominates356's implemented recovery
-contract. Never replace it with “some error exists,” accept the generic suffix,
-or silently skip the case. No new error code, production text or product API is
-invented by this proposal.
-The eventual assertions must bind the owner-issued typed failure code to its
-unique visible message, selected store and safe recovery. A classifier inferred
-from arbitrary logs or the generic footer is not that contract. Configuration,
-DB/WAL/SHM, no-fallback and cleanup checks remain required independently of the
-message and image.
+Root nominated ALL-356's exact source contract (implementation in progress,
+not qualified): private v1 `kind: failed`, `code: store_schema_incompatible`,
+`stage: startup`, with this exact shell-owned visible guidance:
+
+> The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.
+
+The public UI actor requires this complete literal in one visible native text
+element. It records `exact_unique_message_observed_producer_binding_required`
+only after that assertion. Old ec4 source, whose shell appends generic
+compatible-version advice to initialization failures, **must fail** this
+assertion. Generic guidance is not a substitute, and no unconditional case
+success or four-case completion is claimed by this source preparation.
+
+`contract.require_future_recovery` checks a caller-supplied authentic typed v1
+record and the extracted unique message. It rejects an old generic failure,
+wrong stage, or changed guidance. This pure assertion does not classify logs or
+observe the app's private pipe. The public UI actor does not read that pipe,
+and its `expected_private_failure` attachment is an expectation, **not** an
+observed receipt.354 must bind authentic producer evidence and exact included
+producer source/hash to the ordinary app candidate and its observed message.
+No duplicate classifier or production change belongs in342.
+
+Normal `__desktop-configuration` must still select the valid configuration and
+path without opening SQLite. The typed rejection occurs during identified
+serving startup, after store-owned priority. Do not move it into preflight or
+invent a preflight schema code. Preserve checks for the main DB/config hashes,
+WAL/SHM absence, no workspace activation, no alternate store and exact cleanup
+independently of the unique message and image. SDK/source inclusion, generated
+runner execution and actual ordinary images remain gates even when this
+assertion is syntactically present.
 
 The helper has fixed public XCTest actions, exact URL/hash/receipt and app
 incarnation checks, unique foreground/on-screen window checks, and explicit

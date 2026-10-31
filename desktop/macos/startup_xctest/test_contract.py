@@ -2,7 +2,8 @@
 import copy
 import unittest
 
-from contract import BASELINE, CASES, SCHEMA, validate
+from contract import (BASELINE, CASES, SCHEMA, FUTURE_RECOVERY_MESSAGE,
+                      require_future_recovery, validate)
 
 
 def fixture():
@@ -30,6 +31,27 @@ def fixture():
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_nominated_serving_failure_and_exact_guidance(self):
+        # Synthetic observation only, not a producer implementation claim.
+        failure = {'kind': 'failed', 'version': 1, 'code': 'store_schema_incompatible', 'stage': 'startup'}
+        require_future_recovery(failure, FUTURE_RECOVERY_MESSAGE)
+        for key, value in [('code', 'startup_failed'), ('stage', '__desktop-configuration'),
+                           ('kind', 'ready'), ('version', True), ('version', 2)]:
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                require_future_recovery({**failure, key: value}, FUTURE_RECOVERY_MESSAGE)
+
+    def test_old_source_generic_failure_or_footer_cannot_pass(self):
+        generic = ('A store written by a newer NAC version requires a compatible version; '
+                   'keep the existing database. Check directory access and whether another NAC process owns this store.')
+        nominated = {'kind': 'failed', 'version': 1, 'code': 'store_schema_incompatible', 'stage': 'startup'}
+        for message in (generic, 'NAC could not continue', FUTURE_RECOVERY_MESSAGE.lower(),
+                        FUTURE_RECOVERY_MESSAGE[:-1], FUTURE_RECOVERY_MESSAGE + ' '):
+            with self.subTest(message=message), self.assertRaises(ValueError):
+                require_future_recovery(nominated, message)
+        # A unique message alone also cannot disguise an old typed producer.
+        with self.assertRaises(ValueError):
+            require_future_recovery({**nominated, 'code': 'startup_failed'}, FUTURE_RECOVERY_MESSAGE)
+
     def test_four_exact_states_are_declarations_only(self):
         config, receipt = fixture()
         for case in CASES:
