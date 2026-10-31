@@ -37,6 +37,7 @@ mod runtime_context;
 pub(crate) mod subagent;
 mod task_discovery;
 mod task_questions;
+pub(crate) use task_discovery::url_component;
 mod task_wait;
 mod task_wait_state;
 mod terminal_tools;

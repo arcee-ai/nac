@@ -51,6 +51,7 @@ fn outcome(result: anyhow::Result<impl serde::Serialize>) -> ToolResult {
                 Some(QuestionError::Invalid) => "invalid_arguments",
                 Some(QuestionError::NotFound) => "not_found",
                 Some(QuestionError::HumanRequired) => "human_required",
+                Some(QuestionError::Denied) => "permission_denied",
                 Some(QuestionError::Conflict) => "conflict",
                 _ => "unavailable",
             };
@@ -278,13 +279,10 @@ impl NativeTool for AnswerQuestionTool {
     ) -> Result<Vec<PermissionResource>, ToolResult> {
         let (_, broker) = read::caller(services)?;
         Ok(vec![
-            PermissionResource::new(
+            crate::session_service::questions::response_resource(
                 "task_question_answer",
-                format!(
-                    "session:{}/question:{}",
-                    read::url_component(&input.session_id),
-                    read::url_component(&input.request_id)
-                ),
+                &input.session_id,
+                &input.request_id,
             ),
             read::task_resource(&input.session_id),
             read::project_resource(input.project_id.as_deref().or(broker.caller_project())),
