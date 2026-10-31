@@ -119,6 +119,21 @@ class QualificationTests(unittest.TestCase):
                     settle_apps(raw)
             cleanup.assert_not_called()
 
+    def test_target_owner_cleans_recorded_helper_after_app_and_engine_exit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            raw = Path(temporary)
+            (raw / 'evidence').mkdir()
+            record = raw / 'evidence/parent-loss.json'
+            record.write_text(json.dumps({'app_pid': 123, 'app_helper_pid': 456}))
+            remaining = {456}
+            def clean(owned_record, _bundle):
+                self.assertEqual(owned_record, record)
+                remaining.clear()
+            with patch('ci.alive', return_value=False):
+                result = settle_apps(raw, cleanup=clean, extra_alive=lambda pid: pid in remaining)
+            self.assertTrue(result[0]['fallback_cleanup'])
+            self.assertFalse(remaining)
+
 
 if __name__ == '__main__':
     unittest.main()

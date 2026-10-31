@@ -3,12 +3,14 @@
 import argparse
 from collections import deque
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import platform
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -16,13 +18,14 @@ import time
 from ci_support import (console_state, export_evidence, qualify_toolchain, redact_values,
                         require_console, require_terminal_evidence)
 from smoke import cleanup_failed_case
+from ci_qualifications import require_checkout, require_full_preview, select_target
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DEADLINE = time.monotonic() + 30 * 60  # Leave ten job minutes for cleanup/upload.
 
 
-def command(args):
-    return subprocess.check_output(args, cwd=ROOT, text=True, stderr=subprocess.STDOUT,
+def command(args, cwd=ROOT):
+    return subprocess.check_output(args, cwd=cwd, text=True, stderr=subprocess.STDOUT,
                                    timeout=min(30, max(1, RUN_DEADLINE - time.monotonic()))).strip()
 
 
@@ -37,11 +40,11 @@ def native_report(args, log):
     return json.loads(result.stdout)
 
 
-def run(args, log, timeout):
+def run(args, log, timeout, cwd=ROOT):
     """Drain output continuously, retaining at most 256 KiB, including failure."""
     print(f'Native CI phase: {log.name}', flush=True)
     chunks = deque(maxlen=64)
-    process = subprocess.Popen(args, cwd=ROOT, stdout=subprocess.PIPE,
+    process = subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, start_new_session=True)
     def drain():
         while chunk := process.stdout.read(4096):
@@ -65,9 +68,11 @@ def run(args, log, timeout):
         log.write_bytes(b''.join(chunks))
 
 
-def settle_apps(raw):
+def settle_apps(raw, cleanup=None, extra_alive=None):
     """Recover only bundles named in this invocation's app ownership records."""
     results = []
+    cleaner = cleanup or cleanup_failed_case
+    extra_alive = extra_alive or alive
     for record in sorted((raw / 'evidence').glob('*.json')):
         data = json.loads(record.read_text())
         pid = data.get('app_pid')
@@ -76,6 +81,7 @@ def settle_apps(raw):
         engine_pid = data.get('engine_pid', 0)
         target = pid if alive(pid) else engine_pid
         args = command(['/bin/ps', '-p', str(target), '-o', 'command=']) if target and alive(target) else ''
+        bundle = Path(data.get('relocated_app', '/missing-confirmed-dead-bundle'))
         if args:
             member = 'MacOS/NACPreview' if target == pid else 'Resources/nac-web'
             suffix = '/NAC Development Preview Smoke.app/Contents/' + member
@@ -87,9 +93,16 @@ def settle_apps(raw):
                     or not any(p.startswith('nac-mac-relocation-') for p in executable.parts)):
                 raise RuntimeError('Owned app executable binding cannot be verified; refusing signal')
             bundle = Path(path + '/NAC Development Preview Smoke.app')
-            cleanup_failed_case(record, bundle)
-            results.append({'scenario': data.get('scenario'), 'fallback_cleanup': True})
         root = data.get('profile')
+        extras = [data[key] for key in ('app_helper_pid', 'descendant_pid') if data.get(key)]
+        if args or (root and Path(root).exists()) or any(extra_alive(pid) for pid in extras):
+            cleaner(record, bundle)
+            results.append({'scenario': data.get('scenario'), 'fallback_cleanup': True})
+        settled_by = time.monotonic() + 3
+        while any(extra_alive(pid) for pid in extras) and time.monotonic() < settled_by:
+            time.sleep(.025)
+        if any(extra_alive(pid) for pid in extras):
+            raise RuntimeError('Recorded owned fixture helper/descendant survived cleanup')
         if root and Path(root).exists():
             raise RuntimeError('Fixture profile survived cleanup')
         if data.get('engine_pid') and alive(data['engine_pid']):
@@ -112,6 +125,8 @@ def main():
     parser.add_argument('--expected-sha', required=True)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--preflight-only', action='store_true')
+    parser.add_argument('--qualification', help='One checked-in immutable supplier target')
+    parser.add_argument('--source-root', type=Path, help='Separate unchanged target checkout')
     args = parser.parse_args()
     output = args.output.resolve()
     if output.exists():
@@ -119,28 +134,47 @@ def main():
     output.mkdir(parents=True)
     raw = output.parent / (output.name + '-private')
     raw.mkdir(mode=0o700)
-    report = {'result': 'failed', 'acceptance': 'ALL-354 baseline only; full journeys incomplete',
-              'source_sha': command(['git', 'rev-parse', 'HEAD']),
-              'source_dirty': bool(command(['git', 'status', '--porcelain'])),
+    report = {'result': 'failed', 'acceptance': 'Named native qualification only; full ALL-354 incomplete',
+              'harness_sha': command(['git', 'rev-parse', 'HEAD']),
+              'harness_dirty': bool(command(['git', 'status', '--porcelain'])),
               'pr_head': os.environ.get('PR_HEAD_SHA'), 'pr_base': os.environ.get('PR_BASE_SHA'),
               'workflow_sha': os.environ.get('GITHUB_SHA'), 'event': os.environ.get('GITHUB_EVENT_NAME'),
               'run_id': os.environ.get('GITHUB_RUN_ID'), 'run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT')}
     started = time.time()
+    source_root = ROOT
+    target = None
+    target_module = None
     def interrupt(signum, _frame):
         raise RuntimeError(f'CI interrupted by signal {signum}')
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, interrupt)
     try:
-        if report['source_sha'] != args.expected_sha or report['source_dirty']:
+        if report['harness_sha'] != args.expected_sha or report['harness_dirty']:
             raise RuntimeError('Expected clean exact candidate checkout')
+        if args.qualification:
+            target = select_target(args.qualification)
+            if not args.source_root or args.source_root.is_symlink():
+                raise RuntimeError('Qualification requires an explicit non-symlink source root')
+            source_root = args.source_root.resolve()
+            if source_root == ROOT or source_root.is_relative_to(ROOT):
+                raise RuntimeError('Supplier source must be a separate checkout, not part of the harness')
+            report['qualification'] = args.qualification
+            report['target_contract'] = target
+        elif args.source_root:
+            raise RuntimeError('Separate source root requires an approved qualification key')
+        report.update(require_checkout(source_root, target['source_sha'] if target else args.expected_sha))
         if platform.system() != 'Darwin' or platform.machine() != 'arm64':
             raise RuntimeError('Native prerequisite unavailable: Darwin ARM64 required')
         run(['make', 'setup'], raw / 'setup.log', 600)
+        if target:
+            run(['make', 'setup'], raw / 'target-setup.log', 600, cwd=source_root)
+            require_checkout(source_root, target['source_sha'])
         if command(['git', 'status', '--porcelain']):
             raise RuntimeError('Locked setup modified the candidate source')
         run(['python3', '-B', '-m', 'unittest', 'discover', '-s', 'desktop/macos', '-p', 'test_*.py'],
             raw / 'fixture-controls.log', 60)
-        expected = json.loads((ROOT / 'desktop/macos/ci-toolchain.json').read_text())
+        envelope = target['envelope'] if target else 'ci-toolchain.json'
+        expected = json.loads((ROOT / 'desktop/macos' / envelope).read_text())
         actual = {'developer_directory': os.environ.get('DEVELOPER_DIR'),
                   'xcode': command(['xcodebuild', '-version']),
                   'sdk': command(['xcrun', '--sdk', 'macosx', '--show-sdk-version']),
@@ -163,26 +197,59 @@ def main():
             report['result'] = 'preflight-only'
             return
         os.environ['NAC_MAC_OUTPUT'] = str(raw)
-        run(['bash', 'desktop/macos/preview.sh', 'build'], raw / 'ordinary-build.log', 900)
+        for key in ('NAC_MAC_ENGINE', 'NAC_MAC_SKIP_ENGINE_BUILD', 'NAC_MAC_SMOKE_SCENARIOS', 'NAC_MAC_CI_TERMINAL'):
+            os.environ.pop(key, None)
+        os.environ.update(NAC_SOURCE_REVISION=report['source_sha'], NAC_BUILD_TRACK='dev',
+                          NAC_BUILD_ID='dev-' + report['source_sha'])
+        if target:
+            # Reuse the exact source owner's failure cleanup, including its
+            # native fixture helpers. No code is copied into that checkout.
+            sys.path.insert(0, str(source_root / 'desktop/macos'))
+            try:
+                spec = importlib.util.spec_from_file_location('qualified_target_smoke', source_root / 'desktop/macos/smoke.py')
+                target_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(target_module)
+            finally:
+                sys.path.pop(0)
+        run(['bash', 'desktop/macos/preview.sh', 'build'], raw / 'ordinary-build.log', 900, cwd=source_root)
         ordinary = raw / 'NAC Development Preview.app/Contents/MacOS/NACPreview'
         report['ordinary_build'] = {}
         for name, binary in [('native_sha256', ordinary), ('engine_sha256', ordinary.parent.parent / 'Resources/nac-web')]:
             with binary.open('rb') as stream:
                 report['ordinary_build'][name] = hashlib.file_digest(stream, 'sha256').hexdigest()
+        engine = ordinary.parent.parent / 'Resources/nac-web'
+        report['engine_version'] = command([str(engine), '--version'])
+        if report['source_sha'][:12] not in report['engine_version']:
+            raise RuntimeError('Built engine does not identify the exact target source')
+        identity_file = ordinary.parent.parent / 'Resources/engine-identity.json'
+        if identity_file.exists():
+            report['engine_identity'] = json.loads(identity_file.read_text())
+            if report['engine_identity'].get('source_revision') != report['source_sha']:
+                raise RuntimeError('Bundled engine manifest belongs to another target source')
         symbols = command(['/usr/bin/nm', str(ordinary)])
         if any(name in symbols for name in ('PreviewSmoke', 'CITerminal')) or '--smoke-output' in command(['/usr/bin/strings', str(ordinary)]):
             raise RuntimeError('Ordinary app contains test instrumentation')
         os.environ['NAC_MAC_SKIP_ENGINE_BUILD'] = '1'
-        os.environ['NAC_MAC_CI_TERMINAL'] = '1'
-        run(['bash', 'desktop/macos/preview.sh', 'smoke'], raw / 'app-journeys.log', 800)
-        report['trusted_terminal'] = require_terminal_evidence(json.loads((raw / 'evidence/ci-terminal.json').read_text()))
+        if not target:
+            os.environ['NAC_MAC_CI_TERMINAL'] = '1'
+        run(['bash', 'desktop/macos/preview.sh', 'smoke'], raw / 'app-journeys.log', 800, cwd=source_root)
+        if target:
+            report['target_suite'] = require_full_preview(json.loads((raw / 'evidence/summary.json').read_text()), target)
+        else:
+            report['trusted_terminal'] = require_terminal_evidence(json.loads((raw / 'evidence/ci-terminal.json').read_text()))
         helper = raw / 'native-image-reader'
         run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIEvidence.swift',
              '-o', str(helper)], raw / 'image-reader-build.log', 90)
         images = [raw / 'evidence' / name for name in ('streamed-chat.png', 'persisted-chat.png')]
         report['images'] = native_report([str(helper), *map(str, images)], raw / 'image-reader.log')
-        report['terminal_image'] = native_report([str(helper), '--terminal', str(raw / 'evidence/trusted-terminal.png')],
-                                                  raw / 'terminal-image-reader.log')
+        if not target:
+            report['terminal_image'] = native_report([str(helper), '--terminal', str(raw / 'evidence/trusted-terminal.png')],
+                                                      raw / 'terminal-image-reader.log')
+        report['quartz_end'] = native_report([str(gui_helper)], raw / 'gui-reader-end.log')
+        console_end = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'], timeout=15)
+        report['console_end'] = require_console(console_end, os.getuid(), report['quartz_end'])
+        require_checkout(source_root, report['source_sha'])
+        require_checkout(ROOT, args.expected_sha)
         report['result'] = 'passed' if compiler_pinned else 'unqualified-swift'
         if not compiler_pinned:
             raise RuntimeError('Smoke completed; pin observed Swift compiler identity before acceptance')
@@ -191,7 +258,8 @@ def main():
         raise
     finally:
         try:
-            report['cleanup'] = settle_apps(raw)
+            report['cleanup'] = settle_apps(raw, cleanup=target_module.cleanup_failed_case if target_module else None,
+                                            extra_alive=target_module.alive if target_module else None)
         except Exception as error:
             report['cleanup_error'] = str(error)
             report['result'] = 'failed'
@@ -209,7 +277,7 @@ def main():
             (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
             # Bundle resources and binaries are not uploaded. Export only bounded
             # evidence, logs and our report, with exact-value redaction.
-            export_evidence(raw, output, redact_values())
+            export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()])
 
 
 if __name__ == '__main__':

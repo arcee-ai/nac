@@ -7,6 +7,14 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
+    inputs:
+      native_qualification:
+        description: One explicit immutable native supplier qualification
+        type: choice
+        default: none
+        options:
+          - none
+          - all-341-macos26
 
 permissions:
   contents: read
@@ -424,6 +432,17 @@ jobs:
     uses: ./.github/workflows/macos-native.yml
     with:
       source-sha: ${{ needs.prepare.outputs.sha }}
+
+  native-qualification:
+    needs: prepare
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      startsWith(github.ref, 'refs/heads/codex/') &&
+      inputs.native_qualification == 'all-341-macos26'
+    uses: ./.github/workflows/macos-qualification.yml
+    with:
+      harness-sha: ${{ needs.prepare.outputs.sha }}
+      target: ${{ inputs.native_qualification }}
 
   managed:
     needs: [prepare, quality]
