@@ -26,7 +26,7 @@ globalThis.Element = ElementStub;
 const args = ['http://127.0.0.1:4321','owned-run','source-sha',123,'launch','view','document'];
 function fresh() {
   globalThis.window = {};
-  globalThis.location = {origin:args[0], href:args[0]+'/#/session/owned'};
+  globalThis.location = {origin:args[0], href:args[0]+'/#/session/owned/chat'};
   const handlers=[];
   globalThis.document = {addEventListener:(kind,handler,capture) => {
     assert.equal(kind,'click'); assert.equal(capture,true); handlers.push(handler);
@@ -37,6 +37,7 @@ let state=fresh();
 let first=install(...args);
 assert.equal(first.count,0); assert.equal(first.installed,true); assert.equal(first.current_document,true);
 assert.equal(first.document,'document'); assert.equal(first.run,'owned-run'); assert.equal(first.event,null);
+assert.equal(first.href,location.href);
 let descriptor=Object.getOwnPropertyDescriptor(window,'__nac347Fixture');
 assert.equal(descriptor.writable,false); assert.equal(descriptor.configurable,false);
 assert.throws(()=>install(...args), /already installed/); assert.equal(state.handlers.length,1);
@@ -50,6 +51,8 @@ assert.equal(window.__nac347Fixture().count,1); assert.equal(window.__nac347Fixt
 state.click(); assert.throws(()=>window.__nac347Fixture(),/Replayed/);
 state=fresh(); install(...args); globalThis.document={};
 assert.throws(()=>window.__nac347Fixture(),/Stale/);
+state=fresh(); install(...args); state.click(); location.href=args[0]+'/#/session/foreign';
+assert.throws(()=>window.__nac347Fixture(),/Stale reveal route/);
 state=fresh(); install(...args); location.origin='http://127.0.0.1:9999';
 assert.throws(()=>window.__nac347Fixture(),/Stale/);
 state=fresh(); location.origin='https://unrelated.invalid';
@@ -142,6 +145,119 @@ console.log('Actual observer: trusted/current-document/duplicate-install/replay/
             source_path.write_text(program)
             subprocess.run(['xcrun', 'swiftc', '-parse-as-library', '-swift-version', '5', str(source_path), '-o', str(binary)], check=True)
             subprocess.run([str(binary)], check=True)
+
+    def test_actual_form_script_controls(self):
+        source = SMOKE.read_text()
+        script = re.search(r'private static let formScript = #"""\n(.*?)\n        """#', source, re.S).group(1)
+        harness = r"""
+const assert = require('node:assert/strict');
+const inspect = new Function('folderLeaf', SCRIPT);
+const leaf='Folder with spaces 日本語 owned-run';
+const raw='/tmp/owned/'+leaf, physical='/private/tmp/owned/'+leaf;
+const button=(label,text,enabled=true,visible=true)=>({
+  textContent:text, disabled:!enabled, getAttribute:()=>label,
+  getClientRects:()=>visible?[{}]:[]
+});
+let buttons=[], errors=[];
+globalThis.document={querySelectorAll:selector=>selector==='button'?buttons:errors};
+const error=(text,visible=true)=>({textContent:text,getClientRects:()=>visible?[{}]:[]});
+for(const path of [raw,physical]) {
+  buttons=[button('Choose Working Folder: '+path,'folder'),button(null,'Create Project')];
+  errors=[];
+  assert.deepEqual(inspect(leaf),{path,can_create:true,missing:false});
+  errors=[error('/different/spelling/'+leaf+' does not exist')];
+  buttons[1].disabled=true;
+  assert.deepEqual(inspect(leaf),{path,can_create:false,missing:true});
+  errors=[error('Other folder does not exist'),error(leaf+' does not exist',false)];
+  assert.equal(inspect(leaf).missing,false);
+  errors=[error(leaf),error('does not exist')];
+  assert.equal(inspect(leaf).missing,false);
+}
+buttons.push(button('Choose Working Folder: '+raw,'second form'));
+assert.throws(()=>inspect(leaf),/Ambiguous/);
+console.log('Actual form observer preserves observed path spelling, unique error leaf and ambiguity rejection');
+""".replace('SCRIPT', json.dumps(script), 1)
+        subprocess.run(['node', '-e', harness], check=True, cwd=ROOT)
+
+    def test_actual_swift_path_and_route_predicates(self):
+        smoke, journey = SMOKE.read_text(), JOURNEY.read_text()
+
+        def block(source, marker):
+            start = source.index(marker)
+            opening = source.index('{', start)
+            end, depth = opening + 1, 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            return source[start:end]
+
+        types = '\n'.join(block(smoke, name) for name in
+                          ['    private struct RevealEvent:', '    private struct ProjectForm:',
+                           '    private struct RevealObservation:'])
+        label = block(journey, '    private static func selectedFolderLabel(')
+        checks = r"""
+    static func check() throws {
+        let values=CommandLine.arguments
+        let raw=values[1], physical=values[2], foreign=values[3]
+        let folder=URL(fileURLWithPath:raw)
+        func resolve(_ path: String) -> String? {
+            guard let value=realpath(path,nil) else { return nil }
+            defer { free(value) }; return String(cString:value)
+        }
+        func require(_ condition: Bool) throws {
+            if !condition { throw NSError(domain:"FixturePredicates",code:1) }
+        }
+        try require(raw != physical && resolve(raw)==physical)
+        for path in [raw,physical] {
+            let form=ProjectForm(path:path,can_create:true,missing:false)
+            try require(form.selectedFolder(root:physical,resolve:resolve)==path)
+            try require(selectedFolderLabel("Choose Working Folder: "+path,folder:folder))
+            let missing=ProjectForm(path:path,can_create:false,missing:true)
+            try require(missing.rejectedFolder(previousPath:path))
+            try require(!missing.rejectedFolder(previousPath:foreign))
+        }
+        try require(selectedFolderLabel("Choose Working Folder: "+foreign,folder:folder))
+        try require(ProjectForm(path:foreign,can_create:true,missing:false).selectedFolder(root:physical,resolve:resolve)==nil)
+        try require(ProjectForm(path:raw,can_create:false,missing:false).selectedFolder(root:physical,resolve:resolve)==nil)
+        try require(!selectedFolderLabel("Choose Working Folder: relative",folder:folder))
+        try require(!selectedFolderLabel("Choose Working Folder: /other-leaf",folder:folder))
+        let origin="http://127.0.0.1:4321", href=origin+"/#/session/current/chat"
+        var record:[String:Any] = ["version":1,"run":"run","source":"source","app_pid":10,
+            "launch":"launch","view":"view","document":"document","origin":origin,"href":href,
+            "installed":true,"current_document":true,"count":1,
+            "event":["sequence":1,"run":"run","document":"document","href":href]]
+        func observation(_ value:[String:Any]) throws -> RevealObservation {
+            try JSONDecoder().decode(RevealObservation.self,from:JSONSerialization.data(withJSONObject:value))
+        }
+        try require(try observation(record).routeIsCurrent(origin:origin))
+        for badHref in [origin+"/#/session/other","http://127.0.0.1:9999/#/session/current",
+                        "http://user@127.0.0.1:4321/#/session/current",origin+"/#/projects"] {
+            var wrong=record; wrong["href"]=badHref
+            try require(try !observation(wrong).routeIsCurrent(origin:origin))
+        }
+        for (key,value) in [("run","foreign"),("document","foreign"),("href",origin+"/#/session/old")] {
+            var wrong=record; var event=record["event"] as! [String:Any];event[key]=value;wrong["event"]=event
+            try require(try !observation(wrong).routeIsCurrent(origin:origin))
+        }
+        var replay=record;replay["count"]=2
+        try require(try !observation(replay).routeIsCurrent(origin:origin))
+        record["count"]=0;record["event"]=NSNull()
+        try require(try observation(record).routeIsCurrent(origin:origin))
+        print("Actual Swift predicates: canonical aliases accepted, foreign same-leaf root rejected, captured/current JS route and origin strict")
+    }
+"""
+        program='import Foundation\nimport Darwin\nenum FixtureControls {\n'+types+'\n'+label+'\n'+checks+'\n}\n@main struct Main { static func main() throws { try FixtureControls.check() } }\n'
+        with tempfile.TemporaryDirectory(prefix='nac347-alias-controls-', dir='/tmp') as temp:
+            parent=Path(temp)
+            folder=parent/'Folder with spaces 日本語 owned-run'
+            folder.mkdir()
+            foreign=parent/'foreign'/folder.name
+            foreign.mkdir(parents=True)
+            source_path=parent/'Predicates.swift'
+            binary=parent/'predicates'
+            source_path.write_text(program)
+            subprocess.run(['xcrun','swiftc','-parse-as-library','-swift-version','5',str(source_path),'-o',str(binary)],check=True)
+            subprocess.run([str(binary),str(folder),str(folder.resolve()),str(foreign)],check=True)
 
     def test_source_audit_driver_has_no_filesystem_controls(self):
         source = JOURNEY.read_text()

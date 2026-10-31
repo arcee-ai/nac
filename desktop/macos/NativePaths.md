@@ -96,13 +96,19 @@ gone and a distinct current document is ready. XCTest verifies the replacement
 form retained its original path.
 
 After the first actual completed folder selection reaches the normal enabled
-form, the app moves only its freshly created fixture directory to a fixed
-unique sibling and publishes phase 2. XCTest waits for that record, then submits
-the real form. The app observes an actual visible error containing this folder
-and `does not exist`, restores its own directory, and publishes phase 3.
+form, the app canonicalizes the observed form path and checks the exact owned
+root. It pins that observed spelling before moving its freshly created fixture
+directory to a fixed unique sibling and publishing phase 2. XCTest waits for
+that record, then submits the real form. The app requires the pinned form value
+and a visible error paragraph containing both the unique folder leaf and
+`does not exist`, restores its own directory, and publishes phase 3.
 XCTest independently verifies the error, waits for restoration, reselects via
 NSOpenPanel and explicitly retries normal project/first-chat creation. No
 form values, errors or server responses are synthesized by the fixture.
+The driver's selected-folder UI assertion uses the unique run leaf without
+filesystem access; the app independently validates canonical roots for both
+actual selections and the final session. Equivalent macOS path spellings do
+not depend on raw byte equality, while foreign roots with the same leaf fail.
 
 Every run creates a fresh UUID in both the spaces/Unicode folder and
 extensionless reveal leaf. Before explicit reveal, public XCTest records all
@@ -119,8 +125,13 @@ page documents. It records only trusted clicks on the existing enabled Reveal
 button. It exposes a read closure, has no command or fetch replacement, and
 cannot change UI, invoke product operations or accept caller control verbs.
 Installation/current-document identities are retained. Missing, duplicate,
-stale, wrong-route or replayed observations fail. App code verifies the same
-launch/document both before and after each script observation. A real click
+stale, wrong-route or replayed observations fail. The captured event URL must
+equal the live JavaScript URL inside that same document; its origin and session
+route remain required. Actual session/root/denial verification also checks the
+same captured live URL before and after its requests. The native web-view URL
+is used by the existing current document/origin fence, without treating its
+fragment as the live router state. App code verifies the same launch/document
+both before and after each script observation. A real click
 starts a fixed 45-second observation grace and the existing six actual HTTP
 reveal-denial checks. The app then uses ordinary bounded engine/profile cleanup
 without waiting for an XCTest control write. The grace and app receipt grant
@@ -141,7 +152,10 @@ panel; its real navigation causes the predeclared transition.
 and Foundation-only scope/phase implementation in Swift, covering trusted
 input filtering, duplicate/stale/replayed events and finite phase/identity
 controls. Its static no-write and source/mode audits are audits only. These
-controls do not qualify XCTest sandbox reads, NSOpenPanel directory transitions,
+tests also execute actual form/path predicates against real owned macOS
+raw/canonical aliases, a foreign root with the same leaf, and changed event
+routes/origins. They do not reproduce a native web-view fragment omission.
+These controls do not qualify XCTest sandbox reads, NSOpenPanel directory transitions,
 trusted WKWebView events, native input, Finder selection or cleanup.
 
 Full acceptance still requires root-inspected coherent source/build exclusions,

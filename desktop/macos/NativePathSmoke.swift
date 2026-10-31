@@ -26,6 +26,19 @@ final class NativePathSmoke {
         let document: String
         let href: String
     }
+    private struct ProjectForm: Decodable {
+        let path: String?
+        let can_create: Bool
+        let missing: Bool
+
+        func selectedFolder(root: String, resolve: (String) -> String?) -> String? {
+            guard can_create, let path, resolve(path) == root else { return nil }
+            return path
+        }
+        func rejectedFolder(previousPath: String) -> Bool {
+            path == previousPath && missing
+        }
+    }
     private struct RevealObservation: Codable, Equatable {
         let version: Int
         let run: String
@@ -35,10 +48,22 @@ final class NativePathSmoke {
         let view: String
         let document: String
         let origin: String
+        let href: String
         let installed: Bool
         let current_document: Bool
         let count: Int
         let event: RevealEvent?
+
+        func routeIsCurrent(origin: String) -> Bool {
+            guard let page = URLComponents(string: href), let expected = URLComponents(string: origin),
+                  page.scheme == expected.scheme, page.host == expected.host, page.port == expected.port,
+                  page.user == nil, page.password == nil else { return false }
+            if count == 0 { return event == nil }
+            guard count == 1, let event, event.sequence == 1, event.run == run,
+                  event.document == document, event.href == href,
+                  page.fragment?.hasPrefix("/session/") == true else { return false }
+            return true
+        }
     }
 
     func run(failure: Bool = false, publish: @escaping ([String: Any]) -> Void) async throws -> [String: Any] {
@@ -138,14 +163,18 @@ final class NativePathSmoke {
         let successorObserver = try await installObserver(scope, current)
         publish(["paths_listener_successor": try object(successorObserver)])
         try phase("document-reloaded", current)
+        var selectedFormPath: String?
         try await wait("first actual selection reaching an enabled normal project form", timeout: 60) {
             try self.requireCurrent(scope, current)
             let selections = self.paths.smokeSnapshot["selections"] as? [String] ?? []
             guard selections.count <= 1 else { throw PreviewError.message("Unexpected selection before move") }
             guard let selected = selections.first, self.canonical(selected) == scope.root,
                   self.paths.smokeSnapshot["pending"] as? Bool == false, self.app.window.attachedSheet == nil else { return false }
-            return try await self.projectForm(scope, current, folder: folder.path, missing: false)
+            let form = try await self.projectForm(scope, current, folderLeaf: folder.lastPathComponent)
+            selectedFormPath = form.selectedFolder(root: scope.root, resolve: self.canonical)
+            return selectedFormPath != nil
         }
+        guard let selectedFormPath else { throw PreviewError.message("Canonical form selection unavailable") }
         let moved = profile.root.appendingPathComponent(folder.lastPathComponent + ".moved")
         guard canonical(folder.path) == scope.root, !FileManager.default.fileExists(atPath: moved.path) else {
             throw PreviewError.message("Owned fixture rename precondition failed")
@@ -153,7 +182,8 @@ final class NativePathSmoke {
         try FileManager.default.moveItem(at: folder, to: moved)
         try phase("folder-moved", current)
         try await wait("normal server missing-folder rejection") {
-            try await self.projectForm(scope, current, folder: folder.path, missing: true)
+            let form = try await self.projectForm(scope, current, folderLeaf: folder.lastPathComponent)
+            return form.rejectedFolder(previousPath: selectedFormPath)
         }
         try requireCurrent(scope, current)
         guard !FileManager.default.fileExists(atPath: folder.path), canonical(moved.path) != nil else {
@@ -176,7 +206,7 @@ final class NativePathSmoke {
               state["pending"] as? Bool == false, app.window.attachedSheet == nil else {
             throw PreviewError.message("Actual native panel did not settle exactly two explicit selections")
         }
-        let target = try await verifySession(scope, current, revealLeaf: revealLeaf)
+        let target = try await verifySession(scope, current, revealLeaf: revealLeaf, expectedHref: reveal.href)
         // Time only preserves an observation window. It grants no Finder pass.
         // The actual XCTest result/selection attachments are independently required.
         while Date() < graceEnds {
@@ -221,15 +251,23 @@ final class NativePathSmoke {
         try requireCurrent(scope, binding)
         return value
     }
-    private func projectForm(_ scope: Scope, _ binding: NativeDocumentBinding, folder: String, missing: Bool) async throws -> Bool {
-        try await script(#"""
-        const selected = [...document.querySelectorAll('button')].some(button =>
-          button.getAttribute('aria-label') === 'Choose Working Folder: ' + folder && button.getClientRects().length);
-        const create = [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Create Project');
+    private static let formScript = #"""
+        const prefix = 'Choose Working Folder: ';
+        const selected = [...document.querySelectorAll('button')].filter(button =>
+          button.getAttribute('aria-label')?.startsWith(prefix) && button.getClientRects().length);
+        const create = [...document.querySelectorAll('button')].filter(button =>
+          button.textContent.trim() === 'Create Project' && button.getClientRects().length);
+        if (selected.length > 1 || create.length > 1) throw new Error('Ambiguous project form');
         const error = [...document.querySelectorAll('p')].some(item => item.getClientRects().length &&
-          item.textContent.includes(folder) && item.textContent.includes('does not exist'));
-        return selected && !!create && (missing ? error : !create.disabled);
-        """#, arguments: ["folder": folder, "missing": missing], scope: scope, binding: binding) as? Bool == true
+          item.textContent.includes(folderLeaf) && item.textContent.includes('does not exist'));
+        return {path:selected[0]?.getAttribute('aria-label').slice(prefix.length) ?? null,
+                can_create:create.length === 1 && !create[0].disabled, missing:error};
+        """#
+    private func projectForm(_ scope: Scope, _ binding: NativeDocumentBinding, folderLeaf: String) async throws -> ProjectForm {
+        guard let value = try await script(Self.formScript, arguments: ["folderLeaf": folderLeaf], scope: scope, binding: binding) else {
+            throw PreviewError.message("Project form observation unavailable")
+        }
+        return try JSONDecoder().decode(ProjectForm.self, from: JSONSerialization.data(withJSONObject: value))
     }
 
     // Fixture-only observation: a read closure and event listener, no commands,
@@ -243,7 +281,8 @@ final class NativePathSmoke {
     const read = () => {
       if (document !== installedDocument || location.origin !== origin) throw new Error('Stale fixture document');
       if (count > 1) throw new Error('Replayed reveal event');
-      return {...identity, installed:true, current_document:true, count, event:event && {...event}};
+      if (event && event.href !== location.href) throw new Error('Stale reveal route');
+      return {...identity, href:location.href, installed:true, current_document:true, count, event:event && {...event}};
     };
     document.addEventListener('click', input => {
       const button = input.target instanceof Element ? input.target.closest('button') : null;
@@ -276,19 +315,15 @@ final class NativePathSmoke {
               observation.current_document, (0...1).contains(observation.count) else {
             throw PreviewError.message("Missing, stale or replayed reveal observation")
         }
-        if observation.count == 0 {
-            guard observation.event == nil else { throw PreviewError.message("Unexpected early reveal event") }
-        } else {
-            guard let event = observation.event, event.sequence == 1, event.run == scope.run,
-                  event.document == binding.document, URL(string: event.href) == app.webView.url,
-                  URL(string: event.href)?.fragment?.hasPrefix("/session/") == true else {
-                throw PreviewError.message("Reveal event belongs to another route or document")
-            }
+        guard observation.routeIsCurrent(origin: scope.origin) else {
+            throw PreviewError.message("Reveal event belongs to another origin, route or document")
         }
         return observation
     }
-    private func verifySession(_ scope: Scope, _ binding: NativeDocumentBinding, revealLeaf: String) async throws -> [String: Any] {
+    private func verifySession(_ scope: Scope, _ binding: NativeDocumentBinding, revealLeaf: String,
+                               expectedHref: String) async throws -> [String: Any] {
         let target = try await script(#"""
+        if (location.href !== expectedHref) throw new Error('Changed reveal session route');
         const id = location.hash.match(/^#\/session\/([^/]+)/)?.[1];
         if (!id) throw new Error('Normal project flow did not open its first chat');
         const response = await fetch('/sessions/' + encodeURIComponent(id));
@@ -309,8 +344,9 @@ final class NativePathSmoke {
         const projects = await (await fetch('/projects')).json();
         const matching = projects.projects.filter(project => project.cwd === root);
         if (matching.length !== 1) throw new Error('Missing-folder retry duplicated or lost the project');
+        if (location.href !== expectedHref) throw new Error('Changed reveal session route');
         return {session:id, root, sandbox:snapshot.metadata.sandbox_status, denials, matching_projects:matching.length};
-        """#, arguments: ["revealLeaf": revealLeaf], scope: scope, binding: binding) as? [String: Any]
+        """#, arguments: ["revealLeaf": revealLeaf, "expectedHref": expectedHref], scope: scope, binding: binding) as? [String: Any]
         guard let target, let root = target["root"] as? String, canonical(root) == scope.root,
               target["sandbox"] as? String == "off" else {
             throw PreviewError.message("Created chat did not retain the selected Local workspace")

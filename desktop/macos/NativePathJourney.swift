@@ -125,6 +125,14 @@ enum NativePathJourney {
         try authorize()
         unicodeFolder.doubleClick()
     }
+    private static func selectedFolderLabel(_ label: String, folder: URL) -> Bool {
+        let prefix = "Choose Working Folder: "
+        guard label.hasPrefix(prefix) else { return false }
+        let path = String(label.dropFirst(prefix.count))
+        // The app-owned phase producer independently checks canonical root
+        // identity. The driver observes the unique leaf without profile access.
+        return path.hasPrefix("/") && URL(fileURLWithPath: path).lastPathComponent == folder.lastPathComponent
+    }
     static func folderSelection(app: XCUIApplication, initialPath: String, folder: URL,
                                 scope: Scope, revealLeaf: String,
                                 observePhase: @escaping () throws -> Phase, authorize: () throws -> Void) throws {
@@ -146,7 +154,6 @@ enum NativePathJourney {
         try phases.wait(.ready, observe: observePhase)
         let folderButton = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose Working Folder")).firstMatch
         let sheet = app.sheets.firstMatch
-        let selected = app.webViews.buttons["Choose Working Folder: \(folder.path)"]
         func chooseFolder() throws {
             try click(folderButton)
             try require(sheet.waitForExistence(timeout: 10), "Actual NSOpenPanel did not appear")
@@ -155,7 +162,11 @@ enum NativePathJourney {
             try navigatePanel(app: app, sheet: sheet, initialPath: initialPath, folder: folder, authorize: authorize)
             try click(sheet.buttons["Select"])
             try require(sheet.waitForNonExistence(timeout: 10), "Selected native panel survived")
-            try require(selected.waitForExistence(timeout: 10), "Selected path did not reach the normal create-project form")
+            let filled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                folderButton.exists && selectedFolderLabel(folderButton.label, folder: folder)
+            }, object: nil)
+            try require(XCTWaiter.wait(for: [filled], timeout: 10) == .completed,
+                        "Unique selected folder did not reach the normal create-project form")
         }
         // The disposable preview starts in its seeded project's normal first-
         // chat form. Finish that UI before opening another project.
