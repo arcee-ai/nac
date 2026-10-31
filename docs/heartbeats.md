@@ -78,6 +78,17 @@ under the shared exclusive Rust/browser lease:
 | 10 | 4 | 4 / 6 | 153.56 | 12.14 | 179 | 624 | 49,600 / 54,304 |
 | 100 | 4 | 4 / 96 | 163.63 | 13.69 | 440 | 900 | 54,320 / 55,264 |
 
+Repeated on October 31, 2026 at the admission-watermark repair `b49ed3cc`,
+using the same fixture and Apple M5 Max (arm64), with all Rust, browser and
+setup leases held exclusively. The copied test binary was built from that
+exact revision; the measurement passed and left no fixture roots.
+
+| Stored schedules | Runnable chats | Admitted / pending | Cold scan, ms | Warm p95, ms | Maximum initial admission lateness, ms | DB + WAL + SHM, KiB | Process RSS before / active, KiB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1 | 1 / 0 | 49.80 | 9.76 | 57 | 564 | 22,816 / 46,752 |
+| 10 | 4 | 4 / 6 | 157.42 | 13.89 | 182 | 620 | 49,568 / 54,064 |
+| 100 | 4 | 4 / 96 | 155.15 | 12.20 | 409 | 900 | 54,080 / 54,960 |
+
 The ignored test
 `heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention`
 runs two independent scheduler owners against one isolated fixture store and
