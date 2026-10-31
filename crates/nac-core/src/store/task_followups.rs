@@ -247,10 +247,9 @@ pub fn admit_task_followup(path: &Path, request: &TaskFollowupRequest) -> Result
         return Err(TaskFollowupError::RunConflict.into());
     }
     let delivery = match request.action {
-        TaskFollowupAction::Queue => InboxDelivery::Queue,
         TaskFollowupAction::Steer => InboxDelivery::Steer,
         TaskFollowupAction::Auto if active.is_some() => InboxDelivery::Steer,
-        TaskFollowupAction::Auto => InboxDelivery::Queue,
+        TaskFollowupAction::Queue | TaskFollowupAction::Auto => InboxDelivery::Queue,
     };
     let admitted_run = if delivery == InboxDelivery::Steer || request.expected_run_id.is_some() { active } else { None };
     let now = now_utc();
