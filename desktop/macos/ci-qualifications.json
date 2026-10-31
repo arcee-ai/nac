@@ -19,7 +19,7 @@
     "baseline_scenarios": 6
   },
   "all-352-macos26": {
-    "source_sha": "dd87b0e97f7e5f5bfcbfcbf5b2bee2fe30b88b3a",
+    "source_sha": "a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1",
     "profile": "macos26",
     "suite": "terminal",
     "scenario_count": 1,
