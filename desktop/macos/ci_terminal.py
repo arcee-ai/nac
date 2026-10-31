@@ -7,6 +7,7 @@ import shutil
 
 from ci_qualifications import require_checkout
 from ci_xctest import run_terminal
+from ci_xctest_attachments import TEST_URL
 
 CONTRACT = Path(__file__).with_name('ci-terminal-operations.json')
 NAMES = ('unicode', 'interrupt-arm', 'interrupt', 'recovery', 'resize', 'size-readback')
@@ -137,7 +138,10 @@ def qualify(raw, source, target, run, command, native_report, cleanup):
         raise RuntimeError('Terminal build assets differ from target source')
     result = run_terminal(raw, run, command, app_name=app.name, scenario=contract['scenario'],
                           test_name='testTerminalUnicodeControlResize', operations=contract['phases'],
-                          validate=lambda record: require_episode(record, contract, assets), cleanup=cleanup)
+                          validate=lambda record: require_episode(record, contract, assets), cleanup=cleanup,
+                          observer_binding={'harness_sha': command(['git', 'rev-parse', 'HEAD']),
+                                            'target_sha': target['source_sha'], 'test_identifier_url': TEST_URL,
+                                            'operation_contract_sha256': digest(CONTRACT)})
     dispatches = require_dispatches(json.loads((raw / 'xctest-driver.json').read_text()), contract)
     helper = raw / 'native-image-reader'
     run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIEvidence.swift', '-o', str(helper)],

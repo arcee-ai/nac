@@ -156,7 +156,7 @@ not yet qualify terminal descendants or consumer lifecycle behavior.
 | Consumer close/reopen/explicit Quit | ALL-344 supplier not integrated; preview close is not consumer lifecycle |
 | Shared approval | Pending exact scripted operation and actual-app journey |
 | Renderer replacement | Pending supported supplier and actual-app journey |
-| Trusted OS terminal input and descendant cleanup | ALL-354 `ci-terminal-xctest` candidate uses the delivered Local terminal owner; actual OS typing/cleanup qualification pending. App-owned `ci-terminal` CG capability unavailable; broader ALL-352 remains separate |
+| Trusted OS terminal input and descendant cleanup | One public XCTest ASCII case passed with exact receipt and settlement; the additional ALL-352 Unicode/control/resize episode remains unqualified. App-owned CG capability unavailable; broader ALL-352 remains separate |
 
 Baseline smoke is a useful first milestone, **not full ALL-354 completion**.
 Continue the remaining rows against actual committed suppliers without changing
@@ -332,6 +332,37 @@ insensitively; foreign, hidden, inert, disabled, title-only and retry decoys do
 not qualify. The six phases, four literal commands, bytes, controller and resize
 contracts are unchanged. No actual native input result is claimed for this
 revision before a separately authorized exact H/T run.
+
+The corrected run `41192819175`, native job `124513003205`, artifact
+`13040011094`, used harness `c3d99289` and exact supplier `dd87b0e9`. Its scoped
+selector opened the list and connected the actual shell. The source published
+phase 1 ready and rejected its unfocused negative control, but the H XCTest
+driver received NSCocoa 513 / POSIX EPERM saving `xctest-driver.json` before its
+first public input call. The source subsequently timed out waiting for Unicode
+input. Zero phases verified; the one retained PNG is scripted pre-input output,
+not a required post-input capture. App/engine/profile settlement and persistent
+authorization-policy comparison passed. No sandbox cause or Unicode behavior
+is inferred from this reporting failure.
+
+The prepared H observer repair uses twelve distinct, versioned in-memory
+`XCTAttachment` snapshots retained with `keepAlways`. Each before/after snapshot
+contains the cumulative dispatch rows and exact test URL, H/T, configuration,
+operation-contract, native binary and app incarnation/controller bindings.
+The host validates the actual selected test from the real result bundle and
+extracts only its named JSON records into an owned private temporary export.
+Automatic screenshots, videos and host diagnostics are omitted. Actual tool
+identity, help/schema, argv/status, manifest/JSON hashes and result-tree receipt
+remain bound to the retained observations.
+
+Snapshots must form a monotone prefix without gaps, reordering or earlier-row
+edits. A partial dispatching record may contain partial input; it never grants
+replay, inferred completion or a zero-input claim. Only the valid final snapshot
+produces the complete driver receipt, and all existing app/input/image/cleanup
+gates remain required. Test, collector, cleanup, policy and result errors are
+retained separately. This changes the observer output channel only, with no
+permission, entitlement, policy, phase, literal, count or timeout changes. The
+custom attachment producer/collector still needs actual full-SDK qualification
+in a separately authorized run; portable fixtures and parsing are not that proof.
 
 Ordinary required CI at harness `0ec96e49` passed in run `41189561712` attempt 2,
 after one authorized unchanged process-job replay. Its actual merge
