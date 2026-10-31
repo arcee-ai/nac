@@ -92,13 +92,14 @@ final class LifecycleSmoke {
             RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { NSApp.terminate(nil) } }
         }
         if case .confirming = app.quit.lifecycle.phase, let sheet = app.window.attachedSheet {
-            if stage.hasSuffix("-requested") || stage == "work-ready" {
+            if stage.hasSuffix("-requested") || stage == "work-ready" || stage == "reopened" {
                 guard intact() else { fail("Confirmation changed workspace ownership"); return }
                 evidence["confirmation_retained_owners"] = true
                 publish(seen.contains("quit-again") ? "reconfirming" : "confirming")
             }
             if seen.contains("duplicate-quit"), !seen.contains("cancel"),
-               ((NSApp as? NACApplication)?.smokeSuppressedEntries ?? 0) > 0,
+               (((NSApp as? NACApplication)?.smokeSuppressedEntries ?? 0) > 0 ||
+                app.quit.smokeQuitRequests > app.quit.smokeAcceptedQuitRequests),
                stage != "duplicate-confirming" { publish("duplicate-confirming") }
             if take("cancel") { app.window.endSheet(sheet, returnCode: .alertFirstButtonReturn) }
             if take("stop") { app.window.endSheet(sheet, returnCode: .alertSecondButtonReturn) }
@@ -177,6 +178,7 @@ final class LifecycleSmoke {
             "workspace_window_count": NSApp.windows.filter { $0 === app.window }.count,
             "owned_engine_pid": originalPID, "base_url": app.baseURL?.absoluteString ?? "",
             "quit_delegate_requests": app.quit.smokeQuitRequests,
+            "quit_accepted_delegate_requests": app.quit.smokeAcceptedQuitRequests,
             "quit_sheet_presentations": app.quit.smokeSheetPresentations,
             "quit_cancel_replies": app.quit.smokeCancelReplies,
             "quit_stop_replies": app.quit.smokeStopReplies,

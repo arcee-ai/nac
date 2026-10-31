@@ -39,6 +39,7 @@ final class AppQuit {
     #if PREVIEW_SMOKE
     private var fixtureStopTimer: Timer?
     private(set) var smokeQuitRequests = 0
+    private(set) var smokeAcceptedQuitRequests = 0
     private(set) var smokeSheetPresentations = 0
     private(set) var smokeCancelReplies = 0
     private(set) var smokeStopReplies = 0
@@ -84,6 +85,9 @@ final class AppQuit {
         // request must not enter another modal termination wait. Only the
         // original request owns the sheet and its eventual reply.
         guard !terminationPending else { return .terminateCancel }
+        #if PREVIEW_SMOKE
+        smokeAcceptedQuitRequests += 1
+        #endif
         // No complete cross-owner idle projection exists here. Do not infer
         // idle from a parent run: approvals, terminals and uncertain commands
         // remain possible, including while a native startup task is pending.

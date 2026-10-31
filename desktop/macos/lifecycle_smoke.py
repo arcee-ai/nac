@@ -54,6 +54,7 @@ def run_contract(bundle, destination, observer):
                 OPENAI_API_KEY='quit-fixture-dummy-only')
             store = profile / 'selected store.db'
             journey, replacement = None, None
+            os_requests = []
             try:
                 subprocess.run(['/usr/bin/git', 'init', '--quiet', '--initial-branch=main', str(profile)],
                                env=environment, check=True, timeout=5)
@@ -81,8 +82,6 @@ def run_contract(bundle, destination, observer):
                 reopened = journey.stage('reopened')
                 assert reopened['reopen_retained_usable_workspace']
                 fixture.assert_work_running()
-                os_requests = []
-
                 def os_quit():
                     result = json.loads(subprocess.check_output([str(observer), 'terminate', str(moved),
                                                                 json.dumps(journey.identity)], text=True, timeout=4))
@@ -94,7 +93,9 @@ def run_contract(bundle, destination, observer):
                 else:
                     journey.command_file('quit')
                 confirming = journey.stage('confirming')
-                assert confirming['quit_delegate_requests'] == confirming['termination_entries'] == 1, confirming
+                assert confirming['quit_delegate_requests'] == confirming['quit_accepted_delegate_requests'] == 1, confirming
+                if scenario != 'terminal':
+                    assert confirming['termination_entries'] == 1, confirming
                 fixture.assert_work_running()
                 if scenario == 'terminal':
                     os_quit() # Reentrant requests may coalesce before reaching native entry.
@@ -118,9 +119,12 @@ def run_contract(bundle, destination, observer):
                 wait_for('App exited after Stop and Quit', lambda: not journey.observe()['apps'], timeout=6)
                 stopped = journey.read() # Includes the final willTerminate snapshot/reply counters.
                 assert stopped['application_class'] == 'NACApplication', stopped
-                assert stopped['quit_delegate_requests'] == stopped['quit_sheet_presentations'] == 2, stopped
+                assert stopped['quit_accepted_delegate_requests'] == stopped['quit_sheet_presentations'] == 2, stopped
                 assert stopped['quit_cancel_replies'] == stopped['quit_stop_replies'] == 1, stopped
-                assert stopped['suppressed_termination_entries'] >= 1 and stopped['termination_entries'] >= 3, stopped
+                rejected = stopped['quit_delegate_requests'] - stopped['quit_accepted_delegate_requests']
+                assert stopped['suppressed_termination_entries'] + rejected >= 1, stopped
+                if scenario != 'terminal':
+                    assert stopped['termination_entries'] >= 3, stopped
                 assert engine_settled(moved, ready_pid)
                 after = fixture.verify_store(store)
                 replacement = OwnedEngine(moved / 'Contents/Resources/nac-web', profile, store, environment, desktop=True)
@@ -136,6 +140,11 @@ def run_contract(bundle, destination, observer):
                     store_reacquired=True, durable_transcript_preserved=True, assets=assets))
                 journey.restore_prior()
                 journey.log.close()
+            except BaseException as error:
+                native = json.loads(journey.output.read_text()) if journey and journey.output.exists() else {}
+                evidence['failed_case_before_cleanup'] = dict(scenario=scenario, failure=str(error),
+                                                              native=native, os_termination_requests=os_requests)
+                raise
             finally:
                 try:
                     fixture.retire_streams()
