@@ -105,8 +105,10 @@ test("reasoning reading controls work at actual 200 percent tab zoom", async ({
       const file = info.outputPath(name);
       await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
       await info.attach(name, { path: file, contentType: "image/png" });
-      if (process.env.NAC_REASONING_CAPTURE_DIR)
+      if (process.env.NAC_REASONING_CAPTURE_DIR) {
+        await fs.mkdir(process.env.NAC_REASONING_CAPTURE_DIR, { recursive: true });
         await fs.copyFile(file, path.join(process.env.NAC_REASONING_CAPTURE_DIR, name));
+      }
       await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
       const filesDialog = page.getByRole("dialog", { name: "Files", exact: true });
       if (await filesDialog.isVisible())
