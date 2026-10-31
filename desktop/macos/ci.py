@@ -13,20 +13,24 @@ import tempfile
 import threading
 import time
 
-from ci_support import console_state, export_evidence, qualify_toolchain, redact_values, require_console
+from ci_support import (console_state, export_evidence, qualify_toolchain, redact_values,
+                        require_console, require_terminal_evidence)
 from smoke import cleanup_failed_case
 
 ROOT = Path(__file__).resolve().parents[2]
+RUN_DEADLINE = time.monotonic() + 30 * 60  # Leave ten job minutes for cleanup/upload.
 
 
 def command(args):
-    return subprocess.check_output(args, cwd=ROOT, text=True, stderr=subprocess.STDOUT).strip()
+    return subprocess.check_output(args, cwd=ROOT, text=True, stderr=subprocess.STDOUT,
+                                   timeout=min(30, max(1, RUN_DEADLINE - time.monotonic()))).strip()
 
 
 def native_report(args, log):
     # AppKit/Vision may log diagnostics to stderr. Keep those separate from
     # the helper's JSON so warnings cannot corrupt a successful observation.
-    result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=60)
+    result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True,
+                            timeout=min(60, max(1, RUN_DEADLINE - time.monotonic())))
     log.write_text(result.stderr[-65536:])
     if result.returncode:
         raise RuntimeError(f'Native evidence reader failed ({result.returncode}); see {log.name}')
@@ -35,6 +39,7 @@ def native_report(args, log):
 
 def run(args, log, timeout):
     """Drain output continuously, retaining at most 256 KiB, including failure."""
+    print(f'Native CI phase: {log.name}', flush=True)
     chunks = deque(maxlen=64)
     process = subprocess.Popen(args, cwd=ROOT, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, start_new_session=True)
@@ -44,7 +49,7 @@ def run(args, log, timeout):
     thread = threading.Thread(target=drain, daemon=True)
     thread.start()
     try:
-        code = process.wait(timeout=timeout)
+        code = process.wait(timeout=min(timeout, max(1, RUN_DEADLINE - time.monotonic())))
         if code:
             raise RuntimeError(f'{args[0]} failed ({code}); see {log.name}')
     finally:
@@ -130,6 +135,11 @@ def main():
             raise RuntimeError('Expected clean exact candidate checkout')
         if platform.system() != 'Darwin' or platform.machine() != 'arm64':
             raise RuntimeError('Native prerequisite unavailable: Darwin ARM64 required')
+        run(['make', 'setup'], raw / 'setup.log', 600)
+        if command(['git', 'status', '--porcelain']):
+            raise RuntimeError('Locked setup modified the candidate source')
+        run(['python3', '-B', '-m', 'unittest', 'discover', '-s', 'desktop/macos', '-p', 'test_*.py'],
+            raw / 'fixture-controls.log', 60)
         expected = json.loads((ROOT / 'desktop/macos/ci-toolchain.json').read_text())
         actual = {'developer_directory': os.environ.get('DEVELOPER_DIR'),
                   'xcode': command(['xcodebuild', '-version']),
@@ -160,15 +170,19 @@ def main():
             with binary.open('rb') as stream:
                 report['ordinary_build'][name] = hashlib.file_digest(stream, 'sha256').hexdigest()
         symbols = command(['/usr/bin/nm', str(ordinary)])
-        if 'PreviewSmoke' in symbols or '--smoke-output' in command(['/usr/bin/strings', str(ordinary)]):
+        if any(name in symbols for name in ('PreviewSmoke', 'CITerminal')) or '--smoke-output' in command(['/usr/bin/strings', str(ordinary)]):
             raise RuntimeError('Ordinary app contains test instrumentation')
         os.environ['NAC_MAC_SKIP_ENGINE_BUILD'] = '1'
+        os.environ['NAC_MAC_CI_TERMINAL'] = '1'
         run(['bash', 'desktop/macos/preview.sh', 'smoke'], raw / 'app-journeys.log', 800)
+        report['trusted_terminal'] = require_terminal_evidence(json.loads((raw / 'evidence/ci-terminal.json').read_text()))
         helper = raw / 'native-image-reader'
         run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIEvidence.swift',
              '-o', str(helper)], raw / 'image-reader-build.log', 90)
         images = [raw / 'evidence' / name for name in ('streamed-chat.png', 'persisted-chat.png')]
         report['images'] = native_report([str(helper), *map(str, images)], raw / 'image-reader.log')
+        report['terminal_image'] = native_report([str(helper), '--terminal', str(raw / 'evidence/trusted-terminal.png')],
+                                                  raw / 'terminal-image-reader.log')
         report['result'] = 'passed' if compiler_pinned else 'unqualified-swift'
         if not compiler_pinned:
             raise RuntimeError('Smoke completed; pin observed Swift compiler identity before acceptance')
