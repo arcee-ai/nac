@@ -1,13 +1,58 @@
 # ALL-350 attention characterization
 
-This is the independent first milestone of ALL-350, based on engine foundation
+The Swift fixture is the independent first milestone of ALL-350, based on
+engine foundation
 `5aa65f4e7231c8eed910ae039cdf92a112a31fbb`. It provides deterministic,
 content-free transition fixtures before selection of a native notification
 adapter. It is not wired into the app, built into the app bundle, or a completed
 notification feature. It creates no network subscriptions, timers, system
 notifications, permission prompts, navigation, or mutation capabilities.
 
-## Current authoritative evidence
+## Current Rust feed and its limits
+
+The source candidate through `f3896096`, joined on supplier
+`7bb6e1520510562468e6baef2709c58a53ccaeb8`, implements the focused Rust
+application projection described below as option 1. Its inward contracts live
+in `crates/nac-core/src/events/attention.rs`; canonical metadata reads and
+postcommit dirty hints belong to `store/attention.rs` and the existing store
+writers. The optional service observer in `session_service/attention.rs`
+publishes typed operation and settlement metadata. The server composes these
+in `application/attention_runtime.rs` and its `projection.rs`, with bounded
+current state and replay in `application/attention.rs`.
+
+`delivery/attention.rs` serves the private read-only `GET /attention/events`
+SSE endpoint. The native launch owner enables it only after validating the
+selected store and actual listener; ordinary construction leaves observation
+inert. Request guards precede observer reservation and bootstrap. Observation
+uses existing cached services and canonical metadata reads without attaching
+or recovering idle sessions, creating work, or becoming an interactive approver.
+
+The feed currently projects canonical pending structured questions for supported
+primary direct local sessions, including resolution after actual configuration,
+project, cancellation and failure/recovery commits. Completed work requires an
+exact current completed goal/version/last-run receipt, successful known
+settlement and verified idle continuation disposition, with no conflicting
+accounting, continuation, retry, inbox, question or manual operation. A raw
+`RunCompleted` event is insufficient. Ordinary goal-free completion remains
+`Unknown`; live permissions, actionable reviews and unsupported topology
+coverage remain explicit gaps rather than authoritative empty lists.
+
+Initial baselines are silent. Engine/source epochs, revisions and binding tokens
+fence stale reads and callbacks; replay gaps, lag and capacity exhaustion require
+reset/rebaseline. Retention is bounded to 1,024 sources/identities and 1 MiB of
+current metadata, with 256 replay records/256 KiB. One physical observation
+lifetime includes an accepted read still finishing after its waiter is dropped.
+Closing observation detaches its callbacks and reader; these contracts do not
+promise lossless historical notification delivery or measured idle CPU/wakeups.
+
+The Foundation-only Swift `AttentionObserver` remains an isolated historical
+characterization fixture. It is **not a consumer of this native SSE feed** and
+has no notification-center, preferences, activation or app-lifecycle integration.
+Its `runCompleted` input must not be connected directly to raw `RunCompleted`
+events or treated as the current goal-backed completion contract. Full ALL-350
+native acceptance remains unmet.
+
+## Historical fixture evidence
 
 - `crates/nac-core/src/events.rs`: `SessionEventEnvelope` carries session,
   event epoch/sequence and optional run identities. Top-level `RunCompleted`
@@ -58,8 +103,10 @@ unbroken source reuses its sequence frontier and suppresses replay. Recovery
 with a new source generation must take a new canonical baseline before live
 delivery; it cannot turn retained historical completions into fresh notices.
 
-For the current run, only an exact top-level successful completion emits a
-completion notice. Duplicate starts cannot resurrect an already completed run.
+In the historical fixture, only an exact top-level successful completion for
+its current run emits a completion notice. This does not establish eligibility
+for the current Rust feed's goal-backed completion. Duplicate starts cannot
+resurrect an already completed run.
 Requests are deduplicated by session/request identity, including when resolution
 arrives before a semantic repeat of an ask. Resolution removes pending state
 and emits a content-free removal receipt. Neither run completion nor view
@@ -74,38 +121,41 @@ continuous delivery. Recovery requires a strictly newer source generation and
 current canonical rebaseline. A producer must preserve replay boundaries so
 events older than that baseline cannot be reintroduced as new live events.
 This policy may suppress events across a gap; it does not prove lossless
-notification delivery. The integrated producer's replay/reconciliation policy
-remains an acceptance gate.
+notification delivery. The current Rust feed implements its own bounded
+replay/reconciliation contract; native consumer recovery remains an acceptance
+gate.
 
 `retention` reports actual retained session, identity and pending-request counts.
 `retire()` is terminal, idempotent and releases them all. No callbacks, streams
 or timers are acquired by this reducer. These counts do not measure the future
 app's retained subscriptions, CPU or wakeups.
 
-## Pending-decision coverage at the future join
+## Historical pending-decision join evidence
 
 ALL-472's accepted PR #495 head
 `29ffb7cbd2bdcf0339a329b3c5890f0490d7cfec` was inspected read-only. It is
-**absent from this milestone's baseline**. Its `QuestionRequest` carries exact
+**absent from the historical fixture's baseline**; the current Rust feed uses
+the later joined supplier named above. Its `QuestionRequest` carries exact
 session/request/run/generation identities; `QuestionRecord` adds revision and
 pending/answered/cancelled status. Questions are separate from permissions.
 That revision adds no question `SessionEvent`; the focused web query currently
 polls its session every second. That polling is not an app-wide background
 notification architecture.
 
-Recommendation for full ALL-350: include pending human-decision questions in
-addition to live permission asks, keeping their distinct identities and
-resolution rules. Only current `authorizable_review_ids`, rather than every
-blocked historical review, can establish an outstanding review decision.
+Full ALL-350 requires pending human-decision questions and live permission
+asks, keeping their distinct identities and resolution rules. Only current
+`authorizable_review_ids`, rather than every blocked historical review, can
+establish an outstanding review decision.
 This fixture currently characterizes permission requests and successful runs;
-it does not characterize questions or review decisions. The coherent join
-must explicitly consume accepted supplier code and qualify those decisions.
+it does not characterize questions or review decisions. The current Rust feed
+has real question coverage; live permission/review producers remain unimplemented.
 No supplier store/API implementation is copied, no dependency is added here,
 and this milestone does not declare narrower full-ticket acceptance.
 
-## Bounded authoritative feed options
+## Historical bounded authoritative feed options
 
-1. **Recommended for evaluation:** a focused Rust application projection with
+1. **Subsequently implemented by the current Rust feed:** a focused Rust
+   application projection with
    one bounded app-wide metadata subscription, an identified current-state
    baseline and replay frontier. Existing event owners publish only successful
    run/decision identities after their authoritative transitions. Durable
@@ -124,9 +174,10 @@ and this milestone does not declare narrower full-ticket acceptance.
    streams unrelated content. Reject it as the default ALL-350 solution.
    Polling all sessions or rendering hidden transcripts has the same problem.
 
-Options 1/2 require coordinator allocation and architecture/API adjudication.
-Neither has been implemented or selected as a settled product contract here.
-Keep shared web transport/Effect and native commands/lifecycle with their owners.
+These options record the earlier architecture evaluation. Option 1 is now the
+implemented source contract described above; option 2 remains an alternative,
+not a second implemented channel. Shared web transport/Effect and native
+commands/lifecycle remain with their owners.
 
 ## Verification and remaining acceptance
 
@@ -143,8 +194,9 @@ hashes, compiler, target and source revision. Temporary binaries are removed.
 This is compile/execution evidence on the host OS, not macOS 14 qualification.
 
 Full ALL-350 still requires accepted ALL-346 native commands and ALL-344
-lifecycle; the bounded authoritative feed; explicit opt-in, mute/denial/Focus/
-privacy behavior without repeated prompts; click activation of the existing
+lifecycle; full pending-decision/topology coverage and native consumption of the
+bounded feed; explicit opt-in, mute/denial/Focus/privacy behavior without repeated
+prompts; click activation of the existing
 app/current canonical session with resolved requests shown resolved; reset,
 opt-out, close/reopen, Quit, failure/recovery/cleanup journeys in the actual
 app/system WKWebView on the approved isolated host; exclusive matched hidden
