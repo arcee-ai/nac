@@ -50,6 +50,7 @@ private final class WorkspaceReadinessHost {
         case hidden, closed, cancelled
         case positiveNativeFailure, positiveGenerationLoss, positiveOriginLoss
         case beforeProbeDeadline
+        case malformedPageError
     }
     struct Identity: Encodable {}
     struct Receipt {
@@ -122,7 +123,7 @@ private final class WorkspaceReadinessHost {
         case .positiveGenerationLoss: engine.receipt?.incarnation = "new-generation"
         case .positiveOriginLoss: selectedURL = URL(string: "http://127.0.0.1:45679/")
         case .latePositive: ProcessInfo.processInfo.systemUptime = 45
-        case .numericReady, .pageError, .beforeFenceLoss, .beforeProbeDeadline: break
+        case .numericReady, .pageError, .beforeFenceLoss, .beforeProbeDeadline, .malformedPageError: break
         }
         let losses: [Mode] = [.nativeFailure, .generationLoss, .storeLoss, .originLoss,
                               .documentOriginLoss, .retirement, .pidLoss, .hidden, .closed, .cancelled]
@@ -137,6 +138,10 @@ private final class WorkspaceReadinessHost {
         if mode == .numericReady { result["ready"] = 1 }
         if mode == .pageError {
             result["errors"] = [["kind": "javascript-error", "message": "captured page failure", "url": "fixture"]]
+        }
+        if mode == .malformedPageError && attempts == 1 {
+            result["ready"] = 1
+            result["errors"] = [["kind": "resource-error", "message": "captured before malformed metadata", "url": "fixture"]]
         }
         return result
     }
@@ -178,10 +183,14 @@ private final class WorkspaceReadinessHost {
                 precondition(host.attempts == 1 && count == 0 && failure.contains("lost its serving binding"))
             case .beforeProbeDeadline:
                 precondition(host.attempts == 0 && count == 0 && failure.contains("Timed out"))
+            case .malformedPageError:
+                precondition(host.attempts == 1 && count == 1 && failure.contains("JavaScript or resource errors"))
+                let observation = host.evidence["workspace_observation"] as! [String: Any]
+                precondition((observation["errors"] as! [[String: String]]).count == 1)
             default:
                 precondition(host.attempts == 1 && count == 1 && samples == ["observer-error-1"])
             }
         }
-        print("21 exact-method readiness controls passed: recovery, bounded errors/deadline, malformed/page errors and native binding loss")
+        print("22 exact-method readiness controls passed: recovery, bounded errors/deadline, malformed/page errors and native binding loss")
     }
 }

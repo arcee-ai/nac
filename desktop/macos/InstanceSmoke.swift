@@ -186,11 +186,11 @@ final class InstanceSmoke {
             var decoded: InstanceWorkspaceObservation?
             do {
                 let value = try await observeWorkspace(origin: origin, timeout: min(1, remaining))
+                observation = value
                 guard let parsed = decodeInstanceWorkspaceObservation(value) else {
                     evidence["workspace_observation"] = value
                     throw InstanceFixtureError("Malformed workspace observation; readiness remains unknown")
                 }
-                observation = value
                 decoded = parsed
             } catch {
                 observationErrorCount += 1
@@ -204,8 +204,8 @@ final class InstanceSmoke {
             if let observation { evidence["workspace_observation"] = observation; write() }
             // A failed read grants no authority to continue after native retirement.
             try requireWorkspaceBinding(incarnation: receipt.incarnation, origin: origin)
-            if observation != nil {
-                if let errors = decoded?.errors, !errors.isEmpty {
+            if let observation {
+                if let errors = observation["errors"] as? [Any], !errors.isEmpty {
                     throw InstanceFixtureError("Production workspace reported JavaScript or resource errors")
                 }
                 if ProcessInfo.processInfo.systemUptime < deadline,
