@@ -147,6 +147,7 @@ pub struct Agent {
     base_tool_defs: Vec<ToolDefinition>,
     admission_controlled_tools: bool,
     direct_primary: bool,
+    product_context_eligible: bool,
     native_web_capabilities: NativeWebCapabilities,
     compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
@@ -410,6 +411,8 @@ impl Agent {
             base_tool_defs,
             admission_controlled_tools: mode == AgentMode::Direct,
             direct_primary: mode == AgentMode::Direct,
+            product_context_eligible: mode == AgentMode::Orchestrator
+                || (mode == AgentMode::Direct && traditional_child.is_none()),
             native_web_capabilities,
             compaction,
             tool_runtime: ToolRuntime {
@@ -487,7 +490,7 @@ impl Agent {
         &mut self,
         port: Arc<dyn crate::product_context::ProductContextPort>,
     ) -> Result<()> {
-        if !(self.direct_primary || self.mode == AgentMode::Orchestrator) {
+        if !self.product_context_eligible {
             return Ok(());
         }
         let definitions = crate::tools::product_context_tool_definitions();

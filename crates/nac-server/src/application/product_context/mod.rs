@@ -281,6 +281,13 @@ fn destination(
             "Open History in the current chat on a phone; use the revision selector on desktop."
         }
     };
+    let steps = if target == ProductDestination::SessionSubagents
+        && availability != ProductAvailability::Available
+    {
+        "This session does not expose Subagents. Use its supported Insights, Files or Worksets panels."
+    } else {
+        steps
+    };
     ProductDestinationInfo {
         destination: target,
         label: target.label().into(),
