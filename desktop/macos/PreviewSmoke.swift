@@ -45,7 +45,12 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if scenario == "normal" { try await journey() }
+                if scenario.hasPrefix("workspace-") {
+                    try await WorkspaceSmoke(app: app, scenario: scenario, output: destination) { [self] fields in
+                        evidence.merge(fields) { _, new in new }
+                        write()
+                    }.run()
+                } else if scenario == "normal" { try await journey() }
                 else if scenario == "close-startup" {
                     try await wait("engine starting") { self.app.engine.pid > 0 }
                 } else {

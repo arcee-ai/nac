@@ -25,7 +25,9 @@ sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/P
          desktop/macos/PreviewProfile.swift desktop/macos/FixtureProvider.swift desktop/macos/FixtureBootstrap.swift)
 flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O)
 if [[ "$mode" == smoke ]]; then
-    sources+=(desktop/macos/PreviewSmoke.swift)
+    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/WorkspaceSmoke.swift
+              desktop/macos/WorkspaceFixture.swift desktop/macos/WorkspaceJourneys.swift
+              desktop/macos/WorkspaceLegacy.swift)
     flags+=(-D PREVIEW_SMOKE)
 fi
 xcrun swiftc "${flags[@]}" -framework AppKit -framework WebKit -framework Network \
