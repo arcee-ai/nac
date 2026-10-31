@@ -37,6 +37,30 @@ const view = (updates: Partial<ReasoningSegment> = {}) => (
 );
 
 describe("reasoning reading choice", () => {
+  it.each(["focus", "selection"])(
+    "preserves %s in the visible tail of long live reasoning",
+    async (reading) => {
+      const text =
+        Array.from({ length: 220 }, (_, i) => `Paragraph ${i}: inspect the cache.`).join("\n\n") +
+        "\n\n[Cache notes](https://example.test/cache)";
+      const mounted = mount(view({ text }));
+      const link = await screen.findByRole("link", { name: "Cache notes" });
+      if (reading === "focus") link.focus();
+      else {
+        const range = document.createRange();
+        range.selectNodeContents(link);
+        document.getSelection()?.removeAllRanges();
+        document.getSelection()?.addRange(range);
+      }
+      mounted.rerender(view({ text, streaming: false }));
+      expect(screen.getByRole("button", { name: "Reasoning" }).getAttribute("aria-expanded")).toBe(
+        "true",
+      );
+      expect(screen.getByRole("link", { name: "Cache notes" })).toBe(link);
+      if (reading === "focus") expect(document.activeElement).toBe(link);
+      else expect(document.getSelection()?.toString()).toBe("Cache notes");
+    },
+  );
   it("opens live reasoning and collapses on settlement; a new completed mount starts closed", () => {
     const { rerender, unmount } = mount(view());
     expect(screen.getByRole("button", { name: "Thinking…" }).getAttribute("aria-expanded")).toBe(

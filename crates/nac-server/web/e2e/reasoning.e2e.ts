@@ -277,7 +277,12 @@ for (const reading of ["open", "focus", "selection"] as const) {
     test.skip(!!process.env.NAC_REASONING_BASELINE_DIST, "Characterizes the new reading contract");
     const gate = new ScriptGate();
     const prompt = `Preserve reading ${reading}`;
-    const text = `${REASONING}\n\n[Cache notes](https://example.test/cache)`;
+    const prefix =
+      reading === "open"
+        ? ""
+        : Array.from({ length: 220 }, (_, i) => `Earlier reasoning paragraph ${i}.`).join("\n\n") +
+          "\n\n";
+    const text = `${prefix}${REASONING}\n\n[Cache notes](https://example.test/cache)`;
     harness.provider.enqueue(
       `reading-${reading}`,
       { token: prompt },

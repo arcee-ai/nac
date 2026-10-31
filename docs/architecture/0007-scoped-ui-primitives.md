@@ -193,7 +193,7 @@ choices survive chunks/refetch, and settlement preserves focused or selected
 content. No duration or success state is inferred from missing transcript data.
 
 With Node 26.12.0 and this same startup graph script/gzip implementation, ALL-525
-adds 867 B JS / 159 B CSS to the app and 1,031 B JS / 288 B CSS to presentation
+adds 732 B JS / 159 B CSS to the app and 880 B JS / 288 B CSS to presentation
 over preserved pilot `75b2c028`. Adding those deltas to the pilot's measured
 24,189/228 B and 28,077/265 B retains the cumulative +50/+15 KiB ceilings.
 These are build-size results, not a human visual-acceptance decision.

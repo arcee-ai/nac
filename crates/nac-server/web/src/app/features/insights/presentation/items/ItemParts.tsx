@@ -1,12 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import { InsightLinkButton } from "@/app/atoms";
 import type { ItemContext } from "@/app/features/insights/presentation/items/itemContent";
 import type { SessionLink } from "@/app/features/insights/presentation/useDelegatedSessions";
 import { Markdown } from "@/app/lib/markdown";
-
-/** Reasoning has no bound of its own, unlike the backend's tool previews. */
-const TAIL_LINES = 200;
 
 export function BodyText({ children }: { children: ReactNode }) {
   return <p className="whitespace-pre-wrap break-words">{children}</p>;
@@ -34,32 +31,14 @@ export function SessionLinkButton({
 }
 
 export function ReasoningText({ text, streaming }: { text: string; streaming: boolean }) {
-  const [showAll, setShowAll] = useState(false);
-  const lines = text.split("\n");
-  const clipped = streaming && !showAll && lines.length > TAIL_LINES;
+  // Keep the renderer's append-only block identities through chunks and
+  // settlement. Substituting a moving tail here rebinds selected/focused DOM.
+  // The detail column already owns scrolling; reasoning needs no second pane.
   return (
-    <>
-      {clipped ? (
-        <div className="flex items-center gap-2 label-micro text-basic-muted">
-          <span>
-            Last {TAIL_LINES} of {lines.length} lines
-          </span>
-          <button
-            type="button"
-            className="min-h-11 px-2 text-basic-primary hover:underline focus-visible:outline-2"
-            onClick={() => setShowAll(true)}
-          >
-            Show all
-          </button>
-        </div>
-      ) : null}
-      <div className="chat-response">
-        <div className="reasoning-prose">
-          <Markdown className="text-basic-secondary" streaming={streaming}>
-            {clipped ? lines.slice(-TAIL_LINES).join("\n") : text}
-          </Markdown>
-        </div>
-      </div>
-    </>
+    <div className="reasoning-prose">
+      <Markdown className="text-basic-secondary" streaming={streaming}>
+        {text}
+      </Markdown>
+    </div>
   );
 }
