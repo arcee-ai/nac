@@ -116,7 +116,7 @@ class CollectionTests(unittest.TestCase):
             del row['CGSSessionScreenIsLocked']
         else:
             row['CGSSessionScreenIsLocked'] = session_lock
-        tree = [dict(IOConsoleLocked=False, IOConsoleUsers=[row])]
+        tree = [dict(IORegistryEntryName='Root', IOConsoleLocked=False, IOConsoleUsers=[row])]
         return [plistlib.dumps(tree), json.dumps(sample['quartz']).encode(), '501\n']
 
     def collect(self, outputs):
@@ -138,6 +138,16 @@ class CollectionTests(unittest.TestCase):
         self.assertFalse(state['unlocked'])
         self.assertIs(state['root']['IOConsoleLocked'], False)
         self.assertIs(state['sessions'][0]['CGSSessionScreenIsLocked'], True)
+
+    def test_actual_ioreg_root_dictionary_and_singleton_array_are_supported(self):
+        outputs = self.outputs()
+        root = plistlib.loads(outputs[0])[0]
+        outputs[0] = plistlib.dumps(root)
+        self.assertTrue(self.collect(outputs)['unlocked'])
+        for value in ({}, [root, root], [dict(root, IORegistryEntryName='Other')]):
+            outputs = self.outputs()
+            outputs[0] = plistlib.dumps(value)
+            self.assertFalse(self.collect(outputs)['unlocked'])
 
     def test_timeout_malformed_or_missing_quartz_refuses(self):
         for outputs in ([subprocess.TimeoutExpired('ioreg', 4), b'{}'],

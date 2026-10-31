@@ -69,8 +69,9 @@ def console_state(observer):
     try:
         tree = plistlib.loads(subprocess.check_output(
             ['/usr/sbin/ioreg', '-n', 'Root', '-d1', '-a'], timeout=4))
-        assert isinstance(tree, list) and len(tree) == 1 and isinstance(tree[0], dict)
-        root = tree[0]
+        roots = tree if isinstance(tree, list) else [tree]
+        assert len(roots) == 1 and isinstance(roots[0], dict) and roots[0].get('IORegistryEntryName') == 'Root'
+        root = roots[0]
         state['root'] = {key: root.get(key) for key in ('IOConsoleLocked', 'CGSSessionScreenIsLocked')}
         rows = root.get('IOConsoleUsers')
         assert isinstance(rows, list) and all(isinstance(row, dict) for row in rows)
