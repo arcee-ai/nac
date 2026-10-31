@@ -39,9 +39,12 @@ def snapshot(store):
     with closing(sqlite3.connect(store.as_uri() + '?mode=ro', uri=True)) as connection:
         schema = connection.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name').fetchall()
         version = connection.execute('PRAGMA user_version').fetchone()[0]
+        # Compare logical fixture data without printing rows or depending on
+        # WAL/SHM bookkeeping bytes. A rejected opener must not mutate records.
+        content = hashlib.sha256('\n'.join(connection.iterdump()).encode()).hexdigest()
     lock = store.with_name(store.name + '.run-locks') / (b'store-owner'.hex() + '.lock')
     sidecars = {str(lock.relative_to(store.parent)): (lock.stat().st_ino, digest(lock))}
-    return dict(schema=schema, version=version, sidecars=sidecars)
+    return dict(schema=schema, version=version, sidecars=sidecars, content_sha256=content)
 
 
 class OwnedEngine:
