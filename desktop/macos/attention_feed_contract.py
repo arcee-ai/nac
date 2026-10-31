@@ -642,6 +642,78 @@ def transport_cases(swift, artifact):
                     result['capacity_proof'] = dict(faulted_out_of_contract_stream=True, silent_accepted=1024,
                                                   rejected_record=1025, effects=0, terminal_unavailable=True,
                                                   drained_before_retirement=True)
+    return results + source_handoff_cases(swift, artifact)
+
+
+def source_handoff_cases(swift, artifact, modes=(False, True)):
+    results = []
+    for delayed in modes:
+        case = 'source-handoff-' + ('delayed' if delayed else 'active')
+        engine, old_epoch, new_epoch = str(uuid.uuid4()), '30000000-0000-0000-0000-000000000003', str(uuid.uuid4())
+        gates, ended, calls, consumer, result = [threading.Event() for _ in range(5)], threading.Event(), [], None, None
+        question = dict(kind='question', request_id='question', run_id='actual-run', generation='actual-generation', revision=1)
+        next_question = dict(question, request_id='next-question')
+        initial = json.loads(mock_frame(engine).split(b'data: ', 1)[1])['sources'][0]
+        replacement = dict(initial, source=dict(session_id='mock-session', epoch=new_epoch), pending=[question])
+        steps = [(old_epoch, 1, dict(kind='decision_pending', decision=question), True),
+                 (new_epoch, 0, dict(kind='source_replaced', snapshot=replacement), False),
+                 (new_epoch, 1, dict(kind='decision_resolved', decision=question), False),
+                 (new_epoch, 2, dict(kind='decision_pending', decision=next_question), True),
+                 (new_epoch, 3, dict(kind='decision_resolved', decision=next_question), False)]
+        def handler(h):
+            calls.append((h.command, h.path))
+            send(h, 200, mock_frame(engine), 'text/event-stream')
+            for sequence, (gate, (epoch, revision, change, fresh)) in enumerate(zip(gates, steps), 1):
+                assert gate.wait(15), 'unreleased handoff fixture'
+                frame = dict(kind='record', boundary=dict(engine=engine, epoch='20000000-0000-0000-0000-000000000002', sequence=sequence),
+                             source=dict(session_id='mock-session', epoch=epoch), source_revision=revision, change=change, new_attention=fresh)
+                try:
+                    h.wfile.write(('event: attention\nid: '+engine+':'+frame['boundary']['epoch']+':'+str(sequence)+'\ndata: '+json.dumps(frame)+'\n\n').encode())
+                    h.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+            ended.wait(30)
+        server = Server(handler)
+        try:
+            consumer = Consumer(swift, artifact/(case+'-swift.jsonl'))
+            consumer.command('delivery_mode', delivery_mode='delayed' if delayed else 'normal')
+            consumer.command('bind', profile=str(uuid.uuid4()), engine=engine, endpoint=server.base)
+            consumer.command('policy', opted_in=True, authorized=True)
+            consumer.wait(lambda s: s['status']['phase'] == 'observing')
+            gates[0].set()
+            first = consumer.wait(lambda s: len(s['notices']) == 1 and s['status']['delivery_acknowledgments'] == (0 if delayed else 1))
+            assert first['active'] == (0 if delayed else 1) and first['pending_delivery_keys'] == int(delayed)
+            gates[1].set()
+            handoff = consumer.wait(lambda s: s['status']['sequence'] == 2)
+            assert len(handoff['notices']) == 1 and handoff['status']['pending'] == 1
+            assert handoff['active'] == handoff['pending_delivery_keys'] == 0, ('F2 obsolete source delivery retained', handoff)
+            consumer.command('click', index=0); consumer.command('complete_deliveries')
+            late = consumer.snapshot()
+            assert not late['navigations'] and late['active'] == late['pending_delivery_keys'] == late['pending_delivery_callbacks'] == 0
+            assert late['status']['delivery_acknowledgments'] == first['status']['delivery_acknowledgments']
+            gates[2].set()
+            resolved = consumer.wait(lambda s: s['status']['sequence'] == 3)
+            assert resolved['status']['pending'] == 0 and len(resolved['notices']) == 1
+            consumer.command('delivery_mode', delivery_mode='normal'); gates[3].set()
+            current = consumer.wait(lambda s: len(s['notices']) == 2 and s['status']['delivery_acknowledgments'] == first['status']['delivery_acknowledgments'] + 1)
+            assert current['active'] == 1 and current['notices'][1]['source_epoch'].lower() == new_epoch
+            consumer.command('click', index=0); consumer.command('click', index=1)
+            consumer.wait(lambda s: s['navigations'] == ['mock-session'])
+            gates[4].set()
+            done = consumer.wait(lambda s: s['status']['sequence'] == 5)
+            assert done['status']['pending'] == done['active'] == done['pending_delivery_keys'] == 0 and len(done['notices']) == 2
+            assert calls == [('GET', '/attention/events')]
+            result = dict(case='H7-'+case, actual_rust_producer=False, supported_question_handoff_shape=True,
+                          initial=first, silent_handoff=handoff, late_callback=late, current_resolved=done, requests=calls)
+            results.append(result)
+        except Exception as error:
+            (artifact/(case+'-failure-before-cleanup.json')).write_text(json.dumps(dict(error=repr(error), requests=calls), indent=2)+'\n')
+            raise
+        finally:
+            for gate in gates: gate.set()
+            ended.set()
+            closed = cleanup(*([consumer.stop] if consumer else []), server.close)
+            if result is not None: result['cleanup'] = closed
     return results
 
 

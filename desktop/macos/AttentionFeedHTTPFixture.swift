@@ -73,7 +73,7 @@ private final class MockAttentionCenter {
                                          "source_epoch": notice.sourceEpoch.uuidString,
                                          "title": notice.title, "body": notice.body] as [String: Any]
                                      }, "active": active.count, "navigations": navigations, "requests": requests,
-                                     "pending_delivery_callbacks": delayed.count]
+                                     "pending_delivery_callbacks": delayed.count, "pending_delivery_keys": pendingDelivery.count]
         lock.unlock()
         emit(object)
     }

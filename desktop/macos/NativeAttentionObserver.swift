@@ -397,7 +397,10 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
                 if case .reset = frame { throw AttentionFeedError.rebaseline }
                 let effects = try self.projection.accept(frame, engine: binding.engine)
                 self.phase = "observing"; self.retryAttempt = 0
-                let obsolete = self.delivered.filter { !self.projection.isCurrent($0.key, kind: $0.value.kind) }.map { $0.key }
+                let obsolete = self.delivered.filter {
+                    self.projection.sources[$0.key.session]?.source.epoch != $0.value.sourceEpoch ||
+                    !self.projection.isCurrent($0.key, kind: $0.value.kind)
+                }.map { $0.key }
                 for key in obsolete { self.delivered.removeValue(forKey: key) }
                 if !obsolete.isEmpty { self.sinks.withdraw(obsolete) }
                 if self.policy.delivers {
