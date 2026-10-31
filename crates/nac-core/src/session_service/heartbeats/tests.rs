@@ -437,18 +437,18 @@ async fn heartbeat_deferred_or_invalid_admission_does_not_retain_a_session_opera
         assert!(!service.has_active_operation());
         let lease = sessions::SessionOperationLease::try_acquire(&path, "session")
             .expect("a deferred or invalidated occurrence must release the operation lease");
-        let human = service
-            .coordinate_local(move |service| {
-                service.try_begin_run_with_lease(
-                    None,
-                    "Later explicit human run",
-                    Some(lease),
-                    RunAdmissionKind::default(),
-                )
-            })
-            .await
-            .unwrap()
-            .unwrap();
+        let human_service = service.clone();
+        let human = crate::store::spawn_blocking_store_caller(move || {
+            human_service.try_begin_run_with_lease(
+                None,
+                "Later explicit human run",
+                Some(lease),
+                RunAdmissionKind::default(),
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(service.active_run().unwrap().run_id, human.run_id);
     }
 }
