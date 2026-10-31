@@ -20,6 +20,18 @@ from quit_fixture import QuitWorkspaceFixture, TRANSCRIPT, request
 from smoke import session_lock_state
 
 
+def console_state():
+    """Observe both published lock fields; any locked value prevents capture."""
+    session = session_lock_state()
+    values = [session['locked']] if session['observed'] else []
+    root = plistlib.loads(subprocess.check_output(['/usr/sbin/ioreg', '-n', 'Root', '-d', '1', '-a', '-l']))
+    nodes = root if isinstance(root, list) else [root]
+    for node in nodes:
+        if isinstance(node, dict) and isinstance(node.get('IOConsoleLocked'), bool):
+            values.append(node['IOConsoleLocked'])
+    return dict(observed=bool(values), locked=any(values) if values else None)
+
+
 def run_contract(bundle, destination, observer):
     bundle, destination, observer = map(lambda path: Path(path).resolve(), (bundle, destination, observer))
     destination.mkdir(parents=True, exist_ok=True)
@@ -29,7 +41,8 @@ def run_contract(bundle, destination, observer):
     assert receipt['lifecycle_smoke_instrumentation'] and receipt['normal_startup']
     assert receipt['engine_sha256'] == digest(bundle / 'Contents/Resources/nac-web')
     assert receipt['native_sha256'] == digest(bundle / 'Contents/MacOS/NACPreview')
-    evidence = dict(source_head=head, build_receipt=receipt, console_lock=session_lock_state(),
+    evidence = dict(source_head=head, build_receipt=receipt, console_lock=console_state(),
+                    console_lock_sources='CGSSessionScreenIsLocked and Root.IOConsoleLocked when present',
                     os=subprocess.check_output(['/usr/bin/sw_vers', '-productVersion'], text=True).strip(),
                     visible_paint_acceptance=False, trusted_input_acceptance=False,
                     actual_local_app=True, system_wk=True, sheet_completion='programmatic AppKit; no OS input events', cases=[])
@@ -70,7 +83,7 @@ def run_contract(bundle, destination, observer):
                 journey.command_file('prepare')
                 journey.stage('work-ready')
                 def capture(name):
-                    if session_lock_state() == dict(observed=True, locked=False):
+                    if console_state() == dict(observed=True, locked=False):
                         journey.guard_focus()
                         journey.command_file('capture-' + name)
                         wait_for('Lifecycle render capture ' + name,
