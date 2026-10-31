@@ -14,7 +14,8 @@ use crate::SessionManager;
 
 pub(crate) struct StartTraditionalChild {
     pub(crate) profile: String,
-    pub(crate) description: String,
+    /// Required for creation; continuation may omit the immutable label.
+    pub(crate) description: Option<String>,
     pub(crate) prompt: String,
     pub(crate) origin: nac_core::store::InputOrigin,
     pub(crate) child_session_id: Option<String>,

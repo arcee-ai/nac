@@ -334,6 +334,14 @@ impl From<anyhow::Error> for ApiError {
                     StatusCode::BAD_REQUEST
                 }
             }
+        } else if error
+            .downcast_ref::<nac_core::traditional_children::TraditionalChildDescriptionError>()
+            .is_some()
+            || message.starts_with("child description ")
+        {
+            // Typed because a mismatch quotes the caller's own label, which
+            // must not be classified by the text matching below.
+            StatusCode::BAD_REQUEST
         } else if error.downcast_ref::<ModelConfigurationError>().is_some()
             || error.downcast_ref::<RequestConfigurationError>().is_some()
             || message.contains("invalid model configuration")

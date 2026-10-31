@@ -22,7 +22,9 @@ use super::ToolResult;
 #[serde(deny_unknown_fields)]
 pub struct SubagentInput {
     profile: String,
-    description: String,
+    /// Required to launch; continuation resolves the immutable stored label.
+    #[serde(default)]
+    description: Option<String>,
     prompt: String,
     #[serde(default)]
     child_session_id: Option<String>,
@@ -67,10 +69,10 @@ impl NativeTool for SubagentTool {
     fn definition(&self) -> ToolDefinition {
         definition(
             "subagent",
-            "Launch or continue a durable traditional child session. New children have fresh context and inherit the parent model/backend/workspace ceiling. Pass null as child_session_id to launch a new child; a string continues that exact child and steers its current generation when it is running. Foreground waits for a structured outcome; background returns immediately and delivers exactly one completion through the parent inbox. Available profiles:\n- general: general coding work with the eight native coding tools plus native web_search/web_fetch inherited when available to the parent; nesting, goals, and orchestrator control are disabled.",
+            "Launch or continue a durable traditional child session. New children have fresh context and inherit the parent model/backend/workspace ceiling. Pass null as child_session_id with a description to launch a new child; a string continues that exact child and steers its current generation when it is running. A child's description is immutable: pass null description when continuing or steering, or repeat the original exactly. Foreground waits for a structured outcome; background returns immediately and delivers exactly one completion through the parent inbox. Available profiles:\n- general: general coding work with the eight native coding tools plus native web_search/web_fetch inherited when available to the parent; nesting, goals, and orchestrator control are disabled.",
             json!({
                 "profile": {"type": "string", "enum": [GENERAL_CHILD_PROFILE], "description": "The immutable child profile."},
-                "description": {"type": "string", "minLength": 1, "maxLength": 120, "description": "A short 3-5 word task label shown to the user."},
+                "description": {"type": ["string", "null"], "minLength": 1, "maxLength": 120, "description": "A short 3-5 word task label shown to the user. Required to launch a new child. Pass null when continuing or steering an existing child to keep its immutable original label; a different label is rejected."},
                 "prompt": {"type": "string", "minLength": 1, "description": "Complete task and context for a new child, or steering/continuation text for an existing child."},
                 "child_session_id": {"type": ["string", "null"], "minLength": 1, "description": "Pass null to create a fresh child conversation, or an existing child ID to continue or steer it."},
                 "background": {"type": "boolean", "description": "Use false to wait for the structured outcome, or true to return immediately and receive completion through the durable inbox."}
@@ -106,9 +108,17 @@ impl NativeTool for SubagentTool {
     }
 
     fn decode(&self, input: serde_json::Value) -> Result<Self::Input, ToolResult> {
-        serde_json::from_value(input).map_err(|error| {
+        let input: SubagentInput = serde_json::from_value(input).map_err(|error| {
             ToolResult::text(format!("Error: invalid subagent input: {error}"), true)
-        })
+        })?;
+        // A launch has no stored label to resolve; reject it before policy.
+        if input.child_session_id.is_none() {
+            crate::traditional_children::description_for_new_child(input.description.as_deref())
+                .map_err(|error| {
+                    ToolResult::text(format!("Error: invalid subagent input: {error}"), true)
+                })?;
+        }
+        Ok(input)
     }
 
     fn permission_resources(
@@ -556,6 +566,76 @@ mod tests {
         assert_eq!(
             starts[1].execution_mode,
             TraditionalChildExecutionMode::Background
+        );
+    }
+
+    #[tokio::test]
+    async fn native_continuation_resolves_label_but_launch_requires_one() {
+        let store_path =
+            std::env::temp_dir().join(format!("nac_subagent_label_{}.db", uuid::Uuid::new_v4()));
+        let controller = Arc::new(FakeController {
+            starts: Mutex::new(Vec::new()),
+        });
+        crate::traditional_children::register_controller(store_path.clone(), controller.clone());
+        let mut runtime = crate::tools::test_runtime();
+        runtime.store_path = store_path;
+        runtime.session_id = Some("parent-1".to_string());
+        runtime.allowed_tools = Some(Arc::new(
+            crate::tools::DIRECT_TOOL_NAMES
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        ));
+        let client = crate::model::ModelClient::new_for_test();
+        let call = |arguments: serde_json::Value| {
+            crate::tools::execute_tool("subagent", arguments, &runtime, &client)
+        };
+
+        let schema = SubagentTool.definition().function.parameters;
+        assert_eq!(
+            schema["properties"]["description"]["type"],
+            json!(["string", "null"])
+        );
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("description")));
+
+        for launch in [
+            json!({"profile": "general", "prompt": "work", "child_session_id": null, "background": true}),
+            json!({"profile": "general", "description": null, "prompt": "work", "child_session_id": null, "background": true}),
+        ] {
+            let rejected = call(launch).await;
+            assert!(rejected.is_error);
+            assert_eq!(
+                rejected.content.as_text(),
+                Some("Error: invalid subagent input: traditional child description is required to launch a new child; omit it (or pass null) only when continuing an existing child_session_id")
+            );
+        }
+        assert!(controller.starts.lock().unwrap().is_empty());
+
+        for continuation in [
+            json!({"profile": "general", "prompt": "continue", "child_session_id": "child-1", "background": true}),
+            json!({"profile": "general", "description": null, "prompt": "continue", "child_session_id": "child-1", "background": true}),
+            json!({"profile": "general", "description": "review store", "prompt": "continue", "child_session_id": "child-1", "background": true}),
+        ] {
+            let continued = call(continuation).await;
+            assert!(!continued.is_error, "{}", continued.content);
+        }
+        let starts = controller.starts.lock().unwrap();
+        assert_eq!(
+            starts
+                .iter()
+                .map(|start| (
+                    start.child_session_id.as_deref(),
+                    start.description.as_deref()
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (Some("child-1"), None),
+                (Some("child-1"), None),
+                (Some("child-1"), Some("review store")),
+            ]
         );
     }
 
