@@ -46,6 +46,22 @@ async function serveNavigationVersion(page: Page, baseUrl: string, before: () =>
   }
 }
 
+async function captureFrame(page: Page, file: string) {
+  // Capture the browser viewport directly: element screenshot clipping assumes
+  // the configured viewport scale and can crop a real browser-zoomed tab.
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const frame = await cdp.send("Page.captureScreenshot", {
+      format: "png",
+      fromSurface: true,
+      captureBeyondViewport: false,
+    });
+    await fs.writeFile(file, Buffer.from(frame.data, "base64"));
+  } finally {
+    await cdp.detach();
+  }
+}
+
 async function settleCapture(page: Page, target?: Locator) {
   if (target) {
     await target.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
@@ -126,7 +142,7 @@ test("project navigation, overflow, phone actions and notification feedback", as
     );
     await settleCapture(page);
     const file = info.outputPath(`${name}.png`);
-    await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
+    await captureFrame(page, file);
     await info.attach(name, { path: file, contentType: "image/png" });
     if (process.env.NAC_NAVIGATION_CAPTURE_DIR) {
       await fs.mkdir(process.env.NAC_NAVIGATION_CAPTURE_DIR, { recursive: true });
@@ -370,7 +386,7 @@ test("phone navigation and project actions remain reachable at real 200 percent 
         );
         await settleCapture(page, rename);
         const file = info.outputPath(`${version}-${width}-zoom200-navigation.png`);
-        await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
+        await captureFrame(page, file);
         await info.attach(`${version}-${width}-zoom200`, { path: file, contentType: "image/png" });
         if (process.env.NAC_NAVIGATION_CAPTURE_DIR) {
           await fs.mkdir(process.env.NAC_NAVIGATION_CAPTURE_DIR, { recursive: true });
@@ -411,7 +427,7 @@ test("phone navigation and project actions remain reachable at real 200 percent 
           expect(action!.height).toBeGreaterThanOrEqual(44);
         }
         const searchFile = info.outputPath(`${version}-${width}-zoom200-search.png`);
-        await page.screenshot({ path: searchFile, animations: "disabled", caret: "hide" });
+        await captureFrame(page, searchFile);
         if (process.env.NAC_NAVIGATION_CAPTURE_DIR)
           await fs.copyFile(
             searchFile,
@@ -441,7 +457,7 @@ test("phone navigation and project actions remain reachable at real 200 percent 
           expect(action!.height).toBeGreaterThanOrEqual(44);
         }
         const childFile = info.outputPath(`${version}-${width}-zoom200-subagents.png`);
-        await page.screenshot({ path: childFile, animations: "disabled", caret: "hide" });
+        await captureFrame(page, childFile);
         if (process.env.NAC_NAVIGATION_CAPTURE_DIR)
           await fs.copyFile(
             childFile,

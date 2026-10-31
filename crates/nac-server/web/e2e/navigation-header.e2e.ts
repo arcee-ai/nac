@@ -58,7 +58,7 @@ test("delegated phone header retains intrinsic change counts and its parent rout
     ).document.fonts.ready.then(() => undefined),
   );
   const file = info.outputPath("after-390-delegated-header-counts.png");
-  await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
+  await page.screenshot({ path: file, caret: "hide" });
   await info.attach("delegated header with controlled large totals", {
     path: file,
     contentType: "image/png",
