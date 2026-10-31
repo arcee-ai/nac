@@ -38,15 +38,23 @@ enum CITerminal {
         }
         _ = try await js("location.hash = '/session/\(sessionID)/terminal'; return true;")
         try await wait("panel controls") {
-            (try await js("return !!document.querySelector('[aria-label=\"Show panel\"]') || !!document.querySelector('[role=region][aria-label=\"Session terminal\"]');")) as? Bool == true
+            (try await js("return !!document.querySelector('[aria-label=\"Show panel\"]') || !!document.querySelector('[aria-label=\"Session terminal\"]');")) as? Bool == true
         }
         _ = try await js("document.querySelector('[aria-label=\"Show panel\"]')?.click(); return true;")
-        try await wait("New shell") {
-            (try await js("return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New shell' && !b.disabled);")) as? Bool == true
+        try await wait("terminal list control") {
+            (try await js("""
+            const panel=document.querySelector('[aria-label="Session terminal"]');
+            return !!panel && (!!panel.querySelector('button[aria-label="Open list"]') ||
+                [...panel.querySelectorAll('button')].some(b => b.textContent.trim().toLowerCase() === 'new shell'));
+            """)) as? Bool == true
         }
-        _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'New shell').click(); return true;")
+        _ = try await js("document.querySelector('[aria-label=\"Session terminal\"] button[aria-label=\"Open list\"]')?.click(); return true;")
+        try await wait("New shell") {
+            (try await js("return [...document.querySelector('[aria-label=\"Session terminal\"]').querySelectorAll('button')].some(b => b.textContent.trim().toLowerCase() === 'new shell' && !b.disabled);")) as? Bool == true
+        }
+        _ = try await js("[...document.querySelector('[aria-label=\"Session terminal\"]').querySelectorAll('button')].find(b => b.textContent.trim().toLowerCase() === 'new shell' && !b.disabled).click(); return true;")
         try await wait("connected xterm") {
-            (try await js("return !!document.querySelector('.xterm-helper-textarea') && document.querySelector('[role=region][aria-label=\"Session terminal\"]')?.innerText.includes('Connected');")) as? Bool == true
+            (try await js("return !!document.querySelector('.xterm-helper-textarea') && document.querySelector('[aria-label=\"Session terminal\"]')?.innerText.includes('Connected');")) as? Bool == true
         }
         let list = try await js("return await (await fetch('/sessions/\(sessionID)/user-terminals')).json();") as? [String: Any]
         guard let rows = list?["terminals"] as? [[String: Any]], rows.count == 1,

@@ -57,10 +57,25 @@ a separate recorded observation, including false.
 Read-only preflight inspects only the existing Xcode Helper Accessibility row,
 `DevToolsSecurity -status` and no-argument `automationmodetool` status. Missing
 authorization stops before XCTest launch; no provisioning/grant/prompt/enable
-command exists in this runner. Actual generated `.xcresult` identity and
+command exists in this runner. Read-only snapshots immediately before testing
+(after build) and after XCTest/cleanup compare the persistent helper grant,
+developer mode and automation authentication policy. Active Automation Mode is
+transient session state: disabled is allowed when existing no-auth configuration
+and helper authorization are confirmed. A policy change fails qualification;
+declared absence of mutation commands is not used as measured before/after proof.
+Actual generated `.xcresult` identity and
 sanitized `xcresulttool` summary are retained; raw result diagnostics stay
-private. This path is a candidate pending its first full-Xcode result and does
-not establish physical keyboard, CJK, clipboard or VoiceOver acceptance.
+private. The first actual XCTest run (`41180828336`, job `124478157918`, artifact
+`13035366792`, merge `801dffa1` / PR head `db4d3eab`) built the target, validated
+the generated runner and launched the exact relocated app. Its one test failed
+before any keyboard input because the smoke fixture did not open the tablet
+terminal list before finding New Shell. All six baseline cases passed and
+owned app/engine/profile cleanup completed, with no crash report. The receipt
+observed existing helper authorization and developer mode, plus Automation Mode
+disabled with authentication not required to enable it; no enable command was
+issued. A smoke-only responsive-navigation repair is prepared; trusted input
+qualification remains pending. This path does not establish physical keyboard,
+CJK, clipboard or VoiceOver acceptance.
 
 `CITerminal.swift` and its dispatcher/source-list hooks are smoke-only. Ordinary
 preview builds and default `preview.sh smoke` keep their existing behavior;

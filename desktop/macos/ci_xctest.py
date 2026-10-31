@@ -18,7 +18,32 @@ def require_prerequisites(helper_auth, developer_status, automation_status):
             or 'DOES NOT REQUIRE' not in automation_status):
         raise RuntimeError('XCTest unavailable: existing helper authorization/developer automation prerequisites missing; no grant requested')
     return {'xcode_helper_accessibility_auth': 2, 'developer_status': developer_status,
-            'automation_status': automation_status, 'permission_mutations': False}
+            'automation_status': automation_status,
+            'declared_no_permission_mutation_commands': True}
+
+
+def observe_prerequisites(command):
+    rows = json.loads(command(['/usr/bin/sudo', '-n', '/usr/bin/sqlite3', '-json', '-readonly',
+        '/Library/Application Support/com.apple.TCC/TCC.db',
+        "SELECT service,client,client_type,auth_value,auth_reason,auth_version,hex(csreq) AS csreq_hex,"
+        "policy_id,indirect_object_identifier_type,indirect_object_identifier,"
+        "hex(indirect_object_code_identity) AS indirect_identity_hex,flags,last_modified "
+        "FROM access WHERE service='kTCCServiceAccessibility' AND client='com.apple.dt.Xcode-Helper' AND client_type=0;"]) or '[]')
+    return {'xcode_helper_accessibility_rows': rows,
+            'developer_status': command(['/usr/sbin/DevToolsSecurity', '-status']),
+            'automation_status': command(['automationmodetool'])}
+
+
+def authorization_policy(observation):
+    rows = observation['xcode_helper_accessibility_rows']
+    if (len(rows) != 1 or rows[0].get('service') != 'kTCCServiceAccessibility'
+            or rows[0].get('client') != 'com.apple.dt.Xcode-Helper' or rows[0].get('client_type') != 0):
+        raise RuntimeError('Missing or ambiguous existing Xcode Helper authorization; no grant requested')
+    require_prerequisites(str(rows[0].get('auth_value')), observation['developer_status'], observation['automation_status'])
+    # Mode enabled/disabled is transient session state, independent from its
+    # existing no-auth configuration. Timestamps are retained, not policy.
+    return {'helper': {key: value for key, value in rows[0].items() if key != 'last_modified'},
+            'developer_mode_enabled': True, 'automation_authentication_required': False}
 
 
 def require_generated_runner(data, config_path):
@@ -67,12 +92,9 @@ def result_receipt(path):
 def run_terminal(raw, run, command):
     # Every command here is an observation. Missing prerequisites stop before
     # XCTest launch; enabling automation or requesting Accessibility is forbidden.
-    status = require_prerequisites(
-        command(['/usr/bin/sudo', '-n', '/usr/bin/sqlite3', '-readonly',
-                 '/Library/Application Support/com.apple.TCC/TCC.db',
-                 "SELECT auth_value FROM access WHERE service='kTCCServiceAccessibility' AND client='com.apple.dt.Xcode-Helper' AND client_type=0;"]),
-        command(['/usr/sbin/DevToolsSecurity', '-status']), command(['automationmodetool']))
+    status = observe_prerequisites(command)
     (raw / 'xctest-prerequisites.json').write_text(json.dumps(status, indent=2) + '\n')
+    initial_policy = authorization_policy(status)
     evidence = raw / 'evidence/ci-terminal-xctest.json'
     app = raw / 'NAC Development Preview Smoke.app'
     result = raw / 'native-input.xcresult'
@@ -100,7 +122,12 @@ def run_terminal(raw, run, command):
                     'xctestrun_sha256': hashlib.sha256(runner_bytes).hexdigest(),
                     'native_sha256': native_hash, 'generated_target': target}
         (raw / 'xctest-runner.json').write_text(json.dumps(metadata, indent=2) + '\n')
+        before = None
         try:
+            before = observe_prerequisites(command)
+            (raw / 'xctest-prerequisites-before.json').write_text(json.dumps(before, indent=2) + '\n')
+            if authorization_policy(before) != initial_policy:
+                raise RuntimeError('Existing XCTest authorization policy changed during build; stopping before input')
             run(['xcodebuild', 'test-without-building', '-xctestrun', str(runners[0]),
                  '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
                  '-maximum-concurrent-test-device-destinations', '1', '-resultBundlePath', str(result),
@@ -112,15 +139,27 @@ def run_terminal(raw, run, command):
                 raise RuntimeError('Native XCTest fixture cleanup incomplete')
             return {'prerequisites': status, 'runner': metadata, 'terminal': terminal}
         finally:
-            if evidence.exists():
-                record = json.loads(evidence.read_text())
-                record.update(relocated_app=str(relocated), native_sha256=native_hash)
-                evidence.write_text(json.dumps(record, indent=2) + '\n')
-                # Use the existing exact-bundle cleanup while that bundle still
-                # exists, including on failed XCTest assertions or a timeout.
-                if not record.get('engine_reaped') or not record.get('profile_removed'):
-                    cleanup_failed_case(evidence, relocated)
-            if result.exists():
-                (raw / 'xctest-result.json').write_text(json.dumps(result_receipt(result), indent=2) + '\n')
-                summary = command(['xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', str(result)])
-                (raw / 'xctest-summary.json').write_text(json.dumps(json.loads(summary), indent=2) + '\n')
+            try:
+                if evidence.exists():
+                    record = json.loads(evidence.read_text())
+                    record.update(relocated_app=str(relocated), native_sha256=native_hash)
+                    evidence.write_text(json.dumps(record, indent=2) + '\n')
+                    # Existing exact-bundle cleanup while the bundle exists,
+                    # including failed XCTest assertions or a timeout.
+                    if not record.get('engine_reaped') or not record.get('profile_removed'):
+                        cleanup_failed_case(evidence, relocated)
+            finally:
+                try:
+                    after = observe_prerequisites(command)
+                    (raw / 'xctest-prerequisites-after.json').write_text(json.dumps(after, indent=2) + '\n')
+                    unchanged = before is not None and authorization_policy(after) == authorization_policy(before)
+                    (raw / 'xctest-policy-comparison.json').write_text(json.dumps({
+                        'persistent_authorization_policy_unchanged': unchanged,
+                        'transient_active_mode_compared': False}, indent=2) + '\n')
+                    if not unchanged:
+                        raise RuntimeError('Persistent XCTest authorization policy changed; qualification stopped')
+                finally:
+                    if result.exists():
+                        (raw / 'xctest-result.json').write_text(json.dumps(result_receipt(result), indent=2) + '\n')
+                        summary = command(['xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', str(result)])
+                        (raw / 'xctest-summary.json').write_text(json.dumps(json.loads(summary), indent=2) + '\n')
