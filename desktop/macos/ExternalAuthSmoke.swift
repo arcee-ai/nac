@@ -8,9 +8,11 @@ import WebKit
 final class ExternalAuthSmoke {
     private unowned let app: PreviewApp
     private let fixture: URL
+    private let checkpoint: () -> Void
 
-    init(app: PreviewApp) throws {
+    init(app: PreviewApp, checkpoint: @escaping () -> Void) throws {
         self.app = app
+        self.checkpoint = checkpoint
         let args = CommandLine.arguments
         guard let option = args.firstIndex(of: "--external-auth-origin"), option + 1 < args.count,
               let fixture = URL(string: args[option + 1]), fixture.scheme == "http", fixture.host == "127.0.0.1",
@@ -23,6 +25,7 @@ final class ExternalAuthSmoke {
     }
 
     func run() async throws -> [String: Any] {
+        try await wait("verified loaded workspace") { self.app.commands.currentDocument(in: self.app.webView) != nil }
         try await wait("loaded production create-chat control") {
             try await self.js("return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create chat' && !b.disabled)") as? Bool == true
         }
@@ -146,12 +149,31 @@ final class ExternalAuthSmoke {
     }
 
     private func js(_ script: String, arguments: [String: Any] = [:]) async throws -> Any {
-        try await app.webView.callAsyncJavaScript(script, arguments: arguments, in: nil, contentWorld: .page) ?? NSNull()
+        checkpoint()
+        return try await withCheckedThrowingContinuation { continuation in
+            var resolved = false
+            let timeout = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled, !resolved else { return }
+                resolved = true
+                continuation.resume(throwing: PreviewError.message("Auth WK fixture evaluation timed out"))
+            }
+            app.webView.callAsyncJavaScript(script, arguments: arguments, in: nil, contentWorld: .page) { result in
+                guard !resolved else { return }
+                resolved = true
+                timeout.cancel()
+                switch result {
+                case .success(let value): continuation.resume(returning: value ?? NSNull())
+                case .failure: continuation.resume(throwing: PreviewError.message("Auth WK fixture evaluation failed"))
+                }
+            }
+        }
     }
 
     private func wait(_ label: String, timeout: TimeInterval = 25, _ condition: () async throws -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            checkpoint()
             if let failure = app.failure { throw PreviewError.message(failure) }
             if try await condition() { return }
             try await Task.sleep(nanoseconds: 50_000_000)

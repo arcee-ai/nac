@@ -7,9 +7,11 @@ import WebKit
 @MainActor
 final class ExternalNavigationSmoke {
     private unowned let app: PreviewApp
-    init(app: PreviewApp) { self.app = app }
+    private let checkpoint: () -> Void
+    init(app: PreviewApp, checkpoint: @escaping () -> Void) { self.app = app; self.checkpoint = checkpoint }
 
     func run() async throws -> [String: Any] {
+        try await wait("verified loaded workspace") { self.app.commands.currentDocument(in: self.app.webView) != nil }
         try await wait("production create-chat control") {
             try await self.js("return [...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Create chat'&&!b.disabled)") as? Bool == true
         }
@@ -91,12 +93,31 @@ final class ExternalNavigationSmoke {
     }
 
     private func js(_ script: String, arguments: [String: Any] = [:]) async throws -> Any {
-        try await app.webView.callAsyncJavaScript(script, arguments: arguments, in: nil, contentWorld: .page) ?? NSNull()
+        checkpoint()
+        return try await withCheckedThrowingContinuation { continuation in
+            var resolved = false
+            let timeout = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled, !resolved else { return }
+                resolved = true
+                continuation.resume(throwing: PreviewError.message("Recording WK fixture evaluation timed out"))
+            }
+            app.webView.callAsyncJavaScript(script, arguments: arguments, in: nil, contentWorld: .page) { result in
+                guard !resolved else { return }
+                resolved = true
+                timeout.cancel()
+                switch result {
+                case .success(let value): continuation.resume(returning: value ?? NSNull())
+                case .failure: continuation.resume(throwing: PreviewError.message("Recording WK fixture evaluation failed"))
+                }
+            }
+        }
     }
 
     private func wait(_ label: String, _ condition: () async throws -> Bool) async throws {
         let deadline = Date().addingTimeInterval(25)
         while Date() < deadline {
+            checkpoint()
             if let failure = app.failure { throw PreviewError.message(failure) }
             if try await condition() { return }
             try await Task.sleep(nanoseconds: 50_000_000)

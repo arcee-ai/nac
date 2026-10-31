@@ -60,7 +60,11 @@ requires the evidence to report `system_browser_qualified=false`. It can qualify
 WK callback ordering, popup rejection and document correlation; it cannot
 qualify an actual browser opening or an auth callback completing. The common
 builder/PreviewSmoke owner must integrate the source list and named dispatch
-before this fixture can run; a source typecheck alone is not a fixture pass.
+before this fixture can run. Those hooks are included in the shared builder;
+a source typecheck or successful compilation alone is not a fixture pass. The
+fixture waits for the live loaded document before evaluating JavaScript,
+bounds each WK evaluation and records the existing ownership checkpoint so a
+failed run still has exact app/engine/profile cleanup evidence.
 
 `ExternalAuthSmoke` is the separately named `external-auth` scenario. It uses
 production MCP controls and the actual NSWorkspace opener, preserving callback
@@ -76,4 +80,5 @@ consoles before any app/browser launch. An approved hosted Mac contract must
 also supply a disposable browser/profile and owned cleanup; CI environment
 variables alone do not establish isolation. The fixture does not change the
 default browser, close unrelated tabs or qualify a real vendor. Its common
-builder/PreviewSmoke hook and hosted execution remain integration gates.
+builder/PreviewSmoke hook is included; hosted execution remains an integration
+gate.
