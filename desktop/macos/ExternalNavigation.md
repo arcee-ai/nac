@@ -50,3 +50,14 @@ owned cleanup. The locked shared local console is not an external-browser
 acceptance environment. A named recording-opener WK fixture must report that
 system-browser acceptance remains open. ALL-157 Clerk migration stays separate;
 ordinary browser/CLI and offline API-key workflows retain their owners.
+
+`ExternalNavigationSmoke` is the explicitly named
+`external-navigation-recording` PREVIEW_SMOKE scenario. Its bounded observations
+contain navigation classifications and booleans, never destinations. For this
+scenario alone the adapter records admitted actions instead of calling
+NSWorkspace. `external_navigation_recording.py` launches the built app and
+requires the evidence to report `system_browser_qualified=false`. It can qualify
+WK callback ordering, popup rejection and document correlation; it cannot
+qualify an actual browser opening or an auth callback completing. The common
+builder/PreviewSmoke owner must integrate the source list and named dispatch
+before this fixture can run; a source typecheck alone is not a fixture pass.

@@ -8,6 +8,18 @@ final class ExternalNavigation {
     private weak var webView: WKWebView?
     private let receipt: () -> EngineReceipt?
     private let policy: ExternalNavigationPolicy
+    #if PREVIEW_SMOKE
+    private var recordedActions: [[String: Any]] = []
+    private var recordingOnly: Bool {
+        let args = CommandLine.arguments
+        guard let index = args.firstIndex(of: "--smoke-scenario"), index + 1 < args.count else { return false }
+        return args[index + 1] == "external-navigation-recording"
+    }
+    var smokeSnapshot: [String: Any] {
+        ["recording_only": recordingOnly, "actions": recordedActions,
+         "system_browser_qualified": false]
+    }
+    #endif
 
     init?(webView: WKWebView, receipt: @escaping () -> EngineReceipt?) {
         guard let current = receipt(), let policy = ExternalNavigationPolicy(receipt: current) else { return nil }
@@ -39,6 +51,15 @@ final class ExternalNavigation {
     @discardableResult
     func open(_ action: WKNavigationAction, in candidate: WKWebView, popup: Bool) -> Bool {
         guard allows(action, in: candidate, popup: popup), let destination = action.request.url else { return false }
+        #if PREVIEW_SMOKE
+        if recordedActions.count < 128 {
+            recordedActions.append(["popup": popup, "navigation_type": action.navigationType.rawValue,
+                                    "system_opener_invoked": !recordingOnly])
+        }
+        // Explicit non-acceptance fixture. Normal production builds omit both
+        // this branch and its observations; actual auth uses NSWorkspace below.
+        if recordingOnly { return true }
+        #endif
         if !NSWorkspace.shared.open(destination) {
             let alert = NSAlert()
             alert.messageText = "Could not open your browser"

@@ -11,6 +11,8 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     private var bound = false
     #if PREVIEW_SMOKE
     var smokeSnapshot: [String: Any] { bridge?.smokeSnapshot ?? ["installed": false] }
+    var smokeExternalNavigation: [String: Any] { externalNavigation?.smokeSnapshot ?? [:] }
+    private(set) var smokeDocumentInvalidations = 0
     #endif
 
     init(webView: WKWebView, receipt: @escaping () -> EngineReceipt?) {
@@ -31,7 +33,14 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
         externalNavigation = ExternalNavigation(webView: webView, receipt: receipt)
     }
 
-    func navigationStarted(in view: WKWebView, navigation: WKNavigation?) { bridge?.navigationStarted(in: view, navigation: navigation) }
+    func navigationStarted(in view: WKWebView, navigation: WKNavigation?) {
+        bridge?.navigationStarted(in: view, navigation: navigation)
+        #if PREVIEW_SMOKE
+        if view === webView, bridge != nil, bridge?.currentDocument(in: view) == nil {
+            smokeDocumentInvalidations += 1
+        }
+        #endif
+    }
     func navigationFinished(in view: WKWebView, navigation: WKNavigation?) { bridge?.navigationFinished(in: view, navigation: navigation) }
     func currentDocument(in view: WKWebView) -> NativeDocumentBinding? { bridge?.currentDocument(in: view) }
     func allows(_ action: WKNavigationAction, in view: WKWebView) -> Bool {
