@@ -18,12 +18,44 @@ pub(super) enum Mode {
     Goal,
 }
 
+// The advertised default remains run mode when a provider supplies null.
+fn mode_or_default<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Mode, D::Error> {
+    Ok(Option::<Mode>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// Closed, disjoint provider shapes keep irrelevant identities explicitly null.
+/// Native decoding remains flat and accepts omitted optional fields for callers
+/// that already use the original compact form.
+pub(super) fn target_schema(mode: Mode) -> Value {
+    let identity = json!({"type":["string","null"],"minLength":1,"maxLength":160});
+    let unused = json!({"type":"null"});
+    let (run_id, goal_id) = match mode {
+        Mode::Run => (&identity, &unused),
+        Mode::Goal => (&unused, &identity),
+    };
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["session_id","project_id","mode","run_id","goal_id","after_cursor"],
+        "properties":{
+            "session_id":{"type":"string","minLength":1,"maxLength":160},
+            "project_id":identity,
+            "mode":match mode {
+                Mode::Run => json!({"type":["string","null"],"enum":["run",null],"default":"run"}),
+                Mode::Goal => json!({"type":"string","enum":["goal"]}),
+            },
+            "run_id":run_id,
+            "goal_id":goal_id,
+            "after_cursor":{"type":["string","null"],"minLength":1,"maxLength":4096}
+        }
+    })
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Target {
     pub session_id: String,
     pub project_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "mode_or_default")]
     pub mode: Mode,
     pub run_id: Option<String>,
     pub goal_id: Option<String>,

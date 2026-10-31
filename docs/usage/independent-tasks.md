@@ -86,6 +86,12 @@ to this coordinator. For example:
 {"targets":[{"session_id":"task-session","mode":"run","run_id":"exact-run"},{"session_id":"other-session","mode":"goal","goal_id":"exact-goal"}],"timeout_ms":30000}
 ```
 
+Optional fields accept null: `mode: null` uses the documented `run` default,
+and `timeout_ms: null` requests a zero-time snapshot. The provider-facing run
+and goal shapes list every field explicitly and require the other mode's
+identity to be null. Compact native calls may omit these fields. Supplying a
+non-null identity for the wrong mode remains an error; it is never ignored.
+
 Omit the identity to resolve the current run or goal once. Run mode uses the
 current durable run, or the most recent retained result if no run is current.
 Save each returned `resolved_identity` and `after_cursor`. Reuse that cursor

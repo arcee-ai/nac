@@ -24,7 +24,7 @@ const REVALIDATE: Duration = Duration::from_millis(250);
 pub(crate) struct WaitInput {
     targets: Vec<Target>,
     #[serde(default)]
-    timeout_ms: u64,
+    timeout_ms: Option<u64>,
     #[serde(skip)]
     authorized_project: Option<String>,
 }
@@ -52,18 +52,12 @@ impl NativeTool for WaitTasksTool {
 
     fn definition(&self) -> crate::types::ToolDefinition {
         read::definition("wait_tasks", "Passively observe exact independent direct task runs or human-created goals. timeout_ms=0 takes a snapshot; a bounded wait wakes on a new result, stopped goal, failure, existing approval, or this coordinator's pending input. Status/commentary alone stays quiet. Each current selector resolves ONCE; use returned resolved_identity or after_cursor to keep it pinned. Run end is result availability, never objective completion. Repeated cursors suppress replayed proofs; read_task retains inspectable evidence. No attach, recovery, delta approver subscription, acknowledgement, target cancellation or goal mutation. Foreign/unattached owner approvals are unknown. Cursors are untrusted observation hints; resync means authoritative state was re-read after restart or a notification gap.", json!({
-            "type":"object","additionalProperties":false,"required":["targets"],
+            "type":"object","additionalProperties":false,"required":["targets","timeout_ms"],
             "properties":{
                 "targets":{"type":"array","minItems":1,"maxItems":MAX_TARGETS,"items":{
-                    "type":"object","additionalProperties":false,"required":["session_id"],"properties":{
-                        "session_id":{"type":"string","maxLength":160},
-                        "project_id":{"type":"string","maxLength":160},
-                        "mode":{"type":"string","enum":["run","goal"],"default":"run"},
-                        "run_id":{"type":"string","maxLength":160},
-                        "goal_id":{"type":"string","maxLength":160},
-                        "after_cursor":{"type":"string","maxLength":4096}
-                    }}},
-                "timeout_ms":{"type":"integer","minimum":0,"maximum":MAX_TIMEOUT_MS,"default":0}
+                    "anyOf":[super::task_wait_state::target_schema(Mode::Run),super::task_wait_state::target_schema(Mode::Goal)]
+                }},
+                "timeout_ms":{"type":["integer","null"],"minimum":0,"maximum":MAX_TIMEOUT_MS,"default":0}
             }
         }))
     }
@@ -94,7 +88,10 @@ impl NativeTool for WaitTasksTool {
                 "targets must contain 1 to {MAX_TARGETS} entries"
             )));
         }
-        if input.timeout_ms > MAX_TIMEOUT_MS {
+        if input
+            .timeout_ms
+            .is_some_and(|timeout| timeout > MAX_TIMEOUT_MS)
+        {
             return Err(invalid("timeout_ms exceeds 60000"));
         }
         for target in &input.targets {
@@ -157,6 +154,7 @@ impl NativeTool for WaitTasksTool {
         context: &'a ToolCallContext,
     ) -> BoxFuture<'a, ToolResult> {
         Box::pin(async move {
+            let timeout_ms = input.timeout_ms.unwrap_or(0);
             let (caller, broker) = match read::caller(services) {
                 Ok(identity) => identity,
                 Err(error) => return error,
@@ -168,7 +166,7 @@ impl NativeTool for WaitTasksTool {
             }
             // Subscribe before the first snapshot; hints only trigger a read.
             let mut goals = store::goal_changes::subscribe(&services.runtime.store_path);
-            let deadline = tokio::time::Instant::now() + Duration::from_millis(input.timeout_ms);
+            let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
             loop {
                 let mut reports = Vec::new();
                 let mut actionable = false;
@@ -277,19 +275,14 @@ impl NativeTool for WaitTasksTool {
                     }
                     _ => false,
                 };
-                if revalidate
-                    && !actionable
-                    && !interrupted
-                    && input.timeout_ms > 0
-                    && now < deadline
-                {
+                if revalidate && !actionable && !interrupted && timeout_ms > 0 && now < deadline {
                     continue;
                 }
                 let reason = if interrupted {
                     Some("coordinator_input")
                 } else if actionable {
                     Some("target_changed")
-                } else if input.timeout_ms == 0 {
+                } else if timeout_ms == 0 {
                     Some("snapshot")
                 } else if now >= deadline {
                     Some("timeout")
