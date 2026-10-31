@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "terminal_source_head": "24c0179f9e42a36d021a117694f098a76a3ddb80",
+  "terminal_source_head": "dd87b0e97f7e5f5bfcbfcbf5b2bee2fe30b88b3a",
   "scenario": "terminal-xctest",
   "total_seconds_limit": 240,
   "source_files": {
     "desktop/macos/TerminalFixture.swift": "ac8d7e3958b183ed2eb331324194e93d8db27b1cae5b5283ac8382d91665fcdb",
     "desktop/macos/TerminalJourneys.swift": "a553e3885ae6339de396a49d34e4a0efb3faaef4fdbdb880d646f4cf997a12c8",
-    "desktop/macos/TerminalSmoke.swift": "780e316ffe184cbffa1a8f512193bd916cfc173e760710f75c0230bf53af0a5a",
+    "desktop/macos/TerminalSmoke.swift": "8a06a3fb6a2c50a3c895f6242c7d07096be9b0cdd77918780d20203191553f52",
     "desktop/macos/terminal/xctest.md": "2be24b6628abca9d7fa5261c223feae35fffa921b65372d4a2d88ae96ba59403"
   },
   "phases": [

@@ -280,7 +280,7 @@ Only named source/profile records resolve; there is no arbitrary SHA, command,
 paid-runner or matrix input.
 
 `all-352-macos26` is a source-only prepared entry for terminal supplier
-`24c0179f9e42a36d021a117694f098a76a3ddb80`. It checks out that exact source,
+`dd87b0e97f7e5f5bfcbfcbf5b2bee2fe30b88b3a`. It checks out that exact source,
 independently of PR 500's merge commit or its moving parent. Its existing
 `terminal.sh` builder receives a private exact-source engine, checks normal and
 ordinary-smoke exclusion, and builds only the nominated PREVIEW_SMOKE plus
@@ -314,6 +314,34 @@ resize episode, without physical keyboard, IME, paste, full job control, masking
 VoiceOver or full terminal acceptance. Preparation, parsing and portable tests
 do not establish XCTest compilation or actual input. Root inspection of exact
 committed H/T and policy is required before any additional input run.
+
+The first terminal qualification used exact harness `0ec96e49` and supplier
+`24c0179f9e42a36d021a117694f098a76a3ddb80`: run `41189568352`, native job
+`124503463497`, artifact `13038422245`. Actual full-Xcode target/runner generation
+and app launch succeeded, but the source fixture timed out waiting for New shell
+before publishing its first input phase. Zero declared typing/key/resize
+operations, phase/dispatch receipts or PNGs were produced. App/engine/profile
+settlement and unchanged persistent authorization policy passed; the failure is
+not Unicode, Control-C, resize or visible-paint acceptance. Only the real result
+tree hash and bounded sanitized summary are retained, not the full 102 MB result.
+
+The current source-only supplier `dd87b0e97f7e5f5bfcbfcbf5b2bee2fe30b88b3a`
+adds scoped responsive terminal selection and characterization controls. It opens
+the owned panel's Open list once when needed and matches New shell case
+insensitively; foreign, hidden, inert, disabled, title-only and retry decoys do
+not qualify. The six phases, four literal commands, bytes, controller and resize
+contracts are unchanged. No actual native input result is claimed for this
+revision before a separately authorized exact H/T run.
+
+Ordinary required CI at harness `0ec96e49` passed in run `41189561712` attempt 2,
+after one authorized unchanged process-job replay. Its actual merge
+`74c03b4f8ebb6bdd847981d660d3e23f798ea4a8` has the same tree as that head.
+Original process job `124503412792` / artifact `13038516155` retain a readiness
+observation timeout whose cause and failed-run cleanup remain unproved. Replay
+job `124508264000` / artifact `13038990917` passed first/warm tests and empty
+process/file sweeps without source, timeout, cache or policy changes. That
+reproduction establishes no bug fix or flake diagnosis and supplies no terminal
+qualification for either supplier revision.
 
 The additional `all-351-macos14` choice binds the corrected, frozen
 `fa94a859b648cb36fbdcb251bfe4bc9541de3f48` fixture to a separate strict envelope:
