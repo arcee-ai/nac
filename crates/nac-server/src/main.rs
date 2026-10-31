@@ -20,7 +20,9 @@ use nac_core::{
     },
     upgrade::{run_upgrade, UpgradeRequest},
 };
-use nac_server::{serve_with_policy, BindPolicy, ServerOptions, SessionManager};
+use nac_server::{
+    current_upgrade_ownership, serve_with_policy, BindPolicy, ServerOptions, SessionManager,
+};
 
 const MCP_OAUTH_CALLBACK_ORIGIN_ENV: &str = "NAC_MCP_OAUTH_CALLBACK_ORIGIN";
 
@@ -77,7 +79,11 @@ enum RootCommand {
     ArceeAuth(ArceeAuthCli),
 
     /// Download and reinstall the latest stable NAC release
-    #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
+    #[command(
+        version = RELEASE_VERSION,
+        long_version = BUILD_VERSION,
+        after_help = "An engine bundled in a Mac app cannot self-upgrade. Safely quit and replace the whole application; keep your NAC configuration and data."
+    )]
     Upgrade(UpgradeCli),
 
     #[command(name = "__worker", hide = true)]
@@ -1031,6 +1037,8 @@ fn arcee_auth_action(command: ArceeAuthCommand) -> ArceeAuthAction {
 }
 
 async fn run_upgrade_cli(cli: UpgradeCli, invocation_name: &str) -> Result<()> {
+    let ownership = current_upgrade_ownership()?;
+    ownership.ensure_self_upgrade_allowed()?;
     if cli.pre_release {
         let _compatibility_confirmation = cli.yes;
         return Err(anyhow!(
@@ -1043,6 +1051,7 @@ async fn run_upgrade_cli(cli: UpgradeCli, invocation_name: &str) -> Result<()> {
         ));
     }
     let request = UpgradeRequest {
+        ownership,
         install_dir: cli.install_dir,
         executable_path: Some(
             std::env::current_exe().context("failed to determine nac-web executable path")?,
@@ -1802,6 +1811,7 @@ thread_timeout_secs = 7200
             "--install-dir <INSTALL_DIR>",
             "$INSTALL_DIR",
             "current executable directory",
+            "replace the whole application",
         ] {
             assert!(help.contains(expected), "missing {expected:?}:\n{help}");
         }
