@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import CryptoKit
+import Dispatch
 import IOKit
 import XCTest
 import XCUIAutomation
@@ -96,7 +97,8 @@ final class NativeJourneys: XCTestCase {
         continueAfterFailure = false
         executionTimeAllowance = 380
         let configPath = try XCTUnwrap(ProcessInfo.processInfo.environment["NAC_UI_FIXTURE"])
-        let config = try evidence(configPath)
+        let configBytes = try Data(contentsOf: URL(fileURLWithPath: configPath))
+        let config = try XCTUnwrap(JSONSerialization.jsonObject(with: configBytes) as? [String: Any])
         let appURL = URL(fileURLWithPath: try XCTUnwrap(config["app_path"] as? String)).resolvingSymlinksInPath()
         let output = try XCTUnwrap(config["evidence"] as? String)
         let operations = try XCTUnwrap(config["operations"] as? [[String: Any]])
@@ -137,7 +139,25 @@ final class NativeJourneys: XCTestCase {
         try require(terminals.count == 1, "Expected one terminal accessibility element")
         let terminal = terminals.firstMatch
         var dispatched: [[String: Any]] = []
-        let driverOutput = URL(fileURLWithPath: try XCTUnwrap(config["driver_evidence"] as? String))
+        var observerBinding = try XCTUnwrap(config["observer_binding"] as? [String: Any])
+        try require(observerBinding["test_identifier_url"] as? String ==
+            "test://com.apple.xcode/NACNativeUITests/NACNativeUITests/NativeJourneys/testTerminalUnicodeControlResize",
+            "Unexpected observer test identity")
+        observerBinding["configuration_sha256"] = SHA256.hash(data: configBytes)
+            .map { String(format: "%02x", $0) }.joined()
+        observerBinding["native_sha256"] = digest
+        observerBinding["app"] = identity
+        func retainDispatch(_ event: Int, _ stage: String) throws {
+            let snapshot: [String: Any] = ["schema": "nac352-dispatch-v1", "event_index": event,
+                "stage": stage, "uptime_ns": String(DispatchTime.now().uptimeNanoseconds),
+                "binding": observerBinding, "rows": dispatched]
+            let data = try JSONSerialization.data(withJSONObject: snapshot, options: [.prettyPrinted, .sortedKeys])
+            try require(data.count <= 64 * 1024, "Observer snapshot exceeds its fixed bound")
+            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+            attachment.name = String(format: "nac352-dispatch-v1-%02d-%@", event, stage)
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
         for (index, expected) in operations.enumerated() {
             let sequence = index + 1
             try require(expected["sequence"] as? Int == sequence && expected["name"] as? String == names[index],
@@ -169,8 +189,7 @@ final class NativeJourneys: XCTestCase {
             var dispatch = expected
             dispatch["state"] = "dispatching-once"
             dispatched.append(dispatch)
-            try JSONSerialization.data(withJSONObject: dispatched, options: [.prettyPrinted, .sortedKeys])
-                .write(to: driverOutput, options: .atomic)
+            try retainDispatch(index * 2 + 1, "before")
             switch operation["kind"] as? String {
             case "type-text-and-return":
                 let text = try XCTUnwrap(operation["text"] as? String)
@@ -202,8 +221,7 @@ final class NativeJourneys: XCTestCase {
             }
             dispatched[index]["state"] = "dispatched-once"
             dispatched[index]["elapsed_ms"] = Int(Date().timeIntervalSince(started) * 1000)
-            try JSONSerialization.data(withJSONObject: dispatched, options: [.prettyPrinted, .sortedKeys])
-                .write(to: driverOutput, options: .atomic)
+            try retainDispatch(index * 2 + 2, "after")
         }
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 70), "Terminal app did not settle and close")
         let result = try evidence(output)
