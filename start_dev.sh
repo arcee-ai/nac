@@ -117,13 +117,17 @@ APP_URL="http://$VITE_HOST:$VITE_PORT"
 
 # Refuse an occupied address up front and name the override for it. Never stop,
 # reuse, or silently move away from a process this script did not start.
-# curl exits 0 for any HTTP answer, 52/56 for a listener that is not HTTP, and
-# 28 for one that accepts but never answers. A free port refuses (7).
+# curl exits 0 for any HTTP answer; 1, 8, 52 or 56 for a listener that is not
+# HTTP (an SSH banner is 1); and 28 for one that accepts but never answers. A
+# free port refuses (7).
 port_in_use() {
   local status=0
   curl -sS --noproxy '*' --connect-timeout 1 --max-time 2 -o /dev/null -- "$1" \
     >/dev/null 2>&1 || status=$?
-  [[ "$status" -eq 0 || "$status" -eq 28 || "$status" -eq 52 || "$status" -eq 56 ]]
+  case "$status" in
+    0 | 1 | 8 | 28 | 52 | 56) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 if curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 -- "$API_URL/health" >/dev/null 2>&1; then

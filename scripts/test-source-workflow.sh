@@ -95,6 +95,8 @@ case "$url" in
   "${FAKE_CURL_NAC:-unset}"*) exit 0 ;;
   "${FAKE_CURL_OTHER:-unset}"/health) exit 22 ;;
   "${FAKE_CURL_OTHER:-unset}"*) exit 52 ;;
+  # A banner such as SSH's makes curl report an unsupported protocol.
+  "${FAKE_CURL_BANNER:-unset}"*) exit 1 ;;
 esac
 # Otherwise a port is free (connection refused) until its fake process starts.
 case "$url" in
@@ -221,6 +223,9 @@ expect_collision nac-collision 'NAC is already responding at http://127.0.0.1:43
   'DEV_BIND=127.0.0.1:4321 make dev'
 FAKE_CURL_OTHER=http://127.0.0.1:43210 run_supervisor api-collision
 expect_collision api-collision 'another process is already listening at http://127.0.0.1:43210 (DEV_BIND)' \
+  'DEV_BIND=127.0.0.1:4321 make dev'
+FAKE_CURL_BANNER=http://127.0.0.1:43210 run_supervisor banner-collision
+expect_collision banner-collision 'another process is already listening at http://127.0.0.1:43210 (DEV_BIND)' \
   'DEV_BIND=127.0.0.1:4321 make dev'
 FAKE_CURL_OTHER=http://127.0.0.1:45173 run_supervisor app-collision
 expect_collision app-collision 'another process is already listening at http://127.0.0.1:45173 (VITE_PORT)' \
