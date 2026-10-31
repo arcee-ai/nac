@@ -43,6 +43,8 @@ if [[ "$mode" == app-* || "$mode" == instance-* ]]; then
 fi
 sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/PreviewEngine.swift
          desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift
+         desktop/macos/NativeCommands.swift desktop/macos/NativeCommandState.swift
+         desktop/macos/NativeCommandScript.swift desktop/macos/NativeCommandBridge.swift
          desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift)
 flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O -framework AppKit -framework WebKit)
 if [[ "$local_app" == 1 ]]; then
@@ -53,8 +55,8 @@ else
     flags+=(-framework Network)
 fi
 if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then
-    sources+=(desktop/macos/PreviewSmoke.swift)
-    flags+=(-D PREVIEW_SMOKE)
+    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift)
+    flags+=(-D PREVIEW_SMOKE -framework IOKit)
 fi
 if [[ "$mode" == startup-* ]]; then
     sources+=(desktop/macos/StartupSmoke.swift)
@@ -88,6 +90,11 @@ case "$mode" in
             desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift desktop/macos/ProtocolTests.swift \
             -o "$output/EngineProtocolTests"
         "$output/EngineProtocolTests"
+        xcrun swiftc -swift-version 5 -target arm64-apple-macosx14.0 -O \
+            desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift \
+            desktop/macos/NativeCommandState.swift desktop/macos/NativeCommandStateTests.swift \
+            -o "$output/NativeCommandStateTests"
+        "$output/NativeCommandStateTests"
         python3 -B -m unittest discover -s desktop/macos -p 'test_*.py'
         exec python3 -B desktop/macos/smoke.py "$app" "$output/evidence"
         ;;

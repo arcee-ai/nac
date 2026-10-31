@@ -5,6 +5,7 @@ import WebKit
 final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
     private(set) var window: NSWindow!
     private(set) var webView: WKWebView!
+    private(set) var commands: NativeCommands!
     #if !LOCAL_APP
     private(set) var profile: PreviewProfile?
     let provider = FixtureProvider()
@@ -36,18 +37,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
-        let menu = NSMenu()
-        let item = NSMenuItem()
-        menu.addItem(item)
-        let appMenu = NSMenu()
         #if LOCAL_APP
         let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "NAC"
         #else
         let name = "NAC Development Preview"
         #endif
-        appMenu.addItem(withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        item.submenu = appMenu
-        NSApp.mainMenu = menu
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         #if LOCAL_APP
@@ -65,6 +59,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         webView.navigationDelegate = self
         webView.isHidden = true
         window.contentView!.addSubview(webView)
+        commands = NativeCommands(webView: webView, receipt: { [weak self] in self?.engine.receipt })
+        commands.installMenus(applicationName: name)
         #if LOCAL_APP
         status = NSTextField(wrappingLabelWithString: "Starting NAC…")
         #else
@@ -178,6 +174,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
                   engine.receipt?.incarnation == incarnation else { return }
             baseURL = url
             workspaceIncarnation = incarnation
+            commands.bind()
             if let navigation = webView.load(URLRequest(url: URL(string: route, relativeTo: url)!.absoluteURL)) {
                 navigationIncarnations[navigation] = incarnation
             }
@@ -187,6 +184,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard webView === self.webView, !stopping, failure == nil else { return }
+        commands.navigationStarted(in: webView, navigation: navigation)
         guard let navigation, navigationIncarnations[navigation] == nil,
               let incarnation = workspaceIncarnation, engine.receipt?.incarnation == incarnation,
               let url = webView.url, let baseURL, url.scheme == baseURL.scheme,
@@ -196,17 +195,17 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard let navigation,
+        guard webView === self.webView, let navigation,
               let incarnation = navigationIncarnations.removeValue(forKey: navigation),
               !stopping, failure == nil, incarnation == engine.receipt?.incarnation else { return }
+        commands.navigationFinished(in: webView, navigation: navigation)
         status.isHidden = true
         webView.isHidden = false
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = action.request.url, let baseURL,
-              url.scheme == baseURL.scheme, url.host == baseURL.host, url.port == baseURL.port else {
+        guard commands.allows(action, in: webView) else {
             decisionHandler(.cancel)
             return
         }
@@ -214,13 +213,14 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        guard let navigation else { return }
+        guard webView === self.webView, let navigation else { return }
         let incarnation = navigationIncarnations.removeValue(forKey: navigation)
         if !stopping, incarnation != nil, incarnation == engine.receipt?.incarnation {
             fail("Could not load the bundled workspace: \(error.localizedDescription)")
         }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard webView === self.webView else { return }
         if !stopping { fail("The workspace renderer stopped. Close this window and relaunch the preview.") }
     }
 
@@ -272,6 +272,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private func fail(_ message: String) {
         guard !stopping, failure == nil else { return }
         failure = message
+        commands.retire()
         webView.stopLoading()
         webView.isHidden = true
         status.isHidden = false
@@ -294,6 +295,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !stopping else { return .terminateLater }
         stopping = true
+        commands.retire()
         #if LOCAL_APP
         storeConflictRetry.clear()
         storeRetryButton?.isEnabled = false
