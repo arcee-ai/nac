@@ -10,7 +10,7 @@ final class NativePathSmoke {
     private let paths: NativePathBridge
     init(app: PreviewApp, paths: NativePathBridge) { self.app = app; self.paths = paths }
 
-    func run(publish: @escaping ([String: Any]) -> Void) async throws -> [String: Any] {
+    func run(failure: Bool = false, publish: @escaping ([String: Any]) -> Void) async throws -> [String: Any] {
         try await wait("current shared workspace and path bridge") {
             self.app.baseURL != nil && self.paths.smokeSnapshot["installed"] as? Bool == true &&
                 self.app.commands.smokeSnapshot["ready"] as? Bool == true &&
@@ -36,12 +36,37 @@ final class NativePathSmoke {
         let complete = profile.root.appendingPathComponent("all347-xctest-complete")
         publish(["paths_xctest_ready": true, "app_pid": getpid(),
                  "target_window_number": app.window.windowNumber, "initial_parent": profile.root.path,
-                 "selection_path": folder.path, "engine_pid": app.engine.pid, "profile": profile.root.path])
+                 "selection_path": folder.path, "engine_pid": app.engine.pid, "profile": profile.root.path,
+                 "paths_operation": failure ? "pending-engine-failure" : "select-reload-create-reveal"])
+        if failure {
+            let request = profile.root.appendingPathComponent("all347-engine-failure-request")
+            try await wait("external engine failure request with a pending actual panel", timeout: 90) {
+                FileManager.default.fileExists(atPath: request.path)
+            }
+            guard try String(contentsOf: request, encoding: .utf8) == "ALL347_ENGINE_FAILURE",
+                  paths.smokeSnapshot["pending"] as? Bool == true,
+                  app.window.attachedSheet != nil else {
+                throw PreviewError.message("Engine failure was not requested with an actual native panel")
+            }
+            let before = paths.smokeSnapshot
+            app.engine.loseChannel()
+            try await wait("real engine failure retiring the panel and path handler", expectingEngineFailure: true) {
+                self.app.failure != nil && self.app.engine.receipt == nil &&
+                    self.paths.smokeSnapshot["installed"] as? Bool == false &&
+                    self.paths.smokeSnapshot["pending"] as? Bool == false &&
+                    self.app.window.attachedSheet == nil
+            }
+            return ["pending_panel_before_failure": before, "path_bridge_after_failure": paths.smokeSnapshot,
+                    "actual_failure": app.failure ?? "", "launch_identity_retired": app.engine.receipt == nil]
+        }
         try await wait("external reload request while the actual panel is open", timeout: 90) {
             FileManager.default.fileExists(atPath: profile.root.appendingPathComponent("all347-reload-request").path)
         }
         guard paths.smokeSnapshot["pending"] as? Bool == true else {
             throw PreviewError.message("External document replacement did not start with an actual pending panel")
+        }
+        guard try String(contentsOf: profile.root.appendingPathComponent("all347-reload-request"), encoding: .utf8) == "ALL347_RELOAD_REQUEST" else {
+            throw PreviewError.message("Unexpected external reload request")
         }
         let before = paths.smokeSnapshot["documents"] as? Int ?? 0
         app.webView.reload()
@@ -109,11 +134,11 @@ final class NativePathSmoke {
         return String(cString: resolved)
     }
 
-    private func wait(_ label: String, timeout: TimeInterval = 30,
+    private func wait(_ label: String, timeout: TimeInterval = 30, expectingEngineFailure: Bool = false,
                       _ condition: () async throws -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if let failure = app.failure { throw PreviewError.message(failure) }
+            if !expectingEngineFailure, let failure = app.failure { throw PreviewError.message(failure) }
             if try await condition() { return }
             try await Task.sleep(nanoseconds: 50_000_000)
         }

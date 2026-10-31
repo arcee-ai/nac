@@ -75,6 +75,18 @@ panel/document callbacks and verifies stale/outside/missing/symlink/file-URL
 reveal denials through the actual WKWebView and shared server. It has no
 standalone launch or hosted dispatch, does not provision permissions, and does
 not qualify physical IME or paste.
+It also verifies the unconnected SSH form exposes no Local picker and the
+Podman working-folder action retains the shared API browser. A real SSH
+connection or container execution is separate infrastructure coverage.
+
+The separately named `paths-failure-xctest` case uses
+`NativePathJourney.pendingEngineFailure`. With an actual NSOpenPanel open, its
+private fixture receipt asks `NativePathSmoke` to use the existing owned-engine
+channel-loss seam. The observer requires real app failure, invalidated launch
+identity, a retired path handler and no attached native sheet, then returns
+through the existing bounded engine/profile cleanup. Both cases require the
+ALL-354 runner's actual XCTest result and exact artifact identities; these
+receipts are synchronization, not independent acceptance assertions.
 
 Full acceptance additionally requires integration of the separately owned common
 shell wiring and frozen ALL-354 XCTest harness, plus actual `.app`/system

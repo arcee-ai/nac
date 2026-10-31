@@ -58,6 +58,17 @@ enum NativePathJourney {
         try click(project)
         try require(folderButton.waitForExistence(timeout: 10), "Normal create-project form unavailable")
         let original = folderButton.label
+        try click(app.webViews.buttons["SSH"])
+        try require(!folderButton.exists && app.sheets.count == 0,
+                    "Unconnected SSH exposed a native Local folder picker")
+        try click(app.webViews.buttons["Sandbox"])
+        try click(folderButton)
+        let parentDirectory = app.webViews.buttons["Parent directory"]
+        try require(parentDirectory.waitForExistence(timeout: 10) && app.sheets.count == 0,
+                    "Podman browsing did not retain the shared API picker")
+        try click(app.webViews.buttons["Cancel"])
+        try require(parentDirectory.waitForNonExistence(timeout: 10), "Shared API picker did not close")
+        try click(app.webViews.buttons["Local"])
         try click(folderButton)
         try require(sheet.waitForExistence(timeout: 10), "Actual NSOpenPanel did not appear")
         try click(sheet.buttons["Cancel"])
@@ -107,6 +118,36 @@ enum NativePathJourney {
                     "Finder did not expose the selected workspace file")
         try Data("ALL347_XCTEST_COMPLETE".utf8).write(to: folder.deletingLastPathComponent()
             .appendingPathComponent("all347-xctest-complete"), options: .atomic)
+    }
+
+    static func pendingEngineFailure(app: XCUIApplication, initialPath: String, folder: URL,
+                                     authorize: () throws -> Void) throws {
+        func require(_ condition: Bool, _ message: String) throws {
+            guard condition else { throw NSError(domain: "NAC347UI", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: message]) }
+        }
+        func click(_ element: XCUIElement) throws {
+            try require(element.waitForExistence(timeout: 10), "Expected failure-journey control unavailable")
+            let enabled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in element.isEnabled }, object: nil)
+            try require(XCTWaiter.wait(for: [enabled], timeout: 10) == .completed, "Failure-journey control stayed disabled")
+            try authorize()
+            element.click()
+        }
+        try require(folder.deletingLastPathComponent().path == initialPath,
+                    "Failure receipt must belong to the exact disposable fixture directory")
+        try click(app.webViews.buttons["Create chat"])
+        let composer = app.webViews.descendants(matching: .any).matching(identifier: "Message").firstMatch
+        try require(composer.waitForExistence(timeout: 30), "Initial failure fixture chat did not open")
+        try click(app.webViews.buttons["New Project"])
+        try click(app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose Working Folder")).firstMatch)
+        let sheet = app.sheets.firstMatch
+        try require(sheet.waitForExistence(timeout: 10), "Failure test did not open an actual NSOpenPanel")
+        try authorize()
+        try Data("ALL347_ENGINE_FAILURE".utf8).write(to: folder.deletingLastPathComponent()
+            .appendingPathComponent("all347-engine-failure-request"), options: .atomic)
+        try require(sheet.waitForNonExistence(timeout: 15), "Engine failure retained its native sheet")
+        // The caller waits for the app's standard shutdown and verifies the
+        // real failure/retirement/engine-reaped/profile-removed evidence.
     }
 }
 #endif
