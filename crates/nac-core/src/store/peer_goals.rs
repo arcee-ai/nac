@@ -1,5 +1,6 @@
 //! Argument-bound peer start receipts. Goal truth stays in session_goals and
 //! the existing bounded task evidence owner; a receipt is an immutable reply.
+use super::goal_changes::{committed, GoalChangeKind};
 use super::*;
 use crate::peer_goal_control::PeerGoalError;
 
@@ -71,7 +72,7 @@ pub(crate) fn start_peer_goal(path: &Path, request: &PeerGoalStart, active_run: 
         anyhow::ensure!(!current.status.is_unfinished(), PeerGoalError::Conflict("target already has an unfinished goal"));
         anyhow::ensure!(current.accounting_run_id.is_none(), PeerGoalError::Unavailable("previous goal accounting has not settled"));
     }
-    let (goal, _retired) = super::session_goals::create_with_connection(
+    let (goal, retired) = super::session_goals::create_with_connection(
         &tx, &request.target_session_id, &request.objective, request.token_budget, active_run,
     )?;
     tx.execute("INSERT INTO peer_goal_starts VALUES (?1, ?2, ?3, ?4, ?5)", params![
@@ -79,6 +80,10 @@ pub(crate) fn start_peer_goal(path: &Path, request: &PeerGoalStart, active_run: 
         serde_json::to_string(request)?, serde_json::to_string(&goal)?,
     ])?;
     tx.commit()?;
+    if let Some(retired) = &retired {
+        committed(path, retired, GoalChangeKind::Replaced);
+    }
+    committed(path, &goal, GoalChangeKind::Current);
     Ok(PeerGoalStartReceipt { request: request.clone(), admitted_goal: goal })
 }
 command StartPeerGoalCommand { request: PeerGoalStart = request.clone(), active_run: Option<GoalRunBaseline> = active_run.cloned(), config_version: i64 = config_version }
@@ -136,6 +141,7 @@ pub(crate) fn transition_peer_goal(path: &Path, transition: &PeerGoalTransition)
         ..Default::default()
     })?;
     tx.commit()?;
+    committed(path, &updated, GoalChangeKind::Current);
     Ok(updated)
 }
 command TransitionPeerGoalCommand { transition: PeerGoalTransition = transition.clone() }
@@ -166,6 +172,10 @@ fn require_project(
 #[cfg(test)]
 #[path = "peer_goals_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "peer_goal_hint_tests.rs"]
+mod hint_tests;
 
 fn require_configuration(connection: &Connection, session_id: &str, expected: i64) -> Result<()> {
     let matches: bool = connection.query_row(
