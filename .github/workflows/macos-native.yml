@@ -38,10 +38,6 @@ jobs:
           shared-key: native-app
           prefix-key: nac-ci-v1
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
-      - name: Set up locked dependencies
-        run: make setup
-      - name: Verify native CI fixture controls
-        run: python3 -B -m unittest discover -s desktop/macos -p 'test_*.py'
       - name: Build and launch actual relocated app with local scripted provider
         env:
           EXPECTED_SHA: ${{ inputs.source-sha }}

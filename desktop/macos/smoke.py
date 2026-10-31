@@ -121,8 +121,11 @@ def main():
             try:
                 # Each scenario launches the bundle in a different cwd and with a
                 # poisoned parent environment. The engine receives a clean allowlist.
-                for scenario in ('normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeout'):
-                    if scenario in ('normal', 'engine-exit'):
+                scenarios = ['normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeout']
+                if os.environ.get('NAC_MAC_CI_TERMINAL') == '1':
+                    scenarios.append('ci-terminal')
+                for scenario in scenarios:
+                    if scenario in ('normal', 'engine-exit', 'ci-terminal'):
                         os.link(saved, engine)
                     elif scenario == 'missing':
                         engine.unlink(missing_ok=True)

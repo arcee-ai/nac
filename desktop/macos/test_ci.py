@@ -6,7 +6,8 @@ import unittest
 from unittest.mock import patch
 
 from ci import settle_apps
-from ci_support import MAX_FILE, console_state, export_evidence, qualify_toolchain, require_console
+from ci_support import (MAX_FILE, console_state, export_evidence, qualify_toolchain,
+                        require_console, require_terminal_evidence)
 
 
 class QualificationTests(unittest.TestCase):
@@ -77,6 +78,19 @@ class QualificationTests(unittest.TestCase):
             manifest = json.loads((output / 'export.json').read_text())
             self.assertTrue(manifest[0]['truncated'])
             self.assertLessEqual(len(text), MAX_FILE)
+
+    def test_terminal_case_cannot_skip_or_substitute_synthetic_input(self):
+        terminal = {'exact_receipt': True, 'native_terminal_settled': True,
+                    'unfocused_input_rejected': True, 'trusted_keydowns': 70,
+                    'synthetic_keydowns': 0}
+        record = {'scenario': 'ci-terminal', 'passed': True, 'trusted_terminal': terminal}
+        self.assertEqual(require_terminal_evidence(record), terminal)
+        for bad in ({}, {**record, 'passed': False}, {**record, 'scenario': 'normal'},
+                    {**record, 'trusted_terminal': {**terminal, 'synthetic_keydowns': 1}},
+                    {**record, 'trusted_terminal': {**terminal, 'trusted_keydowns': 0}},
+                    {**record, 'trusted_terminal': {**terminal, 'native_terminal_settled': False}}):
+            with self.assertRaisesRegex(RuntimeError, 'missing or incomplete'):
+                require_terminal_evidence(bad)
 
     def test_orphan_engine_cleanup_uses_only_relocated_bundle_record(self):
         with tempfile.TemporaryDirectory() as temporary:

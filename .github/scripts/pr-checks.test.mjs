@@ -216,7 +216,9 @@ test("native app qualification keeps the actual app required beside process regr
   assert.match(workflow, /  app:\n    name: ARM AppKit and system WKWebView app/);
   assert.match(workflow, /  native:\n    name: ARM macOS process and credentials/);
   assert.match(workflow, /DEVELOPER_DIR: \/Applications\/Xcode_26\.6.app\/Contents\/Developer/);
-  assert.match(workflow, /run: make setup/);
+  const runner = fs.readFileSync("desktop/macos/ci.py", "utf8");
+  assert.match(runner, /run\(\['make', 'setup'\]/);
+  assert.match(runner, /require_terminal_evidence/);
   assert.match(workflow, /python3 -B desktop\/macos\/ci.py --expected-sha/);
   assert.match(workflow, /EXPECTED_SHA: \$\{\{ inputs.source-sha \}\}/);
   assert.match(workflow, /if: always\(\)[\s\S]*name: native-app-/);

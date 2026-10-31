@@ -45,7 +45,7 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if scenario == "normal" { try await journey() }
+                if scenario == "normal" || scenario == "ci-terminal" { try await journey() }
                 else if scenario == "close-startup" {
                     try await wait("engine starting") { self.app.engine.pid > 0 }
                 } else {
@@ -130,6 +130,11 @@ final class PreviewSmoke {
         }
         evidence["persisted_assistant_message"] = true
         try await captureWeb("persisted-chat.png")
+        if scenario == "ci-terminal" {
+            evidence["trusted_terminal"] = try await CITerminal.run(app: app, sessionID: sessionID) {
+                try await self.captureWeb("trusted-terminal.png")
+            }
+        }
         // Close with a real active run to exercise cancellation and server settlement.
         try await sendPrompt("MAC_PREVIEW_CLOSE_ACTIVE")
         try await wait("second provider request") { self.app.provider.responseCount == 2 }
@@ -159,7 +164,7 @@ final class PreviewSmoke {
         while Date() < end {
             recordOwnership()
             if try await condition() { return }
-            if app.failure != nil && scenario == "normal" { throw PreviewError.message(app.failure!) }
+            if app.failure != nil && ["normal", "ci-terminal"].contains(scenario) { throw PreviewError.message(app.failure!) }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         throw PreviewError.message("Timed out waiting for \(label)")
