@@ -1,3 +1,17 @@
+[data-nac-runtime]:is(.nac-toast), [data-nac-runtime] .nac-toast {
+  transform: translateY(-100%);
+  transition: transform 150ms ease-out;
+}
+
+[data-nac-runtime]:is(.nac-toast[data-visible="true"]), [data-nac-runtime] .nac-toast[data-visible="true"] {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-nac-runtime]:is(.nac-toast), [data-nac-runtime] .nac-toast {
+    transition: none;
+  }
+}
 /*! tailwindcss v4.3.3 | MIT License | https://tailwindcss.com */
 @supports (((-webkit-hyphens: none)) and (not (margin-trim: inline))) or ((-moz-orient: inline) and (not (color: rgb(from red r g b)))) {
     [data-nac-runtime]:is(*), [data-nac-runtime] *, [data-nac-runtime]:is(:before), [data-nac-runtime] :before, [data-nac-runtime]:is(:after), [data-nac-runtime] :after, [data-nac-runtime]::backdrop, [data-nac-runtime] ::backdrop {
@@ -818,6 +832,10 @@
     margin-top: calc(var(--spacing) * -2);
   }
 
+[data-nac-runtime]:is(.mt-0\.5), [data-nac-runtime] .mt-0\.5 {
+    margin-top: calc(var(--spacing) * .5);
+  }
+
 [data-nac-runtime]:is(.mt-1), [data-nac-runtime] .mt-1 {
     margin-top: var(--spacing);
   }
@@ -1079,10 +1097,6 @@
     height: 100%;
   }
 
-[data-nac-runtime]:is(.\!h-5), [data-nac-runtime] .\!h-5 {
-    height: calc(var(--spacing) * 5) !important;
-  }
-
 [data-nac-runtime]:is(.\!h-7), [data-nac-runtime] .\!h-7 {
     height: calc(var(--spacing) * 7) !important;
   }
@@ -1291,10 +1305,6 @@
     max-height: 1px;
   }
 
-[data-nac-runtime]:is(.max-h-\[20px\]), [data-nac-runtime] .max-h-\[20px\] {
-    max-height: 20px;
-  }
-
 [data-nac-runtime]:is(.max-h-\[50dvh\]), [data-nac-runtime] .max-h-\[50dvh\] {
     max-height: 50dvh;
   }
@@ -1389,10 +1399,6 @@
 
 [data-nac-runtime]:is(.min-h-\[1px\]), [data-nac-runtime] .min-h-\[1px\] {
     min-height: 1px;
-  }
-
-[data-nac-runtime]:is(.min-h-\[20px\]), [data-nac-runtime] .min-h-\[20px\] {
-    min-height: 20px;
   }
 
 [data-nac-runtime]:is(.min-h-\[64px\]), [data-nac-runtime] .min-h-\[64px\] {
@@ -1599,10 +1605,6 @@
     max-width: calc(var(--spacing) * 16);
   }
 
-[data-nac-runtime]:is(.max-w-\[20px\]), [data-nac-runtime] .max-w-\[20px\] {
-    max-width: 20px;
-  }
-
 [data-nac-runtime]:is(.max-w-\[64px\]), [data-nac-runtime] .max-w-\[64px\] {
     max-width: 64px;
   }
@@ -1695,6 +1697,10 @@
     max-width: 1100px;
   }
 
+[data-nac-runtime]:is(.max-w-\[calc\(100\%-2rem\)\]), [data-nac-runtime] .max-w-\[calc\(100\%-2rem\)\] {
+    max-width: calc(100% - 2rem);
+  }
+
 [data-nac-runtime]:is(.max-w-\[calc\(100vw-16px\)\]), [data-nac-runtime] .max-w-\[calc\(100vw-16px\)\] {
     max-width: calc(100vw - 16px);
   }
@@ -1739,10 +1745,6 @@
     min-width: 18px;
   }
 
-[data-nac-runtime]:is(.min-w-\[20px\]), [data-nac-runtime] .min-w-\[20px\] {
-    min-width: 20px;
-  }
-
 [data-nac-runtime]:is(.min-w-\[160px\]), [data-nac-runtime] .min-w-\[160px\] {
     min-width: 160px;
   }
@@ -1769,10 +1771,6 @@
 
 [data-nac-runtime]:is(.flex-none), [data-nac-runtime] .flex-none {
     flex: none;
-  }
-
-[data-nac-runtime]:is(.flex-shrink-0), [data-nac-runtime] .flex-shrink-0 {
-    flex-shrink: 0;
   }
 
 [data-nac-runtime]:is(.shrink), [data-nac-runtime] .shrink {
@@ -2343,12 +2341,12 @@
     border-radius: 4px !important;
   }
 
-[data-nac-runtime]:is(.\!rounded-\[8px\]), [data-nac-runtime] .\!rounded-\[8px\] {
-    border-radius: 8px !important;
-  }
-
 [data-nac-runtime]:is(.\!rounded-full), [data-nac-runtime] .\!rounded-full {
     border-radius: 3.40282e38px !important;
+  }
+
+[data-nac-runtime]:is(.\!rounded-lg), [data-nac-runtime] .\!rounded-lg {
+    border-radius: var(--radius-lg) !important;
   }
 
 [data-nac-runtime]:is(.rounded), [data-nac-runtime] .rounded {
@@ -2768,10 +2766,6 @@
     background-color: var(--color-bg-btn-secondary-hovered);
   }
 
-[data-nac-runtime]:is(.bg-danger-inverse), [data-nac-runtime] .bg-danger-inverse {
-    background-color: var(--color-bg-danger-inverse);
-  }
-
 [data-nac-runtime]:is(.bg-danger-primary), [data-nac-runtime] .bg-danger-primary {
     background-color: var(--color-bg-danger-primary);
   }
@@ -2828,10 +2822,6 @@
     background-color: var(--color-bg-elevation-sublevel-variant-B);
   }
 
-[data-nac-runtime]:is(.bg-error-inverse), [data-nac-runtime] .bg-error-inverse {
-    background-color: var(--color-bg-error-inverse);
-  }
-
 [data-nac-runtime]:is(.bg-error-primary), [data-nac-runtime] .bg-error-primary {
     background-color: var(--color-bg-error-primary);
   }
@@ -2842,10 +2832,6 @@
 
 [data-nac-runtime]:is(.bg-error-tertiary), [data-nac-runtime] .bg-error-tertiary {
     background-color: var(--color-bg-error-tertiary);
-  }
-
-[data-nac-runtime]:is(.bg-info-inverse), [data-nac-runtime] .bg-info-inverse {
-    background-color: var(--color-bg-info-inverse);
   }
 
 [data-nac-runtime]:is(.bg-info-primary), [data-nac-runtime] .bg-info-primary, [data-nac-runtime]:is(.bg-info-primary\/10), [data-nac-runtime] .bg-info-primary\/10 {
@@ -2916,10 +2902,6 @@
 
 [data-nac-runtime]:is(.bg-popover), [data-nac-runtime] .bg-popover {
     background-color: var(--color-bg-elevation-level-3);
-  }
-
-[data-nac-runtime]:is(.bg-success-inverse), [data-nac-runtime] .bg-success-inverse {
-    background-color: var(--color-bg-success-inverse);
   }
 
 [data-nac-runtime]:is(.bg-success-primary), [data-nac-runtime] .bg-success-primary {
@@ -3065,6 +3047,10 @@
     padding-inline: calc(var(--spacing) * 4);
   }
 
+[data-nac-runtime]:is(.px-5), [data-nac-runtime] .px-5 {
+    padding-inline: calc(var(--spacing) * 5);
+  }
+
 [data-nac-runtime]:is(.px-6), [data-nac-runtime] .px-6 {
     padding-inline: calc(var(--spacing) * 6);
   }
@@ -3145,12 +3131,12 @@
     padding-top: calc(var(--spacing) * 2);
   }
 
-[data-nac-runtime]:is(.pt-4), [data-nac-runtime] .pt-4 {
-    padding-top: calc(var(--spacing) * 4);
+[data-nac-runtime]:is(.pt-3), [data-nac-runtime] .pt-3 {
+    padding-top: calc(var(--spacing) * 3);
   }
 
-[data-nac-runtime]:is(.pt-5), [data-nac-runtime] .pt-5 {
-    padding-top: calc(var(--spacing) * 5);
+[data-nac-runtime]:is(.pt-4), [data-nac-runtime] .pt-4 {
+    padding-top: calc(var(--spacing) * 4);
   }
 
 [data-nac-runtime]:is(.pt-6), [data-nac-runtime] .pt-6 {
@@ -3219,6 +3205,10 @@
 
 [data-nac-runtime]:is(.pr-12), [data-nac-runtime] .pr-12 {
     padding-right: calc(var(--spacing) * 12);
+  }
+
+[data-nac-runtime]:is(.pr-14), [data-nac-runtime] .pr-14 {
+    padding-right: calc(var(--spacing) * 14);
   }
 
 [data-nac-runtime]:is(.pr-\[7px\]), [data-nac-runtime] .pr-\[7px\] {
@@ -3453,6 +3443,16 @@
     line-height: calc(var(--spacing) * 3);
   }
 
+[data-nac-runtime]:is(.leading-5), [data-nac-runtime] .leading-5 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 5);
+    line-height: calc(var(--spacing) * 5);
+  }
+
+[data-nac-runtime]:is(.leading-6), [data-nac-runtime] .leading-6 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 6);
+    line-height: calc(var(--spacing) * 6);
+  }
+
 [data-nac-runtime]:is(.leading-\[0\]), [data-nac-runtime] .leading-\[0\] {
     --nac-presentation-tw-leading: 0;
     line-height: 0;
@@ -3552,10 +3552,6 @@
     white-space: pre-wrap;
   }
 
-[data-nac-runtime]:is(.\!text-\[var\(--white\)\]), [data-nac-runtime] .\!text-\[var\(--white\)\] {
-    color: var(--white) !important;
-  }
-
 [data-nac-runtime]:is(.\!text-fill-basic-muted), [data-nac-runtime] .\!text-fill-basic-muted {
     color: var(--color-fill-basic-muted) !important;
   }
@@ -3574,10 +3570,6 @@
 
 [data-nac-runtime]:is(.\!text-fill-error-primary), [data-nac-runtime] .\!text-fill-error-primary {
     color: var(--color-fill-error-primary) !important;
-  }
-
-[data-nac-runtime]:is(.text-\[var\(--white\)\]), [data-nac-runtime] .text-\[var\(--white\)\] {
-    color: var(--white);
   }
 
 [data-nac-runtime]:is(.text-accent-primary), [data-nac-runtime] .text-accent-primary {
@@ -4080,11 +4072,6 @@
     transition-duration: .3s;
   }
 
-[data-nac-runtime]:is(.duration-500), [data-nac-runtime] .duration-500 {
-    --nac-presentation-tw-duration: .5s;
-    transition-duration: .5s;
-  }
-
 [data-nac-runtime]:is(.ease-in-out), [data-nac-runtime] .ease-in-out {
     --nac-presentation-tw-ease: var(--ease-in-out);
     transition-timing-function: var(--ease-in-out);
@@ -4376,11 +4363,6 @@
 [data-nac-runtime]:is(.after\:absolute:after), [data-nac-runtime] .after\:absolute:after {
     content: var(--nac-presentation-tw-content);
     position: absolute;
-  }
-
-[data-nac-runtime]:is(.after\:-inset-1\.5:after), [data-nac-runtime] .after\:-inset-1\.5:after {
-    content: var(--nac-presentation-tw-content);
-    inset: calc(var(--spacing) * -1.5);
   }
 
 [data-nac-runtime]:is(.after\:inset-0:after), [data-nac-runtime] .after\:inset-0:after {
@@ -4680,8 +4662,36 @@
       transition-property: none;
     }
 
+    [data-nac-runtime]:is(.motion-reduce\:duration-0), [data-nac-runtime] .motion-reduce\:duration-0 {
+      --nac-presentation-tw-duration: 0s;
+      transition-duration: 0s;
+    }
+
     [data-nac-runtime]:is(.motion-reduce\:\[-webkit-text-fill-color\:currentColor\]), [data-nac-runtime] .motion-reduce\:\[-webkit-text-fill-color\:currentColor\] {
       -webkit-text-fill-color: currentColor;
+    }
+  }
+
+@media not all and (min-width: 64rem) {
+    [data-nac-runtime]:is(.max-lg\:\!size-11), [data-nac-runtime] .max-lg\:\!size-11 {
+      width: calc(var(--spacing) * 11) !important;
+      height: calc(var(--spacing) * 11) !important;
+    }
+
+    [data-nac-runtime]:is(.max-lg\:min-w-0), [data-nac-runtime] .max-lg\:min-w-0 {
+      min-width: 0;
+    }
+
+    [data-nac-runtime]:is(.max-lg\:shrink), [data-nac-runtime] .max-lg\:shrink {
+      flex-shrink: 1;
+    }
+
+    [data-nac-runtime]:is(.max-lg\:flex-wrap), [data-nac-runtime] .max-lg\:flex-wrap {
+      flex-wrap: wrap;
+    }
+
+    [data-nac-runtime]:is(.max-lg\:gap-0), [data-nac-runtime] .max-lg\:gap-0 {
+      gap: 0;
     }
   }
 
@@ -8071,6 +8081,69 @@
 
   100% {
     background-position: -200% 0;
+  }
+}
+/* Dense navigation uses the conversation recipe's quiet surfaces and 4px rhythm.
+   Scope these values to real navigation consumers, leaving inspector atoms alone. */
+[data-nac-runtime]:is(.nac-navigation .group:has(> button[aria-current="page"])), [data-nac-runtime] .nac-navigation .group:has(> button[aria-current="page"]) {
+  box-shadow: inset 2px 0 0 var(--color-border-focus-outline);
+}
+
+[data-nac-runtime]:is(.nac-navigation .group > button > .truncate), [data-nac-runtime] .nac-navigation .group > button > .truncate {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+[data-nac-runtime]:is(.nac-navigation .text-shimmer-primary), [data-nac-runtime] .nac-navigation .text-shimmer-primary {
+  animation: none;
+  background: none;
+  color: var(--color-text-basic-primary);
+  -webkit-text-fill-color: currentColor;
+}
+
+[data-nac-runtime]:is(.nac-navigation-mobile .group > div:last-child), [data-nac-runtime] .nac-navigation-mobile .group > div:last-child {
+  gap: 0;
+}
+
+[data-nac-runtime]:is(.nac-navigation-mobile .group), [data-nac-runtime] .nac-navigation-mobile .group {
+  height: auto;
+  min-height: 48px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+[data-nac-runtime]:is(.nac-navigation-mobile .group > button), [data-nac-runtime] .nac-navigation-mobile .group > button {
+  min-height: 44px;
+}
+
+@media (max-width: 359px) {
+  [data-nac-runtime]:is(.nac-navigation-mobile .group), [data-nac-runtime] .nac-navigation-mobile .group {
+    flex-wrap: wrap;
+  }
+  [data-nac-runtime]:is(.nac-navigation-mobile .group > button), [data-nac-runtime] .nac-navigation-mobile .group > button {
+    flex-basis: 100%;
+  }
+  [data-nac-runtime]:is(.nac-navigation-mobile .group > div:last-child), [data-nac-runtime] .nac-navigation-mobile .group > div:last-child {
+    margin-left: auto;
+  }
+}
+
+/* Search, Sessions and delegated lists share these same actions. Keep their
+   titles and state cues above the controls at a zoomed phone's narrow width. */
+@media (max-width: 359px) {
+  [data-nac-runtime]:is(.group:has(> div > .nac-session-actions)), [data-nac-runtime] .group:has(> div > .nac-session-actions) {
+    height: auto;
+    min-height: 48px;
+    flex-wrap: wrap;
+  }
+
+  [data-nac-runtime]:is(.group:has(> div > .nac-session-actions) > button), [data-nac-runtime] .group:has(> div > .nac-session-actions) > button {
+    flex-basis: 100%;
+    min-height: 44px;
+  }
+
+  [data-nac-runtime]:is(.group:has(> div > .nac-session-actions) > div:last-child), [data-nac-runtime] .group:has(> div > .nac-session-actions) > div:last-child {
+    margin-left: auto;
   }
 }
 /**

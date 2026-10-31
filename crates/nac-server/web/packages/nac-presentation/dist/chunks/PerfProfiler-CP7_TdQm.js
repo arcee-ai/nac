@@ -12497,50 +12497,46 @@ fS.Size = uS;
 var pS = /* @__PURE__ */ function(e) {
 	return e.Info = "info", e.Success = "success", e.Error = "error", e.Danger = "danger", e;
 }({}), mS = {
-	info: "bg-info-inverse",
-	success: "bg-success-inverse",
-	error: "bg-error-inverse",
-	danger: "bg-danger-inverse"
+	info: "text-info-primary",
+	success: "text-success-primary",
+	error: "text-error-primary",
+	danger: "text-danger-primary"
 }, hS = {
 	info: Cp.Info,
 	success: Cp.CheckCircle,
 	error: Cp.Danger,
 	danger: Cp.Danger
 }, gS = ({ content: e, variant: t, dismissing: n, onClose: r }) => {
-	let [i, a] = p(!1), o = f(null);
+	let [i, a] = p(!1);
 	return c(() => {
 		let e = requestAnimationFrame(() => a(!0));
 		return () => cancelAnimationFrame(e);
 	}, []), /* @__PURE__ */ T("div", {
-		ref: o,
 		className: "overflow-hidden",
 		children: /* @__PURE__ */ T("div", {
-			className: "rounded-[4px] max-w-[360px] w-full pointer-events-auto",
-			style: {
-				transform: i && !n ? "translateY(0)" : "translateY(-100%)",
-				transition: "transform 150ms ease-out"
-			},
+			className: "nac-toast w-full pointer-events-auto",
+			"data-visible": i && !n,
 			children: /* @__PURE__ */ E("div", {
-				className: ["rounded-[4px] flex gap-2 items-start p-3 pr-12 label-small relative text-[var(--white)] shadow-2xl overflow-hidden w-[360px]", mS[t]].join(" "),
+				className: "rounded-xl border border-tertiary bg-elevation-level-2 flex gap-3 items-start p-4 pr-14 relative text-basic-primary shadow-lg w-full",
 				children: [
 					/* @__PURE__ */ T(Tp, {
 						iconName: hS[t],
 						size: 20,
-						className: "flex-shrink-0 mt-[2px] min-w-[20px] min-h-[20px] max-w-[20px] max-h-[20px] text-[var(--white)]"
+						className: `shrink-0 mt-0.5 ${mS[t]}`
 					}),
 					/* @__PURE__ */ T("span", {
-						className: "notification-title label-small flex-grow min-w-0 break-words whitespace-pre-line",
+						role: t === "error" || t === "danger" ? "alert" : "status",
+						"aria-atomic": "true",
+						className: "flex-grow min-w-0 text-sm leading-5 break-words [overflow-wrap:anywhere] whitespace-pre-line",
 						children: e
 					}),
 					/* @__PURE__ */ T(hx, {
 						variant: hx.Variant.Ghost,
 						content: hx.Content.Icon,
-						className: "absolute top-1 right-1 btn-icon-rotate flex-shrink-0",
+						className: "absolute top-1 right-1 !size-11 shrink-0",
+						"aria-label": "Dismiss notification",
 						onClick: r,
-						children: /* @__PURE__ */ T(Tp, {
-							iconName: Cp.Close,
-							className: "!text-[var(--white)]"
-						})
+						children: /* @__PURE__ */ T(Tp, { iconName: Cp.Close })
 					})
 				]
 			})
@@ -19968,8 +19964,12 @@ function nY({ toasts: e, removeToast: t }) {
 	}, [e, t]), c(() => {
 		let e = r.current;
 		return () => e.forEach((e) => clearTimeout(e));
-	}, []), e.length === 0 ? null : D(/* @__PURE__ */ T("div", {
-		className: "fixed top-4 right-4 z-[1100] flex flex-col gap-2 pointer-events-none",
+	}, []), D(/* @__PURE__ */ T("div", {
+		role: "region",
+		"aria-label": "Notifications",
+		"aria-live": "polite",
+		"aria-relevant": "additions",
+		className: "fixed top-4 right-4 z-[1100] flex w-[360px] max-w-[calc(100%-2rem)] flex-col gap-2 pointer-events-none",
 		children: e.map((e) => /* @__PURE__ */ T("div", {
 			className: "pointer-events-auto",
 			children: /* @__PURE__ */ T(gS, {
