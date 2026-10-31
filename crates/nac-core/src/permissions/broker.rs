@@ -67,6 +67,22 @@ impl PermissionBroker {
         Ok(())
     }
 
+    /// Human question response is invocation-only: honor Deny, skip Ask and
+    /// never consult or mutate agent approval mode or remembered grants.
+    pub(crate) fn authorize_submitted_question_response(
+        &self,
+        submission: &crate::session_service::questions::SubmittedQuestionResponse,
+    ) -> anyhow::Result<()> {
+        let decision = self
+            .policy
+            .evaluate(std::slice::from_ref(submission.resource()), &[]);
+        anyhow::ensure!(
+            decision.effect != PermissionEffect::Deny,
+            crate::store::QuestionError::Denied
+        );
+        Ok(())
+    }
+
     pub(crate) fn session_config_version(&self) -> i64 {
         self.session_config_version
     }

@@ -32,26 +32,45 @@ pub(crate) struct WaitInput {
 pub(crate) struct WaitTasksTool;
 
 fn relevant_goal_hint(
-    hint: &store::goal_changes::GoalChange,
+    hint: &store::goal_changes::TaskChange,
     path: &std::path::Path,
     targets: &[Target],
 ) -> bool {
-    hint.store_path == path
-        && hint.version >= 0
-        && (hint.status != store::GoalStatus::Active
-            || hint.kind != store::goal_changes::GoalChangeKind::Current)
-        && targets.iter().any(|target| {
-            target.session_id == hint.session_id
-                && target.mode == Mode::Goal
-                && target.resolved.as_ref() == Some(&hint.goal_id)
-        })
+    match hint {
+        store::goal_changes::TaskChange::Goal(hint) => {
+            hint.store_path == path
+                && hint.version >= 0
+                && (hint.status != store::GoalStatus::Active
+                    || hint.kind != store::goal_changes::GoalChangeKind::Current)
+                && targets.iter().any(|target| {
+                    target.session_id == hint.session_id
+                        && target.mode == Mode::Goal
+                        && target.resolved.as_ref() == Some(&hint.goal_id)
+                })
+        }
+        store::goal_changes::TaskChange::Question {
+            store_path,
+            session_id,
+            run_id,
+            goal_id,
+        } => {
+            store_path == path
+                && targets.iter().any(|target| {
+                    target.session_id == *session_id
+                        && match target.mode {
+                            Mode::Run => target.resolved.as_ref() == Some(run_id),
+                            Mode::Goal => target.resolved.as_ref() == goal_id.as_ref(),
+                        }
+                })
+        }
+    }
 }
 
 impl NativeTool for WaitTasksTool {
     type Input = WaitInput;
 
     fn definition(&self) -> crate::types::ToolDefinition {
-        read::definition("wait_tasks", "Passively observe exact independent direct task runs or human-created goals. timeout_ms=0 takes a snapshot; a bounded wait wakes on a new result, stopped goal, failure, existing approval, or this coordinator's pending input. Status/commentary alone stays quiet. Each current selector resolves ONCE; use returned resolved_identity or after_cursor to keep it pinned. Run end is result availability, never objective completion. Repeated cursors suppress replayed proofs; read_task retains inspectable evidence. No attach, recovery, delta approver subscription, acknowledgement, target cancellation or goal mutation. Foreign/unattached owner approvals are unknown. Cursors are untrusted observation hints; resync means authoritative state was re-read after restart or a notification gap.", json!({
+        read::definition("wait_tasks", "Passively observe exact independent direct task runs or human-created goals. timeout_ms=0 takes a snapshot; a bounded wait wakes on a new result, stopped goal, failure, existing approval, a pending structured question, or this coordinator's pending input. Question attention includes the exact request ID, source run/generation, revision, responder class and human navigation link; it is separate from permission approval. Status/commentary alone stays quiet. Each current selector resolves ONCE; use returned resolved_identity or after_cursor to keep it pinned. Run end is result availability, never objective completion. Repeated cursors suppress replayed proofs; read_task retains inspectable evidence. No attach, recovery, delta approver subscription, acknowledgement, target cancellation or goal mutation. Foreign/unattached owner approvals are unknown. Cursors are untrusted observation hints; resync means authoritative state was re-read after restart or a notification gap.", json!({
             "type":"object","additionalProperties":false,"required":["targets","timeout_ms"],
             "properties":{
                 "targets":{"type":"array","minItems":1,"maxItems":MAX_TARGETS,"items":{
@@ -308,13 +327,12 @@ impl NativeTool for WaitTasksTool {
                         _ = tokio::time::sleep_until(next_read.min(deadline)) => { break; }
                         hint = goals.recv() => {
                             match hint {
-                                Ok(hint) if hint.store_path == services.runtime.store_path => {
+                                Ok(hint) => {
                                     let relevant = relevant_goal_hint(&hint,&services.runtime.store_path,&input.targets);
                                     if !relevant { continue; }
                                         break;
                                 }
                                 Err(_) => { for target in &mut input.targets { target.resync = true; } break; }
-                                _ => continue,
                             }
                         }
                     }

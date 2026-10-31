@@ -89,6 +89,7 @@ pub struct DirectTaskSnapshot {
     pub visible_message_count: u64,
     pub current_run: Option<TaskRunState>,
     pub pending_inbox_items: u64,
+    pub pending_question: Option<QuestionRecord>,
     /// Its objective is redacted and cut to `GOAL_OBJECTIVE_CHARS`.
     pub goal: Option<SessionGoalRecord>,
     pub goal_objective_truncated: bool,
@@ -403,6 +404,7 @@ pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
         visible_message_count: visible.max(0) as u64,
         current_run: current_run(&tx, session_id)?,
         pending_inbox_items: pending_inbox_items.max(0) as u64,
+        pending_question: super::task_questions::pending_with_connection(&tx,session_id)?,
         goal,
         goal_objective_truncated,
         goal_last_run_id: tx

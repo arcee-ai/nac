@@ -300,3 +300,6 @@ export type ShellOutputPage = ApiSchema<"ShellOutputPage">;
 export type TaskLaunchRequest = ApiSchema<"TaskLaunchRequest">;
 export type TaskLaunchRecord = ApiSchema<"TaskLaunchRecord">;
 export type TaskLaunchSourceInfo = ApiSchema<"TaskLaunchSourceInfo">;
+export type QuestionRecord = ApiSchema<"QuestionRecord">;
+export type QuestionAnswer = ApiSchema<"QuestionAnswer">;
+export type QuestionAnswerReceipt = ApiSchema<"QuestionAnswerReceipt">;

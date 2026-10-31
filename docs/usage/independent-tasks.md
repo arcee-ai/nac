@@ -120,6 +120,12 @@ The response separates its wake reason (`snapshot`, `target_changed`, `timeout`,
   ending in `/insights?permission_request=<id>`. This only observes a local
   live broker. Other owners remain `unknown`. The human page revalidates the
   exact request; an expired link never selects another request for approval.
+- `question_attention` carries an exact durable question ID, source run and
+  generation, revision, responder class and a route ending in
+  `/insights?question_request=<id>`. It remains distinct from approval attention
+  and can survive restart. A pinned run or goal never selects another request.
+  Question text and choices count toward the 128 KiB aggregate response limit;
+  request fewer targets if a large set of questions exceeds it.
 
 A repeated cursor suppresses already delivered proof and attention details,
 marking `unchanged`. Status/commentary and active-goal accounting updates do not
@@ -174,3 +180,46 @@ longer waits require fresh qualification; argument and output overflow are
 explicit errors. Reproduce with the owning tests
 `representative_snapshots_and_bounded_wait_cost` and the explicitly ignored
 `maximum_timeout_measurement` in an exclusive performance window.
+
+## Structured questions
+
+Plain direct sessions on Local expose `request_question`, `read_question` and
+`answer_question`. A task can request one blocking question with a stable
+`request_id`, text, optional suggested choices and a required responder class:
+`information` or `human_decision`. Limits are 160 bytes per ID, 4,000 characters
+of question or answer text, and eight choices of 300 characters each. Arbitrary
+forms and nonblocking workflows are outside this surface.
+
+Creation binds the request to its session and exact source run. For a direct
+run, that immutable run UUID is also its generation; child and managed
+relationship generations retain their separate meanings. After the complete
+tool batch commits, NAC yields before another model request. Any active goal
+stays active while the pending question gates autonomous continuation. A normal
+message can still provide guidance without answering the question.
+
+The human sees the question above the composer and submits an answer or cancels
+that exact question. An expired exact link shows no replacement response
+control. `read_question` returns one request by session and request ID;
+`read_task` includes the current pending question in its durable snapshot.
+Human HTTP delivery uses `/sessions/{session_id}/questions`, the exact request
+resource, and its `/answer` or `/cancel` action.
+
+An authorized coordinator may answer already-settled information within its
+human-authorized scope. Its native answer binds `request_id`, `run_id`,
+`generation`, `expected_revision` and literal `answer`. Human decisions reject
+the agent route. Agent answers use ordinary prepared policy under
+`task_question_answer`, plus the existing task/project read scope. Ask remains
+headless fail-closed. Human delivery cannot be selected by an agent input field.
+Neither answer is permission approval, a remembered grant, review intent or
+authority to change the execution backend.
+
+Identical creation and answer retries return stable receipts. Changed answers,
+stale revisions/generations, incompatible owner/configuration/project or goal
+bindings, and cancelled requests conflict. An answer reserves one durable inbox
+item and one continuation run UUID. Even when guidance runs first, only that
+reserved run can consume the answer at the transcript commit boundary. It
+cannot be converted to Steer. Cancelling undelivered input cancels its delivery
+obligation while retaining the accepted answer receipt. Replaying a delivered
+or cancelled receipt never wakes replacement work. Process restart preserves a
+pending question; explicit source cancellation, failure or target deletion does
+not turn a delayed answer into authority over a replacement request.

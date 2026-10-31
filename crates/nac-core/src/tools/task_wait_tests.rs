@@ -795,3 +795,145 @@ async fn provider_shaped_nullable_fields_execute_each_exact_wait_mode() {
     );
     cleanup(&runtime);
 }
+
+#[tokio::test]
+async fn exact_question_attention_is_durable_pinned_and_cursor_suppressed() {
+    let runtime = runtime(Vec::new());
+    let run = uuid::Uuid::new_v4().to_string();
+    store::TranscriptLogWriter::new(&runtime.store_path)
+        .unwrap()
+        .append_run_prompt(
+            "peer-a",
+            0,
+            &crate::types::Message::User {
+                content: "work".into(),
+            },
+            &run,
+        )
+        .unwrap();
+    let question = store::create_task_question(
+        &runtime.store_path,
+        &store::QuestionRequest {
+            session_id: "peer-a".into(),
+            request_id: "format/choice?".into(),
+            run_id: run.clone(),
+            generation: run.clone(),
+            text: "Which format?".into(),
+            choices: vec!["CSV".into()],
+            responder_class: store::QuestionResponder::HumanDecision,
+        },
+        0,
+    )
+    .unwrap();
+    let input =
+        json!({"targets":[{"session_id":"peer-a","mode":"run","run_id":run}],"timeout_ms":0});
+    let first = value(&runtime, "wait_tasks", input.clone()).await;
+    assert_eq!(first["targets"][0]["status"], "question_attention");
+    assert_eq!(
+        first["targets"][0]["attention"]["request_id"],
+        question.request.request_id
+    );
+    assert!(first["targets"][0]["attention"]["navigation"]
+        .as_str()
+        .unwrap()
+        .ends_with("?question_request=format%2Fchoice%3F"));
+    let again=value(&runtime,"wait_tasks",json!({"targets":[{"session_id":"peer-a","mode":"run","run_id":run,"after_cursor":first["targets"][0]["after_cursor"]}],"timeout_ms":0})).await;
+    assert_eq!(again["targets"][0]["unchanged"], true);
+    assert!(again["targets"][0].get("attention").is_none());
+    let other=value(&runtime,"wait_tasks",json!({"targets":[{"session_id":"peer-a","mode":"run","run_id":"replacement"}],"timeout_ms":0})).await;
+    assert_ne!(other["targets"][0]["status"], "question_attention");
+    let read = value(
+        &runtime,
+        "read_question",
+        json!({"session_id":"peer-a","request_id":question.request.request_id,"project_id":null}),
+    )
+    .await;
+    assert_eq!(read["request"], json!(question.request));
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn question_answer_headless_ask_fails_closed_and_input_cannot_select_human_authority() {
+    use crate::permissions::{PermissionEffect, PermissionRule};
+    let runtime = runtime(vec![PermissionRule::new(
+        "task_question_answer",
+        "*",
+        PermissionEffect::Ask,
+    )]);
+    let input = json!({"session_id":"peer-a","project_id":null,"request_id":"q","run_id":"source","generation":"source","expected_revision":1,"answer":"known information"});
+    let result = call(&runtime, "answer_question", input.clone()).await;
+    assert!(result.is_error);
+    assert!(result
+        .content
+        .as_text()
+        .unwrap()
+        .contains("permission denied"));
+    for field in ["human", "approval", "backend", "grant"] {
+        let mut forged = input.clone();
+        forged[field] = json!(true);
+        let result = call(&runtime, "answer_question", forged).await;
+        assert!(result.is_error);
+        assert!(result
+            .content
+            .as_text()
+            .unwrap()
+            .contains("invalid answer_question"));
+    }
+    assert!(store::list_session_inbox(&runtime.store_path, "peer-a")
+        .unwrap()
+        .is_empty());
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn large_question_attention_rejects_aggregate_overflow_without_truncating_identity() {
+    let runtime = runtime(Vec::new());
+    let mut targets = Vec::new();
+    for n in 0..8 {
+        let id = format!("large-question-{n}");
+        session(&runtime.store_path, &id, Some("p1"), "large question");
+        let run = uuid::Uuid::new_v4().to_string();
+        store::TranscriptLogWriter::new(&runtime.store_path)
+            .unwrap()
+            .append_run_prompt(
+                &id,
+                0,
+                &crate::types::Message::User {
+                    content: "work".into(),
+                },
+                &run,
+            )
+            .unwrap();
+        store::create_task_question(
+            &runtime.store_path,
+            &store::QuestionRequest {
+                session_id: id.clone(),
+                request_id: "bounded".into(),
+                run_id: run.clone(),
+                generation: run.clone(),
+                text: "😀".repeat(4000),
+                choices: (0..8).map(|i| format!("{i}{}", "😀".repeat(299))).collect(),
+                responder_class: store::QuestionResponder::HumanDecision,
+            },
+            0,
+        )
+        .unwrap();
+        targets.push(json!({"session_id":id,"mode":"run","run_id":run}));
+    }
+    let overflow = call(&runtime, "wait_tasks", json!({"targets":targets})).await;
+    assert!(overflow.is_error);
+    assert!(overflow
+        .content
+        .as_text()
+        .unwrap()
+        .contains("output exceeds 131072"));
+    let smaller = value(&runtime, "wait_tasks", json!({"targets":&targets[..4]})).await;
+    assert_eq!(smaller["targets"].as_array().unwrap().len(), 4);
+    assert!(smaller["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t["status"] == "question_attention"
+            && t["attention"]["text"].as_str().unwrap().chars().count() == 4000));
+    cleanup(&runtime);
+}

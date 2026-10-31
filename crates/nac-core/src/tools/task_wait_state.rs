@@ -146,6 +146,21 @@ impl Target {
         let Some(id) = self.resolved.as_deref() else {
             return json!({"status":"unavailable", "detail":"No current identity existed when this selector was resolved; it will not advance to later work."});
         };
+        let question = &durable["pending_question"];
+        let relevant = match self.mode {
+            Mode::Run => question["request"]["run_id"] == id,
+            Mode::Goal => question["goal_id"] == id && durable["goal"]["goal_id"] == id,
+        };
+        if relevant && question["status"] == "pending" {
+            let request = &question["request"];
+            let request_id = request["request_id"].as_str().unwrap_or_default();
+            return json!({"status":"question_attention","attention":{
+                "session_id":self.session_id,"request_id":request_id,"run_id":request["run_id"],
+                "generation":request["generation"],"revision":question["revision"],
+                "text":request["text"],"choices":request["choices"],"responder_class":request["responder_class"],
+                "navigation":format!("{}/insights?question_request={}",super::task_discovery::navigation(&self.session_id),super::task_discovery::url_component(request_id))
+            }});
+        }
         match self.mode {
             Mode::Run => {
                 if let Some(outcome) = durable["run_outcomes"]
