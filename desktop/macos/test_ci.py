@@ -2,10 +2,12 @@ import json
 from pathlib import Path
 import plistlib
 import tempfile
+import sys
+import time
 import unittest
 from unittest.mock import patch
 
-from ci import settle_apps
+from ci import run, settle_apps
 from ci_support import (MAX_FILE, console_state, export_evidence, qualify_toolchain,
                         require_console, require_terminal_evidence)
 
@@ -62,6 +64,21 @@ class QualificationTests(unittest.TestCase):
         for field in actual:
             with self.assertRaisesRegex(RuntimeError, 'drift'):
                 qualify_toolchain({**actual, field: 'unexpected'}, pinned)
+
+    def test_owned_fixture_environment_and_abort_do_not_change_default_launches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / 'scoped.log'
+            run([sys.executable, '-c', 'import os; print(os.environ["NAC354_TEST_ENV"])'], log, 3,
+                env={'NAC354_TEST_ENV': 'scoped-only'})
+            self.assertEqual(log.read_text().strip(), 'scoped-only')
+            with patch('ci.subprocess.Popen') as spawn, self.assertRaisesRegex(RuntimeError, 'before helper'):
+                run([sys.executable, '-c', 'raise SystemExit(99)'], log, 3, abort=lambda: True)
+            spawn.assert_not_called()
+            start = time.monotonic()
+            with self.assertRaisesRegex(RuntimeError, 'during helper'):
+                run([sys.executable, '-c', 'import time; time.sleep(30)'], Path(temporary) / 'aborted.log', 3,
+                    abort=lambda: time.monotonic() - start > .15)
+            self.assertLess(time.monotonic() - start, 3)
 
     def test_export_bounds_redacts_and_refuses_symlinks(self):
         with tempfile.TemporaryDirectory() as temporary:

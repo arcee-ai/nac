@@ -43,19 +43,36 @@ def native_report(args, log):
     return json.loads(result.stdout)
 
 
-def run(args, log, timeout, cwd=ROOT, cleanup_grace=5):
+def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None):
     """Drain output continuously, retaining at most 256 KiB, including failure."""
     print(f'Native CI phase: {log.name}', flush=True)
+    if abort is not None and abort():
+        raise RuntimeError('Native fixture ownership unavailable before helper launch')
     chunks = deque(maxlen=64)
     process = subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, start_new_session=True)
+                               stderr=subprocess.STDOUT, start_new_session=True, env=env)
     def drain():
         while chunk := process.stdout.read(4096):
             chunks.append(chunk)
     thread = threading.Thread(target=drain, daemon=True)
     thread.start()
     try:
-        code = process.wait(timeout=min(timeout, max(1, RUN_DEADLINE - time.monotonic())))
+        seconds = min(timeout, max(1, RUN_DEADLINE - time.monotonic()))
+        if abort is None:
+            code = process.wait(timeout=seconds)
+        else:
+            deadline = time.monotonic() + seconds
+            while True:
+                if abort():
+                    raise RuntimeError('Native fixture ownership unavailable during helper execution')
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(args, seconds)
+                try:
+                    code = process.wait(timeout=min(.1, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
         if code:
             raise RuntimeError(f'{args[0]} failed ({code}); see {log.name}')
     finally:
@@ -68,6 +85,8 @@ def run(args, log, timeout, cwd=ROOT, cleanup_grace=5):
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
         thread.join(timeout=5)
+        if not thread.is_alive():
+            process.stdout.close()
         log.write_bytes(b''.join(chunks))
 
 
