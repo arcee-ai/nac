@@ -74,3 +74,65 @@ checked, so one Ask covers the call.
 Sessions whose `session:<id>` is not allowed without a prompt are skipped before
 matching and never count toward the 500-row scan, so they affect no
 candidate, count, flag or cursor.
+
+## Waiting on exact work
+
+`wait_tasks` observes one or more independent sessions without starting or
+steering them. A zero-time call takes a snapshot; a positive timeout waits for
+new actionable evidence, any selected result or stopped goal, or pending input
+to this coordinator. For example:
+
+```json
+{"targets":[{"session_id":"task-session","mode":"run","run_id":"exact-run"},{"session_id":"other-session","mode":"goal","goal_id":"exact-goal"}],"timeout_ms":30000}
+```
+
+Omit the identity to resolve the current run or goal once. Run mode uses the
+current durable run, or the most recent retained result if no run is current.
+Save each returned `resolved_identity` and `after_cursor`. Reuse that cursor
+with the same caller, session, mode and project scope, or name the exact ID.
+A cursor never switches to a later run or replacement goal. If there was no
+identity when the selector resolved, it stays unavailable. Explicit identities
+that conflict with a cursor are rejected. Cursors are bounded, untrusted
+observation hints: editing one grants no authority and cannot change stored
+facts. They survive restart; an epoch change sets `resync` and re-reads truth.
+
+The response separates its wake reason (`snapshot`, `target_changed`, `timeout`,
+`coordinator_input`, or cancellation) from each target's state:
+
+- `active` means the exact durable work is still active, not a claim of process
+  liveness or an interactive human connection.
+- `result_available`, `failed` and `cancelled` are distinct run outcomes. A
+  result never asserts objective completion.
+- `goal_complete`, `goal_paused`, `goal_blocked`, `goal_usage_limited` and
+  `goal_budget_limited` describe that exact goal. Retired active goals return
+  `replaced` or `cleared`; retained stopped goals carry their original proof.
+- `not_found` cannot distinguish deletion from never-created sessions.
+  `unavailable` also covers unretained, interrupted or aged-out exact evidence;
+  a later identity never substitutes for it. Scope and topology errors keep
+  `read_task`'s distinct statuses.
+- `approval_attention` carries one exact, existing request ID and an app route
+  ending in `/insights?permission_request=<id>`. This only observes a local
+  live broker. Other owners remain `unknown`. The human page revalidates the
+  exact request; an expired link never selects another request for approval.
+
+A repeated cursor suppresses already delivered proof and attention details,
+marking `unchanged`. Status/commentary and active-goal accounting updates do not
+wake a wait. The result stays inspectable through `read_task`; observation
+never marks it read, acknowledges it, or deletes it. Proof retention remains
+ALL-469's last eight run outcomes and eight retired goals per session.
+
+Waiters subscribe before their first durable read. Goal-owner post-commit
+hints include session/goal identity, version, status and current/replaced/cleared
+kind. Hints are lossy process-local notifications, not completion evidence or
+a second history store. A ring gap sets `resync`; periodic authoritative reads
+cover missed hints, other owners, reconnects and restart. Delayed or reordered
+hints can only cause another read. No delta subscription is added, so observing
+cannot keep headless approval alive. Cancelling or timing out the wait never
+cancels a target, pauses its goal, or consumes coordinator input.
+
+Calls reject more than eight targets, a timeout over 60,000 ms, identifiers over
+160 bytes, cursors over 4,096 bytes, or a response over 131,072 bytes. Result
+excerpts in waits are capped at 500 characters; `read_task` keeps the longer
+retained excerpt. Authoritative fallback revalidation runs every 250 ms, plus
+relevant stopped-goal notifications. Representative measurements and the final
+bound rationale are recorded with this change's acceptance evidence.

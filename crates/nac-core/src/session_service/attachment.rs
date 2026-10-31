@@ -143,6 +143,24 @@ impl SessionService {
             #[cfg(test)]
             frontend_snapshot_after_workspace_gate: None,
         };
+        if let Some(broker) = &service.permission_broker {
+            let operation = Arc::downgrade(&service.active_operation);
+            crate::permissions::task_observation::bind_runs(
+                broker,
+                Arc::new(move || {
+                    let operation = operation.upgrade()?;
+                    let active = operation
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    match active.as_ref() {
+                        Some(ActiveSessionOperation::Run(run)) => {
+                            Some(run.snapshot.run_id.to_string())
+                        }
+                        _ => None,
+                    }
+                }),
+            );
+        }
         let init = SessionServiceInit {
             metadata,
             restored_messages,
