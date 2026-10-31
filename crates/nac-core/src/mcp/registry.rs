@@ -154,6 +154,8 @@ pub(crate) struct McpSkippedServer {
 pub(crate) struct McpLoadOutcome {
     pub registry: Option<Arc<McpRegistry>>,
     pub skipped: Vec<McpSkippedServer>,
+    /// The configuration and admission snapshot actually used by this load.
+    pub source_revision: Option<[u8; 32]>,
 }
 
 async fn close_mounted_services(services: &mut Vec<SharedMcpService>) {
@@ -174,6 +176,7 @@ fn file_servers_for_policy(
     BTreeMap<String, McpServerConfig>,
     Option<McpSkippedServer>,
     Result<super::admission::ConnectionSnapshot>,
+    Option<[u8; 32]>,
 ) {
     let snapshot = || match connection_state {
         Ok(state) => state.snapshot(),
@@ -185,14 +188,26 @@ fn file_servers_for_policy(
             BTreeMap::new(),
             Some(McpSkippedServer { name, reason }),
             snapshot(),
+            None,
         )
     };
-    let Some(path) = default_config_path(paths) else {
-        return (McpDefaults::default(), BTreeMap::new(), None, snapshot());
+    let path = default_config_path(paths);
+    let Some(path) = path.filter(|path| super::file_config::mcp_configuration_state_exists(path))
+    else {
+        let snapshot = snapshot();
+        let revision = snapshot
+            .as_ref()
+            .ok()
+            .and_then(|state| state.revision().ok())
+            .map(|admission| super::session_refresh::source_revision("", &admission));
+        return (
+            McpDefaults::default(),
+            BTreeMap::new(),
+            None,
+            snapshot,
+            revision,
+        );
     };
-    if !super::file_config::mcp_configuration_state_exists(&path) {
-        return (McpDefaults::default(), BTreeMap::new(), None, snapshot());
-    }
     // The connection snapshot shares the config lease, so it matches the servers read here.
     let (raw, snapshot) =
         match super::file_config::read_mcp_configuration_with(&path, |_| snapshot()) {
@@ -209,8 +224,13 @@ fn file_servers_for_policy(
                 );
             }
         };
+    let revision = snapshot
+        .as_ref()
+        .ok()
+        .and_then(|state| state.revision().ok())
+        .map(|admission| super::session_refresh::source_revision(&raw, &admission));
     match mcp_config_for_policy(&raw, transport_policy) {
-        Ok(config) => (config.mcp, config.mcp_servers, None, snapshot),
+        Ok(config) => (config.mcp, config.mcp_servers, None, snapshot, revision),
         Err(error) => {
             eprintln!(
                 "MCP config at '{}' is invalid; its servers will be skipped: {:#}",
@@ -248,18 +268,20 @@ impl McpRegistry {
         root_policy: McpRootPolicy,
     ) -> Result<McpLoadOutcome> {
         let connection_state = super::admission::ConnectionState::for_home(paths);
-        let (defaults, servers, config_error, snapshot) =
+        let (defaults, servers, config_error, snapshot, source_revision) =
             file_servers_for_policy(paths, transport_policy, &connection_state);
         if let Some(skipped) = config_error {
             return Ok(McpLoadOutcome {
                 registry: None,
                 skipped: vec![skipped],
+                source_revision,
             });
         }
         if servers.is_empty() {
             return Ok(McpLoadOutcome {
                 registry: None,
                 skipped: Vec::new(),
+                source_revision,
             });
         }
 
@@ -631,7 +653,11 @@ impl McpRegistry {
             }))
         };
 
-        Ok(McpLoadOutcome { registry, skipped })
+        Ok(McpLoadOutcome {
+            registry,
+            skipped,
+            source_revision,
+        })
     }
 
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {

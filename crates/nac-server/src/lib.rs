@@ -896,6 +896,12 @@ impl SessionManager {
         application::sessions::SessionIntentApplication::new(self)
     }
 
+    pub(crate) fn session_integrations(
+        &self,
+    ) -> application::session_integrations::SessionIntegrationApplication<'_> {
+        application::session_integrations::SessionIntegrationApplication::new(self)
+    }
+
     pub(crate) fn session_runs(&self) -> application::session_runs::SessionRunApplication<'_> {
         application::session_runs::SessionRunApplication::new(self)
     }

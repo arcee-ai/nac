@@ -1,8 +1,10 @@
 import { createNacApi } from "../../../packages/nac-client/src/api.js";
-import type { TaskLaunchRecord, TaskLaunchRequest, TaskLaunchSourceInfo } from "../types/api";
+import type { TaskLaunchRecord, TaskLaunchRequest, TaskLaunchSourceInfo, SessionMcpRefreshStatus } from "../types/api";
 import { nacClient } from "./nacClient";
 export * from "../../../packages/nac-client/src/api.js";
 export type NativeApi = ReturnType<typeof createNacApi> & {
+    sessionIntegrations(id: string, signal?: AbortSignal): Promise<SessionMcpRefreshStatus>;
+    refreshSessionIntegrations(id: string, expectedRevision: number): Promise<SessionMcpRefreshStatus>;
     startTaskLaunch(request: TaskLaunchRequest): Promise<TaskLaunchRecord>;
     taskLaunchStatus(id: string, signal?: AbortSignal): Promise<TaskLaunchRecord>;
     taskLaunchInventory(projectId: string, signal?: AbortSignal): Promise<TaskLaunchRecord[]>;

@@ -101,7 +101,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 154);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 156);
 for (const owner of Object.values(NAC_API_SURFACE)) {
   if (owner.startsWith("api.")) assert.equal(typeof api[owner.slice(4)], "function", owner);
   if (owner.startsWith("client.")) assert.equal(typeof client[owner.slice(7)], "function", owner);
@@ -113,6 +113,10 @@ for (const [method, owner] of [
 ]) assert.equal(NAC_API_SURFACE[method], owner);
 assert.equal("getManagedUpgrade" in api, false);
 assert.equal("startTaskLaunch" in api, false);
+assert.equal("sessionIntegrations" in api, false);
+assert.equal("refreshSessionIntegrations" in api, false);
+assert.equal(NAC_API_SURFACE["GET /sessions/{session_id}/integrations"], "private:standalone session integration status");
+assert.equal(NAC_API_SURFACE["POST /sessions/{session_id}/integrations/refresh"], "private:standalone explicit session integration refresh");
 assert.equal(NAC_API_SURFACE["POST /task-launches"], "private:standalone Local retained task launch");
 const context = await client.transport.streamContext();
 assert.deepEqual(context, {

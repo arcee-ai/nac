@@ -9,6 +9,7 @@ pub(crate) mod request_validation;
 pub(crate) mod session_attachment;
 pub(crate) mod session_configuration;
 pub(crate) mod session_creation;
+pub(crate) mod session_integrations;
 pub(crate) mod session_lifecycle;
 pub(crate) mod session_runs;
 pub(crate) mod session_terminals;

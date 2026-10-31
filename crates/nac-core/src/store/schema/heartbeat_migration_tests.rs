@@ -66,7 +66,7 @@ fn schema_44_heartbeats_upgrade_actual_43_atomically_and_preserve_all_supplier_r
         assert_eq!(
             conn.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
                 .unwrap(),
-            44
+            STORE_SCHEMA_VERSION
         );
         for table in ["task_followups", "native_task_launches", "peer_goal_starts"] {
             assert_eq!(

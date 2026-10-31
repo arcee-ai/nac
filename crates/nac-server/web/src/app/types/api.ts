@@ -15,6 +15,7 @@ export type DispatchWeight = "light" | "heavy";
 
 /** Immutable execution topology selected when a session is created. */
 export type SessionBehavior = ApiSchema<"SessionBehavior">;
+export type SessionMcpRefreshStatus = ApiSchema<"SessionMcpRefreshStatus">;
 
 /**
  * The optional light worker model. Same shape on records and requests: the

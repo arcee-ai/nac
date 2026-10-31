@@ -800,6 +800,8 @@ function Fe(e) {
 	let t = e.transport.request.bind(e.transport);
 	return {
 		...Pe(e),
+		sessionIntegrations: (e, n) => t("GET", `/sessions/${encodeURIComponent(e)}/integrations`, { signal: n }),
+		refreshSessionIntegrations: (e, n) => t("POST", `/sessions/${encodeURIComponent(e)}/integrations/refresh`, { body: { expected_revision: n } }),
 		startTaskLaunch: (e) => t("POST", "/task-launches", { body: e }),
 		taskLaunchStatus: (e, n) => t("GET", `/task-launches/${encodeURIComponent(e)}`, { signal: n }),
 		taskLaunchInventory: (e, n) => t("GET", `/projects/${encodeURIComponent(e)}/task-launches`, { signal: n }),

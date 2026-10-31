@@ -18,6 +18,7 @@ import {
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { SessionUsage } from "@/app/components/inspector/SessionUsage";
+import { SessionIntegrations } from "@/app/features/session-integrations/SessionIntegrations";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { contextShare, resolveCatalogModel } from "@/app/lib/catalog";
 import { routes } from "@/app/lib/routes";
@@ -239,6 +240,7 @@ export function TopSingleSessionHeader({
           {additions || deletions ? (
             <CodeChangesBadge additions={additions} deletions={deletions} />
           ) : null}
+          {!readOnly ? <SessionIntegrations key={sessionId} sessionId={sessionId} /> : null}
         </div>
       </div>
     </div>

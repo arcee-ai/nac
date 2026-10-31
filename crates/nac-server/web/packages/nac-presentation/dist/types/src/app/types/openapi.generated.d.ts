@@ -1056,6 +1056,9 @@ export interface components {
             events: components["schemas"]["SessionEventEnvelope"][];
         };
         RecoveryAction: "automatic_retry" | "resume_goal" | "regenerate_with_rewind" | "settings" | "none";
+        RefreshSessionIntegrationsRequest: {
+            expected_revision: number;
+        };
         RegenerateSessionRequest: {
             message_idx: number;
         };
@@ -1316,6 +1319,15 @@ export interface components {
             kind: components["schemas"]["SessionLineageKind"];
             parent_session_id: string;
             root_session_id: string;
+        };
+        SessionMcpRefreshState: "current" | "pending" | "degraded" | "failed" | "scheduled_for_workers";
+        SessionMcpRefreshStatus: {
+            applied_revision: number | null;
+            incarnation_id: string | null;
+            message: string | null;
+            requested_at: string | null;
+            revision: number;
+            state: components["schemas"]["SessionMcpRefreshState"];
         };
         SessionMetadata: {
             agents_md_status: string;
