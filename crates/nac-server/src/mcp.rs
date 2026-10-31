@@ -788,3 +788,7 @@ mod tests {
         assert!(!ProtocolVersion::LATEST.has_initialize());
     }
 }
+
+#[cfg(test)]
+#[path = "mcp_product_context_tests.rs"]
+mod product_context_wire_tests;
