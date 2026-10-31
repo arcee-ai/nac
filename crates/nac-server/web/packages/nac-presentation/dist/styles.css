@@ -8127,6 +8127,25 @@
     margin-left: auto;
   }
 }
+
+/* Search, Sessions and delegated lists share these same actions. Keep their
+   titles and state cues above the controls at a zoomed phone's narrow width. */
+@media (max-width: 359px) {
+  [data-nac-runtime]:is(.group:has(> div > .nac-session-actions)), [data-nac-runtime] .group:has(> div > .nac-session-actions) {
+    height: auto;
+    min-height: 48px;
+    flex-wrap: wrap;
+  }
+
+  [data-nac-runtime]:is(.group:has(> div > .nac-session-actions) > button), [data-nac-runtime] .group:has(> div > .nac-session-actions) > button {
+    flex-basis: 100%;
+    min-height: 44px;
+  }
+
+  [data-nac-runtime]:is(.group:has(> div > .nac-session-actions) > div:last-child), [data-nac-runtime] .group:has(> div > .nac-session-actions) > div:last-child {
+    margin-left: auto;
+  }
+}
 /**
  * Copyright (c) 2014 The xterm.js authors. All rights reserved.
  * Copyright (c) 2012-2013, Christopher Jeffrey (MIT License)

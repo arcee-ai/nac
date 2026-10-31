@@ -42,3 +42,22 @@
     margin-left: auto;
   }
 }
+
+/* Search, Sessions and delegated lists share these same actions. Keep their
+   titles and state cues above the controls at a zoomed phone's narrow width. */
+@media (max-width: 359px) {
+  .group:has(> div > .nac-session-actions) {
+    height: auto;
+    min-height: 48px;
+    flex-wrap: wrap;
+  }
+
+  .group:has(> div > .nac-session-actions) > button {
+    flex-basis: 100%;
+    min-height: 44px;
+  }
+
+  .group:has(> div > .nac-session-actions) > div:last-child {
+    margin-left: auto;
+  }
+}

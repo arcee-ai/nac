@@ -135,7 +135,7 @@ function SessionHeading({ sessionId }: { sessionId: string }) {
             iconName={IconName.Right}
             size={16}
             color="var(--color-fill-basic-tertiary)"
-            className="!size-11 shrink-0"
+            className="shrink-0"
           />
           {title}
         </div>
@@ -148,11 +148,7 @@ function SessionHeading({ sessionId }: { sessionId: string }) {
             <span className="label-micro min-w-0 truncate text-btn-secondary">{repo}</span>
           ) : null}
           {additions || deletions ? (
-            <CodeChangesBadge
-              additions={additions}
-              deletions={deletions}
-              className="!size-11 shrink-0"
-            />
+            <CodeChangesBadge additions={additions} deletions={deletions} className="shrink-0" />
           ) : null}
         </div>
       ) : null}

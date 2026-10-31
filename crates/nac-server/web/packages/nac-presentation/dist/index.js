@@ -9331,30 +9331,33 @@ function mh({ icon: e, label: t, title: n, isMobile: r = !1, destructive: i = !1
 }
 // src/app/components/projects/ChatSessionActions.tsx
 function hh({ title: e, pinned: t = !1, isMobile: n = !1, onPin: r, onRename: i, onDelete: a }) {
-	return /* @__PURE__ */ X(J, { children: [
-		r ? /* @__PURE__ */ Y(mh, {
-			icon: t ? B.Unpin : B.Pin,
-			title: t ? "Unpin chat" : "Pin chat",
-			label: `${t ? "Unpin" : "Pin"} ${e}`,
-			isMobile: n,
-			onClick: r
-		}) : null,
-		i ? /* @__PURE__ */ Y(mh, {
-			icon: B.Edit,
-			title: "Rename chat",
-			label: `Rename ${e}`,
-			isMobile: n,
-			onClick: i
-		}) : null,
-		a ? /* @__PURE__ */ Y(mh, {
-			icon: B.Trash,
-			title: "Delete chat",
-			label: `Delete ${e}`,
-			isMobile: n,
-			destructive: !0,
-			onClick: a
-		}) : null
-	] });
+	return /* @__PURE__ */ X("div", {
+		className: n ? "nac-session-actions flex items-center gap-0" : "contents",
+		children: [
+			r ? /* @__PURE__ */ Y(mh, {
+				icon: t ? B.Unpin : B.Pin,
+				title: t ? "Unpin chat" : "Pin chat",
+				label: `${t ? "Unpin" : "Pin"} ${e}`,
+				isMobile: n,
+				onClick: r
+			}) : null,
+			i ? /* @__PURE__ */ Y(mh, {
+				icon: B.Edit,
+				title: "Rename chat",
+				label: `Rename ${e}`,
+				isMobile: n,
+				onClick: i
+			}) : null,
+			a ? /* @__PURE__ */ Y(mh, {
+				icon: B.Trash,
+				title: "Delete chat",
+				label: `Delete ${e}`,
+				isMobile: n,
+				destructive: !0,
+				onClick: a
+			}) : null
+		]
+	});
 }
 // src/app/components/projects/ProjectRowActions.tsx
 function gh({ project: e }) {
@@ -12194,7 +12197,7 @@ function wg({ sessionId: t }) {
 					iconName: B.Right,
 					size: 16,
 					color: "var(--color-fill-basic-tertiary)",
-					className: "!size-11 shrink-0"
+					className: "shrink-0"
 				}),
 				S
 			]
@@ -12209,7 +12212,7 @@ function wg({ sessionId: t }) {
 			}) : null, m || h ? /* @__PURE__ */ Y(Sl, {
 				additions: m,
 				deletions: h,
-				className: "!size-11 shrink-0"
+				className: "shrink-0"
 			}) : null]
 		}) : null]
 	});

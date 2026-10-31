@@ -1,7 +1,14 @@
 import fs from "node:fs/promises";
-import { chromium, type Page } from "@playwright/test";
+import { chromium, type Page, type Locator } from "@playwright/test";
 import path from "node:path";
-import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
+import {
+  createProject,
+  createSession,
+  expect,
+  test,
+  waitForRunIdle,
+  startForegroundChild,
+} from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
 test.use({ orchestration: "0" });
@@ -37,6 +44,35 @@ async function serveNavigationVersion(page: Page, baseUrl: string, before: () =>
       },
     );
   }
+}
+
+async function settleCapture(page: Page, target?: Locator) {
+  if (target) {
+    await target.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
+    await expect(target).toBeInViewport();
+  }
+  await page.evaluate(async () => {
+    const { document, requestAnimationFrame } = globalThis as unknown as {
+      document: {
+        fonts: { ready: Promise<unknown> };
+        getAnimations: () => {
+          effect: { getTiming: () => { iterations: number } } | null;
+          finished: Promise<unknown>;
+        }[];
+      };
+      requestAnimationFrame: (callback: () => void) => void;
+    };
+    await document.fonts.ready;
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)),
+    );
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
+  });
 }
 
 test("project navigation, overflow, phone actions and notification feedback", async ({
@@ -88,6 +124,7 @@ test("project navigation, overflow, phone actions and notification feedback", as
         globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
       ).document.fonts.ready.then(() => undefined),
     );
+    await settleCapture(page);
     const file = info.outputPath(`${name}.png`);
     await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
     await info.attach(name, { path: file, contentType: "image/png" });
@@ -133,6 +170,7 @@ test("project navigation, overflow, phone actions and notification feedback", as
           page.getByRole("button", { name: "Review cache inputs 1", exact: true }),
         ).toBeVisible();
         await selected.focus();
+        await settleCapture(page, selected);
         await page.mouse.move(0, 0);
         await capture(`${version}-${width}-navigation-dark`);
         const rename = page.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true });
@@ -149,12 +187,18 @@ test("project navigation, overflow, phone actions and notification feedback", as
         );
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
         await expect(rename).toBeFocused();
+        await settleCapture(page, rename);
         await capture(`${version}-${width}-keyboard-focus`);
         const runningRow = page.getByRole("button", { name: "Review cache inputs 1", exact: true });
         await runningRow.focus();
+        await settleCapture(page, runningRow);
         await capture(`${version}-${width}-running-navigation`);
         if (width < 768) {
           await notify();
+          await settleCapture(
+            page,
+            page.getByRole("button", { name: `Unpin ${LONG_TITLE}`, exact: true }),
+          );
           await capture(`${version}-${width}-notification-stack`);
           await page
             .getByRole("dialog", { name: "Menu", exact: true })
@@ -176,6 +220,15 @@ test("project navigation, overflow, phone actions and notification feedback", as
           page.getByText("Navigation verification — repository maintenance", { exact: true }),
         ).toBeVisible();
         await expect(page.getByText("9 Sessions", { exact: true })).toBeVisible();
+        if (width >= 768) {
+          await expect(
+            page.getByRole("button", { name: "Configurations", exact: true }),
+          ).toBeVisible();
+          await expect(page.getByText("Sort by", { exact: true })).toBeVisible();
+          await expect(
+            page.getByRole("button", { name: "Copy the store path", exact: true }),
+          ).toBeVisible();
+        }
         await capture(`${version}-${width}-projects-dark`);
       }
     }
@@ -230,6 +283,19 @@ test("phone navigation and project actions remain reachable at real 200 percent 
       })
     ).ok(),
   ).toBe(true);
+  harness.provider.enqueue(
+    "zoom-child",
+    { token: "NAVIGATION_ZOOM_CHILD" },
+    { kind: "text", text: "Zoom fixture complete." },
+  );
+  const started = await startForegroundChild(
+    request,
+    harness,
+    id,
+    "Review nested cache inputs",
+    "NAVIGATION_ZOOM_CHILD",
+  );
+  expect(started.ok()).toBe(true);
   const extension = info.outputPath("zoom-extension");
   await fs.mkdir(extension, { recursive: true });
   await fs.writeFile(
@@ -302,6 +368,7 @@ test("phone navigation and project actions remain reachable at real 200 percent 
             globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
           ).document.fonts.ready.then(() => undefined),
         );
+        await settleCapture(page, rename);
         const file = info.outputPath(`${version}-${width}-zoom200-navigation.png`);
         await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
         await info.attach(`${version}-${width}-zoom200`, { path: file, contentType: "image/png" });
@@ -329,6 +396,57 @@ test("phone navigation and project actions remain reachable at real 200 percent 
         );
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
         await expect(rename).toBeFocused();
+        await menu.getByRole("button", { name: "Search Chats", exact: true }).click();
+        const search = page.getByRole("dialog", { name: "Search Chats", exact: true });
+        const searchRow = search.getByRole("button", { name: LONG_TITLE, exact: true });
+        await searchRow.focus();
+        await settleCapture(page, searchRow);
+        if (!before) {
+          const title = await searchRow.locator("span.truncate").first().boundingBox();
+          expect(title!.width).toBeGreaterThan(40);
+          const action = await search
+            .getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true })
+            .boundingBox();
+          expect(action!.width).toBeGreaterThanOrEqual(44);
+          expect(action!.height).toBeGreaterThanOrEqual(44);
+        }
+        const searchFile = info.outputPath(`${version}-${width}-zoom200-search.png`);
+        await page.screenshot({ path: searchFile, animations: "disabled", caret: "hide" });
+        if (process.env.NAC_NAVIGATION_CAPTURE_DIR)
+          await fs.copyFile(
+            searchFile,
+            path.join(process.env.NAC_NAVIGATION_CAPTURE_DIR, path.basename(searchFile)),
+          );
+        await page.goto(
+          `${harness.baseUrl}/?navigationSubagents=${width}-${version}#/session/${id}/delegated`,
+        );
+        const subagentsTab = page.getByRole("tab", { name: "Subagents", exact: true }).last();
+        if (!(await subagentsTab.isVisible()))
+          await page.getByRole("button", { name: "Open panel", exact: true }).click();
+        await subagentsTab.click();
+        const subagents = page.getByRole("dialog", { name: "Subagents", exact: true });
+        const childRow = subagents.getByRole("button", {
+          name: "Review nested cache inputs",
+          exact: true,
+        });
+        await childRow.focus();
+        await settleCapture(page, childRow);
+        if (!before) {
+          const title = await childRow.locator("span.truncate").first().boundingBox();
+          expect(title!.width).toBeGreaterThan(40);
+          const action = await subagents
+            .getByRole("button", { name: "Rename Review nested cache inputs", exact: true })
+            .boundingBox();
+          expect(action!.width).toBeGreaterThanOrEqual(44);
+          expect(action!.height).toBeGreaterThanOrEqual(44);
+        }
+        const childFile = info.outputPath(`${version}-${width}-zoom200-subagents.png`);
+        await page.screenshot({ path: childFile, animations: "disabled", caret: "hide" });
+        if (process.env.NAC_NAVIGATION_CAPTURE_DIR)
+          await fs.copyFile(
+            childFile,
+            path.join(process.env.NAC_NAVIGATION_CAPTURE_DIR, path.basename(childFile)),
+          );
       }
     }
   } finally {
