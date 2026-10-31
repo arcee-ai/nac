@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "template-not-qualification",
   "fixture_repository": "",
-  "baseline_sha256": "3206e328d0ad703ae4cad96e8b968cb52a1531866af811447979909c1bdd456c",
+  "baseline_sha256": "88fc9563cec2fb1f84b916ad837c4b602580bf88b80eb7f0bc35ef62f9994f27",
   "payload_sha256": "dbdf31959bf6cead69d0d44e66c4100e8d49486faffda100207aa72dcbd660fa",
   "completed_at": null,
   "cases": [
@@ -183,6 +183,13 @@
     },
     {
       "name": "ScottZembsch-approval",
+      "result": "unperformed",
+      "actor_id": null,
+      "head_sha": null,
+      "evidence_url": null
+    },
+    {
+      "name": "Crystalcareai-approval",
       "result": "unperformed",
       "actor_id": null,
       "head_sha": null,

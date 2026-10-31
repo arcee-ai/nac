@@ -14,6 +14,7 @@ export const owners = [
   { login: "tmcarcee", id: 338224923 },
   { login: "adalundhe", id: 23642200 },
   { login: "ScottZembsch", id: 109129358 },
+  { login: "Crystalcareai", id: 162942000 },
 ];
 export const context = "Required PR checks";
 export const actionsApp = 15368;
