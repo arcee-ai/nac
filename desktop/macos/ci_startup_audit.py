@@ -1,11 +1,14 @@
 """Read-only ordinary-app API observations, separate from public UI evidence."""
 import hashlib
 from html.parser import HTMLParser
+import json
 import re
 import threading
 import urllib.request
+import uuid
 
-from ci_startup_api import ListenerPending, endpoint, owned_listener, request, require, require_readiness
+from ci_startup_api import (ListenerPending, endpoint, failure_metadata, owned_listener,
+                           request, require, require_readiness)
 from ci_startup_owner import signature
 
 PROMPT = 'FINDER_CONFIGURED_LOCAL_startup-home'
@@ -118,21 +121,75 @@ def entry_asset_source(dist, url):
     return expected
 
 
-def entry_assets(base, source, stop=None):
+def _entry_document(data, expected, identity, facts):
+    """Admit P's one inert serving binding; every other index byte is fixed."""
+    opening = b'<script id="nac-presentation-binding" type="application/json">'
+    require(len(data) <= len(expected) + 8192 and expected.count(b'</head>') == 1
+            and b'nac-presentation-binding' not in expected, 'entry_document_bound', facts=facts)
+    position = expected.index(b'</head>')
+    prefix, suffix = expected[:position] + opening, b'</script>' + expected[position:]
+    require(data.count(opening) == 1 and data.startswith(prefix) and data.endswith(suffix),
+            'entry_document_position', facts=facts)
+    encoded = data[len(prefix):-len(suffix)]
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, 'entry_document_duplicate_key', facts=facts)
+            result[key] = value
+        return result
+    try:
+        binding = json.loads(encoded.decode('utf-8'), object_pairs_hook=unique_object)
+    except (ValueError, UnicodeError, RecursionError):
+        require(False, 'entry_document_json', facts=facts)
+    require(type(binding) is dict and set(binding) == {'version', 'scope'}
+            and type(binding['version']) is int and binding['version'] == 1
+            and type(binding['scope']) is dict, 'entry_document_shape', facts=facts)
+    scope = binding['scope']
+    require(type(identity) is dict and set(identity) == {'product_version', 'build_id', 'track', 'source_revision'}
+            and all(type(value) is str for value in identity.values()), 'entry_document_identity', facts=facts)
+    require(set(scope) == {'owner', 'profile', 'organization', 'host', 'incarnation', 'release'}
+            and all(type(value) is str for value in scope.values())
+            and scope['profile'] == 'standalone', 'entry_document_scope', facts=facts)
+    value = scope['incarnation']
+    try:
+        parsed = uuid.UUID(value)
+    except ValueError:
+        require(False, 'entry_document_uuid', facts=facts)
+    require(str(parsed) == value and parsed.version == 4 and parsed.variant == uuid.RFC_4122
+            and scope['owner'] == scope['organization'] == scope['host'] == value,
+            'entry_document_uuid', facts=facts)
+    # P's release field is a JSON string containing this exact build tuple.
+    expected_release = json.dumps([identity[key] for key in
+        ('product_version', 'build_id', 'track', 'source_revision')], separators=(',', ':'), ensure_ascii=False)
+    require(scope['release'] == expected_release, 'entry_document_release', facts=facts)
+    return {'source_index_bytes': len(expected), 'source_index_sha256': hashlib.sha256(expected).hexdigest(),
+            'one_inert_binding_verified': True, 'otherwise_exact_source_index': True}
+
+
+def entry_assets(base, source, stop=None, *, identity=None):
     """Check actual served index and its initial JS/CSS/modulepreload inputs."""
     source = source / 'crates/nac-server/assets/dist'
     parser = EntryAssets()
     parser.feed((source / 'index.html').read_text())
     require(parser.paths and len(parser.paths) <= 32, 'entry_asset_inventory')
     files = [(path, entry_asset_source(source, path)) for path in ['/', *sorted(parser.paths)]]
-    observed = []
-    for path, expected in files:
+    observed, document = [], None
+    for ordinal, (path, expected) in enumerate(files):
         require(stop is None or not stop.is_set(), 'asset_observation_interrupted')
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(endpoint(base) + path, timeout=5) as response:
             data = response.read(8 * 1024 * 1024 + 1)
-        require(len(data) <= 8 * 1024 * 1024 and data == expected.read_bytes(), 'served_entry_asset_bytes')
+        original = expected.read_bytes()
+        facts = {'asset_ordinal': ordinal, 'actual_bytes': len(data), 'expected_bytes': len(original),
+                 'actual_sha256': hashlib.sha256(data).hexdigest(), 'expected_sha256': hashlib.sha256(original).hexdigest(),
+                 'http_status': response.status}
+        require(len(data) <= 8 * 1024 * 1024, 'served_entry_asset_bytes', facts=facts)
+        if path == '/':
+            document = _entry_document(data, original, identity, facts)
+        else:
+            require(data == original, 'served_entry_asset_bytes', facts=facts)
         observed.append({'path': path, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
-    return {'observations': observed, 'scope': 'Served production index and initial entry references; not all lazy chunks'}
+    return {'observations': observed, 'entry_document': document,
+            'scope': 'Served production index and initial entry references; not all lazy chunks'}
 
 
 class LiveAudit:
@@ -142,8 +199,11 @@ class LiveAudit:
         self.thread = None
         self.failure = self.proof = self.process = self.assets = None
         self.ready = None
+        self.phase = 'witness'
+        self.failure_detail = None
 
     def sample(self):
+        self.phase = 'witness'
         with self.witness.condition:
             require(self.witness.ready and not self.witness.failure, 'api_witness_unavailable')
             nodes = [node.copy() for node in self.witness.latest if node['kind'] == 'engine' and node['serving']]
@@ -155,20 +215,27 @@ class LiveAudit:
         require(app and node['parent'] == app['pid'], 'app_owned_serving_parent')
         if self.process:
             require(signature(node) == signature(self.process), 'serving_engine_replaced')
+        self.phase = 'listener'
         base = owned_listener(node['pid'], node)
+        self.phase = 'readiness'
         self.ready = require_readiness(request(base, '/readyz'), self.config['engine_identity'])
         self.process = node
         if self.assets is None:
-            self.assets = entry_assets(base, self.source, self.stop_event)
+            self.phase = 'entry_assets'
+            self.assets = entry_assets(base, self.source, self.stop_event, identity=self.config['engine_identity'])
         if self.config['scenario'] == 'onboarding':
+            self.phase = 'onboarding'
             require(request(base, '/projects').get('projects') == [] and request(base, '/sessions') == [],
                     'onboarding_empty_store')
             found = {'onboarding_empty_store': True, 'scope': 'Actual app-owned ordinary engine API'}
         else:
+            self.phase = 'configured_session'
             found = session_facts(base, self.config, self.model_config, live=True)
+        self.phase = 'listener_recheck'
         require(owned_listener(node['pid'], node) == base, 'api_listener_changed')
         if found:
             self.proof = found
+            self.phase = 'complete'
 
     def start(self):
         require(self.thread is None and self.config['scenario'] in ('onboarding', 'configuredLocal'), 'api_audit_selection')
@@ -178,12 +245,22 @@ class LiveAudit:
                     self.sample()
                 except (OSError, ListenerPending):
                     pass  # A newly witnessed engine may not have bound yet.
-                except BaseException:
+                except BaseException as error:
+                    try:
+                        self.failure_detail = failure_metadata(error)
+                    except BaseException:
+                        self.failure_detail = {'exception_type': 'unknown', 'guard_code': 'unknown', 'operands': {}}
                     self.failure = 'ordinary_api_audit_rejected'
                     break
                 self.stop_event.wait(.05)
         self.thread = threading.Thread(target=read, daemon=True)
         self.thread.start()
+
+    def failure_snapshot(self):
+        return {'schema': 'nac-startup-api-diagnostic-v1', 'phase': self.phase,
+                'rejected': self.failure is not None, 'failure': self.failure_detail,
+                'progress': {'readiness_observed': self.ready is not None, 'process_observed': self.process is not None,
+                             'assets_observed': self.assets is not None, 'proof_observed': self.proof is not None}}
 
     def stop(self):
         self.stop_event.set()

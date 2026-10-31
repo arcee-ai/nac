@@ -61,6 +61,25 @@ def cleanup_receipt(proof):
     return result
 
 
+def audit_diagnostic(audit, caller_abort, folder):
+    """Best-effort bounded metadata must never change admission or cleanup."""
+    unavailable = {'schema': 'nac-startup-api-diagnostic-v1', 'unavailable': True}
+    try:
+        snapshot = {**audit.failure_snapshot(), 'caller_abort': dict(caller_abort)}
+        encoded = (json.dumps(snapshot, indent=2) + '\n').encode()
+        if len(encoded) > 8192:
+            snapshot = unavailable
+            encoded = (json.dumps(snapshot) + '\n').encode()
+    except BaseException:
+        snapshot = unavailable
+        encoded = (json.dumps(snapshot) + '\n').encode()
+    try:
+        (folder / 'live-api-diagnostic.json').write_bytes(encoded)
+    except BaseException:
+        snapshot = unavailable
+    return snapshot
+
+
 def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_sha,
              selection, observer, image_reader, run, command, native_report):
     folder.mkdir()
@@ -70,6 +89,7 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
     profile = config = witness = audit = collection = policy = None
     attempted, safe_to_remove = False, False
     proof = {}
+    caller_abort = {'observed': False, 'origin': None}
     result = folder / 'ordinary-startup.xcresult'
     stage = 'preparation'
     try:
@@ -115,16 +135,28 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
                 and digest(runner) == runner_receipt['xctestrun_sha256'], 'runner_configuration_changed_before_input')
         stage = 'test'
         attempted = True
+        def abort():
+            reason = witness.failure
+            origin = 'witness'
+            if not reason:
+                reason = audit and audit.failure
+                origin = 'audit'
+            if reason and not caller_abort['observed']:
+                caller_abort.update(observed=True, origin=origin)
+            return reason
         run(['xcodebuild', 'test-without-building', '-xctestrun', str(runner),
              '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
              '-maximum-concurrent-test-device-destinations', '1', '-resultBundlePath', str(result),
              '-only-testing:NACStartupUITests/StartupJourneys/testOrdinaryStartup'],
             folder / 'test.log', 300, env=runner_environment(),
-            abort=lambda: witness.failure or (audit and audit.failure))
+            abort=abort)
     except BaseException as error:
         errors[stage] = error
     finally:
         if audit:
+            # Preserve the rejection before stop() can replace it with a
+            # generic missing-proof exception. Never retain exception text.
+            proof['api_audit_diagnostic'] = audit_diagnostic(audit, caller_abort, folder)
             try:
                 proof['live_api'] = audit.stop()
             except BaseException as error:
