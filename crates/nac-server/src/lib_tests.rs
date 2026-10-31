@@ -1090,3 +1090,5 @@ mod task_launch_shutdown;
 
 #[path = "tests/task_followups.rs"]
 mod task_followups;
+#[path = "tests/desktop_lifecycle.rs"]
+mod desktop_lifecycle;

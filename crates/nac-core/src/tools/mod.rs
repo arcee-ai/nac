@@ -30,11 +30,16 @@ pub mod kernel;
 mod mcp_adapter;
 pub(crate) mod mutation;
 pub(crate) mod orchestrator;
+mod peer_goals;
 pub mod read;
 mod runtime_context;
 pub(crate) mod subagent;
 mod task_discovery;
 mod task_followups;
+mod task_questions;
+pub(crate) use task_discovery::url_component;
+mod task_wait;
+mod task_wait_state;
 mod terminal_tools;
 pub mod thread;
 mod thread_lifecycle;
@@ -166,7 +171,7 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
 pub(crate) const TASK_FOLLOWUP_TOOL_NAMES: [&str; 2] = ["send_task_followup", "read_task_followup"];
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 19] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 24] = [
     "read",
     "write",
     "edit",
@@ -180,6 +185,11 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 19] = [
     "read_task",
     "send_task_followup",
     "read_task_followup",
+    "wait_tasks",
+    "request_question",
+    "read_question",
+    "answer_question",
+    "task_goal",
     "create_goal",
     "get_goal",
     "update_goal",
@@ -196,7 +206,7 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 23] = [
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 25] = [
     "read",
     "write",
     "edit",
@@ -208,6 +218,8 @@ pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 23] = [
     "list_executions",
     "find_tasks",
     "read_task",
+    "wait_tasks",
+    "task_goal",
     "create_goal",
     "get_goal",
     "update_goal",
@@ -239,6 +251,11 @@ fn worker_tool_registry(
         .register(task_discovery::ReadTaskTool)
         .register(task_followups::SendTaskFollowupTool)
         .register(task_followups::ReadTaskFollowupTool)
+        .register(task_wait::WaitTasksTool)
+        .register(task_questions::CreateQuestionTool)
+        .register(task_questions::ReadQuestionTool)
+        .register(task_questions::AnswerQuestionTool)
+        .register(peer_goals::PeerGoalTool)
         .register(goal::CreateGoalTool)
         .register(goal::GetGoalTool)
         .register(goal::UpdateGoalTool)
@@ -528,6 +545,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         permission_reviewer: None,
         permission_rules: Arc::new(Vec::new()),
         goal_runtime: None,
+        task_question_answers: None,
         command_environment: None,
         web_credential: None,
         command_redactions: Arc::new(StdMutex::new(HashMap::new())),

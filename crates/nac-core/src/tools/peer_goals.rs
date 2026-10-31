@@ -1,0 +1,471 @@
+//! Exact peer goal operations, with separate manual human authority per call.
+use super::kernel::{NativeTool, PermissionResource, ToolAdmission, ToolCallContext, ToolServices};
+use super::{mutation::argument_error, ToolResult};
+use crate::peer_goal_control::{AuthorizedPeerGoal, PeerGoalAction};
+use crate::permissions::AuthorizationOutcome;
+use crate::types::{FunctionDef, ToolDefinition};
+use futures_util::future::BoxFuture;
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Operation {
+    Read,
+    Start,
+    Pause,
+    Resume,
+}
+
+/// Match the advertised flat wire shape before projecting the selected action.
+/// Optional fields may be absent/null or supplied incidentally by a provider;
+/// only the selected operation's fields have meaning or mutation authority.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireInput {
+    action: Operation,
+    session_id: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    project_id: Option<String>,
+    request_id: Option<String>,
+    objective: Option<String>,
+    token_budget: Option<u64>,
+    goal_id: Option<String>,
+    expected_version: Option<i64>,
+}
+
+#[derive(Debug)]
+pub(crate) enum Input {
+    Read {
+        session_id: String,
+        project_id: Option<String>,
+    },
+    Start {
+        session_id: String,
+        project_id: Option<String>,
+        request_id: String,
+        objective: String,
+        token_budget: Option<u64>,
+    },
+    Pause {
+        session_id: String,
+        project_id: Option<String>,
+        goal_id: String,
+        expected_version: i64,
+    },
+    Resume {
+        session_id: String,
+        project_id: Option<String>,
+        goal_id: String,
+        expected_version: i64,
+    },
+}
+impl Input {
+    fn scope(&self) -> (&str, &str, Option<&str>) {
+        match self {
+            Self::Read {
+                session_id,
+                project_id,
+            } => ("read", session_id, project_id.as_deref()),
+            Self::Start {
+                session_id,
+                project_id,
+                ..
+            } => ("start", session_id, project_id.as_deref()),
+            Self::Pause {
+                session_id,
+                project_id,
+                ..
+            } => ("pause", session_id, project_id.as_deref()),
+            Self::Resume {
+                session_id,
+                project_id,
+                ..
+            } => ("resume", session_id, project_id.as_deref()),
+        }
+    }
+    fn resources(&self) -> Vec<PermissionResource> {
+        let (action, session, project) = self.scope();
+        let detail = match self {
+            Self::Start {request_id, objective, token_budget, ..} => {
+                let budget = token_budget.map_or_else(|| "no token limit requested".to_owned(), |budget| budget.to_string());
+                format!("Start finite goal: {objective}\nToken budget: {budget}; request: {request_id}")
+            },
+            Self::Pause {goal_id, expected_version, ..} => format!("Pause goal {goal_id} at version {expected_version}. The active turn and tools continue; future autonomous continuation stops."),
+            Self::Resume {goal_id, expected_version, ..} => format!("Resume goal {goal_id} at version {expected_version} using its remaining budget."),
+            Self::Read {..} => "Read current and retained goal identity/evidence without waking the task.".into(),
+        };
+        let scope = project.map_or_else(
+            || "no saved project".to_owned(),
+            |project| format!("project {project}"),
+        );
+        let mut resources = vec![PermissionResource::new(
+            format!("task_goal_{action}"),
+            format!("session:{session}"),
+        )
+        .with_display(format!("Task {session} in {scope}: {detail}"))];
+        if let Some(project) = project {
+            resources.push(PermissionResource::new(
+                format!("task_goal_{action}"),
+                format!("project:{project}"),
+            ));
+        }
+        // Mutations also return goal state; goal authority must not bypass a
+        // configured read denial on the same target/project.
+        resources.push(PermissionResource::new(
+            "task_read",
+            format!("session:{session}"),
+        ));
+        if let Some(project) = project {
+            resources.push(PermissionResource::new(
+                "task_read",
+                format!("project:{project}"),
+            ));
+        }
+        resources
+    }
+}
+fn failure(error: impl Into<anyhow::Error>) -> ToolResult {
+    let error = error.into();
+    let status = match error.downcast_ref::<crate::peer_goal_control::PeerGoalError>() {
+        Some(crate::peer_goal_control::PeerGoalError::Conflict(_)) => "conflict",
+        _ => "unavailable",
+    };
+    ToolResult::text(
+        json!({"status":status,"detail":error.to_string()}).to_string(),
+        true,
+    )
+}
+pub(crate) struct PeerGoalTool;
+impl NativeTool for PeerGoalTool {
+    type Input = Input;
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {def_type:"function".into(), function:FunctionDef {
+            name:"task_goal".into(),
+            description:"Read, start, pause or resume a finite goal on an exact independent plain direct Local task. Each new goal action requires ordinary permission evaluation AND an explicit human reply for this exact action/target/arguments. An exact previously admitted start request replays its immutable receipt under ordinary policy without a fresh mutation or approval. General coordination intent, read access, auto-approval and peer messages grant no goal authority. Start only for explicitly requested finite objective/budget intent; omit token_budget unless supplied. Persist request_id and reuse identical arguments after lost acknowledgement; the immutable receipt describes original admission, never current completion. Pause/resume require current goal_id and expected_version. Pause prevents future continuation without cancelling active tools/turns. Resume preserves remaining budget and cannot restart terminal/exhausted goals. Only the target can mark complete/blocked. No replacement, clear or budget editing. Pass null for arguments that do not apply to this action and for an unrequested start token budget. Unused fields are ignored and can never change the chosen action, target, objective or budget.".into(),
+            parameters:json!({"type":"object","additionalProperties":false,"properties":{
+                "action":{"type":"string","enum":["read","start","pause","resume"]},
+                "session_id":{"type":"string","maxLength":160},"project_id":{"type":["string","null"],"maxLength":160,"description":"Exact target saved project, or explicit null for a projectless task; never inferred"},
+                "request_id":{"type":["string","null"],"maxLength":160,"description":"Used only for start; durable caller-scoped idempotency key"},
+                "objective":{"type":["string","null"],"maxLength":8000,"description":"Finite objective required for start; ignored by other actions"},"token_budget":{"type":["integer","null"],"minimum":1,"description":"Only start uses this optional budget; null unless the human supplied one"},
+                "goal_id":{"type":["string","null"],"maxLength":160,"description":"Required only for pause/resume; exact current goal identity"},"expected_version":{"type":["integer","null"],"minimum":0,"description":"Required only for pause/resume; exact current goal version"}
+            },"required":["action","session_id","project_id","request_id","objective","token_budget","goal_id","expected_version"]}),
+        }}
+    }
+    fn admission(&self) -> ToolAdmission {
+        ToolAdmission::Exclusive
+    }
+    fn decode(&self, value: Value) -> Result<Input, ToolResult> {
+        let WireInput {
+            action,
+            session_id,
+            project_id,
+            request_id,
+            objective,
+            token_budget,
+            goal_id,
+            expected_version,
+        } = serde_json::from_value(value)
+            .map_err(|error| argument_error(format!("invalid task_goal arguments: {error}")))?;
+        let input = match action {
+            Operation::Read => Input::Read {
+                session_id,
+                project_id,
+            },
+            Operation::Start => Input::Start {
+                session_id,
+                project_id,
+                request_id: request_id
+                    .ok_or_else(|| argument_error("start requires request_id"))?,
+                objective: objective
+                    .ok_or_else(|| argument_error("start requires an explicit finite objective"))?,
+                token_budget,
+            },
+            operation @ (Operation::Pause | Operation::Resume) => {
+                let goal_id =
+                    goal_id.ok_or_else(|| argument_error("pause/resume require exact goal_id"))?;
+                let expected_version = expected_version
+                    .ok_or_else(|| argument_error("pause/resume require expected_version"))?;
+                if matches!(operation, Operation::Pause) {
+                    Input::Pause {
+                        session_id,
+                        project_id,
+                        goal_id,
+                        expected_version,
+                    }
+                } else {
+                    Input::Resume {
+                        session_id,
+                        project_id,
+                        goal_id,
+                        expected_version,
+                    }
+                }
+            }
+        };
+        let (_, target, project) = input.scope();
+        let valid_id = |s: &str| !s.trim().is_empty() && s.len() <= 160;
+        if !valid_id(target) || project.is_some_and(|project| !valid_id(project)) {
+            return Err(argument_error(
+                "exact session_id and a valid saved project or explicit null are required",
+            ));
+        }
+        match &input {
+            Input::Start {
+                request_id,
+                objective,
+                token_budget,
+                ..
+            } if !valid_id(request_id)
+                || objective.trim().is_empty()
+                || objective.len() > 8000
+                || token_budget.is_some_and(|n| n == 0 || n > i64::MAX as u64) =>
+            {
+                return Err(argument_error("invalid finite goal start arguments"))
+            }
+            Input::Pause {
+                goal_id,
+                expected_version,
+                ..
+            }
+            | Input::Resume {
+                goal_id,
+                expected_version,
+                ..
+            } if !valid_id(goal_id) || *expected_version < 0 => {
+                return Err(argument_error(
+                    "exact goal_id and nonnegative expected_version are required",
+                ))
+            }
+            _ => (),
+        }
+        Ok(input)
+    }
+    fn permission_resources(
+        &self,
+        input: &Input,
+        services: ToolServices<'_>,
+    ) -> Result<Vec<PermissionResource>, ToolResult> {
+        if services.runtime.permission_broker.is_none()
+            || services.runtime.session_id.is_none()
+            || !matches!(
+                services.runtime.backend.as_ref(),
+                crate::sandbox::ExecutionBackend::Local { .. }
+            )
+        {
+            return Err(failure(anyhow::anyhow!(
+                "peer goals require an attached Local direct primary"
+            )));
+        }
+        Ok(input.resources())
+    }
+    fn execute<'a>(
+        &'a self,
+        input: Input,
+        services: ToolServices<'a>,
+        context: &'a ToolCallContext,
+    ) -> BoxFuture<'a, ToolResult> {
+        Box::pin(async move {
+            let Some(broker) = services.runtime.permission_broker.as_ref() else {
+                return failure(anyhow::anyhow!("missing ordinary permission broker"));
+            };
+            let Some(caller) = services.runtime.session_id.clone() else {
+                return failure(anyhow::anyhow!("missing attached caller session"));
+            };
+            if let Err(e) = broker
+                .validate_execution_observation_binding(
+                    &services.runtime.store_path,
+                    services.runtime.session_id.as_deref(),
+                    services.runtime.backend.as_ref(),
+                )
+                .await
+            {
+                return failure(e);
+            }
+            // An exact immutable receipt is already an accepted human-authorized
+            // start, not fresh mutation authority. Reconcile it after ordinary
+            // policy even headlessly; never attach, wake or ask to start again.
+            if let Input::Start {
+                session_id,
+                project_id,
+                request_id,
+                objective,
+                token_budget,
+            } = &input
+            {
+                let request = crate::store::PeerGoalStart {
+                    caller_session_id: caller.clone(),
+                    request_id: request_id.clone(),
+                    target_session_id: session_id.clone(),
+                    project_id: project_id.clone(),
+                    objective: objective.clone(),
+                    token_budget: *token_budget,
+                };
+                let path = services.runtime.store_path.clone();
+                match crate::store::spawn_blocking_store_caller(move || {
+                    crate::store::peer_goals::lookup_peer_goal_start(&path, &request)
+                })
+                .await
+                {
+                    Ok(Ok(Some(receipt))) => {
+                        let mut value = json!({"status":"replayed","receipt":receipt});
+                        redact(&mut value);
+                        return ToolResult::text(value.to_string(), false);
+                    }
+                    Ok(Ok(None)) => (),
+                    Ok(Err(error)) | Err(error) => return failure(error),
+                }
+            }
+            match context
+                .authorize_during_execution(broker.authorize_peer_goal(
+                    &input.resources(),
+                    context,
+                    context.cancellation(services.runtime),
+                ))
+                .await
+            {
+                AuthorizationOutcome::Denied(reason) => {
+                    return ToolResult::text(
+                        json!({"status":"denied","detail":reason}).to_string(),
+                        true,
+                    )
+                }
+                AuthorizationOutcome::Allowed => (),
+            }
+            if let Err(e) = broker
+                .validate_execution_observation_binding(
+                    &services.runtime.store_path,
+                    services.runtime.session_id.as_deref(),
+                    services.runtime.backend.as_ref(),
+                )
+                .await
+            {
+                return failure(e);
+            }
+            let (_, target, project) = input.scope();
+            let path = services.runtime.store_path.clone();
+            let target = target.to_owned();
+            let project = project.map(str::to_owned);
+            // Passive exact revalidation after the approval wait, including caller
+            // binding; authenticated-human tool contexts cannot skip the reply.
+            let is_read = matches!(&input, Input::Read { .. });
+            let check_target = target.clone();
+            let check_project = project.clone();
+            let checked =
+                crate::store::spawn_blocking_store_caller(move || -> anyhow::Result<_> {
+                    if is_read {
+                        let summary = crate::sessions::load_session_summary(&path, &check_target)?
+                            .ok_or_else(|| anyhow::anyhow!("target is unavailable"))?;
+                        anyhow::ensure!(
+                            !summary.sandboxed && summary.ssh.is_none(),
+                            "target requires Local execution"
+                        );
+                    }
+                    match crate::store::load_direct_task(&path, &check_target)? {
+                        crate::store::TaskLookup::Found(snapshot)
+                            if snapshot.behavior == "direct" =>
+                        {
+                            // Scope and goal data come from the same read transaction;
+                            // an earlier membership query cannot authorize this snapshot.
+                            anyhow::ensure!(
+                                snapshot.project_id == check_project,
+                                "target is unavailable in the named project scope"
+                            );
+                            Ok(snapshot)
+                        }
+                        _ => anyhow::bail!(
+                            "unavailable: target is not an independent plain direct task"
+                        ),
+                    }
+                })
+                .await;
+            let snapshot = match checked {
+                Ok(Ok(snapshot)) => snapshot,
+                Ok(Err(e)) | Err(e) => return failure(e),
+            };
+            if let Input::Read { .. } = input {
+                return ToolResult::text(json!({"status":"found","session_id":target,"as_of":crate::store::now_utc(),"goal":snapshot.goal,"goal_objective_truncated":snapshot.goal_objective_truncated,"goal_last_run_id":snapshot.goal_last_run_id,"prior_goals":snapshot.prior_goals,"provenance":"passive durable goal owner; no attachment or wake"}).to_string(), false);
+            }
+            let action = match input {
+                Input::Start {
+                    request_id,
+                    objective,
+                    token_budget,
+                    ..
+                } => PeerGoalAction::Start {
+                    request_id,
+                    objective,
+                    token_budget,
+                },
+                Input::Pause {
+                    goal_id,
+                    expected_version,
+                    ..
+                } => PeerGoalAction::Pause {
+                    goal_id,
+                    expected_version,
+                },
+                Input::Resume {
+                    goal_id,
+                    expected_version,
+                    ..
+                } => PeerGoalAction::Resume {
+                    goal_id,
+                    expected_version,
+                },
+                Input::Read { .. } => unreachable!(),
+            };
+            let controller =
+                match crate::peer_goal_control::controller_for(&services.runtime.store_path) {
+                    Ok(controller) => controller,
+                    Err(e) => return failure(e),
+                };
+            match controller
+                .control(AuthorizedPeerGoal {
+                    caller,
+                    target,
+                    project,
+                    action,
+                })
+                .await
+            {
+                Ok(outcome) => match serde_json::to_value(outcome) {
+                    Ok(mut value) => {
+                        redact(&mut value);
+                        ToolResult::text(value.to_string(), false)
+                    }
+                    Err(error) => failure(error),
+                },
+                Err(e) => failure(e),
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+#[path = "peer_goals_tests.rs"]
+mod tests;
+
+fn redact(value: &mut Value) {
+    match value {
+        Value::String(text) => *text = crate::model::redact_credentials(text, &[]),
+        Value::Array(values) => values.iter_mut().for_each(redact),
+        Value::Object(values) => {
+            values.values_mut().for_each(redact);
+            if let Some(Value::String(objective)) = values.get_mut("objective") {
+                let boundary = objective
+                    .char_indices()
+                    .nth(crate::store::GOAL_OBJECTIVE_CHARS)
+                    .map(|(index, _)| index);
+                if let Some(boundary) = boundary {
+                    objective.truncate(boundary);
+                }
+                values.insert(
+                    "objective_truncated".into(),
+                    Value::Bool(boundary.is_some()),
+                );
+            }
+        }
+        _ => (),
+    }
+}

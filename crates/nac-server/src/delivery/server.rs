@@ -781,6 +781,10 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::sessions::list_handler,
             delivery::session_lifecycle::create_session
         ))
+        .routes(routes!(delivery::task_questions::list_questions))
+        .routes(routes!(delivery::task_questions::read_question))
+        .routes(routes!(delivery::task_questions::answer_question))
+        .routes(routes!(delivery::task_questions::cancel_question))
         .routes(routes!(delivery::task_launches::start))
         .routes(routes!(delivery::task_launches::status))
         .routes(routes!(delivery::task_launches::cancel))
@@ -993,6 +997,25 @@ pub(crate) async fn serve_with_policy_and_readiness(
     on_listening: impl FnOnce(SocketAddr),
     readiness_policy: application::managed::ManagedReadinessPolicy,
 ) -> Result<()> {
+    serve_with_lifecycle(
+        addr,
+        policy,
+        manager,
+        on_listening,
+        readiness_policy,
+        shutdown_signal(),
+    )
+    .await
+}
+
+pub(crate) async fn serve_with_lifecycle(
+    addr: SocketAddr,
+    policy: BindPolicy,
+    manager: SessionManager,
+    on_listening: impl FnOnce(SocketAddr),
+    readiness_policy: application::managed::ManagedReadinessPolicy,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<()> {
     policy.validate(addr)?;
     // Establish the durable store before serving requests. Readiness probes
     // then verify this store in place and never create a blank replacement if
@@ -1071,7 +1094,7 @@ pub(crate) async fn serve_with_policy_and_readiness(
         control_listener.map(|listener| (listener, managed_control::router(manager.clone()))),
         app,
         manager,
-        shutdown_signal(),
+        shutdown,
         COMPLETE_SHUTDOWN_TIMEOUT,
         || std::process::exit(0),
     )
@@ -1200,15 +1223,24 @@ where
     result
 }
 
-fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {
-    eprintln!(
-        "nac: complete graceful shutdown exceeded {} ms; forcing runtime exit",
-        timeout.as_millis()
-    );
+pub(crate) fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {
+    // Diagnostic readers disappear with a dead parent, and a stalled reader
+    // can leave another writer holding stderr's lock. Neither may defeat the
+    // independent watchdog. Best-effort reporting never gates forced exit.
+    let _ = std::thread::Builder::new()
+        .name("nac-shutdown-diagnostic".into())
+        .spawn(move || {
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "nac: complete graceful shutdown exceeded {} ms; forcing runtime exit",
+                timeout.as_millis()
+            );
+        });
     force_shutdown();
 }
 
-async fn shutdown_signal() {
+pub(crate) async fn shutdown_signal() {
     let ctrl_c = async {
         if let Err(error) = tokio::signal::ctrl_c().await {
             eprintln!("nac: failed to install Ctrl-C handler: {error}");

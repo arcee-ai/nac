@@ -5,6 +5,9 @@ mod build_identity;
 mod compaction;
 mod delegation_runtime;
 mod delivery;
+#[cfg(unix)]
+#[doc(hidden)]
+pub mod desktop_launch;
 mod executable;
 mod filesystem;
 mod fork;
@@ -617,6 +620,12 @@ impl SessionManager {
         nac_core::traditional_children::register_controller(
             store_path.clone(),
             Arc::new(ServerTraditionalChildController {
+                manager: Arc::downgrade(&manager.inner),
+            }),
+        );
+        nac_core::peer_goal_control::register_controller(
+            store_path.clone(),
+            Arc::new(application::peer_goals::ServerPeerGoalController {
                 manager: Arc::downgrade(&manager.inner),
             }),
         );

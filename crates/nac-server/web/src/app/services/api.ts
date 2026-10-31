@@ -1,9 +1,23 @@
 // Standalone compatibility facade; feature owners obtain their API from runtime context.
 import { createNacApi } from "../../../packages/nac-client/src/api.js";
-import type { TaskLaunchRecord, TaskLaunchRequest, TaskLaunchSourceInfo } from "@/app/types/api";
+import type {
+  TaskLaunchRecord,
+  TaskLaunchRequest,
+  TaskLaunchSourceInfo,
+  QuestionRecord,
+  QuestionAnswer,
+  QuestionAnswerReceipt,
+} from "@/app/types/api";
 import { nacClient } from "@/app/services/nacClient";
 export * from "../../../packages/nac-client/src/api.js";
 export type NativeApi = ReturnType<typeof createNacApi> & {
+  taskQuestions(sessionId: string, signal?: AbortSignal): Promise<QuestionRecord[]>;
+  answerTaskQuestion(sessionId: string, answer: QuestionAnswer): Promise<QuestionAnswerReceipt>;
+  cancelTaskQuestion(
+    sessionId: string,
+    requestId: string,
+    expectedRevision: number,
+  ): Promise<QuestionRecord>;
   startTaskLaunch(request: TaskLaunchRequest): Promise<TaskLaunchRecord>;
   taskLaunchStatus(id: string, signal?: AbortSignal): Promise<TaskLaunchRecord>;
   taskLaunchInventory(projectId: string, signal?: AbortSignal): Promise<TaskLaunchRecord[]>;
@@ -17,6 +31,20 @@ export function createNativeApi(client: typeof nacClient): NativeApi {
   const request = client.transport.request.bind(client.transport);
   return {
     ...createNacApi(client),
+    taskQuestions: (id, signal) =>
+      request<QuestionRecord[]>("GET", `/sessions/${encodeURIComponent(id)}/questions`, { signal }),
+    answerTaskQuestion: (id, answer) =>
+      request<QuestionAnswerReceipt>(
+        "POST",
+        `/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(answer.request_id)}/answer`,
+        { body: answer },
+      ),
+    cancelTaskQuestion: (id, questionId, revision) =>
+      request<QuestionRecord>(
+        "POST",
+        `/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(questionId)}/cancel`,
+        { body: { expected_revision: revision } },
+      ),
     startTaskLaunch: (body: TaskLaunchRequest) =>
       request<TaskLaunchRecord>("POST", "/task-launches", { body }),
     taskLaunchStatus: (id: string, signal?: AbortSignal) =>

@@ -444,9 +444,10 @@ fn schema_31_upgrade_preserves_existing_worker_receipt() {
         )
         .unwrap();
     assert_eq!(history, None);
-    let migrated_version: i64 = conn
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .unwrap();
-    assert_eq!(migrated_version, schema_version());
+    assert_eq!(
+        conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        schema_version()
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
