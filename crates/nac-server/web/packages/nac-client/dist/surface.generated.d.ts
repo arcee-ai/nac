@@ -109,6 +109,10 @@ export declare const NAC_API_SURFACE: {
     readonly "GET /sessions/{session_id}/events": "api.getRecentEvents";
     readonly "GET /sessions/{session_id}/events/stream": "stream.subscribeToSessionEvents";
     readonly "POST /sessions/{session_id}/fork": "api.forkSession";
+    readonly "POST /sessions/{session_id}/selection-questions": "private:standalone Local direct question about selected reply text";
+    readonly "GET /sessions/{session_id}/selection-questions": "private:standalone selection question history";
+    readonly "GET /sessions/{session_id}/selection-questions/{question_id}": "private:standalone selection question status";
+    readonly "POST /sessions/{session_id}/selection-questions/{question_id}/cancel": "private:standalone selection question cancellation";
     readonly "DELETE /sessions/{session_id}/forks/{fork_id}": "api.dismissSessionFork";
     readonly "GET /sessions/{session_id}/goal": "api.getGoal";
     readonly "POST /sessions/{session_id}/goal": "api.createGoal";

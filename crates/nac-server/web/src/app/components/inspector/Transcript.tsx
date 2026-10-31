@@ -19,6 +19,7 @@ import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useTranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
 import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
+import { SelectionQuestions } from "@/app/features/selection-questions/SelectionQuestions";
 import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -658,6 +659,17 @@ export function Transcript({
       </div>
 
       <JumpToLatest visible={showJumpButton} onJump={jumpToLatest} />
+
+      {/* Questions about selected reply text run beside the chat and never
+          enter its run, inbox or transcript. Local direct chats only. */}
+      {snapshot && !readOnly && snapshot.metadata.behavior === "direct" ? (
+        <SelectionQuestions
+          sessionId={sessionId}
+          messages={snapshot.messages}
+          windowStart={messageWindowStart}
+          containerRef={scrollRef}
+        />
+      ) : null}
 
       <RevertModal
         open={revertTarget !== null}

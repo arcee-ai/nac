@@ -808,7 +808,10 @@ function Me(e) {
 			body: {},
 			headers: { "Idempotency-Key": e }
 		}),
-		generateOverview: (e) => t("POST", `/sessions/${encodeURIComponent(e)}/overview`)
+		generateOverview: (e) => t("POST", `/sessions/${encodeURIComponent(e)}/overview`),
+		askSelectionQuestion: (e, n) => t("POST", `/sessions/${encodeURIComponent(e)}/selection-questions`, { body: n }),
+		listSelectionQuestions: (e, n) => t("GET", `/sessions/${encodeURIComponent(e)}/selection-questions`, { signal: n }),
+		cancelSelectionQuestion: (e, n) => t("POST", `/sessions/${encodeURIComponent(e)}/selection-questions/${encodeURIComponent(n)}/cancel`)
 	};
 }
 var Ne = Me(de);

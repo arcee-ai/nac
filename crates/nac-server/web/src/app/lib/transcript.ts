@@ -87,7 +87,16 @@ export type TranscriptBlock =
       /** The model is producing this reasoning right now. */
       streaming: boolean;
     }
-  | { kind: "text"; key: string; text: string }
+  | {
+      kind: "text";
+      key: string;
+      text: string;
+      /**
+       * Raw snapshot index of the persisted assistant message this prose came
+       * from. Absent while it is only a stream, which nobody can ask about.
+       */
+      messageIndex?: number;
+    }
   | { kind: "workset"; key: string; worksetId: string; pending: boolean }
   | { kind: "tool"; key: string; name: string; pending: boolean }
   | { kind: "tool-detail"; key: string; presentation: ToolPresentation }
@@ -700,6 +709,7 @@ export function buildTranscript(
         kind: "text",
         key: `text-${nextOrdinal(blocks, "text")}`,
         text: content,
+        messageIndex: absoluteIndex,
       });
     }
 

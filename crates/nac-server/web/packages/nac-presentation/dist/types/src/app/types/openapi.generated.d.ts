@@ -138,6 +138,19 @@ export interface components {
         ApiErrorBody: {
             error: string;
         };
+        AskSelectionQuestionRequest: {
+            excerpt: string;
+            question: string;
+            request_key: string;
+            selection_end: number;
+            selection_start: number;
+            source_content_sha256: string;
+            source_message_index: number;
+        };
+        AskSelectionQuestionResponse: {
+            question: components["schemas"]["SelectionQuestionResponse"];
+            replayed: boolean;
+        };
         AssignSessionRequest: {
             session_id: string;
         };
@@ -1194,6 +1207,50 @@ export interface components {
             shm_size?: string | null;
             workdir?: string | null;
         };
+        SelectionQuestionLimits: {
+            history_limit: number;
+            max_answer_chars: number;
+            max_excerpt_chars: number;
+            max_prompt_context_chars: number;
+            max_question_chars: number;
+            max_source_context_chars: number;
+            provider_timeout_secs: number;
+        };
+        SelectionQuestionListResponse: {
+            items: components["schemas"]["SelectionQuestionResponse"][];
+            limits: components["schemas"]["SelectionQuestionLimits"];
+        };
+        SelectionQuestionModel: {
+            backend: string;
+            config_version: number;
+            model: string;
+        };
+        SelectionQuestionResponse: {
+            answer: string | null;
+            answer_truncated: boolean;
+            completed_at: string | null;
+            created_at: string;
+            error: string | null;
+            excerpt: string;
+            model: components["schemas"]["SelectionQuestionModel"];
+            question: string;
+            question_id: string;
+            request_key: string;
+            source: components["schemas"]["SelectionQuestionSource"];
+            status: components["schemas"]["SelectionQuestionStatus"];
+            tool_call_attempted: boolean;
+            updated_at: string;
+            usage: components["schemas"]["TokenUsage"] | null;
+        };
+        SelectionQuestionSource: {
+            content_sha256: string;
+            has_preceding_prompt: boolean;
+            message_index: number;
+            selection_end: number;
+            selection_start: number;
+            source_text_truncated: boolean;
+        };
+        SelectionQuestionStatus: "pending" | "answered" | "failed" | "canceled" | "interrupted";
         SessionBehavior: "orchestrator" | "direct" | "direct-with-orchestrator";
         SessionClientId: string;
         SessionEvent: {

@@ -7146,6 +7146,305 @@
         }
       }
     },
+    "/sessions/{session_id}/selection-questions": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_selection_questions",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded question history, separate from the transcript",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionQuestionListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_selection_questions",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskSelectionQuestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Admitted (or replayed) question; the answer arrives asynchronously",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskSelectionQuestionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, bounds, unmappable selection or model configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Unsupported chat, changed or deleted source, conflicting request key, or a question already in flight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "JSON body validation failed, including unknown fields",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many questions in flight on this host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Persistence failure; retry the same request key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Host maintenance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/selection-questions/{question_id}": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_selection_questions_question_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "question_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One question",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionQuestionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or question not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/selection-questions/{question_id}/cancel": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_selection_questions_question_id_cancel",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "question_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The question after cancellation; settled questions are unchanged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionQuestionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or question not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/skills": {
       "get": {
         "tags": [
@@ -10658,6 +10957,68 @@
         "properties": {
           "error": {
             "type": "string"
+          }
+        }
+      },
+      "AskSelectionQuestionRequest": {
+        "type": "object",
+        "required": [
+          "request_key",
+          "source_message_index",
+          "source_content_sha256",
+          "selection_start",
+          "selection_end",
+          "excerpt",
+          "question"
+        ],
+        "properties": {
+          "excerpt": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "request_key": {
+            "type": "string",
+            "description": "Client-chosen UUID. An identical retry returns the original question;\nreusing it with different arguments is a 409 conflict."
+          },
+          "selection_end": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "selection_start": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unicode scalar offsets of `excerpt` inside that visible text.",
+            "minimum": 0
+          },
+          "source_content_sha256": {
+            "type": "string",
+            "description": "SHA-256 (lowercase hex) of that message's complete visible text."
+          },
+          "source_message_index": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Canonical transcript index of the completed assistant message.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "AskSelectionQuestionResponse": {
+        "type": "object",
+        "required": [
+          "replayed",
+          "question"
+        ],
+        "properties": {
+          "question": {
+            "$ref": "#/components/schemas/SelectionQuestionResponse"
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "True when this request key was already admitted."
           }
         }
       },
@@ -16386,6 +16747,223 @@
             ]
           }
         }
+      },
+      "SelectionQuestionLimits": {
+        "type": "object",
+        "required": [
+          "max_excerpt_chars",
+          "max_question_chars",
+          "max_source_context_chars",
+          "max_prompt_context_chars",
+          "max_answer_chars",
+          "history_limit",
+          "provider_timeout_secs"
+        ],
+        "properties": {
+          "history_limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_answer_chars": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_excerpt_chars": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_prompt_context_chars": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_question_chars": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_source_context_chars": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "provider_timeout_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "SelectionQuestionListResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "limits"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SelectionQuestionResponse"
+            },
+            "description": "Oldest first, bounded to `limits.history_limit`."
+          },
+          "limits": {
+            "$ref": "#/components/schemas/SelectionQuestionLimits"
+          }
+        }
+      },
+      "SelectionQuestionModel": {
+        "type": "object",
+        "description": "The model/configuration the question was pinned to when it was admitted.",
+        "required": [
+          "model",
+          "backend",
+          "config_version"
+        ],
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "config_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "model": {
+            "type": "string"
+          }
+        }
+      },
+      "SelectionQuestionResponse": {
+        "type": "object",
+        "required": [
+          "question_id",
+          "request_key",
+          "status",
+          "source",
+          "excerpt",
+          "question",
+          "model",
+          "answer",
+          "answer_truncated",
+          "error",
+          "tool_call_attempted",
+          "usage",
+          "created_at",
+          "updated_at",
+          "completed_at"
+        ],
+        "properties": {
+          "answer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "answer_truncated": {
+            "type": "boolean"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/components/schemas/SelectionQuestionModel",
+            "description": "Model, backend and configuration version pinned at admission."
+          },
+          "question": {
+            "type": "string"
+          },
+          "question_id": {
+            "type": "string"
+          },
+          "request_key": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SelectionQuestionSource"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SelectionQuestionStatus"
+          },
+          "tool_call_attempted": {
+            "type": "boolean",
+            "description": "The provider returned a tool call. It was never executed."
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "usage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TokenUsage",
+                "description": "This question's own provider usage; never part of the chat's run usage."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SelectionQuestionSource": {
+        "type": "object",
+        "required": [
+          "message_index",
+          "content_sha256",
+          "selection_start",
+          "selection_end",
+          "source_text_truncated",
+          "has_preceding_prompt"
+        ],
+        "properties": {
+          "content_sha256": {
+            "type": "string"
+          },
+          "has_preceding_prompt": {
+            "type": "boolean"
+          },
+          "message_index": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "selection_end": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "selection_start": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "source_text_truncated": {
+            "type": "boolean",
+            "description": "The originating text was windowed to the documented context limit."
+          }
+        }
+      },
+      "SelectionQuestionStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "answered",
+          "failed",
+          "canceled",
+          "interrupted"
+        ]
       },
       "SessionBehavior": {
         "type": "string",

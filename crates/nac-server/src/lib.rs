@@ -603,6 +603,9 @@ impl SessionManager {
         if manager.managed_host().is_none() {
             application::task_launches::reconcile_startup(&store_path)?;
         }
+        if !startup_recovery_only {
+            application::selection_questions::reconcile_startup(&store_path);
+        }
         if let Err(error) = mcp_api::synchronize_mcp_oauth_redirect_uris(&manager) {
             eprintln!("MCP OAuth redirect synchronization failed: {error}");
         }

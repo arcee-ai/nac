@@ -1,6 +1,14 @@
 // Standalone compatibility facade; feature owners obtain their API from runtime context.
 import { createNacApi } from "../../../packages/nac-client/src/api.js";
-import type { TaskLaunchRecord, TaskLaunchRequest, TaskLaunchSourceInfo } from "@/app/types/api";
+import type {
+  AskSelectionQuestionRequest,
+  AskSelectionQuestionResponse,
+  SelectionQuestion,
+  SelectionQuestionList,
+  TaskLaunchRecord,
+  TaskLaunchRequest,
+  TaskLaunchSourceInfo,
+} from "@/app/types/api";
 import { nacClient } from "@/app/services/nacClient";
 export * from "../../../packages/nac-client/src/api.js";
 export type NativeApi = ReturnType<typeof createNacApi> & {
@@ -12,6 +20,12 @@ export type NativeApi = ReturnType<typeof createNacApi> & {
   getManagedUpgrade(signal?: AbortSignal): Promise<unknown>;
   startManagedUpgrade(idempotencyKey: string): Promise<unknown>;
   generateOverview(id: string): Promise<{ session_id: string; summary: string }>;
+  askSelectionQuestion(
+    sessionId: string,
+    body: AskSelectionQuestionRequest,
+  ): Promise<AskSelectionQuestionResponse>;
+  listSelectionQuestions(sessionId: string, signal?: AbortSignal): Promise<SelectionQuestionList>;
+  cancelSelectionQuestion(sessionId: string, questionId: string): Promise<SelectionQuestion>;
 };
 export function createNativeApi(client: typeof nacClient): NativeApi {
   const request = client.transport.request.bind(client.transport);
@@ -48,6 +62,24 @@ export function createNativeApi(client: typeof nacClient): NativeApi {
       request<{ session_id: string; summary: string }>(
         "POST",
         `/sessions/${encodeURIComponent(id)}/overview`,
+      ),
+
+    askSelectionQuestion: (sessionId: string, body: AskSelectionQuestionRequest) =>
+      request<AskSelectionQuestionResponse>(
+        "POST",
+        `/sessions/${encodeURIComponent(sessionId)}/selection-questions`,
+        { body },
+      ),
+    listSelectionQuestions: (sessionId: string, signal?: AbortSignal) =>
+      request<SelectionQuestionList>(
+        "GET",
+        `/sessions/${encodeURIComponent(sessionId)}/selection-questions`,
+        { signal },
+      ),
+    cancelSelectionQuestion: (sessionId: string, questionId: string) =>
+      request<SelectionQuestion>(
+        "POST",
+        `/sessions/${encodeURIComponent(sessionId)}/selection-questions/${encodeURIComponent(questionId)}/cancel`,
       ),
   };
 }

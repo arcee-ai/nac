@@ -81,6 +81,7 @@ mod process;
 pub mod run_failure;
 pub mod runtime;
 mod sandbox;
+pub mod selection_question;
 pub use sandbox::{destroy_persisted_container, reconcile_podman_creation_records};
 pub mod session_service;
 pub mod sessions;

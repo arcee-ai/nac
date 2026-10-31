@@ -643,6 +643,10 @@
     bottom: 136px;
   }
 
+[data-nac-runtime]:is(.bottom-\[160px\]), [data-nac-runtime] .bottom-\[160px\] {
+    bottom: 160px;
+  }
+
 [data-nac-runtime]:is(.-left-1), [data-nac-runtime] .-left-1 {
     left: calc(var(--spacing) * -1);
   }
@@ -713,6 +717,10 @@
 
 [data-nac-runtime]:is(.z-30), [data-nac-runtime] .z-30 {
     z-index: 30;
+  }
+
+[data-nac-runtime]:is(.z-50), [data-nac-runtime] .z-50 {
+    z-index: 50;
   }
 
 [data-nac-runtime]:is(.z-\[1\]), [data-nac-runtime] .z-\[1\] {
@@ -1295,12 +1303,20 @@
     max-height: 70vh;
   }
 
+[data-nac-runtime]:is(.max-h-\[72px\]), [data-nac-runtime] .max-h-\[72px\] {
+    max-height: 72px;
+  }
+
 [data-nac-runtime]:is(.max-h-\[75dvh\]), [data-nac-runtime] .max-h-\[75dvh\] {
     max-height: 75dvh;
   }
 
 [data-nac-runtime]:is(.max-h-\[100dvh\]), [data-nac-runtime] .max-h-\[100dvh\] {
     max-height: 100dvh;
+  }
+
+[data-nac-runtime]:is(.max-h-\[120px\]), [data-nac-runtime] .max-h-\[120px\] {
+    max-height: 120px;
   }
 
 [data-nac-runtime]:is(.max-h-\[160px\]), [data-nac-runtime] .max-h-\[160px\] {
@@ -1325,6 +1341,10 @@
 
 [data-nac-runtime]:is(.max-h-\[min\(40vh\,320px\)\]),[data-nac-runtime] .max-h-\[min\(40vh\,320px\)\] {
     max-height: min(40vh, 320px);
+  }
+
+[data-nac-runtime]:is(.max-h-\[min\(70vh\,560px\)\]),[data-nac-runtime] .max-h-\[min\(70vh\,560px\)\] {
+    max-height: min(70vh, 560px);
   }
 
 [data-nac-runtime]:is(.max-h-none), [data-nac-runtime] .max-h-none {
@@ -1533,6 +1553,10 @@
 
 [data-nac-runtime]:is(.w-\[542px\]), [data-nac-runtime] .w-\[542px\] {
     width: 542px;
+  }
+
+[data-nac-runtime]:is(.w-\[min\(380px\,calc\(100vw-32px\)\)\]),[data-nac-runtime] .w-\[min\(380px\,calc\(100vw-32px\)\)\] {
+    width: min(380px, 100vw - 32px);
   }
 
 [data-nac-runtime]:is(.w-\[min\(400px\,calc\(100vw-16px\)\)\]),[data-nac-runtime] .w-\[min\(400px\,calc\(100vw-16px\)\)\] {
@@ -4365,6 +4389,10 @@
 @media (min-width: 48rem) {
     [data-nac-runtime]:is(.md\:top-\[90px\]), [data-nac-runtime] .md\:top-\[90px\] {
       top: 90px;
+    }
+
+    [data-nac-runtime]:is(.md\:right-8), [data-nac-runtime] .md\:right-8 {
+      right: calc(var(--spacing) * 8);
     }
 
     [data-nac-runtime]:is(.md\:col-span-2), [data-nac-runtime] .md\:col-span-2 {
