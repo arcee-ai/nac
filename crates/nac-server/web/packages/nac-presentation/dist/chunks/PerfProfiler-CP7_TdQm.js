@@ -19964,7 +19964,11 @@ function nY({ toasts: e, removeToast: t }) {
 	}, [e, t]), c(() => {
 		let e = r.current;
 		return () => e.forEach((e) => clearTimeout(e));
-	}, []), e.length === 0 ? null : D(/* @__PURE__ */ T("div", {
+	}, []), D(/* @__PURE__ */ T("div", {
+		role: "region",
+		"aria-label": "Notifications",
+		"aria-live": "polite",
+		"aria-relevant": "additions",
 		className: "fixed top-4 right-4 z-[1100] flex w-[360px] max-w-[calc(100%-2rem)] flex-col gap-2 pointer-events-none",
 		children: e.map((e) => /* @__PURE__ */ T("div", {
 			className: "pointer-events-auto",

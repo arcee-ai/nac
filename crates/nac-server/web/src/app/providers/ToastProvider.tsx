@@ -84,10 +84,14 @@ function ToastContainer({
     return () => map.forEach((timer) => clearTimeout(timer));
   }, []);
 
-  if (toasts.length === 0) return null;
-
   return createPortal(
-    <div className="fixed top-4 right-4 z-[1100] flex w-[360px] max-w-[calc(100%-2rem)] flex-col gap-2 pointer-events-none">
+    <div
+      role="region"
+      aria-label="Notifications"
+      aria-live="polite"
+      aria-relevant="additions"
+      className="fixed top-4 right-4 z-[1100] flex w-[360px] max-w-[calc(100%-2rem)] flex-col gap-2 pointer-events-none"
+    >
       {toasts.map((toast) => (
         <div key={toast.id} className="pointer-events-auto">
           <Toast

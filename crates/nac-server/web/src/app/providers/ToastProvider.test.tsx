@@ -34,6 +34,11 @@ describe("notification presentation preserves provider ownership", () => {
         />
       </ToastProvider>,
     );
+    // The live region exists before its first content update. Adding an already
+    // populated status node alone is not reliably announced by assistive tech.
+    const region = screen.getByRole("region", { name: "Notifications" });
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    expect(region.textContent).toBe("");
     act(() => {
       api.success("Saved", { keep: true });
       api.info("Queued", { keep: true });
