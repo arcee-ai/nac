@@ -33,6 +33,7 @@ func executable(_ pid: Int32) -> String {
 func node(_ identity: StartupProcessIdentity) -> [String: Any] {
     var value = identity.record
     value.merge(["kind": identity.pid == 10 ? "app" : "engine", "environment": fixtureEnvironment,
+        "environment_role": identity.pid == 10 ? "launcher" : "engine",
         "arguments_sha256": String(repeating: "c", count: 64), "serving": identity.pid == 11,
         "configuration_helper": false]) { _, new in new }
     if identity.pid == 10 { value["app_launch_epoch"] = 1234.5; value["windows"] = [17] }
@@ -129,6 +130,7 @@ class ProductionObserverControls(unittest.TestCase):
     def config(self, root='/private/nac342-xctest-unit'):
         return {'app_path': '/private/nac342-xctest-unit/NAC.app', 'fixture_root': root,
                 'environment': {'HOME': '/private/owned home', 'NAC_HOME': '/private/owned home/nac'},
+                'child_environment': {'HOME': '/private/owned home', 'NAC_HOME': '/private/owned home/nac'},
                 'scenario': 'onboarding', 'native_sha256': 'a' * 64}
 
     def owner(self, frames):

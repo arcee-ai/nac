@@ -148,14 +148,13 @@ class OwnerWitness:
                 require(isinstance(node, dict) and all(type(node.get(key)) is int for key in
                         ('pid', 'parent', 'uid', 'start_seconds', 'start_microseconds')))
                 common = {'pid', 'parent', 'uid', 'start_seconds', 'start_microseconds', 'executable',
-                          'kind', 'environment', 'arguments_sha256', 'serving', 'configuration_helper'}
+                          'kind', 'environment', 'environment_role', 'arguments_sha256', 'serving', 'configuration_helper'}
                 require(set(node) == common | ({'app_launch_epoch', 'windows'} if node.get('kind') == 'app' else set())
                         and re.fullmatch('[0-9a-f]{64}', str(node.get('arguments_sha256', ''))))
                 require(node['pid'] > 0 and node['parent'] > 0 and node['uid'] == self.uid
                         and node['start_seconds'] > 0 and 0 <= node['start_microseconds'] < 1000000
                         and node['pid'] not in current and type(node.get('executable')) is str
-                        and Path(node['executable']).is_absolute()
-                        and node.get('environment') == self.config['environment'])
+                        and Path(node['executable']).is_absolute())
                 require(node.get('kind') in ('app', 'engine', 'descendant')
                         and type(node.get('serving')) is bool and type(node.get('configuration_helper')) is bool)
                 if node['pid'] in self.history:
@@ -173,6 +172,18 @@ class OwnerWitness:
                     require(node['executable'] == engine)
                 else:
                     require(node['executable'] not in (native, engine))
+                launcher, child = self.config['environment'], self.config['child_environment']
+                require(set(launcher) == set(child) and bool(launcher)
+                        and all(child[key] == value for key, value in launcher.items() if key != 'PATH'))
+                role = ('launcher' if node['kind'] == 'app' else
+                        'descendant' if node['kind'] == 'descendant' else
+                        'configuration_helper' if node['configuration_helper'] else 'engine')
+                require(node['environment_role'] == role
+                        and node['environment'] == (launcher if role == 'launcher' else child)
+                        and not any(key.endswith(('_TOKEN', '_API_KEY')) or key == 'NAC_MANAGED_CONFIG'
+                                    for key in node['environment'])
+                        and (node['configuration_helper'] != node['serving'] if node['kind'] == 'engine'
+                             else not node['configuration_helper'] and not node['serving']))
                 current[node['pid']] = node
             require(sum(node['kind'] == 'app' for node in nodes) <= 1)
             for node in nodes:
