@@ -61,3 +61,27 @@ charge. A running check can overrun a token allowance before its final sample is
 known. Deadlines use monotonic elapsed time and request exact-run cancellation;
 process cleanup may finish after the deadline. History and usage retain those
 facts rather than claiming immediate rollback or a hard provider-token cutoff.
+
+Measured on October 30, 2026 at revision `8b91042c` on an Apple M5 Max (arm64),
+under the shared exclusive Rust/browser lease:
+
+| Stored schedules | Runnable chats | Admitted / pending | Cold scan, ms | Warm p95, ms | Maximum initial admission lateness, ms | DB + WAL + SHM, KiB | Process RSS before / active, KiB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1 | 1 / 0 | 48.25 | 7.60 | 52 | 564 | 22,896 / 46,640 |
+| 10 | 4 | 4 / 6 | 153.56 | 12.14 | 179 | 624 | 49,600 / 54,304 |
+| 100 | 4 | 4 / 96 | 163.63 | 13.69 | 440 | 900 | 54,320 / 55,264 |
+
+The ignored test
+`heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention`
+runs two independent scheduler owners against one isolated fixture store and
+real Local admission. A hanging HTTP model keeps the bounded runs active while
+24 warm scans exercise contention. The fixture uses a non-Git workspace and
+initially eligible due points; RSS is for the entire test process, retained
+across the three cases. These numbers measure this bounded fixture rather than
+provider throughput or long-running history growth.
+
+The live scheduler scans every second and skips timer backlog. Startup, ordinary
+chat work, workspace conflicts, approval/readiness gates and host capacity can
+add lateness. A busy chat keeps one coalesced pending receipt; its lateness grows
+while the conflict persists. The 60-second supported minimum interval is not a
+promise of execution at an exact wall-clock instant.

@@ -766,3 +766,76 @@ fn heartbeat_quiet_mask_and_inherited_base_cannot_hide_a_same_second_ordinary_re
         "2026-10-30 12:01:00"
     );
 }
+
+#[test]
+fn heartbeat_controls_preserve_quiet_metadata_before_and_after_active_settlement() {
+    for pause_during_run in [false, true] {
+        let f = Fixture::new();
+        let schedule = f.create();
+        let conn = open_runtime_connection(&f.path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET updated_at='2026-10-30 12:00:00' WHERE session_id='direct'",
+            [],
+        )
+        .unwrap();
+        let pending = materialize_heartbeats(&f.path, 61_000).unwrap().remove(0);
+        let active = f.admit(&pending, 61_000);
+        committed(&f, &active);
+        let pause = || {
+            f.control(
+                HeartbeatAction::Pause {
+                    schedule_id: schedule.schedule_id.clone(),
+                    expected_version: 1,
+                },
+                62_000,
+            )
+        };
+        if pause_during_run {
+            pause();
+        }
+        report(&f, &active, HeartbeatOutcome::Unchanged);
+        conn.execute(
+            "UPDATE sessions SET updated_at='2026-10-30 12:01:00' WHERE session_id='direct'",
+            [],
+        )
+        .unwrap();
+        f.settle(&active, HeartbeatOutcome::Unknown, Some(1));
+        if !pause_during_run {
+            pause();
+        }
+        f.control(
+            HeartbeatAction::Resume {
+                schedule_id: schedule.schedule_id.clone(),
+                expected_version: 2,
+            },
+            65_000,
+        );
+        assert_eq!(
+            heartbeat_attention_snapshot(&f.path)
+                .unwrap()
+                .quiet_updated_at["direct"],
+            "2026-10-30 12:00:00"
+        );
+        let pending = materialize_heartbeats(&f.path, 121_000).unwrap().remove(0);
+        let active = f.admit(&pending, 121_000);
+        committed(&f, &active);
+        report(&f, &active, HeartbeatOutcome::Unchanged);
+        conn.execute(
+            "UPDATE sessions SET updated_at='2026-10-30 12:02:00' WHERE session_id='direct'",
+            [],
+        )
+        .unwrap();
+        f.settle(&active, HeartbeatOutcome::Unknown, Some(1));
+        assert_eq!(
+            heartbeat_attention_snapshot(&f.path)
+                .unwrap()
+                .quiet_updated_at["direct"],
+            "2026-10-30 12:00:00"
+        );
+        conn.execute("INSERT INTO session_run_outcomes(session_id,run_id,disposition,finished_at) VALUES('direct','later-human','completed','2026-10-30 12:02:00')", []).unwrap();
+        assert!(!heartbeat_attention_snapshot(&f.path)
+            .unwrap()
+            .quiet_updated_at
+            .contains_key("direct"));
+    }
+}

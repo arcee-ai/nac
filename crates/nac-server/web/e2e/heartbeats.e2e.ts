@@ -174,7 +174,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   const reopened = await context.newPage();
   await reopened.goto(`${harness.baseUrl}/#/session/${session}/heartbeats`);
   await reopened.getByRole("button", { name: "Show panel", exact: true }).click();
-  await reopened.getByRole("button", { name: "Local job check", exact: false }).click();
+  await reopened.getByRole("button", { name: "Local job check finished", exact: true }).click();
   await expect(reopened.getByRole("link", { name: `Run ${active.run_id}` })).toBeVisible();
   await expect(
     reopened.getByText("Local job-result.txt contains JOB_READY.", { exact: true }),
@@ -255,10 +255,13 @@ test("human heartbeat UI reconciles lost create acknowledgement and controls an 
     .toBe("interrupted");
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByRole("button", { name: "Delete", exact: true })).toBeDisabled();
-  const remaining = await (
-    await request.get(`${harness.baseUrl}/heartbeats?session_id=${session}`)
-  ).json();
-  expect(remaining).toEqual([]);
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`${harness.baseUrl}/heartbeats?session_id=${session}`)).json())
+          .length,
+    )
+    .toBe(0);
   harness.provider.assertConsumed();
 });
 
@@ -274,6 +277,12 @@ test("heartbeat execution deadline cancels supervised descendants and suspends f
     request.post(`${harness.baseUrl}/sessions/${session}/heartbeats/control`, {
       data: { request_id: randomUUID(), operation },
     });
+  // A permitted file-backed program creates a real supervised descendant.
+  // Shell redirection/nested shell bodies remain hard-denied in this journey.
+  await fs.writeFile(
+    path.join(harness.runRoot, "workspace/heartbeat-deadline.cjs"),
+    "const fs = require('node:fs');\nconst { spawn } = require('node:child_process');\nconst child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' });\nfs.writeFileSync('heartbeat-child.pid', String(child.pid));\nchild.on('exit', () => process.exit(0));\nsetInterval(() => {}, 1000);\n",
+  );
   const created = await control({
     action: "create",
     spec: {
@@ -294,7 +303,7 @@ test("heartbeat execution deadline cancels supervised descendants and suspends f
       name: "exec_command",
       callId: "deadline-child",
       arguments: {
-        cmd: "sleep 30 & echo $! > heartbeat-child.pid; wait",
+        cmd: "node heartbeat-deadline.cjs",
         yield_time_ms: 30000,
       },
     },
@@ -355,6 +364,10 @@ test("crash after a Local effect suspends the exact occurrence without replaying
     request.post(`${harness.baseUrl}/sessions/${session}/heartbeats/control`, {
       data: { request_id: randomUUID(), operation },
     });
+  await fs.writeFile(
+    path.join(harness.runRoot, "workspace/heartbeat-crash.cjs"),
+    "require('node:fs').appendFileSync('crash-effect.txt', 'one effect\\n');\n",
+  );
   const created = await control({
     action: "create",
     spec: {
@@ -373,7 +386,7 @@ test("crash after a Local effect suspends the exact occurrence without replaying
       kind: "function_call",
       name: "exec_command",
       callId: "crash-effect",
-      arguments: { cmd: "printf 'one effect\\n' >> crash-effect.txt", yield_time_ms: 1000 },
+      arguments: { cmd: "node heartbeat-crash.cjs", yield_time_ms: 1000 },
     },
   );
   const gate = new ScriptGate();
