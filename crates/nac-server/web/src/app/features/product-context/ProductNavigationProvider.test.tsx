@@ -216,3 +216,17 @@ it("does not attach or navigate for an unavailable current session", async () =>
   expect(fetch.mock.calls).toHaveLength(1);
   expect(String(fetch.mock.calls[0]?.[0])).toContain("/product-destinations/resolve");
 });
+
+it("hides cached facts and destinations when a replacement serving incarnation rejects the read", async () => {
+  const { fetch } = fixture();
+  fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
+  await screen.findByText("installed-runtime");
+  fireEvent.click(screen.getByRole("button", { name: "Sidebar MCP" }));
+  fetch.mockResolvedValueOnce(
+    Response.json({ error: "Product context unavailable; presentation changed" }, { status: 404 }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Reload this app");
+  expect(screen.queryByText("installed-runtime")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Open MCP settings" })).toBeNull();
+});

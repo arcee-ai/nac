@@ -48,7 +48,14 @@ export function ProductContextModal({
           authorization checks.
         </p>
         {isPending ? <p role="status">Reading capabilities…</p> : null}
-        {error ? <p role="alert">Product context is unavailable.</p> : null}
+        {error ? (
+          <p role="alert">
+            Product context is unavailable.
+            {error.message.includes("presentation changed")
+              ? " Reload this app to reconnect to its current serving instance."
+              : ""}
+          </p>
+        ) : null}
         {data ? (
           <>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 break-words">

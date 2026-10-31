@@ -250,3 +250,40 @@ test("replacing an injected runtime discards a pending navigation for the same s
     await fixture.stop();
   }
 });
+
+test("an old standalone document cannot read or navigate a replacement server at the same origin/build", async ({
+  harness,
+  request,
+  page,
+}) => {
+  test.skip(
+    process.env.NAC_PRODUCT_CONTEXT_BASELINE === "1",
+    "Product serving-incarnation fence is new",
+  );
+  const id = await createSession(request, harness, "direct");
+  await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
+  await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
+  let context = await inspect(page, false);
+  await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  const origin = harness.baseUrl;
+  await harness.restart("1", undefined, true);
+  expect(harness.baseUrl).toBe(origin);
+  context = page.getByRole("dialog", { name: "NAC capabilities", exact: true });
+  await page.getByRole("button", { name: "NAC capabilities", exact: true }).click();
+  await expect(context.getByRole("alert")).toHaveText(
+    "Product context is unavailable. Reload this app to reconnect to its current serving instance.",
+  );
+  await expect(context.getByRole("button", { name: "Open MCP settings", exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
+  context = await inspect(page, false);
+  await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toBeVisible();
+  expect(harness.provider.requests).toHaveLength(0);
+});

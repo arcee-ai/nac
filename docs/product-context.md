@@ -53,3 +53,9 @@ reference to the exact serving owner and cannot follow a replacement at the
 same store path. No durable schema changes or Guide installation are required.
 The response identifies its `installed-runtime` source and build; Guide document
 and section references remain separate version-matched knowledge sources.
+
+Standalone browser requests additionally carry the existing bootstrapped serving
+incarnation on these two product endpoints. A replacement router rejects an old
+document even at the same origin and build. This optional rejection-only header
+is not authentication; headless clients omit it, and embedded consumers retain
+their caller-owned gateway/runtime binding. Failed context reads hide cached facts.

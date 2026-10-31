@@ -1,5 +1,5 @@
 use super::http_listener::HttpListener;
-use super::presentation_bootstrap::PresentationDocument;
+use super::presentation_bootstrap::{PresentationBinding, PresentationDocument};
 use super::ui_configuration::{self, UiConfiguration};
 use crate::*;
 use nac_core::commands::{slash_command_definitions, SlashCommandDefinition};
@@ -604,7 +604,14 @@ pub fn router(manager: SessionManager) -> Router {
                 .config(SwaggerConfig::default().validator_url("none")),
         )
         .layer(middleware::from_fn(secure_docs));
-    secure_public_router(api.merge(docs).merge(embedded_frontend_router()), manager)
+    let presentation = PresentationBinding::capture();
+    let document = presentation.embedded_document();
+    secure_public_router(
+        api.merge(docs)
+            .merge(embedded_frontend_router(document))
+            .layer(axum::Extension(presentation)),
+        manager,
+    )
 }
 
 fn secure_public_router(router: Router, manager: SessionManager) -> Router {
@@ -662,12 +669,12 @@ fn managed_migration_recovery_router(manager: SessionManager) -> Router {
     ))
 }
 
-fn embedded_frontend_router() -> Router {
+fn embedded_frontend_router(document: PresentationDocument) -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
         .route("/assets/{*path}", get(serve_asset))
-        .layer(axum::Extension(PresentationDocument::capture()))
+        .layer(axum::Extension(document))
 }
 
 fn documented_api() -> OpenApiRouter<SessionManager> {

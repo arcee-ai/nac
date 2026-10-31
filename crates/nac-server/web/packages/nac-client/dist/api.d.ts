@@ -32,7 +32,9 @@ export interface ThreadEventsOptions {
     limit?: number;
     signal?: AbortSignal;
 }
-export declare function createNacApi(nacClient: NacClient): {
+export declare function createNacApi(nacClient: NacClient, options?: {
+    productContextBinding?: string;
+}): {
     submitShellCommand: (id: string, body: ShellCommandRequest, signal?: AbortSignal) => Promise<{
         accepted_at_epoch_ms: number;
         command: string;

@@ -1,4 +1,4 @@
-import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Br as f, Bt as p, C as m, Ci as h, Cn as g, Cr as _, Ct as v, D as y, Di as b, Dn as x, Dr as S, Dt as C, E as w, Ei as T, En as E, Er as D, Et as O, F as k, Fi as A, Fn as j, Fr as M, Ft as ee, G as te, Gi as ne, Gn as re, Gr as ie, Gt as ae, H as oe, Hi as se, Hn as ce, Hr as le, Ht as ue, I as de, Ii as fe, In as pe, Ir as me, It as he, J as ge, Ji as N, Jn as _e, Jr as ve, Jt as ye, K as be, Ki as P, Kn as xe, Kr as F, Kt as Se, L as Ce, Li as we, Ln as I, Lr as Te, Lt as Ee, M as De, Mi as Oe, Mn as ke, Mr as Ae, Mt as je, N as Me, Ni as Ne, Nn as Pe, Nr as Fe, Nt as Ie, O as Le, Oi as L, On as Re, Or as ze, Ot as Be, P as Ve, Pi as He, Pn as Ue, Pr as We, Pt as Ge, Q as Ke, Qi as R, Qn as qe, Qr as Je, Qt as Ye, R as Xe, Ri as Ze, Rn as Qe, Rr as $e, Rt as et, S as tt, Si as nt, Sn as rt, Sr as it, St as at, T as ot, Ti as z, Tn as st, Tr as ct, Tt as lt, U as ut, Ui as dt, Un as ft, Ur as pt, Ut as mt, V as ht, Vn as gt, Vr as _t, Vt as vt, W as yt, Wi as B, Wn as bt, Wr as xt, Wt as St, X as Ct, Xi as V, Xn as wt, Xr as Tt, Xt as Et, Y as Dt, Yi as Ot, Yn as kt, Yr as At, Yt as jt, Z as Mt, Zi as H, Zn as Nt, Zr as Pt, Zt as Ft, _ as It, _i as Lt, _n as Rt, _r as zt, _t as Bt, a as Vt, ai as Ht, an as Ut, ar as Wt, at as Gt, b as Kt, bi as qt, bn as Jt, br as Yt, bt as Xt, c as Zt, ci as Qt, cn as $t, cr as en, ct as tn, d as nn, di as rn, dn as an, dr as on, dt as sn, ei as cn, en as ln, er as un, et as dn, f as fn, fi as pn, fn as mn, fr as hn, ft as gn, g as _n, gi as vn, gn as yn, gr as bn, gt as xn, h as Sn, hn as Cn, hr as wn, ht as Tn, i as En, ii as Dn, in as On, ir as kn, it as An, j as jn, ji as Mn, jn as Nn, jr as Pn, jt as Fn, k as In, ki as Ln, kn as Rn, kr as zn, kt as Bn, l as Vn, li as Hn, ln as Un, lr as Wn, lt as Gn, m as Kn, mi as qn, mn as Jn, mr as Yn, mt as Xn, n as Zn, ni as Qn, nn as $n, nr as er, nt as tr, o as nr, oi as rr, on as ir, or as ar, ot as or, p as sr, pi as cr, pn as lr, pr as ur, pt as dr, q as fr, qi as pr, qn as mr, qr as hr, qt as gr, ri as _r, rn as vr, rr as yr, rt as br, s as xr, si as Sr, sn as Cr, sr as wr, st as Tr, t as Er, ti as Dr, tn as Or, tr as kr, tt as Ar, u as jr, ui as Mr, un as Nr, ur as Pr, ut as Fr, v as Ir, vi as Lr, vn as Rr, vr as zr, vt as Br, w as Vr, wi as Hr, wn as Ur, wr as Wr, wt as Gr, x as Kr, xi as qr, xn as Jr, xr as Yr, xt as Xr, y as Zr, yi as Qr, yn as $r, yr as ei, yt as ti, z as ni, zi as ri, zn as ii, zr as ai, zt as oi } from "./chunks/PerfProfiler-CnHxwDK0.js";
+import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Br as f, Bt as p, C as m, Ci as h, Cn as g, Cr as _, Ct as v, D as y, Di as b, Dn as x, Dr as S, Dt as C, E as w, Ei as T, En as E, Er as D, Et as O, F as k, Fi as A, Fn as j, Fr as M, Ft as ee, G as te, Gi as ne, Gn as re, Gr as ie, Gt as ae, H as oe, Hi as se, Hn as ce, Hr as le, Ht as ue, I as de, Ii as fe, In as pe, Ir as me, It as he, J as ge, Ji as N, Jn as _e, Jr as ve, Jt as ye, K as be, Ki as P, Kn as xe, Kr as F, Kt as Se, L as Ce, Li as we, Ln as I, Lr as Te, Lt as Ee, M as De, Mi as Oe, Mn as ke, Mr as Ae, Mt as je, N as Me, Ni as Ne, Nn as Pe, Nr as Fe, Nt as Ie, O as Le, Oi as L, On as Re, Or as ze, Ot as Be, P as Ve, Pi as He, Pn as Ue, Pr as We, Pt as Ge, Q as Ke, Qi as R, Qn as qe, Qr as Je, Qt as Ye, R as Xe, Ri as Ze, Rn as Qe, Rr as $e, Rt as et, S as tt, Si as nt, Sn as rt, Sr as it, St as at, T as ot, Ti as z, Tn as st, Tr as ct, Tt as lt, U as ut, Ui as dt, Un as ft, Ur as pt, Ut as mt, V as ht, Vn as gt, Vr as _t, Vt as vt, W as yt, Wi as B, Wn as bt, Wr as xt, Wt as St, X as Ct, Xi as V, Xn as wt, Xr as Tt, Xt as Et, Y as Dt, Yi as Ot, Yn as kt, Yr as At, Yt as jt, Z as Mt, Zi as H, Zn as Nt, Zr as Pt, Zt as Ft, _ as It, _i as Lt, _n as Rt, _r as zt, _t as Bt, a as Vt, ai as Ht, an as Ut, ar as Wt, at as Gt, b as Kt, bi as qt, bn as Jt, br as Yt, bt as Xt, c as Zt, ci as Qt, cn as $t, cr as en, ct as tn, d as nn, di as rn, dn as an, dr as on, dt as sn, ei as cn, en as ln, er as un, et as dn, f as fn, fi as pn, fn as mn, fr as hn, ft as gn, g as _n, gi as vn, gn as yn, gr as bn, gt as xn, h as Sn, hn as Cn, hr as wn, ht as Tn, i as En, ii as Dn, in as On, ir as kn, it as An, j as jn, ji as Mn, jn as Nn, jr as Pn, jt as Fn, k as In, ki as Ln, kn as Rn, kr as zn, kt as Bn, l as Vn, li as Hn, ln as Un, lr as Wn, lt as Gn, m as Kn, mi as qn, mn as Jn, mr as Yn, mt as Xn, n as Zn, ni as Qn, nn as $n, nr as er, nt as tr, o as nr, oi as rr, on as ir, or as ar, ot as or, p as sr, pi as cr, pn as lr, pr as ur, pt as dr, q as fr, qi as pr, qn as mr, qr as hr, qt as gr, ri as _r, rn as vr, rr as yr, rt as br, s as xr, si as Sr, sn as Cr, sr as wr, st as Tr, t as Er, ti as Dr, tn as Or, tr as kr, tt as Ar, u as jr, ui as Mr, un as Nr, ur as Pr, ut as Fr, v as Ir, vi as Lr, vn as Rr, vr as zr, vt as Br, w as Vr, wi as Hr, wn as Ur, wr as Wr, wt as Gr, x as Kr, xi as qr, xn as Jr, xr as Yr, xt as Xr, y as Zr, yi as Qr, yn as $r, yr as ei, yt as ti, z as ni, zi as ri, zn as ii, zr as ai, zt as oi } from "./chunks/PerfProfiler-CE-k5J6_.js";
 import * as si from "react";
 import ci, { Fragment as li, Suspense as ui, createContext as di, lazy as fi, memo as pi, use as mi, useCallback as U, useContext as hi, useEffect as W, useId as gi, useLayoutEffect as _i, useMemo as G, useRef as K, useState as q, useSyncExternalStore as vi } from "react";
 import { QueryClientProvider as yi, QueryObserver as bi, replaceEqualDeep as xi, useIsFetching as Si, useMutation as Ci, useQueries as wi, useQuery as Ti, useQueryClient as Ei } from "@tanstack/react-query";
@@ -7856,14 +7856,17 @@ function $p() {
 }
 // src/app/features/product-context/queries.ts
 function em(e, t) {
-	let { api: n } = I();
-	return Ti({
+	let { api: n } = I(), r = Ti({
 		queryKey: ["product-context", e],
 		queryFn: ({ signal: t }) => n.getProductContext(e, t),
 		enabled: t,
 		staleTime: 0,
 		retry: !1
 	});
+	return {
+		...r,
+		data: r.isError ? void 0 : r.data
+	};
 }
 // src/app/features/product-context/ProductContextModal.tsx
 function tm({ open: e, sessionId: t, onClose: n }) {
@@ -7900,9 +7903,9 @@ function tm({ open: e, sessionId: t, onClose: n }) {
 					role: "status",
 					children: "Reading capabilities…"
 				}) : null,
-				o ? /* @__PURE__ */ Y("p", {
+				o ? /* @__PURE__ */ X("p", {
 					role: "alert",
-					children: "Product context is unavailable."
+					children: ["Product context is unavailable.", o.message.includes("presentation changed") ? " Reload this app to reconnect to its current serving instance." : ""]
 				}) : null,
 				i ? /* @__PURE__ */ X(J, { children: [
 					/* @__PURE__ */ X("dl", {
@@ -14963,7 +14966,7 @@ function Nv(e, t) {
 // src/app/lib/markdownChunk.ts
 var Pv = null, Fv = !1;
 function Iv() {
-	return Pv ??= import("./chunks/markdown-renderer-DBYUBEwA.js").then((e) => e.t).then((e) => (Fv = !0, e)), Pv;
+	return Pv ??= import("./chunks/markdown-renderer-Cc_lnACH.js").then((e) => e.t).then((e) => (Fv = !0, e)), Pv;
 }
 function Lv() {
 	return Fv;

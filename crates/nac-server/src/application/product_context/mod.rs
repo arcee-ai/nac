@@ -53,7 +53,7 @@ impl ProductContextApplication {
             },
             ProductFeature {
                 feature: ProductFeatureKind::ProductNavigation,
-                label: "Typed navigation".into(),
+                label: "App navigation".into(),
                 availability: ProductAvailability::Available,
             },
         ];

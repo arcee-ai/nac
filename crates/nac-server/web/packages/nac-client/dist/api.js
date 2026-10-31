@@ -4,15 +4,23 @@ import { createUserTerminalApi } from "./userTerminalApi.js";
 import { ApiError } from "./nacClient.js";
 export { ApiError };
 const sessionPath = (id) => `/sessions/${encodeURIComponent(id)}`;
-export function createNacApi(nacClient) {
+export function createNacApi(nacClient, options = {}) {
+    // A rejection-only lifetime hint for the two standalone product queries.
+    // Other operations retain their existing transport/admission contracts.
+    const productHeaders = options.productContextBinding == null
+        ? undefined
+        : {
+            "X-NAC-Presentation-Incarnation": options.productContextBinding,
+        };
     async function request(method, path, { body, headers, signal } = {}) {
         return nacClient.transport.request(method, path, { body, headers, signal });
     }
     return {
-        getProductContext: (sessionId = null, signal) => request("GET", `/product-context${sessionId == null ? "" : `?session_id=${encodeURIComponent(sessionId)}`}`, { signal }),
+        getProductContext: (sessionId = null, signal) => request("GET", `/product-context${sessionId == null ? "" : `?session_id=${encodeURIComponent(sessionId)}`}`, { signal, headers: productHeaders }),
         resolveProductDestination: (body, signal) => request("POST", "/product-destinations/resolve", {
             body,
             signal,
+            headers: productHeaders,
         }),
         ...createUserTerminalApi(nacClient),
         ...createExecutionApi(nacClient),

@@ -344,3 +344,35 @@ it("copies immutable asset URLs without sharing caller-owned mutable options", (
   expect(instance.assets?.mathjaxFontUrl).toBe("/caller/packed/fonts");
   expect(Object.isFrozen(instance.assets)).toBe(true);
 });
+
+it("binds only standalone product requests to their bootstrapped serving incarnation", async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({}));
+  const standalone = runtime(fetch, {
+    ...scope,
+    profile: "standalone",
+    incarnation: "serving-instance",
+  });
+  await standalone.api.getProductContext("session");
+  await standalone.api.resolveProductDestination({
+    destination: "mcp-settings",
+    expected_build_id: "build",
+    session_id: "session",
+  });
+  await standalone.api.health();
+  for (const call of fetch.mock.calls.slice(0, 2))
+    expect(new Headers(call[1]?.headers).get("x-nac-presentation-incarnation")).toBe(
+      "serving-instance",
+    );
+  expect(new Headers(fetch.mock.calls[2]?.[1]?.headers).has("x-nac-presentation-incarnation")).toBe(
+    false,
+  );
+  const hosted = runtime(fetch, {
+    ...scope,
+    profile: "hosted",
+    incarnation: "gateway-owned-instance",
+  });
+  await hosted.api.getProductContext("session");
+  expect(new Headers(fetch.mock.calls[3]?.[1]?.headers).has("x-nac-presentation-incarnation")).toBe(
+    false,
+  );
+});

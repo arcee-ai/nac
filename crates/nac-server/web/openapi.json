@@ -2606,6 +2606,18 @@
                 "null"
               ]
             }
+          },
+          {
+            "name": "X-NAC-Presentation-Incarnation",
+            "in": "header",
+            "description": "Optional standalone presentation lifetime fence; grants no authority",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -2635,6 +2647,20 @@
     "/product-destinations/resolve": {
       "post": {
         "operationId": "resolve_product_destination",
+        "parameters": [
+          {
+            "name": "X-NAC-Presentation-Incarnation",
+            "in": "header",
+            "description": "Optional standalone presentation lifetime fence; grants no authority",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

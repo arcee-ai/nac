@@ -15276,8 +15276,9 @@ function Dz(e) {
 }
 // packages/nac-client/src/api.ts
 var Z = (e) => `/sessions/${encodeURIComponent(e)}`;
-function Oz(e) {
-	async function t(t, n, { body: r, headers: i, signal: a } = {}) {
+function Oz(e, t = {}) {
+	let n = t.productContextBinding == null ? void 0 : { "X-NAC-Presentation-Incarnation": t.productContextBinding };
+	async function r(t, n, { body: r, headers: i, signal: a } = {}) {
 		return e.transport.request(t, n, {
 			body: r,
 			headers: i,
@@ -15285,10 +15286,14 @@ function Oz(e) {
 		});
 	}
 	return {
-		getProductContext: (e = null, n) => t("GET", `/product-context${e == null ? "" : `?session_id=${encodeURIComponent(e)}`}`, { signal: n }),
-		resolveProductDestination: (e, n) => t("POST", "/product-destinations/resolve", {
+		getProductContext: (e = null, t) => r("GET", `/product-context${e == null ? "" : `?session_id=${encodeURIComponent(e)}`}`, {
+			signal: t,
+			headers: n
+		}),
+		resolveProductDestination: (e, t) => r("POST", "/product-destinations/resolve", {
 			body: e,
-			signal: n
+			signal: t,
+			headers: n
 		}),
 		...Dz(e),
 		...Sz(e),
@@ -15297,196 +15302,196 @@ function Oz(e) {
 		getShellCommand: (t, n, r) => e.getShellCommand(t, n, r),
 		cancelShellCommand: (t, n, r) => e.cancelShellCommand(t, n, r),
 		getShellOutput: (t, n, r = 0, i) => e.getShellOutput(t, n, r, i),
-		health: (e) => t("GET", "/health", { signal: e }),
-		getStore: (e) => t("GET", "/store", { signal: e }),
-		getManagedStatus: (e) => t("GET", "/managed/status", { signal: e }),
-		getManagedGitIdentity: (e) => t("GET", "/managed/github/git-identity", { signal: e }),
-		updateManagedGitIdentity: (e) => t("PUT", "/managed/github/git-identity", { body: e }),
-		getManagedGitHub: (e) => t("GET", "/managed/github", { signal: e }),
-		startManagedGitHubLogin: () => t("POST", "/managed/github/login"),
-		pollManagedGitHubLogin: (e, n) => t("GET", `/managed/github/login/${encodeURIComponent(e)}`, { signal: n }),
-		cancelManagedGitHubLogin: (e) => t("DELETE", `/managed/github/login/${encodeURIComponent(e)}`),
-		disconnectManagedGitHub: () => t("DELETE", "/managed/github"),
-		listManagedGitHubRepositories: (e) => t("GET", "/managed/github/repositories", { signal: e }),
-		listManagedGitHubBranches: (e, n, r) => t("GET", `/managed/github/repositories/${encodeURIComponent(e)}/${encodeURIComponent(n)}/branches`, { signal: r }),
-		startManagedClone: (e) => t("POST", "/managed/github/clone-operations", { body: e }),
-		getManagedClone: (e, n) => t("GET", `/managed/github/clone-operations/${encodeURIComponent(e)}`, { signal: n }),
-		cancelManagedClone: (e) => t("DELETE", `/managed/github/clone-operations/${encodeURIComponent(e)}`),
-		terminateTerminal: (e, n) => t("DELETE", `${Z(e)}/terminals/${encodeURIComponent(n)}`),
-		listManagedSecrets: (e) => t("GET", "/managed/secrets", { signal: e }),
-		putManagedSecret: (e, n) => t("PUT", `/managed/secrets/${encodeURIComponent(e)}`, { body: { value: n } }),
-		deleteManagedSecret: (e) => t("DELETE", `/managed/secrets/${encodeURIComponent(e)}`),
-		getSandboxAvailability: (e) => t("GET", "/sandbox/availability", { signal: e }),
-		getSandboxActivity: (e, n) => t("GET", `/sandbox/activity?${new URLSearchParams({ key: e })}`, { signal: n }),
-		listCredentials: (e) => t("GET", "/credentials", { signal: e }),
-		storeCredential: (e, n) => t("PUT", `/credentials/${encodeURIComponent(e)}`, { body: { value: n } }),
-		storeGeneratedCredential: (e) => t("POST", "/credentials", { body: { value: e } }),
-		deleteCredential: (e) => t("DELETE", `/credentials/${encodeURIComponent(e)}`),
-		listManagedAuth: (e) => t("GET", "/auth", { signal: e }),
-		startManagedLogin: (e) => t("POST", `/auth/${encodeURIComponent(e)}/login`),
-		pollManagedLogin: (e, n, r) => t("GET", `/auth/${encodeURIComponent(e)}/login/${encodeURIComponent(n)}`, { signal: r }),
-		cancelManagedLogin: (e, n) => t("DELETE", `/auth/${encodeURIComponent(e)}/login/${encodeURIComponent(n)}`),
-		managedLogout: (e) => t("DELETE", `/auth/${encodeURIComponent(e)}`),
-		browsePath: (e, n = "directory", r = !1, i) => {
-			let a = new URLSearchParams({ kind: n });
-			return e && a.set("path", e), r && a.set("hidden", "true"), t("GET", `/fs/browse?${a.toString()}`, { signal: i });
+		health: (e) => r("GET", "/health", { signal: e }),
+		getStore: (e) => r("GET", "/store", { signal: e }),
+		getManagedStatus: (e) => r("GET", "/managed/status", { signal: e }),
+		getManagedGitIdentity: (e) => r("GET", "/managed/github/git-identity", { signal: e }),
+		updateManagedGitIdentity: (e) => r("PUT", "/managed/github/git-identity", { body: e }),
+		getManagedGitHub: (e) => r("GET", "/managed/github", { signal: e }),
+		startManagedGitHubLogin: () => r("POST", "/managed/github/login"),
+		pollManagedGitHubLogin: (e, t) => r("GET", `/managed/github/login/${encodeURIComponent(e)}`, { signal: t }),
+		cancelManagedGitHubLogin: (e) => r("DELETE", `/managed/github/login/${encodeURIComponent(e)}`),
+		disconnectManagedGitHub: () => r("DELETE", "/managed/github"),
+		listManagedGitHubRepositories: (e) => r("GET", "/managed/github/repositories", { signal: e }),
+		listManagedGitHubBranches: (e, t, n) => r("GET", `/managed/github/repositories/${encodeURIComponent(e)}/${encodeURIComponent(t)}/branches`, { signal: n }),
+		startManagedClone: (e) => r("POST", "/managed/github/clone-operations", { body: e }),
+		getManagedClone: (e, t) => r("GET", `/managed/github/clone-operations/${encodeURIComponent(e)}`, { signal: t }),
+		cancelManagedClone: (e) => r("DELETE", `/managed/github/clone-operations/${encodeURIComponent(e)}`),
+		terminateTerminal: (e, t) => r("DELETE", `${Z(e)}/terminals/${encodeURIComponent(t)}`),
+		listManagedSecrets: (e) => r("GET", "/managed/secrets", { signal: e }),
+		putManagedSecret: (e, t) => r("PUT", `/managed/secrets/${encodeURIComponent(e)}`, { body: { value: t } }),
+		deleteManagedSecret: (e) => r("DELETE", `/managed/secrets/${encodeURIComponent(e)}`),
+		getSandboxAvailability: (e) => r("GET", "/sandbox/availability", { signal: e }),
+		getSandboxActivity: (e, t) => r("GET", `/sandbox/activity?${new URLSearchParams({ key: e })}`, { signal: t }),
+		listCredentials: (e) => r("GET", "/credentials", { signal: e }),
+		storeCredential: (e, t) => r("PUT", `/credentials/${encodeURIComponent(e)}`, { body: { value: t } }),
+		storeGeneratedCredential: (e) => r("POST", "/credentials", { body: { value: e } }),
+		deleteCredential: (e) => r("DELETE", `/credentials/${encodeURIComponent(e)}`),
+		listManagedAuth: (e) => r("GET", "/auth", { signal: e }),
+		startManagedLogin: (e) => r("POST", `/auth/${encodeURIComponent(e)}/login`),
+		pollManagedLogin: (e, t, n) => r("GET", `/auth/${encodeURIComponent(e)}/login/${encodeURIComponent(t)}`, { signal: n }),
+		cancelManagedLogin: (e, t) => r("DELETE", `/auth/${encodeURIComponent(e)}/login/${encodeURIComponent(t)}`),
+		managedLogout: (e) => r("DELETE", `/auth/${encodeURIComponent(e)}`),
+		browsePath: (e, t = "directory", n = !1, i) => {
+			let a = new URLSearchParams({ kind: t });
+			return e && a.set("path", e), n && a.set("hidden", "true"), r("GET", `/fs/browse?${a.toString()}`, { signal: i });
 		},
-		browseSshPath: (e, n, r = !1, i) => t("POST", "/ssh/browse", {
+		browseSshPath: (e, t, n = !1, i) => r("POST", "/ssh/browse", {
 			body: {
 				...e,
-				path: n,
-				hidden: r
+				path: t,
+				hidden: n
 			},
 			signal: i
 		}),
-		listProviderModels: (e, n) => t("POST", "/providers/models", {
+		listProviderModels: (e, t) => r("POST", "/providers/models", {
 			body: e,
-			signal: n
+			signal: t
 		}),
-		getModelCatalog: (e) => t("GET", "/models", { signal: e }),
-		listCommands: (e) => t("GET", "/commands", { signal: e }),
-		listSessionCommands: (e, n) => t("GET", `/sessions/${encodeURIComponent(e)}/commands`, { signal: n }),
-		listSessionSkills: (e, n) => t("GET", `/sessions/${encodeURIComponent(e)}/skills`, { signal: n }),
-		listModelConfigs: (e) => t("GET", "/model-configs", { signal: e }),
-		createModelConfig: (e) => t("POST", "/model-configs", { body: e }),
-		updateModelConfig: (e, n) => t("PATCH", `/model-configs/${encodeURIComponent(e)}`, { body: n }),
-		deleteModelConfig: (e) => t("DELETE", `/model-configs/${encodeURIComponent(e)}`),
-		listSshConfigs: (e) => t("GET", "/ssh-configs", { signal: e }),
-		createSshConfig: (e) => t("POST", "/ssh-configs", { body: e }),
-		updateSshConfig: (e, n) => t("PATCH", `/ssh-configs/${encodeURIComponent(e)}`, { body: n }),
-		deleteSshConfig: (e) => t("DELETE", `/ssh-configs/${encodeURIComponent(e)}`),
-		getMcpLibrary: (e) => t("GET", "/mcp_library/library", { signal: e }),
-		listMcpServers: (e) => t("GET", "/mcp_library/servers", { signal: e }),
-		createMcpServer: (e) => t("POST", "/mcp_library/servers", { body: e }),
-		updateMcpServer: (e, n) => t("PATCH", `/mcp_library/servers/${encodeURIComponent(e)}`, { body: n }),
-		deleteMcpServer: (e) => t("DELETE", `/mcp_library/servers/${encodeURIComponent(e)}`),
-		testMcpServer: (e) => t("POST", "/mcp_library/servers/test", { body: e }),
-		getMcpOAuthStatus: (e, n) => t("GET", `/mcp_library/servers/${encodeURIComponent(e)}/oauth/status`, { signal: n }),
-		configureMcpOAuth: (e, n) => t("POST", `/mcp_library/servers/${encodeURIComponent(e)}/oauth/configure`, { body: n }),
-		authenticateMcpOAuth: (e, n = {}) => t("POST", `/mcp_library/servers/${encodeURIComponent(e)}/oauth/authenticate`, { body: n }),
-		logoutMcpOAuth: (e) => t("POST", `/mcp_library/servers/${encodeURIComponent(e)}/oauth/logout`),
-		listMcpRuntimeStatus: (e) => t("GET", "/mcp_library/servers/status", { signal: e }),
-		connectMcpServer: (e) => t("POST", `/mcp_library/servers/${encodeURIComponent(e)}/connect`),
-		disconnectMcpServer: (e) => t("POST", `/mcp_library/servers/${encodeURIComponent(e)}/disconnect`),
-		reloadMcpServer: (e) => t("POST", `/mcp_library/servers/${encodeURIComponent(e)}/reload`),
-		resolveModelConfig: (e, n) => t("POST", `/model-configs/${encodeURIComponent(e)}/models`, { signal: n }),
-		resolveConfigFile: (e, n) => t("POST", "/model-configs/from-file", {
+		getModelCatalog: (e) => r("GET", "/models", { signal: e }),
+		listCommands: (e) => r("GET", "/commands", { signal: e }),
+		listSessionCommands: (e, t) => r("GET", `/sessions/${encodeURIComponent(e)}/commands`, { signal: t }),
+		listSessionSkills: (e, t) => r("GET", `/sessions/${encodeURIComponent(e)}/skills`, { signal: t }),
+		listModelConfigs: (e) => r("GET", "/model-configs", { signal: e }),
+		createModelConfig: (e) => r("POST", "/model-configs", { body: e }),
+		updateModelConfig: (e, t) => r("PATCH", `/model-configs/${encodeURIComponent(e)}`, { body: t }),
+		deleteModelConfig: (e) => r("DELETE", `/model-configs/${encodeURIComponent(e)}`),
+		listSshConfigs: (e) => r("GET", "/ssh-configs", { signal: e }),
+		createSshConfig: (e) => r("POST", "/ssh-configs", { body: e }),
+		updateSshConfig: (e, t) => r("PATCH", `/ssh-configs/${encodeURIComponent(e)}`, { body: t }),
+		deleteSshConfig: (e) => r("DELETE", `/ssh-configs/${encodeURIComponent(e)}`),
+		getMcpLibrary: (e) => r("GET", "/mcp_library/library", { signal: e }),
+		listMcpServers: (e) => r("GET", "/mcp_library/servers", { signal: e }),
+		createMcpServer: (e) => r("POST", "/mcp_library/servers", { body: e }),
+		updateMcpServer: (e, t) => r("PATCH", `/mcp_library/servers/${encodeURIComponent(e)}`, { body: t }),
+		deleteMcpServer: (e) => r("DELETE", `/mcp_library/servers/${encodeURIComponent(e)}`),
+		testMcpServer: (e) => r("POST", "/mcp_library/servers/test", { body: e }),
+		getMcpOAuthStatus: (e, t) => r("GET", `/mcp_library/servers/${encodeURIComponent(e)}/oauth/status`, { signal: t }),
+		configureMcpOAuth: (e, t) => r("POST", `/mcp_library/servers/${encodeURIComponent(e)}/oauth/configure`, { body: t }),
+		authenticateMcpOAuth: (e, t = {}) => r("POST", `/mcp_library/servers/${encodeURIComponent(e)}/oauth/authenticate`, { body: t }),
+		logoutMcpOAuth: (e) => r("POST", `/mcp_library/servers/${encodeURIComponent(e)}/oauth/logout`),
+		listMcpRuntimeStatus: (e) => r("GET", "/mcp_library/servers/status", { signal: e }),
+		connectMcpServer: (e) => r("POST", `/mcp_library/servers/${encodeURIComponent(e)}/connect`),
+		disconnectMcpServer: (e) => r("POST", `/mcp_library/servers/${encodeURIComponent(e)}/disconnect`),
+		reloadMcpServer: (e) => r("POST", `/mcp_library/servers/${encodeURIComponent(e)}/reload`),
+		resolveModelConfig: (e, t) => r("POST", `/model-configs/${encodeURIComponent(e)}/models`, { signal: t }),
+		resolveConfigFile: (e, t) => r("POST", "/model-configs/from-file", {
 			body: { path: e },
-			signal: n
+			signal: t
 		}),
-		listProjects: (e) => t("GET", "/projects", { signal: e }),
-		createProject: (e) => t("POST", "/projects", { body: e }),
-		updateProject: (e, n) => t("PATCH", `/projects/${encodeURIComponent(e)}`, { body: n }),
-		deleteProject: (e, n = "keep") => t("DELETE", `/projects/${encodeURIComponent(e)}?sessions=${n}`),
-		assignSessionToProject: (e, n) => t("POST", `/projects/${encodeURIComponent(e)}/sessions`, { body: n }),
-		reorderProjects: (e) => t("PUT", "/projects/order", { body: e }),
-		listSessions: (e = {}, n) => {
-			let r = new URLSearchParams();
-			return e.workspaceStats && r.set("workspace_stats", "true"), e.projectId && r.set("project_id", e.projectId), t("GET", `/sessions${r.size > 0 ? `?${r.toString()}` : ""}`, { signal: n });
+		listProjects: (e) => r("GET", "/projects", { signal: e }),
+		createProject: (e) => r("POST", "/projects", { body: e }),
+		updateProject: (e, t) => r("PATCH", `/projects/${encodeURIComponent(e)}`, { body: t }),
+		deleteProject: (e, t = "keep") => r("DELETE", `/projects/${encodeURIComponent(e)}?sessions=${t}`),
+		assignSessionToProject: (e, t) => r("POST", `/projects/${encodeURIComponent(e)}/sessions`, { body: t }),
+		reorderProjects: (e) => r("PUT", "/projects/order", { body: e }),
+		listSessions: (e = {}, t) => {
+			let n = new URLSearchParams();
+			return e.workspaceStats && n.set("workspace_stats", "true"), e.projectId && n.set("project_id", e.projectId), r("GET", `/sessions${n.size > 0 ? `?${n.toString()}` : ""}`, { signal: t });
 		},
 		getSession: (t, n = {}) => e.getSession(t, n),
-		createSession: (e) => t("POST", "/sessions", { body: e }),
-		deleteSession: (e) => t("DELETE", Z(e)),
-		launchDefaults: (e, n) => t("POST", "/sessions/launch-defaults", {
+		createSession: (e) => r("POST", "/sessions", { body: e }),
+		deleteSession: (e) => r("DELETE", Z(e)),
+		launchDefaults: (e, t) => r("POST", "/sessions/launch-defaults", {
 			body: e,
-			signal: n
+			signal: t
 		}),
-		updatePresentation: (e, n) => t("PUT", `${Z(e)}/presentation`, { body: n }),
-		reorderSessions: (e) => t("PUT", "/sessions/order", { body: e }),
-		getConfig: (e, n) => t("GET", `${Z(e)}/config`, { signal: n }),
-		getPermissions: (e, n) => t("GET", `${Z(e)}/permissions`, { signal: n }),
-		replyPermission: (e, n, r) => t("POST", `${Z(e)}/permissions/${encodeURIComponent(n)}`, { body: { reply: r } }),
-		authorizePermissionReviewRetry: (e, n) => t("POST", `${Z(e)}/permissions/reviews/${encodeURIComponent(n)}/authorize-retry`),
-		authorizeChildPermissionReviewRetry: (e, n, r) => t("POST", `${Z(e)}/children/${encodeURIComponent(n)}/permissions/reviews/${encodeURIComponent(r)}/authorize-retry`),
-		setPermissionApprovalMode: (e, n) => t("PUT", `${Z(e)}/permissions/mode`, { body: { mode: n } }),
-		deletePermissionGrant: (e, n) => t("DELETE", `${Z(e)}/permissions/grants/${encodeURIComponent(n)}`),
-		getGoal: (e, n) => t("GET", `${Z(e)}/goal`, { signal: n }),
-		createGoal: (e, n) => t("POST", `${Z(e)}/goal`, { body: n }),
-		updateGoal: (e, n, r) => t("PATCH", `${Z(e)}/goal/${encodeURIComponent(n)}`, { body: r }),
-		clearGoal: (e, n, r) => t("DELETE", `${Z(e)}/goal/${encodeURIComponent(n)}`, { body: { expected_version: r } }),
-		listInbox: (e, n) => t("GET", `${Z(e)}/inbox`, { signal: n }),
-		createInboxItem: (e, n, r) => t("POST", `${Z(e)}/inbox`, { body: {
-			delivery: n,
-			prompt: r
+		updatePresentation: (e, t) => r("PUT", `${Z(e)}/presentation`, { body: t }),
+		reorderSessions: (e) => r("PUT", "/sessions/order", { body: e }),
+		getConfig: (e, t) => r("GET", `${Z(e)}/config`, { signal: t }),
+		getPermissions: (e, t) => r("GET", `${Z(e)}/permissions`, { signal: t }),
+		replyPermission: (e, t, n) => r("POST", `${Z(e)}/permissions/${encodeURIComponent(t)}`, { body: { reply: n } }),
+		authorizePermissionReviewRetry: (e, t) => r("POST", `${Z(e)}/permissions/reviews/${encodeURIComponent(t)}/authorize-retry`),
+		authorizeChildPermissionReviewRetry: (e, t, n) => r("POST", `${Z(e)}/children/${encodeURIComponent(t)}/permissions/reviews/${encodeURIComponent(n)}/authorize-retry`),
+		setPermissionApprovalMode: (e, t) => r("PUT", `${Z(e)}/permissions/mode`, { body: { mode: t } }),
+		deletePermissionGrant: (e, t) => r("DELETE", `${Z(e)}/permissions/grants/${encodeURIComponent(t)}`),
+		getGoal: (e, t) => r("GET", `${Z(e)}/goal`, { signal: t }),
+		createGoal: (e, t) => r("POST", `${Z(e)}/goal`, { body: t }),
+		updateGoal: (e, t, n) => r("PATCH", `${Z(e)}/goal/${encodeURIComponent(t)}`, { body: n }),
+		clearGoal: (e, t, n) => r("DELETE", `${Z(e)}/goal/${encodeURIComponent(t)}`, { body: { expected_version: n } }),
+		listInbox: (e, t) => r("GET", `${Z(e)}/inbox`, { signal: t }),
+		createInboxItem: (e, t, n) => r("POST", `${Z(e)}/inbox`, { body: {
+			delivery: t,
+			prompt: n
 		} }),
-		updateInboxItem: (e, n, r, i) => t("PATCH", `${Z(e)}/inbox/${n}`, { body: {
-			expected_version: r,
+		updateInboxItem: (e, t, n, i) => r("PATCH", `${Z(e)}/inbox/${t}`, { body: {
+			expected_version: n,
 			delivery: i
 		} }),
-		cancelInboxItem: (e, n, r) => t("DELETE", `${Z(e)}/inbox/${n}`, { body: { expected_version: r } }),
-		listTraditionalChildren: (e, n) => t("GET", `${Z(e)}/children`, { signal: n }),
-		startTraditionalChild: (e, n) => t("POST", `${Z(e)}/children`, { body: n }),
-		getTraditionalChild: (e, n, r) => t("GET", `${Z(e)}/children/${encodeURIComponent(n)}`, { signal: r }),
-		cancelTraditionalChild: (e, n) => t("POST", `${Z(e)}/children/${encodeURIComponent(n)}/cancel`),
-		listManagedOrchestrators: (e, n) => t("GET", `${Z(e)}/orchestrators`, { signal: n }),
-		startManagedOrchestrator: (e, n) => t("POST", `${Z(e)}/orchestrators`, { body: n }),
-		getManagedOrchestrator: (e, n, r) => t("GET", `${Z(e)}/orchestrators/${encodeURIComponent(n)}`, { signal: r }),
-		cancelManagedOrchestrator: (e, n) => t("POST", `${Z(e)}/orchestrators/${encodeURIComponent(n)}/cancel`),
-		updateConfig: (e, n) => t("PATCH", `${Z(e)}/config`, { body: n }),
-		getMessages: (e, n = {}) => {
-			let r = new URLSearchParams();
-			n.before !== void 0 && r.set("before", String(n.before)), n.limit !== void 0 && r.set("limit", String(n.limit)), n.includeSystem && r.set("include_system", "true");
-			let i = r.toString();
-			return t("GET", `${Z(e)}/messages${i ? `?${i}` : ""}`, { signal: n.signal });
+		cancelInboxItem: (e, t, n) => r("DELETE", `${Z(e)}/inbox/${t}`, { body: { expected_version: n } }),
+		listTraditionalChildren: (e, t) => r("GET", `${Z(e)}/children`, { signal: t }),
+		startTraditionalChild: (e, t) => r("POST", `${Z(e)}/children`, { body: t }),
+		getTraditionalChild: (e, t, n) => r("GET", `${Z(e)}/children/${encodeURIComponent(t)}`, { signal: n }),
+		cancelTraditionalChild: (e, t) => r("POST", `${Z(e)}/children/${encodeURIComponent(t)}/cancel`),
+		listManagedOrchestrators: (e, t) => r("GET", `${Z(e)}/orchestrators`, { signal: t }),
+		startManagedOrchestrator: (e, t) => r("POST", `${Z(e)}/orchestrators`, { body: t }),
+		getManagedOrchestrator: (e, t, n) => r("GET", `${Z(e)}/orchestrators/${encodeURIComponent(t)}`, { signal: n }),
+		cancelManagedOrchestrator: (e, t) => r("POST", `${Z(e)}/orchestrators/${encodeURIComponent(t)}/cancel`),
+		updateConfig: (e, t) => r("PATCH", `${Z(e)}/config`, { body: t }),
+		getMessages: (e, t = {}) => {
+			let n = new URLSearchParams();
+			t.before !== void 0 && n.set("before", String(t.before)), t.limit !== void 0 && n.set("limit", String(t.limit)), t.includeSystem && n.set("include_system", "true");
+			let i = n.toString();
+			return r("GET", `${Z(e)}/messages${i ? `?${i}` : ""}`, { signal: t.signal });
 		},
-		getThreadEvents: (e, n, r = {}) => {
+		getThreadEvents: (e, t, n = {}) => {
 			let i = new URLSearchParams();
-			r.beforeId !== void 0 && i.set("before_id", String(r.beforeId)), r.limit !== void 0 && i.set("limit", String(r.limit));
+			n.beforeId !== void 0 && i.set("before_id", String(n.beforeId)), n.limit !== void 0 && i.set("limit", String(n.limit));
 			let a = i.toString();
-			return t("GET", `${Z(e)}/threads/${encodeURIComponent(n)}/events${a ? `?${a}` : ""}`, { signal: r.signal });
+			return r("GET", `${Z(e)}/threads/${encodeURIComponent(t)}/events${a ? `?${a}` : ""}`, { signal: n.signal });
 		},
-		getToolCallContent: (e, n, r) => t("GET", `${Z(e)}/tool-calls/${encodeURIComponent(n)}`, { signal: r }),
-		getWorkspaceDiff: (e, n, { stage: r = "all", context: i = 3, revision: a, signal: o } = {}) => {
+		getToolCallContent: (e, t, n) => r("GET", `${Z(e)}/tool-calls/${encodeURIComponent(t)}`, { signal: n }),
+		getWorkspaceDiff: (e, t, { stage: n = "all", context: i = 3, revision: a, signal: o } = {}) => {
 			let s = new URLSearchParams({
-				path: n,
-				stage: r,
+				path: t,
+				stage: n,
 				context: String(i)
 			});
-			return a != null && s.set("revision", String(a)), t("GET", `${Z(e)}/workspace/diff?${s.toString()}`, { signal: o });
+			return a != null && s.set("revision", String(a)), r("GET", `${Z(e)}/workspace/diff?${s.toString()}`, { signal: o });
 		},
-		getWorkspaceFiles: (e, n, r) => {
-			let i = n == null ? "" : `?revision=${n}`;
-			return t("GET", `${Z(e)}/workspace/files${i}`, { signal: r });
+		getWorkspaceFiles: (e, t, n) => {
+			let i = t == null ? "" : `?revision=${t}`;
+			return r("GET", `${Z(e)}/workspace/files${i}`, { signal: n });
 		},
-		getWorkspaceFile: (e, n, r, i) => {
-			let a = new URLSearchParams({ path: n });
-			return r != null && a.set("revision", String(r)), t("GET", `${Z(e)}/workspace/file?${a.toString()}`, { signal: i });
+		getWorkspaceFile: (e, t, n, i) => {
+			let a = new URLSearchParams({ path: t });
+			return n != null && a.set("revision", String(n)), r("GET", `${Z(e)}/workspace/file?${a.toString()}`, { signal: i });
 		},
-		openWorkspacePath: (e, n) => t("POST", `${Z(e)}/workspace/open`, { body: { path: n } }),
-		getWorkspaceRevisions: (e, n) => t("GET", `${Z(e)}/workspace/revisions`, { signal: n }),
-		getWorkspaceRevisionChanges: (e, n, r) => t("GET", `${Z(e)}/workspace/revisions/${n}/changes`, { signal: r }),
-		getBranches: (e, n) => t("GET", `${Z(e)}/workspace/branches`, { signal: n }),
-		switchBranch: (e, n) => t("POST", `${Z(e)}/workspace/branches`, { body: n }),
-		commitWorkspace: (e, n) => t("POST", `${Z(e)}/workspace/commit`, { body: n }),
+		openWorkspacePath: (e, t) => r("POST", `${Z(e)}/workspace/open`, { body: { path: t } }),
+		getWorkspaceRevisions: (e, t) => r("GET", `${Z(e)}/workspace/revisions`, { signal: t }),
+		getWorkspaceRevisionChanges: (e, t, n) => r("GET", `${Z(e)}/workspace/revisions/${t}/changes`, { signal: n }),
+		getBranches: (e, t) => r("GET", `${Z(e)}/workspace/branches`, { signal: t }),
+		switchBranch: (e, t) => r("POST", `${Z(e)}/workspace/branches`, { body: t }),
+		commitWorkspace: (e, t) => r("POST", `${Z(e)}/workspace/commit`, { body: t }),
 		submitRun: (t, n, r) => e.submitPrompt(t, n, r),
-		cancelActiveRun: (e) => t("POST", `${Z(e)}/cancel-active-run`),
-		cancelExactRun: (e, n) => t("POST", `${Z(e)}/runs/${encodeURIComponent(n)}/cancel`),
-		compactSession: (e) => t("POST", `${Z(e)}/compact`),
-		revertSession: (e, n) => t("POST", `${Z(e)}/revert`, { body: { message_idx: n } }),
-		regenerateRun: (e, n) => t("POST", `${Z(e)}/regenerate`, { body: { message_idx: n } }),
-		forkSession: (e, n) => t("POST", `${Z(e)}/fork`, { body: { message_idx: n } }),
-		dismissSessionFork: (e, n) => t("DELETE", `${Z(e)}/forks/${encodeURIComponent(n)}`),
-		steerOrchestrator: (e, n) => t("POST", `${Z(e)}/steering`, { body: { instruction: n } }),
-		steerThread: (e, n, r) => t("POST", `${Z(e)}/threads/${encodeURIComponent(n)}/steering`, { body: { instruction: r } }),
+		cancelActiveRun: (e) => r("POST", `${Z(e)}/cancel-active-run`),
+		cancelExactRun: (e, t) => r("POST", `${Z(e)}/runs/${encodeURIComponent(t)}/cancel`),
+		compactSession: (e) => r("POST", `${Z(e)}/compact`),
+		revertSession: (e, t) => r("POST", `${Z(e)}/revert`, { body: { message_idx: t } }),
+		regenerateRun: (e, t) => r("POST", `${Z(e)}/regenerate`, { body: { message_idx: t } }),
+		forkSession: (e, t) => r("POST", `${Z(e)}/fork`, { body: { message_idx: t } }),
+		dismissSessionFork: (e, t) => r("DELETE", `${Z(e)}/forks/${encodeURIComponent(t)}`),
+		steerOrchestrator: (e, t) => r("POST", `${Z(e)}/steering`, { body: { instruction: t } }),
+		steerThread: (e, t, n) => r("POST", `${Z(e)}/threads/${encodeURIComponent(t)}/steering`, { body: { instruction: n } }),
 		getRecentEvents: (t, n = {}) => e.getRecentEvents(t, n)
 	};
 }
 // src/app/services/api.ts
-function kz(e) {
-	let t = e.transport.request.bind(e.transport);
+function kz(e, t) {
+	let n = e.transport.request.bind(e.transport);
 	return {
-		...Oz(e),
-		startTaskLaunch: (e) => t("POST", "/task-launches", { body: e }),
-		taskLaunchStatus: (e, n) => t("GET", `/task-launches/${encodeURIComponent(e)}`, { signal: n }),
-		taskLaunchInventory: (e, n) => t("GET", `/projects/${encodeURIComponent(e)}/task-launches`, { signal: n }),
-		taskLaunchSource: (e, n) => t("GET", `/projects/${encodeURIComponent(e)}/task-launch-source`, { signal: n }),
-		cancelTaskLaunch: (e) => t("POST", `/task-launches/${encodeURIComponent(e)}/cancel`),
-		getManagedUpgrade: (e) => t("GET", "/__managed/control/v0/upgrade", { signal: e }),
-		startManagedUpgrade: (e) => t("POST", "/__managed/control/v0/upgrade", {
+		...Oz(e, { productContextBinding: t }),
+		startTaskLaunch: (e) => n("POST", "/task-launches", { body: e }),
+		taskLaunchStatus: (e, t) => n("GET", `/task-launches/${encodeURIComponent(e)}`, { signal: t }),
+		taskLaunchInventory: (e, t) => n("GET", `/projects/${encodeURIComponent(e)}/task-launches`, { signal: t }),
+		taskLaunchSource: (e, t) => n("GET", `/projects/${encodeURIComponent(e)}/task-launch-source`, { signal: t }),
+		cancelTaskLaunch: (e) => n("POST", `/task-launches/${encodeURIComponent(e)}/cancel`),
+		getManagedUpgrade: (e) => n("GET", "/__managed/control/v0/upgrade", { signal: e }),
+		startManagedUpgrade: (e) => n("POST", "/__managed/control/v0/upgrade", {
 			body: {},
 			headers: { "Idempotency-Key": e }
 		}),
-		generateOverview: (e) => t("POST", `/sessions/${encodeURIComponent(e)}/overview`)
+		generateOverview: (e) => n("POST", `/sessions/${encodeURIComponent(e)}/overview`)
 	};
 }
 var Az = kz(sz);
@@ -18060,7 +18065,7 @@ var dG = /* @__PURE__ */ new WeakMap(), fG = 0, pG = class {
 				refetchOnWindowFocus: !1
 			},
 			mutations: { retry: !1 }
-		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.stores = nG(e.storage, e.scope, e.draftStorage), this.scope = Object.freeze({ ...e.scope }), this.client = new az(new sG(e.client.transport, this.controller.signal)), this.api = kz(this.client), this.productNavigation = new KR(this.api.resolveProductDestination, this.isClosed), this.eventSource = e.eventSource, dG.set(this.queryClient, this);
+		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.stores = nG(e.storage, e.scope, e.draftStorage), this.scope = Object.freeze({ ...e.scope }), this.client = new az(new sG(e.client.transport, this.controller.signal)), this.api = kz(this.client, this.scope.profile === "standalone" ? this.scope.incarnation : void 0), this.productNavigation = new KR(this.api.resolveProductDestination, this.isClosed), this.eventSource = e.eventSource, dG.set(this.queryClient, this);
 	}
 	isClosed = () => this.controller.signal.aborted;
 	subscribe = (e) => (this.listeners.add(e), () => {

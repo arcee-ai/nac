@@ -164,7 +164,18 @@ export interface ThreadEventsOptions {
   signal?: AbortSignal;
 }
 
-export function createNacApi(nacClient: NacClient) {
+export function createNacApi(
+  nacClient: NacClient,
+  options: { productContextBinding?: string } = {},
+) {
+  // A rejection-only lifetime hint for the two standalone product queries.
+  // Other operations retain their existing transport/admission contracts.
+  const productHeaders =
+    options.productContextBinding == null
+      ? undefined
+      : {
+          "X-NAC-Presentation-Incarnation": options.productContextBinding,
+        };
   async function request<T>(
     method: Method,
     path: string,
@@ -178,12 +189,13 @@ export function createNacApi(nacClient: NacClient) {
       request<ProductContext>(
         "GET",
         `/product-context${sessionId == null ? "" : `?session_id=${encodeURIComponent(sessionId)}`}`,
-        { signal },
+        { signal, headers: productHeaders },
       ),
     resolveProductDestination: (body: ProductNavigationRequest, signal?: AbortSignal) =>
       request<ProductNavigationResolution>("POST", "/product-destinations/resolve", {
         body,
         signal,
+        headers: productHeaders,
       }),
     ...createUserTerminalApi(nacClient),
     ...createExecutionApi(nacClient),

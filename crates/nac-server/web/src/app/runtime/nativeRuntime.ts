@@ -86,7 +86,10 @@ export class NativeRuntime {
     this.client = new NacClient(
       new LifetimeTransport(options.client.transport, this.controller.signal),
     );
-    this.api = createNativeApi(this.client);
+    this.api = createNativeApi(
+      this.client,
+      this.scope.profile === "standalone" ? this.scope.incarnation : undefined,
+    );
     this.productNavigation = new ProductNavigation(
       this.api.resolveProductDestination,
       this.isClosed,
