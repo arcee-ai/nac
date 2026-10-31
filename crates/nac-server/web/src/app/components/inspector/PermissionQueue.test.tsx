@@ -101,7 +101,7 @@ function child(id: string, status = "running"): TraditionalChildRecord {
     status,
   } as TraditionalChildRecord;
 }
-function mount(records = [child("first"), child("second")], seed = true) {
+function mount(records = [child("first"), child("second")], seed = true, search = "") {
   childrenApi.mockResolvedValue(records);
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -114,7 +114,7 @@ function mount(records = [child("first"), child("second")], seed = true) {
   }
   const view = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/session/parent/insights${search}`]}>
         <ToastProvider>
           <PermissionControls sessionId="parent" behavior="direct" />
         </ToastProvider>
@@ -377,4 +377,24 @@ describe("parent permission queue", () => {
       expect(authorizeChild).toHaveBeenCalledExactlyOnceWith("parent", "second", "same-review-id"),
     );
   });
+});
+
+it("opens only the exact requested approval and never falls back to another request", async () => {
+  const parent = state("parent");
+  parent.requests = [
+    { ...parent.requests[0]!, id: "earlier", tool: "earlier-tool" },
+    { ...parent.requests[0]!, id: "exact", tool: "exact-tool" },
+  ];
+  states.set("parent", parent);
+  mount([], true, "?permission_request=exact");
+  expect(screen.getByText(/exact-tool requested by/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+  await waitFor(() => expect(replies).toHaveBeenCalledWith("parent", "exact", "once"));
+});
+
+it("shows a stale exact approval without selecting an unrelated pending request", async () => {
+  states.set("parent", state("parent"));
+  mount([], true, "?permission_request=expired");
+  expect(screen.getByText(/This permission request is no longer pending/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
 });

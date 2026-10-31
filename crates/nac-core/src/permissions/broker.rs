@@ -108,11 +108,12 @@ impl PermissionBroker {
         self.caller_project.get().map(String::as_str)
     }
 
-    pub(crate) fn attach_event_bus(&self, bus: crate::events::SessionEventBus) {
+    pub(crate) fn attach_event_bus(self: &Arc<Self>, bus: crate::events::SessionEventBus) {
         *self
             .event_bus
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(bus);
+        super::task_observation::register(self);
     }
 
     pub fn pending(&self) -> Vec<PermissionRequest> {
