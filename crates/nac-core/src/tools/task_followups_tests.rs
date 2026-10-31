@@ -55,6 +55,27 @@ fn runtime(rules: Vec<PermissionRule>) -> (super::super::ToolRuntime, Arc<Atomic
 fn input() -> Value {
     json!({"session_id":"target","request_id":"one","action":"auto","prompt":"guidance"})
 }
+
+#[test]
+fn followup_capability_surface_is_plain_direct_only() {
+    let names = |definitions: Vec<ToolDefinition>| {
+        definitions
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect::<Vec<_>>()
+    };
+    let direct = names(crate::tools::direct_tool_definitions(false));
+    let dwo = names(crate::tools::direct_with_orchestrator_tool_definitions(
+        false,
+    ));
+    let child = names(crate::tools::worker_tool_definitions(false));
+    for name in ["send_task_followup", "read_task_followup"] {
+        assert!(direct.iter().any(|value| value == name));
+        assert!(!dwo.iter().any(|value| value == name));
+        assert!(!child.iter().any(|value| value == name));
+        assert!(crate::tools::direct_tool_admission(name).is_some());
+    }
+}
 async fn call(rt: &super::super::ToolRuntime, name: &str, args: Value) -> ToolResult {
     super::super::execute_tool(name, args, rt, &crate::model::ModelClient::new_for_test()).await
 }
