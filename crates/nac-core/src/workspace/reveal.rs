@@ -65,10 +65,12 @@ impl LocalRevealTarget {
             if index + 1 < components.len() {
                 flags |= libc::O_DIRECTORY;
             }
+            let parent = pinned
+                .last()
+                .context("reveal workspace anchor is unavailable")?;
             // SAFETY: parent is a live pinned descriptor and name is one
             // NUL-terminated relative component. No component follows links.
-            let descriptor =
-                unsafe { libc::openat(pinned.last().unwrap().1.as_raw_fd(), name.as_ptr(), flags) };
+            let descriptor = unsafe { libc::openat(parent.1.as_raw_fd(), name.as_ptr(), flags) };
             if descriptor < 0 {
                 return Err(std::io::Error::last_os_error())
                     .context("invalid or missing reveal path");
