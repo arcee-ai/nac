@@ -1,5 +1,6 @@
 """Owned ordinary-startup fixtures and phase-aware immutable source admission."""
 import hashlib
+from contextlib import closing
 import importlib.util
 import json
 from pathlib import Path
@@ -84,7 +85,7 @@ def prepare_profile(parent, scenario, catalog_url):
         config.write_text('[broken\n')
     elif scenario == 'futureStore':
         config.write_text('[storage]\nstore_path = ' + json.dumps(str(store)) + '\n')
-        with sqlite3.connect(store) as connection:
+        with closing(sqlite3.connect(store)) as connection, connection:
             connection.execute('PRAGMA user_version=999')
     return {'root': root, 'home': home, 'nac_home': nac, 'workspace': workspace,
             'store': store, 'config': config, 'environment': env, 'scenario': scenario}
