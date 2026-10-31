@@ -113,7 +113,7 @@ class ReaderDiagnosticControls(unittest.TestCase):
             raise AssertionError(result.stderr[-8192:])
         cls.records = []
 
-    def invoke(self, texts=(), *, mode=None, exists=True, large=False, image_count=1, **values):
+    def invoke(self, texts=(), *, mode=None, reader_mode='--terminal', exists=True, large=False, image_count=1, **values):
         image = self.root / 'plain-fixture-bytes-not-a-PNG.dat'
         images = [image] if image_count == 1 else [self.root / f'plain-{n}.dat' for n in range(image_count)]
         for path in images:
@@ -121,7 +121,8 @@ class ReaderDiagnosticControls(unittest.TestCase):
                 path.write_bytes(b'x' * (2 * 1024 * 1024 + 1) if large else b'before')
             else:
                 path.unlink(missing_ok=True)
-        result = subprocess.run([str(self.executable), '--terminal', *map(str, images)],
+        flags = [reader_mode] if reader_mode else []
+        result = subprocess.run([str(self.executable), *flags, *map(str, images)],
             input=json.dumps({'texts': texts, 'mode': mode, **values}), capture_output=True, text=True, timeout=5)
         diagnostics = [json.loads(line) for line in result.stderr.splitlines() if line.startswith('{')]
         if 'control' not in values:
@@ -129,7 +130,7 @@ class ReaderDiagnosticControls(unittest.TestCase):
             for line in (line for line in result.stderr.splitlines() if line.startswith('{')):
                 self.assertLessEqual(len(line.encode()) + 1, 8192)
                 self.assertEqual(json.loads(line)['schema'], 'nac-ci-image-diagnostic-v1')
-        self.records.append({'input': {'texts': texts, 'mode': mode, **values}, 'exit': result.returncode,
+        self.records.append({'input': {'texts': texts, 'mode': mode, 'reader_mode': reader_mode, **values}, 'exit': result.returncode,
                              'stdout': result.stdout, 'stderr': result.stderr})
         return result, diagnostics[0] if diagnostics else None
 
@@ -183,6 +184,62 @@ class ReaderDiagnosticControls(unittest.TestCase):
                 self.assertEqual(diagnostic['comparison']['fixed_marker_membership'], [False])
                 self.assertEqual(result.stderr.count('FIXTURE_RECOGNITION_ONCE'), 1)
                 self.assertNotIn(text, result.stdout + result.stderr)
+
+    def test_rich_requires_every_anchor_and_reports_sentinel_separately(self):
+        anchors = ['export const webkitFixture = 351', 'System WebKit', 'shared React', 'A formula']
+        for sentinel in (False, True):
+            texts = anchors + (['WK_RICH_COMPLETE'] if sentinel else [])
+            result, diagnostic = self.invoke(texts, reader_mode='--workspace-rich')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), [{'file': 'plain-fixture-bytes-not-a-PNG.dat',
+                'width': 1024, 'height': 642, 'logical_width': 1024,
+                'readable_fixture_text': True, 'fixture_kind': 'workspace-rich',
+                'rich_anchors': anchors, 'completion_sentinel_observed': sentinel}])
+            self.assertEqual(diagnostic['comparison']['fixed_marker_membership'], [True] * 4)
+            self.assertEqual(result.stderr.count('FIXTURE_RECOGNITION_ONCE'), 1)
+        for missing in range(len(anchors)):
+            result, diagnostic = self.invoke(['WK_RICH_COMPLETE'] + anchors[:missing] + anchors[missing + 1:],
+                                              reader_mode='--workspace-rich')
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, '')
+            self.assertEqual(diagnostic['phase'], 'marker')
+            self.assertEqual(diagnostic['comparison']['fixed_marker_membership'],
+                             [index != missing for index in range(4)])
+            self.assertEqual(result.stderr.count('FIXTURE_RECOGNITION_ONCE'), 1)
+        for texts in (['WK_RICH_COMPLETE'], [], *([anchor] for anchor in anchors)):
+            result, _ = self.invoke(texts, reader_mode='--workspace-rich')
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, '')
+        result, _ = self.invoke(anchors, reader_mode='--workspace')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, '')
+
+    def test_existing_reader_modes_keep_exact_stdout_and_strict_markers(self):
+        modes = [(None, 'chat', ['Hello from the isolated NAC Mac preview']),
+            ('--terminal', 'terminal', ['NAC354_TRUSTED_XY']),
+            ('--workspace', 'workspace', ['WK_RICH_COMPLETE']),
+            ('--approval', 'approval', ['Permission required']),
+            ('--instance-empty', 'instance-empty', ['No projects yet', 'Get Started']),
+            ('--instance-conflict', 'instance-conflict', ['Another NAC process', 'Retry', 'store-path']),
+            ('--instance-drain', 'instance-drain', ['Native instance', 'drain']),
+            ('--startup-configured', 'startup-configured', ['Finder configured local response.']),
+            ('--startup-invalid', 'startup-invalid', ['config.toml', 'repair', 'relaunch']),
+            ('--startup-future', 'startup-future', ['The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.']),
+            ('--terminal-unicode', 'terminal-unicode', ['WK-XCTEST-UNICODE']),
+            ('--terminal-completed', 'terminal-completed', ['WK-XCTEST-RECOVERED', 'WK-XCTEST-SIZE'])]
+        for flag, kind, markers in modes:
+            with self.subTest(kind=kind):
+                result, diagnostic = self.invoke(markers, reader_mode=flag)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), [{'file': 'plain-fixture-bytes-not-a-PNG.dat',
+                    'width': 1024, 'height': 642, 'logical_width': 1024,
+                    'readable_fixture_text': True, 'fixture_kind': kind}])
+                self.assertEqual(diagnostic['comparison']['fixed_marker_membership'], [True] * len(markers))
+                self.assertEqual(result.stderr.count('FIXTURE_RECOGNITION_ONCE'), 1)
+                result, diagnostic = self.invoke(['wrong'], reader_mode=flag)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(diagnostic['comparison']['fixed_marker_membership'], [False] * len(markers))
 
     def test_two_image_caller_fanout_has_one_record_per_image_and_original_failure(self):
         result, _ = self.invoke(['NAC354_TRUSTED_XY'], image_count=2)
