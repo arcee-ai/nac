@@ -8,24 +8,34 @@ MAX_FILE = 256 * 1024
 MAX_TOTAL = 12 * 1024 * 1024
 
 
-def require_console(data, uid):
+def console_state(data, uid):
     root = plistlib.loads(data)
     if isinstance(root, list):
         root = root[0]
     sessions = root.get('IOConsoleUsers', [])
     session = next((s for s in sessions if s.get('kCGSSessionUserIDKey') == uid
                     and s.get('kCGSSessionOnConsoleKey') is True), None)
-    if not session or session.get('kCGSessionLoginDoneKey') is not True:
+    return {'same_user_on_console': session is not None,
+            'login_done': session.get('kCGSessionLoginDoneKey') if session else None,
+            'locked': session.get('CGSSessionScreenIsLocked') if session else None,
+            'root_locked': root.get('IOConsoleLocked')}
+
+
+def require_console(data, uid):
+    state = console_state(data, uid)
+    if not state['same_user_on_console'] or state['login_done'] is not True:
         raise RuntimeError('GUI unavailable: runner is not the logged-in Aqua console user')
-    if session.get('CGSSessionScreenIsLocked') is not False:
+    if state['root_locked'] is True or state['locked'] is not False:
         raise RuntimeError('GUI unavailable: console locked or lock state unknown')
     return {'on_console': True, 'login_done': True, 'locked': False}
 
 
 def qualify_toolchain(actual, expected):
-    for key in ('developer_directory', 'xcode', 'sdk', 'image', 'os_version', 'os_build'):
+    for key in ('developer_directory', 'xcode', 'sdk', 'os_version', 'os_build'):
         if actual.get(key) != expected.get(key):
             raise RuntimeError(f'{key} drift: expected {expected.get(key)!r}, got {actual.get(key)!r}; requalify explicitly')
+    if actual.get('image') not in expected['images']:
+        raise RuntimeError(f'image drift: {actual.get("image")!r}; requalify explicitly against official inventory')
     if expected['swift'] is not None and actual['swift'] != expected['swift']:
         raise RuntimeError('Swift compiler identity drift; requalify explicitly')
     return expected['swift'] is not None

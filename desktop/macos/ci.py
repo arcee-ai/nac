@@ -13,7 +13,7 @@ import tempfile
 import threading
 import time
 
-from ci_support import export_evidence, qualify_toolchain, redact_values, require_console
+from ci_support import console_state, export_evidence, qualify_toolchain, redact_values, require_console
 from smoke import cleanup_failed_case
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +21,16 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def command(args):
     return subprocess.check_output(args, cwd=ROOT, text=True, stderr=subprocess.STDOUT).strip()
+
+
+def native_report(args, log):
+    # AppKit/Vision may log diagnostics to stderr. Keep those separate from
+    # the helper's JSON so warnings cannot corrupt a successful observation.
+    result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=60)
+    log.write_text(result.stderr[-65536:])
+    if result.returncode:
+        raise RuntimeError(f'Native evidence reader failed ({result.returncode}); see {log.name}')
+    return json.loads(result.stdout)
 
 
 def run(args, log, timeout):
@@ -131,6 +141,11 @@ def main():
         report['toolchain'] = actual
         compiler_pinned = qualify_toolchain(actual, expected)
         console = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'])
+        report['console_state'] = console_state(console, os.getuid())
+        gui_helper = raw / 'native-gui-reader'
+        run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIGUI.swift',
+             '-o', str(gui_helper)], raw / 'gui-reader-build.log', 90)
+        report['quartz'] = native_report([str(gui_helper)], raw / 'gui-reader.log')
         report['console'] = require_console(console, os.getuid())
         report['rustc'] = command(['rustc', '-Vv'])
         report['node'] = command(['node', '--version'])
@@ -153,7 +168,7 @@ def main():
         run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIEvidence.swift',
              '-o', str(helper)], raw / 'image-reader-build.log', 90)
         images = [raw / 'evidence' / name for name in ('streamed-chat.png', 'persisted-chat.png')]
-        report['images'] = json.loads(command([str(helper), *map(str, images)]))
+        report['images'] = native_report([str(helper), *map(str, images)], raw / 'image-reader.log')
         report['result'] = 'passed' if compiler_pinned else 'unqualified-swift'
         if not compiler_pinned:
             raise RuntimeError('Smoke completed; pin observed Swift compiler identity before acceptance')

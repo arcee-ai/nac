@@ -20,13 +20,26 @@ official runner-images revision `102f6553849daabcbd37e321e2e224dbab45c469`:
 Xcode 26.6 build 17F113, SDK 26.5, macOS 26.6.2 / 25G83, image
 20261026.0455.2. `macos-26` is a moving runner label. Unexpected image, OS or
 toolchain drift fails explicitly and needs qualification against the new image.
-The initial Swift identity is deliberately unset: the first successful launch
-records the actual compiler and returns `unqualified-swift`. Pin that exact
-observed identity and rerun before claiming acceptance. No compiler version is
-inferred from the Xcode version.
+The same-head repeat `41173290903` landed on image `20261013.0424.1` and failed
+that drift guard. Its official inventory at runner-images commit
+`49bfbe040355338053d9ef330e4e7a1190c59714` was checked against the recorded
+Xcode/SDK/OS envelope. Both exact inventory identities are now listed as
+candidates; neither has passed the actual-app GUI journey yet. New image
+identities still fail, and ordinary Rust/Node versions remain explicitly pinned
+by setup actions regardless of the runner's defaults.
+The first hosted receipt (run `41173262488`, job `124455556461`, merge candidate
+`b7653271321d8b8fcfbfe71ca5c78a8eced2e4c7`) verified this envelope and recorded
+Swift driver 1.148.6 / Apple Swift 6.3.3, swiftlang-6.3.3.1.3,
+clang-2100.1.1.101, target arm64-apple-macosx26.0. That exact compiler identity is
+now pinned. No compiler version is inferred from the Xcode version. The first
+receipt failed the GUI prerequisite before building/launching the app and is
+not native app acceptance.
 
 A read-only IORegistry check requires the current runner user to own an unlocked,
 completed Aqua console login. Missing/locked/unknown GUI is an explicit failure.
+Read-only CoreGraphics/AppKit diagnostics additionally record whether a Quartz
+session exists, console/login state, optional lock flag, screen count and the
+frontmost bundle identifier. No user names or unrelated window titles are saved.
 The test never unlocks a session, modifies TCC, installs Xcode or changes login
 configuration. Existing local locked-console evidence cannot qualify this job.
 

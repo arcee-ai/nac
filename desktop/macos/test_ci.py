@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from ci import settle_apps
-from ci_support import MAX_FILE, export_evidence, qualify_toolchain, require_console
+from ci_support import MAX_FILE, console_state, export_evidence, qualify_toolchain, require_console
 
 
 class QualificationTests(unittest.TestCase):
@@ -27,12 +27,18 @@ class QualificationTests(unittest.TestCase):
             require_console(self.console(), 456)
         root = plistlib.loads(self.console())
         del root['IOConsoleUsers'][0]['CGSSessionScreenIsLocked']
+        self.assertIsNone(console_state(plistlib.dumps(root), 123)['locked'])
         with self.assertRaisesRegex(RuntimeError, 'unknown'):
+            require_console(plistlib.dumps(root), 123)
+        root = plistlib.loads(self.console())
+        root['IOConsoleLocked'] = True
+        with self.assertRaisesRegex(RuntimeError, 'locked'):
             require_console(plistlib.dumps(root), 123)
 
     def test_toolchain_drift_and_unpinned_swift_cannot_pass(self):
         expected = json.loads(Path(__file__).with_name('ci-toolchain.json').read_text())
-        actual = {**expected, 'swift': 'observed compiler identity'}
+        actual = {key: value for key, value in expected.items() if key != 'images'}
+        actual.update(image=next(iter(expected['images'])), swift='observed compiler identity')
         self.assertFalse(qualify_toolchain(actual, {**expected, 'swift': None}))
         pinned = {**expected, 'swift': actual['swift']}
         self.assertTrue(qualify_toolchain(actual, pinned))
