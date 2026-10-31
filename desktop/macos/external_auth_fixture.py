@@ -17,12 +17,16 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 
 class AuthFixture(AbstractContextManager):
-    def __init__(self, callback='http://localhost:1456/mcp_library/oauth/callback', clock=time.monotonic, device_mode='success'):
+    def __init__(self, callback='http://localhost:1456/mcp_library/oauth/callback', clock=time.monotonic,
+                 device_mode='success', device_timeout_seconds=3):
         if device_mode not in ('success', 'denied', 'expired', 'hold', 'timeout'):
             raise ValueError('Unknown device fixture mode')
+        if type(device_timeout_seconds) is not int or device_timeout_seconds not in (3, 15):
+            raise ValueError('Device fixture timeout must use the owner or native scheduling allowance')
         self.callback = callback
         self.clock = clock
         self.device_mode = device_mode
+        self.device_timeout_seconds = device_timeout_seconds
         self.lock = threading.Lock()
         self.codes = {}
         self.devices = {}
@@ -161,7 +165,7 @@ class AuthFixture(AbstractContextManager):
                         if path.startswith('/app/') and one('client_id') != 'nac-cli':
                             return self.reply(400, {'error': 'invalid_client'})
                         code = secrets.token_urlsafe(12)
-                        expiry = 3 if fixture.device_mode == 'timeout' else 60
+                        expiry = fixture.device_timeout_seconds if fixture.device_mode == 'timeout' else 60
                         with fixture.lock:
                             fixture.devices[code] = {'approved': False, 'expires': fixture.clock() + expiry, 'mode': fixture.device_mode}
                         self.event('device_started')

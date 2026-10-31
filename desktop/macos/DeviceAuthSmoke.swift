@@ -84,7 +84,12 @@ final class DeviceAuthSmoke {
                     // the production explicit retry control when still pending.
                     if try await cardText().contains("Open Arcee") { try await click("Open Arcee", inCard: true) }
                     try await wait("external browser reached the owned double without a native bridge") {
-                        try await self.browserObservations() > browserBefore
+                        if try await self.browserObservations() > browserBefore { return true }
+                        if try await self.cardText().lowercased().contains("expired") {
+                            self.evidence["handoff_coverage_missing"] = true
+                            throw PreviewError.message("Device expiry occurred before observed browser handoff; coverage missing")
+                        }
+                        return false
                     }
                     evidence["external_browser_observed"] = true
                     if scenario == "device-success" {
@@ -130,8 +135,8 @@ final class DeviceAuthSmoke {
         let found = try await js(#"""
         const section=document.querySelector('section[aria-label="Provider connections"]');
         const root=inCard?[...section?.children||[]].find(e=>e.textContent.includes('Arcee sign-in')):document;
-        const button=[...root?.querySelectorAll('button')||[]].find(b=>b.textContent.trim()===title&&!b.disabled);
-        button?.click();return !!button;
+        const control=[...root?.querySelectorAll('button,a[href]')||[]].find(b=>b.textContent.trim()===title&&!b.disabled);
+        control?.click();return !!control;
         """#, arguments: ["title": title, "inCard": inCard]) as? Bool
         guard found == true else { throw PreviewError.message("Device fixture UI control unavailable") }
     }

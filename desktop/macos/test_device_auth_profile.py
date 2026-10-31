@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 
 from device_auth_profile import DeviceProfile
+from device_auth_smoke import require_browser_handoff
 from external_auth_fixture import AuthFixture
 
 
@@ -46,6 +47,31 @@ class DeviceAuthFixtureTests(unittest.TestCase):
                     pass
                 self.assertEqual(self.post(fixture, '/app/v1/device/token', {'client_id': 'nac-cli',
                     'device_code': prompt['device_code']}), (400, {'error': expected}))
+
+    def test_timeout_keeps_owner_default_and_bounds_native_scheduling_allowance(self):
+        for expiry in (3, 15):
+            now = [1.0]
+            with self.subTest(expiry=expiry), AuthFixture(clock=lambda: now[0], device_mode='timeout',
+                    **({} if expiry == 3 else {'device_timeout_seconds': 15})) as fixture:
+                _, prompt = self.post(fixture, '/app/v1/device/code', {'client_id': 'nac-cli'})
+                self.assertEqual(prompt['expires_in'], expiry)
+                form = {'client_id': 'nac-cli', 'device_code': prompt['device_code']}
+                now[0] = 1.0 + expiry - .1
+                self.assertEqual(self.post(fixture, '/app/v1/device/token', form)[1], {'error': 'authorization_pending'})
+                now[0] = 1.0 + expiry + .1
+                with urlopen(prompt['verification_uri_complete'], timeout=3):
+                    pass
+                self.assertEqual(self.post(fixture, '/app/v1/device/token', form)[1], {'error': 'expired_token'})
+                self.assertFalse(any(event['kind'] == 'browser_observation' for event in fixture.snapshot()['events']))
+
+    def test_an_expired_card_or_missing_handoff_never_qualifies_browser_coverage(self):
+        for record in [
+            {'passed': True, 'actual_owner_failure': 'expired'},
+            {'passed': True, 'external_browser_observed': False, 'handoff_coverage_missing': True},
+            {'passed': True, 'external_browser_observed': True, 'handoff_coverage_missing': True},
+        ]:
+            with self.subTest(record=record), self.assertRaises(AssertionError):
+                require_browser_handoff(record)
 
     def test_external_profile_is_exact_private_owned_and_removed(self):
         build = {'track': 'dev', 'build_id': 'native-auth-fixture-v1-test', 'source_revision': 'test-source'}

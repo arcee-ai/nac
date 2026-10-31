@@ -24,6 +24,11 @@ def digest(path):
         return hashlib.file_digest(file, 'sha256').hexdigest()
 
 
+def require_browser_handoff(result):
+    assert result.get('external_browser_observed') is True, 'Device fixture has no actual browser handoff evidence'
+    assert result.get('handoff_coverage_missing') is not True, 'Device expiry won before required handoff coverage'
+
+
 def run_case(app, output, profile, scenario):
     output.mkdir(parents=True, exist_ok=False)
     evidence = output / 'result.json'
@@ -74,9 +79,11 @@ def main():
         shutil.copytree(source_app, app)
         for mode, scenario in [('success', 'device-success'), ('denied', 'device-denied'), ('expired', 'device-expired'),
                                ('hold', 'device-cancel'), ('timeout', 'device-timeout')]:
-            with AuthFixture(device_mode=mode) as fixture, DeviceProfile(build, fixture.origin) as profile:
+            # The owner-only HTTP contract keeps its default three seconds.
+            # This hosted app case allows cold browser startup before expiry.
+            with AuthFixture(device_mode=mode, device_timeout_seconds=15 if mode == 'timeout' else 3) as fixture, DeviceProfile(build, fixture.origin) as profile:
                 result = run_case(app, output / scenario, profile, scenario)
-                assert result.get('external_browser_observed') is True
+                require_browser_handoff(result)
                 before = fixture.snapshot()
                 if mode in ('success', 'hold'):
                     restart_scenario = 'device-restart' if mode == 'success' else 'device-canceled-restart'

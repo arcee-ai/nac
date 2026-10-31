@@ -43,6 +43,10 @@ final class ExternalNavigationSmoke {
             try await self.js("return [...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Create chat'&&!b.disabled)") as? Bool == true
         }
         _ = try await js("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Create chat').click();return true")
+        _ = try await js("document.querySelector('[role=dialog] button[aria-label=Close]')?.click();return true")
+        try await wait("closed initial create-chat dialog") {
+            try await self.js("return !document.querySelector('[role=dialog]')") as? Bool == true
+        }
         try await wait("current live document") { self.app.commands.currentDocument(in: self.app.webView) != nil }
         let expected = app.commands.currentDocument(in: app.webView)!
         let origin = app.baseURL!
@@ -64,23 +68,35 @@ final class ExternalNavigationSmoke {
         }
         try record("first-main-link", expected: expected, origin: origin)
         let beforeNativePopup = actions.count
+        let beforeNativeEvaluations = otherPopupEvaluations.count
         let nativeContext = try await js("const a=navigator.userActivation;return {supported:!!a,isActive:a?.isActive??null,hasBeenActive:a?.hasBeenActive??null,returnedNull:window.open('https://example.invalid/native-api-popup')===null}") as? [String: Any] ?? [:]
-        try await wait("native API-context popup control") { self.actions.count > beforeNativePopup }
-        guard actions.count == beforeNativePopup + 1, actions.last?["popup"] as? Bool == true,
-              actions.last?["navigation_type"] as? Int == WKNavigationType.other.rawValue else {
-            throw PreviewError.message("Native API-context popup counterexample was not observed once")
+        try await wait("native API-context popup delivered to policy") {
+            self.otherPopupEvaluations.count > beforeNativeEvaluations
         }
         try record("native-api-popup-context", expected: expected, origin: origin, activation: nativeContext)
+        guard actions.count == beforeNativePopup,
+              otherPopupEvaluations.dropFirst(beforeNativeEvaluations).allSatisfy({ $0["admitted"] as? Bool == false }) else {
+            throw PreviewError.message("Native API-context other popup reached the opener")
+        }
         let beforePagePopup = actions.count
+        let beforePageEvaluations = otherPopupEvaluations.count
         _ = try await js("if(!window.__nacPagePopupObservation?.installed)throw new Error('observer');dispatchEvent(new Event('nac-recording-page-popup'));return true")
         try await wait("page-owned popup observation") {
             try await self.js("return window.__nacPagePopupObservation.done") as? Bool == true
         }
         let pageContext = try await js("const s=window.__nacPagePopupObservation;return {supported:s.supported,isActive:s.activeAtFire,hasBeenActive:s.stickyAtFire,calls:s.calls,returnedNull:s.returnedNull}") as? [String: Any] ?? [:]
-        try record("page-owned-popup-context", expected: expected, origin: origin, activation: pageContext)
+        try record("page-owned-popup-observation", expected: expected, origin: origin, activation: pageContext)
         guard pageContext["supported"] as? Bool == true, pageContext["isActive"] as? Bool == false,
               pageContext["calls"] as? Int == 1 else {
             throw PreviewError.message("Page-owned nonactivated popup negative coverage unavailable")
+        }
+        try await wait("page-owned inactive popup delivered to policy") {
+            self.otherPopupEvaluations.count > beforePageEvaluations
+        }
+        try record("page-owned-popup-context", expected: expected, origin: origin, activation: pageContext)
+        guard actions.count == beforePagePopup,
+              otherPopupEvaluations.dropFirst(beforePageEvaluations).allSatisfy({ $0["admitted"] as? Bool == false }) else {
+            throw PreviewError.message("Page-owned inactive other popup reached the opener")
         }
         _ = try await js("location.assign('https://example.invalid/script');return true")
         _ = try await js(#"""
@@ -111,10 +127,20 @@ final class ExternalNavigationSmoke {
         guard app.webView.url?.scheme == origin.scheme, app.webView.url?.host == origin.host,
               app.webView.url?.port == origin.port else { throw PreviewError.message("Post-negative origin differed") }
 
-        // A synthetic target=_blank click may be blocked by WebKit's gesture
-        // gate. Record what the real WK does without claiming physical intent.
-        try await link(target: "_blank")
-        _ = try await js("return document.readyState")
+        // Exercise the real shared header anchor. DOM driving establishes a
+        // navigation category, never trusted physical input.
+        let beforeBlank = actions.count
+        _ = try await js("document.querySelector('button[aria-label=\"Open the menu\"]')?.click();return true")
+        try await wait("rendered shared external anchor") {
+            try await self.js("const a=[...document.querySelectorAll('a')].find(a=>a.textContent.trim()==='See docs');return !!a&&a.target==='_blank'&&a.getBoundingClientRect().width>0&&a.getBoundingClientRect().height>0") as? Bool == true
+        }
+        _ = try await js("[...document.querySelectorAll('a')].find(a=>a.textContent.trim()==='See docs').click();return true")
+        try await wait("one rendered target-blank link action") { self.actions.count > beforeBlank }
+        try record("rendered-target-blank-link", expected: expected, origin: origin)
+        guard actions.count == beforeBlank + 1, actions.last?["popup"] as? Bool == true,
+              actions.last?["navigation_type"] as? Int == WKNavigationType.linkActivated.rawValue else {
+            throw PreviewError.message("Rendered target-blank link did not open exactly once")
+        }
         let popupCount = actions.filter { $0["popup"] as? Bool == true }.count
         let beforeReload = expected
         let invalidations = app.commands.smokeDocumentInvalidations
@@ -140,13 +166,18 @@ final class ExternalNavigationSmoke {
         guard app.commands.currentDocument(in: app.webView) == nil else { throw PreviewError.message("Retirement retained current document") }
         return ["scope": "actual-app/system-WK; recording-opener-only", "system_browser_qualified": false,
                 "physical_input_qualified": false, "page_owned_nonactivated_popup_blocked": true,
-                "native_api_popup_context_observed": true,
+                "native_api_other_popup_delivered_and_blocked": true, "rendered_target_blank_link_recorded": true,
                 "main_frame_link_recorded": true, "subframe_and_script_rejected": true,
                 "synthetic_popup_observations": popupCount, "reload_rebound_document": true,
                 "foreign_view_rejected": true, "retirement_current_document_nil": true, "navigation": final]
     }
 
     private var actions: [[String: Any]] { app.commands.smokeExternalNavigation["actions"] as? [[String: Any]] ?? [] }
+    private var otherPopupEvaluations: [[String: Any]] {
+        let values = app.commands.smokeExternalNavigation["evaluations"] as? [[String: Any]] ?? []
+        return values.filter { $0["popup"] as? Bool == true && $0["source_main_frame"] as? Bool == true &&
+            $0["navigation_type"] as? Int == WKNavigationType.other.rawValue }
+    }
 
     /// Only fixed labels, bounded native classifications and booleans leave
     /// this fixture. No document contents, destinations or callback values.

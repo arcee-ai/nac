@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   ButtonContent,
+  ButtonSize,
   ButtonVariant,
   CopyButton,
   Icon,
@@ -13,6 +14,7 @@ import {
   LoaderSize,
 } from "@/app/atoms";
 import { managedQueryKeys, useManagedGitHub } from "@/app/features/managed/queries";
+import { cn } from "@/app/lib/cn";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 
@@ -145,13 +147,19 @@ export function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }
             <CopyButton value={login.user_code} title="Copy device code" />
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              variant={ButtonVariant.Primary}
-              content={ButtonContent.IconRight}
-              onClick={() => window.open(login.verification_uri, "_blank", "noopener")}
+            <a
+              className={cn(
+                "btn",
+                ButtonSize.Medium,
+                ButtonVariant.Primary,
+                ButtonContent.IconRight,
+              )}
+              href={login.verification_uri}
+              target="_blank"
+              rel="noopener noreferrer"
             >
               Open GitHub <Icon iconName={IconName.External} />
-            </Button>
+            </a>
             <Button
               variant={ButtonVariant.Tertiary}
               content={ButtonContent.Text}

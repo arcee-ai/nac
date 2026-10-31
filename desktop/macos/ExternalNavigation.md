@@ -12,20 +12,22 @@ accessors expose correlation to focused shell adapters; they grant no operation
 authority. They return nil during document replacement, UI-owner unregistration,
 launch retirement, failure and for another view or origin.
 
-Only activated external HTTP(S) links and WebKit-admitted new-window actions
-may reach NSWorkspace. URL userinfo, downloads, subframe sources, existing-view
+Only external HTTP(S) actions classified as `.linkActivated` may reach
+NSWorkspace, for either a main-frame target or a new window. URL userinfo, downloads, subframe sources, existing-view
 script/redirect navigation, unsafe schemes, retired launches and same-NAC-origin
 popups are refused. OAuth query/state values remain intact for the OS opener.
 External content receives no shell-owned WKWebView or native bridge.
 
 macOS WKPreferences defaults automatic JavaScript windows to **enabled**.
 NativeCommands explicitly disables `javaScriptCanOpenWindowsAutomatically`
-before loading the page, so WebKit applies its public user-interaction gate.
-The public WKNavigationAction API supplies no portable gesture-authority bit.
-The adapter admits `.other` only for a new-window action which passed that
-gate; main-frame external links require `.linkActivated`. Existing asynchronous
+before loading the page as defense in depth. The public WKNavigationAction API
+supplies no portable gesture-authority bit; this preference and a delivered
+new-window action establish no independent human intent. The adapter rejects
+`.other` for every external target. Existing asynchronous
 device-login auto-open can be blocked after its request completes; the shared
-provider's explicit Open button remains the user retry path. No private WebKit
+provider's explicit Open link remains the same-attempt retry path. The shared
+provider, GitHub, header and error-fix controls use actual styled href anchors.
+No private WebKit
 properties, synthetic trusted input or global popup preference are used.
 
 The NAC serving origin uses the engine's actual assigned loopback port. Local
@@ -70,12 +72,26 @@ Native `callAsyncJavaScript` execution is a separate popup context: an actual
 recording observed WebKit delivering its `.other` popup despite the disabled
 automatic-window preference. A null `window.open` result means the shell
 returned no child WK view; it does not establish that WebKit blocked delivery.
-The fixture preserves that counterexample as a positive control. Its separate
+The original `b24236a3` recording remains a failed immutable counterexample.
+That run also delivered a page-owned timer popup while public transient
+activation was false and sticky activation was true. The preference alone did
+not reject it. The revised source requires both native-API and page-owned
+`.other` controls to reach the delegate classification and be rejected without
+an opener increment; a null return alone never qualifies rejection. Its separate
 document-start observer schedules a page-owned timer, records public
 `navigator.userActivation.isActive` and `hasBeenActive`, and attempts a popup
 only after observing inactive state. Missing public activation support fails
 coverage. Delegate deltas and a subsequent main-link control establish whether
-that page-owned attempt escaped; elapsed time alone establishes nothing.
+that page-owned attempt escaped; elapsed time alone establishes nothing. A
+rendered shared header anchor supplies the target-blank positive control.
+These revised source expectations require new source-qualified WK evidence;
+the failed original run is not superseded by unit tests or compilation.
+
+`.linkActivated` is an allowed navigation category, not proof that every
+programmatic anchor activation is blocked. Terminal links currently use a
+trusted-click-filtered imperative `window.open`; their native compatibility
+requires a separate coordinated disposition before full acceptance. This
+slice does not change the terminal owner or restore blanket `.other` admission.
 
 `ExternalAuthSmoke` is the separately named `external-auth` scenario. It uses
 production MCP controls and the actual NSWorkspace opener, preserving callback
@@ -139,3 +155,10 @@ require the coordinator-approved disposable hosted browser/profile contract;
 the runner never creates such a contract from environment flags. Real vendors,
 physical input, offline behavior and supported-OS qualification remain separate
 evidence obligations.
+
+The hosted/native timeout double advertises 15 seconds to allow browser startup;
+the HTTP-owner double retains its three-second default. Both remain actual
+local-double expiry cases, not changes to production expiry or polling. An
+expired card before an observed browser handoff fails coverage explicitly.
+The runner never treats expiration alone as browser evidence; deterministic
+early-expiry and missing-handoff controls guard that boundary.

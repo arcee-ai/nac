@@ -518,6 +518,80 @@ test("keeps GitHub Connected visible after device authorization and reopening se
   });
 });
 
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  test(`GitHub retry is a keyboard link on the same pending attempt at ${viewport.width}`, async ({
+    harness,
+    page,
+    context,
+  }, info) => {
+    await page.setViewportSize(viewport);
+    await installManagedDouble(page);
+    let starts = 0;
+    let canceled = 0;
+    await page.route(`${harness.baseUrl}/managed/github/login`, async (route) => {
+      starts += 1;
+      await route.fallback();
+    });
+    await page.route(`${harness.baseUrl}/managed/github/login/managed-login-e2e`, async (route) => {
+      if (route.request().method() === "DELETE") {
+        canceled += 1;
+        return route.fulfill({ status: 204 });
+      }
+      return route.fulfill({ json: { state: "pending" } });
+    });
+    await context.route("https://github.com/login/device", (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "<!doctype html><title>Owned GitHub double</title>",
+      }),
+    );
+    await page.goto(harness.baseUrl);
+    await openManagedHost(page);
+    await page.getByRole("button", { name: "GitHub", exact: true }).click();
+    const panel = page.getByTestId("managed-github-settings");
+    await panel.getByRole("button", { name: "Connect GitHub", exact: true }).click();
+    const link = panel.getByRole("link", { name: "Open GitHub", exact: true });
+    await expect(link).toHaveAttribute("href", "https://github.com/login/device");
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(link).toHaveAttribute("rel", /noopener/);
+    await expect(link).toHaveAttribute("rel", /noreferrer/);
+    await page.evaluate(() =>
+      (
+        globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
+      ).document.fonts.ready.then(() => undefined),
+    );
+    const screenshot = info.outputPath(`github-retry-${viewport.width}.png`);
+    await page.screenshot({ path: screenshot, animations: "disabled", caret: "hide" });
+    await info.attach(`github-retry-${viewport.width}.png`, {
+      path: screenshot,
+      contentType: "image/png",
+    });
+    const crop = info.outputPath(`github-retry-${viewport.width}-controls.png`);
+    await panel.screenshot({ path: crop, animations: "disabled", caret: "hide" });
+    await info.attach(`github-retry-${viewport.width}-controls.png`, {
+      path: crop,
+      contentType: "image/png",
+    });
+    const opened = page.waitForEvent("popup");
+    await link.focus();
+    await link.press("Enter");
+    const popup = await opened;
+    await expect(popup).toHaveURL("https://github.com/login/device");
+    expect(
+      await popup.evaluate(() => (globalThis as unknown as { opener: unknown }).opener === null),
+    ).toBe(true);
+    await popup.close();
+    expect(starts).toBe(1);
+    await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect.poll(() => canceled).toBe(1);
+    await expect(panel.getByRole("button", { name: "Connect GitHub", exact: true })).toBeVisible();
+    expect(starts).toBe(1);
+  });
+}
+
 test("runs and reload-recovers a durable latest-beta upgrade through the same-origin facade", async ({
   harness,
   page,

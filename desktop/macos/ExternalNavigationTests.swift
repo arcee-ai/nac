@@ -10,15 +10,16 @@ struct ExternalNavigationTests {
         func allows(_ target: String = "https://provider.example/authorize?state=fixture", source: String = "http://127.0.0.1:43219",
                     document: String = "http://127.0.0.1:43219/settings", current: EngineReceipt? = receipt,
                     main: Bool = true, targetMain: Bool = true, popup: Bool = false,
-                    link: Bool = true, other: Bool = false, download: Bool = false) -> Bool {
+                    link: Bool = true, download: Bool = false) -> Bool {
             policy.allows(destination: URL(string: target), source: URL(string: source), document: URL(string: document),
                           receipt: current, mainFrame: main, mainTarget: targetMain, popup: popup,
-                          activatedLink: link, otherNavigation: other, download: download)
+                          activatedLink: link, download: download)
         }
         precondition(allows())
         precondition(allows("http://127.0.0.1:43220/authorize")) // Local deterministic auth service.
         precondition(allows(popup: true))
-        precondition(allows(targetMain: false, popup: true, link: false, other: true))
+        precondition(allows(targetMain: false, popup: true)) // Actual target=_blank link category.
+        precondition(!allows(targetMain: false, popup: true, link: false)) // Delivered .other popup.
         for target in ["file:///tmp/key", "javascript:alert(1)", "data:text/html,hello", "mailto:test@example.test",
                        "nac://callback", "https://user:password@provider.example/", "https://@provider.example/",
                        "http://127.0.0.1:43219/credentials", "about:blank"] {
@@ -31,7 +32,7 @@ struct ExternalNavigationTests {
         }
         precondition(!allows(main: false))
         precondition(!allows(targetMain: false))
-        precondition(!allows(link: false, other: true)) // Script/redirect in the existing view.
+        precondition(!allows(link: false)) // Script/redirect in the existing view.
         precondition(!allows(popup: true, link: false)) // Form submission, back/forward, reload.
         precondition(!allows(download: true))
         precondition(!allows(current: nil))
@@ -40,7 +41,7 @@ struct ExternalNavigationTests {
         precondition(!allows(current: replacement))
         policy.retire()
         precondition(!allows())
-        precondition(!allows(targetMain: false, popup: true, link: false, other: true))
+        precondition(!allows(targetMain: false, popup: true, link: false))
         print("External navigation policy contracts passed")
     }
 }

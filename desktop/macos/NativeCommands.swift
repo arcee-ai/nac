@@ -19,8 +19,8 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
         self.webView = webView
         self.receipt = receipt
         super.init()
-        // macOS defaults this preference to true. Require WebKit's public
-        // user-interaction popup gate before any new-window browser handoff.
+        // macOS defaults this preference to true. Disable it as defense in
+        // depth; external navigation still requires the linkActivated category.
         webView.configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         webView.uiDelegate = self
     }

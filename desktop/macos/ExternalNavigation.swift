@@ -30,8 +30,8 @@ final class ExternalNavigation {
     }
 
     /// Called only for navigation which the existing internal bridge refused.
-    /// NativeCommands explicitly enables WebKit's user-interaction popup gate
-    /// before the first load; macOS otherwise allows automatic script popups.
+    /// The disabled automatic-window preference is defense in depth. A
+    /// delivered popup is not intent proof; only linkActivated is admitted.
     func allows(_ action: WKNavigationAction, in candidate: WKWebView, popup: Bool) -> Bool {
         let source = action.sourceFrame.securityOrigin
         var components = URLComponents()
@@ -45,7 +45,6 @@ final class ExternalNavigation {
                             mainTarget: action.targetFrame?.isMainFrame == true,
                             popup: popup && action.targetFrame == nil,
                             activatedLink: action.navigationType == .linkActivated,
-                            otherNavigation: action.navigationType == .other,
                             download: action.shouldPerformDownload)
         #if PREVIEW_SMOKE
         if evaluatedActions.count < 128 {
@@ -82,8 +81,8 @@ final class ExternalNavigation {
 }
 
 /// Pure decisions use the same verified receipt/origin contract as UI commands.
-/// `popup` means WebKit delivered a new-window action after its popup checks;
-/// it is not a caller-supplied permission or JavaScript message field.
+/// `popup` describes a delivered new-window action, not human authority. The
+/// allowed link category does not prove that activation was physical.
 final class ExternalNavigationPolicy {
     private let launch: NativeCommandState
 
@@ -94,10 +93,10 @@ final class ExternalNavigationPolicy {
 
     func allows(destination: URL?, source: URL?, document: URL?, receipt: EngineReceipt?,
                 mainFrame: Bool, mainTarget: Bool, popup: Bool, activatedLink: Bool,
-                otherNavigation: Bool, download: Bool) -> Bool {
+                download: Bool) -> Bool {
         guard launch.matches(receipt), launch.allows(source), launch.allows(document),
               mainFrame, !download, let destination,
-              (popup && (activatedLink || otherNavigation)) || (mainTarget && activatedLink),
+              activatedLink && (popup || mainTarget),
               ["http", "https"].contains(destination.scheme),
               let host = destination.host, !host.isEmpty,
               destination.user == nil, destination.password == nil,
