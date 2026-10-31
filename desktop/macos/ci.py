@@ -19,7 +19,7 @@ import time
 from ci_support import (COMPLETE_LOG_LIMIT, console_state, export_evidence, qualify_toolchain, redact_values,
                         require_console, require_terminal_evidence)
 from smoke import cleanup_failed_case
-from ci_qualifications import require_checkout, require_full_preview, require_workspace, select_target
+from ci_qualifications import require_checkout, require_full_preview, require_workspace, require_rich_capture, select_target
 from ci_xctest import run_terminal
 from ci_instances import audit_cleanup as audit_instances, qualify as qualify_instances, retain_receipt as retain_instances
 from ci_terminal import qualify as qualify_terminal
@@ -414,6 +414,10 @@ def main():
                             for name in ('workspace-direct', 'workspace-legacy')}
                 report['target_suite'] = require_workspace(json.loads((raw / 'workspace/matrix.json').read_text()),
                     episodes, json.loads((raw / 'evidence/summary.json').read_text()), target)
+                report['rich_capture'] = require_rich_capture(episodes['workspace-direct'],
+                    json.loads((raw / 'workspace/matrix.json').read_text())['provenance'],
+                    raw / 'workspace/workspace-direct-rich-chat.png', source_root / 'desktop/macos/WorkspaceFixture.swift')
+                report['rich_capture']['episode_sha256'] = hashlib.sha256((raw / 'workspace/workspace-direct.json').read_bytes()).hexdigest()
             else:
                 run(['bash', 'desktop/macos/preview.sh', 'smoke'], raw / 'app-journeys.log', 800, cwd=source_root)
             if target and not workspace:
@@ -428,7 +432,7 @@ def main():
             images = [raw / 'evidence' / name for name in ('streamed-chat.png', 'persisted-chat.png')]
             report['images'] = native_report([str(helper), *map(str, images)], raw / 'image-reader.log')
             if workspace:
-                for kind, name in [('workspace', 'workspace-direct-rich-chat.png'), ('approval', 'workspace-direct-approval.png'),
+                for kind, name in [('workspace-rich', 'workspace-direct-rich-chat.png'), ('approval', 'workspace-direct-approval.png'),
                                    ('chat', 'workspace-legacy-legacy.png')]:
                     flags = [] if kind == 'chat' else ['--' + kind]
                     report.setdefault('workspace_images', []).extend(native_report(
