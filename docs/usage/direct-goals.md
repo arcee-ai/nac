@@ -60,3 +60,10 @@ a default budget. The update tool can mark only `complete` or genuinely
 authority. Goal operations still pass through the native prepared-tool and
 permission boundary, and never alter the selected local, Podman, or SSH
 execution backend.
+
+
+An explicitly authorized coordinator can also use the native
+[`task_goal` peer controls](independent-tasks.md#explicit-peer-goal-controls) on an
+independent plain direct Local task. Each peer action needs a separate manual
+human authorization and ordinary permission evaluation. This adds no authority
+to the target's own `update_goal` tool or to traditional child sessions.

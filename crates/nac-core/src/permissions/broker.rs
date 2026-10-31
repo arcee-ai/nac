@@ -206,8 +206,9 @@ impl PermissionBroker {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .pending
-                .keys()
-                .cloned()
+                .iter()
+                .filter(|(_, pending)| !pending.explicit_human)
+                .map(|(id, _)| id.clone())
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
@@ -323,7 +324,20 @@ impl PermissionBroker {
         context: &crate::tools::kernel::ToolCallContext,
         cancellation: &crate::tools::ThreadCancellation,
     ) -> AuthorizationOutcome {
-        self.authorize_invocation(tool, resources, context, cancellation, false)
+        self.authorize_invocation(tool, resources, context, cancellation, false, false)
+            .await
+    }
+
+    /// Additional invocation-only authorization for exact peer goal controls.
+    /// Policy Deny still wins; allow rules, grants, auto mode and reviewer
+    /// decisions cannot impersonate the human's explicit reply.
+    pub(crate) async fn authorize_peer_goal(
+        self: &Arc<Self>,
+        resources: &[PermissionResource],
+        context: &crate::tools::kernel::ToolCallContext,
+        cancellation: &crate::tools::ThreadCancellation,
+    ) -> AuthorizationOutcome {
+        self.authorize_invocation("task_goal", resources, context, cancellation, false, true)
             .await
     }
 
@@ -334,8 +348,15 @@ impl PermissionBroker {
         cancellation: &crate::tools::ThreadCancellation,
         _submission: &crate::session_service::SubmittedShell,
     ) -> AuthorizationOutcome {
-        self.authorize_invocation("exec_command", resources, context, cancellation, true)
-            .await
+        self.authorize_invocation(
+            "exec_command",
+            resources,
+            context,
+            cancellation,
+            true,
+            false,
+        )
+        .await
     }
 
     pub(crate) async fn authorize_submitted_user_terminal(
@@ -351,6 +372,7 @@ impl PermissionBroker {
             context,
             cancellation,
             true,
+            false,
         )
         .await
     }
@@ -404,6 +426,7 @@ impl PermissionBroker {
         context: &crate::tools::kernel::ToolCallContext,
         cancellation: &crate::tools::ThreadCancellation,
         human_submitted: bool,
+        explicit_human: bool,
     ) -> AuthorizationOutcome {
         let review_stop = self.review_run_stop();
         #[cfg(test)]
@@ -431,7 +454,7 @@ impl PermissionBroker {
         };
         let decision = self.policy.evaluate(resources, &remembered);
         match decision.effect {
-            PermissionEffect::Allow => {
+            PermissionEffect::Allow if !explicit_human => {
                 return if cancellation.is_cancelled() {
                     AuthorizationOutcome::Denied(
                         "run was cancelled before authorization completed".to_string(),
@@ -447,7 +470,7 @@ impl PermissionBroker {
                         .unwrap_or_else(|| format!("configured permission rules deny {tool}")),
                 );
             }
-            PermissionEffect::Ask => {}
+            PermissionEffect::Allow | PermissionEffect::Ask => {}
         }
 
         if cancellation.is_cancelled() {
@@ -456,7 +479,7 @@ impl PermissionBroker {
 
         // Service-issued human intent supplies invocation-only authority after policy.
         // This path neither reads approval mode nor creates a remembered grant.
-        if human_submitted {
+        if human_submitted && !explicit_human {
             return AuthorizationOutcome::Allowed;
         }
 
@@ -475,10 +498,10 @@ impl PermissionBroker {
         // policy has produced Ask. It is never cached: independent managers and
         // processes may attach the same durable session.
         let (_, initial_auto_generation, _) = match self.load_approval_state().await {
-            Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
+            Ok((PermissionApprovalMode::AutoApprove, _, _)) if !explicit_human => {
                 return allowed().await;
             }
-            Ok((PermissionApprovalMode::Review, generation, revision)) => {
+            Ok((PermissionApprovalMode::Review, generation, revision)) if !explicit_human => {
                 // Ineligible requests fall through to the manual path below,
                 // which still fails closed without an interactive client.
                 if let Some(outcome) = self
@@ -535,21 +558,25 @@ impl PermissionBroker {
         };
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let approval_generation = match self.load_approval_state().await {
-            Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
+            Ok((PermissionApprovalMode::AutoApprove, _, _)) if !explicit_human => {
                 return allowed().await;
             }
             Ok((
-                PermissionApprovalMode::Manual | PermissionApprovalMode::Review,
+                PermissionApprovalMode::Manual
+                | PermissionApprovalMode::Review
+                | PermissionApprovalMode::AutoApprove,
                 generation,
                 _,
-            )) if generation > initial_auto_generation => {
+            )) if !explicit_human && generation > initial_auto_generation => {
                 // Auto-approve was enabled and then disabled while this Ask
                 // was already resolving broker ownership. The enable still
                 // owns this invocation even though it never became pending.
                 return allowed().await;
             }
             Ok((
-                PermissionApprovalMode::Manual | PermissionApprovalMode::Review,
+                PermissionApprovalMode::Manual
+                | PermissionApprovalMode::Review
+                | PermissionApprovalMode::AutoApprove,
                 generation,
                 _,
             )) => generation,
@@ -577,6 +604,7 @@ impl PermissionBroker {
                     state.pending.insert(
                         request.id.clone(),
                         PendingPermission {
+                            explicit_human,
                             request: request.clone(),
                             reply: sender,
                         },
@@ -623,7 +651,7 @@ impl PermissionBroker {
                     self.reply_outcome(receiver.await, &request, &waiter_live, &review_stop).await
                 }
             },
-            () = self.auto_approval_after(approval_generation) => {
+            () = self.auto_approval_after(approval_generation), if !explicit_human => {
                 // A local manual reply or cancellation may have claimed the
                 // request after the durable generation was read. Whichever
                 // removes it first owns the sole reply.

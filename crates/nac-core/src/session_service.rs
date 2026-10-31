@@ -43,6 +43,7 @@ mod direct_interaction;
 mod frontend_projection;
 mod manual_compaction;
 mod operation_state;
+mod peer_goals;
 mod recovery;
 mod settlement;
 mod shell_command_types;
