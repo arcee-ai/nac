@@ -210,3 +210,16 @@ test("native macOS is candidate-bound and required even for docs-only PRs", () =
     }
   }
 });
+
+test("native app qualification keeps the actual app required beside process regressions", () => {
+  const workflow = fs.readFileSync(".github/workflows/macos-native.yml", "utf8");
+  assert.match(workflow, /  app:\n    name: ARM AppKit and system WKWebView app/);
+  assert.match(workflow, /  native:\n    name: ARM macOS process and credentials/);
+  assert.match(workflow, /DEVELOPER_DIR: \/Applications\/Xcode_26\.6.app\/Contents\/Developer/);
+  assert.match(workflow, /run: make setup/);
+  assert.match(workflow, /python3 -B desktop\/macos\/ci.py --expected-sha/);
+  assert.match(workflow, /EXPECTED_SHA: \$\{\{ inputs.source-sha \}\}/);
+  assert.match(workflow, /if: always\(\)[\s\S]*name: native-app-/);
+  assert.match(workflow, /retention-days: 7/);
+  assert.doesNotMatch(workflow, /continue-on-error|pull_request_target|sudo|tccutil/);
+});
