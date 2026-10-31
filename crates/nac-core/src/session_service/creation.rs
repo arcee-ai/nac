@@ -20,14 +20,23 @@ impl SessionService {
         resources: crate::runtime::PreparedSessionResources,
         launch_id: String,
     ) -> Result<SessionFrontendSnapshot> {
-        self.persist_prepared_session(resources, Some(launch_id))
+        self.persist_prepared_session(resources, Some(LaunchPublication::Retained(launch_id)))
+            .await
+    }
+
+    pub async fn persist_new_native_task_session_with_snapshot(
+        &self,
+        resources: crate::runtime::PreparedSessionResources,
+        launch_id: String,
+    ) -> Result<SessionFrontendSnapshot> {
+        self.persist_prepared_session(resources, Some(LaunchPublication::Native(launch_id)))
             .await
     }
 
     async fn persist_prepared_session(
         &self,
         resources: crate::runtime::PreparedSessionResources,
-        launch_id: Option<String>,
+        launch_id: Option<LaunchPublication>,
     ) -> Result<SessionFrontendSnapshot> {
         // Accepted blocking work outlives a dropped request. Its shared resource
         // guard must also outlive that request and disarm inside the commit
@@ -80,9 +89,14 @@ impl SessionService {
     }
 }
 
+enum LaunchPublication {
+    Retained(String),
+    Native(String),
+}
+
 struct CreateSessionWithSnapshot {
     snapshot: sessions::SessionSnapshot,
-    launch_id: Option<String>,
+    launch_id: Option<LaunchPublication>,
     response: SessionFrontendSnapshot,
     resources: Arc<StdMutex<Option<crate::runtime::PreparedSessionResources>>>,
     #[cfg(test)]
@@ -103,12 +117,22 @@ impl PersistenceCommand for CreateSessionWithSnapshot {
             let transaction =
                 connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             sessions::insert_new_session_in_transaction(&transaction, path, &self.snapshot)?;
-            if let Some(launch_id) = self.launch_id.as_deref() {
-                crate::store::task_launches::publish_in_transaction(
-                    &transaction,
-                    launch_id,
-                    &self.snapshot,
-                )?;
+            match &self.launch_id {
+                Some(LaunchPublication::Native(id)) => {
+                    crate::store::native_task_launches::publish_in_transaction(
+                        &transaction,
+                        id,
+                        &self.snapshot,
+                    )?
+                }
+                Some(LaunchPublication::Retained(id)) => {
+                    crate::store::task_launches::publish_in_transaction(
+                        &transaction,
+                        id,
+                        &self.snapshot,
+                    )?
+                }
+                None => {}
             }
             self.response.sessions = view::list_sessions_with_connection(&transaction)?;
             transaction.commit()?;

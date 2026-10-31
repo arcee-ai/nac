@@ -1087,3 +1087,6 @@ mod openapi_contract;
 #[cfg(unix)]
 #[path = "tests/task_launch_shutdown.rs"]
 mod task_launch_shutdown;
+
+#[path = "tests/native_task_launches.rs"]
+mod native_task_launches;

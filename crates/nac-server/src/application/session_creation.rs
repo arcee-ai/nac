@@ -255,25 +255,50 @@ impl<'a> SessionCreationApplication<'a> {
         &self,
         request: SessionCreationCommand,
     ) -> Result<SessionFrontendSnapshot> {
-        self.create_prepared_session(request, None).await
+        self.create_prepared_session(request, None, None).await
     }
 
     pub(crate) async fn create_retained_task_session(
         &self,
         launch: nac_core::store::TaskLaunchRecord,
     ) -> Result<SessionFrontendSnapshot> {
-        let request = SessionCreationCommand {
+        let path = self.manager.inner.store_path.clone();
+        let id = launch.request.request_id.clone();
+        let native = nac_core::store::spawn_blocking_store_caller(move || {
+            nac_core::store::load_native_task_launch(&path, &id)
+        })
+        .await??;
+        let mut request = SessionCreationCommand {
             behavior: SessionBehavior::Direct,
             project_id: Some(launch.request.project_id.clone()),
             ..SessionCreationCommand::default()
         };
-        self.create_prepared_session(request, Some(launch)).await
+        if let Some(native) = &native {
+            apply_native_settings(&mut request, native);
+        }
+        self.create_prepared_session(request, Some(launch), None)
+            .await
+    }
+
+    pub(crate) async fn create_native_task_session(
+        &self,
+        launch: nac_core::task_launch_control::NativeTaskLaunch,
+    ) -> Result<SessionFrontendSnapshot> {
+        let mut request = SessionCreationCommand {
+            behavior: SessionBehavior::Direct,
+            project_id: Some(launch.project_id.clone()),
+            ..Default::default()
+        };
+        apply_native_settings(&mut request, &launch);
+        self.create_prepared_session(request, None, Some(launch))
+            .await
     }
 
     async fn create_prepared_session(
         &self,
         mut request: SessionCreationCommand,
         retained: Option<nac_core::store::TaskLaunchRecord>,
+        native: Option<nac_core::task_launch_control::NativeTaskLaunch>,
     ) -> Result<SessionFrontendSnapshot> {
         let first_chat_project_id = if request.first_chat {
             Some(
@@ -435,12 +460,14 @@ impl<'a> SessionCreationApplication<'a> {
             sandbox: sandbox_options(request.sandbox),
             ssh: location.ssh,
         };
-        if retained.is_some() {
+        if retained.is_some() || native.is_some() {
             self.manager.inner.task_preparations.git.check_running()?;
         }
         let preparation = async {
             if let Some(launch) = &retained {
                 runtime::prepare_retained_task_run_config(options, &config, launch).await
+            } else if let Some(launch) = &native {
+                runtime::prepare_native_task_run_config(options, &config, launch).await
             } else {
                 runtime::prepare_run_config_for_project_with_behavior(
                     options, &config, project_id, behavior,
@@ -491,7 +518,7 @@ impl<'a> SessionCreationApplication<'a> {
                     gate.resume.notified().await;
                 }
             }
-            if retained.is_some() {
+            if retained.is_some() || native.is_some() {
                 self.manager.inner.task_preparations.git.check_running()?;
             }
             Ok::<_, anyhow::Error>(service)
@@ -517,10 +544,20 @@ impl<'a> SessionCreationApplication<'a> {
                     )
                     .await?
             }
-            None => service.persist_new_session_with_snapshot(resources).await?,
+            None => match &native {
+                Some(launch) => {
+                    service
+                        .persist_new_native_task_session_with_snapshot(
+                            resources,
+                            launch.request.request_id.clone(),
+                        )
+                        .await?
+                }
+                None => service.persist_new_session_with_snapshot(resources).await?,
+            },
         };
         #[cfg(test)]
-        if retained.is_some() {
+        if retained.is_some() || native.is_some() {
             let gate = self
                 .manager
                 .inner
@@ -552,7 +589,7 @@ impl<'a> SessionCreationApplication<'a> {
                     .or_insert_with(|| Arc::new(service)),
             )
         };
-        if retained.is_some()
+        if (retained.is_some() || native.is_some())
             && self
                 .manager
                 .inner
@@ -564,5 +601,17 @@ impl<'a> SessionCreationApplication<'a> {
             service.stop_run_admission().await?;
         }
         Ok(snapshot)
+    }
+}
+
+fn apply_native_settings(
+    request: &mut SessionCreationCommand,
+    launch: &nac_core::task_launch_control::NativeTaskLaunch,
+) {
+    if let Some(model) = &launch.request.model {
+        request.model = Field::Set(model.clone());
+    }
+    if let Some(reasoning) = &launch.request.reasoning_effort {
+        request.reasoning_effort = Field::Set(reasoning.clone());
     }
 }

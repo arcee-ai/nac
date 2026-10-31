@@ -35,6 +35,8 @@ export interface ToolPresentation {
    * consumers must resolve it against the delegation queries before trusting it.
    */
   spawnedSessionId?: string;
+  /** Native launch identity hint; consumers validate it against passive session inventory. */
+  launchedTask?: { sessionId: string; projectId: string; callerId: string; title: string };
 }
 
 type ToolStarted = Extract<AgentEvent, { type: "tool_call_started" }>;
@@ -112,6 +114,9 @@ const TOOL_LABELS: Record<string, string> = {
   find_tasks: "Find tasks",
   read_task: "Read task",
   subagent: "Start coding agent",
+  list_projects: "Find saved projects",
+  launch_task: "Start separate task",
+  task_launch_status: "Read task preparation",
   subagent_status: "Check coding agent",
   subagent_cancel: "Cancel coding agent",
   orchestrator_launch: "Start NAC orchestrator",
@@ -199,6 +204,37 @@ function spawnedSession(name: string, call: ToolCall, resultText: string | null)
   return sessionId(result[field]);
 }
 
+function launchedTask(name: string, text: string | null): ToolPresentation["launchedTask"] {
+  if (name !== "launch_task" && name !== "task_launch_status") return undefined;
+  const result = parseObject(text);
+  const launch = result?.launch;
+  if (launch === undefined || !isJsonObject(launch)) return undefined;
+  const id = launch.session_id;
+  const caller = launch.caller_session_id;
+  const project = launch.project_id;
+  const request = launch.request;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  if (
+    !isString(id) ||
+    !uuid.test(id) ||
+    result?.navigation !== `/session/${id}` ||
+    !isString(caller) ||
+    !isString(project) ||
+    request === undefined ||
+    !isJsonObject(request) ||
+    !isString(request.request_id) ||
+    !uuid.test(request.request_id) ||
+    !isString(request.title)
+  )
+    return undefined;
+  return {
+    sessionId: id,
+    callerId: caller,
+    projectId: project,
+    title: bounded(request.title, 120),
+  };
+}
+
 function statusFromFinished(event: ToolFinished): ToolPresentationStatus {
   if (event.completion_status === "timed_out") return "timed-out";
   if (event.completion_status === "cancelled") return "cancelled";
@@ -283,5 +319,7 @@ export function presentToolCall({
   }
   const spawnedSessionId = spawnedSession(name, call, resultText);
   if (spawnedSessionId) presentation.spawnedSessionId = spawnedSessionId;
+  const task = launchedTask(name, resultText);
+  if (task && status === "success") presentation.launchedTask = task;
   return presentation;
 }

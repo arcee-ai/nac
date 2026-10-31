@@ -52,12 +52,21 @@ impl<'a> TaskLaunchApplication<'a> {
     }
 
     pub(crate) async fn start(&self, request: TaskLaunchRequest) -> Result<TaskLaunchRecord> {
+        let admission = self.manager.inner.task_preparations.admit().await?;
+        self.start_admitted(request, admission, None).await
+    }
+
+    pub(crate) async fn start_admitted(
+        &self,
+        request: TaskLaunchRequest,
+        admission: tokio::sync::OwnedRwLockReadGuard<()>,
+        authorization: Option<nac_core::task_launch_control::NativeTaskAuthorization>,
+    ) -> Result<TaskLaunchRecord> {
         request.validate()?;
         anyhow::ensure!(
             self.manager.managed_host().is_none(),
             "invalid request: retained tasks require an unmanaged Local host"
         );
-        let admission = self.manager.inner.task_preparations.admit().await?;
         let manager = self.manager.clone();
         let (reply, response) = tokio::sync::oneshot::channel();
         // Register before source resolution. HTTP cancellation cannot detach
@@ -72,6 +81,31 @@ impl<'a> TaskLaunchApplication<'a> {
                     return;
                 }
             };
+            if lease.is_some()
+                && !matches!(
+                    record.phase,
+                    TaskLaunchPhase::Ready | TaskLaunchPhase::Cancelled
+                )
+            {
+                if let Some(authorization) = authorization {
+                    if let Err(error) = authorization.authorize_preparation(&record).await {
+                        let path = manager.inner.store_path.clone();
+                        let id = record.request.request_id.clone();
+                        let message = format!("{error:#}");
+                        let _ = store::spawn_blocking_store_caller(move || {
+                            store::update_task_launch(
+                                &path,
+                                &id,
+                                TaskLaunchPhase::Failed,
+                                Some(message),
+                            )
+                        })
+                        .await;
+                        let _ = reply.send(Err(error));
+                        return;
+                    }
+                }
+            }
             let _ = reply.send(Ok(record.clone()));
             if let Some(_lease) = lease {
                 if !matches!(
@@ -252,6 +286,13 @@ pub(crate) fn reconcile_startup(path: &std::path::Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    std::thread::scope(|scope| scope.spawn(|| store::reconcile_task_launches(path)).join())
-        .map_err(|_| anyhow!("task preparation reconciliation thread panicked"))?
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                store::reconcile_task_launches(path)?;
+                store::reconcile_native_task_launches(path)
+            })
+            .join()
+    })
+    .map_err(|_| anyhow!("task preparation reconciliation thread panicked"))?
 }

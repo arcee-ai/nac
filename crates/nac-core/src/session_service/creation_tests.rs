@@ -225,7 +225,9 @@ async fn retained_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, S
     command.snapshot.ssh = None;
     command.snapshot.sandbox_spec = None;
     command.response.metadata.session_id = Some(launch.session_id);
-    command.launch_id = Some(launch.request.request_id.clone());
+    command.launch_id = Some(LaunchPublication::Retained(
+        launch.request.request_id.clone(),
+    ));
     (command, path, launch.request.request_id)
 }
 
@@ -299,5 +301,142 @@ async fn retained_creation_cancel_before_publication_rolls_back_session_and_inpu
             .phase,
         crate::store::TaskLaunchPhase::Cancelled
     );
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+async fn native_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, String) {
+    let (mut command, path) = command(label).await;
+    crate::store::insert_project(
+        &path,
+        crate::store::NewProject {
+            project_id: "native-project".into(),
+            name: None,
+            description: None,
+            cwd: "/repo".into(),
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        },
+    )
+    .unwrap();
+    let conn = crate::store::open_runtime_connection(&path).unwrap();
+    conn.execute("UPDATE sessions SET behavior='direct',host_id=NULL,sandbox_json=NULL WHERE session_id='baseline'",[]).unwrap();
+    drop(conn);
+    crate::store::assign_session_to_project(&path, "native-project", "baseline").unwrap();
+    let request = crate::task_launch_control::NativeTaskRequest {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        project_id: None,
+        title: "Independent task".into(),
+        prompt: "Only these handoff facts".into(),
+        skill: Some("qa".into()),
+        model: None,
+        reasoning_effort: None,
+        workspace: crate::task_launch_control::TaskWorkspace::ExistingCheckout,
+        git_ref: None,
+        default_ref: None,
+    };
+    let launch = crate::store::reserve_native_task_launch(
+        &path,
+        "baseline",
+        "native-project",
+        Path::new("/repo"),
+        false,
+        request,
+    )
+    .unwrap();
+    crate::store::update_native_task_launch(
+        &path,
+        &launch.request.request_id,
+        "preparing_runtime",
+        None,
+    )
+    .unwrap();
+    command.snapshot.session_id = launch.session_id.clone();
+    command.snapshot.project_id = Some(launch.project_id);
+    command.snapshot.behavior = sessions::SessionBehavior::Direct;
+    command.snapshot.cwd = launch.source_cwd;
+    command.snapshot.ssh = None;
+    command.snapshot.sandbox_spec = None;
+    command.response.metadata.session_id = Some(launch.session_id);
+    command.launch_id = Some(LaunchPublication::Native(launch.request.request_id.clone()));
+    (command, path, launch.request.request_id)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn native_creation_lost_ack_commits_once_without_goal_or_human_intent() {
+    let (mut command, path, id) = native_command("native_lost_ack").await;
+    let (reached, observed) = std::sync::mpsc::channel();
+    let (resume, release) = std::sync::mpsc::channel();
+    command.after_commit = Some((reached, release));
+    let owner_path = path.clone();
+    let owner = crate::store::spawn_blocking_store_caller(move || {
+        crate::store::StoreCoordinator::acquire(&owner_path)
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    let pending = owner.submit(command).unwrap();
+    observed.recv_timeout(Duration::from_secs(5)).unwrap();
+    drop(pending);
+    resume.send(()).unwrap();
+    owner.shutdown().await.unwrap();
+    assert_eq!(owner.stats().acknowledgements_lost, 1);
+    drop(owner);
+    let receipt = crate::store::load_native_task_launch(&path, &id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(receipt.phase, "ready");
+    let inbox = crate::store::list_session_inbox(&path, &receipt.session_id).unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(Some(inbox[0].id), receipt.first_input_id);
+    assert_eq!(
+        inbox[0].content,
+        "Use the requested skill $qa.\n\nOnly these handoff facts"
+    );
+    let conn = crate::store::open_runtime_connection(&path).unwrap();
+    let intent: Option<String> = conn
+        .query_row(
+            "SELECT review_intent FROM session_inbox WHERE id=?1",
+            [inbox[0].id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        intent, None,
+        "agent-produced brief is never human review intent"
+    );
+    let goals: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM session_goals WHERE session_id=?1",
+            [&receipt.session_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(goals, 0);
+    drop(conn);
+    let retry = crate::store::reserve_native_task_launch(
+        &path,
+        "baseline",
+        "native-project",
+        Path::new("/repo"),
+        false,
+        receipt.request.clone(),
+    )
+    .unwrap();
+    assert_eq!(retry, receipt);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn native_cancel_before_publication_rolls_back_session_and_initial_input() {
+    let (command, path, id) = native_command("native_cancel").await;
+    let session = command.snapshot.session_id.clone();
+    crate::store::update_native_task_launch(&path, &id, "cancelled", None).unwrap();
+    assert!(command.execute(&path).is_err());
+    assert!(!sessions::session_exists(&path, &session).unwrap());
+    assert!(crate::store::list_session_inbox(&path, &session)
+        .unwrap()
+        .is_empty());
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
