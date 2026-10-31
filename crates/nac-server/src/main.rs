@@ -56,6 +56,15 @@ struct Cli {
     reason = "Clap owns the closed root command payloads and boxing would complicate derive wiring"
 )]
 enum RootCommand {
+    /// Resolve local Mac launch paths without opening the selected store.
+    #[cfg(unix)]
+    #[command(name = "__desktop-configuration", hide = true)]
+    DesktopConfiguration {
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        store_path: Option<PathBuf>,
+    },
     #[cfg(unix)]
     #[command(name = "__desktop-identity", hide = true)]
     DesktopIdentity,
@@ -511,6 +520,17 @@ async fn run() -> Result<()> {
     let matches = cli_command(&invocation_name).get_matches();
     let cli = Cli::from_arg_matches(&matches).map_err(|error| anyhow!(error.to_string()))?;
     match cli.command {
+        #[cfg(unix)]
+        Some(RootCommand::DesktopConfiguration {
+            directory,
+            store_path,
+        }) => {
+            println!(
+                "{}",
+                nac_server::desktop_startup::configuration_json(&directory, store_path)?
+            );
+            Ok(())
+        }
         None => {
             #[cfg(unix)]
             if let Some(desktop) = desktop {

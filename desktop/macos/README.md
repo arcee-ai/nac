@@ -158,3 +158,73 @@ watchdog. The checked-in runner records source/engine/native binary identities,
 exact receipts, OS/SDK, native failure snapshots and cleanup. `engine_contract.py`
 adds direct binary/channel controls using the same bundled executable. These
 fixtures add no production bridge and make no trusted OS input qualification.
+
+## Normal local startup (ALL-342)
+
+`./desktop/macos/preview.sh app-build` produces the ordinary `NAC.app` with
+`LOCAL_APP`; `app-run` opens it. It starts in HOME by default, independently of
+the app's location or LaunchServices cwd. `--directory` selects another existing
+bootstrap directory; relative arguments resolve from HOME. `--store-path`
+overrides the normal Rust configuration/track store choice. Repeated
+`--command-path directory` arguments prepend explicit command locations before
+the inherited PATH and standard Apple Silicon/Intel Homebrew directories.
+No shell, dotfiles, global preferences or installer runs during discovery.
+
+The exact bundled Rust engine performs bounded `__desktop-configuration`
+discovery using the ordinary NAC_HOME/XDG_CONFIG_HOME/HOME and immutable build
+track owners, including stable legacy-store fallback. It recovers pending
+configuration publications and prepares store parents through their existing
+Rust owners; it opens neither a database nor a serving lease. The subsequent
+identified engine opens that exact selected store and launches workers using
+its own bundled executable. Credentials remain in the existing hardened Rust
+stores or inherited environment; the native app never copies or persists them.
+Missing Git prevents launch with recovery guidance. Optional SSH, Podman and
+MCP discovery retain their normal shared settings and chosen execution backend.
+
+Ordinary and startup-smoke builds exclude PreviewProfile, FixtureProvider and
+FixtureBootstrap definitions from their compiler inputs. The ordinary binary
+also rejects disposable fixture markers during provenance verification.
+`smoke-build` builds the existing disposable preview instrumentation without
+launching it, allowing separate build and native/browser leases.
+
+`startup-build` compiles `LOCAL_APP` plus `PREVIEW_SMOKE` into the separate
+`NAC Startup Smoke.app`. Run `python3 -B desktop/macos/startup_smoke.py APP OUTPUT`
+under the host's native/browser lease. `startup-smoke` combines those steps for
+hosts without a separate lease requirement. The runner relocates the real app,
+uses disposable profiles, drives the production UI in system WKWebView, and
+records startup, configured Local runs, failures and bounded cleanup. Optional
+command cases are selected with `NAC_STARTUP_SCENARIOS` (comma-separated
+`startup-missing-ssh`, `startup-missing-podman`, `startup-missing-mcp`,
+`startup-custom-mcp`). The test-only missing-command switch excludes fallback
+directories only in that smoke bundle. Dummy provider results do not establish
+real-vendor authentication; locked-session DOM results do not establish visible
+paint or trusted OS input.
+
+`node desktop/macos/startup_lifecycle.mjs NAC.app OUTPUT` exercises the ordinary
+uninstrumented app under a native/browser lease. It identifies the unique
+relocated app and exact bundled child before observing that child's loopback
+listener, then verifies an actual bundled worker consumes a dummy credential
+through the Rust owner. A second case holds the configuration publication lock
+while the app exits and checks that its preflight child exits without creating a
+database. Termination and cleanup require matching this fixture's bundle paths;
+unknown ownership retains the disposable profile for inspection.
+
+For the separately authorized real-vendor case, set `NAC_STARTUP_REAL_VENDOR=1`
+and `NAC_STARTUP_SCENARIOS=startup-real-arcee` when invoking the same runner.
+It uses the existing ARCEE_API_KEY child-environment reference and selects a
+model listed by the existing authenticated provider discovery through the
+ordinary catalog UI.
+It creates no key preset and verifies `arcee-api` plus the environment variable
+name before sending one text-only prompt through the shared UI. The key is never
+put in arguments or evidence; HOME/NAC_HOME/store remain disposable. This case
+is excluded from default runs and never uses OAuth refresh or personal stores.
+For selection-only repair verification, `NAC_STARTUP_VENDOR_SELECTION_ONLY=1`
+stops after verifying that the session persisted the exact discovered model,
+before sending any model prompt.
+
+Every builder mode emits `Contents/Resources/build-receipt.json` with source,
+compiler flags, native source hashes, engine identity and both executable
+hashes. It rejects an engine from another source revision or source changes
+during compilation. This is unsigned compiler provenance for the packaging
+owner; signing requires a separate final artifact manifest. The local builder's
+development bundle identifier is not the distribution or track identity contract.
