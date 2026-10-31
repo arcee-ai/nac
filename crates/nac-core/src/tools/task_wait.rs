@@ -31,6 +31,22 @@ pub(crate) struct WaitInput {
 
 pub(crate) struct WaitTasksTool;
 
+fn relevant_goal_hint(
+    hint: &store::goal_changes::GoalChange,
+    path: &std::path::Path,
+    targets: &[Target],
+) -> bool {
+    hint.store_path == path
+        && hint.version >= 0
+        && (hint.status != store::GoalStatus::Active
+            || hint.kind != store::goal_changes::GoalChangeKind::Current)
+        && targets.iter().any(|target| {
+            target.session_id == hint.session_id
+                && target.mode == Mode::Goal
+                && target.resolved.as_ref() == Some(&hint.goal_id)
+        })
+}
+
 impl NativeTool for WaitTasksTool {
     type Input = WaitInput;
 
@@ -246,6 +262,29 @@ impl NativeTool for WaitTasksTool {
                     Ok(Err(error)) | Err(error) => return read::unavailable(error),
                 };
                 let now = tokio::time::Instant::now();
+                // Inspect buffered delivery before returning even when the first
+                // read exhausted the deadline. Gaps still require explicit resync.
+                let revalidate = match goals.try_recv() {
+                    Ok(hint) => {
+                        relevant_goal_hint(&hint, &services.runtime.store_path, &input.targets)
+                    }
+                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
+                        for (target, report) in input.targets.iter_mut().zip(&mut reports) {
+                            target.resync = true;
+                            report["resync"] = json!(true);
+                        }
+                        true
+                    }
+                    _ => false,
+                };
+                if revalidate
+                    && !actionable
+                    && !interrupted
+                    && input.timeout_ms > 0
+                    && now < deadline
+                {
+                    continue;
+                }
                 let reason = if interrupted {
                     Some("coordinator_input")
                 } else if actionable {
@@ -277,11 +316,7 @@ impl NativeTool for WaitTasksTool {
                         hint = goals.recv() => {
                             match hint {
                                 Ok(hint) if hint.store_path == services.runtime.store_path => {
-                                    let relevant = hint.version >= 0
-                                        && (hint.status != store::GoalStatus::Active
-                                            || hint.kind != store::goal_changes::GoalChangeKind::Current)
-                                        && input.targets.iter().any(|t| t.session_id == hint.session_id
-                                        && t.mode == Mode::Goal && t.resolved.as_ref() == Some(&hint.goal_id));
+                                    let relevant = relevant_goal_hint(&hint,&services.runtime.store_path,&input.targets);
                                     if !relevant { continue; }
                                         break;
                                 }

@@ -17118,83 +17118,83 @@ function vb({ grant: e, deleting: t, disabled: n, onDelete: r }) {
 	});
 }
 function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalAvailable: r = !0, requesterLabel: i, retryParentSessionId: a, poll: o = !0, compact: s = !1 }) {
-	let [c] = Li(), l = c.get("permission_request"), u = t === "direct" || t === "direct-with-orchestrator", d = lb(e, u, i, {
+	let c = Pi(), [l] = Li(), u = l.get("permission_request"), d = t === "direct" || t === "direct-with-orchestrator", f = lb(e, d, i, {
 		poll: o,
 		includeChildren: r,
 		parentSessionId: a
-	}), f = d.parent, p = ie(), m = Nt(), h = ht(), g = pe(), v = ar(), y = d.requests, b = d.scopes.flatMap((e) => e.query.data?.grants ?? []), x = d.reviews, C = x.filter((e) => e.authorizable).length, w = f.data?.approval_mode ?? "manual", T = w === "auto_approve", E = w === "review", O = x[0]?.review, k = O ? O.outcome === "unavailable" ? "Unavailable" : O.outcome ? null : "Reviewing" : "Not checked", A = w !== "manual" && !r, [ee, j] = q(!1), [te, M] = q(""), [ne, re] = q(null), [N, ae] = q(null), [oe, se] = q(null), [P, ce] = q(null), le = JSON.stringify(y.map((e) => e.key)), ue = l ? `request:${e}:${l}` : null, de = ee || (ue ? te !== ue : !!(y.length && le !== te)), fe = () => {
-		M(ue ?? le), j(!1);
+	}), p = f.parent, m = ie(), h = Nt(), g = ht(), v = pe(), y = ar(), b = f.requests, x = f.scopes.flatMap((e) => e.query.data?.grants ?? []), C = f.reviews, w = C.filter((e) => e.authorizable).length, T = p.data?.approval_mode ?? "manual", E = T === "auto_approve", O = T === "review", k = C[0]?.review, A = k ? k.outcome === "unavailable" ? "Unavailable" : k.outcome ? null : "Reviewing" : "Not checked", ee = T !== "manual" && !r, [j, te] = q(!1), [M, ne] = q(""), [re, N] = q(null), [ae, oe] = q(null), [se, P] = q(null), [ce, le] = q(null), ue = `${e}:${c.key}`, de = JSON.stringify(b.map((e) => e.key)), fe = u ? `request:${ue}:${u}` : null, me = j || (fe ? M !== fe : !!(b.length && de !== M)), he = () => {
+		ne(fe ?? de), te(!1);
 	};
-	if (!u) return null;
-	let me = y.find((e) => e.key === P) ?? (l ? y.find((t) => t.scope.sessionId === e && t.request.id === l) : y[0]) ?? null, he = me?.request ?? null, F = me?.scope.label ?? i ?? "this session", ge = me?.scope.query.isError || me?.scope.query.isPending, _e = ne !== null, ve = he?.resources.some((e) => e.save_resource) ?? !1, L = async (e) => {
-		if (he && me && !_e && !ge) {
-			re(me.key);
+	if (!d) return null;
+	let F = b.find((e) => ce?.scope === ue && e.key === ce.key) ?? (u ? b.find((t) => t.scope.sessionId === e && t.request.id === u) : b[0]) ?? null, ge = F?.request ?? null, _e = F?.scope.label ?? i ?? "this session", ve = F?.scope.query.isError || F?.scope.query.isPending, L = re !== null, ye = ge?.resources.some((e) => e.save_resource) ?? !1, be = async (e) => {
+		if (ge && F && !L && !ve) {
+			N(F.key);
 			try {
-				await p.mutateAsync({
-					sessionId: me.scope.sessionId,
-					requestId: he.id,
+				await m.mutateAsync({
+					sessionId: F.scope.sessionId,
+					requestId: ge.id,
 					reply: e
-				}), y.length === 1 && fe();
+				}), b.length === 1 && he();
 			} catch (e) {
-				v.error(`Unable to answer permission request: ${Wt($(e))}`);
+				y.error(`Unable to answer permission request: ${Wt($(e))}`);
 			} finally {
-				re(null);
+				N(null);
 			}
 		}
-	}, ye = async (e, t) => {
-		if (!N) {
-			ae(JSON.stringify([e, t.id]));
+	}, xe = async (e, t) => {
+		if (!ae) {
+			oe(JSON.stringify([e, t.id]));
 			try {
-				await h.mutateAsync({
+				await g.mutateAsync({
 					sessionId: e,
 					grantId: t.id
 				});
 			} catch (e) {
-				v.error(`Unable to forget permission: ${Wt($(e))}`);
+				y.error(`Unable to forget permission: ${Wt($(e))}`);
 			} finally {
-				ae(null);
+				oe(null);
 			}
 		}
-	}, be = async (t) => {
-		if (j(!0), t !== w) try {
-			await m.mutateAsync({
+	}, Se = async (t) => {
+		if (te(!0), t !== T) try {
+			await h.mutateAsync({
 				sessionId: e,
 				mode: t
 			});
 		} catch (e) {
-			v.error(`Unable to change approval mode: ${Wt($(e))}`);
+			y.error(`Unable to change approval mode: ${Wt($(e))}`);
 		}
-	}, xe = async (e) => {
-		if (!(oe || e.scope.query.isError || e.scope.query.isPending)) {
-			se(e.key);
+	}, Ce = async (e) => {
+		if (!(se || e.scope.query.isError || e.scope.query.isPending)) {
+			P(e.key);
 			try {
-				await g.mutateAsync({
+				await v.mutateAsync({
 					sessionId: e.scope.sessionId,
 					reviewId: e.review.id,
 					parentSessionId: e.scope.parentSessionId
-				}), v.success("Retry authorized. The agent will retry it, and it is reviewed again.");
+				}), y.success("Retry authorized. The agent will retry it, and it is reviewed again.");
 			} catch (e) {
-				v.error(`Unable to authorize retry: ${Wt($(e))}`);
+				y.error(`Unable to authorize retry: ${Wt($(e))}`);
 			} finally {
-				se(null);
+				P(null);
 			}
 		}
-	}, Se = y.length ? ` (${y.length})` : C ? ` (${C})` : b.length ? ` (${b.length})` : "", Ce = gb(w), we = A ? `This child agent inherits ${Ce} from the parent session. Change the mode on the parent.` : hb.find((e) => e.mode === w)?.description ?? hb[0].description;
+	}, we = b.length ? ` (${b.length})` : w ? ` (${w})` : x.length ? ` (${x.length})` : "", Te = gb(T), Ee = ee ? `This child agent inherits ${Te} from the parent session. Change the mode on the parent.` : hb.find((e) => e.mode === T)?.description ?? hb[0].description;
 	return /* @__PURE__ */ X(J, { children: [
-		d.records.map((e) => /* @__PURE__ */ Y(_b, {
+		f.records.map((e) => /* @__PURE__ */ Y(_b, {
 			sessionId: e.child_session_id,
 			running: e.status === "running"
 		}, e.child_session_id)),
 		/* @__PURE__ */ Y(S, {
-			title: `Permission: ${Ce}`,
-			description: we,
+			title: `Permission: ${Te}`,
+			description: Ee,
 			position: wt.TopCenter,
 			children: /* @__PURE__ */ X(_, {
 				size: R.Small,
-				variant: y.length || C ? D.GhostHighlightedAccent : D.Ghost,
-				content: s && !y.length ? H.Icon : H.IconLeft,
-				"aria-label": A ? `${n} — ${T ? "auto-approve" : Ce} inherited; open permissions` : T ? "Auto-approve on — open permissions" : E ? `Approve for me enabled${Se} — open permissions` : `${n}${Se}`,
-				onClick: () => j(!0),
+				variant: b.length || w ? D.GhostHighlightedAccent : D.Ghost,
+				content: s && !b.length ? H.Icon : H.IconLeft,
+				"aria-label": ee ? `${n} — ${E ? "auto-approve" : Te} inherited; open permissions` : E ? "Auto-approve on — open permissions" : O ? `Approve for me enabled${we} — open permissions` : `${n}${we}`,
+				onClick: () => te(!0),
 				children: [
 					/* @__PURE__ */ Y(I, {
 						iconName: B.Private,
@@ -17202,16 +17202,16 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 					}),
 					s ? null : /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y("span", {
 						className: "label-micro",
-						children: Ce
-					}), E && k ? /* @__PURE__ */ Y("span", {
+						children: Te
+					}), O && A ? /* @__PURE__ */ Y("span", {
 						className: "label-micro text-basic-tertiary",
-						children: k
+						children: A
 					}) : null] }),
-					y.length ? /* @__PURE__ */ X("span", {
+					b.length ? /* @__PURE__ */ X("span", {
 						className: "label-micro",
 						children: [
 							"(",
-							y.length,
+							b.length,
 							" pending)"
 						]
 					}) : null
@@ -17219,35 +17219,35 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 			})
 		}),
 		/* @__PURE__ */ Y(Qn, {
-			open: de,
-			onClose: fe,
+			open: me,
+			onClose: he,
 			size: Cn.Wide,
 			flush: !0,
-			title: he ? "Permission required" : "Permissions",
-			subheader: he ? `${he.tool} requested by ${F} is paused before execution.` : A ? T ? "Automatic approval is inherited from the parent session; change it from the parent." : `${Ce} is inherited from the parent session; change it from the parent.` : T ? "Automatic approval is active for this session and its owned child agents." : E ? "Approve for me is enabled for this session and its owned child agents. This setting does not guarantee that the review service is available." : "Remembered access for this session.",
-			footer: he ? /* @__PURE__ */ X("div", {
+			title: ge ? "Permission required" : "Permissions",
+			subheader: ge ? `${ge.tool} requested by ${_e} is paused before execution.` : ee ? E ? "Automatic approval is inherited from the parent session; change it from the parent." : `${Te} is inherited from the parent session; change it from the parent.` : E ? "Automatic approval is active for this session and its owned child agents." : O ? "Approve for me is enabled for this session and its owned child agents. This setting does not guarantee that the review service is available." : "Remembered access for this session.",
+			footer: ge ? /* @__PURE__ */ X("div", {
 				className: "flex w-full flex-wrap justify-end gap-2",
 				children: [
 					/* @__PURE__ */ Y(_, {
 						variant: D.SecondaryDestructive,
-						loading: ne === me?.key && p.variables?.reply === "reject",
-						disabled: _e || ge,
-						onClick: () => void L("reject"),
+						loading: re === F?.key && m.variables?.reply === "reject",
+						disabled: L || ve,
+						onClick: () => void be("reject"),
 						children: "Reject"
 					}),
 					/* @__PURE__ */ Y(_, {
 						variant: D.Secondary,
-						loading: ne === me?.key && p.variables?.reply === "once",
-						disabled: _e || ge,
-						onClick: () => void L("once"),
+						loading: re === F?.key && m.variables?.reply === "once",
+						disabled: L || ve,
+						onClick: () => void be("once"),
 						children: "Allow once"
 					}),
 					/* @__PURE__ */ Y(_, {
 						variant: D.Primary,
-						loading: ne === me?.key && p.variables?.reply === "always",
-						disabled: _e || ge || !ve,
-						title: ve ? "Remember the server-derived narrow access pattern" : "This operation has no safe reusable permission pattern",
-						onClick: () => void L("always"),
+						loading: re === F?.key && m.variables?.reply === "always",
+						disabled: L || ve || !ye,
+						title: ye ? "Remember the server-derived narrow access pattern" : "This operation has no safe reusable permission pattern",
+						onClick: () => void be("always"),
 						children: "Always allow"
 					})
 				]
@@ -17255,11 +17255,11 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 			children: /* @__PURE__ */ X("div", {
 				className: "flex flex-col gap-5",
 				children: [
-					[...d.includeChildren ? [{
+					[...f.includeChildren ? [{
 						sessionId: "discovery",
 						label: "Child request discovery",
-						query: d.children
-					}] : [], ...d.scopes].map(({ sessionId: e, label: t, query: n }) => n.isError ? /* @__PURE__ */ X("div", {
+						query: f.children
+					}] : [], ...f.scopes].map(({ sessionId: e, label: t, query: n }) => n.isError ? /* @__PURE__ */ X("div", {
 						role: "alert",
 						className: "rounded-[4px] bg-error-secondary p-3 text-small text-error-primary",
 						children: [
@@ -17282,27 +17282,30 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 							"…"
 						]
 					}, e) : null),
-					l && !me && /* @__PURE__ */ Y("p", {
+					u && !F && /* @__PURE__ */ Y("p", {
 						role: "status",
 						className: "text-small text-basic-secondary",
 						children: "This permission request is no longer pending or is unavailable. Refresh the task to inspect its current state."
 					}),
-					y.length ? /* @__PURE__ */ X("section", {
+					b.length ? /* @__PURE__ */ X("section", {
 						"aria-label": "Pending permission requests",
 						className: "flex flex-col gap-2",
 						children: [/* @__PURE__ */ X("div", {
 							className: "tag-label uppercase text-basic-tertiary",
 							children: [
 								"Pending requests (",
-								y.length,
+								b.length,
 								")"
 							]
-						}), y.map((e) => /* @__PURE__ */ Y(_, {
-							variant: e.key === me?.key ? D.Secondary : D.Ghost,
+						}), b.map((e) => /* @__PURE__ */ Y(_, {
+							variant: e.key === F?.key ? D.Secondary : D.Ghost,
 							className: "!h-auto min-h-9 min-w-0 !py-2",
-							"aria-pressed": e.key === me?.key,
-							disabled: _e,
-							onClick: () => ce(e.key),
+							"aria-pressed": e.key === F?.key,
+							disabled: L,
+							onClick: () => le({
+								scope: ue,
+								key: e.key
+							}),
 							children: /* @__PURE__ */ X("span", {
 								className: "min-w-0 flex-1 whitespace-normal text-left [overflow-wrap:anywhere]",
 								children: [
@@ -17325,10 +17328,10 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 						children: [hb.map((t) => /* @__PURE__ */ Y($u, {
 							name: `approval-mode-${e}`,
 							"aria-label": t.name,
-							checked: w === t.mode,
-							disabled: m.isPending || f.isError || f.isPending,
+							checked: T === t.mode,
+							disabled: h.isPending || p.isError || p.isPending,
 							onChange: (e) => {
-								e && be(t.mode);
+								e && Se(t.mode);
 							},
 							children: /* @__PURE__ */ X("div", { children: [/* @__PURE__ */ Y("div", {
 								className: "text-small font-medium text-basic-primary",
@@ -17342,8 +17345,8 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 							children: "The mode governs this session and all existing or future owned child agents, stays saved across restarts and never creates remembered permissions. Separately managed orchestrators are not included."
 						})]
 					}) : null,
-					E ? /* @__PURE__ */ Y(fb, { reviews: x.map((e) => e.review) }) : null,
-					E || x.length ? /* @__PURE__ */ X("section", {
+					O ? /* @__PURE__ */ Y(fb, { reviews: C.map((e) => e.review) }) : null,
+					O || C.length ? /* @__PURE__ */ X("section", {
 						"aria-label": "Automatic reviews",
 						children: [
 							/* @__PURE__ */ Y("div", {
@@ -17358,13 +17361,13 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 								className: "mb-2 text-small text-basic-tertiary",
 								children: "Review history, blocked actions and retry authorizations are temporary. They are lost when the server restarts or an idle session is unloaded, including after all clients disconnect. The selected mode and recorded human intent remain saved."
 							}),
-							x.length === 0 ? /* @__PURE__ */ Y("div", {
+							C.length === 0 ? /* @__PURE__ */ Y("div", {
 								className: "text-small text-basic-secondary",
 								children: "No reviews are retained for this session."
 							}) : null,
 							/* @__PURE__ */ Y("div", {
 								className: "flex flex-col gap-2",
-								children: x.map((e) => {
+								children: C.map((e) => {
 									let t = e.scope.parentSessionId || r ? void 0 : "Open the child's parent to authorize a retry or switch the parent to Manual.";
 									return /* @__PURE__ */ X("section", {
 										"aria-label": `Review for ${e.scope.label}`,
@@ -17379,54 +17382,54 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 										}), /* @__PURE__ */ Y(mb, {
 											review: e.review,
 											authorizable: e.authorizable,
-											authorizing: oe === e.key,
-											disabled: oe !== null || e.scope.query.data?.approval_mode !== "review" || e.scope.query.isError || e.scope.query.isPending || !!t,
+											authorizing: se === e.key,
+											disabled: se !== null || e.scope.query.data?.approval_mode !== "review" || e.scope.query.isError || e.scope.query.isPending || !!t,
 											disabledReason: t,
-											onAuthorize: () => void xe(e)
+											onAuthorize: () => void Ce(e)
 										})]
 									}, e.key);
 								})
 							}),
-							E && r ? /* @__PURE__ */ Y("div", {
+							O && r ? /* @__PURE__ */ Y("div", {
 								className: "mt-2 flex justify-end",
 								children: /* @__PURE__ */ Y(_, {
 									size: R.Small,
 									variant: D.Ghost,
-									disabled: m.isPending || f.isError || f.isPending,
-									onClick: () => void be("manual"),
+									disabled: h.isPending || p.isError || p.isPending,
+									onClick: () => void Se("manual"),
 									children: "Switch to Manual"
 								})
 							}) : null
 						]
 					}) : null,
-					A ? /* @__PURE__ */ X("section", {
+					ee ? /* @__PURE__ */ X("section", {
 						"aria-label": "Inherited automatic approval mode",
 						className: "rounded-[6px] border border-accent-primary bg-elevation-level-2 p-3",
 						children: [/* @__PURE__ */ X("div", {
 							className: "text-small font-medium text-basic-primary",
-							children: [T ? "Auto-approve" : Ce, " inherited"]
+							children: [E ? "Auto-approve" : Te, " inherited"]
 						}), /* @__PURE__ */ X("div", {
 							className: "mt-1 text-small text-basic-secondary",
 							children: [
-								T ? "Ordinary requests from this child agent inherit automatic approval from the parent session." : `Ordinary requests from this child agent follow the parent session’s ${Ce} mode.`,
+								E ? "Ordinary requests from this child agent inherit automatic approval from the parent session." : `Ordinary requests from this child agent follow the parent session’s ${Te} mode.`,
 								" ",
 								"Change this mode from the parent session; hard and configured denials still apply."
 							]
 						})]
 					}) : null,
-					he ? /* @__PURE__ */ X("section", {
+					ge ? /* @__PURE__ */ X("section", {
 						"aria-label": "Requested access",
 						children: [
 							/* @__PURE__ */ X("div", {
 								className: "mb-2 text-small text-basic-secondary",
 								children: [
 									"Requested by ",
-									F,
+									_e,
 									" (",
-									he.session_id,
+									ge.session_id,
 									").",
 									" ",
-									me?.scope.query.data?.approval_mode === "review" ? "This request is not eligible for automatic review, so it needs your decision. Eligibility also depends on the available human intent and redaction checks." : "Manual approval is effective because automatic approval is off for this session and its owned child agents."
+									F?.scope.query.data?.approval_mode === "review" ? "This request is not eligible for automatic review, so it needs your decision. Eligibility also depends on the available human intent and redaction checks." : "Manual approval is effective because automatic approval is off for this session and its owned child agents."
 								]
 							}),
 							/* @__PURE__ */ Y("div", {
@@ -17435,7 +17438,7 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 							}),
 							/* @__PURE__ */ Y("div", {
 								className: "flex flex-col gap-2",
-								children: he.resources.map((e, t) => /* @__PURE__ */ X("div", {
+								children: ge.resources.map((e, t) => /* @__PURE__ */ X("div", {
 									className: "rounded-[4px] bg-elevation-level-2 px-3 py-2",
 									children: [
 										/* @__PURE__ */ Y("div", {
@@ -17453,12 +17456,12 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 									]
 								}, `${e.action}:${e.resource}:${t}`))
 							}),
-							y.length > 1 ? /* @__PURE__ */ X("div", {
+							b.length > 1 ? /* @__PURE__ */ X("div", {
 								className: "mt-2 text-small text-basic-secondary",
 								children: [
-									y.length - 1,
+									b.length - 1,
 									" more request",
-									y.length === 2 ? "" : "s",
+									b.length === 2 ? "" : "s",
 									" waiting."
 								]
 							}) : null
@@ -17475,7 +17478,7 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 								className: "mb-3 text-small text-basic-secondary",
 								children: "Each grant stays in its original session. A child’s grants never apply to the parent or siblings."
 							}),
-							d.scopes.map((t) => /* @__PURE__ */ X("section", {
+							f.scopes.map((t) => /* @__PURE__ */ X("section", {
 								"aria-label": `Remembered for ${t.label}`,
 								className: "mb-4",
 								children: [
@@ -17502,9 +17505,9 @@ function yb({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalA
 											}) : null,
 											(t.query.data?.grants ?? []).map((e) => /* @__PURE__ */ Y(vb, {
 												grant: e,
-												deleting: N === JSON.stringify([t.sessionId, e.id]),
-												disabled: N !== null || t.query.isError || t.query.isPending,
-												onDelete: () => void ye(t.sessionId, e)
+												deleting: ae === JSON.stringify([t.sessionId, e.id]),
+												disabled: ae !== null || t.query.isError || t.query.isPending,
+												onDelete: () => void xe(t.sessionId, e)
 											}, e.id))
 										]
 									}),
