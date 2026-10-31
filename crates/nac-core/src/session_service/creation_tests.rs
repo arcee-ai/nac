@@ -454,8 +454,8 @@ async fn native_wake_error_is_recorded_only_while_the_original_input_is_pending(
     crate::store::update_native_task_admission_error(&path, &id, None).unwrap();
     let conn = crate::store::open_runtime_connection(&path).unwrap();
     conn.execute(
-        "UPDATE session_inbox SET status='delivered' WHERE id=?1",
-        [failed.first_input_id.unwrap()],
+        "UPDATE session_inbox SET status='delivered',delivered_run_id='fixture-successor',delivered_at=?2 WHERE id=?1",
+        rusqlite::params![failed.first_input_id.unwrap(), crate::store::now_utc()],
     )
     .unwrap();
     drop(conn);
