@@ -15,11 +15,12 @@ test("exact native supplier qualification is explicit, bounded and separate from
   const stable = workflow("stable-release");
   const input = stable.on.workflow_dispatch.inputs.native_qualification;
   assert.equal(input.default, "none");
-  assert.deepEqual(input.options, ["none", "all-341-macos26", "all-351-macos14"]);
+  assert.deepEqual(input.options, ["none", "all-341-macos26", "all-343-macos26", "all-351-macos14"]);
   const caller = stable.jobs["native-qualification"];
   assert.match(caller.if, /github.event_name == 'workflow_dispatch'/);
   assert.match(caller.if, /startsWith\(github.ref, 'refs\/heads\/codex\/'\)/);
   assert.match(caller.if, /inputs.native_qualification == 'all-341-macos26'/);
+  assert.match(caller.if, /inputs.native_qualification == 'all-343-macos26'/);
   assert.equal(caller.with["harness-sha"], "${{ needs.prepare.outputs.sha }}");
   assert.equal(caller.uses, "./.github/workflows/macos-qualification.yml");
   assert.equal(requiredJobs.includes("native-qualification"), false);
@@ -40,6 +41,8 @@ test("exact native supplier qualification is explicit, bounded and separate from
   const catalog = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"));
   assert.equal(catalog["all-341-macos26"].source_sha, "1a4f9c31f27b4656897673084f3440e05373393d");
   assert.equal(catalog["all-341-macos26"].profile, "macos26");
+  assert.equal(catalog["all-343-macos26"].source_sha, "0d78ee389e98c0f157a8e8313446fc8006c38ec4");
+  assert.equal(catalog["all-343-macos26"].scenario_count, 8);
   assert.equal(catalog["all-351-macos14"].source_sha, "fa94a859b648cb36fbdcb251bfe4bc9541de3f48");
   assert.equal(catalog["all-351-macos14"].profile, "macos14");
 });
