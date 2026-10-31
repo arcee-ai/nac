@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 
 
@@ -56,14 +57,24 @@ def matrix(provenance, episodes, baseline=None):
                     row['reason'] = 'Requires real operator evidence; scripted DOM cannot qualify this row'
                 elif feature.get('scenario') == 'baseline-smoke':
                     if baseline:
-                        compatible = (baseline.get('engine_sha256') == provenance['engine_sha256']
-                                      and current in baseline.get('os', ''))
-                        passed = compatible and len(baseline.get('scenarios', [])) == 6 and all(
-                            case.get('passed') for case in baseline['scenarios'])
-                        row.update(tested=compatible, status='pass' if passed else 'unavailable',
-                                   evidence='baseline-smoke/summary.json',
+                        version = re.search(r'^ProductVersion:\s*(\S+)\s*$', baseline.get('os', ''), re.MULTILINE)
+                        build = re.search(r'^BuildVersion:\s*(\S+)\s*$', baseline.get('os', ''), re.MULTILINE)
+                        compatible = (all(baseline.get(key) == provenance.get(key) and provenance.get(key)
+                                          for key in ('engine_sha256', 'native_sha256', 'source_head'))
+                                      and baseline.get('source_dirty') is False
+                                      and provenance.get('source_status') == ''
+                                      and version is not None and version.group(1) == current
+                                      and build is not None and build.group(1) == provenance.get('os_build'))
+                        cases = baseline.get('scenarios', [])
+                        complete = len(cases) == 6 and {case.get('scenario') for case in cases} == {
+                            'normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeout'}
+                        tested = bool(compatible and complete)
+                        passed = tested and all(case.get('passed') is True for case in cases)
+                        row.update(tested=tested, status=('pass' if passed else 'fail') if tested else 'unavailable',
+                                   evidence=provenance.get('baseline_evidence', 'baseline-smoke/summary.json'),
                                    reason='Six owned startup/failure/active-close scenarios' if passed else
-                                   'Baseline artifact/OS differs or suite is incomplete')
+                                   'Native lifecycle scenario failed' if tested else
+                                   'Baseline source/native/engine/OS identity differs or suite is incomplete')
                 else:
                     episode = episodes.get(feature.get('scenario'), {})
                     check = episode.get('checks', {}).get(feature['id'])

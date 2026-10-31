@@ -52,10 +52,20 @@ The build manifest retains source revision, tracked diff hash, individual Swift
 source hashes, embedded asset tree, native/engine SHA-256, engine build identity,
 compiler target and actual OS/SDK. The runner rejects changed sources or binaries.
 A macOS 14 compilation target never establishes macOS 14 runtime support.
+Lifecycle results are accepted only from the same clean source head, native and
+engine hashes, exact OS/build and all six distinct baseline scenarios. A launcher
+failure or unconfirmed native cleanup cannot inherit an otherwise passing result.
 The runner records screen-lock state and the prior frontmost PID/bundle ID.
 The owned fixture gets one normal activation in an unlocked session; it never
 repeatedly takes focus back after a user switch. Prior focus is restored only
 if the fixture remains frontmost. A locked session cannot qualify visible paint.
+
+For the startup regression, append `--scenario workspace-direct --slow-start`
+with a fresh output directory. Only the relocated test bundle gets a 23-second
+pre-exec wrapper around its exact source-built engine. The wrapper and real
+engine hashes are recorded separately. This reproduces the former 20-second
+fixture-gate failure while preserving the preview's 30-second engine watchdog;
+it does not change the engine protocol, selected backend or ordinary app.
 
 ## Evidence boundaries
 

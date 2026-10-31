@@ -38,7 +38,7 @@ def build_manifest(app):
     print(json.dumps(record, indent=2))
 
 
-def run_case(app, output, scenario):
+def run_case(app, output, scenario, *, slow_start=False):
     """Use the existing bounded ownership cleanup on timeout and failed launch."""
     evidence = output / f'{scenario}.json'
     if evidence.exists():
@@ -49,6 +49,19 @@ def run_case(app, output, scenario):
     relocated = temporary / 'Moved workspace fixture with spaces' / app.name
     (output / f'{scenario}-relocation.json').write_text(json.dumps({'app': str(relocated)}) + '\n')
     shutil.copytree(app, relocated)
+    launch_fixture = None
+    if slow_start:
+        # Reproduce the old 20s fixture gate without changing engine policy or
+        # the actual source-built engine. Only this relocated test bundle differs.
+        engine = relocated / 'Contents/Resources/nac-web'
+        real = engine.parent / 'workspace-real' / 'nac-web'
+        real.parent.mkdir()
+        engine.rename(real)
+        engine.write_text('#!/bin/bash\n/bin/sleep 23\nexec -a "$0" "${0%/*}/workspace-real/nac-web" "$@"\n')
+        engine.chmod(0o755)
+        launch_fixture = {'kind': 'test-only pre-exec delay', 'delay_seconds': 23,
+                          'real_engine_path': str(real), 'real_engine_sha256': sha256(real),
+                          'wrapper_sha256': sha256(engine)}
     console = console_state()
     (output / f'{scenario}-console.json').write_text(json.dumps(console, indent=2) + '\n')
     started = time.monotonic()
@@ -85,6 +98,13 @@ def run_case(app, output, scenario):
                 evidence.write_text(json.dumps(record, indent=2) + '\n')
                 raise
     record['elapsed_seconds'] = round(time.monotonic() - started, 3)
+    native_success = (record.get('passed') is True and record.get('engine_reaped') is True
+                      and record.get('profile_removed') is True)
+    record['passed'] = native_success and process.returncode == 0
+    if not record['passed']:
+        record.setdefault('runner_error', 'Launcher exit or native scenario/cleanup did not succeed')
+    if launch_fixture:
+        record['engine_launch_fixture'] = launch_fixture
     record['interaction_method'] = 'scripted DOM in actual AppKit/system WKWebView'
     record['console_before_launch'] = console
     record['relocated_app'] = str(relocated)
@@ -113,7 +133,10 @@ def main():
     parser.add_argument('output', type=Path, nargs='?')
     parser.add_argument('--baseline', type=Path)
     parser.add_argument('--scenario', choices=['workspace-direct', 'workspace-legacy', 'workspace-manual'])
+    parser.add_argument('--slow-start', action='store_true', help='Owned 23s pre-exec startup regression (workspace-direct only)')
     args = parser.parse_args()
+    if args.slow_start and args.scenario != 'workspace-direct':
+        parser.error('--slow-start requires --scenario workspace-direct')
     app = args.app.resolve()
     if args.mode == 'capture-build':
         build_manifest(app)
@@ -135,9 +158,11 @@ def main():
         provenance['os_build'] = current['os_build']
     episodes = {}
     baseline = json.loads(args.baseline.read_text()) if args.baseline else None
+    if args.baseline:
+        provenance['baseline_evidence'] = str(args.baseline.resolve())
     try:
         for scenario in [args.scenario] if args.scenario else ['workspace-direct', 'workspace-legacy']:
-            episodes[scenario] = run_case(app, output, scenario)
+            episodes[scenario] = run_case(app, output, scenario, slow_start=args.slow_start)
             write_report(output, provenance, episodes, baseline)
     finally:
         # An interrupted case can still have useful per-feature receipts.

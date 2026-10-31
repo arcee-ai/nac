@@ -10,6 +10,32 @@ from workspace import run_case
 
 
 class WorkspaceRunnerTests(unittest.TestCase):
+    def test_launcher_or_native_cleanup_failure_cannot_inherit_a_pass(self):
+        for code, reaped, removed in [(42, True, True), (0, False, True), (0, True, False)]:
+            with self.subTest(code=code, reaped=reaped, removed=removed), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                app, output, relocation = root / 'Fixture.app', root / 'evidence', root / 'relocation'
+                for path in [app, output, relocation]:
+                    path.mkdir()
+                evidence = output / 'workspace-direct.json'
+                launcher = Mock(returncode=code)
+
+                def finished(**_):
+                    evidence.write_text(json.dumps({'passed': True, 'engine_reaped': reaped,
+                                                    'profile_removed': removed}))
+                    return code
+
+                launcher.wait.side_effect = finished
+                with patch('workspace.tempfile.mkdtemp', return_value=str(relocation)), \
+                        patch('workspace.console_state', return_value={'prior_pid': 0, 'prior_bundle_id': '', 'screen_locked': True}), \
+                        patch('workspace.subprocess.Popen', return_value=launcher), \
+                        patch('workspace.cleanup_failed_case'), contextlib.redirect_stdout(io.StringIO()):
+                    result = run_case(app, output, 'workspace-direct')
+                self.assertFalse(result['passed'])
+                self.assertEqual(result['launcher_exit_code'], code)
+                self.assertIn('runner_error', result)
+
     def test_missing_ownership_preserves_bundle_and_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

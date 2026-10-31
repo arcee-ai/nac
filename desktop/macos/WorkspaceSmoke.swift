@@ -48,7 +48,9 @@ final class WorkspaceSmoke {
             app.window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
-        try await waitJS("fixture configuration", "return !!document.querySelector('[role=dialog]');")
+        // Do not preempt the preview's 30s engine watchdog. Initial document
+        // and UI configuration reads also need their normal bounded window.
+        try await waitJS("fixture configuration", "return !!document.querySelector('[role=dialog]');", timeout: 60)
         guard let profile = app.profile else { throw PreviewError.message("Missing isolated profile") }
         WorkspaceFixture.externalPath = profile.root.appendingPathComponent("approval.txt").path
         try Data("Owned external fixture for approval\n".utf8).write(to: URL(fileURLWithPath: WorkspaceFixture.externalPath))

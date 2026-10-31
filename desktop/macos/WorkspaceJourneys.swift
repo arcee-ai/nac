@@ -150,11 +150,19 @@ extension WorkspaceSmoke {
 
     func overlayJourney() async throws -> String {
         try await button("Configurations")
+        _ = try await js("window.__wkModalOpener=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Configurations' && b.getClientRects().length);return true;")
         try await waitJS("instance inert background", "return !!document.querySelector('[data-nac-runtime] [inert]') && !!document.querySelector('[role=dialog]');")
         try await require("Dialog overflows viewport", "const r=document.querySelector('[role=dialog]').getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
         _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
         try await waitJS("Escape closes layer", "return !document.querySelector('[role=dialog]');")
-        return "Production modal bounds/inertness/synthetic Escape; real keyboard/VoiceOver remain separate"
+        try await waitJS("modal focus return", "return document.activeElement === window.__wkModalOpener;")
+        _ = try await js("window.__wkPopoverOpener=document.querySelector('button[aria-label=Model]');return true;")
+        try await button("Model")
+        try await waitJS("production model popover", "return !!document.querySelector('input[placeholder=\"Search models…\"]') && document.querySelector('button[aria-label=Model]').getAttribute('aria-expanded') === 'true';")
+        try await require("Popover overflows viewport", "const input=document.querySelector('input[placeholder=\"Search models…\"]');const panel=input.closest('[data-radix-popper-content-wrapper]');if(!panel)return false;const r=panel.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
+        _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
+        try await waitJS("popover dismissed and focus restored", "return !document.querySelector('input[placeholder=\"Search models…\"]') && document.activeElement === window.__wkPopoverOpener && window.__wkPopoverOpener.getAttribute('aria-expanded') === 'false';")
+        return "Production modal + model-popover bounds, inertness, synthetic Escape and focus return; real keyboard/VoiceOver remain separate"
     }
 
     func resizeJourney() async throws -> String {
