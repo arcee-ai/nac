@@ -106,9 +106,15 @@ for (const mobile of [false, true]) {
         await fs.readFile(path.join(workspace, `${name}.bytes`)).catch(() => Buffer.alloc(0)),
       );
     // A phone's menu is a sheet outside the pane.
-    const choose = async (name: string) => {
+    const choose = async (name: string, settledAction: string) => {
       await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
       await page.getByRole("button", { name, exact: true }).click();
+      // The ownership badge can update before the mutation's reconciliation
+      // GET settles. Input remains paused during that operation. The reciprocal
+      // action becomes enabled only once the same input binding is ready.
+      await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
+      await expect(page.getByRole("button", { name: settledAction, exact: true })).toBeEnabled();
+      await page.keyboard.press("Escape");
     };
     const type = async (text: string) => {
       await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
@@ -132,7 +138,7 @@ for (const mobile of [false, true]) {
       }
       await page.keyboard.press("Enter");
     };
-    await choose("Take Control");
+    await choose("Take Control", "Give Agent Control");
     await expect(pane.getByLabel("Input controller")).toHaveText("Input: Human");
     await type("agent-π<RET>");
     const agentHumanBytes = Array.from(new TextEncoder().encode("agent-π<RET>\r"));
@@ -188,7 +194,7 @@ for (const mobile of [false, true]) {
       await api.replyPermission(session, approval.id, "once");
       await waitForRunIdle(request, harness, session);
     };
-    await choose("Give Agent Control");
+    await choose("Give Agent Control", "Take Control");
     await expect(pane.getByLabel("Input controller")).toHaveText("Input: Agent");
     await modelInput("AGENT_RETURN_INPUT", agent.id, "agent-model<RET>");
     await expect
@@ -208,13 +214,13 @@ for (const mobile of [false, true]) {
     await type("human-π<RET>");
     const humanBytes = Array.from(new TextEncoder().encode("human-π<RET>\r"));
     await expect.poll(() => bytes("human")).toEqual(humanBytes);
-    await choose("Give Agent Control");
+    await choose("Give Agent Control", "Reclaim Input");
     await expect(pane.getByLabel("Input controller")).toHaveText("Input: Agent");
     // A phone shows the list on its own screen.
     const handedRow = pane.getByRole("button", { name: /^Shell \d+, Agent, / });
     if (!mobile) await expect(handedRow).toBeVisible();
     await modelInput("STALE_HUMAN_INPUT", human.id, "must-not-write<RET>", async () => {
-      await choose("Reclaim Input");
+      await choose("Reclaim Input", "Give Agent Control");
       await expect(pane.getByLabel("Input controller")).toHaveText("Input: Human");
       if (!mobile) await expect(handedRow).toHaveCount(0);
     });
