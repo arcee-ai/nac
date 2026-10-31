@@ -123,14 +123,14 @@ impl PersistenceCommand for CreateSessionWithSnapshot {
                         &transaction,
                         id,
                         &self.snapshot,
-                    )?
+                    )?;
                 }
                 Some(LaunchPublication::Retained(id)) => {
                     crate::store::task_launches::publish_in_transaction(
                         &transaction,
                         id,
                         &self.snapshot,
-                    )?
+                    )?;
                 }
                 None => {}
             }
