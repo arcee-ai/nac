@@ -32,6 +32,19 @@ def console_state():
     return dict(observed=bool(values), locked=any(values) if values else None)
 
 
+def verify_native_quit_completion(stopped):
+    assert stopped['application_class'] == 'NSApplication', stopped
+    assert stopped['quit_confirmation_decisions'] == stopped['quit_sheet_presentations'] == 2, stopped
+    assert stopped['quit_cancel_choices'] == stopped['quit_stop_completions'] == 1, stopped
+    assert stopped['native_duplicate_returned'], stopped
+    assert stopped['native_duplicate_delegate_after'] == stopped['native_duplicate_delegate_before'] + 1, stopped
+    # Initial, measured native duplicate, and genuine later Quit. AppKit may
+    # terminate the settled app without another delegate call.
+    assert stopped['quit_delegate_requests'] >= 3, stopped
+    assert stopped['application_will_terminate'], stopped
+    assert stopped['termination_phase'].startswith('finished('), stopped
+
+
 def run_contract(bundle, destination, observer):
     bundle, destination, observer = map(lambda path: Path(path).resolve(), (bundle, destination, observer))
     destination.mkdir(parents=True, exist_ok=True)
@@ -142,14 +155,7 @@ def run_contract(bundle, destination, observer):
                 assert stopped['passed'] and stopped['document_released'] and stopped['commands_retired'], stopped
                 wait_for('App exited after Stop and Quit', lambda: not journey.observe()['apps'], timeout=6)
                 stopped = journey.read() # Includes the final settled-termination snapshot.
-                assert stopped['application_class'] == 'NSApplication', stopped
-                assert stopped['quit_confirmation_decisions'] == stopped['quit_sheet_presentations'] == 2, stopped
-                assert stopped['quit_cancel_choices'] == stopped['quit_stop_completions'] == 1, stopped
-                assert stopped['native_duplicate_returned'], stopped
-                assert stopped['native_duplicate_delegate_after'] == stopped['native_duplicate_delegate_before'] + 1, stopped
-                # Initial, duplicate, genuine later Quit, then settled final Quit.
-                # An extra OS request may coalesce or add another declined call.
-                assert stopped['quit_delegate_requests'] >= 4, stopped
+                verify_native_quit_completion(stopped)
                 assert engine_settled(moved, ready_pid)
                 after = fixture.verify_store(store)
                 replacement = OwnedEngine(moved / 'Contents/Resources/nac-web', profile, store, environment, desktop=True)
