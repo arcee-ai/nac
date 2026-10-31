@@ -20,7 +20,7 @@ final class PreviewEngine {
         guard run == nil || run?.pid == 0 else { throw PreviewError.message("The previous engine is still stopping.") }
         let identityURL = executable.deletingLastPathComponent().appendingPathComponent("engine-identity.json")
         let identity = try JSONDecoder().decode(EngineIdentity.self, from: Data(contentsOf: identityURL))
-        let next = EngineRun(identity: identity, profile: profile)
+        let next = try EngineRun(identity: identity, profile: profile)
         #if PREVIEW_SMOKE
         next.holdHello = holdHello
         #endif
@@ -69,8 +69,8 @@ private final class EngineRun {
     var onExit: ((Int32) -> Void)?
     var onFailure: ((String) -> Void)?
 
-    init(identity: EngineIdentity, profile: PreviewProfile) {
-        protocolState = EngineProtocol(identity: identity, store: profile.store)
+    init(identity: EngineIdentity, profile: PreviewProfile) throws {
+        protocolState = try EngineProtocol(identity: identity, store: profile.store)
     }
 
     func launch(executable: URL, profile: PreviewProfile, provider: FixtureProvider) throws {

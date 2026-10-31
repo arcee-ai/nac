@@ -1220,10 +1220,19 @@ where
 }
 
 pub(crate) fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {
-    eprintln!(
-        "nac: complete graceful shutdown exceeded {} ms; forcing runtime exit",
-        timeout.as_millis()
-    );
+    // Diagnostic readers disappear with a dead parent, and a stalled reader
+    // can leave another writer holding stderr's lock. Neither may defeat the
+    // independent watchdog. Best-effort reporting never gates forced exit.
+    let _ = std::thread::Builder::new()
+        .name("nac-shutdown-diagnostic".into())
+        .spawn(move || {
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "nac: complete graceful shutdown exceeded {} ms; forcing runtime exit",
+                timeout.as_millis()
+            );
+        });
     force_shutdown();
 }
 

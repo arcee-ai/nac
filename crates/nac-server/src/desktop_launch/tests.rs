@@ -182,3 +182,71 @@ fn descriptor_probe() {
         assert_eq!(unsafe { libc::fcntl(fd, libc::F_GETFD) }, -1);
     }
 }
+
+#[test]
+fn desktop_watchdog_force_callback_is_independent_of_diagnostics() {
+    for mode in ["closed", "locked"] {
+        let marker =
+            std::env::temp_dir().join(format!("nac-desktop-watchdog-{}", uuid::Uuid::new_v4()));
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "desktop_launch::tests::desktop_watchdog_diagnostic_probe",
+                "--nocapture",
+            ])
+            .env("NAC_TEST_DESKTOP_WATCHDOG_MARKER", &marker)
+            .env("NAC_TEST_DESKTOP_WATCHDOG_MODE", mode)
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                break child.wait().unwrap();
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(
+            status.success(),
+            "watchdog reporting blocked forced exit in {mode} mode"
+        );
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "forced");
+        std::fs::remove_file(marker).unwrap();
+    }
+}
+
+#[test]
+fn desktop_watchdog_diagnostic_probe() {
+    let Some(marker) = std::env::var_os("NAC_TEST_DESKTOP_WATCHDOG_MARKER") else {
+        return;
+    };
+    let mode = std::env::var("NAC_TEST_DESKTOP_WATCHDOG_MODE").unwrap();
+    let (held, acquired) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let holder = if mode == "closed" {
+        // SAFETY: only this isolated exec probe closes its own diagnostic FD.
+        unsafe {
+            libc::close(libc::STDERR_FILENO);
+        }
+        None
+    } else {
+        let holder = std::thread::spawn(move || {
+            let stderr = std::io::stderr();
+            let _lock = stderr.lock();
+            held.send(()).unwrap();
+            released.recv().unwrap();
+        });
+        acquired.recv_timeout(Duration::from_secs(1)).unwrap();
+        Some(holder)
+    };
+    server::forced_shutdown_after_timeout(crate::COMPLETE_SHUTDOWN_TIMEOUT, || {
+        std::fs::write(marker, "forced").unwrap();
+    });
+    if let Some(holder) = holder {
+        release.send(()).unwrap();
+        holder.join().unwrap();
+    }
+}
