@@ -1,17 +1,36 @@
 import copy
 import json
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import generate
 
 
 class GuideGeneration(unittest.TestCase):
-    def test_deterministic_sources_and_version(self):
+    def test_deterministic_sources_and_manifest(self):
         self.assertEqual(generate.generate(), generate.generate())
         pack = json.loads(generate.generate())
-        self.assertEqual(pack["product_version"], (generate.ROOT / "version.txt").read_text().strip())
+        self.assertNotIn("product_version", pack)
         self.assertEqual(len(pack["fingerprint"]), 64)
         self.assertIn("mcp", [doc["document_id"] for doc in pack["documents"]])
+
+    def test_version_only_release_keeps_content_pack_valid(self):
+        # Release Please changes version.txt without rewriting other artifacts.
+        # BuildIdentity binds that installed version at compile time; source
+        # generation must not create an independently stale version value.
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "topic.md").write_text("# Topic\nRelease-local knowledge.\n")
+            router = root / "router.md"
+            router.write_text("Use the installed guide.\n")
+            sources = [dict(document_id="topic", source_path="topic.md", title="Topic", sections=[])]
+            with patch.object(generate, "ROOT", root), patch.object(generate, "ROUTER", router):
+                (root / "version.txt").write_text("0.1.4\n")
+                before = generate.generate(sources)
+                (root / "version.txt").write_text("9.8.7\n")
+                self.assertEqual(before, generate.generate(sources))
 
     def test_ids_and_heading_drift_are_rejected(self):
         sources = json.loads(generate.SOURCES.read_text())

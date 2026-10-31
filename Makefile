@@ -78,7 +78,7 @@ test: test-nac-guide test-capture-qualification test-source-size test-source-wor
 generate-nac-guide:
 	python3 scripts/nac-guide/generate.py
 
-## Check guide source/heading/link/version/fingerprint drift and generator contracts
+## Check guide source/heading/link/fingerprint drift and generator contracts
 test-nac-guide:
 	python3 scripts/nac-guide/generate.py --check
 	python3 -m unittest discover -s scripts/nac-guide -p 'test_*.py'

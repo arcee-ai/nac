@@ -18,7 +18,6 @@ const MAX_READ: usize = 6000;
 #[serde(deny_unknown_fields)]
 pub struct GuidePack {
     pub schema_version: u32,
-    pub product_version: String,
     pub fingerprint: String,
     router_digest: String,
     pub documents: Vec<Document>,
@@ -87,10 +86,6 @@ impl GuidePack {
             "unsupported guide manifest schema"
         );
         ensure!(
-            pack.product_version == nac_contracts::PRODUCT_VERSION,
-            "guide product version mismatch"
-        );
-        ensure!(
             !pack.documents.is_empty() && pack.documents.len() <= 64,
             "invalid guide document count"
         );
@@ -98,8 +93,7 @@ impl GuidePack {
             pack.router_digest == digest(ROUTER),
             "guide router digest mismatch"
         );
-        let mut fingerprint_input =
-            format!("1\n{}\n{}\n", pack.product_version, pack.router_digest);
+        let mut fingerprint_input = format!("1\n{}\n", pack.router_digest);
         let mut documents = HashSet::new();
         for document in &pack.documents {
             ensure!(

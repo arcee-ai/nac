@@ -18,6 +18,12 @@ source paths, content digests and the pack fingerprint, alongside the installed
 Readable excerpts appear in ordinary tool results. Answers cite those refs and
 the installed version; no custom URL scheme or app bridge is required.
 
+The fingerprint identifies documentation content. The shared compiled build
+identity supplies the installed product version and revision; the generated
+corpus does not store a second version value. A version-only release bump can
+reuse unchanged documentation, while source/router/registry edits still require
+regeneration and the required PR drift check.
+
 For offline use without starting a server, `nac-web guide --query skills`
 searches the installed index. `nac-web guide skills` lists its sections and
 `nac-web guide skills discovery` reads a bounded excerpt. Pass `--offset` with

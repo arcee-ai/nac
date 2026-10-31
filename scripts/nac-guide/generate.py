@@ -95,12 +95,11 @@ def generate(sources=None):
                               source_path=source["source_path"], content_digest=digest(text),
                               sections=sections))
     router_digest = digest(ROUTER.read_text())
-    version = (ROOT / "version.txt").read_text().strip()
-    fingerprint_input = f"1\n{version}\n{router_digest}\n" + "".join(
+    fingerprint_input = f"1\n{router_digest}\n" + "".join(
         f'{doc["document_id"]}:{doc["source_path"]}:{doc["content_digest"]}:{doc["title"]}\n' +
         "".join(f'{section["section_id"]}:{section["title"]}\n' for section in doc["sections"])
         for doc in documents)
-    pack = dict(schema_version=1, product_version=version,
+    pack = dict(schema_version=1,
                 fingerprint=digest(fingerprint_input), router_digest=router_digest,
                 documents=documents)
     encoded = json.dumps(pack, ensure_ascii=False, indent=2) + "\n"

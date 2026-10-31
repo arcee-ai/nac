@@ -1,7 +1,6 @@
 {
   "schema_version": 1,
-  "product_version": "0.1.4",
-  "fingerprint": "2f38cf239abcce1ce140b616f1f850a3ba2f67bd79aeb0a80e16e1ee1872bfb8",
+  "fingerprint": "5cdfaecb12117d0ea4f0924c47ed13216cbe48b537759c38a7405e5a4f5ffbd6",
   "router_digest": "0334a13f13bdc3afba2bf09a78a2060da41be13e469a9a1e9bacf0f8061f21b5",
   "documents": [
     {
@@ -389,7 +388,7 @@
       "document_id": "guide",
       "title": "NAC Guide",
       "source_path": "docs/usage/nac-guide.md",
-      "content_digest": "9f7e3bc9bd273421064e2d3963a15a8300de152c71fc2a7e2af9e1991be9d8f5",
+      "content_digest": "fa67d0836dac746b33176ab810a4fee2bf894bace802a385cd20ab02a6f3d4b0",
       "sections": [
         {
           "section_id": "overview",
@@ -399,7 +398,7 @@
         {
           "section_id": "sources-and-retrieval",
           "title": "Sources and retrieval",
-          "text": "## Sources and retrieval\n\nThe executable embeds a deterministic pack made from maintained NAC Markdown\ndocumentation. It requires no checkout, internet, Exa key or manual skill\ninstallation. `nac_guide` provides a bounded topic index/search, manifest and\nsection reads. Sources carry stable `document_id` and `section_id` values,\nsource paths, content digests and the pack fingerprint, alongside the installed\n`product_version`, `build_id`, `track` and `source_revision`.\nReadable excerpts appear in ordinary tool results. Answers cite those refs and\nthe installed version; no custom URL scheme or app bridge is required.\n\nFor offline use without starting a server, `nac-web guide --query skills`\nsearches the installed index. `nac-web guide skills` lists its sections and\n`nac-web guide skills discovery` reads a bounded excerpt. Pass `--offset` with\nthe returned `next_offset` to continue a section. These commands write no\nconfiguration, create no store and perform no network requests.\n\nThe installed pack is authoritative for installed behavior. Online main/latest\ndocumentation can describe a different release and must be labeled separately.\nUnknown topics and current configuration remain unknown. A supplied stale pack\nfingerprint fails with a version mismatch; search the installed index again.\nRestart/resume uses the current binary's immutable pack, with fresh identity in\neach retrieval result. Old transcript excerpts remain historical evidence.\n\nGuide retrieval runs in the harness, independent of Local, SSH or Podman\nfilesystem access. Managed binaries embed the same pack. That portability does\nnot prove backend infrastructure, network access, credentials or other tools are\navailable. Worker threads receive only selected skill preloads; they have no\ngeneral skill activation/catalog. A selected guide preload carries retrieval\ninstructions for its immutable references.\n\n"
+          "text": "## Sources and retrieval\n\nThe executable embeds a deterministic pack made from maintained NAC Markdown\ndocumentation. It requires no checkout, internet, Exa key or manual skill\ninstallation. `nac_guide` provides a bounded topic index/search, manifest and\nsection reads. Sources carry stable `document_id` and `section_id` values,\nsource paths, content digests and the pack fingerprint, alongside the installed\n`product_version`, `build_id`, `track` and `source_revision`.\nReadable excerpts appear in ordinary tool results. Answers cite those refs and\nthe installed version; no custom URL scheme or app bridge is required.\n\nThe fingerprint identifies documentation content. The shared compiled build\nidentity supplies the installed product version and revision; the generated\ncorpus does not store a second version value. A version-only release bump can\nreuse unchanged documentation, while source/router/registry edits still require\nregeneration and the required PR drift check.\n\nFor offline use without starting a server, `nac-web guide --query skills`\nsearches the installed index. `nac-web guide skills` lists its sections and\n`nac-web guide skills discovery` reads a bounded excerpt. Pass `--offset` with\nthe returned `next_offset` to continue a section. These commands write no\nconfiguration, create no store and perform no network requests.\n\nThe installed pack is authoritative for installed behavior. Online main/latest\ndocumentation can describe a different release and must be labeled separately.\nUnknown topics and current configuration remain unknown. A supplied stale pack\nfingerprint fails with a version mismatch; search the installed index again.\nRestart/resume uses the current binary's immutable pack, with fresh identity in\neach retrieval result. Old transcript excerpts remain historical evidence.\n\nGuide retrieval runs in the harness, independent of Local, SSH or Podman\nfilesystem access. Managed binaries embed the same pack. That portability does\nnot prove backend infrastructure, network access, credentials or other tools are\navailable. Worker threads receive only selected skill preloads; they have no\ngeneral skill activation/catalog. A selected guide preload carries retrieval\ninstructions for its immutable references.\n\n"
         },
         {
           "section_id": "provenance-and-collisions",
