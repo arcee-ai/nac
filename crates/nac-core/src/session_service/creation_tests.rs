@@ -322,7 +322,7 @@ async fn native_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, Str
     )
     .unwrap();
     let conn = crate::store::open_runtime_connection(&path).unwrap();
-    conn.execute("UPDATE sessions SET behavior='direct',host_id=NULL,sandbox_json=NULL WHERE session_id='baseline'",[]).unwrap();
+    conn.execute("UPDATE sessions SET behavior='direct',cwd=?1,host_id=NULL,sandbox_json=NULL WHERE session_id='baseline'",rusqlite::params![source.to_string_lossy()]).unwrap();
     drop(conn);
     crate::store::assign_session_to_project(&path, "native-project", "baseline").unwrap();
     let request = crate::task_launch_control::NativeTaskRequest {

@@ -256,7 +256,11 @@ test("native saved-project launches open independent named-skill tasks across Gi
     await expect(
       page.getByText("Separate ordinary launch accepted", { exact: true }),
     ).toBeVisible();
-    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() =>
+      (
+        globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
+      ).document.fonts.ready.then(() => undefined),
+    );
     await page.screenshot({
       path: info.outputPath("native-task-before.png"),
       animations: "disabled",
@@ -267,7 +271,11 @@ test("native saved-project launches open independent named-skill tasks across Gi
   await expect(
     page.getByRole("link", { name: "Open separate task: Native ordinary task", exact: true }),
   ).toBeVisible();
-  await page.evaluate(() => document.fonts.ready);
+  await page.evaluate(() =>
+    (
+      globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
+    ).document.fonts.ready.then(() => undefined),
+  );
   await page.screenshot({ path: info.outputPath("native-task-after.png"), animations: "disabled" });
   await harness.restart("1", undefined, true);
   await page.reload();
