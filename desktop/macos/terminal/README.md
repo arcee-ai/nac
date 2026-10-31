@@ -68,6 +68,17 @@ while locked/inactive/occluded and never retries activation or requests TCC.
 This mode collects evidence; event counts alone cannot certify exact PTY bytes,
 IME correctness or full ALL-352 acceptance. Do not enter real credentials.
 
+The separately owned ALL-354 public XCTest driver can consume the opt-in
+`terminal-xctest` app scenario after coordinator nomination of exact harness and
+terminal sources. Its [phase contract](xctest.md) fixes Unicode, foreground
+Ctrl-C recovery and native resize/readback operations. The app only publishes
+readiness and independently observes results; it never posts keys, accepts
+external commands or consumes acknowledgements as authority. The existing
+XCTest helper's read-only before/after prerequisite observations remain the
+driver owner's responsibility. App CoreGraphics event-post access is recorded,
+not required or assumed. The ordinary terminal runner does not dispatch XCTest.
+This source contract alone supplies no new actual-WK acceptance evidence.
+
 ## Evidence contract
 
 Each fresh output folder contains per-scenario JSON/logs, console and relocation
@@ -107,9 +118,9 @@ provenance and exact written bytes for Unicode/bracketed paste, Ctrl-C, alternat
 screen, job control and resize. Never replace that evidence with DOM events,
 Playwright WebKit, Chromium, a direct input API or a patched trust gate.
 
-Consume the coordinator-nominated immutable ALL-354 `ci-terminal` fixture for
-its narrow hosted OS-event preflight/case; this slice does not duplicate it or
-promote its one benign typing case into IME/paste qualification. The remaining
+Consume the coordinator-nominated immutable ALL-354 public XCTest driver for
+its qualified narrow ASCII case and nominated terminal phases; this slice does
+not duplicate the harness or promote ASCII into Unicode/IME/paste qualification. The remaining
 matrix also requires accepted-but-uncertain input freeze/explicit recovery with
 no replay, current controller revisions, history read-only behavior, selection
 attribution and masking, exact renderer-crash/replay-gap lifecycle, sustained

@@ -4,6 +4,14 @@ import Foundation
 /// Output comes from the owned shell's startup file, never an input API. Files
 /// rendezvous with the fixture driver; neither source supplies human authority.
 enum TerminalFixture {
+    // Fixed, harmless fixture operations. External drivers must compare these
+    // with their nominated contract; readiness never accepts caller commands.
+    static let unicode = "Ω中🙂"
+    static let unicodeCommand = "printf '%s' 'Ω中🙂' > wk-xctest-unicode.txt; printf 'WK-XCTEST-%s: ' UNICODE; cat wk-xctest-unicode.txt; printf '\\n'"
+    static let interruptCommand = "trap 'printf INT > wk-xctest-int.txt; printf \"WK-XCTEST-%s\\n\" INTERRUPTED' INT; printf RUNNING > wk-xctest-running.txt; printf 'WK-XCTEST-%s\\n' RUNNING; /bin/sleep 30; printf '%s' \"$?\" > wk-xctest-status.txt"
+    static let recoveryCommand = "trap - INT; printf RECOVERED > wk-xctest-recovered.txt; printf 'WK-XCTEST-%s\\n' RECOVERED"
+    static let sizeCommand = "/bin/stty size > wk-xctest-size.txt; printf 'WK-XCTEST-%s\\n' SIZE"
+
     static let bashrc = #"""
     export PS1='WK-SHELL> '
     export HISTFILE=/dev/null
@@ -55,17 +63,25 @@ enum TerminalFixture {
     // Content-free bounded observation. No request is replayed, no response is
     // replaced, no input gate is patched. We do not keep typed/pasted text.
     static let observer = #"""
-    window.__terminal352 = {inputPosts:0, inputBytes:0, controls:0, gapFrames:0, resetAcks:0, maxFrameBytes:0, markerReceipts:{}, frames:[], events:[], clipboardWrites:0};
+    window.__terminal352 = {inputPosts:0, inputBytes:0, inputSettled:0, inputWritten:0,
+      trustedEvents:0, syntheticEvents:0, trustedKeys:0, syntheticKeys:0,
+      controls:0, gapFrames:0, resetAcks:0, maxFrameBytes:0, markerReceipts:{}, frames:[], events:[], clipboardWrites:0};
     const evidence = window.__terminal352;
     const markerNames=['WK-UTF8-SPLIT-READY','WK-CSI-SPLIT-READY','WK-OSC-DONE',
-      'WK-ALT-SCREEN','WK-NORMAL-SCREEN','WK-RETAINED-TAIL'];
+      'WK-ALT-SCREEN','WK-NORMAL-SCREEN','WK-RETAINED-TAIL',
+      'WK-XCTEST-UNICODE: Ω中🙂','WK-XCTEST-RUNNING','WK-XCTEST-INTERRUPTED',
+      'WK-XCTEST-RECOVERED','WK-XCTEST-SIZE'];
     const tails=new Map();
+    const decoders=new Map();
     const acceptedAcks=new Map();
     const push = (name, row) => { const list=evidence[name]; list.push(row); if(list.length>128) list.shift(); };
     for(const type of ['keydown','paste','compositionstart','compositionend','input']) {
       document.addEventListener(type, event => {
-        if(event.target?.classList?.contains('xterm-helper-textarea'))
+        if(event.target?.classList?.contains('xterm-helper-textarea')) {
+          evidence[event.isTrusted?'trustedEvents':'syntheticEvents']++;
+          if(type==='keydown') evidence[event.isTrusted?'trustedKeys':'syntheticKeys']++;
           push('events',{type, trusted:event.isTrusted, composing:!!event.isComposing});
+        }
       },true);
     }
     const nativeFetch=window.fetch;
@@ -77,6 +93,10 @@ enum TerminalFixture {
       }
       if(path.endsWith('/input-control') && options?.method==='POST') evidence.controls++;
       const result=nativeFetch.apply(this,arguments);
+      if(path.endsWith('/input') && options?.method==='POST') result.then(async response=>{
+        const receipt=await response.clone().json();
+        if(response.ok && receipt.outcome==='written') evidence.inputWritten++;
+      }).catch(()=>{}).finally(()=>{evidence.inputSettled++;});
       if(path.includes('/observers/') && path.endsWith('/read')) result.then(async response=>{
         if(!response.ok) return;
         const observer=path.match(/\/observers\/([^/]+)\/read$/)?.[1];
@@ -93,9 +113,14 @@ enum TerminalFixture {
         if(frame.gap) evidence.gapFrames++;
         if(body?.acknowledge_reset) evidence.resetAcks++;
         evidence.maxFrameBytes=Math.max(evidence.maxFrameBytes,frame.bytes?.length || 0);
-        if(frame.gap) tails.delete(frame.observer_id);
+        if(frame.gap) { tails.delete(frame.observer_id); decoders.delete(frame.observer_id); }
         if(frame.bytes?.length) {
-          const text=(tails.get(frame.observer_id)||'')+new TextDecoder().decode(new Uint8Array(frame.bytes));
+          let decoder=decoders.get(frame.observer_id);
+          if(!decoder) {
+            decoder=new TextDecoder(); decoders.set(frame.observer_id,decoder);
+            if(decoders.size>16) decoders.delete(decoders.keys().next().value);
+          }
+          const text=(tails.get(frame.observer_id)||'')+decoder.decode(new Uint8Array(frame.bytes),{stream:true});
           for(const marker of markerNames) if(text.includes(marker)) evidence.markerReceipts[marker]={
             observer:frame.observer_id,cursor:frame.next_offset,
             acknowledged:acceptedAcks.has(frame.observer_id) &&

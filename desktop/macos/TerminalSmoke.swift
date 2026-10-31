@@ -46,7 +46,7 @@ final class TerminalSmoke: NSObject {
                 record(["prior_focus_restored": prior.activate(options: [])])
             }
         }
-        guard ["terminal-output", "terminal-renderer-failure", "terminal-manual"].contains(scenario) else {
+        guard ["terminal-output", "terminal-renderer-failure", "terminal-manual", "terminal-xctest"].contains(scenario) else {
             throw PreviewError.message("Unknown terminal scenario")
         }
         record(["interaction_method": "scripted production UI; owned bashrc output in actual system WKWebView",
@@ -102,6 +102,7 @@ final class TerminalSmoke: NSObject {
         try await snapshot("before-output-assertions")
         if scenario == "terminal-output" { try await outputJourney() }
         else if scenario == "terminal-manual" { try await manualJourney() }
+        else if scenario == "terminal-xctest" { try await externalInputJourney() }
         else { try await rendererFailure() }
         record(["checks": checks])
         if checks.values.contains(where: { $0["status"] as? String == "fail" }) {

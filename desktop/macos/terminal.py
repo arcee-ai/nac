@@ -24,7 +24,7 @@ REQUIRED = {
     'overflow-gap-reset': 'terminal-output',
     'parser-completion-backpressure': 'terminal-output',
     'renderer-crash': 'terminal-renderer-failure',
-    'trusted-mac-keyboard-unicode': None,
+    'trusted-mac-keyboard-unicode': 'terminal-xctest',
     'real-cjk-ime': None,
     'edit-menu-bracketed-paste': None,
     'ctrl-c-job-control': None,
@@ -32,7 +32,7 @@ REQUIRED = {
     'live-noise-input-cancel-bounds': None,
     'ambiguous-accepted-write-explicit-recovery': None,
     'history-readonly': None,
-    'resize-pty-readback': None,
+    'resize-pty-readback': 'terminal-xctest',
     'visible-paint': None,
 }
 
@@ -60,7 +60,7 @@ def sources():
     root = Path('desktop/macos')
     return {str(root / name): sha256(root / name) for name in (
         'terminal.py', 'terminal.sh', 'workspace.py', 'workspace_report.py', 'smoke.py',
-        'test_terminal_report.py')}
+        'test_terminal_report.py', 'test_terminal_observer.py')}
 
 
 def environment_probe(*command):
