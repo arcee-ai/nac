@@ -45,7 +45,16 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if scenario.hasPrefix("workspace-") {
+                if scenario.hasPrefix("terminal-") {
+                    #if TERMINAL_SMOKE
+                    try await TerminalSmoke(app: app, scenario: scenario, output: destination) { [self] fields in
+                        evidence.merge(fields) { _, new in new }
+                        write()
+                    }.run()
+                    #else
+                    throw PreviewError.message("Terminal scenarios require the TERMINAL_SMOKE build flag")
+                    #endif
+                } else if scenario.hasPrefix("workspace-") {
                     try await WorkspaceSmoke(app: app, scenario: scenario, output: destination) { [self] fields in
                         evidence.merge(fields) { _, new in new }
                         write()

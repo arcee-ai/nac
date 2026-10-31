@@ -1,0 +1,112 @@
+# WKWebView terminal qualification (ALL-352)
+
+This fixture runs the existing production terminal inside the actual AppKit
+preview and system WKWebView. It uses pinned xterm 6.0.0, the existing Effect
+lifetime, runtime-free client, HTTP observation protocol and Rust Local owner.
+It does not change production terminal behavior or create an input bridge.
+
+The production **Create chat** and **New shell** controls create an isolated
+Local shell. Before launch, the fixture writes `.bashrc` into that preview's
+private HOME. Startup and a bounded file rendezvous producer emit deterministic
+Unicode, split output, alternate-screen sequences, OSC52/query sequences and a
+12 MiB retention overflow. These are fixture-generated output, never human input.
+The synthetic key/paste/composition negative control must issue zero input POSTs.
+Transport observations are bounded metadata; typed or pasted contents are not
+recorded. OSC write attempts are counted and suppressed without reading or
+changing the system clipboard.
+
+## Reproduce
+
+Run `make setup` through the shared setup gate in every fresh worktree. Build the
+exact current `nac-web` inside the shared Rust lease and copy it into a private
+path before releasing the lease. The build embeds the committed production
+assets; do not reuse a shared target executable after releasing its lease.
+
+With `NAC_MAC_ENGINE` pointing at that private executable and `NAC_MAC_OUTPUT`
+pointing at a private output folder, run under the single browser/AppKit lease:
+
+```sh
+./desktop/macos/terminal.sh
+python3 -B desktop/macos/terminal.py run \
+  "$NAC_MAC_OUTPUT/NAC Development Preview.app" FRESH_EVIDENCE_DIRECTORY
+```
+
+`terminal.sh` builds three native artifacts: normal preview, ordinary
+`PREVIEW_SMOKE`, and the terminal fixture with both `PREVIEW_SMOKE` and
+`TERMINAL_SMOKE`. It checks that terminal instrumentation is absent from the
+first two. `preview.sh smoke` includes the terminal sources only when
+`NAC_MAC_TERMINAL_SMOKE=1`. Ordinary workspace and CI smoke builds do not need the
+terminal sources. The terminal runner refuses a changed source/native/engine
+identity after build capture.
+
+The actual bundle is relocated to a private path with spaces and opened through
+LaunchServices. The inherited workspace runner supplies isolated startup and
+identity-checked bounded process/profile cleanup. It records the prior frontmost
+application and strongest explicit console lock observation. This output fixture
+posts no CoreGraphics events, prompts for no TCC access, and changes no input
+source or global preference. A locked console remains locked.
+
+Use `--scenario terminal-output` for the output suite. The
+`terminal-renderer-failure` scenario records the missing exact-owned public
+WebContent crash seam as unavailable; it does not simulate a crash and claim
+recovery. Existing ALL-340 startup/failure/close acceptance remains reproducible
+with `desktop/macos/smoke.py` on the same instrumented bundle.
+
+## Evidence contract
+
+Each fresh output folder contains per-scenario JSON/logs, console and relocation
+records, diagnostic WK snapshots when capture succeeds, `matrix.json`,
+`matrix.txt`, and `sha256.json`. The build receipt records source HEAD/base,
+tracked diff and native source hashes, embedded asset tree, exact engine/native
+binary hashes and version, compile flags, OS/build, SDK, developer directory and
+available Xcode information. Resources loaded by the actual WK document are
+recorded in the native episode.
+
+The current xterm accessibility **screen tree** establishes decoded parser
+output; its historical live region is excluded. A screen-tree pass is not a
+paint pass. Snapshots record fresh animation-frame and window-occlusion facts.
+A blank or occluded snapshot never qualifies visible rendering.
+
+Every required ALL-352 acceptance row remains present. Exit zero means the
+scripted characterization and bounded cleanup succeeded; only
+`matrix.json.accepted` describes full qualification. It remains false while any
+required row is failed or unavailable. Local characterization, SSH and Podman
+coverage are reported separately. Missing infrastructure never counts as pass.
+
+The unmanaged preview has no managed command-environment snapshot. A model
+provider key is not a terminal masking pattern. Therefore this fixture does not
+claim exact-value masking acceptance merely by printing a synthetic provider
+key; the required masking row remains unavailable until the real redaction
+owner supplies an isolated launch snapshot. Existing collector, selection and
+native managed-redaction tests are supplier evidence, not a WK substitute.
+
+## Remaining real-environment contract
+
+Acceptance still needs an unlocked authorized Mac session with real keyboard,
+CJK IME and native responder-chain Edit-menu paste. Preserve genuine `isTrusted`
+provenance and exact written bytes for Unicode/bracketed paste, Ctrl-C, alternate
+screen, job control and resize. Never replace that evidence with DOM events,
+Playwright WebKit, Chromium, a direct input API or a patched trust gate.
+
+Consume the coordinator-nominated immutable ALL-354 `ci-terminal` fixture for
+its narrow hosted OS-event preflight/case; this slice does not duplicate it or
+promote its one benign typing case into IME/paste qualification. The remaining
+matrix also requires accepted-but-uncertain input freeze/explicit recovery with
+no replay, current controller revisions, history read-only behavior, selection
+attribution and masking, exact renderer-crash/replay-gap lifecycle, sustained
+noise/input/cancel queue bounds, and visible paint. The ALL-340 preview ends on
+window close; consumer close/reopen and crash recovery must consume their real
+lifecycle owners rather than inventing an alternative app lifecycle here.
+
+Verification while iterating:
+
+```sh
+python3 -B -m unittest discover -s desktop/macos -p 'test_*.py'
+xcrun swiftc -swift-version 5 -target arm64-apple-macosx14.0 \
+  -D PREVIEW_SMOKE -D TERMINAL_SMOKE -typecheck desktop/macos/*.swift
+make test-source-size
+```
+
+Full ALL-352 acceptance, current-head review readiness, human approval, merge,
+and ticket closure are separate facts. This fixture does not authorize any of
+them by assertion.
