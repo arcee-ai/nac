@@ -2,6 +2,9 @@ use super::*;
 use crate::application::native_task_launches::NativeTaskLaunchController;
 use nac_core::task_launch_control::{NativeTaskRequest, TaskLaunchController, TaskWorkspace};
 
+#[path = "native_task_launch_recovery_tests.rs"]
+mod recovery;
+
 fn request(project: Option<String>) -> NativeTaskRequest {
     NativeTaskRequest {
         request_id: uuid::Uuid::new_v4().to_string(),

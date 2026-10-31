@@ -130,7 +130,11 @@ async fn receipt(manager: &SessionManager, caller_id: &str, id: &str) -> Result<
                 .as_str()
                 .ok_or_else(|| anyhow!("invalid launch phase"))?
                 .to_owned();
-            launch.error.clone_from(&retained.error);
+            launch.error = if retained.phase == store::TaskLaunchPhase::Ready {
+                retained.error.clone().or(launch.error)
+            } else {
+                retained.error.clone()
+            };
             launch.first_input_id = retained.first_input_id;
             launch.updated_at.clone_from(&retained.updated_at);
         }
@@ -178,6 +182,55 @@ async fn phase(
         store::update_native_task_launch(&path, &id, &value, error)
     })
     .await?
+}
+
+async fn resume_initial_input(manager: &SessionManager, launch: &NativeTaskLaunch) -> Result<()> {
+    let path = manager.inner.store_path.clone();
+    let session = launch.session_id.clone();
+    let expected = launch.clone();
+    let input = launch
+        .first_input_id
+        .ok_or_else(|| anyhow!("published launch has no initial input identity"))?;
+    let item = store::spawn_blocking_store_caller(move || {
+        let snapshot = sessions::load_session(&path, &session)?;
+        let cwd = if expected.retained {
+            let retained = store::load_task_launch(&path, &expected.request.request_id)?
+                .ok_or_else(|| anyhow!("retained launch not found"))?;
+            anyhow::ensure!(
+                retained.session_id == session,
+                "retained initial input owner changed"
+            );
+            retained.workspace_path.join(retained.source.subdirectory)
+        } else {
+            expected.source_cwd
+        };
+        anyhow::ensure!(
+            snapshot.behavior == sessions::SessionBehavior::Direct
+                && snapshot.project_id.as_deref() == Some(expected.project_id.as_str())
+                && snapshot.cwd == cwd
+                && snapshot.ssh.is_none()
+                && snapshot.sandbox_spec.is_none(),
+            "published native task binding changed; initial input was not resumed"
+        );
+        store::load_session_inbox_item(&path, &session, input)
+    })
+    .await??;
+    if item.status == store::InboxStatus::Pending {
+        manager.inner.task_preparations.git.check_running()?;
+        // This is an active exact launch retry, never a status read. Existing
+        // attachment/admission recovers only the durable input, without reinserting it.
+        manager.attach_session(&launch.session_id).await?;
+        manager.inner.task_preparations.git.check_running()?;
+    }
+    if launch.error.is_some() {
+        let path = manager.inner.store_path.clone();
+        let id = launch.request.request_id.clone();
+        store::spawn_blocking_store_caller(move || {
+            store::update_native_task_admission_error(&path, &id, None)
+        })
+        .await??;
+    }
+    Ok(())
 }
 
 async fn prepare(
@@ -311,7 +364,26 @@ impl TaskLaunchController for NativeTaskLaunchController {
             let id = launch.request.request_id.clone();
             let receipt_id = id.clone();
             if let Some(lease) = lease {
+                if launch.phase == "ready" {
+                    let _lease = lease;
+                    if let Err(error) = resume_initial_input(&manager, &launch).await {
+                        let path = manager.inner.store_path.clone();
+                        let id = id.clone();
+                        let message = format!("initial input admission failed: {error:#}");
+                        store::spawn_blocking_store_caller(move || {
+                            store::update_native_task_admission_error(&path, &id, Some(message))
+                        })
+                        .await??;
+                    }
+                    return receipt(&manager, caller_id, &receipt_id).await;
+                }
                 if !matches!(launch.phase.as_str(), "ready" | "cancelled") {
+                    let phase_name = if launch.retained {
+                        "reserved"
+                    } else {
+                        "preparing_runtime"
+                    };
+                    let launch = phase(&manager, &id, phase_name, None).await?;
                     if launch.retained {
                         let _lease = lease;
                         if let Err(error) =
@@ -322,6 +394,8 @@ impl TaskLaunchController for NativeTaskLaunchController {
                         }
                         return receipt(&manager, caller_id, &receipt_id).await;
                     }
+                    // Publish the owned retry's preparation state before its
+                    // acknowledgement; the background task cannot race a stale failed receipt.
                     let worker = manager.clone();
                     tokio::spawn(async move {
                         let _lease = lease;

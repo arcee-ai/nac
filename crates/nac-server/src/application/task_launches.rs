@@ -74,13 +74,22 @@ impl<'a> TaskLaunchApplication<'a> {
         tokio::spawn(async move {
             let _admission = admission;
             let prepared = Self::resolve_and_reserve(&manager, request).await;
-            let (record, lease) = match prepared {
+            let (mut record, lease) = match prepared {
                 Ok(prepared) => prepared,
                 Err(error) => {
                     let _ = reply.send(Err(error));
                     return;
                 }
             };
+            if lease.is_some() && record.phase == TaskLaunchPhase::Failed {
+                match Self::phase(&manager, &record, TaskLaunchPhase::Pinned).await {
+                    Ok(resumed) => record = resumed,
+                    Err(error) => {
+                        let _ = reply.send(Err(error));
+                        return;
+                    }
+                }
+            }
             if lease.is_some()
                 && !matches!(
                     record.phase,

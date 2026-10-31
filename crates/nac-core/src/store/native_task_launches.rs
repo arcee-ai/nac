@@ -124,7 +124,7 @@ port public;
 
 coordinated_command! {
 pub fn update_native_task_launch(path: &Path, request_id: &str, phase: &str, error: Option<String>) -> Result<NativeTaskLaunch> {
-    anyhow::ensure!(matches!(phase,"preparing_runtime"|"failed"|"cancelled"), "invalid native launch phase");
+    anyhow::ensure!(matches!(phase,"reserved"|"preparing_runtime"|"failed"|"cancelled"), "invalid native launch phase");
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     tx.execute("UPDATE native_task_launches SET phase=CASE WHEN phase='ready' THEN phase ELSE ?2 END,error=?3,updated_at=?4 WHERE request_id=?1 AND phase!='cancelled' AND (phase!='ready' OR ?2='failed')",
@@ -135,6 +135,24 @@ pub fn update_native_task_launch(path: &Path, request_id: &str, phase: &str, err
 }
 command UpdateNativeTaskLaunchCommand { request_id: String = request_id.to_owned(), phase: String = phase.to_owned(), error: Option<String> = error }
 call |c| (&c.request_id, &c.phase, c.error)
+correlation |_c| crate::telemetry::Correlation::default();
+port public;
+}
+
+coordinated_command! {
+/// A published preparation stays ready; this records only initial-input admission.
+pub fn update_native_task_admission_error(path: &Path, request_id: &str, error: Option<String>) -> Result<NativeTaskLaunch> {
+    let mut conn = open_runtime_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let record = load(&tx,request_id)?.ok_or_else(||anyhow!("native launch not found"))?;
+    anyhow::ensure!(record.phase == "ready" && record.first_input_id.is_some(),"initial-input admission requires a published native launch");
+    tx.execute("UPDATE native_task_launches SET error=?2,updated_at=?3 WHERE request_id=?1",params![request_id,error,now_utc()])?;
+    let record = load(&tx,request_id)?.ok_or_else(||anyhow!("native launch not found"))?;
+    tx.commit()?;
+    Ok(record)
+}
+command UpdateNativeTaskAdmissionErrorCommand { request_id: String = request_id.to_owned(), error: Option<String> = error }
+call |c| (&c.request_id,c.error)
 correlation |_c| crate::telemetry::Correlation::default();
 port public;
 }

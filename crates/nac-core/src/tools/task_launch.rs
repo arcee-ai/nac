@@ -243,7 +243,8 @@ impl NativeTool for LaunchTaskTool {
                 .await
             {
                 Ok(receipt) => {
-                    let failed = matches!(receipt.launch.phase.as_str(), "failed" | "cancelled");
+                    let failed = matches!(receipt.launch.phase.as_str(), "failed" | "cancelled")
+                        || receipt.launch.error.is_some();
                     let mut output = result(receipt);
                     output.is_error |= failed;
                     output

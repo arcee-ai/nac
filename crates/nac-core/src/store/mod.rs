@@ -38,7 +38,7 @@ pub(crate) mod task_followups;
 pub(crate) mod task_launches;
 pub use native_task_launches::{
     load_native_task_launch, reconcile_native_task_launches, reserve_native_task_launch,
-    update_native_task_launch,
+    update_native_task_admission_error, update_native_task_launch,
 };
 mod terminal_cleanups;
 mod terminal_selection;

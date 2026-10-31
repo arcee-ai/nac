@@ -138,6 +138,12 @@ test("native saved-project launches open independent named-skill tasks across Gi
   );
   expect(discovery).toContain(cross);
   expect(discovery).toContain(local);
+  const candidates = JSON.parse(discovery!) as {
+    ambiguous: boolean;
+    candidates: Array<{ project_id: string }>;
+  };
+  expect(candidates.ambiguous).toBe(true);
+  expect(new Set(candidates.candidates.map((project) => project.project_id)).size).toBe(3);
   const receipts: Receipt[] = [];
   const intents: Record<string, unknown>[] = [];
   for (const [kind, project] of [
@@ -169,7 +175,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
     );
     harness.provider.enqueue(
       `skill-${kind}`,
-      { token: `NATIVE_CHILD_${kind}`, requiredTools: ["read"] },
+      { token: `NATIVE_CHILD_${kind}`, forbiddenToken: callId, requiredTools: ["read"] },
       {
         kind: "function_call",
         stream: "request",
@@ -207,6 +213,8 @@ test("native saved-project launches open independent named-skill tasks across Gi
     const link = page.getByRole("link", { name: `Open separate task: ${title}`, exact: true });
     await expect(link).toBeVisible();
     await link.click();
+    await expect(page).toHaveURL(new RegExp(`${receipt.launch.session_id}/insights`));
+    await page.goto(`${harness.baseUrl}/#${receipt.navigation}`);
     await expect(page).toHaveURL(new RegExp(`${receipt.launch.session_id}/insights`));
     await expect(page.getByText(`NATIVE_SKILL_READ_${kind}`, { exact: true })).toBeVisible();
     await waitForRunIdle(request, harness, receipt.launch.session_id);
