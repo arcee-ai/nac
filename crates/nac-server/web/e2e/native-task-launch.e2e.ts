@@ -256,6 +256,10 @@ test("native saved-project launches open independent named-skill tasks across Gi
     await expect(
       page.getByText("Separate ordinary launch accepted", { exact: true }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("status", { name: "Loading conversation", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "Message", exact: true })).toBeVisible();
     await page.evaluate(() =>
       (
         globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
@@ -271,6 +275,10 @@ test("native saved-project launches open independent named-skill tasks across Gi
   await expect(
     page.getByRole("link", { name: "Open separate task: Native ordinary task", exact: true }),
   ).toBeVisible();
+  await expect(page.getByRole("status", { name: "Loading conversation", exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("combobox", { name: "Message", exact: true })).toBeVisible();
   await page.evaluate(() =>
     (
       globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
