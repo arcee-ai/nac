@@ -41,6 +41,7 @@ export declare const NAC_API_SURFACE: {
     readonly "PUT /credentials/{name}": "api.storeCredential";
     readonly "DELETE /credentials/{name}": "api.deleteCredential";
     readonly "GET /fs/browse": "api.browsePath";
+    readonly "POST /fs/folders": "api.createFolder";
     readonly "GET /health": "api.health";
     readonly "GET /healthz": "private:liveness probe for infrastructure";
     readonly "GET /managed/github": "api.getManagedGitHub";
@@ -151,6 +152,7 @@ export declare const NAC_API_SURFACE: {
     readonly "DELETE /ssh-configs/{config_id}": "api.deleteSshConfig";
     readonly "PATCH /ssh-configs/{config_id}": "api.updateSshConfig";
     readonly "POST /ssh/browse": "api.browseSshPath";
+    readonly "POST /ssh/folders": "api.createSshFolder";
     readonly "GET /store": "api.getStore";
     readonly "GET /ui-config": "client.getUiConfiguration";
 };
