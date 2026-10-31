@@ -29,6 +29,11 @@ if [[ "$mode" == smoke ]]; then
               desktop/macos/WorkspaceFixture.swift desktop/macos/WorkspaceJourneys.swift
               desktop/macos/WorkspaceLegacy.swift)
     flags+=(-D PREVIEW_SMOKE)
+    if [[ "${NAC_MAC_TERMINAL_SMOKE:-0}" == 1 ]]; then
+        sources+=(desktop/macos/TerminalSmoke.swift desktop/macos/TerminalJourneys.swift
+                  desktop/macos/TerminalFixture.swift)
+        flags+=(-D TERMINAL_SMOKE)
+    fi
 fi
 xcrun swiftc "${flags[@]}" -framework AppKit -framework WebKit -framework Network \
     "${sources[@]}" -o "$app/Contents/MacOS/NACPreview"
