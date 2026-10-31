@@ -1,0 +1,17 @@
+/* shadcn/ui's semantic colour names for the primitives in `ui/`, aliased onto
+   NAC tokens. `inline` emits nothing into `:root`: each utility reads the NAC
+   variable directly, so the light/dark themes and the presentation scope apply
+   unchanged. Names NAC already owns (primary, secondary, muted, card, input)
+   stay out — aliasing them would redefine NAC's own utilities. */
+@theme inline {
+  --color-background: var(--color-bg-elevation-ground);
+  --color-foreground: var(--color-text-basic-primary);
+  --color-popover: var(--color-bg-elevation-level-3);
+  --color-popover-foreground: var(--color-text-basic-primary);
+  --color-muted-foreground: var(--color-text-basic-muted);
+  --color-accent: var(--color-bg-btn-ghost-hovered);
+  --color-accent-foreground: var(--color-text-basic-primary);
+  --color-destructive: var(--color-text-error-primary);
+  --color-border: var(--color-border-secondary);
+  --color-ring: var(--color-border-focus-outline);
+}

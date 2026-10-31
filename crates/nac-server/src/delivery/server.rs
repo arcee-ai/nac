@@ -1,3 +1,4 @@
+use super::http_listener::HttpListener;
 use super::presentation_bootstrap::PresentationDocument;
 use super::ui_configuration::{self, UiConfiguration};
 use crate::*;
@@ -1108,7 +1109,7 @@ where
     clippy::expect_used,
     reason = "the single forced-shutdown callback is moved only after graceful shutdown starts"
 )]
-async fn serve_router_listener_with_shutdown<F, X>(
+pub(crate) async fn serve_router_listener_with_shutdown<F, X>(
     listener: TcpListener,
     control: Option<(TcpListener, Router)>,
     app: Router,
@@ -1126,6 +1127,7 @@ where
     let (graceful_tx, graceful_rx) = tokio::sync::oneshot::channel();
     let (control_graceful_tx, control_graceful_rx) = tokio::sync::oneshot::channel();
     let mut control_server = control.map(|(listener, app)| {
+        let listener = HttpListener(listener);
         tokio::spawn(
             axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
@@ -1134,6 +1136,7 @@ where
                 .into_future(),
         )
     });
+    let listener = HttpListener(listener);
     let mut server = tokio::spawn(
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {

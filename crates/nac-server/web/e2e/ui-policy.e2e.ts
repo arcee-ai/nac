@@ -152,9 +152,8 @@ for (const orchestration of [null, "0"] as const) {
         const childId = (await childResponse.json()).child_session_id;
         await page.goto(`${harness.baseUrl}/#/session/${childId}/threads`);
         await expect(page).toHaveURL(new RegExp(`/session/${childId}/insights`));
-        if (!mobile)
-          await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
         await expect(page.getByRole("button", { name: "Parent chat" })).toBeVisible();
+        await expect(page.getByText("Traditional coding agent", { exact: true })).toHaveCount(0);
         await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
         await expect(page.getByRole("button", { name: "Create fork", exact: true })).toHaveCount(0);
         await page.getByRole("button", { name: "Parent chat" }).click();
