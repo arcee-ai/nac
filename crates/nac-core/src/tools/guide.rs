@@ -10,8 +10,7 @@ use crate::types::{FunctionDef, ToolDefinition};
 pub(crate) const NAME: &str = "nac_guide";
 pub(crate) struct GuideTool;
 
-#[derive(Debug, Deserialize)]
-#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Debug)]
 pub(crate) enum GuideInput {
     Manifest {
         expected_fingerprint: Option<String>,
@@ -30,21 +29,49 @@ pub(crate) enum GuideInput {
     },
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Operation {
+    Manifest,
+    Index,
+    Read,
+}
+
+/// Matches the one advertised object, including strict providers that populate
+/// every optional property. Project only the selected operation into policy
+/// and execution; unused fields never acquire resource authority.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Arguments {
+    operation: Operation,
+    query: Option<String>,
+    limit: Option<usize>,
+    document_id: Option<String>,
+    section_id: Option<String>,
+    offset: Option<usize>,
+    max_bytes: Option<usize>,
+    expected_fingerprint: Option<String>,
+}
+
+fn nonempty(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.is_empty())
+}
+
 pub(crate) fn definition() -> ToolDefinition {
     ToolDefinition {
         def_type: "function".into(),
         function: FunctionDef {
             name: NAME.into(),
-            description: "Read/search the first-party installed NAC Guide. Offline immutable documentation, independent of host paths. Use for NAC product questions; returns readable excerpts, stable source refs, pack fingerprint and installed build identity. Does not inspect current settings or execute work. index searches topics; read without section_id gives an outline; read a section in bounded UTF-8 pages. Unknown topics/refs or stale fingerprints fail explicitly.".into(),
+            description: "Read/search the first-party installed NAC Guide. Offline immutable documentation, independent of host paths. Use for NAC product questions; returns readable excerpts, stable source refs, pack fingerprint and installed build identity. Does not inspect current settings or execute work. index searches topics; read requires document_id, with null section_id for an outline (paging fields are then ignored). Use null for unused fields. Empty optional refs/fingerprint mean omitted. Unknown topics/refs or stale fingerprints fail explicitly.".into(),
             parameters: json!({"type":"object","properties":{
                 "operation":{"type":"string","enum":["manifest","index","read"]},
-                "query":{"type":"string","maxLength":512},
-                "limit":{"type":"integer","minimum":1,"maximum":20},
-                "document_id":{"type":"string","maxLength":128},
-                "section_id":{"type":"string","maxLength":128},
-                "offset":{"type":"integer","minimum":0},
-                "max_bytes":{"type":"integer","minimum":1,"maximum":6000},
-                "expected_fingerprint":{"type":"string","maxLength":64}
+                "query":{"type":["string","null"],"maxLength":512},
+                "limit":{"type":["integer","null"],"minimum":1,"maximum":20},
+                "document_id":{"type":["string","null"],"maxLength":128},
+                "section_id":{"type":["string","null"],"maxLength":128},
+                "offset":{"type":["integer","null"],"minimum":0},
+                "max_bytes":{"type":["integer","null"],"minimum":1,"maximum":6000},
+                "expected_fingerprint":{"type":["string","null"],"minLength":64,"maxLength":64}
             },"required":["operation"],"additionalProperties":false}),
         },
     }
@@ -127,9 +154,38 @@ impl NativeTool for GuideTool {
     }
 
     fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
-        let input: GuideInput = serde_json::from_value(input).map_err(|error| {
+        let args: Arguments = serde_json::from_value(input).map_err(|error| {
             ToolResult::text(format!("Error: invalid guide arguments: {error}"), true)
         })?;
+        let expected_fingerprint = nonempty(args.expected_fingerprint);
+        let input = match args.operation {
+            Operation::Manifest => GuideInput::Manifest {
+                expected_fingerprint,
+            },
+            Operation::Index => GuideInput::Index {
+                query: args.query,
+                limit: args.limit,
+                expected_fingerprint,
+            },
+            Operation::Read => {
+                let document_id = nonempty(args.document_id).ok_or_else(|| {
+                    ToolResult::text("Error: document_id is required for read", true)
+                })?;
+                let section_id = nonempty(args.section_id);
+                let (offset, max_bytes) = if section_id.is_some() {
+                    (args.offset, args.max_bytes)
+                } else {
+                    (None, None)
+                };
+                GuideInput::Read {
+                    document_id,
+                    section_id,
+                    offset,
+                    max_bytes,
+                    expected_fingerprint,
+                }
+            }
+        };
         input
             .validate()
             .map_err(|error| ToolResult::text(format!("Error: {error}"), true))?;

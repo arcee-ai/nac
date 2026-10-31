@@ -54,6 +54,7 @@ for (const journey of [
       },
       {
         kind: "function_call",
+        stream: "request",
         name: "nac_guide",
         callId: "guide-index",
         arguments: { operation: "index", query: journey.question },
@@ -64,6 +65,7 @@ for (const journey of [
       { functionOutputCallId: "guide-index" },
       {
         kind: "function_call",
+        stream: "request",
         name: "nac_guide",
         callId: "guide-section",
         arguments: {
@@ -76,19 +78,19 @@ for (const journey of [
     harness.provider.enqueue(
       "guide-answer",
       { functionOutputCallId: "guide-section" },
-      { kind: "text", text: journey.answer },
+      { kind: "text", text: journey.answer, stream: "request" },
     );
     const sessionId = await createSession(request, harness, journey.behavior);
     if (journey.document === "skills") {
       await page.goto(`${harness.baseUrl}/#/session/${sessionId}/threads`);
-      const composer = page.getByRole("textbox", { name: "Send a message", exact: true }).first();
+      const composer = page.getByRole("combobox", { name: "Message", exact: true }).first();
       await composer.fill("$nac");
       const choices = page.getByRole("listbox", {
         name: "Skills",
         exact: true,
       });
       await choices.getByRole("option", { name: /nac-help/ }).click();
-      await expect(composer).toHaveValue("$nac-help ");
+      await expect(composer).toHaveValue("$nac-help");
       await composer.fill("");
     }
     const catalog = await request.get(`${harness.baseUrl}/sessions/${sessionId}/skills`);
@@ -137,6 +139,7 @@ for (const journey of [
         },
         {
           kind: "function_call",
+          stream: "request",
           name: "nac_guide",
           callId: "old-guide-ref",
           arguments: {
@@ -150,6 +153,7 @@ for (const journey of [
         { functionOutputCallId: "old-guide-ref" },
         {
           kind: "function_call",
+          stream: "request",
           name: "nac_guide",
           callId: "current-guide-ref",
           arguments: { operation: "manifest" },
@@ -158,7 +162,7 @@ for (const journey of [
       harness.provider.enqueue(
         "guide-resumed-answer",
         { functionOutputCallId: "current-guide-ref" },
-        { kind: "text", text: "The current installed guide is authoritative." },
+        { kind: "text", text: "The current installed guide is authoritative.", stream: "request" },
       );
       expect(
         (

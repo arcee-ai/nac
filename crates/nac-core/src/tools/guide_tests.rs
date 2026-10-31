@@ -1,6 +1,35 @@
 use super::*;
 
 #[tokio::test]
+async fn strict_provider_full_object_projects_only_the_selected_guide_operation() {
+    let client = crate::model::ModelClient::new_for_test();
+    let runtime = crate::tools::test_runtime();
+    // Actual failed Codex shape: all advertised properties, even when the
+    // operation uses only query/limit. Empty optional strings mean omitted.
+    let mut input = json!({"_nac":null,"operation":"index","query":"MCP","limit":10,
+        "document_id":"","section_id":"","offset":0,"max_bytes":4000,"expected_fingerprint":""});
+    let result = crate::tools::execute_tool(NAME, input.clone(), &runtime, &client).await;
+    assert!(!result.is_error, "{}", result.content);
+    assert!(result.content.contains("add-a-server"));
+    input["operation"] = "read".into();
+    input["document_id"] = "mcp".into();
+    input["section_id"] = "add-a-server".into();
+    let result = crate::tools::execute_tool(NAME, input.clone(), &runtime, &client).await;
+    assert!(!result.is_error, "{}", result.content);
+    assert!(result.content.contains("mcp_servers"));
+    input["operation"] = "manifest".into();
+    let result = crate::tools::execute_tool(NAME, input, &runtime, &client).await;
+    assert!(!result.is_error, "{}", result.content);
+    let nullable = json!({"operation":"index","query":"MCP","limit":null,"document_id":null,
+        "section_id":null,"offset":null,"max_bytes":null,"expected_fingerprint":null});
+    assert!(GuideTool.decode(nullable).is_ok());
+    assert_eq!(
+        definition().function.parameters["properties"]["document_id"]["type"],
+        json!(["string", "null"])
+    );
+}
+
+#[tokio::test]
 async fn guide_reads_are_offline_bound_and_policy_checked() {
     let client = crate::model::ModelClient::new_for_test();
     let mut runtime = crate::tools::test_runtime();
