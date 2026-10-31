@@ -81,7 +81,10 @@ final class TerminalSmoke {
                 }));
                 """#),
                 "surface": ["visible": app.window.isVisible, "key": app.window.isKeyWindow,
-                            "occlusion_visible": app.window.occlusionState.contains(.visible)]])
+                            "occlusion_visible": app.window.occlusionState.contains(.visible),
+                            "window_frame": NSStringFromRect(app.window.frame),
+                            "screen_frame": app.window.screen.map { NSStringFromRect($0.frame) } ?? "unavailable",
+                            "backing_scale": app.window.backingScaleFactor]])
         if scenario == "terminal-output" { try await outputJourney() }
         else { try await rendererFailure() }
         record(["checks": checks])

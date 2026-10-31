@@ -60,7 +60,10 @@ records, diagnostic WK snapshots when capture succeeds, `matrix.json`,
 tracked diff and native source hashes, embedded asset tree, exact engine/native
 binary hashes and version, compile flags, OS/build, SDK, developer directory and
 available Xcode information. Resources loaded by the actual WK document are
-recorded in the native episode.
+recorded in the native episode. Xcode absence includes its failed operation and
+diagnostic. Selected/enabled input-source preferences are read without mutation;
+native window/screen bounds and backing scale are recorded without hardware
+serials. These facts never imply that a real IME interaction occurred.
 
 The current xterm accessibility **screen tree** establishes decoded parser
 output; its historical live region is excluded. A screen-tree pass is not a

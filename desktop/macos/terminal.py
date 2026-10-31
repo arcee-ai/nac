@@ -61,6 +61,14 @@ def sources():
         'test_terminal_report.py')}
 
 
+def environment_probe(*command):
+    """Read-only provenance; unavailable host tools stay explicit."""
+    result = subprocess.run(command, capture_output=True, text=True)
+    return {'status': 'observed' if result.returncode == 0 else 'unavailable',
+            'exit_code': result.returncode, 'stdout': result.stdout.strip(),
+            'stderr': result.stderr.strip()}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=['capture-build', 'run'])
@@ -84,12 +92,15 @@ def main():
                           compile_flags=['PREVIEW_SMOKE', 'TERMINAL_SMOKE'],
                           normal_sha256=sha256(app.parent / 'normal-preview'),
                           ordinary_smoke_sha256=sha256(app.parent / 'ordinary-smoke'),
-                          xcode=subprocess.run(['xcodebuild', '-version'], capture_output=True, text=True).stdout.strip())
+                          xcode=environment_probe('xcodebuild', '-version'),
+                          selected_input_sources=environment_probe('defaults', 'read', 'com.apple.HIToolbox', 'AppleSelectedInputSources'),
+                          enabled_input_sources=environment_probe('defaults', 'read', 'com.apple.HIToolbox', 'AppleEnabledInputSources'))
         manifest.write_text(json.dumps(provenance, indent=2) + '\n')
         return
     if args.output is None:
         parser.error('run requires a fresh output directory')
     provenance = json.loads(manifest.read_text())
+    provenance['execution_input_sources'] = environment_probe('defaults', 'read', 'com.apple.HIToolbox', 'AppleSelectedInputSources')
     current = identity(app)
     for key in ['source_head', 'tracked_diff_sha256', 'native_sources', 'engine_sha256', 'native_sha256', 'assets_tree']:
         if current[key] != provenance[key]:
