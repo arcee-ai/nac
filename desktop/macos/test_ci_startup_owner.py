@@ -16,6 +16,7 @@ class StartupOwnerTests(unittest.TestCase):
         self.sequence = 0
         self.config = {'app_path': '/private/nac342-xctest-unit/NAC.app', 'fixture_root': '/private/nac342-xctest-unit',
                        'environment': {'HOME': '/private/owned home', 'NAC_HOME': '/private/owned home/nac'},
+                       'child_environment': {'HOME': '/private/owned home', 'NAC_HOME': '/private/owned home/nac'},
                        'scenario': 'onboarding', 'native_sha256': 'a' * 64}
         self.owner = OwnerWitness(self.config, 'b' * 64, uid=501, clock=lambda: self.clock)
 
@@ -30,7 +31,8 @@ class StartupOwnerTests(unittest.TestCase):
         executable = self.config['app_path'] + ('/Contents/MacOS/NACPreview' if kind == 'app' else '/Contents/Resources/nac-web')
         node = {'pid': pid, 'parent': parent, 'uid': 501, 'start_seconds': 1234, 'start_microseconds': pid,
                 'executable': executable, 'kind': kind, 'environment': copy.deepcopy(self.config['environment']),
-                'arguments_sha256': 'c' * 64, 'serving': kind == 'engine', 'configuration_helper': False}
+                'arguments_sha256': 'c' * 64, 'serving': kind == 'engine', 'configuration_helper': False,
+                'environment_role': 'launcher' if kind == 'app' else kind}
         if kind == 'app':
             node.update(app_launch_epoch=1234.5, windows=[17])
         node.update(changes)

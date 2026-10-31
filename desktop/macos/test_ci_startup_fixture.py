@@ -81,11 +81,18 @@ class StartupFixtureTests(unittest.TestCase):
         owner = Mock()
         owner.inspect_normal_package.return_value = proof
         owner.validate_normal_package.return_value = {'scope': 'synthetic-unit-admission-only'}
-        with patch('ci_startup_fixture.require_checkout'), patch('ci_startup_fixture.test_contract', return_value=owner):
+        child = {**profile['environment'], 'PATH': '/synthetic-resolved-path'}
+        with patch('ci_startup_fixture.require_checkout'), patch('ci_startup_fixture.test_contract', return_value=owner), \
+                patch('ci_startup_fixture.resolve_environment', return_value=(child, {'scope': 'synthetic resolver'})):
             config, path, admission = prepare_configuration(profile, app, manifest, self.parent, self.parent, '1' * 40)
         self.assertEqual(config['source_sha'], PRODUCT)
         self.assertEqual(config['test_source_sha'], TEST_SOURCE)
         self.assertEqual(config['harness_sha'], '1' * 40)
+        self.assertEqual(config['environment'], profile['environment'])
+        self.assertEqual(config['child_environment'], child)
+        self.assertEqual(config['environment_resolution']['app_launch_arguments'], ['--directory', str(profile['home'])])
+        self.assertEqual(config['environment_resolution']['configuration_helper_arguments'],
+                         ['__desktop-configuration', '--directory', str(profile['home'])])
         for key, expected in proof['post_sign_receipt'].items():
             self.assertEqual(config[key], expected)
         self.assertEqual(json.loads(path.read_text()), config)
