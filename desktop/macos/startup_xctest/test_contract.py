@@ -268,6 +268,188 @@ FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: resul
         self.assertFalse(Path(row['home']).exists())
 
 
+@unittest.skipUnless(os.environ.get('NAC342_SWIFT_QUERY_PROOF') == '1', 'Pure Swift query projection proof not requested')
+class QueryDiagnosticTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory(prefix='nac342-query-projection-')
+        cls.addClassCleanup(cls.temporary.cleanup)
+        source = Path(__file__).with_name('StartupJourneys.swift').read_text()
+        blocks = [source.split('// BEGIN ' + key, 1)[1].split('\n', 1)[1].split('// END ' + key, 1)[0]
+                  for key in ('CONSOLE POLICY', 'PATH POLICY', 'QUERY DIAGNOSTIC')]
+        driver = '''
+let rows = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [[String: Any]]
+let result: [[String: Any]] = rows.map { row in
+    if row["action"] as? String == "assert" {
+        var waits = 0, diagnostics = 0
+        do {
+            try StartupQueryDiagnostic.requireOnboarding(wait: {
+                waits += 1; return StartupConsolePolicy.boolean(row["legacy"]) == true
+            }, diagnose: { diagnostics += 1; _ = row["alternate_positive"] })
+            return ["passed": true, "waits": waits, "diagnostics": diagnostics]
+        } catch {
+            let error = error as NSError
+            return ["passed": false, "waits": waits, "diagnostics": diagnostics,
+                    "domain": error.domain, "code": error.code, "message": error.localizedDescription]
+        }
+    }
+    if row["action"] as? String == "candidate" {
+        guard let candidate = StartupQueryDiagnostic.candidate(row["input"] as! [String: Any], target: 0)
+            else { return ["accepted": false] }
+        return ["accepted": true, "fields": candidate.fields, "bounded": candidate.bounded]
+    }
+    var census = StartupQueryDiagnostic.Census(start: 0)
+    if row["action"] as? String == "read_budget" {
+        var attempts = 0
+        for _ in 0..<12 {
+            if census.readCandidate() { attempts += 1 }
+        }
+        return ["reads": census.reads, "attempts": attempts]
+    }
+    for item in row["rows"] as! [[String: Any]] {
+        var candidates: [StartupQueryDiagnostic.Candidate] = []
+        for input in item["candidates"] as? [[String: Any]] ?? [] {
+            guard census.readCandidate() else { return ["accepted": false] }
+            guard let candidate = StartupQueryDiagnostic.candidate(input, target: 0) else { return ["accepted": false] }
+            candidates.append(candidate)
+        }
+        guard census.append(count: item["count"] as Any, candidates: candidates,
+                            truncated: item["truncated"] as? Bool ?? false) else { return ["accepted": false] }
+    }
+    for time in row["times"] as? [Double] ?? [0.012] { _ = census.available(now: time) }
+    if let special = row["clock"] as? String {
+        _ = census.available(now: special == "nan" ? .nan : .infinity)
+        _ = census.available(now: 7)
+    }
+    var binding = row["binding"] as! [String: Any]
+    if row["epoch_nan"] as? Bool == true { binding["app_launch_epoch"] = Double.nan }
+    guard let record = census.record(binding: binding, scenario: row["scenario"] as? String ?? "onboarding",
+        guardBefore: row["guard_before"] as? Bool ?? true, guardAfter: row["guard_after"] as? Bool ?? true),
+        StartupQueryDiagnostic.encode(record) != nil else { return ["accepted": false] }
+    return ["accepted": true, "record": record]
+}
+FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]))
+'''
+        path = Path(cls.temporary.name) / 'main.swift'
+        path.write_text('import Foundation\nimport CoreFoundation\nimport Darwin\n' + '\n'.join(blocks) + driver)
+        cls.runner = path.with_name('query-proof')
+        build = subprocess.run(['swiftc', '-swift-version', '5', str(path), '-o', str(cls.runner)], capture_output=True)
+        if build.returncode:
+            raise RuntimeError(build.stderr.decode())
+
+    def run_rows(self, rows):
+        result = subprocess.run([str(self.runner)], input=json.dumps(rows).encode(), check=True, capture_output=True)
+        return json.loads(result.stdout)
+
+    def candidate(self, **changes):
+        return {**dict(element_type=48, exists=True, hittable=True, enabled=True, window_intersection=True,
+                       label='No projects yet', value=None, identifier=''), **changes}
+
+    def sample(self, **changes):
+        config, _ = fixture()
+        binding = {key: config[key] for key in ('source_sha', 'startup_source_sha256', 'app_path', 'native_sha256')}
+        binding.update(test_source_sha=BASELINE, harness_sha=HARNESS, configuration_sha256='a' * 64,
+                       app_pid=123, app_launch_epoch=1234567890.25, window_number=456)
+        return {**dict(binding=binding, rows=[dict(count=0) for _ in range(12)]), **changes}
+
+    def test_legacy_result_cannot_be_overridden_by_diagnostics(self):
+        rows = [dict(action='assert', legacy=value, alternate_positive=alternate)
+                for value in (False, True) for alternate in (False, True)]
+        results = self.run_rows(rows)
+        for row, found in zip(rows, results):
+            self.assertEqual(found['passed'], row['legacy'])
+            self.assertEqual(found['waits'], 1)
+            self.assertEqual(found['diagnostics'], int(not row['legacy']))
+            if not row['legacy']:
+                self.assertEqual((found['domain'], found['code'], found['message']),
+                                 ('NAC342', 1, 'Shared onboarding absent'))
+
+    def test_exact_contains_trim_and_nonstring_projection(self):
+        rows = [self.candidate(), self.candidate(label=' No projects yet ', value='No projects yet'),
+                self.candidate(label='No projects yet suffix', identifier='No projects yet'),
+                self.candidate(label='No projects YET', value=False, exists=False, hittable=False,
+                               enabled=False, window_intersection=False)]
+        found = self.run_rows([dict(action='candidate', input=row) for row in rows])
+        self.assertTrue(found[0]['fields']['label_exact'])
+        self.assertFalse(found[1]['fields']['label_exact'])
+        self.assertTrue(found[1]['fields']['label_trim_exact'])
+        self.assertTrue(found[1]['fields']['value_exact'])
+        self.assertTrue(found[2]['fields']['label_contains'])
+        self.assertTrue(found[2]['fields']['identifier_exact'])
+        self.assertFalse(found[3]['fields']['value_is_string'])
+        self.assertFalse(found[3]['fields']['label_exact'])
+        self.assertFalse(found[3]['fields']['hittable'])
+
+    def test_malformed_candidate_and_private_text_never_escape(self):
+        bad = [self.candidate(element_type=True), self.candidate(element_type=1.0), self.candidate(element_type=1.5),
+               self.candidate(element_type=1001), self.candidate(exists=1), self.candidate(label=None),
+               self.candidate(raw_tree='secret/private/path')]
+        self.assertEqual([r['accepted'] for r in self.run_rows([dict(action='candidate', input=x) for x in bad])],
+                         [False] * len(bad))
+        found = self.run_rows([dict(action='candidate', input=self.candidate(label='SECRET/PATH/' * 40))])[0]
+        self.assertFalse(found['bounded'])
+        self.assertNotIn('SECRET', json.dumps(found))
+        self.assertNotIn('label', found['fields'])
+
+    def test_prefix_order_and_fifth_query_candidate_boundary(self):
+        good, bad = self.sample(), self.sample()
+        for row, index in [(good, 4), (bad, 3)]:
+            row['rows'][index] = dict(count=1, candidates=[self.candidate()])
+        results = self.run_rows([good, bad])
+        self.assertTrue(results[0]['accepted'])
+        self.assertEqual(results[0]['record']['queries'][4]['query'], 'window_static_title')
+        self.assertEqual(results[0]['record']['legacy_exists'], False)
+        self.assertFalse(results[1]['accepted'])
+        self.assertEqual(len({r['query'] for r in results[0]['record']['queries']}), 12)
+        duplicate = self.sample()
+        duplicate['rows'][4] = dict(count=2, candidates=[self.candidate(element_type=1)] * 2)
+        record = self.run_rows([duplicate])[0]['record']
+        self.assertEqual(record['queries'][4]['count'], 2)
+        self.assertEqual([c['element_type'] for c in record['queries'][4]['candidates']], [1, 1])
+        self.assertFalse(record['legacy_exists'])
+
+    def test_query_count_candidate_and_projection_caps(self):
+        self.assertEqual(self.run_rows([dict(action='read_budget')])[0], dict(reads=8, attempts=8))
+        bad = [self.sample(rows=[dict(count=-1)]), self.sample(rows=[dict(count=True)]),
+               self.sample(rows=[dict(count=1.0)]), self.sample(rows=[dict(count=1.5)]), self.sample(rows=[dict(count=0)] * 13)]
+        per_row = self.sample(); per_row['rows'][4] = dict(count=5, candidates=[self.candidate()] * 5)
+        total = self.sample()
+        for index in (4, 5, 6): total['rows'][index] = dict(count=3, candidates=[self.candidate()] * 3)
+        missing = self.sample(); missing['rows'][4] = dict(count=1)
+        self.assertEqual([r['accepted'] for r in self.run_rows(bad + [per_row, total, missing])], [False] * 8)
+        overflow = self.run_rows([self.sample(rows=[dict(count=4097)])])[0]['record']
+        self.assertEqual((overflow['stop_reason'], overflow['queries'][0]['count']), ('count_limit', 4096))
+        cut = self.sample(); cut['rows'][4] = dict(count=1, candidates=[self.candidate(label='X' * 257)])
+        record = self.run_rows([cut])[0]['record']
+        self.assertEqual((record['status'], record['stop_reason']), ('partial', 'candidate_limit'))
+
+    def test_final_time_edges_and_sticky_invalid_clock(self):
+        times = [4.999, 5, 5.001, 600, 600.001]
+        found = self.run_rows([self.sample(times=[time]) for time in times])
+        self.assertEqual([r['record']['elapsed_ms'] for r in found], [4999, 5000, 5001, 600000, 600000])
+        self.assertEqual([r['record']['status'] for r in found], ['complete'] + ['partial'] * 4)
+        self.assertEqual([r['record']['elapsed_overflow'] for r in found], [False] * 4 + [True])
+        for item in self.run_rows([self.sample(times=[2, 1, 7]), self.sample(times=[-1, 7]),
+                                  self.sample(clock='nan'), self.sample(clock='inf')]):
+            record = item['record']
+            self.assertEqual((record['stop_reason'], record['elapsed_ms'], record['elapsed_overflow']),
+                             ('clock_invalid', 0, False))
+        record = self.run_rows([self.sample(rows=[dict(count=4097)], times=[5])])[0]['record']
+        self.assertEqual(record['stop_reason'], 'time_budget')
+
+    def test_binding_guard_and_serialization_admission(self):
+        rows = [self.sample(guard_before=False), self.sample(guard_after=False), self.sample(epoch_nan=True),
+                self.sample(scenario='futureStore')]
+        for key, value in [('app_pid', True), ('app_launch_epoch', True), ('window_number', 0), ('source_sha', 'BAD'),
+                           ('configuration_sha256', 'x' * 64), ('app_path', '../foreign'), ('raw', 'SECRET')]:
+            row = self.sample(); row['binding'][key] = value; rows.append(row)
+        self.assertEqual([r['accepted'] for r in self.run_rows(rows)], [False] * len(rows))
+        row = self.sample()
+        for index in (4, 5): row['rows'][index] = dict(count=4, candidates=[self.candidate()] * 4)
+        row['binding']['app_path'] = '/'+ 'x' * 4000 + '/Moved app folder with spaces/NAC.app'
+        self.assertFalse(self.run_rows([row])[0]['accepted'])
+
+
 def fixture():
     root = '/private/tmp/nac342-xctest-owned'
     home = root + '/home with spaces'

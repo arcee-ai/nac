@@ -121,6 +121,138 @@ struct StartupPaths {
 }
 // END PATH POLICY
 
+// BEGIN QUERY DIAGNOSTIC (compiled verbatim; no AX access in this projection)
+private enum StartupQueryDiagnostic {
+    static let queries = ["app_webviews", "window_webviews", "legacy_title", "app_static_title",
+        "window_static_title", "window_label_title", "window_value_title", "window_identifier_title",
+        "window_button_start", "legacy_button_start", "window_label_subtitle", "window_value_subtitle"]
+    static let targets = ["No projects yet", "Create your first and start building!", "Get Started"]
+    static let targetIndices = [0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 1, 1]
+
+    static func requireOnboarding(wait: () -> Bool, diagnose: () -> Void) throws {
+        let exists = wait()
+        if !exists { diagnose() }
+        if !exists { throw NSError(domain: "NAC342", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Shared onboarding absent"]) }
+    }
+
+    struct Candidate {
+        let fields: [String: Any]
+        let bounded: Bool
+    }
+
+    static func candidate(_ input: [String: Any], target: Int) -> Candidate? {
+        let names: Set<String> = ["element_type", "exists", "hittable", "enabled", "window_intersection",
+                                  "label", "value", "identifier"]
+        guard Set(input.keys) == names, targets.indices.contains(target),
+              let type = StartupConsolePolicy.integer(input["element_type"]), (0...1000).contains(type),
+              let label = input["label"] as? String, let identifier = input["identifier"] as? String else { return nil }
+        var fields: [String: Any] = ["element_type": type]
+        for key in ["exists", "hittable", "enabled", "window_intersection"] {
+            guard let value = StartupConsolePolicy.boolean(input[key]) else { return nil }
+            fields[key] = value
+        }
+        let value = input["value"] as? String
+        fields["value_is_string"] = value != nil
+        var bounded = true
+        for (key, text) in [("label", Optional(label)), ("value", value), ("identifier", Optional(identifier))] {
+            let within = text.map { $0.utf8.count <= 256 } ?? true
+            bounded = bounded && within
+            fields[key + "_exact"] = within && text == targets[target]
+            fields[key + "_contains"] = within && (text?.contains(targets[target]) ?? false)
+            fields[key + "_trim_exact"] = within && text?.trimmingCharacters(in: .whitespacesAndNewlines) == targets[target]
+        }
+        return Candidate(fields: fields, bounded: bounded)
+    }
+
+    struct Census {
+        let start: Double
+        private(set) var rows: [[String: Any]] = []
+        private(set) var reads = 0
+        private var elapsed = 0
+        private var elapsedOverflow = false
+        private var reason = "none"
+        private var last: Double
+        private var projected = 0
+
+        init(start: Double) { self.start = start; last = start }
+
+        mutating func stop(_ next: String) {
+            let priority = ["none", "candidate_limit", "count_limit", "time_budget", "clock_invalid"]
+            if priority.firstIndex(of: next)! > priority.firstIndex(of: reason)! { reason = next }
+        }
+
+        mutating func available(now: Double) -> Bool {
+            if reason == "clock_invalid" { return false }
+            let delta = now - start
+            guard start.isFinite, start >= 0, now.isFinite, now >= last, delta.isFinite else {
+                elapsed = 0; elapsedOverflow = false; stop("clock_invalid"); return false
+            }
+            last = now
+            elapsedOverflow = delta > 600
+            elapsed = elapsedOverflow ? 600000 : Int(delta * 1000)
+            if delta >= 5 { stop("time_budget"); return false }
+            return reason != "count_limit" && reason != "clock_invalid"
+        }
+
+        mutating func readCandidate() -> Bool {
+            guard reads < 8 else { stop("candidate_limit"); return false }
+            reads += 1 // Count attempts, including rejected/overlength projections.
+            return true
+        }
+
+        mutating func append(count raw: Any, candidates: [Candidate], truncated: Bool) -> Bool {
+            guard rows.count < 12, let count = StartupConsolePolicy.integer(raw), count >= 0,
+                  candidates.count <= 4, projected + candidates.count <= reads,
+                  candidates.count <= count,
+                  rows.count >= 4 || (candidates.isEmpty && !truncated) else { return false }
+            let overflow = count > 4096
+            guard !overflow || candidates.isEmpty else { return false }
+            let cut = truncated || candidates.contains { !$0.bounded }
+            guard rows.count < 4 || overflow || cut || candidates.count == count else { return false }
+            if cut { stop("candidate_limit") }
+            if overflow { stop("count_limit") }
+            rows.append(["query": queries[rows.count], "count": min(count, 4096), "overflow": overflow,
+                         "candidate_truncated": cut, "candidates": candidates.map(\.fields)])
+            projected += candidates.count
+            return true
+        }
+
+        func record(binding: [String: Any], scenario: String,
+                    guardBefore: Bool, guardAfter: Bool) -> [String: Any]? {
+            let hex40 = ["source_sha", "test_source_sha", "harness_sha"]
+            let hex64 = ["startup_source_sha256", "configuration_sha256", "native_sha256"]
+            let names = Set(hex40 + hex64 + ["app_path", "app_pid", "app_launch_epoch", "window_number"])
+            guard guardBefore, guardAfter, Set(binding.keys) == names,
+                  ["onboarding", "configuredLocal"].contains(scenario),
+                  rows.count == 12 || reason != "none",
+                  let path = binding["app_path"] as? String, StartupPaths.lexical(path),
+                  path.hasSuffix("/Moved app folder with spaces/NAC.app"),
+                  let pid = StartupConsolePolicy.integer(binding["app_pid"]), pid > 0,
+                  let window = StartupConsolePolicy.integer(binding["window_number"]), window > 0,
+                  let epoch = binding["app_launch_epoch"] as? NSNumber,
+                  CFGetTypeID(epoch) != CFBooleanGetTypeID(), epoch.doubleValue.isFinite, epoch.doubleValue > 0 else { return nil }
+            for (keys, width) in [(hex40, 40), (hex64, 64)] {
+                for key in keys {
+                    guard let text = binding[key] as? String,
+                          text.range(of: "^[0-9a-f]{\(width)}$", options: .regularExpression) != nil else { return nil }
+                }
+            }
+            return binding.merging(["schema": "nac342-query-diagnostic-v1", "version": 1,
+                "phase": "onboarding", "scenario": scenario, "legacy_exists": false,
+                "guard_before": guardBefore, "guard_after": guardAfter, "status": reason == "none" ? "complete" : "partial",
+                "stop_reason": reason, "elapsed_ms": elapsed, "elapsed_overflow": elapsedOverflow,
+                "queries": rows]) { _, new in new }
+        }
+    }
+    static func encode(_ record: [String: Any]) -> Data? {
+        guard let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
+              data.count <= 8192 else { return nil }
+        return data
+    }
+}
+// END QUERY DIAGNOSTIC
+
 /// Proposed external public-XCTest actor. ALL-354 must include this source in
 /// an actual generated runner before it is runnable. No app bridge or file IPC.
 final class StartupJourneys: XCTestCase {
@@ -303,6 +435,57 @@ final class StartupJourneys: XCTestCase {
     }
 
     @MainActor
+    private func queryDiagnostic(_ ui: XCUIApplication, guardTarget: () throws -> Void,
+                                 binding: [String: Any], scenario: String) throws {
+        try guardTarget()
+        let window = ui.windows.firstMatch
+        let title = StartupQueryDiagnostic.targets[0], subtitle = StartupQueryDiagnostic.targets[1]
+        let start = StartupQueryDiagnostic.targets[2]
+        func match(_ query: XCUIElementQuery, _ attribute: String, _ text: String) -> XCUIElementQuery {
+            query.matching(NSPredicate(format: attribute + " == %@", text))
+        }
+        let any = window.descendants(matching: .any)
+        let queries = [ui.webViews, window.webViews,
+            ui.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", title)),
+            match(ui.staticTexts, "label", title), match(window.staticTexts, "label", title),
+            match(any, "label", title), match(any, "value", title), match(any, "identifier", title),
+            match(window.buttons, "label", start), match(ui.webViews.buttons, "label", start),
+            match(any, "label", subtitle), match(any, "value", subtitle)]
+        var census = StartupQueryDiagnostic.Census(start: ProcessInfo.processInfo.systemUptime)
+        for (index, query) in queries.enumerated() {
+            guard census.available(now: ProcessInfo.processInfo.systemUptime) else { break }
+            // One explicit query materialization. SDK-internal work/latency is
+            // not bounded by our result/attribute caps or between-call budget.
+            let elements = query.allElementsBoundByAccessibilityElement
+            var candidates: [StartupQueryDiagnostic.Candidate] = []
+            var truncated = false
+            if index >= 4 && elements.count <= 4096 {
+                for element in elements.prefix(4) {
+                    guard census.available(now: ProcessInfo.processInfo.systemUptime),
+                          census.readCandidate() else { truncated = true; break }
+                    let frame = element.frame, owned = window.frame
+                    let finite = [frame.minX, frame.minY, frame.width, frame.height,
+                                  owned.minX, owned.minY, owned.width, owned.height].allSatisfy { $0.isFinite }
+                    let input: [String: Any] = ["element_type": Int(element.elementType.rawValue),
+                        "exists": element.exists, "hittable": element.isHittable, "enabled": element.isEnabled,
+                        "window_intersection": finite && !frame.isEmpty && frame.intersects(owned),
+                        "label": element.label, "value": element.value ?? NSNull(), "identifier": element.identifier]
+                    guard let candidate = StartupQueryDiagnostic.candidate(input,
+                        target: StartupQueryDiagnostic.targetIndices[index]) else { truncated = true; break }
+                    candidates.append(candidate)
+                }
+                truncated = truncated || elements.count > candidates.count
+            }
+            guard census.append(count: elements.count, candidates: candidates, truncated: truncated) else { return }
+        }
+        _ = census.available(now: ProcessInfo.processInfo.systemUptime)
+        try guardTarget()
+        guard let record = census.record(binding: binding, scenario: scenario, guardBefore: true, guardAfter: true),
+              StartupQueryDiagnostic.encode(record) != nil else { return }
+        try attachment(record, name: "nac342-query-diagnostic-v1-onboarding")
+    }
+
+    @MainActor
     func testOrdinaryStartup() throws {
         continueAfterFailure = false
         executionTimeAllowance = 210
@@ -423,7 +606,21 @@ final class StartupJourneys: XCTestCase {
             try require(ui.webViews.allElementsBoundByIndex.allSatisfy { !$0.isHittable },
                         "Recovery unexpectedly activated shared workspace")
         } else {
-            try require(text("No projects yet").waitForExistence(timeout: 45), "Shared onboarding absent")
+            try StartupQueryDiagnostic.requireOnboarding(wait: {
+                text("No projects yet").waitForExistence(timeout: 45)
+            }, diagnose: {
+                // Diagnostics never change the observed legacy result or
+                // mask its original failure. Missing evidence stays missing.
+                try? queryDiagnostic(ui, guardTarget: {
+                    try guardTarget()
+                    let current = try Data(contentsOf: URL(fileURLWithPath: path))
+                    try require(current == bytes, "Fixture configuration changed during query diagnostics")
+                }, binding: ["source_sha": fixture.source_sha, "test_source_sha": fixture.test_source_sha,
+                    "harness_sha": fixture.harness_sha, "startup_source_sha256": fixture.startup_source_sha256,
+                    "configuration_sha256": digest(bytes), "app_path": paths.emittedPath,
+                    "native_sha256": fixture.native_sha256, "app_pid": Int(running.processIdentifier),
+                    "app_launch_epoch": launch.timeIntervalSince1970, "window_number": number], scenario: fixture.scenario)
+            })
             if fixture.scenario == "configuredLocal" {
                 try click(ui.webViews.buttons, "Get Started")
                 try click(ui.webViews.buttons, fixture.home)
