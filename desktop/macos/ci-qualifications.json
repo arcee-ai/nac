@@ -17,5 +17,12 @@
     "suite": "workspace",
     "scenario_count": 2,
     "baseline_scenarios": 6
+  },
+  "all-352-macos26": {
+    "source_sha": "24c0179f9e42a36d021a117694f098a76a3ddb80",
+    "profile": "macos26",
+    "suite": "terminal",
+    "scenario_count": 1,
+    "phase_count": 6
   }
 }

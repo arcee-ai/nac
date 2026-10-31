@@ -5,7 +5,7 @@ import IOKit
 import XCTest
 import XCUIAutomation
 
-/// External, OS-generated ASCII input only. No physical keyboard/IME claim.
+/// External public XCTest input. No physical keyboard or IME claim.
 final class NativeJourneys: XCTestCase {
     struct Fixture: Decodable {
         let app_path: String
@@ -89,6 +89,145 @@ final class NativeJourneys: XCTestCase {
         XCTAssertEqual(input["exact_receipt"] as? Bool, true)
         XCTAssertEqual(input["synthetic_keydowns"] as? Int, 0)
         XCTAssertGreaterThanOrEqual(input["trusted_keydowns"] as? Int ?? 0, command.count + 1)
+    }
+
+    @MainActor
+    func testTerminalUnicodeControlResize() throws {
+        continueAfterFailure = false
+        executionTimeAllowance = 380
+        let configPath = try XCTUnwrap(ProcessInfo.processInfo.environment["NAC_UI_FIXTURE"])
+        let config = try evidence(configPath)
+        let appURL = URL(fileURLWithPath: try XCTUnwrap(config["app_path"] as? String)).resolvingSymlinksInPath()
+        let output = try XCTUnwrap(config["evidence"] as? String)
+        let operations = try XCTUnwrap(config["operations"] as? [[String: Any]])
+        let names = ["unicode", "interrupt-arm", "interrupt", "recovery", "resize", "size-readback"]
+        try require(config["scenario"] as? String == "terminal-xctest" && operations.count == 6,
+                    "Unexpected terminal fixture contract")
+        try require(appURL.lastPathComponent == "NAC Development Preview.app"
+                    && appURL.path.contains("/nac-mac-relocation-"), "Unexpected terminal bundle URL")
+        let executable = appURL.appendingPathComponent("Contents/MacOS/NACPreview")
+        let digest = SHA256.hash(data: try Data(contentsOf: executable)).map { String(format: "%02x", $0) }.joined()
+        try require(digest == config["native_sha256"] as? String, "Terminal executable hash changed")
+        try require(NSRunningApplication.runningApplications(withBundleIdentifier: "ai.arcee.nac.development-preview")
+            .allSatisfy { $0.isTerminated }, "Refusing to affect an existing preview instance")
+        try requireUnlockedConsole()
+        let app = XCUIApplication(url: appURL)
+        app.launchArguments = ["--smoke-output", output, "--smoke-scenario", "terminal-xctest"]
+        app.launchEnvironment = ["NAC_HOME": "/DO-NOT-USE-PERSONAL-NAC", "NAC_MANAGED_CONFIG": "/DO-NOT-INHERIT",
+                                 "OPENAI_API_KEY": "must-not-reach-engine"]
+        app.launch()
+        let first = try waitTerminalPhase(output, sequence: 1, timeout: 90)
+        let identity = try XCTUnwrap(first["terminal_xctest_identity"] as? [String: Any])
+        let pid = try XCTUnwrap((identity["app_pid"] as? NSNumber)?.int32Value)
+        let number = try XCTUnwrap(identity["target_window_number"] as? Int)
+        let running = try XCTUnwrap(NSRunningApplication(processIdentifier: pid))
+        let launch = try XCTUnwrap(running.launchDate)
+        let epoch = try XCTUnwrap(identity["app_launch_epoch"] as? Double)
+        try require(identity["schema"] as? Int == 1 && identity["bundle_path"] as? String == appURL.path
+                    && abs(epoch - launch.timeIntervalSince1970) < 0.01
+                    && identity["unfocused_guard_rejected"] as? Bool == true
+                    && !(identity["session_id"] as? String ?? "").isEmpty
+                    && !(identity["terminal_id"] as? String ?? "").isEmpty
+                    && !(identity["controller_revision"] as? String ?? "").isEmpty,
+                    "Terminal initial incarnation/negative guard differs")
+        try require(app.windows.count == 1, "Ambiguous terminal fixture window")
+        let window = app.windows.firstMatch
+        let initialFrame = window.frame
+        let terminals = app.webViews.textViews.matching(identifier: "Terminal input")
+        try require(terminals.count == 1, "Expected one terminal accessibility element")
+        let terminal = terminals.firstMatch
+        var dispatched: [[String: Any]] = []
+        let driverOutput = URL(fileURLWithPath: try XCTUnwrap(config["driver_evidence"] as? String))
+        for (index, expected) in operations.enumerated() {
+            let sequence = index + 1
+            try require(expected["sequence"] as? Int == sequence && expected["name"] as? String == names[index],
+                        "Nominated terminal phase order differs")
+            _ = try waitTerminalPhase(output, sequence: sequence, timeout: 65)
+            let operation = try XCTUnwrap(expected["operation"] as? [String: Any])
+            func guardOperation() throws {
+                try requireTarget(running, url: appURL, launch: launch, window: number)
+                try require(app.windows.count == 1 && terminals.count == 1, "Terminal window/element became ambiguous")
+                let current = try evidence(output)
+                try require(current["error"] == nil, "Terminal app rejected input episode")
+                let currentIdentity = try XCTUnwrap(current["terminal_xctest_identity"] as? [String: Any])
+                try require(NSDictionary(dictionary: currentIdentity).isEqual(NSDictionary(dictionary: identity)),
+                            "Terminal controller/process identity changed")
+                let phase = try XCTUnwrap(current["terminal_xctest_phase"] as? [String: Any])
+                let actual = try XCTUnwrap(phase["operation"] as? [String: Any])
+                try require(phase["schema"] as? Int == 1 && phase["sequence"] as? Int == sequence
+                            && phase["name"] as? String == names[index] && phase["state"] as? String == "ready"
+                            && phase["seconds_limit"] as? Int == expected["seconds_limit"] as? Int
+                            && NSDictionary(dictionary: actual).isEqual(NSDictionary(dictionary: operation)),
+                            "Terminal phase/literal changed; refusing dispatch")
+                try require(phase["app_pid"] as? Int == Int(pid) && phase["target_window_number"] as? Int == number
+                            && phase["session_id"] as? String == identity["session_id"] as? String
+                            && phase["terminal_id"] as? String == identity["terminal_id"] as? String,
+                            "Terminal phase target changed")
+            }
+            try guardOperation()
+            let started = Date()
+            var dispatch = expected
+            dispatch["state"] = "dispatching-once"
+            dispatched.append(dispatch)
+            try JSONSerialization.data(withJSONObject: dispatched, options: [.prettyPrinted, .sortedKeys])
+                .write(to: driverOutput, options: .atomic)
+            switch operation["kind"] as? String {
+            case "type-text-and-return":
+                let text = try XCTUnwrap(operation["text"] as? String)
+                // Each public operation uses the nominated config literal;
+                // live readiness can only match or reject it, never supply it.
+                for character in text {
+                    try guardOperation()
+                    terminal.typeText(String(character))
+                }
+                try guardOperation()
+                terminal.typeKey(.return, modifierFlags: [])
+            case "key":
+                try require(sequence == 3 && operation["key"] as? String == "c"
+                            && operation["modifiers"] as? [String] == ["control"], "Unexpected terminal control key")
+                terminal.typeKey("c", modifierFlags: .control)
+            case "resize-window":
+                try require(sequence == 5 && operation["width_delta"] as? Int == -160
+                            && operation["height_delta"] as? Int == -80, "Unexpected native resize")
+                try require(abs(window.frame.width - initialFrame.width) <= 2
+                            && abs(window.frame.height - initialFrame.height) <= 2, "Window frame changed before resize")
+                // One declared public mouse drag on this exact owned window.
+                // No terminal click/refocus, private AX setter or app bridge.
+                let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
+                    .withOffset(CGVector(dx: -5, dy: -5))
+                try guardOperation()
+                corner.click(forDuration: 0.1, thenDragTo: corner.withOffset(CGVector(dx: -160, dy: -80)))
+            default:
+                throw NSError(domain: "NACUI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Unknown terminal operation"])
+            }
+            dispatched[index]["state"] = "dispatched-once"
+            dispatched[index]["elapsed_ms"] = Int(Date().timeIntervalSince(started) * 1000)
+            try JSONSerialization.data(withJSONObject: dispatched, options: [.prettyPrinted, .sortedKeys])
+                .write(to: driverOutput, options: .atomic)
+        }
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 70), "Terminal app did not settle and close")
+        let result = try evidence(output)
+        XCTAssertEqual(result["passed"] as? Bool, true)
+        XCTAssertEqual(result["engine_reaped"] as? Bool, true)
+        XCTAssertEqual(result["profile_removed"] as? Bool, true)
+        XCTAssertEqual((result["terminal_xctest_phases"] as? [[String: Any]])?.count, 6)
+        XCTAssertEqual((result["terminal_xctest_phase"] as? [String: Any])?["state"] as? String, "finished")
+    }
+
+    private func waitTerminalPhase(_ path: String, sequence: Int, timeout: TimeInterval) throws -> [String: Any] {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let record = try? evidence(path) {
+                try require(record["error"] == nil && record["passed"] as? Bool != false,
+                            "Terminal fixture failed before next phase")
+                if let phase = record["terminal_xctest_phase"] as? [String: Any], let current = phase["sequence"] as? Int {
+                    try require(current <= sequence, "Terminal phase advanced without its one dispatch")
+                    if current == sequence && phase["state"] as? String == "ready" { return record }
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.025))
+        }
+        throw NSError(domain: "NACUI", code: 3, userInfo: [NSLocalizedDescriptionKey: "Terminal phase readiness deadline exceeded"])
     }
 
     @MainActor
