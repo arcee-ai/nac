@@ -5,11 +5,13 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 import zlib
 
-from ci_startup_attachments import (IDENTITY, PROVENANCE, TEST_ID, TEST_URL, collect, png_identity)
+from ci_startup_attachments import (IDENTITY, PROVENANCE, QUERY_DIAGNOSTIC, QUERY_FLAGS, QUERY_ORDER,
+                                    TEST_ID, TEST_URL, collect, png_identity, require_query_diagnostic)
 from ci_startup_fixture import CASES, PRODUCT, SCHEMA, TEST_FILES, TEST_SOURCE, operations
-from ci_xctest_attachments import AttachmentTool, digest
+from ci_xctest_attachments import AttachmentTool, bounded_file, digest
 
 
 class StartupAttachmentTests(unittest.TestCase):
@@ -97,6 +99,7 @@ class StartupAttachmentTests(unittest.TestCase):
                 self.assertEqual(digest(image), index['observation']['png_sha256'])
                 self.assertEqual(len(image), index['image']['bytes'])
                 self.assertEqual(index['automatic_omitted'], 1)
+                self.assertEqual(index['query_diagnostic'], {'retention': 'missing'})
                 for file in raw.rglob('*'):
                     if file.is_file():
                         self.assertNotIn(b'HOST-AUTOMATIC-MUST-NOT-BE-RETAINED', file.read_bytes())
@@ -217,6 +220,292 @@ class StartupAttachmentTests(unittest.TestCase):
                 for file in (raw / 'selected').rglob('*'):
                     if file.is_file():
                         self.assertNotIn(b'FOREIGN-MUST-NOT-BE-RETAINED', file.read_bytes())
+
+
+    def diagnostic(self, config, config_hash, witness, *, partial=False):
+        row = {key: config[key] for key in ('source_sha', 'test_source_sha', 'harness_sha', 'startup_source_sha256')}
+        row.update({key: witness[key] for key in IDENTITY})
+        row.update(schema='nac342-query-diagnostic-v1', version=1, phase='onboarding', scenario=config['scenario'],
+                   configuration_sha256=config_hash, legacy_exists=False, guard_before=True, guard_after=True,
+                   status='partial' if partial else 'complete', stop_reason='time_budget' if partial else 'none',
+                   elapsed_ms=5001 if partial else 12, elapsed_overflow=False,
+                   queries=[dict(query=name, count=0, overflow=False, candidate_truncated=False, candidates=[])
+                            for name in (QUERY_ORDER[:4] if partial else QUERY_ORDER)])
+        if not partial:
+            # A positive alternate fixed-target match still cannot pass the legacy assertion.
+            candidate = dict.fromkeys(QUERY_FLAGS, False)
+            candidate.update(element_type=48, exists=True, hittable=True, enabled=True, window_intersection=True,
+                             label_exact=True, label_contains=True, label_trim_exact=True)
+            row['queries'][5].update(count=1, candidates=[candidate])
+        return row
+
+    def failed_diagnostic(self, raw, payload=None, *, case='onboarding', mutate=None, prefix=0):
+        config, config_hash, witness, rows = self.fixture(case)
+        if payload is None:
+            payload = json.dumps(self.diagnostic(config, config_hash, witness)).encode()
+        failed = [*rows[:prefix], (f'nac342-failure-{case}', self.png()), rows[-1], (QUERY_DIAGNOSTIC, payload)]
+        with self.assertRaisesRegex(RuntimeError, 'required_ordinary_observation'):
+            collect(self.tool(raw, failed, result='Failed', mutate=mutate), raw / 'unit.xcresult',
+                    config, config_hash, witness, raw / 'selected')
+        index = json.loads((raw / 'selected/index.json').read_text())
+        self.assertFalse(index['complete'])
+        self.assertTrue(index['input_completion_unknown'])
+        self.assertEqual(index['actual_test']['result'], 'Failed')
+        self.assertEqual(index['collection_error']['reason'], 'required_ordinary_observation')
+        self.assertIn('cleanup', index)
+        self.assertIn('failure_image', index)
+        self.assertNotIn('image', index)
+        self.assertNotIn('observation', index)
+        self.assertTrue(all(item['name'] != QUERY_DIAGNOSTIC for item in index['selected']))
+        self.assertEqual(len(index['dispatches']), prefix)
+        return index
+
+    def test_optional_complete_partial_and_exact_bound_are_retained_without_success_or_input_credit(self):
+        for case, partial, padding in (('onboarding', False, False), ('configuredLocal', True, False),
+                                       ('onboarding', False, True)):
+            with self.subTest(case=case, partial=partial, padding=padding), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary)
+                config, config_hash, witness, _ = self.fixture(case)
+                value = self.diagnostic(config, config_hash, witness, partial=partial)
+                data = json.dumps(value).encode()
+                if padding:
+                    data += b' ' * (8192 - len(data))
+                index = self.failed_diagnostic(raw, data, case=case, prefix=2 if case == 'configuredLocal' else 0)
+                receipt = index['query_diagnostic']
+                self.assertEqual(receipt['retention'], 'retained')
+                self.assertEqual(receipt['status'], value['status'])
+                self.assertEqual(receipt['sha256'], digest(data))
+                self.assertEqual((raw / 'selected' / receipt['file']).read_bytes(), data)
+
+    def test_diagnostic_uses_actual_case_bindings_instead_of_historical_example_pins(self):
+        config, config_hash, witness, _ = self.fixture('onboarding')
+        config.update(source_sha='1' * 40, test_source_sha='2' * 40, harness_sha='3' * 40,
+                      startup_source_sha256='4' * 64)
+        data = json.dumps(self.diagnostic(config, config_hash, witness)).encode()
+        self.assertEqual(require_query_diagnostic(data, config, config_hash, witness)['harness_sha'], '3' * 40)
+
+    def test_fixed_query_contract_and_append_only_clock_clarification(self):
+        self.assertEqual(QUERY_ORDER, ('app_webviews', 'window_webviews', 'legacy_title', 'app_static_title',
+                         'window_static_title', 'window_label_title', 'window_value_title', 'window_identifier_title',
+                         'window_button_start', 'legacy_button_start', 'window_label_subtitle', 'window_value_subtitle'))
+        config, config_hash, witness, _ = self.fixture('onboarding')
+        base = self.diagnostic(config, config_hash, witness)
+        for elapsed, overflow, status, reason in ((4999, False, 'complete', 'none'),
+                (5000, False, 'partial', 'time_budget'), (5001, False, 'partial', 'time_budget'),
+                (600000, False, 'partial', 'time_budget'), (600000, True, 'partial', 'time_budget'),
+                (0, False, 'partial', 'clock_invalid')):
+            with self.subTest(elapsed=elapsed, overflow=overflow):
+                row = {**base, 'elapsed_ms': elapsed, 'elapsed_overflow': overflow, 'status': status, 'stop_reason': reason}
+                require_query_diagnostic(json.dumps(row).encode(), config, config_hash, witness)
+        # Fifth query may contain candidates; the first four queries are counts only.
+        row = copy.deepcopy(base)
+        row['queries'][4], row['queries'][5] = row['queries'][5], row['queries'][4]
+        row['queries'][4]['query'], row['queries'][5]['query'] = QUERY_ORDER[4:6]
+        require_query_diagnostic(json.dumps(row).encode(), config, config_hash, witness)
+        for index in range(4):
+            row = copy.deepcopy(base)
+            row['queries'][index].update(count=1, candidates=base['queries'][5]['candidates'])
+            with self.assertRaisesRegex(RuntimeError, 'query_count_only'):
+                require_query_diagnostic(json.dumps(row).encode(), config, config_hash, witness)
+        for changes in ({'elapsed_ms': 5000}, {'elapsed_ms': 5001}, {'elapsed_overflow': True},
+                        {'status': 'partial', 'stop_reason': 'time_budget', 'elapsed_ms': 4999},
+                        {'status': 'partial', 'stop_reason': 'clock_invalid', 'elapsed_ms': 1},
+                        {'status': 'partial', 'stop_reason': 'clock_invalid', 'elapsed_ms': 0, 'elapsed_overflow': True}):
+            with self.subTest(changes=changes), self.assertRaises(RuntimeError):
+                require_query_diagnostic(json.dumps({**base, **changes}).encode(), config, config_hash, witness)
+
+    def test_count_candidate_and_time_precedence_are_honest_partial_prefixes(self):
+        config, config_hash, witness, _ = self.fixture('onboarding')
+        base = self.diagnostic(config, config_hash, witness)
+        variants = []
+        count = copy.deepcopy(base)
+        count.update(status='partial', stop_reason='count_limit', queries=count['queries'][:5])
+        count['queries'][-1].update(count=4096, overflow=True)
+        variants.append(count)
+        truncated = copy.deepcopy(base)
+        truncated.update(status='partial', stop_reason='candidate_limit')
+        truncated['queries'][5].update(candidate_truncated=True)
+        variants.append(truncated)
+        exhausted = copy.deepcopy(truncated)
+        candidate = exhausted['queries'][5]['candidates'][0]
+        for index in (4, 5):
+            exhausted['queries'][index].update(count=5, candidates=[candidate] * 4, candidate_truncated=True)
+        variants.append(exhausted)
+        for row in variants:
+            for elapsed, reason in ((12, row['stop_reason']), (5000, 'time_budget'), (0, 'clock_invalid')):
+                with self.subTest(reason=reason, source_reason=row['stop_reason']):
+                    value = {**row, 'elapsed_ms': elapsed, 'stop_reason': reason}
+                    require_query_diagnostic(json.dumps(value).encode(), config, config_hash, witness)
+        for mutate in (lambda r: r.update(stop_reason='none', status='complete'),
+                       lambda r: r.update(stop_reason='candidate_limit'),
+                       lambda r: r.update(elapsed_ms=5000),
+                       lambda r: r['queries'].append(base['queries'][5])):
+            row = copy.deepcopy(count)
+            mutate(row)
+            with self.assertRaises(RuntimeError):
+                require_query_diagnostic(json.dumps(row).encode(), config, config_hash, witness)
+        # Nine candidates and an unreported candidate shortfall cannot be a complete census.
+        row = copy.deepcopy(exhausted)
+        row['queries'][6].update(count=1, candidates=[candidate])
+        with self.assertRaisesRegex(RuntimeError, 'query_candidate_bound'):
+            require_query_diagnostic(json.dumps(row).encode(), config, config_hash, witness)
+        row = copy.deepcopy(base)
+        row['queries'][5].update(count=2)
+        with self.assertRaisesRegex(RuntimeError, 'query_candidate_prefix'):
+            require_query_diagnostic(json.dumps(row).encode(), config, config_hash, witness)
+
+    def test_malformed_optional_json_never_masks_failure_or_retains_rejected_content(self):
+        config, config_hash, witness, _ = self.fixture('onboarding')
+        base = self.diagnostic(config, config_hash, witness)
+        mutations = [('extra_private_content', lambda r: r.update(raw_tree='FOREIGN-MUST-NOT-BE-RETAINED')),
+                     ('legacy_success', lambda r: r.update(legacy_exists=True)),
+                     ('guard', lambda r: r.update(guard_after=False)),
+                     ('version_bool', lambda r: r.update(version=True)),
+                     ('phase', lambda r: r.update(phase='FOREIGN-MUST-NOT-BE-RETAINED')),
+                     ('status', lambda r: r.update(status='passed')),
+                     ('elapsed_bool', lambda r: r.update(elapsed_ms=True)),
+                     ('elapsed_bound', lambda r: r.update(elapsed_ms=600001)),
+                     ('overflow_type', lambda r: r.update(elapsed_overflow=1)),
+                     ('prefix_gap', lambda r: r['queries'].pop(1)),
+                     ('duplicate_query', lambda r: r['queries'].append(r['queries'][0])),
+                     ('count_bool', lambda r: r['queries'][0].update(count=True)),
+                     ('count_negative', lambda r: r['queries'][0].update(count=-1)),
+                     ('count_bound', lambda r: r['queries'][0].update(count=4097)),
+                     ('candidate_count', lambda r: r['queries'][5].update(candidates=r['queries'][5]['candidates'] * 5)),
+                     ('candidate_private', lambda r: r['queries'][5]['candidates'][0].update(label='FOREIGN-MUST-NOT-BE-RETAINED')),
+                     ('nonstring_value_flags', lambda r: r['queries'][5]['candidates'][0].update(value_exact=True))]
+        for key in ('source_sha', 'test_source_sha', 'harness_sha', 'startup_source_sha256',
+                    'configuration_sha256', 'native_sha256', 'app_path'):
+            mutations.append((key, lambda r, k=key: r.update({k: 'FOREIGN-MUST-NOT-BE-RETAINED'})))
+        for key, value in (('app_pid', 124), ('app_pid', True), ('app_launch_epoch', True),
+                           ('app_launch_epoch', float('nan')), ('app_launch_epoch', float('inf')),
+                           ('app_launch_epoch', 1234.6), ('window_number', 18), ('window_number', True)):
+            mutations.append((key, lambda r, k=key, v=value: r.update({k: v})))
+        for name, mutation in mutations:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                row = copy.deepcopy(base)
+                mutation(row)
+                raw = Path(temporary)
+                index = self.failed_diagnostic(raw, json.dumps(row).encode())
+                self.assertEqual(index['query_diagnostic']['retention'], 'rejected')
+                self.assertFalse((raw / 'selected' / (QUERY_DIAGNOSTIC + '.json')).exists())
+                self.assertTrue(all(b'FOREIGN-MUST-NOT-BE-RETAINED' not in file.read_bytes()
+                                    for file in (raw / 'selected').iterdir()))
+        data = json.dumps(base).encode()
+        for malformed in (b'{"raw":"FOREIGN-MUST-NOT-BE-RETAINED"', b'[]', data + b' ',
+                          data[:-1] + b',"version":1}', data.replace(b'"count": 0', b'"count": 0,"count": 0', 1)):
+            if malformed == data + b' ':
+                malformed += b' ' * 8192
+            with self.subTest(malformed=digest(malformed)), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary)
+                index = self.failed_diagnostic(raw, malformed)
+                self.assertEqual(index['query_diagnostic']['retention'], 'rejected')
+                self.assertFalse((raw / 'selected' / (QUERY_DIAGNOSTIC + '.json')).exists())
+
+    def test_optional_inventory_rejects_late_aliases_unsafe_paths_and_nonregular_files(self):
+        def duplicate(export, manifest):
+            manifest[0]['attachments'].append(copy.deepcopy(manifest[0]['attachments'][-2]))
+        def duplicate_file(export, manifest):
+            manifest[0]['attachments'].append({**manifest[0]['attachments'][-2], 'suggestedHumanReadableName': 'Automatic'})
+        def unsafe(export, manifest):
+            manifest[0]['attachments'][-2]['exportedFileName'] = '../FOREIGN-MUST-NOT-BE-RETAINED'
+        def symlink(export, manifest):
+            file = export / manifest[0]['attachments'][-2]['exportedFileName']
+            file.unlink()
+            file.symlink_to(export / 'automatic.png')
+        def foreign(export, manifest):
+            manifest[0]['attachments'][-2]['suggestedHumanReadableName'] = 'nac342-query-diagnostic-v1-foreign'
+        for mutation in (duplicate, duplicate_file, unsafe, symlink, foreign):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary)
+                index = self.failed_diagnostic(raw, mutate=mutation)
+                self.assertEqual(index['query_diagnostic']['retention'], 'rejected')
+                self.assertFalse((raw / 'selected' / (QUERY_DIAGNOSTIC + '.json')).exists())
+
+    def test_optional_diagnostic_on_pass_is_rejected_and_original_failed_result_is_preserved(self):
+        for result, reason in (('Passed', 'unexpected_failure_diagnostic'), ('Failed', 'actual_test_result')):
+            with self.subTest(result=result), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary)
+                config, config_hash, witness, rows = self.fixture('onboarding')
+                rows.append((QUERY_DIAGNOSTIC, json.dumps(self.diagnostic(config, config_hash, witness)).encode()))
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    collect(self.tool(raw, rows, result=result), raw / 'unit.xcresult', config, config_hash, witness, raw / 'selected')
+                index = json.loads((raw / 'selected/index.json').read_text())
+                self.assertEqual(index['actual_test']['result'], result)
+                self.assertFalse(index['complete'])
+                self.assertTrue(index['input_completion_unknown'])
+                self.assertEqual(index['query_diagnostic']['retention'], 'retained' if result == 'Failed' else 'rejected')
+
+    def test_diagnostic_write_failure_removes_partial_file_without_masking_original_failure(self):
+        original = Path.write_bytes
+        def write(file, data):
+            if file.name == QUERY_DIAGNOSTIC + '.json':
+                original(file, data[:50])
+                raise OSError('FOREIGN-MUST-NOT-BE-RETAINED')
+            return original(file, data)
+        with tempfile.TemporaryDirectory() as temporary, patch.object(Path, 'write_bytes', write):
+            raw = Path(temporary)
+            index = self.failed_diagnostic(raw)
+            self.assertEqual(index['query_diagnostic']['retention'], 'rejected')
+            self.assertFalse((raw / 'selected' / (QUERY_DIAGNOSTIC + '.json')).exists())
+            self.assertNotIn('FOREIGN-MUST-NOT-BE-RETAINED', json.dumps(index))
+
+    def test_optional_unavailable_or_growing_file_is_rejected_without_exception_text(self):
+        class UnknownError(Exception):
+            def __str__(self):
+                raise AssertionError('Do not stringify diagnostic errors')
+        for failure in ('unavailable', 'growth'):
+            def read(path, limit):
+                if Path(path).name == 'payload-2':  # Failure PNG, cleanup, then diagnostic.
+                    if failure == 'unavailable':
+                        raise UnknownError()
+                    Path(path).write_bytes(b'FOREIGN-MUST-NOT-BE-RETAINED' + b'x' * 8192)
+                return bounded_file(path, limit)
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary, \
+                    patch('ci_startup_attachments.bounded_file', read):
+                raw = Path(temporary)
+                index = self.failed_diagnostic(raw)
+                self.assertEqual(index['query_diagnostic']['retention'], 'rejected')
+                self.assertFalse((raw / 'selected' / (QUERY_DIAGNOSTIC + '.json')).exists())
+                self.assertNotIn('FOREIGN-MUST-NOT-BE-RETAINED', json.dumps(index))
+
+    def test_diagnostic_cannot_bypass_cleanup_scope_or_actual_test_selection(self):
+        for case, mode, reason in (('onboarding', 'missing_cleanup', 'cleanup_missing'),
+                ('invalidConfig', 'wrong_scope', 'required_ordinary_observation'),
+                ('futureStore', 'wrong_scope', 'required_ordinary_observation'),
+                ('onboarding', 'foreign_test', 'selected_test')):
+            with self.subTest(case=case, mode=mode), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary)
+                config, config_hash, witness, rows = self.fixture(case)
+                data = json.dumps(self.diagnostic(config, config_hash, witness)).encode()
+                failed = ([] if mode == 'missing_cleanup' else [rows[-1]]) + [(QUERY_DIAGNOSTIC, data)]
+                tool = self.tool(raw, failed, result='Failed')
+                if mode == 'foreign_test':
+                    command = tool.command
+                    def foreign(argv):
+                        return command(argv).replace(TEST_URL, TEST_URL + '-foreign')
+                    tool.command = foreign
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    collect(tool, raw / 'unit.xcresult', config, config_hash, witness, raw / 'selected')
+                index = json.loads((raw / 'selected/index.json').read_text())
+                self.assertFalse(index['complete'])
+                self.assertTrue(index['input_completion_unknown'])
+                self.assertEqual(index['query_diagnostic']['retention'],
+                                 'retained' if mode == 'missing_cleanup' else 'missing' if mode == 'foreign_test' else 'rejected')
+
+    def test_candidate_closed_types_and_comparison_projection(self):
+        config, config_hash, witness, _ = self.fixture('onboarding')
+        base = self.diagnostic(config, config_hash, witness)
+        mutations = [(key, 1) for key in QUERY_FLAGS]
+        mutations += [('element_type', True), ('element_type', -1), ('element_type', 1001),
+                      ('element_type', 48.0), ('raw_hash', 'FOREIGN-MUST-NOT-BE-RETAINED'),
+                      ('label_contains', False), ('label_trim_exact', False)]
+        for key, value in mutations:
+            with self.subTest(key=key, value=value):
+                row = copy.deepcopy(base)
+                row['queries'][5]['candidates'][0][key] = value
+                with self.assertRaises(RuntimeError):
+                    require_query_diagnostic(json.dumps(row).encode(), config, config_hash, witness)
 
 
 if __name__ == '__main__':
