@@ -536,9 +536,17 @@ impl SessionService {
             self.terminal_manager
                 .acquire_workspace_activity_lease()
                 .map_err(|error| SessionSubmitError::Coordination {
-                    message: SessionCoordinationError::store(format!(
-                        "failed to acquire workspace run authority: {error:#}"
-                    )),
+                    message: if heartbeat_occurrence.is_some()
+                        && matches!(
+                            error.downcast_ref::<sessions::SessionOperationLeaseError>(),
+                            Some(sessions::SessionOperationLeaseError::Busy(_))
+                        ) {
+                        SessionCoordinationError::local_agent_busy()
+                    } else {
+                        SessionCoordinationError::store(format!(
+                            "failed to acquire workspace run authority: {error:#}"
+                        ))
+                    },
                 })?
         } else {
             None

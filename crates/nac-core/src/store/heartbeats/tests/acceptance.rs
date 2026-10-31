@@ -628,3 +628,91 @@ fn heartbeat_restart_after_prompt_commit_retains_delivery_and_never_withdraws_or
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn heartbeat_run_now_obeys_minimum_start_spacing_and_finite_occurrence_allowance() {
+    let f = Fixture::new();
+    let mut limited = spec();
+    limited.max_occurrences = 2;
+    let schedule = f
+        .control(HeartbeatAction::Create { spec: limited }, 1_000)
+        .schedule;
+    let pending = materialize_heartbeats(&f.path, 61_000).unwrap().remove(0);
+    let first = f.admit(&pending, 61_000);
+    committed(&f, &first);
+    report(&f, &first, HeartbeatOutcome::Unchanged);
+    f.settle(&first, HeartbeatOutcome::Unknown, Some(1));
+    let manual = f
+        .control(
+            HeartbeatAction::RunNow {
+                schedule_id: schedule.schedule_id.clone(),
+                expected_version: schedule.version,
+            },
+            65_000,
+        )
+        .occurrence
+        .unwrap();
+    let attempt = |now| {
+        admit_heartbeat(
+            &f.path,
+            "direct",
+            &manual.occurrence_id,
+            manual.revision,
+            &uuid::Uuid::new_v4().to_string(),
+            &uuid::Uuid::new_v4().to_string(),
+            "same pending check",
+            "/tmp/project",
+            now,
+        )
+        .unwrap()
+    };
+    assert!(attempt(65_000).is_none());
+    let second = attempt(76_000).unwrap();
+    assert_eq!(second.occurrence_id, manual.occurrence_id);
+    committed(&f, &second);
+    report(&f, &second, HeartbeatOutcome::Unchanged);
+    f.settle(&second, HeartbeatOutcome::Unknown, Some(1));
+    let current = read_heartbeat(&f.path, "direct", &schedule.schedule_id).unwrap();
+    assert_eq!(
+        (current.starts, current.state),
+        (2, HeartbeatState::Suspended)
+    );
+    assert!(materialize_heartbeats(&f.path, 181_000).unwrap().is_empty());
+}
+
+#[test]
+fn heartbeat_host_start_rate_defers_the_same_receipt_until_capacity_returns() {
+    let f = Fixture::new();
+    for _ in 0..61 {
+        f.create();
+    }
+    let pending = materialize_heartbeats(&f.path, 61_000).unwrap();
+    assert_eq!(pending.len(), 61);
+    for occurrence in &pending[..60] {
+        let active = f.admit(occurrence, 61_000);
+        committed(&f, &active);
+        report(&f, &active, HeartbeatOutcome::Unchanged);
+        f.settle(&active, HeartbeatOutcome::Unknown, Some(1));
+    }
+    let last = &pending[60];
+    let attempt = |now| {
+        admit_heartbeat(
+            &f.path,
+            "direct",
+            &last.occurrence_id,
+            last.revision,
+            &uuid::Uuid::new_v4().to_string(),
+            &uuid::Uuid::new_v4().to_string(),
+            "same pending check",
+            "/tmp/project",
+            now,
+        )
+        .unwrap()
+    };
+    assert!(attempt(61_000).is_none());
+    let later = attempt(121_001).unwrap();
+    assert_eq!(
+        (later.occurrence_id, later.receipt_id),
+        (last.occurrence_id.clone(), last.receipt_id.clone())
+    );
+}

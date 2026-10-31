@@ -666,7 +666,7 @@
         "tags": [
           "sessions"
         ],
-        "operationId": "inventory",
+        "operationId": "get_heartbeats",
         "parameters": [
           {
             "name": "session_id",

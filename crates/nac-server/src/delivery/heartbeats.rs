@@ -39,7 +39,7 @@ pub(crate) async fn acknowledge(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(get,path="/heartbeats",tag="sessions",params(InventoryQuery),responses((status=200,body=Vec<HeartbeatSchedule>),(status=400,body=ApiErrorBody)))]
+#[utoipa::path(get,path="/heartbeats",operation_id="get_heartbeats",tag="sessions",params(InventoryQuery),responses((status=200,body=Vec<HeartbeatSchedule>),(status=400,body=ApiErrorBody)))]
 pub(crate) async fn inventory(
     State(manager): State<SessionManager>,
     Query(query): Query<InventoryQuery>,
