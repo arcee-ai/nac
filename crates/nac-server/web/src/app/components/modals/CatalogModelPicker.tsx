@@ -327,7 +327,9 @@ export function CatalogModelPicker({
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-label={compact ? "Model" : undefined}
-        className={compact ? "min-w-0 max-w-full !gap-1 !px-2" : "w-full md:w-[280px]"}
+        className={
+          compact ? "min-w-0 max-w-full !gap-1 !rounded-[4px] !px-2" : "w-full md:w-[280px]"
+        }
       >
         <span
           className={cn(

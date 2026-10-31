@@ -58,10 +58,10 @@ const TONE = {
 
 /** A chevron without a status follows the label through the button's states. */
 const CHEVRON_TONE = cn(
-  "[&_path]:fill-btn-secondary",
-  "group-hover/file-list-tab-button:[&_path]:fill-btn-secondary-hovered",
-  "group-active/file-list-tab-button:[&_path]:fill-btn-secondary-pressed",
-  "group-disabled/file-list-tab-button:[&_path]:fill-btn-secondary-disabled",
+  "text-fill-btn-secondary",
+  "group-hover/file-list-tab-button:text-fill-btn-secondary-hovered",
+  "group-active/file-list-tab-button:text-fill-btn-secondary-pressed",
+  "group-disabled/file-list-tab-button:text-fill-btn-secondary-disabled",
 );
 
 const DIMMED_WHEN_DISABLED = "group-disabled/file-list-tab-button:opacity-50";
@@ -100,7 +100,7 @@ const FileListTabButton: React.FC<FileListTabButtonProps> = ({
       aria-pressed={folder ? undefined : active}
       aria-expanded={folder ? active : undefined}
       className={cn(
-        "group/file-list-tab-button flex w-full min-w-0 items-center rounded-[4px]",
+        "group/file-list-tab-button flex w-full min-w-0 items-center rounded-interaction",
         "transition-colors duration-150 ease-out disabled:cursor-not-allowed",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]",
         style.box,

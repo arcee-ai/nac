@@ -1,0 +1,126 @@
+import { createDirectSession, expect, test } from "./harness";
+import { reviewTerminalEvidence } from "./terminal-evidence";
+
+for (const mobile of [false, true]) {
+  test(`terminal options keep keyboard focus ${mobile ? "on a phone" : "in an expanded panel"}`, async ({
+    harness,
+    page,
+    request,
+  }, testInfo) => {
+    if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+    const session = await createDirectSession(request, harness);
+    await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
+    if (mobile) await page.getByRole("button", { name: "Open panel", exact: true }).click();
+    else {
+      const show = page.getByRole("button", { name: "Show panel", exact: true });
+      if (await show.isVisible()) await show.click();
+    }
+    const pane = page.getByRole("region", { name: "Session terminal", exact: true });
+    await pane.getByRole("button", { name: /^New shell$/i }).click();
+    await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    if (!mobile) await page.getByRole("button", { name: "Expand panel", exact: true }).click();
+    // Expanding replaces the observer along with its containing panel.
+    await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    // Seed one painted selection with intentional keyboard input before the
+    // menu-only request audit. Octal keeps the echoed command distinct from it.
+    const evidence = "menu focus handoff";
+    const octal = Array.from(
+      new TextEncoder().encode(evidence + "\n"),
+      (byte) => `\\${byte.toString(8).padStart(3, "0")}`,
+    ).join("");
+    await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
+    await page.keyboard.type(`printf '${octal}'`);
+    await page.keyboard.press("Enter");
+    await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);
+    const processActions: string[] = [];
+    page.on("request", (sent) => {
+      if (
+        sent.method() === "POST" &&
+        /\/(input|input-control|stop)$/.test(new URL(sent.url()).pathname)
+      )
+        processActions.push(sent.url());
+    });
+    const trigger = pane.getByRole("button", { name: "Terminal options", exact: true });
+    const actions = page.getByRole("dialog", { name: "Terminal actions", exact: true });
+    const reconnect = actions.getByRole("button", { name: "Reconnect", exact: true });
+    const review = actions.getByRole("button", { name: "Review Selected text", exact: true });
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    await expect(reconnect).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(review).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(reconnect).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(
+      actions.getByRole("button", { name: "Give Agent Control", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(review).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(reconnect).toBeFocused();
+    await expect(review).toBeInViewport({ ratio: 1 });
+    await page.screenshot({ path: testInfo.outputPath("keyboard-actions.png") });
+    if (!mobile) {
+      // The real header hint can sit above the focused actions menu. Only the
+      // stack handles Escape, so the hint leaves before the menu underneath it.
+      await pane.locator(".cursor-help").hover();
+      const hint = page.getByRole("tooltip", { name: /Human shell/ });
+      await expect(hint).toBeVisible();
+      await expect(reconnect).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(hint).toHaveCount(0);
+      await expect(actions).toBeVisible();
+      await expect(reconnect).toBeFocused();
+    }
+    // Phone hints are sheets opened by tap; the actions sheet itself is the
+    // top layer in this sequence and uses the same stack-owned focus return.
+    await page.keyboard.press("Escape");
+    await expect(actions).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(pane).toBeVisible();
+    expect(processActions).toEqual([]);
+
+    // Keyboard activation reconnects observation, without submitting shell input.
+    await page.keyboard.press("Enter");
+    await expect(reconnect).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(actions).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    expect(processActions).toEqual([]);
+
+    // Enter from the focused Review row replaces the menu with a real dialog.
+    // Wait past the phone sheet's retained exit DOM before dismissing Review:
+    // its return target must still be Terminal options, not the removed row.
+    const reviewDialog = await reviewTerminalEvidence(page, pane, evidence, true);
+    await page.waitForTimeout(350);
+    await expect(reviewDialog).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(reviewDialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(pane).toBeVisible();
+    expect(processActions).toEqual([]);
+
+    // A live handle reopened through history still offers only read-only reconnect.
+    if (mobile) await pane.getByRole("button", { name: "Open list", exact: true }).click();
+    const recent = pane.getByRole("region", { name: "Recent terminal activity", exact: true });
+    await recent.getByRole("button", { name: /^Shell · / }).click();
+    // History owns a fresh read-only observer; its reconnect starts disabled.
+    await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    await expect(pane.getByLabel("Terminal input ownership")).toHaveCount(0);
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    await expect(reconnect).toBeFocused();
+    await expect(actions.getByRole("button")).toHaveCount(1);
+    await page.keyboard.press("Tab");
+    await expect(reconnect).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(reconnect).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(actions).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    expect(processActions).toEqual([]);
+    expect(harness.provider.requests).toHaveLength(0);
+  });
+}

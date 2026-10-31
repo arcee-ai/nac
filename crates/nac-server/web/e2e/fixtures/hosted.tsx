@@ -6,12 +6,15 @@ import { createNativeRuntime, NativePresentationRoot } from "../../src/app/runti
 import { createNacClient } from "../../src/app/services/nacClient";
 import "../../src/index.css";
 
-const configuration = (await (await fetch("/fixture-config")).json()) as { sessionId: string };
-function openRuntime(release: string) {
+const configuration = (await (await fetch("/fixture-config")).json()) as {
+  sessionId: string;
+  twoInstances: boolean;
+};
+function openRuntime(release: string, instance: string) {
   return createNativeRuntime({
     scope: {
       owner: "fixture-owner",
-      profile: "fixture-profile",
+      profile: instance === "single" ? "fixture-profile" : `fixture-profile-${instance}`,
       organization: "fixture-org",
       host: "fixture-host",
       incarnation: "fixture-incarnation",
@@ -31,15 +34,15 @@ function openRuntime(release: string) {
     },
   });
 }
-function HostedFixture() {
-  const [runtime, setRuntime] = useState(() => openRuntime("first"));
+function HostedFixture({ instance = "single" }: { instance?: string }) {
+  const [runtime, setRuntime] = useState(() => openRuntime("first", instance));
   return (
     <>
       <nav aria-label="Fixture controls">
         <button
           onClick={() => {
             runtime.close();
-            setRuntime(openRuntime("replacement"));
+            setRuntime(openRuntime("replacement", instance));
           }}
         >
           Replace runtime
@@ -61,6 +64,16 @@ function HostedFixture() {
 }
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <HostedFixture />
+    {configuration.twoInstances ? (
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        {["Left", "Right"].map((name) => (
+          <section key={name} aria-label={`${name} presentation`} style={{ minWidth: 0 }}>
+            <HostedFixture instance={name.toLowerCase()} />
+          </section>
+        ))}
+      </div>
+    ) : (
+      <HostedFixture />
+    )}
   </StrictMode>,
 );

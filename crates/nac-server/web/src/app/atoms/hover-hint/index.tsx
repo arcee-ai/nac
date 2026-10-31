@@ -40,7 +40,7 @@ const HoverHint: React.FC<HoverHintProps> & { Size: typeof HoverHintSize } = ({
     <Icon
       iconName={IconName.Info}
       size={size}
-      className={cn("cursor-help shrink-0", muted && "[&>path]:!fill-basic-muted")}
+      className={cn("cursor-help shrink-0", muted && "!text-fill-basic-muted")}
       color={muted ? undefined : "var(--color-fill-basic-tertiary)"}
     />
   </Tooltip>

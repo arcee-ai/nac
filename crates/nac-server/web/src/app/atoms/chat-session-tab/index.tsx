@@ -78,8 +78,8 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   // Not the shimmer: it paints text through a transparent color, which leaves an SVG blank.
   const glyphClass =
     active && !forkedFromTitle
-      ? "[&_path]:fill-btn-secondary-pressed"
-      : "[&_path]:fill-btn-secondary group-hover:[&_path]:fill-btn-secondary-hovered";
+      ? "text-fill-btn-secondary-pressed"
+      : "text-fill-btn-secondary group-hover:text-fill-btn-secondary-hovered";
 
   const tabButton = (
     <button

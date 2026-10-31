@@ -1,19 +1,28 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Cause, Effect, Exit, Scope } from "effect";
 import {
   createExecutionConnection,
   type ExecutionStatus,
 } from "../../../../packages/nac-client/src/index";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
+import { IconName } from "@/app/atoms";
+import { cn } from "@/app/lib/cn";
 import { createLogRenderer } from "./logRenderer";
+import { TerminalFrame, TerminalNotice } from "./TerminalChrome";
+import type { TerminalHeading } from "./terminalLabels";
 
 export function ExecutionLog({
   sessionId,
   source,
+  heading,
+  menuSlot,
+  notices = [],
 }: {
   sessionId: string;
   source: ExecutionStatus;
+  heading: TerminalHeading;
+  menuSlot: HTMLElement | null;
+  notices?: readonly ReactNode[];
 }) {
   const { api } = useNativeRuntime();
   const host = useRef<HTMLPreElement>(null);
@@ -70,31 +79,47 @@ export function ExecutionLog({
     };
   }, [api, sessionId, binding, attempt]);
   return (
-    <>
-      <div className="flex items-center gap-2">
-        <span role="status">{phase}</span>
-        <Button
-          type="button"
-          size={ButtonSize.Small}
-          variant={ButtonVariant.Ghost}
-          onClick={() => setAttempt((value) => value + 1)}
-        >
-          Reconnect
-        </Button>
-      </div>
-      {notice ? <p role="alert">{notice}</p> : null}
-      {displayTruncated ? (
-        <p role="status">
-          Display limit reached. Showing the latest output; earlier text is hidden in this view.
-        </p>
-      ) : null}
-      <pre
-        ref={host}
-        tabIndex={0}
-        role="region"
-        aria-label="Execution log"
-        className="flex-1 min-h-32 overflow-auto whitespace-pre-wrap break-words bg-elevation-level-1 p-2 text-sm font-mono"
-      />
-    </>
+    <TerminalFrame
+      heading={heading}
+      menuSlot={menuSlot}
+      options={() => [
+        {
+          label: "Reconnect",
+          icon: IconName.Refresh,
+          onSelect: () => setAttempt((value) => value + 1),
+        },
+      ]}
+      notices={[
+        ...notices,
+        notice ? (
+          <TerminalNotice key="notice" info={phase !== "Disconnected"} live="alert">
+            {notice}
+          </TerminalNotice>
+        ) : null,
+        displayTruncated ? (
+          <TerminalNotice key="display" info>
+            Display limit reached. Showing the latest output; earlier text is hidden in this view.
+          </TerminalNotice>
+        ) : null,
+      ]}
+    >
+      {(top) => (
+        <>
+          <span role="status" className="sr-only">
+            {phase}
+          </span>
+          <pre
+            ref={host}
+            tabIndex={0}
+            role="region"
+            aria-label="Execution log"
+            className={cn(
+              "flex-1 min-h-32 overflow-auto whitespace-pre-wrap break-words px-4 pb-4 font-[family-name:IBMPlexMono] text-sm font-medium text-basic-primary -outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
+              top,
+            )}
+          />
+        </>
+      )}
+    </TerminalFrame>
   );
 }

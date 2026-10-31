@@ -1,12 +1,12 @@
 import type { ComponentProps, FormHTMLAttributes, ReactNode } from "react";
 
-import { Button, ButtonContent, ButtonSize, ButtonVariant } from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 
 /**
- * The ground fades in under a 640px column of controls, so the transcript
- * scrolls out beneath the composer instead of stopping at a card edge. Only the
- * controls take the pointer; the faded margin lets it through.
+ * The ground fades in under a 656px column of controls, so the transcript
+ * scrolls out beneath the composer instead of stopping at a card edge. Only
+ * the controls take the pointer; the faded margin lets it through.
  */
 export function ComposerFrame({
   compact,
@@ -18,7 +18,7 @@ export function ComposerFrame({
   return (
     <form
       className={cn(
-        "pointer-events-none flex flex-col items-center gap-4 pt-4 pb-8 [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[640px]",
+        "pointer-events-none flex flex-col items-center gap-4 py-4 [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[656px]",
         compact ? "px-2" : "px-4",
         faded && "fade-from-bottom",
         className,
@@ -30,38 +30,87 @@ export function ComposerFrame({
   );
 }
 
-/** The level-3 pill around the field and the buttons that ride inside it. */
-export function ComposerPill({
+/**
+ * The level-1 card both composers share: the field row over the session
+ * controls. A focused field draws a hairline inside the edge, in the border
+ * token `outline` names, and the goal editor washes the whole card in accent.
+ * Rows that should paint over the wash are `relative`.
+ */
+export function ComposerCard({
   compact,
-  outline,
+  surface,
+  outline = "muted",
   className,
   children,
 }: {
   compact: boolean;
-  /** A 2px ring inside the edge: the focused field, or the goal editor's. */
-  outline?: "focus" | "accent";
+  surface?: "focus" | "goal";
+  outline?: "muted" | "tertiary";
   className?: string;
   children: ReactNode;
 }) {
   return (
     <div
       className={cn(
-        "relative flex min-w-0 flex-1 items-end bg-elevation-level-3 shadow-xl",
-        compact ? "rounded-[20px]" : "rounded-[24px]",
+        "relative flex flex-col gap-4 bg-elevation-level-1 pb-4 shadow-xl",
+        compact ? "rounded-[24px] px-1 pt-1" : "rounded-[32px] px-2 pt-2",
         className,
       )}
     >
-      {children}
-      {outline ? (
+      {surface ? (
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute inset-0 rounded-[inherit] border-2",
-            outline === "accent" ? "border-accent-primary" : "border-tertiary",
+            "pointer-events-none absolute inset-0 rounded-[inherit]",
+            surface === "goal"
+              ? "bg-accent-primary"
+              : outline === "tertiary"
+                ? "border border-tertiary"
+                : "border border-muted",
           )}
         />
       ) : null}
+      {children}
     </div>
+  );
+}
+
+/** The 48px place beside Send that an inline control takes, 40px tall on a phone. */
+export function ComposerInlineSlot({
+  compact,
+  children,
+}: {
+  compact: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex shrink-0 items-center justify-center",
+        compact ? "h-10 w-12" : "size-12 px-1",
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A 36px circle around a 20px glyph, for the controls that ride inside the
+ * card: the goal flag, Close and a subagent's Stop. `.btn` sets the radius
+ * unlayered, hence `!`.
+ */
+export function ComposerInlineButton({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof Button>, "size" | "content">) {
+  return (
+    <Button
+      size={ButtonSize.Medium}
+      content={ButtonContent.Icon}
+      className={cn("shrink-0 !rounded-full", className)}
+      {...props}
+    />
   );
 }
 
@@ -76,23 +125,6 @@ export function ComposerIconButton({ compact, className, ...props }: ComposerIco
       size={compact ? ButtonSize.Medium : ButtonSize.Large}
       content={ButtonContent.Icon}
       className={cn("btn-round shrink-0", className)}
-      {...props}
-    />
-  );
-}
-
-/**
- * Send stands outside the pill on a shadow of its own, which replaces the
- * primary fill's convex one; that unlayered rule beats a plain utility.
- */
-export function ComposerSendButton({
-  className,
-  ...props
-}: Omit<ComposerIconButtonProps, "variant">) {
-  return (
-    <ComposerIconButton
-      variant={ButtonVariant.Primary}
-      className={cn("!shadow-composer-send", className)}
       {...props}
     />
   );
