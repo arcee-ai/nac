@@ -165,7 +165,12 @@ extension TerminalSmoke {
         let enginePID = app.engine.pid
         let bundle = Bundle.main.bundleURL.resolvingSymlinksInPath()
         let initialFrame = window.frame
+        let wholeLower = TerminalFixture.PhaseEvidence.now()
         let deadline = Date().addingTimeInterval(240)
+        let wholeUpper = TerminalFixture.PhaseEvidence.now()
+        let episode = UUID().uuidString
+        var diagnostic: TerminalFixture.PhaseEvidence?
+        var diagnosticRecords: [[String: Any]] = []
         let names = ["unicode", "int", "running", "status", "recovered", "size"]
         for name in names {
             guard try terminalReceipt(profile.workspace, name) == nil else {
@@ -183,6 +188,7 @@ extension TerminalSmoke {
             try await self.js("return document.activeElement===document.querySelector('.xterm-helper-textarea');") as? Bool == true
         }
         func target() async throws {
+            diagnostic?.predicate("target", "sampling")
             guard self.app.window === window, window.windowNumber == number,
                   self.app.webView.window === window, window.isVisible, window.isKeyWindow,
                   window.occlusionState.contains(.visible), NSApp.isActive,
@@ -191,10 +197,19 @@ extension TerminalSmoke {
                   Bundle.main.bundleURL.resolvingSymlinksInPath() == bundle,
                   self.app.profile === profile, self.app.engine.pid == enginePID, enginePID > 0,
                   self.app.failure == nil, Date() < deadline else {
+                diagnostic?.predicate("target", "false")
                 throw PreviewError.message("External terminal target identity/focus/deadline changed")
             }
+            diagnostic?.predicate("target", "true")
+            diagnostic?.predicate("console", "sampling")
             try self.requireExternalConsole()
-            guard try await focused() else { throw PreviewError.message("External terminal textarea lost focus") }
+            diagnostic?.predicate("console", "true")
+            diagnostic?.predicate("focus", "sampling")
+            guard try await focused() else {
+                diagnostic?.predicate("focus", "false")
+                throw PreviewError.message("External terminal textarea lost focus")
+            }
+            diagnostic?.predicate("focus", "true")
         }
         _ = try await js("document.querySelector('[role=combobox][aria-label=Message]').focus(); return true;")
         do {
@@ -220,58 +235,147 @@ extension TerminalSmoke {
         func phase(_ name: String, _ operation: [String: Any], expectedBytes: Int, seconds: TimeInterval = 60,
                    _ proof: () async throws -> Bool) async throws {
             try await target()
-            let before = try await self.js("return __terminal352;") as! [String: Any]
+            let reference = TerminalFixture.inputReference(command: operation["text"] as? String, expectedBytes: expectedBytes)
+            let config: [String: Any] = ["episode": episode, "name": name, "sequence": sequence + 1,
+                "origin": self.app.baseURL?.absoluteString ?? "",
+                "session": self.sessionID, "terminal": self.terminalID, "revision": revision, "reference": reference]
+            let json = (try? JSONSerialization.data(withJSONObject: config)).map { String(decoding: $0, as: UTF8.self) } ?? "null"
+            let beforeBegin = TerminalFixture.PhaseEvidence.now()
+            let before = try await self.js("""
+            try { window.__terminal352Diagnostics?.begin(\(json)); } catch {}
+            let diagnostic=null; try { diagnostic=window.__terminal352Diagnostics?.snapshot(true) ?? null; } catch {}
+            return {...__terminal352,diagnostic};
+            """) as! [String: Any]
+            let beforeEnd = TerminalFixture.PhaseEvidence.now()
             sequence += 1
+            let phaseLower = TerminalFixture.PhaseEvidence.now()
             let started = Date()
+            let phaseUpper = TerminalFixture.PhaseEvidence.now()
             let identity: [String: Any] = ["schema": 1, "sequence": sequence, "name": name,
                 "state": "ready", "operation": operation, "seconds_limit": seconds,
                 "app_pid": getpid(), "target_window_number": number,
                 "session_id": self.sessionID, "terminal_id": self.terminalID]
-            self.record(["terminal_xctest_phase": identity])
             let end = started.addingTimeInterval(seconds)
-            while true {
-                guard Date() < end else { throw PreviewError.message("External terminal phase timed out: \(name)") }
+            let observation = TerminalFixture.PhaseEvidence(identity: ["episode_id": episode, "phase": name,
+                "phase_sequence": String(sequence), "app_pid": String(getpid()),
+                "app_launch_epoch": String(running.timeIntervalSince1970), "bundle_path": bundle.path,
+                "window_number": String(number), "engine_pid": String(enginePID),
+                "profile_id": profile.root.lastPathComponent, "engine_seal_reference": "terminal-build.json",
+                "session_id": self.sessionID, "terminal_id": self.terminalID, "controller_revision": revision],
+                whole: (wholeLower, wholeUpper), phase: (phaseLower, phaseUpper), seconds: seconds,
+                wallDeadline: end, wholeDeadline: deadline)
+            diagnostic = observation
+            defer { diagnostic = nil }
+            observation.observe(before["diagnostic"], begin: beforeBegin, end: beforeEnd, baseline: true)
+            self.record(["terminal_xctest_phase": identity, "terminal_xctest_diagnostics_v1": diagnosticRecords + [
+                observation.snapshot(state: "ready", stage: "ready-emission", now: TerminalFixture.PhaseEvidence.now())]])
+            observation.readyReturned(TerminalFixture.PhaseEvidence.now())
+            var stage = "deadline"
+            do {
+                while true {
+                    stage = "deadline"
+                    guard Date() < end else {
+                        observation.predicate("deadline", "false")
+                        throw PreviewError.message("External terminal phase timed out: \(name)")
+                    }
+                    observation.predicate("deadline", "true")
+                    stage = "target"
+                    try await target()
+                    stage = "controller"
+                    observation.predicate("controller", "sampling")
+                    let state = try await self.externalTerminalState()
+                    observation.terminalState(state)
+                    guard state["revision"] as? String == revision else {
+                        observation.predicate("controller", "false")
+                        throw PreviewError.message("External terminal controller revision changed")
+                    }
+                    observation.predicate("controller", "true")
+                    stage = "proof"
+                    observation.predicate("proof", "sampling")
+                    let complete = try await proof()
+                    observation.predicate("proof", complete ? "true" : "false")
+                    stage = "transport-settlement"
+                    let sampleBegin = TerminalFixture.PhaseEvidence.now()
+                    let sample = try await self.js("""
+                    const settled=__terminal352.inputSettled===__terminal352.inputPosts;
+                    let diagnostic=null; try { diagnostic=window.__terminal352Diagnostics?.snapshot() ?? null; } catch {}
+                    return {settled,diagnostic};
+                    """) as? [String: Any] ?? [:]
+                    observation.observe(sample["diagnostic"], begin: sampleBegin, end: TerminalFixture.PhaseEvidence.now())
+                    let settled = sample["settled"] as? Bool == true
+                    observation.predicate("transport_settled", settled ? "true" : "false")
+                    if complete && settled {
+                        stage = "proof-deadline"
+                        guard Date() < end else {
+                            observation.predicate("deadline", "false")
+                            throw PreviewError.message("External terminal phase proof exceeded deadline: \(name)")
+                        }
+                        break
+                    }
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                // Both the production written receipts and actual DOM provenance
+                // must settle. A file/driver ack alone never completes a phase.
+                stage = "target"
                 try await target()
-                let state = try await self.externalTerminalState()
-                guard state["revision"] as? String == revision else {
-                    throw PreviewError.message("External terminal controller revision changed")
+                stage = "final-observation"
+                let afterBegin = TerminalFixture.PhaseEvidence.now()
+                let after = try await self.js("""
+                let diagnostic=null; try { diagnostic=window.__terminal352Diagnostics?.snapshot(true) ?? null; } catch {}
+                return {...__terminal352,diagnostic};
+                """) as! [String: Any]
+                observation.observe(after["diagnostic"], begin: afterBegin, end: TerminalFixture.PhaseEvidence.now())
+                func delta(_ key: String) -> Int { (after[key] as? Int ?? 0) - (before[key] as? Int ?? 0) }
+                stage = "exact-bytes-written-trust"
+                guard delta("inputBytes") == expectedBytes, delta("syntheticEvents") == 0,
+                      delta("syntheticKeys") == 0, delta("inputPosts") == delta("inputWritten"),
+                      (expectedBytes == 0 ? delta("trustedKeys") == 0 : delta("trustedKeys") > 0) else {
+                    observation.predicate("exact_bytes_written_trust", "false")
+                    throw PreviewError.message("External phase lacked exact bytes/written receipts/trusted provenance: \(name)")
                 }
-                let complete = try await proof()
-                let settled = try await self.js("return __terminal352.inputSettled===__terminal352.inputPosts;") as? Bool == true
-                if complete && settled {
-                    guard Date() < end else { throw PreviewError.message("External terminal phase proof exceeded deadline: \(name)") }
-                    break
-                }
-                try await Task.sleep(nanoseconds: 100_000_000)
+                observation.predicate("exact_bytes_written_trust", "true")
+                var verified = identity
+                verified["state"] = "verified"
+                verified["proof"] = ["input_bytes": delta("inputBytes"), "input_posts": delta("inputPosts"),
+                    "written_receipts": delta("inputWritten"), "trusted_keydowns": delta("trustedKeys"),
+                    "synthetic_events": delta("syntheticEvents"), "terminal_alive": true,
+                    "controller_revision": revision, "elapsed_ms": Int(Date().timeIntervalSince(started) * 1000)]
+                receipts.append(verified)
+                diagnosticRecords.append(observation.snapshot(state: "verified", stage: "complete", now: TerminalFixture.PhaseEvidence.now(), seal: true))
+                self.record(["terminal_xctest_phase": verified, "terminal_xctest_phases": receipts,
+                             "terminal_xctest_diagnostics_v1": diagnosticRecords])
+            } catch {
+                // No JS/read/drain after failure: retain the last completed sample.
+                diagnosticRecords.append(observation.snapshot(state: "failed", stage: stage, now: TerminalFixture.PhaseEvidence.now(), seal: true))
+                self.record(["terminal_xctest_diagnostics_v1": diagnosticRecords])
+                throw error
             }
-            // Both the production written receipts and actual DOM provenance
-            // must settle. A file/driver ack alone never completes a phase.
-            try await target()
-            let after = try await self.js("return __terminal352;") as! [String: Any]
-            func delta(_ key: String) -> Int { (after[key] as? Int ?? 0) - (before[key] as? Int ?? 0) }
-            guard delta("inputBytes") == expectedBytes, delta("syntheticEvents") == 0,
-                  delta("syntheticKeys") == 0, delta("inputPosts") == delta("inputWritten"),
-                  (expectedBytes == 0 ? delta("trustedKeys") == 0 : delta("trustedKeys") > 0) else {
-                throw PreviewError.message("External phase lacked exact bytes/written receipts/trusted provenance: \(name)")
-            }
-            var verified = identity
-            verified["state"] = "verified"
-            verified["proof"] = ["input_bytes": delta("inputBytes"), "input_posts": delta("inputPosts"),
-                "written_receipts": delta("inputWritten"), "trusted_keydowns": delta("trustedKeys"),
-                "synthetic_events": delta("syntheticEvents"), "terminal_alive": true,
-                "controller_revision": revision, "elapsed_ms": Int(Date().timeIntervalSince(started) * 1000)]
-            receipts.append(verified)
-            self.record(["terminal_xctest_phase": verified, "terminal_xctest_phases": receipts])
         }
         func text(_ command: String) -> [String: Any] {
             ["kind": "type-text-and-return", "text": command]
         }
         func marker(_ value: String) async throws -> Bool {
-            try await self.js("return __terminal352.markerReceipts[\(self.quote(value))]?.acknowledged===true && document.querySelector('.xterm-accessibility-tree')?.textContent.includes(\(self.quote(value)))===true;") as? Bool == true
+            let result = try await self.js("""
+            const ack=__terminal352.markerReceipts[\(self.quote(value))]?.acknowledged===true;
+            const screen=ack ? document.querySelector('.xterm-accessibility-tree')?.textContent.includes(\(self.quote(value)))===true : null;
+            let metadata={};try{metadata=window.__terminal352Diagnostics?.marker(\(self.quote(value))) || {};}catch{}
+            return {ack,screen,complete:ack && screen===true,...metadata};
+            """) as? [String: Any] ?? [:]
+            diagnostic?.predicate("marker_ack", result["ack"] as? Bool == true ? "true" : "false")
+            diagnostic?.markerState(value, result)
+            diagnostic?.predicate("current_screen", result["screen"] is NSNull ? "not-evaluated" :
+                (result["screen"] as? Bool == true ? "true" : "false"))
+            return result["complete"] as? Bool == true
+        }
+        func receipt(_ name: String) throws -> Data? {
+            diagnostic?.predicate("file_" + name, "sampling")
+            let data = try self.terminalReceipt(profile.workspace, name)
+            diagnostic?.file(name, data)
+            return data
         }
         try await phase("unicode", text(TerminalFixture.unicodeCommand),
                         expectedBytes: TerminalFixture.unicodeCommand.utf8.count + 1) {
-            guard try self.terminalReceipt(profile.workspace, "unicode") == Data(TerminalFixture.unicode.utf8) else { return false }
+            guard try receipt("unicode") == Data(TerminalFixture.unicode.utf8) else { return false }
             return try await marker("WK-XCTEST-UNICODE: Ω中🙂")
         }
         checks["trusted-mac-keyboard-unicode"] = ["status": "pass",
@@ -279,17 +383,17 @@ extension TerminalSmoke {
         try await snapshot("xctest-unicode")
         try await phase("interrupt-arm", text(TerminalFixture.interruptCommand),
                         expectedBytes: TerminalFixture.interruptCommand.utf8.count + 1) {
-            guard try self.terminalReceipt(profile.workspace, "running") == Data("RUNNING".utf8) else { return false }
+            guard try receipt("running") == Data("RUNNING".utf8) else { return false }
             return try await marker("WK-XCTEST-RUNNING")
         }
         try await phase("interrupt", ["kind": "key", "key": "c", "modifiers": ["control"]], expectedBytes: 1, seconds: 10) {
-            guard try self.terminalReceipt(profile.workspace, "int") == Data("INT".utf8),
-                  try self.terminalReceipt(profile.workspace, "status") == Data("130".utf8) else { return false }
+            guard try receipt("int") == Data("INT".utf8),
+                  try receipt("status") == Data("130".utf8) else { return false }
             return try await marker("WK-XCTEST-INTERRUPTED")
         }
         try await phase("recovery", text(TerminalFixture.recoveryCommand),
                         expectedBytes: TerminalFixture.recoveryCommand.utf8.count + 1) {
-            guard try self.terminalReceipt(profile.workspace, "recovered") == Data("RECOVERED".utf8) else { return false }
+            guard try receipt("recovered") == Data("RECOVERED".utf8) else { return false }
             return try await marker("WK-XCTEST-RECOVERED")
         }
         checks["xctest-ctrl-c-recovery"] = ["status": "pass",
@@ -302,7 +406,7 @@ extension TerminalSmoke {
         }
         try await phase("size-readback", text(TerminalFixture.sizeCommand),
                         expectedBytes: TerminalFixture.sizeCommand.utf8.count + 1) {
-            guard let data = try self.terminalReceipt(profile.workspace, "size"),
+            guard let data = try receipt("size"),
                   let value = String(data: data, encoding: .utf8) else { return false }
             let sizes = value.split(whereSeparator: { $0.isWhitespace }).compactMap { Int($0) }
             let state = try await self.externalTerminalState()

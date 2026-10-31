@@ -72,3 +72,57 @@ registered masking and renderer-crash requirements remain separate. Snapshots
 are retained for visual inspection; parser/screen-tree evidence alone never
 qualifies visible paint. The full ALL-352 matrix stays false while any required
 row is missing, failed or unavailable.
+
+## Passive phase diagnostics
+
+`terminal_xctest_diagnostics_v1` is additive fixture evidence. It does not change
+the existing phase schema, six operations, literal bytes, focus, proof predicates
+or 60/10/240-second limits. Only the doubly gated terminal smoke binary installs
+it, in the disposable owned main document. No product endpoint or input hook is
+added. Direct xterm onKey/IME and private client-pump admission remain unknown.
+
+Each native record binds an episode/phase to app launch, bundle, exact window,
+engine/profile, session, terminal and controller revision. The page observation
+also captures the existing `data-nac-runtime` root and exact textarea identity,
+with a document UUID. A replaced/disconnected root, textarea, document or runtime
+retires that observation; it cannot adopt another target. Requests capture their
+original phase, so late outcomes cannot enter a replacement phase's counters.
+Legacy counters and the original admission/proof checks remain separate.
+
+Native `dispatch-uptime-ns` values are decimal strings. They bracket the original
+wall-clock anchors and record nominal monotonic deadlines, ready emission and
+the ready callback's return interval. The governing `Date` deadlines remain
+unchanged. Callback return is not proof of durable file publication or the time
+the external driver read readiness. Document `performance` timestamps and
+XCTest-relative time are separate domains; no clock conversion is inferred.
+
+Baseline counters accompany ready. Existing polling caches bounded diagnostics;
+on failure the app retains the last completed sample, its age, evaluated predicate
+verdicts and the original error. It performs no new JS await, input drain or
+network read after failure/deadline. File verdicts distinguish absent, exact,
+mismatched and unexamined contents; ACK and current-screen predicates remain
+separate and preserve their original short circuit. Fetch-written is not shell
+interpretation, file proof, visible paint or native input acceptance.
+
+The observer retains only allowed metadata: aggregate trust/type/timing counts,
+64 input outcome rows, 128 DOM metadata rows and fixed-reference prefix mismatch
+positions. No unexpected bytes, key/data, textarea/clipboard contents, headers,
+credentials, error bodies or file contents are exported. Matching is incremental
+across UTF-8/batch boundaries and never changes bytes or dispatches requests.
+The original fetch receives identical arguments and returns its original Promise,
+Response and errors; observation faults cannot replace them.
+
+All hot-path work stays in memory, with no per-key disk/console/network/crypto.
+Detailed rings cross the existing JS polling boundary at most once a second,
+plus the existing before/after calls; their age is reported separately. Native
+projection roundtrip intervals and aggregate observer work are measured, not
+claimed to be incremental overhead. A handler interval over 2 ms or total over
+20 ms marks measurement degraded. Dropped rows, unavailable observations and
+overflow make capture incomplete. Snapshots are capped at 64 KiB per phase,
+six phases/384 KiB total; failed serialization emits a bounded unavailable row.
+An immutable native cutoff cannot be updated by a late page callback. Its failure
+record does not claim JS cleanup or all outstanding requests have completed.
+
+Node VM and Foundation-only Swift source harnesses exercise retention, clocks,
+retirement, fetch identity, UTF-8/privacy and bounds. They do not run the app,
+engine, browser or public input driver and cannot qualify an actual native row.
