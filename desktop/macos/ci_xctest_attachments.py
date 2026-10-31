@@ -260,10 +260,21 @@ class AttachmentTool:
                 snapshots = []
                 for file, name in selected:
                     data = bounded_file(file, MAX_SNAPSHOT)
+                    metadata = {'file': name + '.json', 'exported_file': file.name,
+                                'bytes': len(data), 'sha256': digest(data)}
+                    try:
+                        candidate = json_data(data, MAX_SNAPSHOT)
+                        prefix = require_snapshots([*snapshots, candidate], binding, operations)
+                    except BaseException as error:
+                        index['rejected_input'] = {**metadata, 'retained': False,
+                                                  'error_type': type(error).__name__}
+                        raise
+                    # Retain only after this complete prefix has passed JSON,
+                    # identity, literal, state and earlier-row immutability checks.
                     (folder / (name + '.json')).write_bytes(data)
-                    index['snapshots'].append({'file': name + '.json', 'exported_file': file.name,
-                                               'bytes': len(data), 'sha256': digest(data)})
-                    snapshots.append(json_data(data, MAX_SNAPSHOT))
+                    index['snapshots'].append(metadata)
+                    snapshots.append(candidate)
+                    index.update(prefix)
                 index.update(require_snapshots(snapshots, binding, operations))
                 if index['complete']:
                     (self.raw / 'xctest-driver.json').write_text(json.dumps(index['rows'], indent=2) + '\n')
