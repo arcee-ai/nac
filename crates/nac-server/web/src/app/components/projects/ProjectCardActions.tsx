@@ -33,6 +33,7 @@ function IconAction({
         variant={variant}
         size={ButtonSize.Small}
         content={ButtonContent.Icon}
+        className="max-lg:!size-11"
         aria-label={title}
         disabled={disabled}
         onClick={(e) => {
@@ -80,7 +81,12 @@ export function ProjectCardActions({
   reorder,
 }: ProjectCardActionsProps) {
   return (
-    <div className={cn("flex items-center shrink-0", orphan ? "gap-2" : "gap-1.5")}>
+    <div
+      className={cn(
+        "flex items-center shrink-0 max-lg:gap-0 max-lg:flex-wrap max-lg:min-w-0 max-lg:shrink",
+        orphan ? "gap-2" : "gap-1.5",
+      )}
+    >
       {reorder ? (
         <>
           <IconAction

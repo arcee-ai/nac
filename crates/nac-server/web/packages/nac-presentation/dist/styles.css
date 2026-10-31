@@ -1,3 +1,17 @@
+[data-nac-runtime]:is(.nac-toast), [data-nac-runtime] .nac-toast {
+  transform: translateY(-100%);
+  transition: transform 150ms ease-out;
+}
+
+[data-nac-runtime]:is(.nac-toast[data-visible="true"]), [data-nac-runtime] .nac-toast[data-visible="true"] {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-nac-runtime]:is(.nac-toast), [data-nac-runtime] .nac-toast {
+    transition: none;
+  }
+}
 /*! tailwindcss v4.3.3 | MIT License | https://tailwindcss.com */
 @supports (((-webkit-hyphens: none)) and (not (margin-trim: inline))) or ((-moz-orient: inline) and (not (color: rgb(from red r g b)))) {
     [data-nac-runtime]:is(*), [data-nac-runtime] *, [data-nac-runtime]:is(:before), [data-nac-runtime] :before, [data-nac-runtime]:is(:after), [data-nac-runtime] :after, [data-nac-runtime]::backdrop, [data-nac-runtime] ::backdrop {
@@ -816,6 +830,10 @@
 
 [data-nac-runtime]:is(.-mt-2), [data-nac-runtime] .-mt-2 {
     margin-top: calc(var(--spacing) * -2);
+  }
+
+[data-nac-runtime]:is(.mt-0\.5), [data-nac-runtime] .mt-0\.5 {
+    margin-top: calc(var(--spacing) * .5);
   }
 
 [data-nac-runtime]:is(.mt-1), [data-nac-runtime] .mt-1 {
@@ -1695,6 +1713,10 @@
     max-width: 1100px;
   }
 
+[data-nac-runtime]:is(.max-w-\[calc\(100\%-2rem\)\]), [data-nac-runtime] .max-w-\[calc\(100\%-2rem\)\] {
+    max-width: calc(100% - 2rem);
+  }
+
 [data-nac-runtime]:is(.max-w-\[calc\(100vw-16px\)\]), [data-nac-runtime] .max-w-\[calc\(100vw-16px\)\] {
     max-width: calc(100vw - 16px);
   }
@@ -2349,6 +2371,10 @@
 
 [data-nac-runtime]:is(.\!rounded-full), [data-nac-runtime] .\!rounded-full {
     border-radius: 3.40282e38px !important;
+  }
+
+[data-nac-runtime]:is(.\!rounded-lg), [data-nac-runtime] .\!rounded-lg {
+    border-radius: var(--radius-lg) !important;
   }
 
 [data-nac-runtime]:is(.rounded), [data-nac-runtime] .rounded {
@@ -3065,6 +3091,10 @@
     padding-inline: calc(var(--spacing) * 4);
   }
 
+[data-nac-runtime]:is(.px-5), [data-nac-runtime] .px-5 {
+    padding-inline: calc(var(--spacing) * 5);
+  }
+
 [data-nac-runtime]:is(.px-6), [data-nac-runtime] .px-6 {
     padding-inline: calc(var(--spacing) * 6);
   }
@@ -3145,6 +3175,10 @@
     padding-top: calc(var(--spacing) * 2);
   }
 
+[data-nac-runtime]:is(.pt-3), [data-nac-runtime] .pt-3 {
+    padding-top: calc(var(--spacing) * 3);
+  }
+
 [data-nac-runtime]:is(.pt-4), [data-nac-runtime] .pt-4 {
     padding-top: calc(var(--spacing) * 4);
   }
@@ -3219,6 +3253,10 @@
 
 [data-nac-runtime]:is(.pr-12), [data-nac-runtime] .pr-12 {
     padding-right: calc(var(--spacing) * 12);
+  }
+
+[data-nac-runtime]:is(.pr-14), [data-nac-runtime] .pr-14 {
+    padding-right: calc(var(--spacing) * 14);
   }
 
 [data-nac-runtime]:is(.pr-\[7px\]), [data-nac-runtime] .pr-\[7px\] {
@@ -3451,6 +3489,16 @@
 [data-nac-runtime]:is(.leading-3), [data-nac-runtime] .leading-3 {
     --nac-presentation-tw-leading: calc(var(--spacing) * 3);
     line-height: calc(var(--spacing) * 3);
+  }
+
+[data-nac-runtime]:is(.leading-5), [data-nac-runtime] .leading-5 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 5);
+    line-height: calc(var(--spacing) * 5);
+  }
+
+[data-nac-runtime]:is(.leading-6), [data-nac-runtime] .leading-6 {
+    --nac-presentation-tw-leading: calc(var(--spacing) * 6);
+    line-height: calc(var(--spacing) * 6);
   }
 
 [data-nac-runtime]:is(.leading-\[0\]), [data-nac-runtime] .leading-\[0\] {
@@ -4680,8 +4728,36 @@
       transition-property: none;
     }
 
+    [data-nac-runtime]:is(.motion-reduce\:duration-0), [data-nac-runtime] .motion-reduce\:duration-0 {
+      --nac-presentation-tw-duration: 0s;
+      transition-duration: 0s;
+    }
+
     [data-nac-runtime]:is(.motion-reduce\:\[-webkit-text-fill-color\:currentColor\]), [data-nac-runtime] .motion-reduce\:\[-webkit-text-fill-color\:currentColor\] {
       -webkit-text-fill-color: currentColor;
+    }
+  }
+
+@media not all and (min-width: 64rem) {
+    [data-nac-runtime]:is(.max-lg\:\!size-11), [data-nac-runtime] .max-lg\:\!size-11 {
+      width: calc(var(--spacing) * 11) !important;
+      height: calc(var(--spacing) * 11) !important;
+    }
+
+    [data-nac-runtime]:is(.max-lg\:min-w-0), [data-nac-runtime] .max-lg\:min-w-0 {
+      min-width: 0;
+    }
+
+    [data-nac-runtime]:is(.max-lg\:shrink), [data-nac-runtime] .max-lg\:shrink {
+      flex-shrink: 1;
+    }
+
+    [data-nac-runtime]:is(.max-lg\:flex-wrap), [data-nac-runtime] .max-lg\:flex-wrap {
+      flex-wrap: wrap;
+    }
+
+    [data-nac-runtime]:is(.max-lg\:gap-0), [data-nac-runtime] .max-lg\:gap-0 {
+      gap: 0;
     }
   }
 
@@ -8071,6 +8147,50 @@
 
   100% {
     background-position: -200% 0;
+  }
+}
+/* Dense navigation uses the conversation recipe's quiet surfaces and 4px rhythm.
+   Scope these values to real navigation consumers, leaving inspector atoms alone. */
+[data-nac-runtime]:is(.nac-navigation .group:has(> button[aria-current="page"])), [data-nac-runtime] .nac-navigation .group:has(> button[aria-current="page"]) {
+  box-shadow: inset 2px 0 0 var(--color-border-focus-outline);
+}
+
+[data-nac-runtime]:is(.nac-navigation .group > button > .truncate), [data-nac-runtime] .nac-navigation .group > button > .truncate {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+[data-nac-runtime]:is(.nac-navigation .text-shimmer-primary), [data-nac-runtime] .nac-navigation .text-shimmer-primary {
+  animation: none;
+  background: none;
+  color: var(--color-text-basic-primary);
+  -webkit-text-fill-color: currentColor;
+}
+
+[data-nac-runtime]:is(.nac-navigation-mobile .group > div:last-child), [data-nac-runtime] .nac-navigation-mobile .group > div:last-child {
+  gap: 0;
+}
+
+[data-nac-runtime]:is(.nac-navigation-mobile .group), [data-nac-runtime] .nac-navigation-mobile .group {
+  height: auto;
+  min-height: 48px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+[data-nac-runtime]:is(.nac-navigation-mobile .group > button), [data-nac-runtime] .nac-navigation-mobile .group > button {
+  min-height: 44px;
+}
+
+@media (max-width: 359px) {
+  [data-nac-runtime]:is(.nac-navigation-mobile .group), [data-nac-runtime] .nac-navigation-mobile .group {
+    flex-wrap: wrap;
+  }
+  [data-nac-runtime]:is(.nac-navigation-mobile .group > button), [data-nac-runtime] .nac-navigation-mobile .group > button {
+    flex-basis: 100%;
+  }
+  [data-nac-runtime]:is(.nac-navigation-mobile .group > div:last-child), [data-nac-runtime] .nac-navigation-mobile .group > div:last-child {
+    margin-left: auto;
   }
 }
 /**

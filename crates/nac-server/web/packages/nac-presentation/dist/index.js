@@ -1,4 +1,4 @@
-import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Br as f, Bt as p, C as m, Ci as h, Cn as g, Cr as _, Ct as v, D as y, Di as b, Dn as x, Dr as S, Dt as C, E as w, Ei as T, En as E, Er as D, Et as O, F as k, Fi as A, Fn as ee, Fr as j, Ft as te, G as M, Gi as ne, Gn as re, Gr as N, Gt as ie, H as ae, Hi as oe, Hn as se, Hr as P, Ht as ce, I as le, Ii as ue, In as de, Ir as fe, It as pe, J as me, Ji as he, Jn as F, Jr as I, Jt as ge, K as _e, Ki as ve, Kn as L, Kr as ye, Kt as be, L as xe, Li as Se, Ln as Ce, Lr as we, Lt as Te, M as Ee, Mi as De, Mn as Oe, Mr as ke, Mt as Ae, N as je, Ni as Me, Nn as Ne, Nr as Pe, Nt as Fe, O as Ie, Oi as Le, On as Re, Or as ze, Ot as Be, P as Ve, Pi as He, Pn as Ue, Pr as We, Pt as Ge, Q as Ke, Qi as qe, Qn as Je, Qr as Ye, Qt as Xe, R as Ze, Ri as Qe, Rn as $e, Rr as et, Rt as tt, S as nt, Si as rt, Sn as it, Sr as at, St as ot, T as st, Ti as ct, Tn as lt, Tr as R, Tt as ut, U as dt, Ui as ft, Un as pt, Ur as mt, Ut as ht, V as gt, Vi as _t, Vn as vt, Vr as yt, Vt as bt, W as xt, Wi as St, Wn as Ct, Wr as wt, Wt as Tt, X as Et, Xi as Dt, Xn as Ot, Xr as z, Xt as kt, Y as At, Yi as jt, Yn as Mt, Yr as B, Yt as Nt, Z as Pt, Zi as Ft, Zn as It, Zr as Lt, Zt as Rt, _ as zt, _i as Bt, _n as Vt, _r as Ht, _t as Ut, a as Wt, ai as Gt, an as Kt, ar as qt, at as Jt, b as Yt, bi as Xt, bn as Zt, br as Qt, bt as $t, c as en, ci as tn, cn as nn, cr as rn, ct as an, d as on, di as sn, dn as cn, dr as ln, dt as un, ei as dn, en as fn, er as pn, et as mn, f as hn, fi as gn, fn as _n, fr as vn, ft as yn, g as bn, gi as xn, gn as Sn, gr as Cn, gt as wn, h as Tn, hi as En, hn as Dn, hr as On, ht as kn, i as An, ii as V, in as jn, ir as Mn, it as Nn, j as Pn, ji as Fn, jn as In, jr as Ln, jt as Rn, k as zn, ki as Bn, kn as Vn, kr as Hn, kt as Un, l as Wn, li as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mi as Xn, mn as Zn, mr as Qn, mt as $n, n as er, ni as tr, nn as nr, nr as rr, nt as ir, o as ar, oi as or, on as sr, or as cr, ot as lr, p as ur, pi as dr, pn as fr, pt as pr, q as mr, qi as hr, qn as gr, qr as _r, qt as vr, ri as yr, rn as br, rr as xr, rt as Sr, s as Cr, si as wr, sn as Tr, sr as Er, st as Dr, t as Or, ti as kr, tn as Ar, tr as jr, tt as Mr, u as Nr, ui as Pr, un as Fr, ur as Ir, ut as Lr, v as Rr, vi as zr, vn as Br, vr as Vr, vt as Hr, w as Ur, wi as Wr, wn as Gr, wr as H, wt as Kr, x as qr, xi as Jr, xn as Yr, xr as Xr, xt as Zr, y as Qr, yi as $r, yn as ei, yr as ti, yt as ni, z as ri, zi as ii, zn as ai, zt as oi } from "./chunks/PerfProfiler-C2dcJrB9.js";
+import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Br as f, Bt as p, C as m, Ci as h, Cn as g, Cr as _, Ct as v, D as y, Di as b, Dn as x, Dr as S, Dt as C, E as w, Ei as T, En as E, Er as D, Et as O, F as k, Fi as A, Fn as ee, Fr as j, Ft as te, G as M, Gi as ne, Gn as re, Gr as N, Gt as ie, H as ae, Hi as oe, Hn as se, Hr as P, Ht as ce, I as le, Ii as ue, In as de, Ir as fe, It as pe, J as me, Ji as he, Jn as F, Jr as I, Jt as ge, K as _e, Ki as ve, Kn as L, Kr as ye, Kt as be, L as xe, Li as Se, Ln as Ce, Lr as we, Lt as Te, M as Ee, Mi as De, Mn as Oe, Mr as ke, Mt as Ae, N as je, Ni as Me, Nn as Ne, Nr as Pe, Nt as Fe, O as Ie, Oi as Le, On as Re, Or as ze, Ot as Be, P as Ve, Pi as He, Pn as Ue, Pr as We, Pt as Ge, Q as Ke, Qi as qe, Qn as Je, Qr as Ye, Qt as Xe, R as Ze, Ri as Qe, Rn as $e, Rr as et, Rt as tt, S as nt, Si as rt, Sn as it, Sr as at, St as ot, T as st, Ti as ct, Tn as lt, Tr as R, Tt as ut, U as dt, Ui as ft, Un as pt, Ur as mt, Ut as ht, V as gt, Vi as _t, Vn as vt, Vr as yt, Vt as bt, W as xt, Wi as St, Wn as Ct, Wr as wt, Wt as Tt, X as Et, Xi as Dt, Xn as Ot, Xr as z, Xt as kt, Y as At, Yi as jt, Yn as Mt, Yr as B, Yt as Nt, Z as Pt, Zi as Ft, Zn as It, Zr as Lt, Zt as Rt, _ as zt, _i as Bt, _n as Vt, _r as Ht, _t as Ut, a as Wt, ai as Gt, an as Kt, ar as qt, at as Jt, b as Yt, bi as Xt, bn as Zt, br as Qt, bt as $t, c as en, ci as tn, cn as nn, cr as rn, ct as an, d as on, di as sn, dn as cn, dr as ln, dt as un, ei as dn, en as fn, er as pn, et as mn, f as hn, fi as gn, fn as _n, fr as vn, ft as yn, g as bn, gi as xn, gn as Sn, gr as Cn, gt as wn, h as Tn, hi as En, hn as Dn, hr as On, ht as kn, i as An, ii as V, in as jn, ir as Mn, it as Nn, j as Pn, ji as Fn, jn as In, jr as Ln, jt as Rn, k as zn, ki as Bn, kn as Vn, kr as Hn, kt as Un, l as Wn, li as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mi as Xn, mn as Zn, mr as Qn, mt as $n, n as er, ni as tr, nn as nr, nr as rr, nt as ir, o as ar, oi as or, on as sr, or as cr, ot as lr, p as ur, pi as dr, pn as fr, pt as pr, q as mr, qi as hr, qn as gr, qr as _r, qt as vr, ri as yr, rn as br, rr as xr, rt as Sr, s as Cr, si as wr, sn as Tr, sr as Er, st as Dr, t as Or, ti as kr, tn as Ar, tr as jr, tt as Mr, u as Nr, ui as Pr, un as Fr, ur as Ir, ut as Lr, v as Rr, vi as zr, vn as Br, vr as Vr, vt as Hr, w as Ur, wi as Wr, wn as Gr, wr as H, wt as Kr, x as qr, xi as Jr, xn as Yr, xr as Xr, xt as Zr, y as Qr, yi as $r, yn as ei, yr as ti, yt as ni, z as ri, zi as ii, zn as ai, zt as oi } from "./chunks/PerfProfiler-CGGhDyT5.js";
 import * as si from "react";
 import ci, { Fragment as li, Suspense as ui, createContext as di, lazy as fi, memo as pi, use as mi, useCallback as U, useContext as hi, useEffect as W, useId as gi, useLayoutEffect as _i, useMemo as G, useRef as K, useState as q, useSyncExternalStore as vi } from "react";
 import { QueryClientProvider as yi, QueryObserver as bi, replaceEqualDeep as xi, useIsFetching as Si, useMutation as Ci, useQueries as wi, useQuery as Ti, useQueryClient as Ei } from "@tanstack/react-query";
@@ -9323,7 +9323,7 @@ function mh({ icon: e, label: t, title: n, isMobile: r = !1, destructive: i = !1
 			size: r ? R.Medium : R.Small,
 			content: H.Icon,
 			"aria-label": t,
-			className: z(r && "relative !h-5 !rounded-[8px] !p-0 after:absolute after:-inset-1.5"),
+			className: z(r && "!size-11 !rounded-lg !p-0"),
 			onClick: a,
 			children: /* @__PURE__ */ Y(I, { iconName: e })
 		})
@@ -9799,38 +9799,43 @@ function Ah({ projects: e, sessions: t, query: n, activeSessionId: r, activeProj
 		className: "label-small text-basic-muted px-4 py-3",
 		children: "No matching sessions"
 	}) : /* @__PURE__ */ X("div", {
-		className: z("flex flex-col [&>*]:shrink-0", a && "gap-2 px-2 py-4"),
-		children: [S.map((e, t) => {
-			let n = e.project.project_id, i = b(n), o = e.project.name.toLowerCase().includes(_), s = _ && !o ? e.sessions.filter((e) => l(e.summary).toLowerCase().includes(_)) : e.sessions, d = /* @__PURE__ */ Y(Zu, {
-				entityId: n,
+		className: z("nac-navigation flex flex-col gap-1 px-2 py-3 [&>*]:shrink-0", a && "nac-navigation-mobile"),
+		children: [S.map((e) => {
+			let t = e.project.project_id, n = b(t), i = e.project.name.toLowerCase().includes(_), o = _ && !i ? e.sessions.filter((e) => l(e.summary).toLowerCase().includes(_)) : e.sessions, s = /* @__PURE__ */ Y(Zu, {
+				entityId: t,
 				name: e.project.name,
 				running: e.running > 0,
 				isMobile: a,
 				actions: a ? /* @__PURE__ */ Y(gh, { project: e.project }) : void 0,
-				"aria-expanded": i,
-				onClick: () => x(n)
+				title: e.project.name,
+				trailing: /* @__PURE__ */ Y("span", {
+					"aria-label": `${e.sessions.length} sessions`,
+					children: e.sessions.length
+				}),
+				"aria-expanded": n,
+				onClick: () => x(t)
 			});
-			return /* @__PURE__ */ X(li, { children: [t > 0 ? /* @__PURE__ */ Y(cd, {}) : null, /* @__PURE__ */ X("section", {
-				className: z("flex flex-col", !a && "p-2"),
-				children: [d, /* @__PURE__ */ Y(Wo, {
-					isOpen: i,
-					inert: !i,
-					"aria-hidden": !i,
-					className: "w-full duration-500 ease-in-out",
+			return /* @__PURE__ */ Y(li, { children: /* @__PURE__ */ X("section", {
+				className: "flex flex-col",
+				children: [s, /* @__PURE__ */ Y(Wo, {
+					isOpen: n,
+					inert: !n,
+					"aria-hidden": !n,
+					className: "w-full duration-150 ease-out motion-reduce:duration-0",
 					children: /* @__PURE__ */ Y(Nh, {
-						sessions: s,
+						sessions: o,
 						activeSessionId: r,
-						revealed: _.length > 0 || h.has(n),
+						revealed: _.length > 0 || h.has(t),
 						onReveal: () => g((e) => {
-							let t = new Set(e);
-							return t.add(n), t;
+							let n = new Set(e);
+							return n.add(t), n;
 						}),
 						now: u,
 						mobile: a,
 						onOpen: c
 					})
 				})]
-			})] }, n);
+			}) }, t);
 		}), C.length > 0 ? /* @__PURE__ */ X(J, { children: [S.length > 0 ? /* @__PURE__ */ Y(cd, {}) : null, /* @__PURE__ */ Y("section", {
 			className: z("flex flex-col gap-1", !a && "p-2"),
 			children: C.map((e) => /* @__PURE__ */ Y(Zu, {
@@ -9884,11 +9889,11 @@ function Nh({ sessions: e, activeSessionId: t, revealed: n, onReveal: r, now: i,
 	});
 	let f = jh(Mh(d, n), d, t), p = f.reduce((e, t) => e + t.items.length, 0), m = Math.max(0, e.length - p);
 	return /* @__PURE__ */ X("div", {
-		className: z("flex flex-col pt-1 pb-4", a ? "gap-0.5" : "gap-1"),
+		className: "flex flex-col gap-1 pb-2 pl-2",
 		children: [f.map((e) => /* @__PURE__ */ X("div", {
-			className: "flex flex-col gap-2 pt-4",
+			className: "flex flex-col gap-1 pt-3",
 			children: [/* @__PURE__ */ Y("p", {
-				className: "tag-label text-basic-muted uppercase px-2",
+				className: "text-xs leading-5 text-basic-tertiary px-2",
 				children: e.label
 			}), /* @__PURE__ */ Y("div", {
 				className: "flex flex-col gap-1",
@@ -12120,13 +12125,13 @@ function Sg({ open: e, onClose: t }) {
 function Cg() {
 	let { openSidePanelList: e } = V().stores.sessionLayoutStore, t = Fi(), { pathname: n } = Pi(), [r, i] = q(!1), a = ur(n);
 	return /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ X("header", {
-		className: "fade-from-top fixed inset-x-0 top-0 z-10 flex items-center gap-4 p-2",
+		className: "fade-from-top fixed inset-x-0 top-0 z-10 flex items-center gap-2 p-2",
 		children: [
 			/* @__PURE__ */ X("div", {
-				className: "flex min-w-0 flex-1 items-center gap-4",
+				className: "flex min-w-0 flex-1 items-center gap-2",
 				children: [/* @__PURE__ */ Y(Qt, {
 					content: H.Icon,
-					className: "shrink-0",
+					className: "!size-11 shrink-0",
 					"aria-label": "All projects",
 					onClick: () => t(hn.list()),
 					children: /* @__PURE__ */ Y(Cu, {
@@ -12141,14 +12146,14 @@ function Cg() {
 			}),
 			a ? /* @__PURE__ */ Y(Qt, {
 				content: H.Icon,
-				className: "shrink-0",
+				className: "!size-11 shrink-0",
 				"aria-label": "Open panel",
 				onClick: () => e(),
 				children: /* @__PURE__ */ Y(I, { iconName: B.ShowSidePanel })
 			}) : null,
 			/* @__PURE__ */ Y(Qt, {
 				content: H.Icon,
-				className: "shrink-0",
+				className: "!size-11 shrink-0",
 				"aria-label": "Open the menu",
 				"aria-expanded": r,
 				onClick: () => i(!0),
@@ -12165,7 +12170,7 @@ function wg({ sessionId: t }) {
 		total_additions: 0,
 		total_deletions: 0
 	}, m = p?.total_additions ?? 0, h = p?.total_deletions ?? 0, g = f?.repo_label ?? f?.workspace_display ?? null, y = s?.lineage ?? o?.lineage ?? null, b = y ? c.find((e) => e.summary.session_id === y.parent_session_id) : void 0, x = b ? a(b.summary) : "Parent session", S = /* @__PURE__ */ Y("p", {
-		className: z("header-sm min-w-0 flex-1 truncate", l ? "text-shimmer-basic" : "text-btn-secondary-pressed"),
+		className: z("text-sm leading-5 font-medium min-w-0 flex-1 truncate", l ? "text-shimmer-basic" : "text-btn-secondary-pressed"),
 		children: a(s?.summary)
 	});
 	return /* @__PURE__ */ X("div", {
@@ -12189,7 +12194,7 @@ function wg({ sessionId: t }) {
 					iconName: B.Right,
 					size: 16,
 					color: "var(--color-fill-basic-tertiary)",
-					className: "shrink-0"
+					className: "!size-11 shrink-0"
 				}),
 				S
 			]
@@ -12204,7 +12209,7 @@ function wg({ sessionId: t }) {
 			}) : null, m || h ? /* @__PURE__ */ Y(Sl, {
 				additions: m,
 				deletions: h,
-				className: "shrink-0"
+				className: "!size-11 shrink-0"
 			}) : null]
 		}) : null]
 	});
@@ -14760,7 +14765,7 @@ function Ov(e, t) {
 // src/app/lib/markdownChunk.ts
 var kv = null, Av = !1;
 function jv() {
-	return kv ??= import("./chunks/markdown-renderer-DtTgw2Tu.js").then((e) => e.t).then((e) => (Av = !0, e)), kv;
+	return kv ??= import("./chunks/markdown-renderer-Bkd2Lbu3.js").then((e) => e.t).then((e) => (Av = !0, e)), kv;
 }
 function Mv() {
 	return Av;
@@ -15529,6 +15534,7 @@ function dy({ title: e, icon: t, onClick: n, variant: r = D.Ghost, disabled: i =
 			variant: r,
 			size: R.Small,
 			content: H.Icon,
+			className: "max-lg:!size-11",
 			"aria-label": e,
 			disabled: i,
 			onClick: (e) => {
@@ -15540,7 +15546,7 @@ function dy({ title: e, icon: t, onClick: n, variant: r = D.Ghost, disabled: i =
 }
 function fy({ orphan: e, pinned: t, onDelete: n, onTogglePin: r, onRename: i, onAssign: a, reorder: o }) {
 	return /* @__PURE__ */ X("div", {
-		className: z("flex items-center shrink-0", e ? "gap-2" : "gap-1.5"),
+		className: z("flex items-center shrink-0 max-lg:gap-0 max-lg:flex-wrap max-lg:min-w-0 max-lg:shrink", e ? "gap-2" : "gap-1.5"),
 		children: [o ? /* @__PURE__ */ X(J, { children: [/* @__PURE__ */ Y(dy, {
 			title: "Move down",
 			icon: B.ArrowDown,
@@ -15697,7 +15703,7 @@ function yy({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 		"data-item-id": u.id,
 		"data-item-kind": u.orphan ? "orphan" : "project",
 		"data-item-pinned": u.pinned ? "true" : "false",
-		className: z("group fade relative flex flex-col gap-4 rounded-[16px] overflow-hidden cursor-default", f ? "px-6 pt-5 pb-3" : "p-4", "shadow-convex bg-elevation-level-1", l && "shadow-lg"),
+		className: z("group fade relative flex flex-col gap-4 rounded-xl border border-tertiary overflow-hidden cursor-default", f ? "px-5 pt-4 pb-3" : "p-4", "bg-elevation-level-1", l && "shadow-lg"),
 		role: "button",
 		tabIndex: 0,
 		"aria-pressed": t,
@@ -15768,7 +15774,7 @@ function yy({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 								className: "shrink-0 text-fill-basic-primary"
 							}) : null,
 							/* @__PURE__ */ Y("div", {
-								className: z("header-md flex-1 min-w-0 truncate", u.running ? "text-shimmer-primary" : "text-basic-primary"),
+								className: z("text-base leading-6 font-medium flex-1 min-w-0 truncate", u.running ? "text-shimmer-primary" : "text-basic-primary"),
 								children: u.title
 							}),
 							d ? /* @__PURE__ */ Y(S, {
@@ -15792,14 +15798,14 @@ function yy({ item: e, selected: t, attention: n, onOpen: r, onDelete: i, onTogg
 							}) : null
 						]
 					}), /* @__PURE__ */ Y("div", {
-						className: "code code-micro text-basic-tertiary truncate w-full",
+						className: "code text-xs leading-5 text-basic-tertiary truncate w-full",
 						children: u.cwd
 					})]
 				})]
 			}),
 			f ? null : /* @__PURE__ */ Y(_y, { facts: u }),
 			/* @__PURE__ */ X("div", {
-				className: "relative flex items-center justify-between w-full h-6 gap-2",
+				className: "relative flex flex-wrap items-center justify-between w-full min-h-6 gap-2",
 				children: [/* @__PURE__ */ Y(gy, { facts: u }), C ? /* @__PURE__ */ Y(fy, {
 					orphan: u.orphan,
 					pinned: u.pinned,

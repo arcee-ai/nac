@@ -1,0 +1,44 @@
+/* Dense navigation uses the conversation recipe's quiet surfaces and 4px rhythm.
+   Scope these values to real navigation consumers, leaving inspector atoms alone. */
+.nac-navigation .group:has(> button[aria-current="page"]) {
+  box-shadow: inset 2px 0 0 var(--color-border-focus-outline);
+}
+
+.nac-navigation .group > button > .truncate {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.nac-navigation .text-shimmer-primary {
+  animation: none;
+  background: none;
+  color: var(--color-text-basic-primary);
+  -webkit-text-fill-color: currentColor;
+}
+
+.nac-navigation-mobile .group > div:last-child {
+  gap: 0;
+}
+
+.nac-navigation-mobile .group {
+  height: auto;
+  min-height: 48px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.nac-navigation-mobile .group > button {
+  min-height: 44px;
+}
+
+@media (max-width: 359px) {
+  .nac-navigation-mobile .group {
+    flex-wrap: wrap;
+  }
+  .nac-navigation-mobile .group > button {
+    flex-basis: 100%;
+  }
+  .nac-navigation-mobile .group > div:last-child {
+    margin-left: auto;
+  }
+}
