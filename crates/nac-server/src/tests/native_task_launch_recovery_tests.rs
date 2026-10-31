@@ -397,3 +397,104 @@ async fn native_saved_symlink_projects_bind_canonical_targets_and_reject_retarge
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_retained_wake_failure_is_visible_and_exact_retry_recovers_one_input() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("native_retained_wake_failure");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let manager = test_manager(&root);
+    let (controller, caller, input) = fixture_context(&root, &manager, true).await;
+    let gate = Arc::new(application::session_creation::CreationProjectionGate::default());
+    *manager
+        .inner
+        .task_preparations
+        .initial_input_wake
+        .lock()
+        .unwrap() = Some(gate.clone());
+    let first = start(
+        &controller,
+        &caller,
+        input.clone(),
+        &manager.inner.store_path,
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+        .await
+        .unwrap();
+    let published = controller.status(&caller, &input.request_id).await.unwrap();
+    assert_eq!(published.launch.phase, "ready");
+    let input_id = published.launch.first_input_id.unwrap();
+    // Exercise a real fail-closed lease error for this exact reserved session;
+    // request/preparation lease files remain untouched and keep their owners.
+    let lock_name = first
+        .launch
+        .session_id
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let lock_dir = manager.inner.store_path.with_file_name(format!(
+        "{}.run-locks",
+        manager
+            .inner
+            .store_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+    ));
+    let lock_path = lock_dir.join(format!("{lock_name}.lock"));
+    let saved_lock = lock_dir.join(format!("{lock_name}.saved-fixture-lock"));
+    if lock_path.exists() {
+        std::fs::rename(&lock_path, &saved_lock).unwrap();
+    }
+    std::fs::create_dir(&lock_path).unwrap();
+    gate.resume.notify_one();
+    settle(&manager).await;
+    std::fs::remove_dir(&lock_path).unwrap();
+    if saved_lock.exists() {
+        std::fs::rename(saved_lock, lock_path).unwrap();
+    }
+    let failed = controller.status(&caller, &input.request_id).await.unwrap();
+    assert_eq!(failed.launch.phase, "ready");
+    assert!(
+        failed.launch.error.is_some(),
+        "published retained wake failure must be visible"
+    );
+    assert_eq!(failed.task.unwrap().pending_inbox_items, 1);
+    assert_eq!(
+        nac_core::store::load_session_inbox_item(
+            &manager.inner.store_path,
+            &first.launch.session_id,
+            input_id
+        )
+        .unwrap()
+        .status,
+        nac_core::store::InboxStatus::Pending
+    );
+    stop(&manager).await;
+    let restarted = test_manager(&root);
+    let controller = NativeTaskLaunchController::new(&restarted);
+    let retry = start(&controller, &caller, input, &restarted.inner.store_path).await;
+    assert_eq!(retry.launch.session_id, first.launch.session_id);
+    assert_eq!(retry.launch.first_input_id, Some(input_id));
+    assert!(retry.launch.error.is_none());
+    assert_eq!(
+        nac_core::store::load_session_inbox_item(
+            &restarted.inner.store_path,
+            &retry.launch.session_id,
+            input_id
+        )
+        .unwrap()
+        .status,
+        nac_core::store::InboxStatus::Delivered
+    );
+    assert_eq!(
+        nac_core::store::list_session_inbox(&restarted.inner.store_path, &retry.launch.session_id)
+            .unwrap()
+            .len(),
+        1
+    );
+    stop(&restarted).await;
+    std::fs::remove_dir_all(root).unwrap();
+}

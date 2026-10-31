@@ -124,13 +124,25 @@ impl<'a> TaskLaunchApplication<'a> {
                     if let Err(error) = Self::prepare(&manager, record.clone()).await {
                         let path = manager.inner.store_path.clone();
                         let id = record.request.request_id;
-                        let _ = store::spawn_blocking_store_caller(move || {
+                        let _ = store::spawn_blocking_store_caller(move || -> Result<()> {
+                            let message = format!("{error:#}");
                             store::update_task_launch(
                                 &path,
                                 &id,
                                 TaskLaunchPhase::Failed,
-                                Some(format!("{error:#}")),
-                            )
+                                Some(message.clone()),
+                            )?;
+                            if store::load_native_task_launch(&path, &id)?.is_some() {
+                                // Preparation can already be published while
+                                // its original input still awaits admission.
+                                store::update_native_task_launch(
+                                    &path,
+                                    &id,
+                                    "failed",
+                                    Some(message),
+                                )?;
+                            }
+                            Ok(())
                         })
                         .await;
                     }
@@ -261,6 +273,20 @@ impl<'a> TaskLaunchApplication<'a> {
         // owns its idempotent promotion; reattachment recovers pending input.
         let service = manager.inner.active_sessions.read().await.get(&id).cloned();
         if let Some(service) = service {
+            #[cfg(test)]
+            {
+                let gate = manager
+                    .inner
+                    .task_preparations
+                    .initial_input_wake
+                    .lock()
+                    .unwrap()
+                    .clone();
+                if let Some(gate) = gate {
+                    gate.reached.notify_one();
+                    gate.resume.notified().await;
+                }
+            }
             if manager.inner.task_preparations.git.check_running().is_ok() {
                 manager.wake_direct_inbox(&service).await?;
             } else {

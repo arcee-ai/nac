@@ -129,7 +129,7 @@ pub fn update_native_task_launch(path: &Path, request_id: &str, phase: &str, err
     anyhow::ensure!(matches!(phase,"reserved"|"preparing_runtime"|"failed"|"cancelled"), "invalid native launch phase");
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    tx.execute("UPDATE native_task_launches SET phase=CASE WHEN phase='ready' THEN phase ELSE ?2 END,error=?3,updated_at=?4 WHERE request_id=?1 AND phase!='cancelled' AND (phase!='ready' OR ?2='failed')",
+    tx.execute("UPDATE native_task_launches SET phase=CASE WHEN phase='ready' THEN phase ELSE ?2 END,error=?3,updated_at=?4 WHERE request_id=?1 AND phase!='cancelled' AND (phase!='ready' OR (?2='failed' AND EXISTS(SELECT 1 FROM session_inbox i WHERE i.id=native_task_launches.first_input_id AND i.session_id=native_task_launches.session_id AND i.status='pending')))",
         params![request_id,phase,error,now_utc()])?;
     let record = load(&tx, request_id)?.ok_or_else(|| anyhow!("native launch not found"))?;
     tx.commit()?;

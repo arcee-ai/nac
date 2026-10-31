@@ -441,3 +441,36 @@ async fn native_cancel_before_publication_rolls_back_session_and_initial_input()
         .is_empty());
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+#[tokio::test]
+async fn native_wake_error_is_recorded_only_while_the_original_input_is_pending() {
+    let (command, path, id) = native_command("native_wake_error").await;
+    command.execute(&path).unwrap();
+    let failed =
+        crate::store::update_native_task_launch(&path, &id, "failed", Some("wake failed".into()))
+            .unwrap();
+    assert_eq!(failed.phase, "ready");
+    assert_eq!(failed.error.as_deref(), Some("wake failed"));
+    crate::store::update_native_task_admission_error(&path, &id, None).unwrap();
+    let conn = crate::store::open_runtime_connection(&path).unwrap();
+    conn.execute(
+        "UPDATE session_inbox SET status='delivered' WHERE id=?1",
+        [failed.first_input_id.unwrap()],
+    )
+    .unwrap();
+    drop(conn);
+    let late = crate::store::update_native_task_launch(
+        &path,
+        &id,
+        "failed",
+        Some("late failed wake".into()),
+    )
+    .unwrap();
+    assert_eq!(late.phase, "ready");
+    assert!(
+        late.error.is_none(),
+        "a late failed wake cannot replace successful admission"
+    );
+    assert_eq!(late.first_input_id, failed.first_input_id);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}

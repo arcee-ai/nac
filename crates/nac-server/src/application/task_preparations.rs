@@ -12,6 +12,9 @@ pub(crate) struct TaskPreparations {
     #[cfg(test)]
     pub(crate) source_resolution:
         std::sync::Mutex<Option<Arc<super::session_creation::CreationProjectionGate>>>,
+    #[cfg(test)]
+    pub(crate) initial_input_wake:
+        std::sync::Mutex<Option<Arc<super::session_creation::CreationProjectionGate>>>,
 }
 
 impl TaskPreparations {
