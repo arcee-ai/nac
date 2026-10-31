@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import CryptoKit
 import CoreFoundation
+import Darwin
 import IOKit
 import XCTest
 import XCUIAutomation
@@ -51,6 +52,75 @@ enum StartupConsolePolicy {
 }
 // END CONSOLE POLICY
 
+// BEGIN PATH POLICY (compiled verbatim against owned empty filesystem fixtures)
+struct StartupPaths {
+    struct Resource: Equatable {
+        let path: String
+        let device: dev_t
+        let inode: ino_t
+        let kind: mode_t
+    }
+    let root, app, native: Resource
+    var url: URL { URL(fileURLWithPath: app.path) }
+    var emittedPath: String { app.path }
+
+    static func lexical(_ path: String) -> Bool {
+        path.hasPrefix("/") && path.utf8.count <= 4096
+            && !path.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+            && path.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
+                .allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
+
+    static func child(_ path: String, of parent: String) -> Bool {
+        lexical(path) && lexical(parent) && path.hasPrefix(parent + "/")
+    }
+
+    static func physical(_ path: String) -> String? {
+        guard lexical(path), let pointer = realpath(path, nil) else { return nil }
+        defer { free(pointer) }
+        return String(cString: pointer)
+    }
+
+    static func need(_ condition: Bool, _ reason: String) throws {
+        if !condition { throw NSError(domain: "NAC342Path", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: reason]) }
+    }
+
+    static func declared(_ path: String, kind: mode_t) throws -> Resource {
+        try need(lexical(path) && physical(path) == path, "Declaration is not an existing physical canonical path")
+        var info = stat()
+        try need(lstat(path, &info) == 0 && info.st_mode & mode_t(S_IFMT) == kind,
+                 "Declared resource has the wrong type or is unavailable")
+        return Resource(path: path, device: info.st_dev, inode: info.st_ino, kind: kind)
+    }
+
+    init(root: String, app: String) throws {
+        try Self.need(Self.lexical(root) && root.split(separator: "/").last?.hasPrefix("nac342-xctest-") == true
+            && app == root + "/Moved app folder with spaces/NAC.app", "Unexpected owned ordinary app layout")
+        self.root = try Self.declared(root, kind: mode_t(S_IFDIR))
+        self.app = try Self.declared(app, kind: mode_t(S_IFDIR))
+        native = try Self.declared(app + "/Contents/MacOS/NACPreview", kind: mode_t(S_IFREG))
+    }
+
+    static func observes(_ url: URL?, resource: Resource) -> Bool {
+        guard let url, url.isFileURL, let path = physical(url.path), path == resource.path,
+              let current = try? declared(path, kind: resource.kind) else { return false }
+        return current == resource
+    }
+
+    func matches(bundle: URL?, executable: URL?) -> Bool {
+        Self.observes(URL(fileURLWithPath: root.path), resource: root)
+            && Self.observes(bundle, resource: app) && Self.observes(executable, resource: native)
+    }
+
+    // Declarations only: no filesystem operation on profile/store paths.
+    func profiles(home: String, nac: String, workspace: String, store: String) -> Bool {
+        Self.child(home, of: root.path) && Self.child(nac, of: home)
+            && Self.child(workspace, of: root.path) && Self.child(store, of: nac)
+    }
+}
+// END PATH POLICY
+
 /// Proposed external public-XCTest actor. ALL-354 must include this source in
 /// an actual generated runner before it is runnable. No app bridge or file IPC.
 final class StartupJourneys: XCTestCase {
@@ -81,10 +151,6 @@ final class StartupJourneys: XCTestCase {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    private func canonical(_ path: String) -> URL {
-        URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
-    }
-
     private func json(_ data: Data) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
@@ -98,21 +164,16 @@ final class StartupJourneys: XCTestCase {
         add(attachment)
     }
 
-    private func admit(_ fixture: Fixture, app: URL) throws {
+    private func admit(_ fixture: Fixture, paths: StartupPaths) throws {
+        let app = paths.url
         try require(fixture.schema == "nac342-startup-xctest-v1"
             && fixture.contract_baseline == "ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8"
             && ["onboarding", "configuredLocal", "invalidConfig", "futureStore"].contains(fixture.scenario),
             "Unexpected four-state acceptance contract")
-        let root = canonical(fixture.fixture_root)
-        try require(root.path == fixture.fixture_root && root.lastPathComponent.hasPrefix("nac342-xctest-")
-            && app.path == fixture.app_path && app.path.hasPrefix(root.path + "/")
-            && app.path.hasSuffix("/Moved app folder with spaces/NAC.app"), "Unexpected ordinary app URL")
-        // Validate profile path declarations only. No permission to inspect or
-        // modify these files is inferred from access to NAC_UI_FIXTURE.
-        try require(fixture.home.hasPrefix(root.path + "/")
-            && fixture.nac_home.hasPrefix(fixture.home + "/")
-            && fixture.expected_store.hasPrefix(fixture.nac_home + "/")
-            && fixture.workspace.hasPrefix(root.path + "/"), "Disposable profile declaration escaped")
+        // Validate declarations only; access to NAC_UI_FIXTURE grants no
+        // permission to inspect or modify the normal profile/store.
+        try require(paths.profiles(home: fixture.home, nac: fixture.nac_home,
+            workspace: fixture.workspace, store: fixture.expected_store), "Disposable profile declaration escaped")
         for (member, expected) in [
             ("Contents/MacOS/NACPreview", fixture.native_sha256),
             ("Contents/Resources/nac-web", fixture.engine_sha256),
@@ -121,7 +182,9 @@ final class StartupJourneys: XCTestCase {
             ("Contents/Resources/PackageIdentity.json", fixture.package_identity_sha256),
             ("Contents/Resources/engine-identity.json", fixture.engine_identity_sha256)
         ] {
-            let bytes = try Data(contentsOf: app.appendingPathComponent(member))
+            let memberPath = paths.emittedPath + "/" + member
+            _ = try StartupPaths.declared(memberPath, kind: mode_t(S_IFREG))
+            let bytes = try Data(contentsOf: URL(fileURLWithPath: memberPath))
             try require(digest(bytes) == expected,
                         "Exact ordinary bundle bytes differ")
         }
@@ -217,17 +280,16 @@ final class StartupJourneys: XCTestCase {
     }
 
     @MainActor
-    private func incarnation(_ running: NSRunningApplication, app: URL, launch: Date) throws {
+    private func incarnation(_ running: NSRunningApplication, paths: StartupPaths, launch: Date) throws {
         try require(!running.isTerminated && running.launchDate == launch
-            && running.bundleURL?.resolvingSymlinksInPath() == app
-            && running.executableURL?.resolvingSymlinksInPath() == app.appendingPathComponent("Contents/MacOS/NACPreview"),
+            && paths.matches(bundle: running.bundleURL, executable: running.executableURL),
             "Ordinary app process incarnation changed")
     }
 
     @MainActor
     private func guardWindow(_ ui: XCUIApplication, running: NSRunningApplication,
-                             app: URL, launch: Date, number: Int) throws {
-        try incarnation(running, app: app, launch: launch)
+                             paths: StartupPaths, launch: Date, number: Int) throws {
+        try incarnation(running, paths: paths, launch: launch)
         try require(NSWorkspace.shared.frontmostApplication?.processIdentifier == running.processIdentifier
             && ui.windows.count == 1, "Ordinary app lost unique foreground window")
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
@@ -248,17 +310,29 @@ final class StartupJourneys: XCTestCase {
         let bytes = try Data(contentsOf: URL(fileURLWithPath: path))
         try require(bytes.count <= 32 * 1024, "Fixture configuration exceeds bound")
         let fixture = try JSONDecoder().decode(Fixture.self, from: bytes)
-        let appURL = canonical(fixture.app_path)
-        try admit(fixture, app: appURL)
+        let paths: StartupPaths
+        do { paths = try StartupPaths(root: fixture.fixture_root, app: fixture.app_path) }
+        catch {
+            try attachment(["schema": "nac342-path-admission-v1", "configuration_sha256": digest(bytes),
+                "declared_root": fixture.fixture_root, "declared_app": fixture.app_path,
+                "physical_root": StartupPaths.physical(fixture.fixture_root) as Any? ?? NSNull(),
+                "physical_app": StartupPaths.physical(fixture.app_path) as Any? ?? NSNull(),
+                "error": error.localizedDescription], name: "nac342-path-admission-failure")
+            throw error
+        }
+        let appURL = paths.url
+        try admit(fixture, paths: paths)
         try require(NSRunningApplication.runningApplications(withBundleIdentifier: fixture.bundle_id)
             .allSatisfy { $0.isTerminated }, "Existing bundle-ID owner blocks qualification")
         observations.append(try console())
+        try require(paths.matches(bundle: appURL, executable: URL(fileURLWithPath: paths.native.path)),
+                    "Ordinary app resource changed before launch")
         let ui = XCUIApplication(url: appURL)
         ui.launchArguments = ["--directory", fixture.home]
         ui.launchEnvironment = fixture.environment
         ui.launch()
         let running = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: fixture.bundle_id)
-            .filter { $0.bundleURL?.resolvingSymlinksInPath() == appURL && !$0.isTerminated }.only)
+            .filter { paths.matches(bundle: $0.bundleURL, executable: $0.executableURL) && !$0.isTerminated }.only)
         let launch = try XCTUnwrap(running.launchDate)
         var targetWindow: Int?
         var captured = false
@@ -270,20 +344,20 @@ final class StartupJourneys: XCTestCase {
                     if !captured, let number = targetWindow {
                         // Failure images still require the same exact window
                         // and console guards. No unguarded desktop capture.
-                        if (try? guardWindow(ui, running: running, app: appURL, launch: launch, number: number)) != nil {
+                        if (try? guardWindow(ui, running: running, paths: paths, launch: launch, number: number)) != nil {
                             let image = XCTAttachment(screenshot: ui.windows.firstMatch.screenshot())
                             image.name = "nac342-failure-" + fixture.scenario
                             image.lifetime = .keepAlways
                             add(image)
                         }
                     }
-                    try incarnation(running, app: appURL, launch: launch)
+                    try incarnation(running, paths: paths, launch: launch)
                     ui.terminate()
                 }
                 let stopped = ui.wait(for: .notRunning, timeout: 30)
                 try attachment(["schema": "nac342-cleanup-v1", "scenario": fixture.scenario,
                     "configuration_sha256": digest(bytes), "app_pid": Int(running.processIdentifier),
-                    "app_path": appURL.path, "app_termination_observed": stopped,
+                    "app_path": paths.emittedPath, "app_termination_observed": stopped,
                     "engine_cleanup": "requires_external_exact_owner_audit",
                     "profile_cleanup": "requires_external_exact_owner_audit"],
                     name: "nac342-cleanup-v1-" + fixture.scenario)
@@ -302,7 +376,7 @@ final class StartupJourneys: XCTestCase {
         targetWindow = number
         var operations: [String] = []
         func guardTarget() throws {
-            try guardWindow(ui, running: running, app: appURL, launch: launch, number: number)
+            try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
         }
         func dispatch(_ name: String, action: () -> Void) throws {
             try guardTarget()
@@ -312,7 +386,7 @@ final class StartupJourneys: XCTestCase {
                     "configuration_sha256": digest(bytes), "operation_index": index,
                     "operation": name, "stage": stage, "app_pid": Int(running.processIdentifier),
                     "app_launch_epoch": launch.timeIntervalSince1970, "window_number": number,
-                    "app_path": appURL.path, "native_sha256": fixture.native_sha256],
+                    "app_path": paths.emittedPath, "native_sha256": fixture.native_sha256],
                     name: String(format: "nac342-dispatch-v1-%02d-%@", index, stage))
             }
             try retain("before")
@@ -395,7 +469,7 @@ final class StartupJourneys: XCTestCase {
             "engine_identity_sha256": fixture.engine_identity_sha256, "build_receipt_sha256": fixture.build_receipt_sha256,
             "startup_source_sha256": fixture.startup_source_sha256,
             "native_sha256": fixture.native_sha256, "engine_sha256": fixture.engine_sha256,
-            "app_path": appURL.path, "bundle_id": fixture.bundle_id,
+            "app_path": paths.emittedPath, "bundle_id": fixture.bundle_id,
             "app_pid": Int(running.processIdentifier), "app_launch_epoch": launch.timeIntervalSince1970,
             "window_number": number, "ordinary_compile_mode": "LOCAL_APP",
             "smoke_instrumentation": false, "operations": operations, "console": observations,

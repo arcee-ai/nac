@@ -16,8 +16,9 @@ dummy provider, with no live inference or credential copying.
 
 Root's product nomination is now P
 `d443a2aca506def2817b9afc0c9a20a75f5c4b5d`, with an available normal ad-hoc
-package. The earlier helper Q was `57b16ef4`; this corrective candidate must
-receive its own exact Q nomination before inclusion. H
+package. The earlier helper Q was `57b16ef4`, followed by published Q
+`1412af562c56edebc63dbf61af849f08e2255b54`. This first path repair requires a
+new exact Q nomination before inclusion. H
 `a4ec6b17a92dabd28501fa427992528cd3729100` remains an interface reference.
 Keep P, Q and eventual H identities distinct; only the four files in this
 directory may be supplied from Q, and only the Swift file is a test input.
@@ -198,10 +199,41 @@ Public attachment names are `nac342-dispatch-v1-NN-before/after`,
 `nac342-cleanup-v1-<case>`. The final observation says
 `visible_paint: requires_actual_image_review`; it is not a pass receipt.
 
+## Physical declarations and observed URLs
+
+H owns frozen absolute, lexical, POSIX-physical fixture declarations. The
+root must be an existing directory named `nac342-xctest-*`; its exact app layout
+is `Moved app folder with spaces/NAC.app`. `StartupPaths` requires declared
+root/app/native paths to equal `realpath`, rejects symlink declarations and
+wrong types, and pins device/inode/type for subsequent resource witnesses.
+The six bundle members retain their byte hashes and now also require existing
+physical regular files. Receipt, PackageIdentity, source and engine checks stay
+in the ordinary admission path.
+
+Foundation may display `/private/var/...` as `/var/...`. Observed file URLs
+must resolve to the pinned physical resource; display spelling alone supplies
+no identity. The actor uses this comparison for pre-launch admission, running
+app selection, incarnation, window guards and cleanup. Attachments emit the
+admitted physical declaration. Profile fields use bounded absolute lexical
+component containment only, without profile/store filesystem access. H retains
+profile no-follow, integrity, environment and process-ownership obligations.
+A failed root/app admission retains bounded declared/physical path diagnostics
+and the configuration digest, with no environment or profile content.
+
+The first hosted attempt at Q1412 (run41223240327/job124602097842) failed before
+`ui.launch()` at the compound URL guard. Its operands were not retained. An
+owned local Foundation probe reproduces the spelling defect, but does not
+prove the hosted cause. Preserve Q1412, interface erratum SHA256
+`d30aa21b7b648912db9ca4df4356e132fd2740ceaf73a29f6659fdaec2bb0d0e`
+and the original failed 53-file episode as historical evidence. No UI state gained
+qualification; launch/input/PNG remain uncaptured and input completion unknown.
+This repair is local source preparation pending the same bounded affected
+review, root nomination and H's matching observer/source-hash update.
+
 ## Local preparation checks
 
 ```sh
-NAC342_PRODUCT_SOURCE_ROOT=<clean-exact-P-checkout> NAC342_SWIFT_POLICY_PROOF=1 \
+NAC342_PRODUCT_SOURCE_ROOT=<clean-exact-P-checkout> NAC342_SWIFT_POLICY_PROOF=1 NAC342_SWIFT_PATH_PROOF=1 \
   python3 -B -m unittest discover -s desktop/macos/startup_xctest -p 'test_*.py' -v
 swiftc -frontend -parse desktop/macos/startup_xctest/StartupJourneys.swift
 ```
@@ -211,10 +243,15 @@ because the opt-in Swift proof compiles a tiny Foundation-only CLI. It extracts
 the exact production `StartupConsolePolicy` source block from this helper and
 runs the same31 supplied fixture observations as Python and immutable H's
 existing policy, including omitted/false/true/malformed flags and missing
-positive observations. It performs no live console observation or GUI action.
+positive observations. The path proof extracts the actual `StartupPaths`
+block and exercises physical declarations, verified `/var` URL observations,
+spaces, emitted paths, missing/wrong-type resources, lexical/containment/layout
+failures, declared symlinks and same-path resource replacement. Its temporary
+files are inert fixtures; missing profile/store leaves are never inspected.
+These proofs perform no live console observation or GUI action.
 The normal package tests use tiny synthetic non-executable artifacts and P's
 real owner validator; they require the separate nominated P checkout. Missing
-P or no Swift opt-in is an explicit skipped proof, not a passing substitute.
+P or either Swift opt-in is an explicit skipped proof, not a passing substitute.
 
 No new dependency, workflow, SDK install, app/engine change, project generation,
 PR publication, actual UI execution, or live-provider request is performed by

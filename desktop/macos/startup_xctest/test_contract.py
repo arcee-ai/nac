@@ -123,6 +123,151 @@ FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: resul
         self.assertEqual(json.loads(result.stdout), [policy_result(row) for row in cases])
 
 
+@unittest.skipUnless(os.environ.get('NAC342_SWIFT_PATH_PROOF') == '1', 'Foundation/Darwin path proof not requested')
+class PathTests(unittest.TestCase):
+    """Compile the actual policy; fixtures contain inert files, never app code."""
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory(prefix='nac342-path-policy-unit-')
+        cls.addClassCleanup(cls.temporary.cleanup)
+        source = Path(__file__).with_name('StartupJourneys.swift').read_text()
+        policy = source.split('// BEGIN PATH POLICY', 1)[1].split('\n', 1)[1].split('// END PATH POLICY', 1)[0]
+        driver = '''
+let rows = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [[String: Any]]
+let results: [[String: Any]] = rows.map { row in
+    do {
+        if let lexical = row["lexical"] as? String {
+            return ["passed": StartupPaths.lexical(lexical)]
+        }
+        let paths = try StartupPaths(root: row["root"] as! String, app: row["app"] as! String)
+        if let replace = row["replace"] as? String {
+            let target = replace == "root" ? paths.root.path : replace == "app" ? paths.app.path : paths.native.path
+            try FileManager.default.moveItem(atPath: target, toPath: target + ".retained")
+            if replace != "native" {
+                try FileManager.default.createDirectory(atPath: paths.app.path + "/Contents/MacOS",
+                    withIntermediateDirectories: true)
+            }
+            try Data("inert native fixture".utf8).write(to: URL(fileURLWithPath: paths.native.path))
+        }
+        let bundle = URL(fileURLWithPath: row["bundle"] as! String)
+        let executable = URL(fileURLWithPath: row["executable"] as! String)
+        let resolved = row["resolve_observations"] as? Bool == true
+        try StartupPaths.need(paths.matches(bundle: resolved ? bundle.resolvingSymlinksInPath() : bundle,
+            executable: resolved ? executable.resolvingSymlinksInPath() : executable), "Resource witness differs")
+        try StartupPaths.need(!StartupPaths.observes(URL(string: "https://example.invalid/NAC.app"), resource: paths.app),
+            "Non-file URL accepted")
+        try StartupPaths.need(paths.profiles(home: row["home"] as! String, nac: row["nac"] as! String,
+            workspace: row["workspace"] as! String, store: row["store"] as! String), "Profile declaration escaped")
+        return ["passed": true, "emitted_path": paths.emittedPath, "launch_path": paths.url.path,
+            "observed_bundle": (resolved ? bundle.resolvingSymlinksInPath() : bundle).path,
+            "physical_bundle": StartupPaths.physical(bundle.path) as Any? ?? NSNull()]
+    } catch { return ["passed": false, "reason": error.localizedDescription] }
+}
+FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: results, options: [.sortedKeys]))
+'''
+        file = Path(cls.temporary.name) / 'main.swift'
+        file.write_text('import Foundation\nimport Darwin\n' + policy + driver)
+        cls.runner = Path(cls.temporary.name) / 'path-policy'
+        subprocess.run(['swiftc', '-swift-version', '5', str(file), '-o', str(cls.runner)], check=True, capture_output=True)
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix='nac342-owned-paths-')
+        self.addCleanup(self.directory.cleanup)
+        self.base = Path(self.directory.name).resolve()
+
+    def fixture(self, name):
+        root = self.base / ('nac342-xctest-' + name)
+        app = root / 'Moved app folder with spaces/NAC.app'
+        native = app / 'Contents/MacOS/NACPreview'
+        native.parent.mkdir(parents=True)
+        native.write_bytes(b'inert native fixture')
+        home = root / 'missing home with spaces'
+        return dict(root=str(root), app=str(app), bundle=str(app), executable=str(native),
+                    home=str(home), nac=str(home / 'selected nac'), workspace=str(root / 'missing workspace'),
+                    store=str(home / 'selected nac/dev.db'))
+
+    def run_rows(self, rows):
+        result = subprocess.run([str(self.runner)], input=json.dumps(rows).encode(), check=True, capture_output=True)
+        return json.loads(result.stdout)
+
+    def test_physical_declarations_and_verified_platform_alias_observations(self):
+        row = self.fixture('physical')
+        self.assertTrue(row['root'].startswith('/private/var/'), 'This proof requires the actual macOS temp alias')
+        self.assertTrue(os.path.samefile('/private/var', '/var'))
+        alias = {**row, 'bundle': row['bundle'].replace('/private/var/', '/var/', 1),
+                 'executable': row['executable'].replace('/private/var/', '/var/', 1)}
+        for result in self.run_rows([row, {**row, 'resolve_observations': True}, alias]):
+            self.assertTrue(result['passed'], result)
+            self.assertEqual(result['emitted_path'], row['app'])
+            self.assertEqual(result['launch_path'], row['app'])
+            self.assertEqual(result['physical_bundle'], row['app'])
+        # Verified aliases are observations, never accepted declaration spellings.
+        declared_alias = {key: value.replace('/private/var/', '/var/', 1) for key, value in row.items()}
+        self.assertFalse(self.run_rows([declared_alias])[0]['passed'])
+
+    def test_bounded_absolute_lexical_paths(self):
+        bad = ['', '/', 'relative', '/a/', '//a', '/a//b', '/a/./b', '/a/../b',
+               '/a\0b', '/a\nb', '/a\tb', '/a\x7fb', '/a\u0085b', '/' + 'x' * 4096]
+        results = self.run_rows([{'lexical': value} for value in bad] + [{'lexical': '/a space/b'}])
+        self.assertEqual([row['passed'] for row in results], [False] * len(bad) + [True])
+
+    def test_exact_owned_layout_and_foreign_resource_witnesses(self):
+        row, foreign = self.fixture('owned'), self.fixture('foreign')
+        sibling = self.fixture('owned-sibling')
+        rows = [{**row, 'root': str(self.base / 'unowned')}, {**row, 'app': sibling['app']},
+                {**row, 'app': foreign['app']}, {**row, 'app': row['app'].replace('NAC.app', 'NAC Preview.app')},
+                {**row, 'app': row['root'] + '/nested/Moved app folder with spaces/NAC.app'},
+                {**row, 'bundle': foreign['bundle']}, {**row, 'executable': foreign['executable']}]
+        self.assertEqual([x['passed'] for x in self.run_rows(rows)], [False] * len(rows))
+
+    def test_root_interior_final_and_native_symlink_declarations(self):
+        rows = []
+        for member in ('root', 'interior', 'app', 'native'):
+            row = self.fixture('symlink-' + member)
+            target = Path(row['root'] if member == 'root' else row['app'] if member == 'app'
+                          else row['executable'] if member == 'native' else str(Path(row['app']).parent))
+            retained = target.with_name(target.name + '.retained')
+            target.rename(retained)
+            target.symlink_to(retained, target_is_directory=member != 'native')
+            rows.append(row)
+        self.assertEqual([x['passed'] for x in self.run_rows(rows)], [False] * len(rows))
+
+    def test_missing_and_wrong_type_root_app_and_native(self):
+        rows = []
+        for member in ('root', 'app', 'executable'):
+            for wrong_type in (False, True):
+                row = self.fixture(member + str(wrong_type))
+                target = Path(row[member])
+                if target.is_dir():
+                    shutil.rmtree(target)
+                    if wrong_type:
+                        target.write_bytes(b'wrong type')
+                else:
+                    target.unlink()
+                    if wrong_type:
+                        target.mkdir()
+                rows.append(row)
+        self.assertEqual([x['passed'] for x in self.run_rows(rows)], [False] * len(rows))
+
+    def test_same_path_replacement_cannot_reuse_pinned_resource_identity(self):
+        rows = [{**self.fixture('replaced-' + member), 'replace': member} for member in ('root', 'app', 'native')]
+        self.assertEqual([x['passed'] for x in self.run_rows(rows)], [False] * len(rows))
+
+    def test_profile_declarations_are_component_contained_without_profile_io(self):
+        row = self.fixture('profile')
+        self.assertFalse(Path(row['home']).exists())
+        self.assertTrue(self.run_rows([row])[0]['passed'])  # Missing profile/store leaves are allowed.
+        rows = []
+        for field in ('home', 'nac', 'workspace', 'store'):
+            for value in ('relative', '/foreign', row[field] + '/../escape', row[field] + '//child', row[field] + '\n'):
+                rows.append({**row, field: value})
+        rows += [{**row, 'home': row['root'] + '-sibling/home'},
+                 {**row, 'nac': row['home'] + '-sibling/nac'},
+                 {**row, 'store': row['nac'] + '-sibling/dev.db'}]
+        self.assertEqual([x['passed'] for x in self.run_rows(rows)], [False] * len(rows))
+        self.assertFalse(Path(row['home']).exists())
+
+
 def fixture():
     root = '/private/tmp/nac342-xctest-owned'
     home = root + '/home with spaces'
