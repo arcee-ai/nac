@@ -11,6 +11,7 @@ final class AppQuit {
     private var terminationPending = false
     #if PREVIEW_SMOKE
     private var fixtureStopTimer: Timer?
+    private(set) var smokeQuitRequests = 0
 
     /// Legacy startup/instance fixtures explicitly finish by choosing the real
     /// owned Quit sheet. This never ships or answers an agent permission ask.
@@ -46,6 +47,13 @@ final class AppQuit {
     func childExited(_ launch: UUID) { lifecycle.childExited(launch) }
 
     func shouldTerminate() -> NSApplication.TerminateReply {
+        #if PREVIEW_SMOKE
+        smokeQuitRequests += 1
+        #endif
+        // There is one outstanding AppKit terminateLater handshake. A second
+        // request must not enter another modal termination wait. Only the
+        // original request owns the sheet and its eventual reply.
+        guard !terminationPending else { return .terminateCancel }
         // No complete cross-owner idle projection exists here. Do not infer
         // idle from a parent run: approvals, terminals and uncertain commands
         // remain possible, including while a native startup task is pending.

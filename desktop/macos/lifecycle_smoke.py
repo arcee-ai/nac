@@ -80,6 +80,11 @@ def run_contract(bundle, destination, observer):
                 journey.stage('confirming')
                 fixture.assert_unapproved()
                 journey.command_file('duplicate-quit')
+                # Preserve the original immediate duplicate/Cancel race in the
+                # run case; the other cases prove a duplicate reached the real
+                # delegate while its first confirmation was still outstanding.
+                if scenario != 'run':
+                    journey.stage('duplicate-confirming')
                 journey.command_file('cancel')
                 cancelled = journey.stage('cancelled')
                 assert cancelled['cancel_retained_owners']
@@ -128,6 +133,9 @@ def run_contract(bundle, destination, observer):
                                                                json.loads(journey.output.read_text()).get('owned_engine_pid')), timeout=25)
                         elif not journey.log.closed:
                             journey.log.close()
+                        raw = json.loads(journey.output.read_text()) if journey.output.exists() else {}
+                        wait_for('Owned engine cleanup even after unexpected app exit',
+                                 lambda: engine_settled(moved, raw.get('owned_engine_pid') or raw.get('engine_pid')), timeout=25)
                 finally:
                     fixture.close()
         evidence['passed'] = True

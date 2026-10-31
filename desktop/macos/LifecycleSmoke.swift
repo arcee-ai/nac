@@ -97,6 +97,8 @@ final class LifecycleSmoke {
                 evidence["confirmation_retained_owners"] = true
                 publish(seen.contains("quit-again") ? "reconfirming" : "confirming")
             }
+            if seen.contains("duplicate-quit"), !seen.contains("cancel"), app.quit.smokeQuitRequests >= 2,
+               stage != "duplicate-confirming" { publish("duplicate-confirming") }
             if take("cancel") { app.window.endSheet(sheet, returnCode: .alertFirstButtonReturn) }
             if take("stop") { app.window.endSheet(sheet, returnCode: .alertSecondButtonReturn) }
         }
@@ -153,6 +155,12 @@ final class LifecycleSmoke {
         publish("stopped")
     }
 
+    func willTerminate() {
+        evidence["application_will_terminate"] = true
+        evidence["termination_phase"] = String(describing: app.quit.lifecycle.phase)
+        publish(stage)
+    }
+
     private func take(_ command: String) -> Bool {
         !seen.contains(command) && FileManager.default.fileExists(atPath: control.appendingPathComponent(command).path) &&
             seen.insert(command).inserted
@@ -167,6 +175,7 @@ final class LifecycleSmoke {
         evidence.merge(["stage": next, "scenario": scenario, "app_pid": getpid(), "engine_pid": app.engine.pid,
             "workspace_window_count": NSApp.windows.filter { $0 === app.window }.count,
             "owned_engine_pid": originalPID, "base_url": app.baseURL?.absoluteString ?? "",
+            "quit_delegate_requests": app.quit.smokeQuitRequests,
             "visible_paint_acceptance": false, "trusted_input_acceptance": false,
             "instrumentation": "LIFECYCLE_SMOKE", "sheet_completion": "programmatic AppKit, no OS input events"]) { _, new in new }
         if let receipt = app.engine.receipt {

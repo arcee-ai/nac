@@ -326,6 +326,10 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    #if LIFECYCLE_SMOKE
+    func applicationWillTerminate(_ notification: Notification) { lifecycleSmoke?.willTerminate() }
+    #endif
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         #if LOCAL_APP
         return quit.shouldTerminate()
