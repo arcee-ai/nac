@@ -25,9 +25,13 @@ mod registry;
 mod resources;
 mod tool;
 
+#[cfg(test)]
+mod bundled_tests;
+
 #[cfg(all(test, unix))]
 mod qualification;
 
+pub(crate) use registry::bundled_help_for_prompt;
 pub use registry::SkillRegistry;
 pub use tool::auto_mounts;
 
@@ -72,7 +76,7 @@ mod tests {
     use crate::TEST_ENV_LOCK;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn temp_dir(label: &str) -> PathBuf {
+    pub(super) fn temp_dir(label: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -82,7 +86,7 @@ mod tests {
         path
     }
 
-    struct EnvVarGuard {
+    pub(super) struct EnvVarGuard {
         name: &'static str,
         previous: Option<std::ffi::OsString>,
     }
@@ -106,7 +110,7 @@ mod tests {
         }
     }
 
-    fn isolate_user_skill_env(root: &Path) -> Vec<EnvVarGuard> {
+    pub(super) fn isolate_user_skill_env(root: &Path) -> Vec<EnvVarGuard> {
         let home = root.join("home");
         fs::create_dir_all(&home).unwrap();
         vec![
@@ -116,7 +120,7 @@ mod tests {
         ]
     }
 
-    fn write_skill(root: &Path, name: &str, description: &str, body: &str) -> PathBuf {
+    pub(super) fn write_skill(root: &Path, name: &str, description: &str, body: &str) -> PathBuf {
         let dir = root.join(name);
         fs::create_dir_all(&dir).unwrap();
         fs::write(
@@ -188,7 +192,9 @@ mod tests {
             &PathContext::new(&repo),
         )
         .unwrap();
-        assert!(registry.is_none());
+        let registry = registry.unwrap();
+        assert!(!registry.has_skill("foo"));
+        assert!(registry.has_skill("nac-help"));
     }
 
     #[test]
@@ -277,7 +283,10 @@ mod tests {
             .into_iter()
             .map(|entry| entry.name)
             .collect();
-        assert_eq!(names, vec!["agents-home-skill", "nac-home-skill"]);
+        assert_eq!(
+            names,
+            vec!["agents-home-skill", "nac-help", "nac-home-skill"]
+        );
 
         match original_home {
             Some(value) => unsafe { std::env::set_var("HOME", value) },

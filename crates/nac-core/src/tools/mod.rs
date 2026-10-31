@@ -26,6 +26,7 @@ mod execution_observation;
 pub mod glob;
 pub(crate) mod goal;
 pub mod grep;
+pub(crate) mod guide;
 pub mod kernel;
 mod mcp_adapter;
 pub(crate) mod mutation;
@@ -179,7 +180,8 @@ pub(crate) fn product_context_tool_definitions() -> Vec<ToolDefinition> {
 }
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 17] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 18] = [
+    "nac_guide",
     "read",
     "write",
     "edit",
@@ -207,7 +209,8 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 23] = [
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 24] = [
+    "nac_guide",
     "read",
     "write",
     "edit",
@@ -237,6 +240,7 @@ fn worker_tool_registry(
     image_read: bool,
 ) -> Result<kernel::ToolRegistry, kernel::ToolRegistryError> {
     let registry = kernel::ToolRegistry::builder()
+        .register(guide::GuideTool)
         .register(ReadTool { image_read })
         .register(write::WriteTool)
         .register(edit::EditTool)
@@ -361,6 +365,7 @@ pub fn orchestrator_tool_definitions(
     light: Option<&crate::model::ModelClient>,
 ) -> Vec<ToolDefinition> {
     vec![
+        guide::definition(),
         thread::dispatch_definition(skills, light),
         thread::threads_definition(),
         thread::thread_read_definition(),

@@ -700,8 +700,15 @@ async fn session_skills_route_uses_the_attached_session_registry() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
+    let mut catalog = response_json(response).await;
+    let bundled = catalog.as_array_mut().unwrap().remove(1);
+    assert_eq!(bundled["name"], "nac-help");
+    assert!(bundled["description"]
+        .as_str()
+        .unwrap()
+        .contains("first-party"));
     assert_eq!(
-        response_json(response).await,
+        catalog,
         serde_json::json!([
             {
                 "name": "demo",
@@ -732,7 +739,9 @@ async fn session_skills_route_uses_the_attached_session_registry() {
 
     let response = get_response(app.clone(), &format!("/sessions/{empty_id}/skills"), None).await;
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response_json(response).await, serde_json::json!([]));
+    let catalog = response_json(response).await;
+    assert_eq!(catalog.as_array().unwrap().len(), 1);
+    assert_eq!(catalog[0]["name"], "nac-help");
 
     let response = get_response(app, "/sessions/missing/skills", None).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);

@@ -96,6 +96,18 @@ test("browser binds the same committed bundle and independent drift gate without
   assert.match(makefile, /npm --prefix \$\(WEB_DIR\) run check:api/);
 });
 
+test("release-local guide drift runs before a reusable quality receipt", () => {
+  const stable = workflow("stable-release");
+  const step = stable.jobs["test-workspace"].steps.find(s =>
+    s.run?.split("\n").some(line => line.trim() === "make test-nac-guide"));
+  assert.ok(step, "every-PR workspace quality must check canonical guide source drift");
+  assert.equal(step.if, undefined, "guide drift cannot be conditionally skipped");
+  assert.equal(step["continue-on-error"], undefined);
+  assert.ok(stable.jobs.quality.needs.includes("test-workspace"));
+  assert.match(readFileSync("Makefile", "utf8"), /^test:.*\btest-nac-guide\b/m,
+    "standalone managed full quality must check the same guide sources");
+});
+
 const trustedWrite = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}";
 test("compiler caches isolate job/profile/toolchain and PRs cannot save npm/Cargo/container caches", () => {
   for (const file of ["stable-release", "managed-image", "macos-native"]) {
