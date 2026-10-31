@@ -211,8 +211,9 @@ unknown ownership retains the disposable profile for inspection.
 
 For the separately authorized real-vendor case, set `NAC_STARTUP_REAL_VENDOR=1`
 and `NAC_STARTUP_SCENARIOS=startup-real-arcee` when invoking the same runner.
-It uses the existing ARCEE_API_KEY
-child-environment reference and the ordinary catalog/default model selection.
+It uses the existing ARCEE_API_KEY child-environment reference and selects a
+model listed by the existing authenticated provider discovery through the
+ordinary catalog UI.
 It creates no key preset and verifies `arcee-api` plus the environment variable
 name before sending one text-only prompt through the shared UI. The key is never
 put in arguments or evidence; HOME/NAC_HOME/store remain disposable. This case

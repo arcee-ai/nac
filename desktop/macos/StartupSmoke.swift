@@ -126,6 +126,7 @@ final class StartupSmoke {
         _ = try await js("document.querySelector('input[placeholder=\"/path/to/directory\"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})); return true;")
         try await waitJS("selected working folder", "return document.body.innerText.includes(\(json("Selected: " + workspace)));")
         _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Select' && !b.disabled).click(); return true;")
+        if vendor { try await selectVendorModel() }
         try await waitJS("configured project ready", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create Project' && !b.disabled);")
         _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Create Project' && !b.disabled).click(); return true;")
         try await waitJS("configured local chat", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
@@ -172,6 +173,28 @@ final class StartupSmoke {
     func didStop() {
         evidence["stopped"] = app.engine.pid == 0 && app.engine.receipt == nil
         write()
+    }
+
+    private func selectVendorModel() async throws {
+        let available = try await js("""
+        const response = await fetch('/providers/models', {method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({backend:'arcee-api',api_key_env:'ARCEE_API_KEY'})});
+        if (!response.ok) throw new Error('Existing provider model discovery returned HTTP '+response.status);
+        return (await response.json()).models.map(model => model.id);
+        """) as! [String]
+        guard let model = available.first(where: { $0 == "trinity-large-thinking" }) ?? available.first else {
+            throw DesktopStartupError.message("The existing API credential has no available model for qualification")
+        }
+        evidence["vendor_discovery"] = "existing authenticated /providers/models using environment variable name"
+        evidence["available_model_count"] = available.count
+        evidence["selected_available_model"] = model
+        try await waitJS("ordinary Arcee catalog control", "return [...document.querySelectorAll('button[aria-expanded]')].some(b => b.textContent.includes('Arcee API (Key)'));")
+        _ = try await js("[...document.querySelectorAll('button[aria-expanded]')].find(b => b.textContent.includes('Arcee API (Key)')).click(); return true;")
+        try await waitJS("ordinary model search", "return !!document.querySelector('input[placeholder=\"Search models…\"]');")
+        try await fill("input[placeholder=\"Search models…\"]", model)
+        let selected = "[...document.querySelectorAll('button[data-row]')].find(b => b.textContent.includes(\(json(model))) && b.parentElement.textContent.includes('Arcee API (Key)'))"
+        try await waitJS("available Arcee model row", "return !!(\(selected));")
+        _ = try await js("\(selected).click(); return true;")
     }
 
     private func commandJourney() async throws {
