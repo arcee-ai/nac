@@ -1,3 +1,4 @@
+import { startPackedPresentation } from "./packed-presentation-fixture";
 import { ScriptGate } from "./scripted-provider";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -162,133 +163,136 @@ async function tokens(page: Page, theme: string) {
 
 for (const width of [1440, 768, 390])
   for (const theme of ["dark", "light"]) {
-    test(`full names on navigation ${width} ${theme}`, async ({
-      harness,
-      page,
-      request,
-      context,
-    }, info) => {
-      test.setTimeout(90_000);
-      await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-      await page.setViewportSize({ width, height: 900 });
-      await serveBaseline(page, harness.baseUrl);
-      const project = await createProject(request, harness, { name: "Session name acceptance" });
-      const ids: string[] = [];
-      for (const name of names) {
-        const id = await createSession(request, harness, "direct", project);
-        await rename(request, harness.baseUrl, id, name);
-        ids.push(id);
-      }
-      const fallback = await createSession(request, harness, "direct", project);
-      await page.goto(`${harness.baseUrl}/#/session/${ids[0]}/files`);
-      await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-      await tokens(page, theme);
-      const url = page.url();
-      const mutations: string[] = [];
-      page.on("request", (req) => {
-        if (!["GET", "HEAD"].includes(req.method()) && !req.url().endsWith("/providers/models"))
-          mutations.push(req.url());
-      });
-      if (baseline) {
+    test.describe(`input mode ${width} ${theme}`, () => {
+      test.use({ hasTouch: width < 768 });
+      test(`full names on navigation ${width} ${theme}`, async ({
+        harness,
+        page,
+        request,
+        context,
+      }, info) => {
+        test.setTimeout(90_000);
+        await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+        await page.setViewportSize({ width, height: 900 });
+        await serveBaseline(page, harness.baseUrl);
+        const project = await createProject(request, harness, { name: "Session name acceptance" });
+        const ids: string[] = [];
+        for (const name of names) {
+          const id = await createSession(request, harness, "direct", project);
+          await rename(request, harness.baseUrl, id, name);
+          ids.push(id);
+        }
+        const fallback = await createSession(request, harness, "direct", project);
+        await page.goto(`${harness.baseUrl}/#/session/${ids[0]}/files`);
+        await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
+        await tokens(page, theme);
+        const url = page.url();
+        const mutations: string[] = [];
+        page.on("request", (req) => {
+          if (!["GET", "HEAD"].includes(req.method()) && !req.url().endsWith("/providers/models"))
+            mutations.push(req.url());
+        });
+        if (baseline) {
+          if (width >= 768) {
+            const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+            if (await show.isVisible()) await show.click();
+            await page
+              .locator("[data-sidebar]")
+              .getByRole("button", { name: new RegExp("^Investigate.*Beta") })
+              .hover();
+          }
+          await capture(page, info, `${width}-${theme}`);
+          return;
+        }
+        const heading = page.getByRole("button", {
+          name: `View full name: ${names[0]}`,
+          exact: true,
+        });
+        await viewName(page, heading, names[0]);
+        if (width < 768) {
+          await capture(page, info, `${width}-${theme}`);
+          await heading.tap();
+          await capture(page, info, `full-name-${width}-${theme}`);
+          await page.keyboard.press("Escape");
+        }
         if (width >= 768) {
           const show = page.getByRole("button", { name: "Show sidebar", exact: true });
           if (await show.isVisible()) await show.click();
+          const sidebar = page.locator("[data-sidebar]");
+          for (const name of names.slice(0, 2)) {
+            const row = sidebar.getByRole("button", {
+              name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")},`),
+            });
+            await row.hover();
+            await expect(page.getByRole("tooltip")).toContainText(name);
+            await fits(page, page.locator('[data-slot="tooltip-content"]').last());
+            await capture(page, info, `${width}-${theme}`);
+            await page.keyboard.press("Escape");
+            await expect(page.getByRole("tooltip")).toHaveCount(0);
+            await row.focus();
+            await page.keyboard.press("Tab");
+            await page.keyboard.press("Shift+Tab");
+            await expect(page.getByRole("tooltip")).toContainText(name);
+            await page.keyboard.press("Escape");
+            await viewName(
+              page,
+              row.locator("..").getByRole("button", { name: "View full name", exact: true }),
+              name,
+            );
+          }
+          await page.getByRole("button", { name: "Search chats", exact: true }).click();
+        } else {
+          await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+        }
+        // Both project history and phone navigation consume the same row atom.
+        const navigation = page.getByRole("dialog", {
+          name: width >= 768 ? "Search Chats" : "Menu",
+          exact: true,
+        });
+        const visibleRows = navigation.locator("button[aria-label]").filter({ hasText: names[1] });
+        const row = visibleRows.last();
+        await expect(row).toBeVisible();
+        if (width >= 768) await row.hover();
+        const rowAction = row
+          .locator("..")
+          .getByRole("button", { name: "View full name", exact: true });
+        await viewName(page, rowAction, names[1]);
+        const unbroken = navigation
+          .locator("button[aria-label]")
+          .filter({ hasText: names[2] })
+          .last();
+        if (width >= 768) await unbroken.hover();
+        await viewName(
+          page,
+          unbroken.locator("..").getByRole("button", { name: "View full name", exact: true }),
+          names[2],
+        );
+        const fallbackRow = navigation.getByRole("button", { name: /^New Session(?:,|$)/ }).last();
+        if (width >= 768) await fallbackRow.hover();
+        await viewName(
+          page,
+          fallbackRow.locator("..").getByRole("button", { name: "View full name", exact: true }),
+          "New Session",
+        );
+        await page.keyboard.press("Escape");
+        expect(page.url()).toBe(url);
+        expect(mutations).toEqual([]);
+        // Normal row activation still navigates, including touch-sized navigation.
+        if (width < 768) {
+          await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+          await page
+            .getByRole("button", { name: new RegExp(`^${names[2]}`) })
+            .last()
+            .click();
+        } else {
           await page
             .locator("[data-sidebar]")
-            .getByRole("button", { name: new RegExp("^Investigate.*Beta") })
-            .hover();
+            .getByRole("button", { name: new RegExp(`^${names[2]}`) })
+            .click();
         }
-        await capture(page, info, `${width}-${theme}`);
-        return;
-      }
-      const heading = page.getByRole("button", {
-        name: `View full name: ${names[0]}`,
-        exact: true,
+        await expect(page).toHaveURL(new RegExp(`/session/${ids[2]}/`));
+        expect(fallback).toBeTruthy();
       });
-      await viewName(page, heading, names[0]);
-      if (width < 768) {
-        await capture(page, info, `${width}-${theme}`);
-        await heading.tap();
-        await capture(page, info, `full-name-${width}-${theme}`);
-        await page.keyboard.press("Escape");
-      }
-      if (width >= 768) {
-        const show = page.getByRole("button", { name: "Show sidebar", exact: true });
-        if (await show.isVisible()) await show.click();
-        const sidebar = page.locator("[data-sidebar]");
-        for (const name of names.slice(0, 2)) {
-          const row = sidebar.getByRole("button", {
-            name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")},`),
-          });
-          await row.hover();
-          await expect(page.getByRole("tooltip")).toContainText(name);
-          await fits(page, page.locator('[data-slot="tooltip-content"]').last());
-          await capture(page, info, `${width}-${theme}`);
-          await page.keyboard.press("Escape");
-          await expect(page.getByRole("tooltip")).toHaveCount(0);
-          await row.focus();
-          await page.keyboard.press("Tab");
-          await page.keyboard.press("Shift+Tab");
-          await expect(page.getByRole("tooltip")).toContainText(name);
-          await page.keyboard.press("Escape");
-          await viewName(
-            page,
-            row.locator("..").getByRole("button", { name: "View full name", exact: true }),
-            name,
-          );
-        }
-        await page.getByRole("button", { name: "Search chats", exact: true }).click();
-      } else {
-        await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-      }
-      // Both project history and phone navigation consume the same row atom.
-      const navigation = page.getByRole("dialog", {
-        name: width >= 768 ? "Search Chats" : "Menu",
-        exact: true,
-      });
-      const visibleRows = navigation.locator("button[aria-label]").filter({ hasText: names[1] });
-      const row = visibleRows.last();
-      await expect(row).toBeVisible();
-      if (width >= 768) await row.hover();
-      const rowAction = row
-        .locator("..")
-        .getByRole("button", { name: "View full name", exact: true });
-      await viewName(page, rowAction, names[1]);
-      const unbroken = navigation
-        .locator("button[aria-label]")
-        .filter({ hasText: names[2] })
-        .last();
-      if (width >= 768) await unbroken.hover();
-      await viewName(
-        page,
-        unbroken.locator("..").getByRole("button", { name: "View full name", exact: true }),
-        names[2],
-      );
-      const fallbackRow = navigation.getByRole("button", { name: /^New Session(?:,|$)/ }).last();
-      if (width >= 768) await fallbackRow.hover();
-      await viewName(
-        page,
-        fallbackRow.locator("..").getByRole("button", { name: "View full name", exact: true }),
-        "New Session",
-      );
-      await page.keyboard.press("Escape");
-      expect(page.url()).toBe(url);
-      expect(mutations).toEqual([]);
-      // Normal row activation still navigates, including touch-sized navigation.
-      if (width < 768) {
-        await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-        await page
-          .getByRole("button", { name: new RegExp(`^${names[2]}`) })
-          .last()
-          .click();
-      } else {
-        await page
-          .locator("[data-sidebar]")
-          .getByRole("button", { name: new RegExp(`^${names[2]}`) })
-          .click();
-      }
-      await expect(page).toHaveURL(new RegExp(`/session/${ids[2]}/`));
-      expect(fallback).toBeTruthy();
     });
   }
 
@@ -661,3 +665,55 @@ for (const width of [1440, 390])
     } else await open.tap();
     await expect(page).toHaveURL(new RegExp(`/session/${ids[1]}/`));
   });
+
+test("packed full-name view stays inside the hosted frame and preserves caller styles", async ({
+  harness,
+  page,
+  request,
+  context,
+}) => {
+  test.skip(baseline);
+  test.setTimeout(90_000);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const id = await createSession(request, harness, "direct");
+  await rename(request, harness.baseUrl, id, names[0]);
+  const fixture = await startPackedPresentation(harness, id);
+  try {
+    await page.goto(fixture.baseUrl);
+    const sentinel = page.locator("#sentinel");
+    const caller = () =>
+      sentinel.evaluate((node) => {
+        const style = node.ownerDocument.defaultView!.getComputedStyle(node);
+        return {
+          color: style.color,
+          padding: style.padding,
+          radius: style.borderRadius,
+          font: style.fontFamily,
+        };
+      });
+    const before = await caller();
+    const url = page.url();
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      const heading = page.getByRole("button", {
+        name: `View full name: ${names[0]}`,
+        exact: true,
+      });
+      await viewName(page, heading, names[0]);
+      expect(await caller()).toEqual(before);
+      expect(page.url()).toBe(url);
+      await heading.click();
+      const dialog = page.getByRole("dialog", { name: "Full session name", exact: true });
+      expect(await dialog.evaluate((node) => !!node.closest("[data-nac-overlays]"))).toBe(true);
+      expect(await page.locator("body").getAttribute("inert")).toBeNull();
+      await sentinel.focus();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeVisible();
+      await dialog.focus();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+    }
+  } finally {
+    await fixture.stop();
+  }
+});

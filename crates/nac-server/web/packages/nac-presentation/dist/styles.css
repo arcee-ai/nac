@@ -4719,13 +4719,6 @@
     }
   }
 
-@media not all and (min-width: 40rem) {
-    [data-nac-runtime]:is(.max-sm\:\!size-11), [data-nac-runtime] .max-sm\:\!size-11 {
-      width: calc(var(--spacing) * 11) !important;
-      height: calc(var(--spacing) * 11) !important;
-    }
-  }
-
 @media (min-width: 40rem) {
     [data-nac-runtime]:is(.sm\:col-span-2), [data-nac-runtime] .sm\:col-span-2 {
       grid-column: span 2 / span 2;
@@ -8093,6 +8086,53 @@
 
   100% {
     background-position: -200% 0;
+  }
+}
+/* Pointer capability and viewport width are independent on tablets and hybrid devices. */
+@media (hover: none) {
+  [data-nac-runtime]:is(.session-name-row-actions), [data-nac-runtime] .session-name-row-actions {
+    clip-path: none;
+    white-space: normal;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    position: static;
+    overflow: visible;
+  }
+
+  [data-nac-runtime]:is(.session-name-tab-actions), [data-nac-runtime] .session-name-tab-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  [data-nac-runtime]:is(.session-name-tab-trigger), [data-nac-runtime] .session-name-tab-trigger {
+    padding-right: 56px;
+  }
+}
+
+@media (max-width: 767.98px) {
+  [data-nac-runtime]:is(.btn.btn-icon.btn-tertiary.session-name-view), [data-nac-runtime] .btn.btn-icon.btn-tertiary.session-name-view {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  [data-nac-runtime]:is(.session-name-tab-actions .btn.btn-icon.btn-tertiary.session-name-view), [data-nac-runtime] .session-name-tab-actions .btn.btn-icon.btn-tertiary.session-name-view {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  [data-nac-runtime]:is(.chat-session-tab:hover .session-name-tab-trigger),
+  [data-nac-runtime] .chat-session-tab:hover .session-name-tab-trigger,
+  [data-nac-runtime]:is(.chat-session-tab:focus-within .session-name-tab-trigger),
+  [data-nac-runtime] .chat-session-tab:focus-within .session-name-tab-trigger {
+    padding-right: 64px;
+  }
+}
+
+@media (hover: none) and (max-width: 767.98px) {
+  [data-nac-runtime]:is(.session-name-tab-trigger), [data-nac-runtime] .session-name-tab-trigger {
+    padding-right: 64px;
   }
 }
 /* Dense navigation uses the conversation recipe's quiet surfaces and 4px rhythm.

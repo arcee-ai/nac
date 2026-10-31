@@ -109,6 +109,7 @@ const ProjectButton: React.FC<ProjectButtonProps> & {
         <div
           className={cn(
             "items-center shrink-0",
+            orphan && "session-name-row-actions",
             isMobile
               ? "flex gap-3"
               : "flex gap-1.5 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only",

@@ -330,7 +330,7 @@ function ya(e, t) {
 			title: "View full name",
 			"aria-haspopup": "dialog",
 			onClick: o,
-			className: "shrink-0 max-sm:!size-11",
+			className: "session-name-view shrink-0",
 			children: /* @__PURE__ */ Y(B, { iconName: R.Info })
 		}),
 		overlay: n ? /* @__PURE__ */ Y("div", {
@@ -725,7 +725,7 @@ var Qa = /* @__PURE__ */ function(e) {
 				]
 			})),
 			/* @__PURE__ */ X("div", {
-				className: r("flex flex-wrap max-w-full justify-end items-center shrink-0", f ? "gap-3" : "gap-1 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden"),
+				className: r("session-name-row-actions flex flex-wrap max-w-full justify-end items-center shrink-0", f ? "gap-3" : "gap-1 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden"),
 				children: [y.action, m]
 			}),
 			y.overlay
@@ -810,7 +810,7 @@ var co = (e) => Math.round(e * .7 / 4) * 4, lo = (e) => Math.round(e / 10), uo =
 		type: u,
 		"aria-label": d ?? (s ? `${e}, ${s}` : e),
 		"aria-current": t ? "page" : void 0,
-		className: "flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-1 py-1 pl-2 pr-2 group-hover:pr-14 group-has-[:focus-visible]:pr-14",
+		className: "session-name-tab-trigger flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-1 py-1 pl-2 pr-2 group-hover:pr-14 group-has-[:focus-visible]:pr-14",
 		...f,
 		children: [
 			/* @__PURE__ */ Y(xa, {
@@ -835,7 +835,7 @@ var co = (e) => Math.round(e * .7 / 4) * 4, lo = (e) => Math.round(e / 10), uo =
 		children: [
 			p.hint(g),
 			/* @__PURE__ */ X("div", {
-				className: "absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto",
+				className: "session-name-tab-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto",
 				children: [p.action, c ? /* @__PURE__ */ Y(v, {
 					variant: O.Tertiary,
 					size: z.Small,
@@ -4017,7 +4017,7 @@ var td = ({ id: e, size: t = 40, isRunning: n = !1, className: i = "", ...a }) =
 				children: o
 			}) : null,
 			c || p ? /* @__PURE__ */ X("div", {
-				className: r("items-center shrink-0", s ? "flex gap-3" : "flex gap-1.5 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only"),
+				className: r("items-center shrink-0", p && "session-name-row-actions", s ? "flex gap-3" : "flex gap-1.5 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only"),
 				children: [p ? f.action : null, c]
 			}) : null,
 			p ? f.overlay : null

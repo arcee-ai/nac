@@ -87,7 +87,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
       type={type}
       aria-label={ariaLabel ?? (behaviorLabel ? `${title}, ${behaviorLabel}` : title)}
       aria-current={active ? "page" : undefined}
-      className="flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-1 py-1 pl-2 pr-2 group-hover:pr-14 group-has-[:focus-visible]:pr-14"
+      className="session-name-tab-trigger flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-1 py-1 pl-2 pr-2 group-hover:pr-14 group-has-[:focus-visible]:pr-14"
       {...props}
     >
       <ChatSessionLeadingMark
@@ -128,7 +128,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
       )}
     >
       {disclosure.hint(tabButton)}
-      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto">
+      <div className="session-name-tab-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto">
         {disclosure.action}
         {onDismiss ? (
           <Button

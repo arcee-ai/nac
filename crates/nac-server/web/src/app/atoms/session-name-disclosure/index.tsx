@@ -1,3 +1,4 @@
+import "./session-name-disclosure.css";
 import { useState, type ReactElement } from "react";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip";
@@ -71,7 +72,7 @@ export function useSessionNameDisclosure(name: string, description?: string) {
         title="View full name"
         aria-haspopup="dialog"
         onClick={view}
-        className="shrink-0 max-sm:!size-11"
+        className="session-name-view shrink-0"
       >
         <Icon iconName={IconName.Info} />
       </Button>
@@ -81,6 +82,7 @@ export function useSessionNameDisclosure(name: string, description?: string) {
         <Modal
           open
           title="Full session name"
+          className="session-name-dialog"
           onClose={() => setOpen(false)}
           onNavigate={() => setOpen(false)}
           footer={
