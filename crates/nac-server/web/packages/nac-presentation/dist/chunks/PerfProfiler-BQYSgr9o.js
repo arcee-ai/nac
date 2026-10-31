@@ -14652,10 +14652,11 @@ function GR(e) {
 var KR = class {
 	resolve;
 	closed;
+	inspect;
 	adapter;
 	version = 0;
-	constructor(e, t) {
-		this.resolve = e, this.closed = t;
+	constructor(e, t, n) {
+		this.resolve = e, this.closed = t, this.inspect = n;
 	}
 	connect(e) {
 		return this.adapter = e, this.version++, () => {
@@ -14669,13 +14670,20 @@ var KR = class {
 		if (this.closed()) throw Error("Product runtime is closed.");
 		let t = this.adapter, n = ++this.version, r = t?.currentSession(), i = e.session_id ?? null;
 		if (t && i !== r) throw Error("Product destination belongs to another session.");
-		let a = await this.resolve(e);
-		if (this.closed() || this.version !== n || this.adapter !== t || t && t.currentSession() !== r) throw Error("Product view changed; inspect capabilities again.");
-		if (a.build.build_id !== e.expected_build_id || (a.session_id ?? null) !== i || a.target.destination !== e.destination) throw Error("Product destination binding changed.");
-		let o = a.target.availability === "available" && !!t?.open(a);
+		let a = await this.resolve(e), o = () => {
+			if (this.closed() || this.version !== n || this.adapter !== t || t && t.currentSession() !== r) throw Error("Product view changed; inspect capabilities again.");
+		};
+		if (o(), a.build.build_id !== e.expected_build_id || (a.session_id ?? null) !== i || a.target.destination !== e.destination) throw Error("Product destination binding changed.");
+		if (!t || a.target.availability !== "available" || !this.inspect) return {
+			...a,
+			opened: !1
+		};
+		let s = await this.inspect(i);
+		if (o(), s.build.build_id !== e.expected_build_id || (s.session?.session_id ?? null) !== i || !s.destinations.some((t) => t.destination === e.destination && t.availability === "available")) throw Error("Product destination binding changed.");
+		let c = t.open(a);
 		return {
 			...a,
-			opened: o
+			opened: c
 		};
 	}
 }, qR = class extends Error {
@@ -18056,7 +18064,7 @@ var dG = /* @__PURE__ */ new WeakMap(), fG = 0, pG = class {
 	eventSource;
 	constructor(e) {
 		if (e.scope.endpoint !== e.client.transport.endpoint) throw Error("Runtime scope must name the supplied client's endpoint.");
-		this.queryClient = new h({ defaultOptions: {
+		if (this.queryClient = new h({ defaultOptions: {
 			queries: {
 				queryKeyHashFn: (e) => g([this.id, ...e]),
 				staleTime: 3e4,
@@ -18065,7 +18073,8 @@ var dG = /* @__PURE__ */ new WeakMap(), fG = 0, pG = class {
 				refetchOnWindowFocus: !1
 			},
 			mutations: { retry: !1 }
-		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.stores = nG(e.storage, e.scope, e.draftStorage), this.scope = Object.freeze({ ...e.scope }), this.client = new az(new sG(e.client.transport, this.controller.signal)), this.api = kz(this.client, this.scope.profile === "standalone" ? this.scope.incarnation : void 0), this.productNavigation = new KR(this.api.resolveProductDestination, this.isClosed), this.eventSource = e.eventSource, dG.set(this.queryClient, this);
+		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.stores = nG(e.storage, e.scope, e.draftStorage), this.scope = Object.freeze({ ...e.scope }), this.client = new az(new sG(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
+		this.api = kz(this.client, e.standaloneServingIncarnation), this.productNavigation = new KR(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, dG.set(this.queryClient, this);
 	}
 	isClosed = () => this.controller.signal.aborted;
 	subscribe = (e) => (this.listeners.add(e), () => {

@@ -287,3 +287,48 @@ test("an old standalone document cannot read or navigate a replacement server at
   await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toBeVisible();
   expect(harness.provider.requests).toHaveLength(0);
 });
+
+test("a delayed old navigation receipt cannot open UI after a same-origin serving replacement", async ({
+  harness,
+  request,
+  page,
+}) => {
+  test.skip(process.env.NAC_PRODUCT_CONTEXT_BASELINE === "1", "Pending receipt fence is new");
+  const id = await createSession(request, harness, "direct");
+  const origin = harness.baseUrl;
+  let release!: () => void;
+  const pending = new Promise<void>((done) => {
+    release = done;
+  });
+  let arrived!: () => void;
+  const accepted = new Promise<void>((done) => {
+    arrived = done;
+  });
+  await page.route("**/product-destinations/resolve", async (route) => {
+    const response = await route.fetch();
+    expect(response.status()).toBe(200);
+    arrived();
+    await pending;
+    await route.fulfill({ response });
+  });
+  try {
+    await page.goto(`${origin}/#/session/${id}/insights`);
+    await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
+    const context = await inspect(page, false);
+    await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
+    await accepted;
+    await harness.restart("1", undefined, true);
+    expect(harness.baseUrl).toBe(origin);
+    release();
+    await expect(context.getByRole("alert")).toHaveText(
+      "Product context is unavailable. Reload this app to reconnect to its current serving instance.",
+    );
+    await expect(
+      context.getByRole("button", { name: "Open MCP settings", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toHaveCount(0);
+    expect(harness.provider.requests).toHaveLength(0);
+  } finally {
+    release();
+  }
+});

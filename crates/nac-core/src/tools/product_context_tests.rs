@@ -87,3 +87,40 @@ fn product_tools_cannot_deserialize_another_session_or_arbitrary_control() {
     assert_eq!(resources[0].resource, "current");
     assert!(resources[0].hard_denial.is_some());
 }
+
+#[test]
+fn product_native_wire_schema_matches_each_exact_destination_decoder() {
+    use crate::tools::kernel::NativeTool;
+    use serde_json::json;
+    let read = ReadTool.definition().function.parameters;
+    assert_eq!(read["properties"], json!({}));
+    assert_eq!(read["required"], json!([]));
+    assert_eq!(read["additionalProperties"], false);
+    assert!(ReadTool.decode(json!({})).is_ok());
+    let schema = ResolveTool.definition().function.parameters;
+    assert_eq!(
+        schema["required"],
+        json!(["destination", "expected_build_id"])
+    );
+    assert_eq!(schema["properties"].as_object().unwrap().len(), 2);
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(
+        schema["properties"]["destination"]["enum"],
+        json!(ProductDestination::ALL)
+    );
+    for destination in ProductDestination::ALL {
+        let input = json!({"destination": destination, "expected_build_id": "build"});
+        assert!(ResolveTool.decode(input).is_ok());
+        assert!(ResolveTool
+            .decode(json!({"destination": destination, "expected_build_id": null}))
+            .is_err());
+    }
+    assert!(ResolveTool
+        .decode(json!({"destination": null, "expected_build_id": "build"}))
+        .is_err());
+    assert!(ResolveTool
+        .decode(json!({"destination": "mcp-settings"}))
+        .is_err());
+    // Neither native tool advertises optional fields or operation variants for
+    // a provider to fill with null/unused values. Required strings stay strict.
+}

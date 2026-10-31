@@ -16,11 +16,16 @@ import { ProductNavigationProvider } from "./ProductNavigationProvider";
 import { useProductNavigationOwner } from "./context";
 
 const state = vi.hoisted(() => ({ mobile: false, known: true }));
-vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => state.mobile }));
+vi.mock("@/app/hooks/useMediaQuery", () => ({
+  useIsMobile: () => state.mobile,
+}));
 vi.mock("@/app/services/queries", () => ({
   useSessionSummary: () => ({
     data: state.known
-      ? { summary: { session_id: "session", behavior: "direct" }, lineage: null }
+      ? {
+          summary: { session_id: "session", behavior: "direct" },
+          lineage: null,
+        }
       : undefined,
   }),
   useSessionSnapshot: (_: string | null, options: { enabled?: boolean }) => {
@@ -78,16 +83,32 @@ const context: ProductContext = {
   source: "installed-runtime",
   managed: false,
   features: [],
-  session: null,
+  session: {
+    session_id: "session",
+    behavior: "direct",
+    execution_backend: "local",
+    skills: { availability: "unknown", count: null },
+    tools: { availability: "unknown", count: null },
+  },
   mcp: { availability: "disabled", count: 0 },
-  destinations: [
-    {
-      destination: "mcp-settings",
-      label: "MCP settings",
-      availability: "available",
-      steps: "Open MCP.",
-    },
-  ],
+  destinations: (
+    [
+      "mcp-settings",
+      "configurations",
+      "model-authentication",
+      "ssh-configurations",
+      "projects",
+      "session-files",
+      "session-terminal",
+      "session-subagents",
+      "session-history",
+    ] satisfies ProductDestination[]
+  ).map((destination) => ({
+    destination,
+    label: destination === "mcp-settings" ? "MCP settings" : destination,
+    availability: "available",
+    steps: "Open the existing UI.",
+  })),
 };
 const opened: ReturnType<typeof createNativeRuntime>[] = [];
 afterEach(() => {
@@ -213,8 +234,10 @@ it("does not attach or navigate for an unavailable current session", async () =>
   const { open, fetch } = fixture();
   expect((await open("session-files")).opened).toBe(false);
   expect(screen.getByTestId("route").textContent).toBe("/session/session/insights");
-  expect(fetch.mock.calls).toHaveLength(1);
-  expect(String(fetch.mock.calls[0]?.[0])).toContain("/product-destinations/resolve");
+  expect(fetch.mock.calls.map(([url]) => String(url).split("?")[0])).toEqual([
+    "/runtime/product-destinations/resolve",
+    "/runtime/product-context",
+  ]);
 });
 
 it("hides cached facts and destinations when a replacement serving incarnation rejects the read", async () => {

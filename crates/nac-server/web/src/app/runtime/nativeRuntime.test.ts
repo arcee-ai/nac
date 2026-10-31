@@ -14,9 +14,14 @@ const scope: NativeRuntimeScope = {
   release: "release",
 };
 const opened: ReturnType<typeof createNativeRuntime>[] = [];
-function runtime(fetch: typeof globalThis.fetch = vi.fn(), binding = scope) {
+function runtime(
+  fetch: typeof globalThis.fetch = vi.fn(),
+  binding = scope,
+  standaloneServingIncarnation?: string,
+) {
   const instance = createNativeRuntime({
     scope: binding,
+    standaloneServingIncarnation,
     client: createNacClient({ endpoint: binding.endpoint, fetch }),
   });
   opened.push(instance);
@@ -347,11 +352,15 @@ it("copies immutable asset URLs without sharing caller-owned mutable options", (
 
 it("binds only standalone product requests to their bootstrapped serving incarnation", async () => {
   const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({}));
-  const standalone = runtime(fetch, {
-    ...scope,
-    profile: "standalone",
-    incarnation: "serving-instance",
-  });
+  const standalone = runtime(
+    fetch,
+    {
+      ...scope,
+      profile: "standalone",
+      incarnation: "serving-instance",
+    },
+    "serving-instance",
+  );
   await standalone.api.getProductContext("session");
   await standalone.api.resolveProductDestination({
     destination: "mcp-settings",
@@ -375,4 +384,81 @@ it("binds only standalone product requests to their bootstrapped serving incarna
   expect(new Headers(fetch.mock.calls[3]?.[1]?.headers).has("x-nac-presentation-incarnation")).toBe(
     false,
   );
+});
+
+it("does not use a delayed old resolution as authority after the serving instance changes", async () => {
+  let release!: (response: Response) => void;
+  const receipt = new Promise<Response>((done) => {
+    release = done;
+  });
+  let arrived!: () => void;
+  const accepted = new Promise<void>((done) => {
+    arrived = done;
+  });
+  let replaced = false;
+  const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+    if (init?.method === "POST") {
+      arrived();
+      return receipt;
+    }
+    if (replaced)
+      return Response.json(
+        { error: "Product context unavailable; presentation changed" },
+        { status: 404 },
+      );
+    throw new Error("Unexpected request before resolution");
+  });
+  const instance = runtime(
+    fetch,
+    {
+      ...scope,
+      profile: "standalone",
+      incarnation: "old-serving-instance",
+    },
+    "old-serving-instance",
+  );
+  const open = vi.fn().mockReturnValue(true);
+  instance.productNavigation.connect({ currentSession: () => "session", open });
+  const action = instance.productNavigation.open({
+    destination: "mcp-settings",
+    session_id: "session",
+    expected_build_id: "build",
+  });
+  await accepted;
+  replaced = true;
+  release(
+    Response.json({
+      build: {
+        product_version: "1.0.0",
+        build_id: "build",
+        track: "dev",
+        source_revision: "revision",
+      },
+      session_id: "session",
+      target: {
+        destination: "mcp-settings",
+        availability: "available",
+        label: "MCP settings",
+        steps: "Open MCP",
+      },
+      opened: false,
+    }),
+  );
+  await expect(action).rejects.toThrow();
+  expect(open).not.toHaveBeenCalled();
+});
+
+it("omits a synthetic unbootstrapped Vite incarnation instead of sending a false serving fence", async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({}));
+  const vite = runtime(fetch, { ...scope, profile: "standalone", incarnation: "standalone" });
+  await vite.api.getProductContext(null);
+  await vite.api.resolveProductDestination({
+    destination: "mcp-settings",
+    expected_build_id: "build",
+  });
+  expect(
+    fetch.mock.calls.every(
+      ([, init]) => !new Headers(init?.headers).has("x-nac-presentation-incarnation"),
+    ),
+  ).toBe(true);
 });

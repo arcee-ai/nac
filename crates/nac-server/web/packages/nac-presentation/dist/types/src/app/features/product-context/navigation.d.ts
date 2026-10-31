@@ -1,4 +1,4 @@
-import type { ProductNavigationRequest, ProductNavigationResolution } from "../../types/api";
+import type { ProductContext, ProductNavigationRequest, ProductNavigationResolution } from "../../types/api";
 export interface ProductNavigationAdapter {
     currentSession(): string | null;
     open(resolution: ProductNavigationResolution): boolean;
@@ -8,9 +8,10 @@ export interface ProductNavigationAdapter {
 export declare class ProductNavigation {
     private readonly resolve;
     private readonly closed;
+    private readonly inspect?;
     private adapter;
     private version;
-    constructor(resolve: (request: ProductNavigationRequest) => Promise<ProductNavigationResolution>, closed: () => boolean);
+    constructor(resolve: (request: ProductNavigationRequest) => Promise<ProductNavigationResolution>, closed: () => boolean, inspect?: ((sessionId: string | null) => Promise<ProductContext>) | undefined);
     connect(adapter: ProductNavigationAdapter): () => void;
     close(): void;
     /** Call only for a user click or explicit navigation request. The server

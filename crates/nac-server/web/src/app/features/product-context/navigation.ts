@@ -1,4 +1,8 @@
-import type { ProductNavigationRequest, ProductNavigationResolution } from "@/app/types/api";
+import type {
+  ProductContext,
+  ProductNavigationRequest,
+  ProductNavigationResolution,
+} from "@/app/types/api";
 
 export interface ProductNavigationAdapter {
   currentSession(): string | null;
@@ -15,6 +19,7 @@ export class ProductNavigation {
       request: ProductNavigationRequest,
     ) => Promise<ProductNavigationResolution>,
     private readonly closed: () => boolean,
+    private readonly inspect?: (sessionId: string | null) => Promise<ProductContext>,
   ) {}
 
   connect(adapter: ProductNavigationAdapter): () => void {
@@ -44,20 +49,38 @@ export class ProductNavigation {
     if (adapter && requestedSession !== session)
       throw new Error("Product destination belongs to another session.");
     const resolution = await this.resolve(request);
-    if (
-      this.closed() ||
-      this.version !== version ||
-      this.adapter !== adapter ||
-      (adapter && adapter.currentSession() !== session)
-    )
-      throw new Error("Product view changed; inspect capabilities again.");
+    const assertView = () => {
+      if (
+        this.closed() ||
+        this.version !== version ||
+        this.adapter !== adapter ||
+        (adapter && adapter.currentSession() !== session)
+      )
+        throw new Error("Product view changed; inspect capabilities again.");
+    };
+    assertView();
     if (
       resolution.build.build_id !== request.expected_build_id ||
       (resolution.session_id ?? null) !== requestedSession ||
       resolution.target.destination !== request.destination
     )
       throw new Error("Product destination binding changed.");
-    const opened = resolution.target.availability === "available" && !!adapter?.open(resolution);
+    if (!adapter || resolution.target.availability !== "available" || !this.inspect)
+      return { ...resolution, opened: false };
+    // A delayed receipt is not current serving authority. Re-read through this
+    // runtime's bound transport before acting, then fence this additional await.
+    const current = await this.inspect(requestedSession);
+    assertView();
+    if (
+      current.build.build_id !== request.expected_build_id ||
+      (current.session?.session_id ?? null) !== requestedSession ||
+      !current.destinations.some(
+        (target) =>
+          target.destination === request.destination && target.availability === "available",
+      )
+    )
+      throw new Error("Product destination binding changed.");
+    const opened = adapter.open(resolution);
     return { ...resolution, opened };
   }
 }

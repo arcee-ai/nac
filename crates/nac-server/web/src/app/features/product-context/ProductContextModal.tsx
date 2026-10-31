@@ -14,7 +14,7 @@ export function ProductContextModal({
   onClose(): void;
 }) {
   const runtime = useNativeRuntime();
-  const { data, isPending, error } = useProductContext(sessionId, open);
+  const { data, isPending, error, refetch } = useProductContext(sessionId, open);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
   const navigate = async (target: ProductDestinationInfo) => {
@@ -33,6 +33,7 @@ export function ProductContextModal({
       });
       if (!result.opened) setMessage(result.target.steps);
     } catch {
+      await refetch();
       setMessage(
         "This destination is unavailable or the view changed. Close and inspect capabilities again.",
       );

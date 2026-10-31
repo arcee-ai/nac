@@ -35,6 +35,8 @@ export interface NativePresentationAssets {
 
 export interface NativeRuntimeOptions {
   scope: NativeRuntimeScope;
+  /** Parsed embedded-server bootstrap only; an optional rejection fence, never authentication. */
+  standaloneServingIncarnation?: string;
   client: Pick<NacClient, "transport">;
   storage?: Pick<Storage, "getItem" | "setItem">;
   /** Text drafts only; caller owns tab lifetime and complete identity scoping. */
@@ -86,13 +88,17 @@ export class NativeRuntime {
     this.client = new NacClient(
       new LifetimeTransport(options.client.transport, this.controller.signal),
     );
-    this.api = createNativeApi(
-      this.client,
-      this.scope.profile === "standalone" ? this.scope.incarnation : undefined,
-    );
+    if (
+      options.standaloneServingIncarnation !== undefined &&
+      (this.scope.profile !== "standalone" ||
+        options.standaloneServingIncarnation !== this.scope.incarnation)
+    )
+      throw new Error("Product serving binding must match the standalone runtime scope.");
+    this.api = createNativeApi(this.client, options.standaloneServingIncarnation);
     this.productNavigation = new ProductNavigation(
       this.api.resolveProductDestination,
       this.isClosed,
+      this.api.getProductContext,
     );
     this.eventSource = options.eventSource;
     runtimes.set(this.queryClient, this);

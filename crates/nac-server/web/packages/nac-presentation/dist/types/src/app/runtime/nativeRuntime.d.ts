@@ -22,6 +22,8 @@ export interface NativePresentationAssets {
 }
 export interface NativeRuntimeOptions {
     scope: NativeRuntimeScope;
+    /** Parsed embedded-server bootstrap only; an optional rejection fence, never authentication. */
+    standaloneServingIncarnation?: string;
     client: Pick<NacClient, "transport">;
     storage?: Pick<Storage, "getItem" | "setItem">;
     /** Text drafts only; caller owns tab lifetime and complete identity scoping. */

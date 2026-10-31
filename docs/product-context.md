@@ -59,3 +59,10 @@ incarnation on these two product endpoints. A replacement router rejects an old
 document even at the same origin and build. This optional rejection-only header
 is not authentication; headless clients omit it, and embedded consumers retain
 their caller-owned gateway/runtime binding. Failed context reads hide cached facts.
+
+Before opening a resolved destination, the attached browser reads current passive
+context through the same bound transport and rechecks its view lifetime. This
+rejects a successful old receipt delayed across a same-origin server restart.
+Unbootstrapped Vite development proxies these endpoints without inventing a
+serving fence. Production browser acceptance uses the embedded bootstrap; hosted
+callers retain their existing gateway fences.

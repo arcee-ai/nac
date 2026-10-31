@@ -1,5 +1,5 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { Cr as r, Fn as i, Ln as a, Pr as o, Vi as s, Wi as c, hi as l, l as u, mi as d, n as f, r as p, t as m, u as h, wr as g, xr as _ } from "./PerfProfiler-CE-k5J6_.js";
+import { Cr as r, Fn as i, Ln as a, Pr as o, Vi as s, Wi as c, hi as l, l as u, mi as d, n as f, r as p, t as m, u as h, wr as g, xr as _ } from "./PerfProfiler-BQYSgr9o.js";
 import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-rX7C_D5H.js";
 import { Suspense as T, isValidElement as E, memo as D, use as O, useState as k } from "react";
 import { useQueryClient as ee } from "@tanstack/react-query";
@@ -6521,7 +6521,7 @@ function fl(e, t) {
 var pl = /* @__PURE__ */ e({ default: () => Al }), ml = [Uc], hl = /* @__PURE__ */ new Map();
 function gl(e) {
 	let t = hl.get(e);
-	return t || (t = import("./markdown-mathjax-CD4m6Pmr.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-BuGu2tzy.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...ml, n],
 		rehype: [t(e)]
 	})), hl.set(e, t)), t;
