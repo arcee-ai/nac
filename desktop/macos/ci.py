@@ -20,6 +20,7 @@ from ci_support import (console_state, export_evidence, qualify_toolchain, redac
 from smoke import cleanup_failed_case
 from ci_qualifications import require_checkout, require_full_preview, require_workspace, select_target
 from ci_xctest import run_terminal
+from ci_instances import audit_cleanup as audit_instances, qualify as qualify_instances, retain_receipt as retain_instances
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DEADLINE = time.monotonic() + 30 * 60  # Leave ten job minutes for cleanup/upload.
@@ -41,7 +42,7 @@ def native_report(args, log):
     return json.loads(result.stdout)
 
 
-def run(args, log, timeout, cwd=ROOT):
+def run(args, log, timeout, cwd=ROOT, cleanup_grace=5):
     """Drain output continuously, retaining at most 256 KiB, including failure."""
     print(f'Native CI phase: {log.name}', flush=True)
     chunks = deque(maxlen=64)
@@ -61,7 +62,7 @@ def run(args, log, timeout, cwd=ROOT):
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGTERM)
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=cleanup_grace)
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
@@ -149,6 +150,7 @@ def main():
     target = None
     target_module = None
     workspace = False
+    instances = False
     def interrupt(signum, _frame):
         raise RuntimeError(f'CI interrupted by signal {signum}')
     for signum in (signal.SIGTERM, signal.SIGINT):
@@ -159,6 +161,7 @@ def main():
         if args.qualification:
             target = select_target(args.qualification)
             workspace = target['suite'] == 'workspace'
+            instances = target['suite'] == 'instances'
             if not args.source_root or args.source_root.is_symlink():
                 raise RuntimeError('Qualification requires an explicit non-symlink source root')
             source_root = args.source_root.resolve()
@@ -208,7 +211,7 @@ def main():
             os.environ.pop(key, None)
         os.environ.update(NAC_SOURCE_REVISION=report['source_sha'], NAC_BUILD_TRACK='dev',
                           NAC_BUILD_ID='dev-' + report['source_sha'])
-        if target:
+        if target and not instances:
             # Reuse the exact source owner's failure cleanup, including its
             # native fixture helpers. No code is copied into that checkout.
             sys.path.insert(0, str(source_root / 'desktop/macos'))
@@ -219,64 +222,67 @@ def main():
                 target_module = loaded
             finally:
                 sys.path.pop(0)
-        run(['bash', 'desktop/macos/preview.sh', 'build'], raw / 'ordinary-build.log', 900, cwd=source_root)
-        ordinary = raw / 'NAC Development Preview.app/Contents/MacOS/NACPreview'
-        report['ordinary_build'] = {}
-        for name, binary in [('native_sha256', ordinary), ('engine_sha256', ordinary.parent.parent / 'Resources/nac-web')]:
-            with binary.open('rb') as stream:
-                report['ordinary_build'][name] = hashlib.file_digest(stream, 'sha256').hexdigest()
-        engine = ordinary.parent.parent / 'Resources/nac-web'
-        report['engine_version'] = command([str(engine), '--version'])
-        if report['source_sha'][:12] not in report['engine_version']:
-            raise RuntimeError('Built engine does not identify the exact target source')
-        identity_file = ordinary.parent.parent / 'Resources/engine-identity.json'
-        if identity_file.exists():
-            report['engine_identity'] = json.loads(identity_file.read_text())
-            if report['engine_identity'].get('source_revision') != report['source_sha']:
-                raise RuntimeError('Bundled engine manifest belongs to another target source')
-        symbols = command(['/usr/bin/nm', str(ordinary)])
-        if any(name in symbols for name in ('PreviewSmoke', 'CITerminal')) or '--smoke-output' in command(['/usr/bin/strings', str(ordinary)]):
-            raise RuntimeError('Ordinary app contains test instrumentation')
-        os.environ['NAC_MAC_SKIP_ENGINE_BUILD'] = '1'
-        if workspace:
-            # The source owner requires a private exact-source binary; the
-            # dedicated runner owns it throughout this complete job.
-            cargo_target = Path(os.environ.get('CARGO_TARGET_DIR', source_root / 'target'))
-            if not cargo_target.is_absolute():
-                cargo_target = source_root / cargo_target
-            os.environ['NAC_MAC_ENGINE'] = str(cargo_target / 'debug/nac-web')
-            run(['bash', 'desktop/macos/workspace.sh'], raw / 'workspace-build.log', 120, cwd=source_root)
-            app = raw / 'NAC Development Preview.app'
-            run(['python3', '-B', 'desktop/macos/smoke.py', str(app), str(raw / 'evidence')],
-                raw / 'app-journeys.log', 800, cwd=source_root)
-            run(['python3', '-B', 'desktop/macos/workspace.py', 'run', str(app), str(raw / 'workspace'),
-                 '--baseline', str(raw / 'evidence/summary.json')], raw / 'workspace-journeys.log', 650, cwd=source_root)
-            episodes = {name: json.loads((raw / 'workspace' / (name + '.json')).read_text())
-                        for name in ('workspace-direct', 'workspace-legacy')}
-            report['target_suite'] = require_workspace(json.loads((raw / 'workspace/matrix.json').read_text()),
-                episodes, json.loads((raw / 'evidence/summary.json').read_text()), target)
+        if instances:
+            report.update(qualify_instances(raw, source_root, target, run, command, native_report))
         else:
-            run(['bash', 'desktop/macos/preview.sh', 'smoke'], raw / 'app-journeys.log', 800, cwd=source_root)
-        if target and not workspace:
-            report['target_suite'] = require_full_preview(json.loads((raw / 'evidence/summary.json').read_text()),
-                target, report['ordinary_build']['engine_sha256'])
-        elif not target:
-            report['xctest'] = run_terminal(raw, run, command)
-            report['trusted_terminal'] = require_terminal_evidence(json.loads((raw / 'evidence/ci-terminal-xctest.json').read_text()))
-        helper = raw / 'native-image-reader'
-        run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIEvidence.swift',
-             '-o', str(helper)], raw / 'image-reader-build.log', 90)
-        images = [raw / 'evidence' / name for name in ('streamed-chat.png', 'persisted-chat.png')]
-        report['images'] = native_report([str(helper), *map(str, images)], raw / 'image-reader.log')
-        if workspace:
-            for kind, name in [('workspace', 'workspace-direct-rich-chat.png'), ('approval', 'workspace-direct-approval.png'),
-                               ('chat', 'workspace-legacy-legacy.png')]:
-                flags = [] if kind == 'chat' else ['--' + kind]
-                report.setdefault('workspace_images', []).extend(native_report(
-                    [str(helper), *flags, str(raw / 'workspace' / name)], raw / (kind + '-image-reader.log')))
-        if not target:
-            report['terminal_image'] = native_report([str(helper), '--terminal', str(raw / 'evidence/trusted-terminal.png')],
-                                                      raw / 'terminal-image-reader.log')
+            run(['bash', 'desktop/macos/preview.sh', 'build'], raw / 'ordinary-build.log', 900, cwd=source_root)
+            ordinary = raw / 'NAC Development Preview.app/Contents/MacOS/NACPreview'
+            report['ordinary_build'] = {}
+            for name, binary in [('native_sha256', ordinary), ('engine_sha256', ordinary.parent.parent / 'Resources/nac-web')]:
+                with binary.open('rb') as stream:
+                    report['ordinary_build'][name] = hashlib.file_digest(stream, 'sha256').hexdigest()
+            engine = ordinary.parent.parent / 'Resources/nac-web'
+            report['engine_version'] = command([str(engine), '--version'])
+            if report['source_sha'][:12] not in report['engine_version']:
+                raise RuntimeError('Built engine does not identify the exact target source')
+            identity_file = ordinary.parent.parent / 'Resources/engine-identity.json'
+            if identity_file.exists():
+                report['engine_identity'] = json.loads(identity_file.read_text())
+                if report['engine_identity'].get('source_revision') != report['source_sha']:
+                    raise RuntimeError('Bundled engine manifest belongs to another target source')
+            symbols = command(['/usr/bin/nm', str(ordinary)])
+            if any(name in symbols for name in ('PreviewSmoke', 'CITerminal')) or '--smoke-output' in command(['/usr/bin/strings', str(ordinary)]):
+                raise RuntimeError('Ordinary app contains test instrumentation')
+            os.environ['NAC_MAC_SKIP_ENGINE_BUILD'] = '1'
+            if workspace:
+                # The source owner requires a private exact-source binary; the
+                # dedicated runner owns it throughout this complete job.
+                cargo_target = Path(os.environ.get('CARGO_TARGET_DIR', source_root / 'target'))
+                if not cargo_target.is_absolute():
+                    cargo_target = source_root / cargo_target
+                os.environ['NAC_MAC_ENGINE'] = str(cargo_target / 'debug/nac-web')
+                run(['bash', 'desktop/macos/workspace.sh'], raw / 'workspace-build.log', 120, cwd=source_root)
+                app = raw / 'NAC Development Preview.app'
+                run(['python3', '-B', 'desktop/macos/smoke.py', str(app), str(raw / 'evidence')],
+                    raw / 'app-journeys.log', 800, cwd=source_root)
+                run(['python3', '-B', 'desktop/macos/workspace.py', 'run', str(app), str(raw / 'workspace'),
+                     '--baseline', str(raw / 'evidence/summary.json')], raw / 'workspace-journeys.log', 650, cwd=source_root)
+                episodes = {name: json.loads((raw / 'workspace' / (name + '.json')).read_text())
+                            for name in ('workspace-direct', 'workspace-legacy')}
+                report['target_suite'] = require_workspace(json.loads((raw / 'workspace/matrix.json').read_text()),
+                    episodes, json.loads((raw / 'evidence/summary.json').read_text()), target)
+            else:
+                run(['bash', 'desktop/macos/preview.sh', 'smoke'], raw / 'app-journeys.log', 800, cwd=source_root)
+            if target and not workspace:
+                report['target_suite'] = require_full_preview(json.loads((raw / 'evidence/summary.json').read_text()),
+                    target, report['ordinary_build']['engine_sha256'])
+            elif not target:
+                report['xctest'] = run_terminal(raw, run, command)
+                report['trusted_terminal'] = require_terminal_evidence(json.loads((raw / 'evidence/ci-terminal-xctest.json').read_text()))
+            helper = raw / 'native-image-reader'
+            run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIEvidence.swift',
+                 '-o', str(helper)], raw / 'image-reader-build.log', 90)
+            images = [raw / 'evidence' / name for name in ('streamed-chat.png', 'persisted-chat.png')]
+            report['images'] = native_report([str(helper), *map(str, images)], raw / 'image-reader.log')
+            if workspace:
+                for kind, name in [('workspace', 'workspace-direct-rich-chat.png'), ('approval', 'workspace-direct-approval.png'),
+                                   ('chat', 'workspace-legacy-legacy.png')]:
+                    flags = [] if kind == 'chat' else ['--' + kind]
+                    report.setdefault('workspace_images', []).extend(native_report(
+                        [str(helper), *flags, str(raw / 'workspace' / name)], raw / (kind + '-image-reader.log')))
+            if not target:
+                report['terminal_image'] = native_report([str(helper), '--terminal', str(raw / 'evidence/trusted-terminal.png')],
+                                                          raw / 'terminal-image-reader.log')
         report['quartz_end'] = native_report([str(gui_helper)], raw / 'gui-reader-end.log')
         console_end = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'], timeout=15)
         report['console_end'] = require_console(console_end, os.getuid(), report['quartz_end'])
@@ -290,6 +296,11 @@ def main():
         raise
     finally:
         try:
+            if instances:
+                try:
+                    report['instance_cleanup'] = audit_instances(raw / 'instances', raw / 'instance-dev/InstanceObservation', command)
+                finally:
+                    report['instance_receipt_index'] = retain_instances(raw / 'instances')
             report['cleanup'] = settle_apps(raw, cleanup=target_module.cleanup_failed_case if target_module else None,
                                             extra_alive=getattr(target_module, 'alive', None), workspace=workspace)
         except Exception as error:
