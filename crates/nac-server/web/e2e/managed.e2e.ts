@@ -1,4 +1,4 @@
-import type { Page, Route } from "@playwright/test";
+import type { Page, Route, TestInfo } from "@playwright/test";
 
 import { expect, test } from "./harness";
 
@@ -518,6 +518,44 @@ test("keeps GitHub Connected visible after device authorization and reopening se
   });
 });
 
+function linkBrowserEvents(page: Page) {
+  const events: Array<Record<string, unknown>> = [];
+  page.on("console", (message) => {
+    events.push({ kind: "console", type: message.type(), text: message.text() });
+  });
+  page.on("pageerror", (error) => {
+    events.push({ kind: "pageerror", message: error.message });
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 400) {
+      const url = new URL(response.url());
+      events.push({
+        kind: "http-error",
+        origin: url.origin,
+        path: url.pathname,
+        status: response.status(),
+      });
+    }
+  });
+  page.on("requestfailed", (request) => {
+    const url = new URL(request.url());
+    events.push({
+      kind: "requestfailed",
+      origin: url.origin,
+      path: url.pathname,
+      error: request.failure()?.errorText,
+    });
+  });
+  return events;
+}
+
+async function attachLinkBrowserEvents(info: TestInfo, events: Array<Record<string, unknown>>) {
+  await info.attach("external-link browser console and request failures", {
+    body: JSON.stringify(events, null, 2),
+    contentType: "application/json",
+  });
+}
+
 for (const viewport of [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
@@ -527,6 +565,7 @@ for (const viewport of [
     page,
     context,
   }, info) => {
+    const browserEvents = linkBrowserEvents(page);
     await page.setViewportSize(viewport);
     await installManagedDouble(page);
     let starts = 0;
@@ -549,7 +588,15 @@ for (const viewport of [
       }),
     );
     await page.goto(harness.baseUrl);
-    await openManagedHost(page);
+    if (viewport.width === 390) {
+      await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+      await page
+        .getByRole("navigation", { name: "Menu", exact: true })
+        .getByRole("button", { name: "Manage Host", exact: true })
+        .click();
+    } else {
+      await openManagedHost(page);
+    }
     await page.getByRole("button", { name: "GitHub", exact: true }).click();
     const panel = page.getByTestId("managed-github-settings");
     await panel.getByRole("button", { name: "Connect GitHub", exact: true }).click();
@@ -564,6 +611,7 @@ for (const viewport of [
       ).document.fonts.ready.then(() => undefined),
     );
     const screenshot = info.outputPath(`github-retry-${viewport.width}.png`);
+    await attachLinkBrowserEvents(info, browserEvents);
     await page.screenshot({ path: screenshot, animations: "disabled", caret: "hide" });
     await info.attach(`github-retry-${viewport.width}.png`, {
       path: screenshot,
@@ -589,6 +637,7 @@ for (const viewport of [
     await expect.poll(() => canceled).toBe(1);
     await expect(panel.getByRole("button", { name: "Connect GitHub", exact: true })).toBeVisible();
     expect(starts).toBe(1);
+    await attachLinkBrowserEvents(info, browserEvents);
   });
 }
 

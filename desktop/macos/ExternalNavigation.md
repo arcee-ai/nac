@@ -87,9 +87,28 @@ rendered shared MCP catalog Docs anchor supplies the target-blank positive
 control: the existing embedded `exa` entry in `nac-core::mcp::library` has
 `docs_url=https://docs.exa.ai/reference/exa-mcp`. The fixture opens the real MCP
 picker and selects that template to render `EntryDetails`; it never saves,
-connects or authenticates the template. Catalog/thumbnail fixture isolation
-and independent Rust catalog warmup must be settled before running this lane;
-selecting a local template alone does not establish offline operation.
+connects or authenticates the template. The recording-only document observer
+stubs only same-origin GET `/mcp_library/library` without a query. It mirrors
+that embedded entry exactly, except `icon_url=null` suppresses its remote
+thumbnail. The returned recording facts name this stub and its request count.
+
+Only the exact `external-navigation-recording` PREVIEW_SMOKE scenario constructs
+child `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` values pointing at the existing
+loopback `FixtureProvider`, with `NO_PROXY=127.0.0.1,localhost,::1`. The provider
+rejects CONNECT with its existing 404-and-close response; it never forwards.
+Other preview scenarios and the normal app receive no added proxy values. The
+host environment is unchanged. A bounded smoke-only rejection counter retains
+no destinations or headers. The recording requires an actual rejection and zero
+inference; absent observation fails coverage.
+
+`RecordingFenceTests.swift` is a separate CLI control using the real identified
+normal Rust child, its actual catalog warmup, and that same existing provider.
+It verifies exact/other/malformed scenario construction, embedded catalog
+fallback after actual CONNECT rejection, zero inference, child reaping and
+identity retirement, provider stop and private-profile removal. It creates no
+AppKit app, window, WKWebView or browser. This characterizes the catalog client's
+use of this fence; neither proxy environment variables nor the document stub
+establish universal offline or vendor-egress qualification.
 These revised source expectations require new source-qualified WK evidence;
 the failed original run is not superseded by unit tests or compilation.
 

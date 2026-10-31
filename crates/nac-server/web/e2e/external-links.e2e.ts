@@ -1,8 +1,46 @@
 import type { APIRequestContext, Locator, Page, TestInfo } from "@playwright/test";
 
-import { createDirectSession, expect, test, type EmbeddedHarness } from "./harness";
+import { createDirectSession, createProject, expect, test, type EmbeddedHarness } from "./harness";
 
 test.use({ orchestration: "0" });
+
+function linkBrowserEvents(page: Page) {
+  const events: Array<Record<string, unknown>> = [];
+  page.on("console", (message) => {
+    events.push({ kind: "console", type: message.type(), text: message.text() });
+  });
+  page.on("pageerror", (error) => {
+    events.push({ kind: "pageerror", message: error.message });
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 400) {
+      const url = new URL(response.url());
+      events.push({
+        kind: "http-error",
+        origin: url.origin,
+        path: url.pathname,
+        status: response.status(),
+      });
+    }
+  });
+  page.on("requestfailed", (request) => {
+    const url = new URL(request.url());
+    events.push({
+      kind: "requestfailed",
+      origin: url.origin,
+      path: url.pathname,
+      error: request.failure()?.errorText,
+    });
+  });
+  return events;
+}
+
+async function attachLinkBrowserEvents(info: TestInfo, events: Array<Record<string, unknown>>) {
+  await info.attach("external-link browser console and request failures", {
+    body: JSON.stringify(events, null, 2),
+    contentType: "application/json",
+  });
+}
 
 async function linkSession(request: APIRequestContext, harness: EmbeddedHarness) {
   const id = await createDirectSession(request, harness);
@@ -13,7 +51,14 @@ async function linkSession(request: APIRequestContext, harness: EmbeddedHarness)
   return id;
 }
 
-async function capture(page: Page, info: TestInfo, name: string, controls: Locator) {
+async function capture(
+  page: Page,
+  info: TestInfo,
+  name: string,
+  controls: Locator,
+  events: Array<Record<string, unknown>>,
+) {
+  await attachLinkBrowserEvents(info, events);
   await page.evaluate(() =>
     (
       globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
@@ -48,12 +93,13 @@ for (const viewport of [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
 ]) {
-  test(`header links retain browser navigation and commands at ${viewport.width}`, async ({
+  test(`header component browser navigation and existing mobile menu at ${viewport.width}`, async ({
     harness,
     page,
     context,
     request,
   }, info) => {
+    const browserEvents = linkBrowserEvents(page);
     await page.setViewportSize(viewport);
     await context.route("https://github.com/arcee-ai/nac**", (route) =>
       route.fulfill({
@@ -68,23 +114,72 @@ for (const viewport of [
         json: { ...(await response.json()), store_path: "/fixture/store.db" },
       });
     });
-    const id = await linkSession(request, harness);
-    await page.goto(`${harness.baseUrl}/#/session/${id}/threads`);
-    const menu = page.getByRole("button", { name: "Open the menu", exact: true });
-    await menu.click();
-    const docs = page.getByRole("link", { name: "See docs", exact: true });
-    const repository = page.getByRole("link", { name: "See Github", exact: true });
-    await expect(docs).toBeVisible();
-    await expect(repository).toBeVisible();
-    await capture(page, info, `header-links-${viewport.width}.png`, docs.locator(".."));
-    await followWithKeyboard(page, docs, "https://github.com/arcee-ai/nac#readme");
-    await expect(menu).toBeVisible();
-    await menu.click();
-    await followWithKeyboard(page, repository, "https://github.com/arcee-ai/nac");
-    await menu.click();
-    await page.getByRole("button", { name: "Configurations", exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/#/session/${id}/threads$`));
+    const projectId = await createProject(request, harness, { name: "External links fixture" });
+    // HeaderMenu is mounted while this real project route awaits ownership.
+    // This is transient/loading component evidence, not a session-header journey.
+    const sessionList = (url: URL) =>
+      url.origin === new URL(harness.baseUrl).origin && url.pathname === "/sessions" && !url.search;
+    let releaseSessionList = () => {};
+    const sessionListGate = new Promise<void>((resolve) => {
+      releaseSessionList = resolve;
+    });
+    const deferredResponses: Promise<void>[] = [];
+    await page.route(sessionList, (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const response = (async () => {
+        const response = await route.fetch();
+        await sessionListGate;
+        await route.fulfill({ response });
+      })();
+      deferredResponses.push(response);
+      return response;
+    });
+    try {
+      await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+      const menu = page.getByRole("button", { name: "Open the menu", exact: true });
+      await menu.click();
+      const docs = page.getByRole("link", { name: "See docs", exact: true });
+      const repository = page.getByRole("link", { name: "See Github", exact: true });
+      if (viewport.width < 768) {
+        await expect(docs).toHaveCount(0);
+        await expect(repository).toHaveCount(0);
+      } else {
+        await expect(docs).toBeVisible();
+        await expect(repository).toBeVisible();
+      }
+      expect(deferredResponses.length).toBeGreaterThan(0);
+      await capture(
+        page,
+        info,
+        `header-component-${viewport.width}.png`,
+        viewport.width < 768
+          ? page.getByRole("navigation", { name: "Menu", exact: true })
+          : docs.locator(".."),
+        browserEvents,
+      );
+      if (viewport.width < 768) {
+        await page.getByRole("button", { name: "Configurations", exact: true }).click();
+        await expect(
+          page.getByRole("dialog", { name: "Configurations", exact: true }),
+        ).toBeVisible();
+        await expect(page).toHaveURL(new RegExp(`/#/project/${projectId}$`));
+        await attachLinkBrowserEvents(info, browserEvents);
+        return;
+      }
+      await followWithKeyboard(page, docs, "https://github.com/arcee-ai/nac#readme");
+      await expect(menu).toBeVisible();
+      await menu.click();
+      await followWithKeyboard(page, repository, "https://github.com/arcee-ai/nac");
+      await menu.click();
+      await page.getByRole("button", { name: "Configurations", exact: true }).click();
+      await expect(page.getByRole("dialog", { name: "Configurations", exact: true })).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`/#/project/${projectId}$`));
+      await attachLinkBrowserEvents(info, browserEvents);
+    } finally {
+      releaseSessionList();
+      await page.unroute(sessionList);
+      await Promise.all(deferredResponses);
+    }
   });
 
   test(`provider browser auto-open and explicit retry share one attempt at ${viewport.width}`, async ({
@@ -93,6 +188,7 @@ for (const viewport of [
     context,
     request,
   }, info) => {
+    const browserEvents = linkBrowserEvents(page);
     await page.setViewportSize(viewport);
     const destination = "https://auth-fixture.example.test/device";
     await context.route("https://auth-fixture.example.test/**", (route) =>
@@ -139,7 +235,7 @@ for (const viewport of [
       return route.fulfill({ json: { state: "pending" } });
     });
     const id = await linkSession(request, harness);
-    await page.goto(`${harness.baseUrl}/#/session/${id}/threads`);
+    await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
     await page.getByRole("button", { name: "Session settings", exact: true }).click();
     const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
     await settings.getByRole("button", { name: "Provider connections", exact: true }).click();
@@ -154,7 +250,7 @@ for (const viewport of [
       await popup.evaluate(() => (globalThis as unknown as { opener: unknown }).opener === null),
     ).toBe(true);
     await popup.close();
-    await capture(page, info, `provider-retry-${viewport.width}.png`, accounts);
+    await capture(page, info, `provider-retry-${viewport.width}.png`, accounts, browserEvents);
     await followWithKeyboard(
       page,
       accounts.getByRole("link", { name: "Open Arcee", exact: true }),
@@ -167,7 +263,8 @@ for (const viewport of [
       accounts.getByRole("button", { name: "Sign in with Arcee", exact: true }),
     ).toBeVisible();
     expect(starts).toBe(1);
-    await expect(page).toHaveURL(new RegExp(`/#/session/${id}/threads$`));
+    await expect(page).toHaveURL(new RegExp(`/#/session/${id}/insights$`));
+    await attachLinkBrowserEvents(info, browserEvents);
   });
 
   test(`session failure presents the wallet fix as a browser link at ${viewport.width}`, async ({
@@ -176,6 +273,7 @@ for (const viewport of [
     context,
     request,
   }, info) => {
+    const browserEvents = linkBrowserEvents(page);
     await page.setViewportSize(viewport);
     const destination = "https://platform.arcee.ai/api/wallet";
     await context.route(destination, (route) =>
@@ -185,14 +283,25 @@ for (const viewport of [
       }),
     );
     const id = await linkSession(request, harness);
-    await page.route(`${harness.baseUrl}/sessions/${id}`, (route) =>
-      route.fulfill({ status: 402, json: { error: "insufficient_credits" } }),
+    await page.route(
+      (url) => url.origin === new URL(harness.baseUrl).origin && url.pathname === `/sessions/${id}`,
+      (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({ status: 402, json: { error: "insufficient_credits" } })
+          : route.fallback(),
     );
-    await page.goto(`${harness.baseUrl}/#/session/${id}/threads`);
+    await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
     const wallet = page.getByRole("link", { name: "Open wallet", exact: true });
     await expect(wallet).toBeVisible();
-    await capture(page, info, `error-wallet-${viewport.width}.png`, wallet.locator(".."));
+    await capture(
+      page,
+      info,
+      `error-wallet-${viewport.width}.png`,
+      wallet.locator(".."),
+      browserEvents,
+    );
     await followWithKeyboard(page, wallet, destination);
-    await expect(page).toHaveURL(new RegExp(`/#/session/${id}/threads$`));
+    await expect(page).toHaveURL(new RegExp(`/#/session/${id}/insights$`));
+    await attachLinkBrowserEvents(info, browserEvents);
   });
 }

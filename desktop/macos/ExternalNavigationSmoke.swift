@@ -14,6 +14,28 @@ final class ExternalNavigationSmoke {
     static func installObserver(in view: WKWebView) {
         let source = #"""
         (()=>{
+          // Exact mirror of embedded_library_entries():exa in
+          // crates/nac-core/src/mcp/library.rs. Only its remote thumbnail is omitted.
+          const catalog={entries:[{id:'exa',name:'exa',
+            description:'Web search and content extraction built for agents.',
+            transport:'streamable_http',url:'https://mcp.exa.ai/mcp',auth:'optional_header',
+            auth_header:'x-api-key',auth_hint:'Exa API key; anonymous use is rate limited',
+            docs_url:'https://docs.exa.ai/reference/exa-mcp',icon_url:null,
+            category:'Web Search',tags:['search','web','research','crawl']}]};
+          const fixture=window.__nacRecordingCatalog={requests:0,thumbnailOmitted:true,
+            source:'embedded_library_entries:exa'};
+          const fetch=window.fetch.bind(window);
+          window.fetch=(input,init)=>{
+            const request=input instanceof Request?input:null;
+            const url=new URL(request?request.url:input,location.href);
+            const method=(init?.method??request?.method??'GET').toUpperCase();
+            if(url.origin===location.origin&&url.pathname==='/mcp_library/library'&&!url.search&&method==='GET'){
+              fixture.requests++;
+              return Promise.resolve(new Response(JSON.stringify(catalog),{status:200,
+                headers:{'Content-Type':'application/json'}}));
+            }
+            return fetch(input,init);
+          };
           const state=window.__nacPagePopupObservation={installed:true,requested:false,done:false,calls:0,
             supported:!!navigator.userActivation,activeAtFire:null,stickyAtFire:null,returnedNull:null};
           addEventListener('nac-recording-page-popup',()=>{
@@ -53,6 +75,9 @@ final class ExternalNavigationSmoke {
         guard app.webView.configuration.preferences.javaScriptCanOpenWindowsAutomatically == false,
               app.commands.smokeExternalNavigation["recording_only"] as? Bool == true else {
             throw PreviewError.message("Recording fixture did not retain the user-interaction popup gate")
+        }
+        try await wait("actual Rust catalog warmup reached the recording fence") {
+            self.app.provider.rejectedConnectCount > 0
         }
         let foreign = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         guard app.commands.currentDocument(in: foreign) == nil else {
@@ -141,6 +166,12 @@ final class ExternalNavigationSmoke {
         try await wait("rendered shared MCP Docs anchor") {
             try await self.js("const a=[...document.querySelectorAll('[role=dialog][aria-label=\"MCP servers\"] a')].find(a=>a.textContent.trim()==='Docs');return !!a&&a.href==='https://docs.exa.ai/reference/exa-mcp'&&a.target==='_blank'&&a.getBoundingClientRect().width>0&&a.getBoundingClientRect().height>0") as? Bool == true
         }
+        let catalogStub = try await js("return window.__nacRecordingCatalog") as? [String: Any] ?? [:]
+        guard let catalogRequests = catalogStub["requests"] as? Int, (1...8).contains(catalogRequests),
+              catalogStub["source"] as? String == "embedded_library_entries:exa",
+              catalogStub["thumbnailOmitted"] as? Bool == true else {
+            throw PreviewError.message("Recording catalog stub did not serve the existing Exa template")
+        }
         _ = try await js("[...document.querySelectorAll('[role=dialog][aria-label=\"MCP servers\"] a')].find(a=>a.textContent.trim()==='Docs').click();return true")
         try await wait("one rendered target-blank link action") { self.actions.count > beforeBlank }
         try record("rendered-target-blank-link", expected: expected, origin: origin)
@@ -152,10 +183,10 @@ final class ExternalNavigationSmoke {
         let beforeReload = expected
         let invalidations = app.commands.smokeDocumentInvalidations
         app.webView.reload()
-        return try await finish(beforeReload: beforeReload, popupCount: popupCount, invalidations: invalidations)
+        return try await finish(beforeReload: beforeReload, popupCount: popupCount, invalidations: invalidations, catalogStub: catalogStub)
     }
 
-    private func finish(beforeReload: NativeDocumentBinding, popupCount: Int, invalidations: Int) async throws -> [String: Any] {
+    private func finish(beforeReload: NativeDocumentBinding, popupCount: Int, invalidations: Int, catalogStub: [String: Any]) async throws -> [String: Any] {
         try await wait("replacement document") {
             guard let binding = self.app.commands.currentDocument(in: self.app.webView) else { return false }
             return binding.document != beforeReload.document
@@ -166,6 +197,9 @@ final class ExternalNavigationSmoke {
             throw PreviewError.message("Reload changed launch/view correlation")
         }
         let final = app.commands.smokeExternalNavigation
+        guard app.provider.rejectedConnectCount > 0, app.provider.responseCount == 0 else {
+            throw PreviewError.message("Recording fence observation or zero-inference coverage missing")
+        }
         guard actions.allSatisfy({ $0["system_opener_invoked"] as? Bool == false }) else {
             throw PreviewError.message("Recording fixture invoked a system browser")
         }
@@ -174,7 +208,9 @@ final class ExternalNavigationSmoke {
         return ["scope": "actual-app/system-WK; recording-opener-only", "system_browser_qualified": false,
                 "physical_input_qualified": false, "page_owned_nonactivated_popup_blocked": true,
                 "native_api_other_popup_delivered_and_blocked": true, "rendered_target_blank_link_recorded": true,
-                "rendered_link_source": "embedded-mcp-exa-docs",
+                "rendered_link_source": "embedded-mcp-exa-docs", "catalog_stub": catalogStub,
+                "recording_child_proxy": ["existing_fixture_rejected_connects": app.provider.rejectedConnectCount,
+                    "inference_count": app.provider.responseCount, "universal_offline_qualified": false],
                 "main_frame_link_recorded": true, "subframe_and_script_rejected": true,
                 "synthetic_popup_observations": popupCount, "reload_rebound_document": true,
                 "foreign_view_rejected": true, "retirement_current_document_nil": true, "navigation": final]
@@ -195,6 +231,7 @@ final class ExternalNavigationSmoke {
             "current_document_present": binding != nil, "same_document": binding == expected,
             "same_scheme": app.webView.url?.scheme == origin.scheme,
             "same_host": app.webView.url?.host == origin.host, "same_port": app.webView.url?.port == origin.port,
+            "provider_connect_rejections": app.provider.rejectedConnectCount,
             "application_active": NSApp.isActive, "window_key": app.window.isKeyWindow,
             "window_visible": app.window.isVisible, "window_minimized": app.window.isMiniaturized,
             "webview_hidden": app.webView.isHidden, "navigation": app.commands.smokeExternalNavigation,
