@@ -28,6 +28,7 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
 
     func navigationStarted(in view: WKWebView, navigation: WKNavigation?) { bridge?.navigationStarted(in: view, navigation: navigation) }
     func navigationFinished(in view: WKWebView, navigation: WKNavigation?) { bridge?.navigationFinished(in: view, navigation: navigation) }
+    func currentDocument(in view: WKWebView) -> NativeDocumentBinding? { bridge?.currentDocument(in: view) }
     func allows(_ action: WKNavigationAction, in view: WKWebView) -> Bool {
         bridge?.allows(action, in: view) ?? false
     }
