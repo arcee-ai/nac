@@ -11,7 +11,11 @@ const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export async function startHostedFixture(
   harness: EmbeddedHarness,
   sessionId: string,
-  options: { build?: (output: string) => Promise<void>; twoInstances?: boolean } = {},
+  options: {
+    build?: (output: string) => Promise<void>;
+    twoInstances?: boolean;
+    nameSurfaces?: boolean;
+  } = {},
 ) {
   const output = path.join(harness.runRoot, "hosted-dist");
   if (options.build) await options.build(output);
@@ -44,7 +48,13 @@ export async function startHostedFixture(
         "Set-Cookie",
         "native_fixture=fixture-only; Path=/fixture-runtime; HttpOnly; SameSite=Strict",
       );
-      response.end(JSON.stringify({ sessionId, twoInstances: options.twoInstances ?? false }));
+      response.end(
+        JSON.stringify({
+          sessionId,
+          twoInstances: options.twoInstances ?? false,
+          nameSurfaces: options.nameSurfaces ?? false,
+        }),
+      );
       return;
     }
     if (url.pathname.startsWith("/fixture-runtime/")) {

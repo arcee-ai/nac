@@ -1341,6 +1341,10 @@
     max-height: 520px;
   }
 
+[data-nac-runtime]:is(.max-h-\[calc\(100dvh-16px\)\]), [data-nac-runtime] .max-h-\[calc\(100dvh-16px\)\] {
+    max-height: calc(100dvh - 16px);
+  }
+
 [data-nac-runtime]:is(.max-h-\[calc\(100vh-2rem\)\]), [data-nac-runtime] .max-h-\[calc\(100vh-2rem\)\] {
     max-height: calc(100vh - 2rem);
   }
@@ -1707,6 +1711,10 @@
 
 [data-nac-runtime]:is(.max-w-\[calc\(100vw-32px\)\]), [data-nac-runtime] .max-w-\[calc\(100vw-32px\)\] {
     max-width: calc(100vw - 32px);
+  }
+
+[data-nac-runtime]:is(.max-w-\[min\(360px\,calc\(100vw-16px\)\)\]),[data-nac-runtime] .max-w-\[min\(360px\,calc\(100vw-16px\)\)\] {
+    max-width: min(360px, 100vw - 16px);
   }
 
 [data-nac-runtime]:is(.max-w-fit), [data-nac-runtime] .max-w-fit {
@@ -4092,6 +4100,11 @@
     user-select: none;
   }
 
+[data-nac-runtime]:is(.select-text), [data-nac-runtime] .select-text {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
 [data-nac-runtime]:is(.\[nac\:threads\]), [data-nac-runtime] .\[nac\:threads\] {
     nac: threads;
   }
@@ -4120,10 +4133,6 @@
       overflow: visible;
     }
 
-    [data-nac-runtime]:is(.group-hover\:flex:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:flex:is(:where(.group):hover *) {
-      display: flex;
-    }
-
     [data-nac-runtime]:is(.group-hover\:hidden:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:hidden:is(:where(.group):hover *) {
       display: none;
     }
@@ -4144,8 +4153,8 @@
       background-image: none;
     }
 
-    [data-nac-runtime]:is(.group-hover\:pr-8:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:pr-8:is(:where(.group):hover *) {
-      padding-right: calc(var(--spacing) * 8);
+    [data-nac-runtime]:is(.group-hover\:pr-14:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:pr-14:is(:where(.group):hover *) {
+      padding-right: calc(var(--spacing) * 14);
     }
 
     [data-nac-runtime]:is(.group-hover\:text-btn-secondary-hovered:is(:where(.group):hover *)), [data-nac-runtime] .group-hover\:text-btn-secondary-hovered:is(:where(.group):hover *) {
@@ -4284,16 +4293,12 @@
     overflow: visible;
   }
 
-[data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:flex:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:flex:is(:where(.group):has(:focus-visible) *) {
-    display: flex;
-  }
-
 [data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:hidden:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:hidden:is(:where(.group):has(:focus-visible) *) {
     display: none;
   }
 
-[data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:pr-8:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:pr-8:is(:where(.group):has(:focus-visible) *) {
-    padding-right: calc(var(--spacing) * 8);
+[data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:pr-14:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:pr-14:is(:where(.group):has(:focus-visible) *) {
+    padding-right: calc(var(--spacing) * 14);
   }
 
 [data-nac-runtime]:is(.group-has-\[\:focus-visible\]\:opacity-100:is(:where(.group):has(:focus-visible) *)), [data-nac-runtime] .group-has-\[\:focus-visible\]\:opacity-100:is(:where(.group):has(:focus-visible) *) {
@@ -8081,6 +8086,64 @@
 
   100% {
     background-position: -200% 0;
+  }
+}
+[data-nac-runtime]:is(.session-name-dialog), [data-nac-runtime] .session-name-dialog {
+  max-height: min(100%, calc(100dvh - 2rem));
+}
+
+/* Pointer capability and viewport width are independent on tablets and hybrid devices. */
+@media (hover: none) {
+  [data-nac-runtime]:is(.session-name-row-actions), [data-nac-runtime] .session-name-row-actions {
+    clip-path: none;
+    white-space: normal;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    position: static;
+    overflow: visible;
+  }
+
+  [data-nac-runtime]:is(.session-name-tab-actions), [data-nac-runtime] .session-name-tab-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  [data-nac-runtime]:is(.session-name-tab-trigger), [data-nac-runtime] .session-name-tab-trigger {
+    padding-right: 56px;
+  }
+}
+
+@media (max-width: 767.98px) {
+  /* Respect both a smaller hosted frame and a phone's dynamic visible viewport. */
+  [data-nac-runtime]:is(.session-name-dialog), [data-nac-runtime] .session-name-dialog {
+    height: min(100%, 100dvh);
+    min-height: min(100%, 100dvh);
+    max-height: min(100%, 100dvh);
+  }
+
+  [data-nac-runtime]:is(.btn.btn-icon.btn-tertiary.session-name-view), [data-nac-runtime] .btn.btn-icon.btn-tertiary.session-name-view {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  [data-nac-runtime]:is(.session-name-tab-actions .btn.btn-icon.btn-tertiary.session-name-view), [data-nac-runtime] .session-name-tab-actions .btn.btn-icon.btn-tertiary.session-name-view {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  [data-nac-runtime]:is(.chat-session-tab:hover .session-name-tab-trigger),
+  [data-nac-runtime] .chat-session-tab:hover .session-name-tab-trigger,
+  [data-nac-runtime]:is(.chat-session-tab:focus-within .session-name-tab-trigger),
+  [data-nac-runtime] .chat-session-tab:focus-within .session-name-tab-trigger {
+    padding-right: 64px;
+  }
+}
+
+@media (hover: none) and (max-width: 767.98px) {
+  [data-nac-runtime]:is(.session-name-tab-trigger), [data-nac-runtime] .session-name-tab-trigger {
+    padding-right: 64px;
   }
 }
 /* Dense navigation uses the conversation recipe's quiet surfaces and 4px rhythm.
