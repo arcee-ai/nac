@@ -198,7 +198,7 @@ publication, a tag, merge or deployment.
 
 `all-343-macos26` adds the exact corrected instance fixture
 `0d78ee389e98c0f157a8e8313446fc8006c38ec4`, using the same strict macOS 26
-envelope. It is a prepared qualification entry, not a hosted pass. The source's
+envelope. Its first hosted qualification failed, as detailed below. The source's
 ordinary `app-build` and instrumented `instance-build` each run for exact-source
 dev and stable engines, copied privately before the next track rebuild. Actual
 source/mode/track, engine/native/plist hashes, normal bundle identities, excluded
@@ -240,6 +240,19 @@ all semantic receipt fields within the existing per-file limit when the source's
 monolithic summary is capped; no observation is dropped or rewritten as safe.
 The total 12 MiB export limit and redaction policy remain unchanged.
 
+The first instance run `41187334758`, native job `124496908923`, artifact
+`13037268703`, used exact harness `5f91f003` and target `0d78ee38`. Clean source,
+pinned toolchain/image, both dev/stable ordinary/instrumented builds and all
+four recorded console boundaries passed their checks. The first simultaneous
+workspace failed in the target's `readyWorkspace` check before its first
+snapshot: “Production workspace was blank or failed.” Zero cases completed
+and zero PNGs were captured; no instance runtime or paint acceptance follows.
+The retained evidence does not contain the failed body/frame, so the cause is
+unproved. Cleanup observed no private live process or crash, and retained the
+failure profile under the target's policy. The index's original summary hash
+precedes export redaction; the exported summary has a separate hash. A new
+source-owner diagnosis and explicit nomination are required before another run.
+
 Root inspection of the committed harness SHA, immutable target/catalog and
 command policy is required before a manual instance run. The planned command
 uses the existing `stable-release.yml` manual entry, non-tag
@@ -265,6 +278,42 @@ The coordinator must inspect the target PNGs before accepting supplier paint.
 
 Only named source/profile records resolve; there is no arbitrary SHA, command,
 paid-runner or matrix input.
+
+`all-352-macos26` is a source-only prepared entry for terminal supplier
+`24c0179f9e42a36d021a117694f098a76a3ddb80`. It checks out that exact source,
+independently of PR 500's merge commit or its moving parent. Its existing
+`terminal.sh` builder receives a private exact-source engine, checks normal and
+ordinary-smoke exclusion, and builds only the nominated PREVIEW_SMOKE plus
+TERMINAL_SMOKE app. Source/native/engine/asset hashes and the four contract
+source hashes must match before launch. No source is copied into that checkout.
+
+The shared real XCTest target adds one opt-in test for six fixed phases:
+Unicode, interrupt setup, Control-C, recovery, window resize and `stty` readback.
+`ci-terminal-operations.json` contains the nominated literals and limits; mutable
+app readiness must match this contract and cannot supply commands. The driver
+checks the exact bundle, launch epoch, PID, window, element, phase and unlocked
+console before each public operation. It never replays a phase or clicks the
+terminal to recover focus. Resize is one explicitly declared public XCTest
+coordinate drag on the owned window corner by −160/−80 points; there is no
+private frame setter or app control endpoint. The app independently proves
+actual frame/PTY changes, shell bytes, controller revision, trusted events,
+written receipts and negative unfocused admission.
+
+Existing helper authorization and developer/automation policy are observed
+before and after input; no permission grant is requested. Actual generated
+`.xctestrun`, fixture-config hash, result tree hash and bounded result summary
+remain required. Failed or missing ownership/settlement evidence retains the
+relocated bundle for diagnosis instead of deleting it while its process might
+remain live. Process/profile settlement is observed before successful removal.
+
+Two post-input images require readable Unicode-output and recovery/size markers,
+exact PNG hashes and independent image review. Exact Unicode bytes are proved
+by the app's file/input/parser receipts; OCR does not establish Unicode fidelity.
+The source matrix remains partial: this prepares one automated OS Unicode/control/
+resize episode, without physical keyboard, IME, paste, full job control, masking,
+VoiceOver or full terminal acceptance. Preparation, parsing and portable tests
+do not establish XCTest compilation or actual input. Root inspection of exact
+committed H/T and policy is required before any additional input run.
 
 The additional `all-351-macos14` choice binds the corrected, frozen
 `fa94a859b648cb36fbdcb251bfe4bc9541de3f48` fixture to a separate strict envelope:
