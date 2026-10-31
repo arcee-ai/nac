@@ -28,7 +28,11 @@ authority; the production React UI and HTTP/SSE client remain shared.
 - Window close quits the disposable preview, with bounded child cleanup before
   deleting its profile. Normal LOCAL_APP close keeps the same window/document,
   bridge, streams and owned engine; AppInstance reopens it. AppLifecycle/AppQuit
-  own explicit native Cancel or Stop and Quit. Unknown activity requires
+  own explicit native Cancel or Stop and Quit. The normal app's NACApplication
+  owns the full synchronous
+  terminate call/modal wait, rejecting nested entry even if AppKit bypasses the
+  delegate. Cancel unwinds that entry before another genuine Quit is accepted.
+  Preview keeps its ordinary NSApplication owner. Unknown activity requires
   confirmation; a parent run alone never proves idle. Stop retires NativeCommands
   and releases the WK document before PreviewEngine.stop. The engine retains its
   existing Rust 20-second watchdog and owned 23-second fallback. A later 26-second

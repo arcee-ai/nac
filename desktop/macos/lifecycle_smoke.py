@@ -97,6 +97,11 @@ def run_contract(bundle, destination, observer):
                                    lambda: (value if (value := journey.read()).get('stopped') else None), timeout=30)
                 assert stopped['passed'] and stopped['document_released'] and stopped['commands_retired'], stopped
                 wait_for('App exited after Stop and Quit', lambda: not journey.observe()['apps'], timeout=6)
+                stopped = journey.read() # Includes the final willTerminate snapshot/reply counters.
+                assert stopped['application_class'] == 'NACApplication', stopped
+                assert stopped['quit_delegate_requests'] == stopped['quit_sheet_presentations'] == 2, stopped
+                assert stopped['quit_cancel_replies'] == stopped['quit_stop_replies'] == 1, stopped
+                assert stopped['suppressed_termination_entries'] >= 1 and stopped['termination_entries'] >= 3, stopped
                 assert engine_settled(moved, ready_pid)
                 after = fixture.verify_store(store)
                 replacement = OwnedEngine(moved / 'Contents/Resources/nac-web', profile, store, environment, desktop=True)

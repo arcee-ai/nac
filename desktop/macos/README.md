@@ -296,6 +296,9 @@ descendant and store cleanup under its existing 20-second watchdog. The existing
 owned-engine fallback remains 23 seconds. A later 26-second UI wait can cancel a
 stuck app termination request, but cannot claim cleanup, restart the retired
 workspace or send another stop. Quit again waits on that original shutdown.
+The normal application also rejects nested native Quit entry while its original
+modal confirmation/drain call is pending; after Cancel unwinds, a later genuine
+Quit follows the normal delegate path again.
 
 `preview.sh lifecycle-build` builds separate test instrumentation around the
 normal app owner. Run `python3 -B desktop/macos/lifecycle_smoke.py APP OUTPUT

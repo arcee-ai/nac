@@ -97,7 +97,8 @@ final class LifecycleSmoke {
                 evidence["confirmation_retained_owners"] = true
                 publish(seen.contains("quit-again") ? "reconfirming" : "confirming")
             }
-            if seen.contains("duplicate-quit"), !seen.contains("cancel"), app.quit.smokeQuitRequests >= 2,
+            if seen.contains("duplicate-quit"), !seen.contains("cancel"),
+               ((NSApp as? NACApplication)?.smokeSuppressedEntries ?? 0) > 0,
                stage != "duplicate-confirming" { publish("duplicate-confirming") }
             if take("cancel") { app.window.endSheet(sheet, returnCode: .alertFirstButtonReturn) }
             if take("stop") { app.window.endSheet(sheet, returnCode: .alertSecondButtonReturn) }
@@ -176,6 +177,12 @@ final class LifecycleSmoke {
             "workspace_window_count": NSApp.windows.filter { $0 === app.window }.count,
             "owned_engine_pid": originalPID, "base_url": app.baseURL?.absoluteString ?? "",
             "quit_delegate_requests": app.quit.smokeQuitRequests,
+            "quit_sheet_presentations": app.quit.smokeSheetPresentations,
+            "quit_cancel_replies": app.quit.smokeCancelReplies,
+            "quit_stop_replies": app.quit.smokeStopReplies,
+            "application_class": (NSApp as? NACApplication).map { NSStringFromClass(type(of: $0)) } ?? "unexpected",
+            "termination_entries": (NSApp as? NACApplication)?.smokeTerminationEntries ?? 0,
+            "suppressed_termination_entries": (NSApp as? NACApplication)?.smokeSuppressedEntries ?? 0,
             "visible_paint_acceptance": false, "trusted_input_acceptance": false,
             "instrumentation": "LIFECYCLE_SMOKE", "sheet_completion": "programmatic AppKit, no OS input events"]) { _, new in new }
         if let receipt = app.engine.receipt {

@@ -1,5 +1,32 @@
 import AppKit
 
+/// NSApplication can terminate immediately on a nested terminate call without
+/// asking the delegate again. Own the complete original call, including its
+/// terminateLater modal wait and Cancel unwind, before accepting another Quit.
+@objc(NACApplication)
+final class NACApplication: NSApplication {
+    private var handlingTerminationCall = false
+    #if PREVIEW_SMOKE
+    private(set) var smokeTerminationEntries = 0
+    private(set) var smokeSuppressedEntries = 0
+    #endif
+
+    override func terminate(_ sender: Any?) {
+        #if PREVIEW_SMOKE
+        smokeTerminationEntries += 1
+        #endif
+        guard !handlingTerminationCall else {
+            #if PREVIEW_SMOKE
+            smokeSuppressedEntries += 1
+            #endif
+            return
+        }
+        handlingTerminationCall = true
+        defer { handlingTerminationCall = false }
+        super.terminate(sender)
+    }
+}
+
 /// AppKit's asynchronous Quit request and its native confirmation UI. The app
 /// retires its own document; PreviewEngine alone controls and reaps the child.
 @MainActor
@@ -12,6 +39,9 @@ final class AppQuit {
     #if PREVIEW_SMOKE
     private var fixtureStopTimer: Timer?
     private(set) var smokeQuitRequests = 0
+    private(set) var smokeSheetPresentations = 0
+    private(set) var smokeCancelReplies = 0
+    private(set) var smokeStopReplies = 0
 
     /// Legacy startup/instance fixtures explicitly finish by choosing the real
     /// owned Quit sheet. This never ships or answers an agent permission ask.
@@ -87,6 +117,9 @@ final class AppQuit {
         alert.addButton(withTitle: "Cancel").keyEquivalent = "\r"
         alert.addButton(withTitle: "Stop and Quit").keyEquivalent = ""
         confirmation = alert
+        #if PREVIEW_SMOKE
+        smokeSheetPresentations += 1
+        #endif
         window.makeKeyAndOrderFront(nil)
         alert.beginSheetModal(for: window) { [weak self, weak alert] response in
             guard let self, self.confirmation === alert else { return }
@@ -132,6 +165,9 @@ final class AppQuit {
     private func reply(_ terminate: Bool) {
         guard terminationPending else { return }
         terminationPending = false
+        #if PREVIEW_SMOKE
+        if terminate { smokeStopReplies += 1 } else { smokeCancelReplies += 1 }
+        #endif
         NSApp.reply(toApplicationShouldTerminate: terminate)
     }
 }
