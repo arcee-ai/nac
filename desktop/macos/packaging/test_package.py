@@ -6,6 +6,7 @@ from pathlib import Path
 import plistlib
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -92,6 +93,40 @@ class PackageContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'identity'):
             package.verify_files(changed, self.root)
 
+    def test_distribution_plan_cannot_promote_preview_fixture(self):
+        path = self.root / 'manifest.json'
+        write_json(path, self.manifest)
+        args = SimpleNamespace(manifest=str(path), output=str(self.root / 'plan'))
+        with patch('package.signing_commands') as signer:
+            with self.assertRaisesRegex(ValueError, 'preview fixtures'):
+                package.distribution_plan(args)
+            signer.assert_not_called()
+        self.assertFalse((self.root / 'plan').exists())
+
+    def test_normal_distribution_plan_preserves_adhoc_input_and_never_executes(self):
+        identity = {**self.identity, 'purpose': 'normal-app-preparation',
+                    'source': {'revision': 'a' * 40}, 'native_build_receipt': {'version': 1}}
+        write_json(self.app / 'Contents/Resources/PackageIdentity.json', identity)
+        files = inventory(self.app)
+        manifest = {**self.manifest, 'identity': identity,
+                    'bundle': {**self.manifest['bundle'], 'files': files, 'sha256': object_digest(files)}}
+        path = self.root / 'manifest.json'
+        write_json(path, manifest)
+        args = SimpleNamespace(manifest=str(path), output=str(self.root / 'plan'),
+                               certificate='a' * 40, team='TESTTEAM01', notary_profile='synthetic-profile')
+        before = inventory(self.app)
+        with patch('package.subprocess.run') as execute:
+            package.distribution_plan(args)
+            execute.assert_not_called()
+        plan = json.loads((self.root / 'plan/distribution-plan.json').read_text())
+        self.assertFalse(plan['execution_authorized'])
+        self.assertEqual(inventory(self.app), before)
+        self.assertEqual(plan['staging_commands'][1][1], str(self.app.resolve()))
+        for command in plan['signing_commands']:
+            self.assertIn('/plan/developer-id-candidate/', command[-1])
+            self.assertNotEqual(command[-1], str(self.app))
+        self.assertIn('Qualified track identifiers', plan['required_gate'])
+
     def test_engine_receipt_binds_source_assets_schema_bytes_and_track(self):
         source = {'revision': 'a' * 40, 'assets': {'sha256': 'b' * 64}, 'store_schema': 40}
         receipt = {'schema_version': 1, 'source': source, 'target': 'aarch64-apple-darwin',
@@ -116,9 +151,9 @@ class PackageContract(unittest.TestCase):
 
     def test_nested_signing_is_leaf_first_and_never_deep_or_credentialed(self):
         with patch('package.run') as command, patch('package.verify_signatures', return_value={}) as verify:
-            package.sign_adhoc(self.app, package.FIXTURE_ENGINE)
+            package.sign_adhoc(self.app, package.ENGINE_PATH)
         calls = [call.args for call in command.call_args_list]
-        self.assertEqual([x[-1] for x in calls], [str(self.app / package.FIXTURE_ENGINE), str(self.app)])
+        self.assertEqual([x[-1] for x in calls], [str(self.app / package.ENGINE_PATH), str(self.app)])
         for args in calls:
             self.assertNotIn('--deep', args)
             self.assertEqual(args[args.index('--sign') + 1], '-')
@@ -132,7 +167,7 @@ class PackageContract(unittest.TestCase):
         with patch('package.run'), patch('package.subprocess.run', side_effect=[response,
                 subprocess.CompletedProcess([], 0, stdout='', stderr='flags=0x10000(runtime)\nSignature=adhoc')]):
             with self.assertRaisesRegex(ValueError, 'Unexpected entitlements'):
-                package.verify_signatures(self.app, package.FIXTURE_ENGINE)
+                package.verify_signatures(self.app, package.ENGINE_PATH)
 
     def test_non_system_or_wrong_arch_runtime_dependency_fails(self):
         for results in [('x86_64',), ('arm64', 'shell:\n\t/opt/homebrew/lib/libfixture.dylib (compatibility version 1)')]:

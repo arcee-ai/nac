@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   fixture:
-    name: Ad-hoc fixture archive integrity (not distribution qualification)
+    name: Ad-hoc app preparation integrity (not distribution qualification)
     runs-on: macos-26
     timeout-minutes: 40
     steps:
@@ -62,6 +62,15 @@ jobs:
           python3 -B desktop/macos/packaging/package.py relocate-check
           --manifest "$RUNNER_TEMP/package-fixture/manifest.json"
           --output "$RUNNER_TEMP/package-relocation"
+      - name: Consume normal native builder and validate its actual compiler receipt
+        run: >-
+          python3 -B desktop/macos/packaging/package.py normal
+          --engine-receipt "$RUNNER_TEMP/package-engine/engine-build.json"
+          --output "$RUNNER_TEMP/package-normal"
+      - name: Verify normal sealed bundle and archive round trip
+        run: |
+          python3 -B desktop/macos/packaging/package.py verify "$RUNNER_TEMP/package-normal/manifest.json" --signatures
+          python3 -B desktop/macos/packaging/package.py relocate-check --manifest "$RUNNER_TEMP/package-normal/manifest.json" --output "$RUNNER_TEMP/package-normal-relocation"
       - name: Retain preparation evidence only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -71,4 +80,6 @@ jobs:
             ${{ runner.temp }}/package-engine/engine-build.json
             ${{ runner.temp }}/package-fixture/manifest.json
             ${{ runner.temp }}/package-relocation/relocation.json
+            ${{ runner.temp }}/package-normal/manifest.json
+            ${{ runner.temp }}/package-normal-relocation/relocation.json
           if-no-files-found: error

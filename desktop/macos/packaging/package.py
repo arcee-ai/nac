@@ -12,13 +12,12 @@ import sys
 
 sys.dont_write_bytecode = True
 
-from signing import SignaturePolicy, signature_evidence, signing_commands, verification_commands
+from signing import (SignaturePolicy, notarization_plan, signature_evidence,
+                     signing_commands, verification_commands)
+from native_receipt import (ENGINE as ENGINE_PATH, SHELL as SHELL_PATH,
+                            expected_identity, validate_native_receipt)
 from provenance import (ROOT, clean_source, digest, inventory, new_directory,
                         object_digest, run, validate_receipt, write_json)
-
-FIXTURE_APP = 'NAC Development Preview.app'
-FIXTURE_ENGINE = 'Contents/Resources/nac-web'
-FIXTURE_SHELL = 'Contents/MacOS/NACPreview'
 
 
 def require_mac():
@@ -60,7 +59,11 @@ def prepare_engine(args):
                'target': 'aarch64-apple-darwin', 'deployment_target': '14.0',
                'engine': {'sha256': digest(engine), 'size': engine.stat().st_size},
                'rustc': run('rustc', '-Vv'), 'toolchain': toolchain(),
-               'identity_evidence': 'build environment plus --version; not runtime receipt qualification'}
+               'identity_evidence': 'exact bundled __desktop-identity plus --version; not runtime launch qualification'}
+    identity = json.loads(run(engine, '__desktop-identity'))
+    if identity != expected_identity(source, build):
+        raise ValueError('Compiled engine identity differs from the exact source/build')
+    receipt['engine_identity'] = identity
     write_json(output / 'engine-build.json', receipt)
     print(output / 'engine-build.json')
 
@@ -99,7 +102,7 @@ def verify_signatures(app, engine):
     return results
 
 
-def build_fixture(args):
+def build_package(args):
     require_mac()
     source = clean_source()
     receipt_path = Path(args.engine_receipt).resolve(strict=True)
@@ -107,38 +110,54 @@ def build_fixture(args):
     engine = receipt_path.parent / 'nac-web'
     validate_receipt(receipt, source, engine)
     verify_version(engine, source)
+    observed_identity = json.loads(run(engine, '__desktop-identity'))
+    if observed_identity != expected_identity(source, receipt['build']):
+        raise ValueError('Private engine identity differs from the exact source/build')
     output = new_directory(args.output)
     env = dict(os.environ, NAC_MAC_OUTPUT=str(output), NAC_MAC_ENGINE=str(engine),
                NAC_MAC_SKIP_ENGINE_BUILD='1')
     # Existing single native writer; build never launches the fixture or user stores.
-    subprocess.run([str(ROOT / 'desktop/macos/preview.sh'), 'build'], cwd=ROOT, env=env, check=True)
-    app = output / FIXTURE_APP
-    if digest(app / FIXTURE_ENGINE) != receipt['engine']['sha256']:
+    mode = 'app-build' if args.normal else 'build'
+    subprocess.run([str(ROOT / 'desktop/macos/preview.sh'), mode], cwd=ROOT, env=env, check=True)
+    apps = list(output.glob('*.app'))
+    if len(apps) != 1:
+        raise ValueError('Native builder must produce exactly one app bundle')
+    app = apps[0]
+    native_receipt = (validate_native_receipt(app, source, receipt, observed_identity, ROOT)
+                      if args.normal else None)
+    if digest(app / ENGINE_PATH) != receipt['engine']['sha256']:
         raise ValueError('Native builder consumed a different engine')
     executables = {name: executable_evidence(app / name)
-                   for name in (FIXTURE_SHELL, FIXTURE_ENGINE)}
+                   for name in (SHELL_PATH, ENGINE_PATH)}
     plist_path = app / 'Contents/Info.plist'
     info = plistlib.loads(plist_path.read_bytes())
-    if info['CFBundleIdentifier'] != 'ai.arcee.nac.development-preview':
+    if not args.normal and info['CFBundleIdentifier'] != 'ai.arcee.nac.development-preview':
         raise ValueError('Unexpected fixture bundle identity')
+    if args.normal and info['CFBundleIdentifier'] == 'ai.arcee.nac.development-preview':
+        raise ValueError('Normal app cannot use the preview bundle identity')
     info['CFBundleShortVersionString'] = source['product_version']
     info['CFBundleVersion'] = source['product_version']
     plist_path.write_bytes(plistlib.dumps(info, sort_keys=True))
     resources = app / 'Contents/Resources'
     shutil.copy2(ROOT / 'LICENSE', resources / 'LICENSE')
     shutil.copytree(ROOT / 'crates/nac-server/assets/dist/licenses', resources / 'licenses')
-    identity = {'schema_version': 1, 'purpose': 'development-preview-fixture',
+    purpose = 'normal-app-preparation' if args.normal else 'development-preview-fixture'
+    identity = {'schema_version': 1, 'purpose': purpose,
                 'consumer_distribution': False, 'source': source, 'build': receipt['build'],
+                'engine_identity': observed_identity,
                 'engine_input': receipt['engine'], 'native_builder': 'desktop/macos/preview.sh',
                 'native_builder_sha256': digest(ROOT / 'desktop/macos/preview.sh'),
-                'instrumentation': 'ordinary preview includes disposable profile/provider; PREVIEW_SMOKE absent',
+                'instrumentation': ('LOCAL_APP; no preview definitions or smoke instrumentation'
+                                    if args.normal else 'disposable preview profile/provider; PREVIEW_SMOKE absent'),
                 'minimum_os': {'declared': info['LSMinimumSystemVersion'], 'qualified': None},
                 'toolchain': toolchain()}
+    if native_receipt is not None:
+        identity['native_build_receipt'] = native_receipt
     write_json(resources / 'PackageIdentity.json', identity)
-    signatures = sign_adhoc(app, FIXTURE_ENGINE)
+    signatures = sign_adhoc(app, ENGINE_PATH)
     if clean_source() != source:
         raise ValueError('Source changed during native build/package')
-    container = output / 'NAC-development-preview-fixture-arm64.zip'
+    container = output / f'NAC-{purpose}-arm64.zip'
     run('/usr/bin/ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', app, container)
     files = inventory(app)
     manifest = {'schema_version': 1, 'identity': identity, 'bundle': {
@@ -148,6 +167,9 @@ def build_fixture(args):
         'signatures': signatures, 'qualification': {'developer_id': False, 'notarized': False,
         'stapled': False, 'gatekeeper': False, 'quarantined_download': False,
         'applications_install': False, 'app_translocation': False, 'actual_app_runtime': False}}
+    if args.normal:
+        manifest['qualification']['track_bundle_identity'] = False
+        manifest['qualification']['consumer_ready'] = False
     write_json(output / 'manifest.json', manifest)
     print(output / 'manifest.json')
 
@@ -171,7 +193,7 @@ def verify_files(manifest, directory):
     if embedded != manifest['identity']:
         raise ValueError('Embedded identity differs from outer manifest')
     if embedded.get('consumer_distribution') is not False or any(manifest['qualification'].values()):
-        raise ValueError('This fixture format cannot establish consumer/distribution qualification')
+        raise ValueError('Preparation format cannot establish consumer/distribution qualification')
 
 
 def verify(args):
@@ -180,8 +202,8 @@ def verify(args):
     verify_files(manifest, path.parent)
     if args.signatures:
         require_mac()
-        verify_signatures(path.parent / manifest['bundle']['name'], FIXTURE_ENGINE)
-    print('Fixture integrity verified; Developer ID/notary/Gatekeeper/runtime acceptance unavailable')
+        verify_signatures(path.parent / manifest['bundle']['name'], ENGINE_PATH)
+    print('Preparation integrity verified; Developer ID/notary/Gatekeeper/runtime acceptance unavailable')
 
 
 
@@ -198,8 +220,11 @@ def relocate_check(args):
     app = relocated / manifest['bundle']['name']
     if inventory(app) != manifest['bundle']['files']:
         raise ValueError('Archive round trip changed the exact bundle inventory')
-    signatures = verify_signatures(app, FIXTURE_ENGINE)
-    verify_version(app / FIXTURE_ENGINE, manifest['identity']['source'])
+    signatures = verify_signatures(app, ENGINE_PATH)
+    verify_version(app / ENGINE_PATH, manifest['identity']['source'])
+    if 'engine_identity' in manifest['identity']:
+        if json.loads(run(app / ENGINE_PATH, '__desktop-identity')) != manifest['identity']['engine_identity']:
+            raise ValueError('Relocated bundled engine identity changed')
     write_json(output / 'relocation.json', {
         'schema_version': 1, 'manifest_sha256': digest(path),
         'source_revision': manifest['identity']['source']['revision'],
@@ -208,6 +233,31 @@ def relocate_check(args):
         'bundled_engine_version': True, 'actual_app_runtime': False,
         'gatekeeper': False, 'app_translocation': False, 'toolchain': toolchain()})
     print(output / 'relocation.json')
+
+
+def distribution_plan(args):
+    path = Path(args.manifest).resolve(strict=True)
+    manifest = json.loads(path.read_text())
+    verify_files(manifest, path.parent)
+    identity = manifest['identity']
+    if identity.get('purpose') != 'normal-app-preparation' or 'native_build_receipt' not in identity:
+        raise ValueError('A validated normal-app preparation is required; preview fixtures cannot be signed for distribution')
+    policy = SignaturePolicy('developer-id', args.certificate, args.team)
+    output = new_directory(args.output)
+    app = path.parent / manifest['bundle']['name']
+    candidate = output / 'developer-id-candidate' / app.name
+    plan = {'schema_version': 1, 'execution_authorized': False,
+            'source_revision': identity['source']['revision'], 'input_manifest_sha256': digest(path),
+            'input_bundle_sha256': manifest['bundle']['sha256'],
+            'staging_commands': [['/bin/mkdir', '-p', str(candidate.parent)],
+                                 ['/usr/bin/ditto', str(app), str(candidate)]],
+            'signing_commands': signing_commands(candidate, [ENGINE_PATH], policy),
+            'verification_commands': verification_commands(candidate, [ENGINE_PATH], policy),
+            'notarization': notarization_plan(candidate, output / 'submission.zip', args.notary_profile),
+            'required_gate': 'Qualified track identifiers and required normal-app native evidence, then explicit authorization for the designated NAC identity/profile and this exact artifact; '
+                             'no commands executed, no distribution qualification inferred'}
+    write_json(output / 'distribution-plan.json', plan)
+    print(output / 'distribution-plan.json')
 
 
 def main():
@@ -220,7 +270,11 @@ def main():
     fixture = commands.add_parser('fixture', help='Ad-hoc package only; no consumer or signing qualification')
     fixture.add_argument('--engine-receipt', required=True)
     fixture.add_argument('--output', required=True)
-    fixture.set_defaults(action=build_fixture)
+    fixture.set_defaults(action=build_package, normal=False)
+    normal = commands.add_parser('normal', help='Consume the sole normal-app builder; ad-hoc preparation only')
+    normal.add_argument('--engine-receipt', required=True)
+    normal.add_argument('--output', required=True)
+    normal.set_defaults(action=build_package, normal=True)
     check = commands.add_parser('verify', help='Verify every file, executable mode and container digest')
     check.add_argument('manifest')
     check.add_argument('--signatures', action='store_true')
@@ -229,6 +283,13 @@ def main():
     relocation.add_argument('--manifest', required=True)
     relocation.add_argument('--output', required=True)
     relocation.set_defaults(action=relocate_check)
+    plan = commands.add_parser('distribution-plan', help='Write reviewable commands only; never sign or submit')
+    plan.add_argument('--manifest', required=True)
+    plan.add_argument('--certificate', required=True, help='Explicitly designated Developer ID Application SHA-1')
+    plan.add_argument('--team', required=True)
+    plan.add_argument('--notary-profile', required=True)
+    plan.add_argument('--output', required=True)
+    plan.set_defaults(action=distribution_plan)
     args = parser.parse_args()
     args.action(args)
 

@@ -1,145 +1,165 @@
 # Mac package preparation (ALL-355)
 
-This is the outer package writer. It reuses `desktop/macos/preview.sh`, the
-ordinary locked `nac-web` build, root `version.txt`, existing compile-time build
-identity and committed embedded web assets. It does not rebuild the frontend.
-The current output is an **ad-hoc development-preview fixture**, containing the
-disposable profile/provider. It is not a consumer app or a release candidate.
-There is deliberately no command here that signs with a personal identity,
-submits software to Apple, changes credentials or publishes a release.
+The outer package writer reuses `desktop/macos/preview.sh`, the locked `nac-web`
+build, root `version.txt`, existing engine identity and committed embedded web
+assets. It builds no second frontend or native client. `fixture` packages the
+disposable preview. `normal` consumes the corrected ALL-342 normal-app builder
+and its actual compiler-output receipt. Both produce **ad-hoc preparation**,
+with consumer readiness and distribution qualification explicitly withheld.
 
-After `make setup`, commit a clean candidate first. Both phases reject dirty
-tracked or untracked source, mismatched engine receipts and existing output
-paths. Run the following on Apple Silicon macOS, with Rust/Cargo and Apple Swift
-SDK build prerequisites. Use fresh output paths on every attempt; failed outputs
-are retained. On the shared host, use its supplied FIFO lease wrapper:
+After `make setup`, commit a clean candidate. Commands reject dirty tracked or
+untracked source, mismatched private engine receipts and existing output paths.
+Build prerequisites are Apple Silicon macOS, Rust/Cargo, an Apple Swift SDK and
+Python 3.10+. Use fresh output paths; failures are retained:
 
 ```sh
-python3 /tmp/nac-35-01a18fbf/gate.py rust \
-  python3 -B desktop/macos/packaging/package.py prepare-engine \
+python3 -B desktop/macos/packaging/package.py prepare-engine \
   --output /tmp/nac-package-engine
 
-python3 /tmp/nac-35-01a18fbf/gate.py browser \
-  python3 -B desktop/macos/packaging/package.py fixture \
+python3 -B desktop/macos/packaging/package.py normal \
   --engine-receipt /tmp/nac-package-engine/engine-build.json \
-  --output /tmp/nac-package-fixture
+  --output /tmp/nac-package-normal
 
 python3 -B desktop/macos/packaging/package.py verify \
-  /tmp/nac-package-fixture/manifest.json --signatures
+  /tmp/nac-package-normal/manifest.json --signatures
 
-python3 /tmp/nac-35-01a18fbf/gate.py browser \
-  python3 -B desktop/macos/packaging/package.py relocate-check \
-  --manifest /tmp/nac-package-fixture/manifest.json \
+python3 -B desktop/macos/packaging/package.py relocate-check \
+  --manifest /tmp/nac-package-normal/manifest.json \
   --output /tmp/nac-package-relocation
 ```
 
-On a dedicated host, invoke the Python commands directly. The Rust lease owns
-compilation and the private binary copy/digest. After it exits, the native phase
-uses only that private copy; it never reads a released shared Cargo cache.
+On the shared development host, prefix the first command with its supplied
+`python3 /tmp/nac-35-01a18fbf/gate.py rust` lease; prefix native package and
+relocation commands with `python3 /tmp/nac-35-01a18fbf/gate.py browser`.
+Compilation, private engine copying and hashing finish inside the Rust lease.
+Later phases consume only that private copy, never a released shared cache.
+On a dedicated host the commands above run directly.
+
 `prepare-engine --track` accepts the engine's existing `dev`, `beta`, or `stable`
-values; this is build identity, not release authorization or channel publication.
-The fixture bundle identifier remains the existing isolated preview identifier.
+values. It binds full `__desktop-identity` and version output to the exact clean
+source. Track selection does not authorize release/channel publication. To test
+the explicitly disposable preview instead, use `fixture` in place of `normal`
+with a different output directory. Both can reuse the same private engine.
 
-Outputs are `.app`, ZIP download container and `manifest.json`. The embedded
-`Contents/Resources/PackageIdentity.json` binds the source commit/tree, product
-version, engine track/build, source schema, asset inventory, builder hash,
-input engine digest, exact SDK/toolchain/OS and declared minimum OS. The outer
-manifest inventories every final signed file, executable mode, shell/engine
-binary and ZIP digest. The engine input and signed engine digests differ because
-signing changes executable bytes; both are retained. Existing root LICENSE and
-embedded frontend notices are copied before sealing. Manifest hashes establish
-integrity, not publisher authentication or a human source-review attestation.
+## Exact-source normal admission
 
-The signing order is engine leaf, then app bundle, with hardened runtime and no
-entitlements. Every code object is individually verified, entitlements must be
-empty, and the outer bundle is also recursively verified. `--deep` is used only
-for verification. Do not add sandbox inheritance, `get-task-allow`, disabled
-library validation, JIT or unsigned-executable-memory entitlements from a remote
-Swift client; a demonstrated requirement needs separate review.
+`normal` invokes the sole native builder's `app-build` mode and consumes its
+`Contents/Resources/build-receipt.json`. Admission is pinned to ALL-342's normal
+contract nominated at `701fb685edee702bbf60046b7bade67c76ea9672`: six selected
+Swift sources and actual compiler flags, clean full source revision, LOCAL_APP
+and no smoke instrumentation. Every selected source hash must match the current
+clean checkout. The original engine, native executable and plist digests must
+match the producer receipt; the bundled and executable-reported engine identity
+must both match source/product/track/build. Preview definitions must be excluded,
+producer marker proof must exist and the actual binary must pass that check.
+Unexpected files in the unsigned native bundle are rejected.
 
-The archive round trip extracts into a newly owned path with spaces, compares
-all bytes/modes and verifies signatures and the bundled engine's version. It
-never opens the UI or a user store. It does not test app translocation, Finder
-startup, Gatekeeper, installation or minimum-OS compatibility. The fixture
-manifest explicitly marks each of those acceptance fields false. The compiler
-target and plist currently declare macOS 14; that is a candidate minimum and
-requires actual matching-OS evidence before qualification.
+This validates the existing producer JSON format rather than generating another
+native build receipt or reconstructing the producer's source selection. Future
+qualified native suppliers explicitly extend the admission policy with their
+normal sources and flags. ALL-343 owns the pending track-derived bundle IDs and
+app-instance contract. The current normal package retains the supplier's
+transitional identifier and records `track_bundle_identity: false` and
+`consumer_ready: false`; it cannot be promoted to a consumer artifact by a label.
+ALL-354 owns full-Xcode actual AppKit/WKWebView evidence. Later lifecycle and
+joined normal-app acceptance remain prerequisites for distribution claims.
 
-The ordinary `.app` includes compiled Swift, Rust and embedded React assets;
-opening its UI needs no user-installed Swift/Rust/Node/Go compiler. `otool` checks
-reject non-system linked dependencies. Build tools and this Python packaging
-runner are not copied into the bundle. Genuine project tools remain external:
-Git, SSH, optional Podman and user-configured MCP commands must be detected and
-explained by the normal startup/tool owners, never silently installed here.
+## Artifacts and checks
 
-## Normal-app and distribution gate
+Outputs are `.app`, ZIP download container and `manifest.json`. Embedded
+`PackageIdentity.json` binds commit/tree, root product version, engine identity,
+source schema, complete asset inventory, native builder hash, private engine
+input, exact SDK/toolchain/OS and declared minimum OS. Normal output also retains
+the actual producer receipt. The outer manifest inventories every final signed
+file, executable mode, shell/engine and ZIP digest. Original unsigned/input
+hashes and final signed hashes are both retained because signing changes bytes.
+Root LICENSE and existing embedded frontend notices are copied before sealing.
+Hashes establish integrity, not publisher authentication or human source review.
 
-ALL-342 must nominate the clean normal-app source/build entry point and an
-explicit normal-vs-smoke source/flag receipt. ALL-343 owns track-derived bundle
-identifiers and app-instance compatibility. Consumer integration must consume
-those exact contracts; it must reject the preview profile/provider, fixture
-keys, smoke hooks, input injection and synthetic redaction features. The normal
-bundle should place Mach-O helpers in `Contents/MacOS` (or another Apple code
-location), with the native engine owner resolving that bundle-relative path.
-The current preview's Resources engine location is retained only for fixtures.
-ALL-354 owns full-Xcode actual AppKit/WKWebView CI. The separate
-`macos-package.yml` lane records uncredentialed fixture integrity and uploads
-only evidence, never a consumer archive. A joined normal build should reuse the
-existing stable macOS engine artifact, without another Rust/frontend build.
-ALL-356 can consume the version/source/track/build/schema/assets and complete
-bundle/container inventory fields; update policy and replacement are its scope.
+The nested engine is signed before the outer app, with hardened runtime and no
+entitlements. Each object is individually verified; recursive verification is
+also required. `--deep` is never used to sign. Do not copy App Store sandbox
+inheritance, debugging, JIT or disabled-library-validation entitlements from a
+remote Swift client. Changing this policy requires a demonstrated normal-app
+requirement and review.
 
-Before any credentialed operation, present the exact normal source, artifact,
-leaf signing order, entitlements and commands for an explicitly authorized NAC
-Developer ID Application identity and established notary keychain profile.
-Machine credential presence is not authority to choose one. No identity has
-been selected and no notary submission has occurred in this preparation lane.
-Required intervention is the maintainer's designated NAC identity/profile and
-explicit authorization for those exact operations on the clean normal artifact.
-No certificate/keychain/account setup is performed here.
+The native owner currently resolves its engine at
+`Contents/Resources/nac-web`. Packaging preserves that nominated layout and
+verifies both the executable signature and its outer resource seal. It never
+replaces that nested executable in a sealed app. Whole-app replacement is
+ALL-356's scope; it can consume the version/source/track/build/schema/assets and
+complete bundle/container inventory interface.
 
-The concrete future operation order is:
+`relocate-check` extracts into a newly owned path with spaces, compares all bytes
+and modes, verifies signatures and runs the relocated engine's version and full
+identity commands. It opens no UI or store. It proves archive/resource integrity,
+not Finder startup, Gatekeeper, quarantine, Applications installation,
+translocation or minimum-OS compatibility. Those qualification fields remain
+false. macOS 14 is the declared compiler/plist candidate minimum; actual matching
+OS evidence is still required.
 
-1. Sign each nested executable inside out with the authorized Developer ID
-   Application certificate, `--options runtime --timestamp`, then the outer app.
-   Verify each signature, expected Team ID/requirements and exact entitlements;
-   recursively verify the sealed app.
-2. Create the submission ZIP with `ditto -c -k --keepParent`, submit using
-   `xcrun notarytool submit … --keychain-profile … --wait --output-format json`,
-   retain the submission ID/status/log against the signed digest, and require
-   `Accepted`. A credential/profile name is not proof of acceptance.
-3. `xcrun stapler staple` the accepted `.app`, then `stapler validate` and
-   `spctl --assess --type execute --verbose=4`. ZIP cannot itself be stapled:
-   recreate the final ZIP from the stapled app and regenerate final digests.
-4. Test the actual quarantined download through LaunchServices on a qualified
-   Mac and in a fresh **owned disposable** Applications test location. Record
-   quarantine, actual translocated path when applicable, spaces, bundle-relative
-   resources, normal UI/engine identity, lifecycle and descendant cleanup. Never
-   overwrite an installed/user app or disable Gatekeeper, SIP, TCC or quarantine.
+The `.app` contains compiled Swift/Rust and embedded React assets. Opening its
+UI requires no user-installed Swift/Rust/Node/Go compiler. `otool` checks reject
+non-system linked dependencies. The Python runner and build tools are not copied
+into the app. Git, SSH, optional Podman and configured MCP commands remain genuine
+project prerequisites, detected/explained by the startup owners and never
+silently installed by packaging.
 
-`signing.py` constructs the exact inside-out command arrays for either ad-hoc
-or Developer ID signing. Developer ID requires an explicit certificate SHA-1
-fingerprint and Team ID; no discovery or default identity is available. The
-verification plan tests Apple's Developer ID Application certificate requirement
-and exact team, while the signature-evidence parser requires the hardened
-runtime flag, secure timestamp and empty entitlements. It records no personal
-certificate subject. The normal package command will integrate this plan only
-after consuming the nominated normal build receipt and approved signing gate.
-The current CLI executes only ad-hoc commands.
+`macos-package.yml` builds the engine once, packages preview and normal modes
+through the same native owner, and uploads only preparation receipts/manifests.
+It has contents-read permission and no signing secrets, notarization or release
+publication. Ordinary stable publication/tag policy is unchanged. A joined stable
+lane should consume its existing macOS engine artifact rather than add another
+engine/frontend build.
 
-The notary planner creates commands for an explicit existing keychain profile,
-with an intervening Accepted/submission-ID check before app stapling and
-Gatekeeper assessment. Plans carry `execution_authorized: false`. Synthetic
-response tests verify this parser contract; they are not Apple receipts. A real
-submission must retain its exact submitted archive digest, command result and
-submission ID/log. The stapled app must be archived again into a new final ZIP,
-and its final digests regenerated before any consumer download test.
+## Credentialed distribution gate
 
-Developer ID, notarization, stapling, Gatekeeper, quarantine/download,
-Applications installation, translocation and actual normal-app startup remain
-unavailable until their corresponding real artifacts and environment receipts
-exist. Ad-hoc success substitutes for none of these. Missing authorized signing
-inputs block distribution acceptance while allowing secret-free preparation.
+`distribution-plan` writes reviewable command arrays for a normal preparation;
+it executes none. Supply only the maintainer's explicitly designated NAC
+Developer ID Application certificate SHA-1, Team ID and existing notary profile:
+
+```sh
+python3 -B desktop/macos/packaging/package.py distribution-plan \
+  --manifest /tmp/nac-package-normal/manifest.json \
+  --certificate "$NAC_AUTHORIZED_CERT_SHA1" --team "$NAC_AUTHORIZED_TEAM_ID" \
+  --notary-profile "$NAC_AUTHORIZED_NOTARY_PROFILE" --output /tmp/nac-signing-plan
+```
+
+Do all secret-free preparation before requesting authorization for the exact
+source, artifact, identity/profile and commands. Machine credential presence is
+not selection authority. No identity/profile is discovered or installed here;
+no certificate, keychain or signing-account setup occurs. Current preparation
+has no actual Developer ID/notary acceptance. The signing planner requires an
+explicit certificate fingerprint and team, verifies Apple's Developer ID
+Application certificate requirement and exact team, and checks hardened runtime,
+secure timestamp and empty entitlements. It retains no personal certificate CN.
+
+Plans carry `execution_authorized: false`. They stage a separate Developer ID
+candidate so the ad-hoc preparation and its evidence remain intact. Before any
+credentialed execution, require qualified track identifiers, required normal-app
+native evidence and explicit authorization for the designated NAC identity and
+profile. Planned operation order:
+
+1. Sign leaves inside out with the authorized certificate and
+   `--options runtime --timestamp`, then the outer app. Verify each object,
+   expected Team ID/certificate requirement and entitlements, then the whole app.
+2. Submit a ZIP through `notarytool --keychain-profile … --wait`, retaining its
+   exact submitted digest, successful tool result, submission ID and log. Require
+   `Accepted`; synthetic parser tests are not Apple receipts.
+3. Staple the accepted `.app`, validate its ticket and assess it with Gatekeeper.
+   A ZIP cannot be stapled. Create a **new** final ZIP from the stapled app and
+   regenerate final bundle/container digests.
+4. Test the actual quarantined download through LaunchServices and a new owned
+   disposable Applications test location, including spaces, observed
+   translocation when applicable, bundle resources, UI/engine identity, lifecycle
+   and descendant cleanup. Never overwrite a user app or change Gatekeeper,
+   quarantine, SIP, TCC, privacy or global system settings.
+
+Developer ID, notarization, stapling, Gatekeeper, download/quarantine,
+Applications, translocation and actual packaged normal-app acceptance require
+their own real artifact/environment receipts. Ad-hoc success substitutes for
+none of them. Missing authorized signing inputs block distribution acceptance
+while allowing secret-free preparation.
 
 Apple primary references:
 
