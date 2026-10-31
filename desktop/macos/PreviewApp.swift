@@ -51,16 +51,16 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         smoke?.start()
         #endif
         startup = Task { await start() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
-            guard let self, self.baseURL == nil, self.failure == nil, !self.stopping else { return }
-            self.fail("The bundled engine did not become ready within 30 seconds.")
-        }
     }
 
     private func start() async {
         do {
             let profile = try PreviewProfile()
             self.profile = profile
+            #if PREVIEW_SMOKE
+            try smoke?.configure(profile)
+            smoke?.configure(engine)
+            #endif
             try await provider.start()
             guard !stopping else { return }
             let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/nac-web")
@@ -71,6 +71,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             engine.onExit = { [weak self] status in
                 self?.fail("The bundled engine stopped (status \(status)). Close this window and relaunch the preview.")
             }
+            engine.onFailure = { [weak self] message in self?.fail(message) }
             try engine.launch(executable: executable, profile: profile, provider: provider)
         } catch { if !stopping { fail(error.localizedDescription) } }
     }

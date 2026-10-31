@@ -993,6 +993,25 @@ pub(crate) async fn serve_with_policy_and_readiness(
     on_listening: impl FnOnce(SocketAddr),
     readiness_policy: application::managed::ManagedReadinessPolicy,
 ) -> Result<()> {
+    serve_with_lifecycle(
+        addr,
+        policy,
+        manager,
+        on_listening,
+        readiness_policy,
+        shutdown_signal(),
+    )
+    .await
+}
+
+pub(crate) async fn serve_with_lifecycle(
+    addr: SocketAddr,
+    policy: BindPolicy,
+    manager: SessionManager,
+    on_listening: impl FnOnce(SocketAddr),
+    readiness_policy: application::managed::ManagedReadinessPolicy,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<()> {
     policy.validate(addr)?;
     // Establish the durable store before serving requests. Readiness probes
     // then verify this store in place and never create a blank replacement if
@@ -1071,7 +1090,7 @@ pub(crate) async fn serve_with_policy_and_readiness(
         control_listener.map(|listener| (listener, managed_control::router(manager.clone()))),
         app,
         manager,
-        shutdown_signal(),
+        shutdown,
         COMPLETE_SHUTDOWN_TIMEOUT,
         || std::process::exit(0),
     )
@@ -1200,7 +1219,7 @@ where
     result
 }
 
-fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {
+pub(crate) fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {
     eprintln!(
         "nac: complete graceful shutdown exceeded {} ms; forcing runtime exit",
         timeout.as_millis()
@@ -1208,7 +1227,7 @@ fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce(
     force_shutdown();
 }
 
-async fn shutdown_signal() {
+pub(crate) async fn shutdown_signal() {
     let ctrl_c = async {
         if let Err(error) = tokio::signal::ctrl_c().await {
             eprintln!("nac: failed to install Ctrl-C handler: {error}");
