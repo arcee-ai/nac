@@ -483,3 +483,9 @@ export type ShellOutputPage = ApiSchema<"ShellOutputPage">;
 export type TaskLaunchRequest = ApiSchema<"TaskLaunchRequest">;
 export type TaskLaunchRecord = ApiSchema<"TaskLaunchRecord">;
 export type TaskLaunchSourceInfo = ApiSchema<"TaskLaunchSourceInfo">;
+
+export type ProductContext = ApiSchema<"ProductContext">;
+export type ProductDestination = ApiSchema<"ProductDestination">;
+export type ProductDestinationInfo = ApiSchema<"ProductDestinationInfo">;
+export type ProductNavigationRequest = ApiSchema<"ProductNavigationRequest">;
+export type ProductNavigationResolution = ApiSchema<"ProductNavigationResolution">;

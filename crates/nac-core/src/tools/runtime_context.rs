@@ -8,6 +8,7 @@ static SHARED_WORKSPACE_GATES: LazyLock<
 
 #[derive(Clone)]
 pub struct ToolRuntime {
+    pub(crate) product_context: Option<Arc<dyn crate::product_context::ProductContextPort>>,
     pub workspace_cwd: PathBuf,
     pub config_cwd: PathBuf,
     pub store_path: PathBuf,
