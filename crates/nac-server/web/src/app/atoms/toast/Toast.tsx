@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Icon, { IconName } from "../icon";
 import Button from "../button";
+import "./toast.css";
 
 export enum ToastVariant {
   Info = "info",
@@ -17,10 +18,10 @@ interface ToastProps {
 }
 
 const VARIANT_STYLES = {
-  [ToastVariant.Info]: "bg-info-inverse",
-  [ToastVariant.Success]: "bg-success-inverse",
-  [ToastVariant.Error]: "bg-error-inverse",
-  [ToastVariant.Danger]: "bg-danger-inverse",
+  [ToastVariant.Info]: "text-info-primary",
+  [ToastVariant.Success]: "text-success-primary",
+  [ToastVariant.Error]: "text-error-primary",
+  [ToastVariant.Danger]: "text-danger-primary",
 } satisfies Record<ToastVariant, string>;
 
 const VARIANT_ICONS = {
@@ -32,7 +33,6 @@ const VARIANT_ICONS = {
 
 const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) => {
   const [mounted, setMounted] = useState(false);
-  const nodeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setMounted(true));
@@ -42,36 +42,31 @@ const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) 
   const isVisible = mounted && !dismissing;
 
   return (
-    <div ref={nodeRef} className="overflow-hidden">
-      <div
-        className="rounded-[4px] max-w-[360px] w-full pointer-events-auto"
-        style={{
-          transform: isVisible ? "translateY(0)" : "translateY(-100%)",
-          transition: "transform 150ms ease-out",
-        }}
-      >
-        <div
-          className={[
-            "rounded-[4px] flex gap-2 items-start p-3 pr-12 label-small relative text-[var(--white)] shadow-2xl overflow-hidden w-[360px]",
-            VARIANT_STYLES[variant],
-          ].join(" ")}
-        >
+    <div className="overflow-hidden">
+      <div className="nac-toast w-full pointer-events-auto" data-visible={isVisible}>
+        <div className="rounded-xl border border-tertiary bg-elevation-level-2 flex gap-3 items-start p-4 pr-14 relative text-basic-primary shadow-lg w-full">
           <Icon
             iconName={VARIANT_ICONS[variant]}
             size={20}
-            className="flex-shrink-0 mt-[2px] min-w-[20px] min-h-[20px] max-w-[20px] max-h-[20px] [&>path]:fill-[var(--white)]"
+            className={`shrink-0 mt-0.5 ${VARIANT_STYLES[variant]}`}
           />
-          <span className="notification-title label-small flex-grow min-w-0 break-words whitespace-pre-line">
+          <span
+            role={
+              variant === ToastVariant.Error || variant === ToastVariant.Danger ? "alert" : "status"
+            }
+            aria-atomic="true"
+            className="flex-grow min-w-0 text-sm leading-5 break-words [overflow-wrap:anywhere] whitespace-pre-line"
+          >
             {content}
           </span>
           <Button
             variant={Button.Variant.Ghost}
             content={Button.Content.Icon}
-            className="absolute top-1 right-1 btn-icon-rotate flex-shrink-0"
+            className="absolute top-1 right-1 !size-11 shrink-0"
+            aria-label="Dismiss notification"
             onClick={onClose}
           >
-            {/* Beat `.btn-ghost .icon path { fill: … }` from atoms.css. */}
-            <Icon iconName={IconName.Close} className="[&>path]:!fill-[var(--white)]" />
+            <Icon iconName={IconName.Close} />
           </Button>
         </div>
       </div>

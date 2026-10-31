@@ -92,7 +92,7 @@ const InsightItem: React.FC<InsightItemProps> = ({
             aria-hidden
             className={cn(
               "shrink-0",
-              failed ? "[&>path]:fill-error-primary" : "[&>path]:fill-basic-primary",
+              failed ? "text-fill-error-primary" : "text-fill-basic-primary",
             )}
           />
         )}

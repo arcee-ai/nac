@@ -26,6 +26,8 @@
     "@xterm/xterm": "6.0.0",
     "clsx": "^2.1.1",
     "effect": "3.22.2",
+    "lucide-react": "1.61.0",
+    "radix-ui": "1.8.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
@@ -73,6 +75,7 @@
       "katex": "0.18.2"
     },
     "@xmldom/xmldom": "^0.9.12",
-    "tinypool": "~2.1.2"
+    "tinypool": "~2.1.2",
+    "minimatch@^10": "11.0.3"
   }
 }
