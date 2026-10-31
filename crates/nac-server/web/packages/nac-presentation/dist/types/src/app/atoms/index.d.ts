@@ -44,7 +44,7 @@ export { default as ProgressLoader } from "./loader/ProgressLoader";
 export { default as ShimmerLoader } from "./loader/ShimmerLoader";
 export { default as Logo } from "./logo";
 export { default as MessageBox, MessageBoxSize, MessageBoxVariant } from "./message-box";
-export { default as Modal, ModalSize } from "./modal";
+export { default as Modal, ModalDescription, ModalSize } from "./modal";
 export { default as ModelLoader, type ModelLoaderFrame, ModelLoaderSize, ModelLoaderVariant, } from "./model-loader";
 export { default as ModelPill, ModelPillSize } from "./model-pill";
 export { default as NumberInput } from "./number-input";
@@ -63,6 +63,7 @@ export { default as SubagentTranscriptCard, SubagentCardStatus } from "./subagen
 export { default as Switch, SwitchSize } from "./switch";
 export { default as TabButton, TabButtonSize, TabButtonVariant } from "./tab-button";
 export { default as TagsSelector } from "./tags-selector";
+export { default as TerminalTabButton, TerminalTabButtonSize } from "./terminal-tab-button";
 export { default as Toast, ToastVariant } from "./toast/Toast";
 export { default as ToolsAndReasoningBadge } from "./tools-and-reasoning-badge";
 export { default as Tooltip, TooltipPosition } from "./tooltip";

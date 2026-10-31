@@ -10,6 +10,8 @@ interface CopyButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElem
     position?: AnchorPlacement;
     /** Label shown in the tooltip before anything is copied. */
     title?: string;
+    /** Pixel size of the default copy/check glyph; the Icon atom's default when omitted. */
+    iconSize?: number;
     onCopy?: () => void;
     children?: React.ReactNode;
 }

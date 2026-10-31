@@ -103,7 +103,7 @@ export async function startPackedPresentation(harness: EmbeddedHarness, id: stri
     `<html><head><style>
 body{margin:17px;background:rgb(111,22,33);font-family:monospace;color:rgb(3,4,5)}
 .btn{padding:11px;border-radius:13px;color:rgb(6,7,8)}.title{font:17px monospace}
-:root{--brand-500:caller-brand}@keyframes fade{to{opacity:.2}}
+:root{--brand-500:caller-brand;--icon-color:#fa0102}@keyframes fade{to{opacity:.2}}
 #caller-math{font-family:monospace;line-height:19px}
 </style></head><body><div id="caller"></div><script type="module" src="/consumer.tsx"></script></body></html>`,
   );
