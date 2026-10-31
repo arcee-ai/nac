@@ -3,6 +3,7 @@ fn live() -> Arc<Live> {
     let runtime = Arc::new(Mutex::new(RuntimeState::default()));
     Arc::new(Live {
         hub: AttentionHub::new(Uuid::new_v4(), AttentionLimits::default()).unwrap(),
+        limits: AttentionLimits::default(),
         state: Mutex::new(Projection {
             sources: BTreeMap::new(),
             dirty: BTreeSet::new(),
@@ -308,3 +309,6 @@ async fn cancelled_owned_read_keeps_its_physical_seat_until_the_accepted_caller_
     drop(manager);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[path = "attention_scope_tests.rs"]
+mod scope;

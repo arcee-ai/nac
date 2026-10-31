@@ -202,3 +202,6 @@ fn metadata_helper_does_not_weaken_the_canonical_question_readers_goal_validatio
     drop(connection);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+#[path = "attention_scope_tests.rs"]
+mod scope;

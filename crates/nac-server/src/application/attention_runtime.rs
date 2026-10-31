@@ -5,10 +5,7 @@ use crate::SessionManager;
 use nac_core::{
     events::*,
     session_service::SessionService,
-    store::{
-        AttentionStoreObservation, AttentionStoredSession, ATTENTION_METADATA_BYTES,
-        ATTENTION_SOURCE_LIMIT,
-    },
+    store::{AttentionStoreObservation, AttentionStoredSession, ATTENTION_SOURCE_LIMIT},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -35,6 +32,10 @@ struct RuntimeState {
     bootstrap_gate: Option<Arc<BootstrapGate>>,
     #[cfg(test)]
     read_gate: Option<Arc<ReadGate>>,
+    #[cfg(test)]
+    after_read_gate: Option<Arc<ReadGate>>,
+    #[cfg(test)]
+    limits: Option<AttentionLimits>,
 }
 #[cfg(test)]
 #[derive(Default)]
@@ -47,6 +48,22 @@ struct ReadGate {
     reached: Notify,
     release: Mutex<std::sync::mpsc::Receiver<()>>,
 }
+#[cfg(test)]
+struct AfterReadGate(Option<Arc<ReadGate>>);
+#[cfg(test)]
+impl Drop for AfterReadGate {
+    fn drop(&mut self) {
+        if let Some(gate) = self.0.take() {
+            gate.reached.notify_one();
+            let _ = gate
+                .release
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .recv();
+        }
+    }
+}
+
 struct Permit {
     runtime: Arc<Mutex<RuntimeState>>,
     token: Uuid,
@@ -97,6 +114,7 @@ struct Projection {
 }
 struct Live {
     hub: AttentionHub,
+    limits: AttentionLimits,
     state: Mutex<Projection>,
     wake: Notify,
     task: Mutex<Option<JoinHandle<()>>>,
@@ -239,7 +257,7 @@ impl AttentionRuntime {
         manager: SessionManager,
         cursor: Option<AttentionBoundary>,
     ) -> Result<NativeAttentionSubscription> {
-        let (engine, permit) = {
+        let (engine, permit, limits) = {
             let mut state = self
                 .0
                 .lock()
@@ -257,17 +275,21 @@ impl AttentionRuntime {
             }
             let token = Uuid::new_v4();
             state.seat = Some(token);
+            let limits = AttentionLimits::default();
+            #[cfg(test)]
+            let limits = state.limits.unwrap_or(limits);
             (
                 engine,
                 Arc::new(Permit {
                     runtime: Arc::clone(&self.0),
                     token,
                 }),
+                limits,
             )
         };
         let live = Arc::new(Live {
-            hub: AttentionHub::new(engine, AttentionLimits::default())
-                .map_err(AttentionSubscribeError::Unavailable)?,
+            hub: AttentionHub::new(engine, limits).map_err(AttentionSubscribeError::Unavailable)?,
+            limits,
             state: Mutex::new(Projection {
                 sources: BTreeMap::new(),
                 dirty: BTreeSet::new(),
@@ -394,12 +416,13 @@ async fn read(
     let path = manager.inner.store_path.clone();
     let id = id.map(str::to_owned);
     #[cfg(test)]
-    let read_gate = permit
-        .runtime
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .read_gate
-        .clone();
+    let (read_gate, after_read_gate) = {
+        let mut state = permit
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (state.read_gate.clone(), state.after_read_gate.take())
+    };
     manager
         .inner
         ._store_ownership
@@ -416,6 +439,8 @@ async fn read(
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .recv();
             }
+            #[cfg(test)]
+            let _after_read = AfterReadGate(after_read_gate);
             nac_core::store::read_attention_metadata(&path, id.as_deref())
         })
         .await
@@ -427,7 +452,7 @@ impl Live {
     fn source<'a>(&self, state: &'a mut Projection, id: &str) -> Result<&'a mut Source> {
         if id.trim().is_empty()
             || id.len() > 512
-            || (!state.sources.contains_key(id) && state.sources.len() >= ATTENTION_SOURCE_LIMIT)
+            || (!state.sources.contains_key(id) && state.sources.len() >= self.limits.sources)
         {
             return Err(AttentionSubscribeError::Unavailable(
                 AttentionUnavailable::Capacity,
@@ -489,7 +514,7 @@ impl Live {
                     })
             })
             .sum();
-        if bytes > ATTENTION_METADATA_BYTES {
+        if bytes > self.limits.current_bytes {
             Err(AttentionSubscribeError::Unavailable(
                 AttentionUnavailable::Capacity,
             ))

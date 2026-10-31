@@ -88,6 +88,10 @@ impl AttentionStoreObservation {
                 store_path,
                 session_id,
                 ..
+            }
+            | goal_changes::TaskChange::SessionDirty {
+                store_path,
+                session_id,
             } => (store_path, session_id),
         };
         (path == self.path).then_some(session)

@@ -937,3 +937,92 @@ async fn large_question_attention_rejects_aggregate_overflow_without_truncating_
             && t["attention"]["text"].as_str().unwrap().chars().count() == 4000));
     cleanup(&runtime);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scope_hint_rereads_only_its_pinned_session_without_retargeting_or_inventing_a_result() {
+    let mut runtime = runtime(Vec::new());
+    let path = runtime.store_path.clone();
+    let goal =
+        store::create_session_goal(&path, "peer-a", "keep exact identity", None, None).unwrap();
+    let run = uuid::Uuid::new_v4().to_string();
+    store::TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            "peer-a",
+            0,
+            &crate::types::Message::User {
+                content: "work".into(),
+            },
+            &run,
+        )
+        .unwrap();
+    store::create_task_question(
+        &path,
+        &store::QuestionRequest {
+            session_id: "peer-a".into(),
+            request_id: "scope".into(),
+            run_id: run.clone(),
+            generation: run,
+            text: "private choice".into(),
+            choices: vec![],
+            responder_class: store::QuestionResponder::HumanDecision,
+        },
+        0,
+    )
+    .unwrap();
+    let owner = store::StoreCoordinator::acquire(&path).unwrap();
+    runtime.store_path = owner.store_path().to_owned();
+    let first = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[target("peer-a")]}),
+    )
+    .await;
+    assert_eq!(first["targets"][0]["status"], "question_attention");
+    let pinned = json!({"session_id":"peer-a","mode":"goal","after_cursor":first["targets"][0]["after_cursor"]});
+    let mut identity: Target = serde_json::from_value(pinned.clone()).unwrap();
+    assert!(identity
+        .bind_cursor(runtime.session_id.as_deref().unwrap())
+        .is_ok());
+    let mut hints = store::goal_changes::subscribe(&runtime.store_path);
+    let mut config = crate::sessions::load_session_config(&runtime.store_path, "peer-a").unwrap();
+    config.orchestrator_compaction_threshold = Some(64_000);
+    owner.update_raw_session_config(config).await.unwrap();
+    let hint = hints.try_recv().unwrap();
+    assert!(matches!(
+        &hint,
+        store::goal_changes::TaskChange::SessionDirty { .. }
+    ));
+    assert!(relevant_goal_hint(
+        &hint,
+        &runtime.store_path,
+        std::slice::from_ref(&identity)
+    ));
+    assert!(!relevant_goal_hint(
+        &store::goal_changes::TaskChange::SessionDirty {
+            store_path: runtime.store_path.clone(),
+            session_id: "peer-b".into()
+        },
+        &runtime.store_path,
+        std::slice::from_ref(&identity)
+    ));
+    assert!(!relevant_goal_hint(
+        &hint,
+        std::path::Path::new("/different-store"),
+        std::slice::from_ref(&identity)
+    ));
+    let reread = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[pinned],"timeout_ms":0}),
+    )
+    .await;
+    assert_eq!(reread["targets"][0]["resolved_identity"], goal.goal_id);
+    assert_eq!(reread["targets"][0]["status"], "active");
+    assert!(reread["targets"][0].get("attention").is_none());
+    assert_eq!(identity.resolved.as_deref(), Some(goal.goal_id.as_str()));
+    drop(hints);
+    owner.shutdown().await.unwrap();
+    drop(owner);
+    cleanup(&runtime);
+}
