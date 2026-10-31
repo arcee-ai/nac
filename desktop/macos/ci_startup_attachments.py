@@ -1,5 +1,6 @@
 """Collect only the nominated ordinary-startup test's named public attachments."""
 import json
+from collections import Counter
 from pathlib import Path
 import re
 import stat
@@ -132,6 +133,60 @@ def require_observation(row, config, configuration_sha256, witness, png):
     return row
 
 
+def select_inventory(export, entries, fixed, pattern, index):
+    """Inspect all metadata before payloads; late aliases invalidate prior rows."""
+    files, names, selected = Counter(), Counter(), []
+    metadata, errors = [], []
+    index.update(selection_metadata=metadata, selection_errors=errors)
+    total, first_error = 0, len(entries)
+    for ordinal, entry in enumerate(entries):
+        filename = entry.get('exportedFileName') if isinstance(entry, dict) else None
+        name = entry.get('suggestedHumanReadableName') if isinstance(entry, dict) else None
+        match = re.fullmatch(pattern, name) if isinstance(name, str) else None
+        canonical = match[1] if match else None
+        if isinstance(filename, str):
+            files[filename] += 1
+        if canonical:
+            names[canonical] += 1
+        row = {'ordinal': ordinal, 'name': metadata_value(name), 'filename': metadata_value(filename)}
+        if len(metadata) < 64:
+            metadata.append(row)
+        try:
+            require(isinstance(entry, dict), 'manifest_entry')
+            require(isinstance(filename, str) and filename not in ('', '.', '..')
+                    and not any(c in filename for c in ('/', '\\', '\0')) and files[filename] == 1, 'export_filename')
+            file = export / filename
+            info = file.lstat()
+            require(stat.S_ISREG(info.st_mode), 'export_regular_file')
+            require(isinstance(name, str), 'display_name')
+            if not name.startswith('nac342-'):
+                index['automatic_omitted'] += 1
+                row.clear()
+                row.update(ordinal=ordinal, kind='omitted_automatic')
+                continue
+            require(match is not None, 'named_attachment')
+            dispatch = re.fullmatch(r'nac342-dispatch-v1-(\d{2})-(before|after)', canonical)
+            kind = 'dispatch' if dispatch else fixed.get(canonical)
+            require(kind is not None and names[canonical] == 1, 'foreign_or_duplicate_attachment')
+            row['kind'] = kind
+            if dispatch:
+                row.update(operation_index=int(dispatch[1]), stage=dispatch[2])
+            limit = MAX_PNG if kind in ('png', 'failure') else MAX_JSON
+            require(info.st_size <= limit and total + info.st_size <= MAX_SELECTED, 'selected_size')
+            total += info.st_size
+            selected.append((ordinal, file, canonical, kind))
+        except BaseException as error:
+            first_error = min(first_error, ordinal)
+            if len(errors) < 64:
+                errors.append({'ordinal': ordinal, 'reason': error.reason if isinstance(error, StartupAttachmentError)
+                               else 'inventory_unavailable'})
+    # No ambiguous identity/file is ever copied, including a duplicate whose
+    # later metadata points outside the export. Keep only a continuous dispatch
+    # prefix preceding the first inventory error; never infer SDK chronology.
+    return [(file, name, kind) for ordinal, file, name, kind in selected
+            if files[file.name] == 1 and names[name] == 1 and (kind != 'dispatch' or ordinal < first_error)]
+
+
 def collect(tool, result, config, configuration_sha256, witness, output):
     """Tool is the actual prepared H SDK observer; unit adapters are explicit."""
     output.mkdir()
@@ -174,44 +229,10 @@ def collect(tool, result, config, configuration_sha256, witness, output):
                      f'nac342-ordinary-v1-{scenario}': 'observation', f'nac342-cleanup-v1-{scenario}': 'cleanup'}
             uuid = r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}'
             pattern = r'(nac342-[A-Za-z0-9-]+?)(?:_\d+_' + uuid + r')?(?:\.(?:json|png))?'
-            seen_files, selected, seen_names, metadata = set(), [], set(), []
-            index['selection_metadata'] = metadata
-            total = 0
-            for ordinal, entry in enumerate(entries):
-                require(isinstance(entry, dict), 'manifest_entry')
-                filename, name = entry.get('exportedFileName'), entry.get('suggestedHumanReadableName')
-                row = {'ordinal': ordinal, 'name': metadata_value(name), 'filename': metadata_value(filename)}
-                if len(metadata) < 128:
-                    metadata.append(row)
-                require(isinstance(filename, str) and filename not in ('', '.', '..')
-                        and not any(c in filename for c in ('/', '\\', '\0')) and filename not in seen_files, 'export_filename')
-                seen_files.add(filename)
-                file = export / filename
-                info = file.lstat()
-                require(stat.S_ISREG(info.st_mode), 'export_regular_file')
-                require(isinstance(name, str), 'display_name')
-                if not name.startswith('nac342-'):
-                    index['automatic_omitted'] += 1
-                    row.clear()
-                    row.update(ordinal=ordinal, kind='omitted_automatic')
-                    continue
-                match = re.fullmatch(pattern, name)
-                require(match is not None, 'named_attachment')
-                canonical = match[1]
-                dispatch = re.fullmatch(r'nac342-dispatch-v1-(\d{2})-(before|after)', canonical)
-                kind = 'dispatch' if dispatch else fixed.get(canonical)
-                require(kind is not None and canonical not in seen_names, 'foreign_or_duplicate_attachment')
-                row['kind'] = kind
-                if dispatch:
-                    row.update(operation_index=int(dispatch[1]), stage=dispatch[2])
-                seen_names.add(canonical)
-                limit = MAX_PNG if kind in ('png', 'failure') else MAX_JSON
-                require(info.st_size <= limit and total + info.st_size <= MAX_SELECTED, 'selected_size')
-                total += info.st_size
-                selected.append((file, canonical, kind))
+            selected = select_inventory(export, entries, fixed, pattern, index)
             # Admission of the complete inventory precedes any payload copy;
             # no later duplicate can retroactively invalidate a retained file.
-            require(not any(p.is_symlink() or not (p.is_file() or p.is_dir()) for p in export.rglob('*')), 'private_inventory')
+            inventory_valid = not any(p.is_symlink() or not (p.is_file() or p.is_dir()) for p in export.rglob('*'))
             values, images, total = {}, {}, 0
             for file, name, kind in selected:
                 data = bounded_file(file, MAX_PNG if kind in ('png', 'failure') else MAX_JSON)
@@ -245,6 +266,7 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             (output / (name + '.png')).write_bytes(data)
             (output / (values['observation'][0] + '.json')).write_bytes(values['observation'][1])
             index.update(image=image, observation=observation)
+            require(inventory_valid and not index['selection_errors'], 'complete_inventory')
             require(len(index['dispatches']) == len(operations(config)) * 2, 'dispatch_completion')
             require(test['result'] == 'Passed', 'actual_test_result')
             index.update(complete=True, image=image, observation=observation, input_completion_unknown=False)

@@ -24,5 +24,30 @@
     "suite": "terminal",
     "scenario_count": 1,
     "phase_count": 6
+  },
+  "all-342-startup-macos26": {
+    "source_sha": "d443a2aca506def2817b9afc0c9a20a75f5c4b5d",
+    "test_source_sha": "1412af562c56edebc63dbf61af849f08e2255b54",
+    "protocol_source_sha": "25046f450110d1b795d529d046d2c1deee880877",
+    "profile": "macos26",
+    "suite": "startup",
+    "scenario_count": 4,
+    "scenarios": [
+      "onboarding",
+      "configuredLocal",
+      "invalidConfig",
+      "futureStore"
+    ],
+    "test_files": {
+      "README.md": "ef79761bd31774dec00f080a80392b988215ca87be0c1b8512fc54112f694021",
+      "StartupJourneys.swift": "1288826cbfd9f2ba3aa604d6be03a1ab3616f1f7b9ce66ac29ed6d1ee91869cd",
+      "contract.py": "86d5182b77f64301b6c14f97642fff3ebcb1f656502b406606c68e42e0b94048",
+      "test_contract.py": "3556f47d0ae8ea1ef68e55f76dd4d263d4afe250984ce61a2ed1e3a64ca2e220"
+    },
+    "protocol_files": {
+      "Cargo.lock": "641d909e84b0c2b1dfef821fe07e02fe5f405d7d098ede8c2a7f63ed4b977286",
+      "crates/nac-server/Cargo.toml": "d87d6ea026fe5040e7ea32a8888a8cba7329242e2832132caa280a7236b2e7b0",
+      "crates/nac-server/tests/desktop_schema_contract.rs": "0eb70e49c7aba12bdb8c8c350246e892e2a5418403ca14a55674f2419a0aab1e"
+    }
   }
 }

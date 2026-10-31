@@ -1,5 +1,6 @@
 """Private fixture tests: no app, engine, provider or XCTest is launched."""
 import json
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -32,7 +33,7 @@ class StartupFixtureTests(unittest.TestCase):
         self.assertFalse(profiles[0]['config'].exists())
         self.assertFalse(profiles[1]['store'].exists())
         self.assertEqual(profiles[2]['config'].read_text(), '[broken\n')
-        with sqlite3.connect(profiles[3]['store']) as connection:
+        with closing(sqlite3.connect(profiles[3]['store'])) as connection, connection:
             self.assertEqual(connection.execute('PRAGMA user_version').fetchone()[0], 999)
         self.assertEqual(immutable_snapshot(profiles[3])['wal_shm'], [])
         with self.assertRaises(RuntimeError):
@@ -49,7 +50,7 @@ class StartupFixtureTests(unittest.TestCase):
                     require_integrity(profile, before)
         profile = self.profile('invalidConfig')
         before = immutable_snapshot(profile)
-        with sqlite3.connect(profile['nac_home'] / 'fallback.db') as connection:
+        with closing(sqlite3.connect(profile['nac_home'] / 'fallback.db')) as connection, connection:
             connection.execute('CREATE TABLE unexpected(value)')
         with self.assertRaisesRegex(RuntimeError, 'alternate'):
             require_integrity(profile, before)

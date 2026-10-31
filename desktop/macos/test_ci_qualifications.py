@@ -1,7 +1,9 @@
 from pathlib import Path
+import json
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from ci_qualifications import require_checkout, require_full_preview, require_workspace, select_target
 
@@ -18,6 +20,11 @@ class ExactSourceTests(unittest.TestCase):
         self.assertEqual(instance['scenario_count'], 8)
         terminal = select_target('all-352-macos26')
         self.assertEqual(terminal['source_sha'], 'dd87b0e97f7e5f5bfcbfcbf5b2bee2fe30b88b3a')
+        startup = select_target('all-342-startup-macos26')
+        self.assertEqual(startup['source_sha'], 'd443a2aca506def2817b9afc0c9a20a75f5c4b5d')
+        self.assertEqual(startup['test_source_sha'], '1412af562c56edebc63dbf61af849f08e2255b54')
+        self.assertEqual(startup['protocol_source_sha'], '25046f450110d1b795d529d046d2c1deee880877')
+        self.assertEqual(startup['scenarios'], ['onboarding', 'configuredLocal', 'invalidConfig', 'futureStore'])
         self.assertEqual(terminal['suite'], 'terminal')
         self.assertEqual(terminal['phase_count'], 6)
         older = select_target('all-351-macos14')
@@ -47,6 +54,17 @@ class ExactSourceTests(unittest.TestCase):
             (root / 'subdirectory').mkdir()
             with self.assertRaisesRegex(RuntimeError, 'exact repository root'):
                 require_checkout(root / 'subdirectory', sha)
+
+    def test_startup_contract_cannot_substitute_sources_cases_or_file_rosters(self):
+        selected = select_target('all-342-startup-macos26')
+        target = {key: value for key, value in selected.items()
+                  if key not in ('runner', 'envelope', 'developer_directory')}
+        for changed in ({'source_sha': 'f' * 40}, {'test_source_sha': 'f' * 40},
+                        {'protocol_source_sha': 'f' * 40}, {'test_files': {}}, {'protocol_files': {}},
+                        {'scenarios': list(reversed(target['scenarios']))}, {'scenario_count': 5}):
+            with self.subTest(changed=changed), patch.object(Path, 'read_text', return_value=json.dumps({
+                    'all-342-startup-macos26': {**target, **changed}})), self.assertRaisesRegex(RuntimeError, 'P/Q/R'):
+                select_target('all-342-startup-macos26')
 
     def test_partial_wrong_source_or_failed_target_driver_is_not_acceptance(self):
         target = select_target('all-341-macos26')

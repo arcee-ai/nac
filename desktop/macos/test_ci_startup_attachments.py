@@ -156,6 +156,33 @@ class StartupAttachmentTests(unittest.TestCase):
                 collect(self.tool(raw, rows), raw / 'unit.xcresult', config, config_hash,
                         {**witness, 'preinstalled': False}, raw / 'selected')
 
+    def test_late_inventory_errors_keep_only_unambiguous_continuous_dispatch_prefix(self):
+        def unsafe(export, manifest):
+            manifest[0]['attachments'][3]['exportedFileName'] = '../FOREIGN-MUST-NOT-BE-RETAINED'
+        def duplicate_name_with_unsafe_path(export, manifest):
+            manifest[0]['attachments'].append({
+                **manifest[0]['attachments'][2], 'exportedFileName': '../FOREIGN-MUST-NOT-BE-RETAINED'})
+        def duplicate_file_with_automatic_name(export, manifest):
+            manifest[0]['attachments'].append({**manifest[0]['attachments'][2],
+                                               'suggestedHumanReadableName': 'Automatic screenshot'})
+        for mutation, expected in ((unsafe, 3), (duplicate_name_with_unsafe_path, 2),
+                                   (duplicate_file_with_automatic_name, 2)):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary)
+                config, config_hash, witness, rows = self.fixture('configuredLocal')
+                with self.assertRaises(RuntimeError):
+                    collect(self.tool(raw, rows, mutate=mutation), raw / 'unit.xcresult',
+                            config, config_hash, witness, raw / 'selected')
+                index = json.loads((raw / 'selected/index.json').read_text())
+                self.assertFalse(index['complete'])
+                self.assertTrue(index['input_completion_unknown'])
+                self.assertEqual(len(index['dispatches']), expected)
+                self.assertTrue(index['selection_errors'])
+                self.assertLessEqual(len(index['selection_metadata']), 64)
+                for file in (raw / 'selected').rglob('*'):
+                    if file.is_file():
+                        self.assertNotIn(b'FOREIGN-MUST-NOT-BE-RETAINED', file.read_bytes())
+
     def test_test_failure_keeps_valid_bound_observation_without_promoting_it(self):
         with tempfile.TemporaryDirectory() as temporary:
             raw = Path(temporary)
