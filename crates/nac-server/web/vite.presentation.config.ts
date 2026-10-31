@@ -26,11 +26,19 @@ function presentationOutput(): Plugin {
         .filter((output) => output.type === "asset" && output.fileName.startsWith("assets/"))
         .map((output) => output.fileName)
         .sort();
-      this.emitFile({
-        type: "asset",
-        fileName: "licenses/xterm.txt",
-        source: fs.readFileSync(path.join(web, "public/licenses/xterm.txt")),
-      });
+      for (const license of [
+        "lucide.txt",
+        "xterm.txt",
+        "radix-ui.txt",
+        "floating-ui.txt",
+        "shadcn-ui.txt",
+      ]) {
+        this.emitFile({
+          type: "asset",
+          fileName: `licenses/${license}`,
+          source: fs.readFileSync(path.join(web, "public/licenses", license)),
+        });
+      }
       this.emitFile({
         type: "asset",
         fileName: "assets.json",

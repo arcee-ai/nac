@@ -183,10 +183,10 @@ export function SessionFilters({
     </>
   );
 
-  const section = inset ? "px-3 py-2" : "py-2";
+  const section = inset ? "px-3 py-2" : "p-4";
   return (
-    <div className="flex flex-col gap-2">
-      <div className={cn("flex flex-col gap-6", section)}>{sortRows}</div>
+    <div className={cn("flex flex-col", inset && "gap-2")}>
+      <div className={cn("flex flex-col", inset ? "gap-6" : "gap-2", section)}>{sortRows}</div>
       {envOptions.length > 1 ? (
         <>
           <Divider />
