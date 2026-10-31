@@ -1,27 +1,34 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 /** Select known ASCII evidence from the current public DOM renderer, once. */
-export async function reviewTerminalEvidence(page: Page, pane: Locator, evidence: string) {
+export async function reviewTerminalEvidence(
+  page: Page,
+  pane: Locator,
+  evidence: string,
+  keyboard = false,
+) {
   expect(evidence.length).toBeGreaterThan(0);
   expect(
     /^[\x20-\x7e]+$/.test(evidence),
     "Evidence fixture must occupy one cell per character",
   ).toBe(true);
-  // History loads independently of the live shell. Its empty-state paragraph
-  // disappears when this source arrives, resizing the terminal and clearing a
-  // selection. Settle that real layout prerequisite before measuring a drag.
-  const source = await pane.getByRole("combobox", { name: "Shell", exact: true }).inputValue();
-  await expect(
-    pane
-      .getByRole("combobox", { name: "Recent activity", exact: true })
-      .locator(`option[value="${source}"]`),
-  ).toHaveCount(1);
+  // History loads into the list beside the terminal, or a screen of its own,
+  // so its arrival cannot resize the grid and clear the selection below.
   const screen = pane.locator(".xterm-screen");
   await expect(screen).toBeVisible();
   await screen.scrollIntoViewIfNeeded();
 
   // Accessibility row positions can lag a resize. Use the rows users see.
   const lines = pane.locator(".xterm-rows > div");
+  // Reconnect marks the transport connected before replay is painted. Wait for
+  // the real cells before measuring them or starting a pointer selection.
+  await expect
+    .poll(
+      async () =>
+        (await lines.allTextContents()).filter((text) => text.trimEnd() === evidence).length,
+      { message: "Expected one live painted evidence row after terminal replay" },
+    )
+    .toBe(1);
   const rows = await lines.allTextContents();
   const matches = rows.flatMap((text, index) => (text.trimEnd() === evidence ? [index] : []));
   const grid = await screen.boundingBox();
@@ -63,7 +70,24 @@ export async function reviewTerminalEvidence(page: Page, pane: Locator, evidence
   await page.mouse.down();
   await page.mouse.move(endX, y, { steps: 10 });
   await page.mouse.up();
-  await pane.getByRole("button", { name: "Review selected text", exact: true }).click();
+  // A phone's menu is a sheet outside the pane.
+  const options = pane.getByRole("button", { name: "Terminal options", exact: true });
+  const review = page.getByRole("button", { name: "Review Selected text", exact: true });
+  if (keyboard) {
+    await options.focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page
+        .getByRole("dialog", { name: "Terminal actions", exact: true })
+        .getByRole("button", { name: "Reconnect", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(review).toBeFocused();
+    await page.keyboard.press("Enter");
+  } else {
+    await options.click();
+    await review.click();
+  }
   const dialog = page.getByRole("dialog", { name: "Review terminal selection" });
   await expect(dialog.getByLabel("Reviewed selected text")).toHaveText(evidence);
   return dialog;

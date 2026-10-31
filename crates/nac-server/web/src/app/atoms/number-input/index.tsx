@@ -87,7 +87,7 @@ const NumberInput: React.FC<NumberInputProps> = ({
         aria-valuemin={min}
         aria-valuemax={max}
         className={cn(
-          "input rounded-[4px] text-center w-16 px-1 font-normal",
+          "input rounded-interaction text-center w-16 px-1 font-normal",
           size,
           disabled && "input-disabled",
         )}

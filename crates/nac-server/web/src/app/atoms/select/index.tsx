@@ -126,9 +126,9 @@ const Select: React.FC<SelectProps> = ({
       open={open}
       onClose={() => changeOpen(false)}
       placement={placement}
-      // A fixed panel measures `min-w-full` against the viewport rather than
-      // against the trigger, so a portalled list hugs its content instead.
-      size={sticky ? PopoverSize.Fit : "min-w-full"}
+      // A portalled list hugs its content; an inline one keeps at least the
+      // trigger's width, so it reads as the field dropping open.
+      size={sticky ? PopoverSize.Fit : PopoverSize.TriggerWidth}
       sticky={sticky}
       className={className}
       panelClassName={panelClassName}

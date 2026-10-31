@@ -13,8 +13,6 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { formatMessageDate } from "@/app/features/insights/transcript/messageDate";
-import { usePromptCreatedAt } from "@/app/features/insights/transcript/transcriptTurns";
 import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
 
@@ -29,11 +27,6 @@ interface UserMessageProps {
    * bubble so the injection is visible; null for an ordinary prompt.
    */
   invokedSkills?: string[] | null;
-  /**
-   * Shown when the transcript has no time of its own for the message. The
-   * transcript's time for `messageIndex` wins, in the chat's English format.
-   */
-  timestamp?: string | null;
   /**
    * Raw snapshot index the actions address. Absent while the message is still
    * only in flight, which is what disables the revert affordance.
@@ -54,38 +47,34 @@ interface UserMessageProps {
   onRevert?: ((messageIndex: number, text: string) => void) | null;
   /** Disable destructive / network actions while a run is in flight. */
   actionsDisabled?: boolean;
-  /** Parent-owned delegated transcripts expose copy/time but no mutation affordances. */
+  /** Parent-owned delegated transcripts expose copy but no mutation affordances. */
   readOnly?: boolean;
 }
 
-type UserMessageBodyProps = Omit<UserMessageProps, "timestamp"> & { date: string | null };
+/** Dimmed at rest; keyboard focus lifts it so the focus ring keeps its contrast. */
+const ACTION_CLASS = "opacity-75 focus-visible:opacity-100";
 
-const UserMessageBody = memo(function UserMessageBody({
+/** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
+export const UserMessage = memo(function UserMessage({
   text,
   terminalSelection,
   sessionId,
   pending = false,
   invokedSkills = null,
-  date,
   messageIndex,
   onRefresh = null,
   onRevert = null,
   actionsDisabled = false,
   readOnly = false,
-}: UserMessageBodyProps) {
+}: UserMessageProps) {
   perfRender("UserMessage");
   const canRefresh = !readOnly && onRefresh != null && messageIndex != null;
   const canRevert = !readOnly && onRevert != null && messageIndex != null;
   return (
     <div className="flex flex-col items-end w-full max-w-full py-6">
-      {date ? (
-        <span className="max-w-full min-w-0 pb-2 label-2xs text-basic-muted whitespace-nowrap truncate">
-          {date}
-        </span>
-      ) : null}
       <div
         className={cn(
-          "min-w-0 max-w-full p-5 rounded-[12px] bg-elevation-sublevel-variant-B shadow-convex",
+          "w-full p-5 overflow-hidden rounded-[16px] bg-elevation-level-2",
           "label-small text-basic-primary whitespace-pre-wrap break-words",
           "transition-opacity duration-150",
           pending && "opacity-60",
@@ -136,6 +125,7 @@ const UserMessageBody = memo(function UserMessageBody({
               aria-label="Regenerate from original prompt"
               disabled={actionsDisabled}
               onClick={() => onRefresh(messageIndex)}
+              className={ACTION_CLASS}
             >
               <Icon iconName={IconName.Refresh} size={16} />
             </Button>
@@ -151,6 +141,7 @@ const UserMessageBody = memo(function UserMessageBody({
               aria-label="Revert to this snapshot"
               disabled={actionsDisabled}
               onClick={() => onRevert(messageIndex, text)}
+              className={ACTION_CLASS}
             >
               <Icon iconName={IconName.TurnLeft} size={16} />
             </Button>
@@ -167,6 +158,7 @@ const UserMessageBody = memo(function UserMessageBody({
                 content={ButtonContent.Icon}
                 aria-label="Revert to this snapshot"
                 disabled
+                className={ACTION_CLASS}
               >
                 <Icon iconName={IconName.TurnLeft} size={16} />
               </Button>
@@ -178,16 +170,12 @@ const UserMessageBody = memo(function UserMessageBody({
           value={text}
           size={ButtonSize.Small}
           variant={ButtonVariant.Ghost}
+          iconSize={16}
           title={terminalSelection ? "Copy canonical message" : "Copy message"}
           position={TooltipPosition.BottomLeft}
+          className={ACTION_CLASS}
         />
       </div>
     </div>
   );
-});
-
-/** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
-export const UserMessage = memo(function UserMessage({ timestamp, ...props }: UserMessageProps) {
-  const createdAt = usePromptCreatedAt(props.messageIndex);
-  return <UserMessageBody {...props} date={formatMessageDate(createdAt) ?? timestamp ?? null} />;
 });

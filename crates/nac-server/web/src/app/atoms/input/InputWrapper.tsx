@@ -12,6 +12,10 @@ export interface InputWrapperProps {
   caption?: "large" | "compact";
   /** Info glyph beside the label, for the explanation that will not fit inline. */
   hoverHint?: HoverHintConfig;
+  /** Id of the control the label names. */
+  htmlFor?: string;
+  /** Id of the hint / validation line, for the control's `aria-describedby`. */
+  descriptionId?: string;
   className?: string;
   children?: React.ReactNode;
 }
@@ -25,6 +29,8 @@ const InputWrapper: React.FC<InputWrapperProps> = ({
   hintText,
   caption,
   hoverHint,
+  htmlFor,
+  descriptionId,
   className,
   children,
 }) => {
@@ -37,6 +43,7 @@ const InputWrapper: React.FC<InputWrapperProps> = ({
       {label ? (
         <div className="flex items-baseline gap-1 min-w-0">
           <Label
+            htmlFor={htmlFor}
             validation={validation}
             hoverHint={hoverHint}
             tone="primary"
@@ -59,9 +66,13 @@ const InputWrapper: React.FC<InputWrapperProps> = ({
       ) : null}
       {children}
       {validation && validationText ? (
-        <p className={cn(captionClass, "text-error-primary")}>{validationText}</p>
+        <p id={descriptionId} className={cn(captionClass, "text-error-primary")}>
+          {validationText}
+        </p>
       ) : !validation && hintText ? (
-        <p className="text-micro text-basic-muted">{hintText}</p>
+        <p id={descriptionId} className="text-micro text-basic-muted">
+          {hintText}
+        </p>
       ) : null}
     </div>
   );

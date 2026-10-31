@@ -201,16 +201,16 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
     let resizeRunning = false;
     let latestGeometry: { cols: number; rows: number } | null = null;
     const resize = Effect.suspend(() => {
-      if (
-        ports.readonly ||
-        (ports.source && ports.source.origin !== "human" && ports.source.resize === false)
-      ) {
-        if (ports.source) view.terminal.resize(ports.source.cols, ports.source.rows);
-        return Effect.void;
-      }
       const geometry = view.fit();
       if (geometry) latestGeometry = geometry;
-      if (resizeRunning || !connected || !processAlive || ports.source?.resize === false)
+      // The local grid may differ from the PTY: only a writable, resizable source is ever resized.
+      if (
+        resizeRunning ||
+        !connected ||
+        !processAlive ||
+        ports.readonly ||
+        ports.source?.resize === false
+      )
         return Effect.void;
       resizeRunning = true;
       return Effect.gen(function* () {

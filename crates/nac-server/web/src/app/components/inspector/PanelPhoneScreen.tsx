@@ -32,7 +32,7 @@ export function PanelPhoneScreen({
   const chrome = usePanelPhoneChrome();
   return (
     <div className="relative flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">
-      <header className="fade-from-top absolute inset-x-0 top-0 z-10 flex h-14 items-center gap-4 p-1">
+      <header className="fade-from-top absolute inset-x-0 top-0 z-10 flex h-14 items-center gap-4 py-1 pl-2 pr-1">
         <StickyButton
           variant={ButtonVariant.Ghost}
           content={ButtonContent.Icon}
