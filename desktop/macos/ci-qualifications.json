@@ -4,5 +4,12 @@
     "profile": "macos26",
     "suite": "preview",
     "scenario_count": 29
+  },
+  "all-351-macos14": {
+    "source_sha": "fa94a859b648cb36fbdcb251bfe4bc9541de3f48",
+    "profile": "macos14",
+    "suite": "workspace",
+    "scenario_count": 2,
+    "baseline_scenarios": 6
   }
 }

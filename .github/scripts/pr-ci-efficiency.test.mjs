@@ -15,7 +15,7 @@ test("exact native supplier qualification is explicit, bounded and separate from
   const stable = workflow("stable-release");
   const input = stable.on.workflow_dispatch.inputs.native_qualification;
   assert.equal(input.default, "none");
-  assert.deepEqual(input.options, ["none", "all-341-macos26"]);
+  assert.deepEqual(input.options, ["none", "all-341-macos26", "all-351-macos14"]);
   const caller = stable.jobs["native-qualification"];
   assert.match(caller.if, /github.event_name == 'workflow_dispatch'/);
   assert.match(caller.if, /startsWith\(github.ref, 'refs\/heads\/codex\/'\)/);
@@ -40,6 +40,8 @@ test("exact native supplier qualification is explicit, bounded and separate from
   const catalog = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"));
   assert.equal(catalog["all-341-macos26"].source_sha, "1a4f9c31f27b4656897673084f3440e05373393d");
   assert.equal(catalog["all-341-macos26"].profile, "macos26");
+  assert.equal(catalog["all-351-macos14"].source_sha, "fa94a859b648cb36fbdcb251bfe4bc9541de3f48");
+  assert.equal(catalog["all-351-macos14"].profile, "macos14");
 });
 
 const quality = () => ({

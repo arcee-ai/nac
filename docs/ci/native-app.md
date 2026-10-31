@@ -157,6 +157,29 @@ while separate actual image/session evidence remains available for human review.
 The coordinator must inspect the target PNGs before accepting supplier paint.
 
 Only named source/profile records resolve; there is no arbitrary SHA, command,
-paid-runner or matrix input. Additional 351 and macOS 14 entries require corrected
-immutable nominations and separate bounded qualification. The macOS 14 opportunity
-does not change the primary 26 lane or select a product minimum OS.
+paid-runner or matrix input.
+
+The additional `all-351-macos14` choice binds the corrected, frozen
+`fa94a859b648cb36fbdcb251bfe4bc9541de3f48` fixture to a separate strict envelope:
+standard ARM `macos-14`, macOS 14.8.9 / 23J631, image 20260831.0302.1,
+Xcode 16.2 / 16C5032a, SDK 15.2. Its official image inventory is runner-images
+commit `a574079cf338d5d04f54b82b01c6652b824b39c0`. The exact Swift compiler patch
+is deliberately unset until observed; the first bounded diagnostic remains
+`unqualified-swift` even if its native journeys complete. Do not fabricate a
+patch version or treat the moving label as an immutable image pin.
+
+The source's workspace builder receives the exact just-built private engine,
+then its six baseline scenarios and both direct/legacy workspace scenarios run
+against the same instrumented native binary. The source's manifest/projection
+must agree on source/native/engine identity; all scripted checks and cleanup must
+pass. External OCR checks baseline chat, rich workspace, approval and legacy
+captures. Physical input/IME/VoiceOver and product-minimum rows remain explicitly
+unavailable in the unchanged source report. Exact 14.8.9 plus its observed modern
+system WebKit/Safari does not establish 14.0 or original-Sonoma WebKit behavior.
+
+This is one opt-in qualification at a time. The deprecated image retires November
+2, 2026, with scheduled brownouts; availability failure is an explicit missing
+environment, never a pass. Primary macOS 26 is unchanged, and no minimum product
+OS is selected. `DEVELOPER_DIR` is the compiler selector; the separate
+`xcode_select_default` field explains any unchanged global-default path in the
+target's raw report. No global toolchain selection is modified.

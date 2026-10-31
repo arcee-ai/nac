@@ -15,6 +15,7 @@ on:
         options:
           - none
           - all-341-macos26
+          - all-351-macos14
 
 permissions:
   contents: read
@@ -438,7 +439,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       startsWith(github.ref, 'refs/heads/codex/') &&
-      inputs.native_qualification == 'all-341-macos26'
+      (inputs.native_qualification == 'all-341-macos26' || inputs.native_qualification == 'all-351-macos14')
     uses: ./.github/workflows/macos-qualification.yml
     with:
       harness-sha: ${{ needs.prepare.outputs.sha }}
