@@ -10,3 +10,5 @@ export {
 export { RuntimeContext, useNativeRuntime } from "./RuntimeContext";
 
 export type { PromptDraftStorage } from "../store/promptDraftStore";
+
+export type { DesktopCommandPort } from "../features/desktop-commands/adapter";

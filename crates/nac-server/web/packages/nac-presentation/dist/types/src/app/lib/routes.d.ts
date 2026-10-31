@@ -14,7 +14,7 @@ export declare const SESSION_PANEL_LABEL: {
  * Panels the wide side box tabs between. A wide box carries the revisions in
  * its footer chip, so History is a phone-only panel of the bottom bar.
  */
-export declare const WIDE_SESSION_PANELS: ("terminal" | "sessions" | "insights" | "threads" | "delegated" | "files" | "worksets")[];
+export declare const WIDE_SESSION_PANELS: ("sessions" | "insights" | "threads" | "delegated" | "files" | "terminal" | "worksets")[];
 export declare const DEFAULT_SESSION_PANEL: SessionPanel;
 export declare function isSessionPanel(value: string | undefined): value is SessionPanel;
 export declare const routes: {
