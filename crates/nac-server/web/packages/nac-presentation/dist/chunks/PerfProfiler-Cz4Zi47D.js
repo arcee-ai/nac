@@ -800,6 +800,9 @@ function Fe(e) {
 	let t = e.transport.request.bind(e.transport);
 	return {
 		...Pe(e),
+		taskQuestions: (e, n) => t("GET", `/sessions/${encodeURIComponent(e)}/questions`, { signal: n }),
+		answerTaskQuestion: (e, n) => t("POST", `/sessions/${encodeURIComponent(e)}/questions/${encodeURIComponent(n.request_id)}/answer`, { body: n }),
+		cancelTaskQuestion: (e, n, r) => t("POST", `/sessions/${encodeURIComponent(e)}/questions/${encodeURIComponent(n)}/cancel`, { body: { expected_revision: r } }),
 		startTaskLaunch: (e) => t("POST", "/task-launches", { body: e }),
 		taskLaunchStatus: (e, n) => t("GET", `/task-launches/${encodeURIComponent(e)}`, { signal: n }),
 		taskLaunchInventory: (e, n) => t("GET", `/projects/${encodeURIComponent(e)}/task-launches`, { signal: n }),

@@ -44,6 +44,8 @@ pub struct ToolRuntime {
     /// fail closed on `ask` while still honoring an explicit final allow.
     pub(crate) permission_rules: Arc<Vec<crate::permissions::PermissionRule>>,
     /// Direct-only bridge for exact mid-run durable-goal baselines.
+    pub(crate) task_question_answers:
+        Option<Arc<dyn crate::session_service::TaskQuestionAnswerPort>>,
     pub(crate) goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
     /// Optional process-environment capability, read immediately before each
     /// command spawn so replacements affect new processes while existing

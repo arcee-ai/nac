@@ -168,6 +168,7 @@ export interface components {
       truncated: boolean;
     };
     CancelInboxItemRequest: { expected_version: number };
+    CancelQuestionRequest: { expected_revision: number };
     ChangedFileStat: {
       additions?: number | null;
       deletions?: number | null;
@@ -934,6 +935,42 @@ export interface components {
       wait_ms: number;
     };
     PutManagedSecretRequest: { value: string };
+    QuestionAnswer: {
+      answer: string;
+      expected_revision: number;
+      generation: string;
+      request_id: string;
+      run_id: string;
+    };
+    QuestionAnswerReceipt: {
+      answer: string;
+      continuation_run_id: string;
+      generation: string;
+      inbox_item_id: number;
+      request_id: string;
+      revision: number;
+      run_id: string;
+      session_id: string;
+    };
+    QuestionRecord: {
+      answer: components["schemas"]["QuestionAnswerReceipt"] | null;
+      continuation_state: string | null;
+      created_at: string;
+      goal_id: string | null;
+      request: components["schemas"]["QuestionRequest"];
+      revision: number;
+      status: string;
+    };
+    QuestionRequest: {
+      choices: string[];
+      generation: string;
+      request_id: string;
+      responder_class: components["schemas"]["QuestionResponder"];
+      run_id: string;
+      session_id: string;
+      text: string;
+    };
+    QuestionResponder: "information" | "human_decision";
     RawSessionConfig: {
       allow_insecure_http: boolean;
       api_key_env: string | null;
