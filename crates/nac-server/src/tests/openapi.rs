@@ -251,6 +251,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("POST", "/sessions/{session_id}/workspace/branches"),
     ("POST", "/sessions/{session_id}/workspace/commit"),
     ("POST", "/sessions/{session_id}/workspace/open"),
+    ("POST", "/sessions/{session_id}/workspace/reveal"),
     ("POST", "/ssh-configs"),
     ("POST", "/ssh/browse"),
     ("PUT", "/credentials/{name}"),
@@ -357,6 +358,23 @@ async fn openapi_document_matches_the_running_api_router() {
         .unwrap()
         .iter()
         .any(|parameter| parameter["name"] == "project_id"));
+    let reveal = &document["components"]["schemas"]["RevealWorkspacePathRequest"];
+    assert_eq!(reveal["additionalProperties"], false);
+    let required: std::collections::BTreeSet<_> = reveal["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|field| field.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        required,
+        std::collections::BTreeSet::from(["path", "expected_workspace_root"])
+    );
+    assert_eq!(
+        document["paths"]["/sessions/{session_id}/workspace/reveal"]["post"]["requestBody"]
+            ["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/RevealWorkspacePathRequest"
+    );
 
     let mut documented = std::collections::BTreeSet::new();
     for (path, item) in document["paths"].as_object().expect("OpenAPI paths") {

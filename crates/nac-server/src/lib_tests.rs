@@ -1090,3 +1090,6 @@ mod task_launch_shutdown;
 
 #[path = "tests/desktop_lifecycle.rs"]
 mod desktop_lifecycle;
+
+#[path = "tests/workspace_reveal.rs"]
+mod workspace_reveal;

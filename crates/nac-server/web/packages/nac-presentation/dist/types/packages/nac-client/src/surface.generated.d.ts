@@ -1,4 +1,5 @@
 export declare const NAC_API_SURFACE: {
+    readonly "POST /sessions/{session_id}/workspace/reveal": "api.revealWorkspacePath";
     readonly "GET /product-context": "api.getProductContext";
     readonly "POST /product-destinations/resolve": "api.resolveProductDestination";
     readonly "POST /task-launches": "private:standalone Local retained task launch";

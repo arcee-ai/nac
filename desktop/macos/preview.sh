@@ -45,6 +45,8 @@ sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/P
          desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift
          desktop/macos/NativeCommands.swift desktop/macos/NativeCommandState.swift
          desktop/macos/NativeCommandScript.swift desktop/macos/NativeCommandBridge.swift
+         desktop/macos/NativeFolderSelection.swift desktop/macos/NativeFolderPanel.swift
+         desktop/macos/NativePathRequest.swift desktop/macos/NativePathScript.swift desktop/macos/NativePathBridge.swift
          desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift)
 flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O -framework AppKit -framework WebKit)
 if [[ "$local_app" == 1 ]]; then
@@ -55,7 +57,7 @@ else
     flags+=(-framework Network)
 fi
 if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then
-    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift)
+    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift desktop/macos/NativePathSmoke.swift)
     flags+=(-D PREVIEW_SMOKE -framework IOKit)
 fi
 if [[ "$mode" == startup-* ]]; then

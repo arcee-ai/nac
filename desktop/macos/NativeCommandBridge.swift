@@ -48,6 +48,14 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
             !action.shouldPerformDownload && state.allows(action.request.url)
     }
 
+    /// Read-only eligibility for focused shell adapters. It grants no operation
+    /// authority and becomes false while a document loads or this launch retires.
+    func currentDocument(in candidate: WKWebView) -> NativeDocumentBinding? {
+        guard installed, candidate === webView, state.matches(receipt()),
+              state.ready, state.allows(candidate.url) else { return nil }
+        return state.binding
+    }
+
     func navigationStarted(in candidate: WKWebView, navigation: WKNavigation?) {
         guard candidate === webView else { return }
         self.navigation = navigation

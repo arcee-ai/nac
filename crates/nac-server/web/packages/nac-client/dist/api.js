@@ -269,6 +269,11 @@ export function createNacApi(nacClient, options = {}) {
         openWorkspacePath: (id, path) => request("POST", `${sessionPath(id)}/workspace/open`, {
             body: { path },
         }),
+        /** Explicit existing Local target only; never opens a missing parent. */
+        revealWorkspacePath: (id, path, expectedWorkspaceRoot, signal) => request("POST", `${sessionPath(id)}/workspace/reveal`, {
+            body: { path, expected_workspace_root: expectedWorkspaceRoot },
+            signal,
+        }),
         getWorkspaceRevisions: (id, signal) => request("GET", `${sessionPath(id)}/workspace/revisions`, { signal }),
         getWorkspaceRevisionChanges: (id, revision, signal) => request("GET", `${sessionPath(id)}/workspace/revisions/${revision}/changes`, { signal }),
         getBranches: (id, signal) => request("GET", `${sessionPath(id)}/workspace/branches`, {

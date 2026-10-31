@@ -49,6 +49,12 @@ final class PreviewSmoke {
                 if ["commands", "commands-input"].contains(scenario) {
                     evidence["commands"] = try await NativeCommandSmoke(app: app, commands: app.commands).run(
                         trustedInput: scenario == "commands-input", captures: destination.deletingLastPathComponent())
+                } else if ["paths-xctest", "paths-failure-xctest"].contains(scenario) {
+                    guard let paths = app.nativePaths else { throw PreviewError.message("Native path bridge unavailable") }
+                    evidence["native_paths"] = try await NativePathSmoke(app: app, paths: paths).run(failure: scenario == "paths-failure-xctest") { record in
+                        record.forEach { self.evidence[$0] = $1 }
+                        self.write()
+                    }
                 } else if ["normal", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
                     if scenario == "stale-launch" {
                         try await wait("first launch load barrier") { self.pausedFirstLoad }

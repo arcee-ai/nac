@@ -1,4 +1,5 @@
 import { readDesktopCommandPort } from "./app/features/desktop-commands/adapter";
+import { readNativeDirectoryPort } from "./app/features/setup/localFolder";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createNativeRuntime } from "./app/runtime/nativeRuntime";
@@ -33,6 +34,7 @@ const runtime = createNativeRuntime({
       }
     : undefined,
   queryRetry: 1,
+  nativeDirectory: readNativeDirectoryPort(Reflect.get(window, "__nacLocalPaths")),
 });
 
 // Alt-click jumps from a rendered element to its source. The import is dynamic

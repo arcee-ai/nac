@@ -6,6 +6,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private(set) var window: NSWindow!
     private(set) var webView: WKWebView!
     private(set) var commands: NativeCommands!
+    private(set) var nativePaths: NativePathBridge?
     #if !LOCAL_APP
     private(set) var profile: PreviewProfile?
     let provider = FixtureProvider()
@@ -175,6 +176,12 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             baseURL = url
             workspaceIncarnation = incarnation
             commands.bind()
+            nativePaths?.retire()
+            nativePaths = NativePathBridge(webView: webView, receipt: { [weak self] in self?.engine.receipt },
+                source: { [weak view = self.webView, weak commands = self.commands] in
+                    guard let view, let commands else { return nil }
+                    return commands.currentDocument(in: view)
+                })
             if let navigation = webView.load(URLRequest(url: URL(string: route, relativeTo: url)!.absoluteURL)) {
                 navigationIncarnations[navigation] = incarnation
             }
@@ -186,6 +193,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard webView === self.webView, !stopping, failure == nil else { return }
         commands.navigationStarted(in: webView, navigation: navigation)
+        nativePaths?.navigationStarted(in: webView, navigation: navigation)
         guard let navigation, navigationIncarnations[navigation] == nil,
               let incarnation = workspaceIncarnation, engine.receipt?.incarnation == incarnation,
               let url = webView.url, let baseURL, url.scheme == baseURL.scheme,
@@ -199,6 +207,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
               let incarnation = navigationIncarnations.removeValue(forKey: navigation),
               !stopping, failure == nil, incarnation == engine.receipt?.incarnation else { return }
         commands.navigationFinished(in: webView, navigation: navigation)
+        nativePaths?.navigationFinished(in: webView, navigation: navigation)
         status.isHidden = true
         webView.isHidden = false
     }
@@ -272,6 +281,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private func fail(_ message: String) {
         guard !stopping, failure == nil else { return }
         failure = message
+        nativePaths?.retire()
+        nativePaths = nil
         commands.retire()
         webView.stopLoading()
         webView.isHidden = true
@@ -290,11 +301,18 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         engine.stop {}
     }
 
-    func windowShouldClose(_ sender: NSWindow) -> Bool { NSApp.terminate(nil); return false }
+    func applicationWillHide(_ notification: Notification) { nativePaths?.cancelPending() }
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        nativePaths?.cancelPending()
+        NSApp.terminate(nil)
+        return false
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !stopping else { return .terminateLater }
         stopping = true
+        nativePaths?.retire()
+        nativePaths = nil
         commands.retire()
         #if LOCAL_APP
         storeConflictRetry.clear()

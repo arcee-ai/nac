@@ -844,6 +844,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::workspace::workspace_files))
         .routes(routes!(delivery::workspace::workspace_file))
         .routes(routes!(delivery::workspace::open_workspace_path))
+        .routes(routes!(delivery::workspace::reveal_workspace_path))
         .routes(routes!(
             delivery::workspace::workspace_branches,
             delivery::workspace::switch_workspace_branch

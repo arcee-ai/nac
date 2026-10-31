@@ -9352,6 +9352,76 @@
         }
       }
     },
+    "/sessions/{session_id}/workspace/reveal": {
+      "post": {
+        "tags": [
+          "workspace"
+        ],
+        "operationId": "post_sessions_session_id_workspace_reveal",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevealWorkspacePathRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Existing Local path revealed in Finder",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenLocalPathResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or stale workspace path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or target unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reveal rejected or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/workspace/revisions": {
       "get": {
         "tags": [
@@ -16455,6 +16525,24 @@
             ]
           }
         }
+      },
+      "RevealWorkspacePathRequest": {
+        "type": "object",
+        "required": [
+          "path",
+          "expected_workspace_root"
+        ],
+        "properties": {
+          "expected_workspace_root": {
+            "type": "string",
+            "description": "Root observed in the initiating session snapshot; never a target override."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing path relative to the current Local workspace."
+          }
+        },
+        "additionalProperties": false
       },
       "RevertSessionRequest": {
         "type": "object",
