@@ -19634,7 +19634,7 @@ function Px(e, t, n = !1) {
 		retry: !1,
 		onSuccess: (t) => {
 			i.setQueryData([...Nx(e), t.schedule.schedule_id], (e) => ({
-				schedule: e && (e.schedule.version > t.schedule.version || e.schedule.version === t.schedule.version && e.schedule.starts > t.schedule.starts) ? e.schedule : t.schedule,
+				schedule: e && e.schedule.version >= t.schedule.version ? e.schedule : t.schedule,
 				history: e?.history ?? [t.active_occurrence, t.occurrence].filter((e) => e != null)
 			})), a.current?.(t), a.current = void 0, s(null), i.invalidateQueries({ queryKey: ["heartbeats"] }), i.invalidateQueries({ queryKey: ln.sessionsAll });
 		}

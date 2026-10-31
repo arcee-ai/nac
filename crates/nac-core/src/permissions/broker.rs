@@ -1,6 +1,12 @@
 use super::*;
 
 impl PermissionBroker {
+    /// Immutable policy/runtime construction version for a transaction's
+    /// final current-chat control binding; never supplied by model JSON.
+    pub(crate) fn heartbeat_control_config_version(&self) -> i64 {
+        self.session_config_version
+    }
+
     /// Automatic admission is not an interactive approver. Ask/Deny retain a
     /// schedule-specific attention reason; executing tools still use their
     /// ordinary prepared authorization on the selected backend.

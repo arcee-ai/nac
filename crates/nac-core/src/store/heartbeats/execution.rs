@@ -146,7 +146,7 @@ pub fn heartbeat_report(path:&Path,session_id:&str,occurrence_id:&str,run_id:&st
 command HeartbeatReportCommand {session_id:String=session_id.to_owned(),occurrence_id:String=occurrence_id.to_owned(),run_id:String=run_id.to_owned(),generation:String=generation.to_owned(),expected_revision:i64=expected_revision,outcome:HeartbeatOutcome=outcome,evidence:String=evidence.to_owned()}
 call |command| (&command.session_id,&command.occurrence_id,&command.run_id,&command.generation,command.expected_revision,command.outcome,&command.evidence)
 correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port public;
+port internal;
 }
 
 /// Canonical terminal settlement calls this in its own transaction, before

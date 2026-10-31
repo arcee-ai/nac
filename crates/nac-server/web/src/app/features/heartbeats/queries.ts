@@ -35,11 +35,9 @@ export function useHeartbeats(sessionId: string, scheduleId: string | null, allC
       client.setQueryData<HeartbeatInspection>(
         [...heartbeatKey(sessionId), receipt.schedule.schedule_id],
         (current) => {
-          const newer =
-            current &&
-            (current.schedule.version > receipt.schedule.version ||
-              (current.schedule.version === receipt.schedule.version &&
-                current.schedule.starts > receipt.schedule.starts));
+          // A replay returns the original receipt. Keep any already-read
+          // state at that version, including suspension before a run starts.
+          const newer = current && current.schedule.version >= receipt.schedule.version;
           return {
             schedule: newer ? current.schedule : receipt.schedule,
             history:

@@ -390,3 +390,107 @@ async fn heartbeat_automatic_relinquishing_control_is_bound_to_own_occurrence_an
         HeartbeatState::Active
     );
 }
+
+#[tokio::test]
+async fn heartbeat_deferred_or_invalid_admission_does_not_retain_a_session_operation_lease() {
+    for invalidated in [false, true] {
+        let (parts, path) = fixture();
+        let service = &parts.service;
+        let schedule = service
+            .control_human_heartbeat(Uuid::new_v4().to_string(), create())
+            .await
+            .unwrap()
+            .schedule;
+        let pending = crate::store::materialize_heartbeats(&path, schedule.next_due_ms)
+            .unwrap()
+            .remove(0);
+        if invalidated {
+            service
+                .control_human_heartbeat(
+                    Uuid::new_v4().to_string(),
+                    HeartbeatAction::Pause {
+                        schedule_id: schedule.schedule_id,
+                        expected_version: schedule.version,
+                    },
+                )
+                .await
+                .unwrap();
+        } else {
+            crate::store::create_person_session_inbox_item(
+                &path,
+                "session",
+                crate::store::InboxDelivery::Queue,
+                "Queued human input wins",
+                None,
+                None,
+                "Queued human input wins",
+            )
+            .unwrap();
+        }
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+        let result = service.start_heartbeat_occurrence(pending, lease).await;
+        if invalidated {
+            assert!(result.is_err());
+        } else {
+            assert!(result.unwrap().is_none());
+        }
+        assert!(!service.has_active_operation());
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "session")
+            .expect("a deferred or invalidated occurrence must release the operation lease");
+        let human_service = service.clone();
+        let human = crate::store::spawn_blocking_store_caller(move || {
+            human_service.try_begin_run_with_lease(
+                None,
+                "Later explicit human run",
+                Some(lease),
+                RunAdmissionKind::default(),
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(service.active_run().unwrap().run_id, human.run_id);
+    }
+}
+
+#[tokio::test]
+async fn heartbeat_workspace_conflict_defers_without_consuming_transient_retry_allowance() {
+    let (parts, path) = fixture();
+    let service = &parts.service;
+    let schedule = service
+        .control_human_heartbeat(Uuid::new_v4().to_string(), create())
+        .await
+        .unwrap()
+        .schedule;
+    let pending = crate::store::materialize_heartbeats(&path, schedule.next_due_ms)
+        .unwrap()
+        .remove(0);
+    let identity = crate::workspace::GitTarget::local("/repo").lease_identity();
+    let mutation = sessions::WorkspaceMutationLease::try_acquire(&path, &identity).unwrap();
+    for _ in 0..5 {
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+        assert!(service
+            .start_heartbeat_occurrence(pending.clone(), lease)
+            .await
+            .unwrap()
+            .is_none());
+    }
+    let history = crate::store::heartbeat_history(&path, "session", &schedule.schedule_id).unwrap();
+    assert_eq!(history[0].attempt_count, 0);
+    assert_eq!(
+        history[0].state,
+        crate::store::HeartbeatOccurrenceState::Pending
+    );
+    assert!(crate::store::list_session_inbox(&path, "session")
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        crate::store::read_heartbeat(&path, "session", &schedule.schedule_id)
+            .unwrap()
+            .state,
+        HeartbeatState::Active
+    );
+    drop(mutation);
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+    drop(lease);
+}

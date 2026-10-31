@@ -72,6 +72,9 @@ async fn measure_case(n: usize) -> Measurement {
     }
     let due = epoch_ms();
     for index in 0..n {
+        let mut binding =
+            store::heartbeat_binding(&path, &format!("chat-{}", index % chats)).unwrap();
+        binding.execution_cwd = Some(root.to_string_lossy().into_owned());
         store::control_heartbeat(
             &path,
             &format!("chat-{}", index % chats),
@@ -90,7 +93,7 @@ async fn measure_case(n: usize) -> Measurement {
                 },
             },
             "Check the Local fixture every minute.",
-            root.to_str().unwrap(),
+            &binding,
             due - 60_000,
         )
         .unwrap();

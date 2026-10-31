@@ -151,7 +151,10 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
     state: "settled",
   });
   expect(finished.schedule.starts).toBe(1);
-  expect(await api.getGoal(session)).toBeNull();
+  const restartedApi = createNacApi(
+    new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }),
+  );
+  expect(await restartedApi.getGoal(session)).toBeNull();
   const automated = harness.provider.requests.find(
     (entry) => entry.matchedStep === "automatic-job-read",
   )!;
@@ -335,5 +338,95 @@ test("heartbeat execution deadline cancels supervised descendants and suspends f
   expect(inspection!.history[0].evidence).toContain("deadline");
   expect(inspection!.schedule.starts).toBe(1);
   expect(await api.getGoal(session)).toBeNull();
+  harness.provider.assertConsumed();
+});
+
+test("crash after a Local effect suspends the exact occurrence without replaying it", async ({
+  harness,
+  request,
+}) => {
+  const project = await createProject(request, harness);
+  const session = await createSession(request, harness, "direct", project);
+  const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
+  await api.setPermissionApprovalMode(session, "auto_approve");
+  const control = (operation: unknown) =>
+    request.post(`${harness.baseUrl}/sessions/${session}/heartbeats/control`, {
+      data: { request_id: randomUUID(), operation },
+    });
+  const created = await control({
+    action: "create",
+    spec: {
+      ...specification,
+      skills: [],
+      execution_timeout_ms: 120000,
+      instructions: "Append one receipt to crash-effect.txt for the authorized Local check.",
+    },
+  });
+  expect(created.ok()).toBeTruthy();
+  const { schedule } = await created.json();
+  harness.provider.enqueue(
+    "crash-effect",
+    { token: "Durable heartbeat occurrence" },
+    {
+      kind: "function_call",
+      name: "exec_command",
+      callId: "crash-effect",
+      arguments: { cmd: "printf 'one effect\\n' >> crash-effect.txt", yield_time_ms: 1000 },
+    },
+  );
+  const gate = new ScriptGate();
+  harness.provider.enqueue(
+    "effect-observed",
+    { functionOutputCallId: "crash-effect" },
+    { kind: "text", text: "Effect was observed before the crash." },
+    gate,
+  );
+  expect(
+    (
+      await control({
+        action: "run_now",
+        schedule_id: schedule.schedule_id,
+        expected_version: schedule.version,
+      })
+    ).ok(),
+  ).toBeTruthy();
+  await gate.accepted;
+  const effect = path.join(harness.runRoot, "workspace/crash-effect.txt");
+  expect(await fs.readFile(effect, "utf8")).toBe("one effect\n");
+  const inspect = () =>
+    request
+      .get(`${harness.baseUrl}/sessions/${session}/heartbeats/${schedule.schedule_id}`)
+      .then((response) => response.json() as Promise<HeartbeatInspection>);
+  const active = (await inspect()).history[0];
+  expect(active.state).toBe("admitted");
+  const owned = JSON.parse(await fs.readFile(path.join(harness.runRoot, "process.json"), "utf8"));
+  expect(owned.binaryPath).toBe(harness.binaryPath);
+  expect(owned.baseUrl).toBe(harness.baseUrl);
+  process.kill(owned.pid, "SIGKILL");
+  await expect
+    .poll(() => {
+      try {
+        process.kill(owned.pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    })
+    .toBe(true);
+  gate.release();
+  await harness.restart("1");
+  await expect.poll(async () => (await inspect()).history[0]?.state).toBe("settled");
+  const recovered = await inspect();
+  expect(recovered.schedule.state).toBe("suspended");
+  expect(recovered.schedule.starts).toBe(1);
+  expect(recovered.schedule.usage_unknown).toBe(true);
+  expect(recovered.history).toHaveLength(1);
+  expect(recovered.history[0]).toMatchObject({
+    occurrence_id: active.occurrence_id,
+    receipt_id: active.receipt_id,
+    run_id: active.run_id,
+    outcome: "interrupted",
+  });
+  expect(await fs.readFile(effect, "utf8")).toBe("one effect\n");
   harness.provider.assertConsumed();
 });
