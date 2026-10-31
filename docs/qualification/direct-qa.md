@@ -32,6 +32,8 @@ reports, source identity and model-visible tools:
 - Cancelling the exact owned second child retains its cancelled terminal state;
   aggregate receives actual structured outcomes and writes the missing report as
   `infra`, with no replacement worker.
+- A loopback provider rejection fails the second child run; aggregate retains
+  the actual failed outcome and produces an `infra` stub without replacing it.
 - A scripted unavailable-rootless-Podman setup outcome produces no RUN.json,
   test wave or aggregate claiming completed slots.
 - All artifact writes stay under the ignored fixture pass root; the committed
@@ -55,7 +57,7 @@ cargo test --locked -p nac-server direct_qa -- --nocapture --test-threads=1
 
 For retained fixture artifacts, set `NAC_QA_FIXTURE_EVIDENCE` to an absolute,
 ignored or external directory before that command. It writes separate `finding`,
-`cancelled` and `missing-podman` directories. Use a fresh destination per run.
+`failed`, `cancelled` and `missing-podman` directories. Use a fresh destination per run.
 Respect any host resource gate around the entire Cargo operation. These fixtures
 invoke the internal child runtime with a scripted provider; they do not start
 live QA SUTs or user-owned tasks.

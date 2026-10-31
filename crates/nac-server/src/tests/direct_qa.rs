@@ -1,5 +1,6 @@
 //! Scripted choreography qualification, not a live QA pass or model evaluation.
 use super::*;
+use axum::response::IntoResponse;
 use axum::{extract::State, routing::post, Json};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -100,7 +101,7 @@ fn retained_messages(root: &std::path::Path, session: &str) -> Vec<Message> {
     messages
 }
 
-async fn respond(State(model): State<Arc<Model>>, Json(request): Json<Value>) -> Json<Value> {
+async fn respond(State(model): State<Arc<Model>>, Json(request): Json<Value>) -> Response {
     model.requests.lock().unwrap().push(request.clone());
     let parent = request["tools"]
         .as_array()
@@ -158,8 +159,9 @@ async fn respond(State(model): State<Arc<Model>>, Json(request): Json<Value>) ->
                 "SUMMARY.md retained; two slots accounted; no live QA claim".into(),
             )]
         } else {
-            let mut writes = vec![model.write("summary", "SUMMARY.md", format!("Source: {}\nFixture only\nrequested=2 terminal=2 completed={} cancelled={}\npass=1 finding={} infra={}\nCoverage gap: rootless Podman and live SUT not exercised\nCleanup: no SUT resources created\nReports: reports/1.md reports/2.md\n", model.sha, if model.case == "cancelled" { 1 } else { 2 }, usize::from(model.case == "cancelled"), usize::from(model.case == "finding"), usize::from(model.case == "cancelled")))];
-            if model.case == "cancelled" {
+            let infra = matches!(model.case, "cancelled" | "failed");
+            let mut writes = vec![model.write("summary", "SUMMARY.md", format!("Source: {}\nFixture only\nrequested=2 terminal=2 completed={} cancelled={} failed={}\npass=1 finding={} infra={}\nCoverage gap: rootless Podman and live SUT not exercised\nCleanup: no SUT resources created\nReports: reports/1.md reports/2.md\n", model.sha, if infra { 1 } else { 2 }, usize::from(model.case == "cancelled"), usize::from(model.case == "failed"), usize::from(model.case == "finding"), usize::from(infra)))];
+            if infra {
                 writes.push(model.write("stub", "reports/2.md", model.report(2, "infra")));
             }
             writes
@@ -179,6 +181,13 @@ async fn respond(State(model): State<Arc<Model>>, Json(request): Json<Value>) ->
             // finish: sequential dispatch would time out this fixture.
             model.workers.fetch_add(1, Ordering::SeqCst);
             model.arrived.wait().await;
+            if slot == 2 && model.case == "failed" {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error":{"message":"fixture worker failure"}})),
+                )
+                    .into_response();
+            }
             if slot == 2 && model.case == "cancelled" {
                 std::future::pending::<()>().await;
             }
@@ -191,7 +200,7 @@ async fn respond(State(model): State<Arc<Model>>, Json(request): Json<Value>) ->
     };
     Json(
         json!({"status":"completed", "output":output, "usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}),
-    )
+    ).into_response()
 }
 
 async fn fixture(case: &'static str) {
@@ -329,21 +338,25 @@ async fn fixture(case: &'static str) {
     let children =
         nac_core::store::list_traditional_children(&root.join("store.db"), "direct").unwrap();
     assert_eq!(children.len(), if case == "missing-podman" { 1 } else { 4 });
-    if case == "cancelled" {
+    if matches!(case, "cancelled" | "failed") {
         let worker = children
             .iter()
             .find(|child| child.description == "QA slot 2")
             .unwrap();
         assert_eq!(
             worker.status,
-            nac_core::store::TraditionalChildStatus::Cancelled
+            if case == "cancelled" {
+                nac_core::store::TraditionalChildStatus::Cancelled
+            } else {
+                nac_core::store::TraditionalChildStatus::Failed
+            }
         );
         let aggregate = children
             .iter()
             .find(|child| child.description == "QA aggregate")
             .unwrap();
         let messages = retained_messages(&root, &aggregate.child_session_id);
-        assert!(messages.iter().any(|message| matches!(message, Message::User { content } if content.contains(&worker.child_session_id) && content.contains("cancelled"))));
+        assert!(messages.iter().any(|message| matches!(message, Message::User { content } if content.contains(&worker.child_session_id) && content.contains(case))));
     }
     assert_eq!(
         sessions::list_sessions(&root.join("store.db"))
@@ -358,10 +371,7 @@ async fn fixture(case: &'static str) {
         assert_eq!(snapshot.behavior, sessions::SessionBehavior::Direct);
         assert_eq!(snapshot.cwd, project);
         assert!(child.status.is_terminal());
-        assert!(
-            child.report.is_some()
-                || child.status == nac_core::store::TraditionalChildStatus::Cancelled
-        );
+        assert!(child.report.is_some() || child.failure.is_some());
         assert!(nac_core::store::list_traditional_children(
             &root.join("store.db"),
             &child.child_session_id
@@ -500,4 +510,12 @@ async fn direct_qa_missing_podman_stops_before_dispatch() {
         return;
     }
     fixture("missing-podman").await;
+}
+
+#[tokio::test]
+async fn direct_qa_failed_slot_is_aggregated_without_replacement() {
+    if run_isolated("direct_qa_failed_slot_is_aggregated_without_replacement") {
+        return;
+    }
+    fixture("failed").await;
 }
