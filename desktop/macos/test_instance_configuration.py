@@ -73,6 +73,29 @@ class ConfigurationTests(unittest.TestCase):
             self.invoke(self.selected(), code=70)
         self.assertEqual(json.loads(self.diagnostic.read_text())['exit_code'], 70)
 
+    def test_canonical_foreign_store_is_rejected_before_app_creation(self):
+        with tempfile.TemporaryDirectory() as foreign:
+            value = dict(self.selected(), store=str(Path(foreign).resolve() / 'foreign.db'))
+            response = subprocess.CompletedProcess([], 0, json.dumps(value).encode(), b'')
+            with patch('instance_smoke.subprocess.run', return_value=response), \
+                    patch('instance_smoke.subprocess.check_output', return_value=b'{"track":"dev"}'), \
+                    patch('instance_smoke.AppJourney') as app:
+                with self.assertRaisesRegex(AssertionError, 'escaped the owned fixture root'):
+                    coexist_case(self.root / 'dev.app', self.root / 'stable.app', self.root, self.root,
+                                 self.root / 'observer', [])
+            app.assert_not_called()
+            self.assertFalse((Path(foreign) / 'foreign.db').exists())
+
+    def test_symlink_outside_cannot_supply_an_owned_store(self):
+        with tempfile.TemporaryDirectory() as foreign:
+            outside = Path(foreign).resolve()
+            alias = self.root / 'escape'
+            alias.symlink_to(outside, target_is_directory=True)
+            for store in (alias / 'foreign.db', (alias / 'foreign.db').resolve()):
+                with self.subTest(store=store), self.assertRaises(AssertionError):
+                    self.invoke(dict(self.selected(), store=str(store)))
+            self.assertFalse((outside / 'foreign.db').exists())
+
     def test_malformed_oversized_and_stderr_are_hashed_without_retaining_text(self):
         for raw in (b'private-value not JSON', b'\xff', b'private-value' * 2000):
             with self.subTest(size=len(raw)), self.assertRaises(AssertionError):

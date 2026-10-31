@@ -373,6 +373,8 @@ def coexist_selection(binary, root, env, track, diagnostic):
             valid_store = False
         if not valid_store:
             reason = reason or 'configuration store was not a canonical absolute path'
+        elif root not in Path(store).parents:
+            reason = reason or 'configuration store escaped the owned fixture root'
     if reason:
         # Never retain arbitrary helper text, malformed output or stderr. Keep
         # bounded, allowlisted protocol facts and byte identities for diagnosis.

@@ -263,7 +263,8 @@ actual AppKit/system WKWebView evidence, with screenshots reviewed separately.
 The coexist fixture runs each bundled configuration helper with the exact owned
 profile as both process cwd and `--directory`. Before accessing its store, it
 requires selected version 1, the expected dev/stable track, the same canonical
-root and a canonical absolute store path. Fresh track defaults are `dev.db` and
+root and a canonical absolute store path strictly inside that owned root;
+foreign paths and symlink escapes fail before app creation. Fresh track defaults are `dev.db` and
 `stable.db`; legacy stable `store.db` reuse applies only when that file exists.
 On mismatch, `dev/configuration-failure.json` or
 `stable/configuration-failure.json` retains bounded allowlisted protocol facts
