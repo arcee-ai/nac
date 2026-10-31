@@ -122,7 +122,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
       stream: "request",
       name: "list_projects",
       callId: "discover",
-      arguments: {},
+      arguments: { query: null },
     },
   );
   harness.provider.enqueue(

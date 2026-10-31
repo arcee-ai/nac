@@ -1237,4 +1237,15 @@ fn codex_native_task_launch_wire_schema_preserves_the_native_decoder_contract() 
         assert_eq!(wire["parameters"]["additionalProperties"], false);
         assert!(wire["parameters"]["properties"]["operation"].is_null());
     }
+    let discovery = tools
+        .iter()
+        .find(|tool| tool["name"] == "list_projects")
+        .unwrap();
+    // Strict Responses normalization may require every property. Null must
+    // remain an advertised unfiltered value, without inventing a search term.
+    assert_eq!(
+        discovery["parameters"]["properties"]["query"]["type"],
+        json!(["string", "null"])
+    );
+    assert_eq!(discovery["parameters"]["required"], json!([]));
 }

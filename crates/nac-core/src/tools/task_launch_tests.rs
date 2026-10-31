@@ -132,6 +132,11 @@ async fn native_launch_ask_is_headless_fail_closed_and_project_reads_are_passive
     assert!(call(&runtime, "launch_task", request()).await.is_error);
     let projects = call(&runtime, "list_projects", json!({"query":"Project"})).await;
     assert!(!projects.is_error, "{}", projects.content);
+    let unfiltered = call(&runtime, "list_projects", json!({"query":null})).await;
+    assert!(!unfiltered.is_error, "{}", unfiltered.content);
+    let discovered: Value = serde_json::from_str(unfiltered.content.as_text().unwrap()).unwrap();
+    assert_eq!(discovered["candidates"].as_array().unwrap().len(), 1);
+    assert_eq!(discovered["candidates"][0]["project_id"], "p");
     assert_eq!(controller.launches.load(Ordering::SeqCst), 0);
     std::fs::remove_dir_all(runtime.store_path.parent().unwrap()).unwrap();
 }

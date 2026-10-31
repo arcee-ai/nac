@@ -71,7 +71,7 @@ fn caller(services: ToolServices<'_>) -> Result<&str, ToolResult> {
 impl NativeTool for ListProjectsTool {
     type Input = ProjectsInput;
     fn definition(&self) -> ToolDefinition {
-        definition("list_projects", "Discover saved project IDs, names, locations, configured defaults and backend eligibility. Optional query filters names/IDs/locations; multiple matches are candidates, never a selected project. Reads saved records only; does not scan or initialize directories. Use a returned project_id for cross-project launch.", json!({"query":{"type":"string","maxLength":256}}), &[])
+        definition("list_projects", "Discover saved project IDs, names, locations, configured defaults and backend eligibility. Optional query filters names/IDs/locations; multiple matches are candidates, never a selected project. Reads saved records only; does not scan or initialize directories. Use a returned project_id for cross-project launch.", json!({"query":{"type":["string","null"],"maxLength":256}}), &[])
     }
     fn admission(&self) -> ToolAdmission {
         ToolAdmission::Parallel
