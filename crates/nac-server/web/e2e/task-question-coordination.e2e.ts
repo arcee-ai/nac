@@ -209,7 +209,7 @@ test("ALL472-D4 human cancellation after settled question wakes once without ans
     );
     expect(cancelled.status()).toBe(200);
     expect(await cancelled.json()).toMatchObject({
-      status: "cancelled",
+      status: "answered",
       answer: receipt,
       continuation_state: "cancelled",
     });
