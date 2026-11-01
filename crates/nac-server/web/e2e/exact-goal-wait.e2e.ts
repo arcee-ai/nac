@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, TestInfo } from "@playwright/test";
 import {
   createProject,
   createSession,
@@ -172,6 +172,29 @@ async function currentGoal(request: APIRequestContext, harness: EmbeddedHarness,
   return goal!;
 }
 
+async function retainGoalEvidence(
+  info: TestInfo,
+  harness: EmbeddedHarness,
+  caseId: "g1" | "g2",
+  evidence: Evidence,
+) {
+  // The existing harness writes its final stop receipt to this same inode,
+  // then removes runRoot. Retain that ledger, without changing teardown.
+  const processFile = path.join(harness.runRoot, "process.json");
+  const processStat = await fs.lstat(processFile);
+  expect(processStat.isFile()).toBe(true);
+  expect(processStat.isSymbolicLink()).toBe(false);
+  await fs.link(processFile, info.outputPath(`all471-${caseId}-cleanup.json`));
+  const proofFile = info.outputPath(`all471-${caseId}-proof.json`);
+  const proof = JSON.stringify(evidence, null, 2);
+  expect(Buffer.byteLength(proof)).toBeLessThanOrEqual(131_072);
+  await fs.writeFile(proofFile, proof);
+  await info.attach(`ALL471-${caseId.toUpperCase()} evidence`, {
+    path: proofFile,
+    contentType: "application/json",
+  });
+}
+
 async function identity(request: APIRequestContext, harness: EmbeddedHarness) {
   const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
   const { stdout } = await promisify(execFile)("git", ["rev-parse", "HEAD"], {
@@ -285,9 +308,11 @@ test("ALL471-G1 exact completed goal stays quiet through settlement, clear and r
     );
     begin.release();
     const verified = await step(harness, "g1-complete");
+    evidence.verified_read = output(verified.body, "g1-read");
     expect(output(verified.body, "g1-read")).toContain(marker);
     read.release();
-    await step(harness, "g1-settle");
+    const goalUpdate = await step(harness, "g1-settle");
+    evidence.native_complete = output(goalUpdate.body, "g1-complete");
     const completed = await finishNative<WaitResult>(waiting);
     expect(completed.status).toBe("target_changed");
     const terminal = observed(completed, target, goal);
@@ -394,10 +419,7 @@ test("ALL471-G1 exact completed goal stays quiet through settlement, clear and r
     begin.release();
     read.release();
     settle.release();
-    await info.attach("ALL471-G1 evidence", {
-      body: JSON.stringify(evidence, null, 2),
-      contentType: "application/json",
-    });
+    await retainGoalEvidence(info, harness, "g1", evidence);
   }
 });
 
@@ -523,6 +545,7 @@ test("ALL471-G2 input interruption and human pause preserve exact goal and indep
     });
     expect(pause.status()).toBe(200);
     const paused = (await pause.json()) as Goal;
+    evidence.human_pause = { http_status: pause.status(), goal: paused };
     expect(paused).toMatchObject({ goal_id: goal, status: "paused", accounting_run_id: run });
     const changed = await finishNative<WaitResult>(waiting);
     expect(Date.now() - pauseStarted).toBeLessThan(3_000);
@@ -534,7 +557,9 @@ test("ALL471-G2 input interruption and human pause preserve exact goal and indep
     });
     expect(await currentGoal(request, harness, target)).toEqual(paused);
     begin.release();
-    expect(output((await step(harness, "g2-settle")).body, "g2-read")).toContain(marker);
+    const targetResult = await step(harness, "g2-settle");
+    evidence.verified_read = output(targetResult.body, "g2-read");
+    expect(output(targetResult.body, "g2-read")).toContain(marker);
     await waitForRunIdle(request, harness, target);
     const settled = await currentGoal(request, harness, target);
     expect(settled).toMatchObject({
@@ -592,9 +617,6 @@ test("ALL471-G2 input interruption and human pause preserve exact goal and indep
     harness.provider.assertConsumed();
   } finally {
     begin.release();
-    await info.attach("ALL471-G2 evidence", {
-      body: JSON.stringify(evidence, null, 2),
-      contentType: "application/json",
-    });
+    await retainGoalEvidence(info, harness, "g2", evidence);
   }
 });
