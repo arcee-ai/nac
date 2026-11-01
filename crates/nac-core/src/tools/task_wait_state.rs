@@ -220,18 +220,47 @@ impl Target {
     }
 
     pub fn report(&self, caller: &str, mut observation: Value) -> (Value, bool) {
+        let stopped_goal = self.mode == Mode::Goal
+            && matches!(
+                observation["status"].as_str(),
+                Some("goal_paused" | "goal_blocked" | "goal_budget_limited")
+            );
+        let full_fingerprint =
+            || format!("{:x}", Sha256::digest(observation.to_string().as_bytes()));
         // Active accounting/progress changes are deliberately quiet.
         let fingerprint = if observation["status"] == "active" {
             "active".to_owned()
         } else if observation["status"] == "goal_complete" {
             "goal_complete".to_owned()
+        } else if stopped_goal {
+            // Settlement and retention change proof presentation, not the
+            // stopped outcome. A different run or failure still needs attention.
+            let outcome = json!({
+                "status":observation["status"],
+                "goal_id":observation["proof"]["goal_id"],
+                "last_run_id":observation["proof"]["last_run_id"],
+                "failure":observation["proof"]["failure"],
+                "attention":observation["attention"],
+            });
+            format!(
+                "goal_outcome_v1:{:x}",
+                Sha256::digest(outcome.to_string().as_bytes())
+            )
         } else {
-            format!("{:x}", Sha256::digest(observation.to_string().as_bytes()))
+            full_fingerprint()
         };
-        let changed = self
-            .previous
-            .as_ref()
-            .is_none_or(|previous| previous.fingerprint != fingerprint);
+        // Old stopped-goal cursors hashed the whole proof. An exact old hash
+        // can migrate quietly. Otherwise re-read and deliver once with resync:
+        // the opaque old hash cannot prove whether only accounting changed.
+        let legacy_goal_cursor = stopped_goal
+            && self.previous.as_ref().is_some_and(|previous| {
+                !matches!(previous.fingerprint.as_str(), "active" | "goal_complete")
+                    && !previous.fingerprint.starts_with("goal_outcome_v1:")
+            });
+        let changed = self.previous.as_ref().is_none_or(|previous| {
+            previous.fingerprint != fingerprint
+                && !(legacy_goal_cursor && previous.fingerprint == full_fingerprint())
+        });
         let actionable = observation["status"] != "active" && changed;
         if !changed {
             if let Some(object) = observation.as_object_mut() {
@@ -253,7 +282,7 @@ impl Target {
         observation["mode"] = json!(self.mode);
         observation["resolved_identity"] = json!(self.resolved);
         observation["after_cursor"] = json!(json!(cursor).to_string());
-        observation["resync"] = json!(self.resync);
+        observation["resync"] = json!(self.resync || legacy_goal_cursor);
         observation["navigation"] = json!(super::task_discovery::navigation(&self.session_id));
         (observation, actionable)
     }

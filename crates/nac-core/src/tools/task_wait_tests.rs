@@ -6,6 +6,33 @@ fn target(id: &str) -> Value {
     json!({"session_id":id,"mode":"goal"})
 }
 
+fn paused_goal_with_run(path: &std::path::Path, budget: Option<u64>) -> store::SessionGoalRecord {
+    let goal = store::create_session_goal(path, "peer-a", "ship", budget, None).unwrap();
+    let bound = store::bind_session_goal_run(
+        path,
+        "peer-a",
+        &store::GoalRunBaseline {
+            run_id: "paused-run".into(),
+            billable_tokens: 0,
+            started_at_epoch_ms: 0,
+            continuation: false,
+        },
+    )
+    .unwrap()
+    .unwrap();
+    store::update_session_goal_by_user(
+        path,
+        "peer-a",
+        &goal.goal_id,
+        bound.version,
+        UserGoalUpdate {
+            status: Some(GoalStatus::Paused),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+}
+
 #[tokio::test]
 async fn exact_goal_survives_replacement_and_cursor_suppresses_terminal_replay() {
     let runtime = runtime(Vec::new());
@@ -707,6 +734,262 @@ async fn completing_run_provenance_is_stable_before_settlement_and_after_replace
     .await;
     assert_eq!(retained["targets"][0]["proof"]["last_run_id"], "R2");
     assert_eq!(retained["targets"][0]["proof"]["retained"], true);
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn paused_goal_settlement_and_retention_do_not_replay_stopped_outcome() {
+    let runtime = runtime(Vec::new());
+    let paused = paused_goal_with_run(&runtime.store_path, None);
+    assert_eq!(paused.accounting_run_id.as_deref(), Some("paused-run"));
+    let first = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[target("peer-a")]}),
+    )
+    .await;
+    assert_eq!(first["targets"][0]["status"], "goal_paused");
+    assert_eq!(first["targets"][0]["proof"]["last_run_id"], "paused-run");
+    let settled = store::settle_session_goal_run(
+        &runtime.store_path,
+        "peer-a",
+        "paused-run",
+        10,
+        20,
+        store::GoalRunDisposition::Completed,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(settled.status, GoalStatus::Paused);
+    assert!(settled.version > paused.version);
+    assert!(settled.accounting_run_id.is_none());
+    let fresh = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[target("peer-a")]}),
+    )
+    .await;
+    assert_eq!(fresh["targets"][0]["proof"]["version"], settled.version);
+    assert_eq!(fresh["targets"][0]["proof"]["last_run_id"], "paused-run");
+    let pinned = json!({"session_id":"peer-a","mode":"goal",
+        "after_cursor":first["targets"][0]["after_cursor"]});
+    let repeated = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[pinned],"timeout_ms":30}),
+    )
+    .await;
+    assert_eq!(repeated["status"], "timeout");
+    assert_eq!(repeated["targets"][0]["resolved_identity"], paused.goal_id);
+    assert_eq!(repeated["targets"][0]["unchanged"], true);
+    assert!(repeated["targets"][0]["proof"].is_null());
+
+    // A new run is a new stopped outcome even if no intervening Active snapshot
+    // was delivered. Status alone is not a sufficient fingerprint.
+    store::update_session_goal_by_user(
+        &runtime.store_path,
+        "peer-a",
+        &paused.goal_id,
+        settled.version,
+        UserGoalUpdate {
+            status: Some(GoalStatus::Active),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let bound = store::bind_session_goal_run(
+        &runtime.store_path,
+        "peer-a",
+        &store::GoalRunBaseline {
+            run_id: "later-run".into(),
+            billable_tokens: 10,
+            started_at_epoch_ms: 20,
+            continuation: false,
+        },
+    )
+    .unwrap()
+    .unwrap();
+    store::update_session_goal_by_user(
+        &runtime.store_path,
+        "peer-a",
+        &paused.goal_id,
+        bound.version,
+        UserGoalUpdate {
+            status: Some(GoalStatus::Paused),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let later = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[pinned],"timeout_ms":30}),
+    )
+    .await;
+    assert_eq!(later["status"], "target_changed");
+    assert_eq!(later["targets"][0]["status"], "goal_paused");
+    assert_eq!(later["targets"][0]["proof"]["last_run_id"], "later-run");
+    let settled = store::settle_session_goal_run(
+        &runtime.store_path,
+        "peer-a",
+        "later-run",
+        11,
+        30,
+        store::GoalRunDisposition::Completed,
+    )
+    .unwrap()
+    .unwrap();
+    store::clear_session_goal(
+        &runtime.store_path,
+        "peer-a",
+        &paused.goal_id,
+        settled.version,
+    )
+    .unwrap();
+    store::create_session_goal(&runtime.store_path, "peer-a", "replacement", None, None).unwrap();
+    let retained = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[{
+            "session_id":"peer-a","mode":"goal","goal_id":paused.goal_id
+        }]}),
+    )
+    .await;
+    assert_eq!(retained["targets"][0]["proof"]["retained"], true);
+    assert_eq!(retained["targets"][0]["proof"]["retirement"], "cleared");
+    assert_eq!(retained["targets"][0]["proof"]["version"], settled.version);
+    let repeated = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[{
+        "session_id":"peer-a","mode":"goal","after_cursor":later["targets"][0]["after_cursor"]
+    }],"timeout_ms":30}),
+    )
+    .await;
+    assert_eq!(repeated["status"], "timeout");
+    assert_eq!(repeated["targets"][0]["resolved_identity"], paused.goal_id);
+    assert_eq!(repeated["targets"][0]["unchanged"], true);
+    assert!(repeated["targets"][0]["proof"].is_null());
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn paused_goal_settlement_still_wakes_for_failure_or_budget_outcome() {
+    for (budget, disposition, status) in [
+        (
+            None,
+            store::GoalRunDisposition::RetryableFailed,
+            "goal_paused",
+        ),
+        (None, store::GoalRunDisposition::Failed, "goal_blocked"),
+        (
+            Some(1),
+            store::GoalRunDisposition::Completed,
+            "goal_budget_limited",
+        ),
+    ] {
+        let runtime = runtime(Vec::new());
+        let goal = paused_goal_with_run(&runtime.store_path, budget);
+        let first = value(
+            &runtime,
+            "wait_tasks",
+            json!({"targets":[target("peer-a")]}),
+        )
+        .await;
+        let failure = crate::run_failure::RunFailure::unknown("new terminal failure");
+        store::settle_session_goal_run_with_failure(
+            &runtime.store_path,
+            "peer-a",
+            "paused-run",
+            1,
+            20,
+            disposition,
+            (disposition != store::GoalRunDisposition::Completed).then_some(&failure),
+        )
+        .unwrap();
+        let changed = value(
+            &runtime,
+            "wait_tasks",
+            json!({"targets":[{
+            "session_id":"peer-a","mode":"goal","after_cursor":first["targets"][0]["after_cursor"]
+        }],"timeout_ms":30}),
+        )
+        .await;
+        assert_eq!(changed["status"], "target_changed");
+        assert_eq!(changed["targets"][0]["status"], status);
+        assert_eq!(changed["targets"][0]["resolved_identity"], goal.goal_id);
+        assert_eq!(changed["targets"][0]["proof"]["last_run_id"], "paused-run");
+        if disposition != store::GoalRunDisposition::Completed {
+            assert_eq!(
+                changed["targets"][0]["proof"]["failure"]["diagnostic"],
+                failure.diagnostic
+            );
+        }
+        cleanup(&runtime);
+    }
+}
+
+#[tokio::test]
+async fn legacy_stopped_goal_cursor_migrates_with_authoritative_resync() {
+    use sha2::{Digest, Sha256};
+    let runtime = runtime(Vec::new());
+    let goal = paused_goal_with_run(&runtime.store_path, None);
+    let first = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[target("peer-a")]}),
+    )
+    .await;
+    let mut cursor: Value =
+        serde_json::from_str(first["targets"][0]["after_cursor"].as_str().unwrap()).unwrap();
+    let legacy_observation = json!({"status":"goal_paused","proof":first["targets"][0]["proof"]});
+    cursor["fingerprint"] = json!(format!(
+        "{:x}",
+        Sha256::digest(legacy_observation.to_string().as_bytes())
+    ));
+    let pinned = json!({"session_id":"peer-a","mode":"goal","after_cursor":cursor.to_string()});
+    let same = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[pinned],"timeout_ms":30}),
+    )
+    .await;
+    assert_eq!(same["status"], "timeout");
+    assert_eq!(same["targets"][0]["resync"], true);
+    assert_eq!(same["targets"][0]["unchanged"], true);
+    assert!(same["targets"][0]["proof"].is_null());
+    store::settle_session_goal_run(
+        &runtime.store_path,
+        "peer-a",
+        "paused-run",
+        1,
+        20,
+        store::GoalRunDisposition::Completed,
+    )
+    .unwrap();
+    // The old opaque hash cannot distinguish accounting from a changed failure.
+    // It stays pinned and delivers one fresh proof with an explicit resync.
+    let migrated = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[pinned],"timeout_ms":30}),
+    )
+    .await;
+    assert_eq!(migrated["status"], "target_changed");
+    assert_eq!(migrated["targets"][0]["resync"], true);
+    assert_eq!(migrated["targets"][0]["resolved_identity"], goal.goal_id);
+    assert_eq!(migrated["targets"][0]["proof"]["last_run_id"], "paused-run");
+    let repeated = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[{
+        "session_id":"peer-a","mode":"goal","after_cursor":migrated["targets"][0]["after_cursor"]
+    }],"timeout_ms":30}),
+    )
+    .await;
+    assert_eq!(repeated["status"], "timeout");
+    assert_eq!(repeated["targets"][0]["unchanged"], true);
+    assert!(repeated["targets"][0]["proof"].is_null());
     cleanup(&runtime);
 }
 
