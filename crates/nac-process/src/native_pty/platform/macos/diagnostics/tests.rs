@@ -107,7 +107,7 @@ unsafe extern "C" fn send_fake(key: *const [u32; 8], signal: i32) -> i32 {
         }
     })
 }
-fn scope() -> Scope {
+fn reset_fake() {
     FAKE.with(|f| {
         *f.borrow_mut() = Fake {
             uniqueid: 7,
@@ -116,9 +116,16 @@ fn scope() -> Scope {
             ..Fake::default()
         }
     });
+}
+fn scope() -> Scope {
+    reset_fake();
     let scope = Scope::with_inspector(Some(inspect_fake));
     phase(Phase::Signal);
     scope
+}
+fn census_scope() -> Scope {
+    reset_fake();
+    Scope::with_capture(Some(inspect_fake), Some(0))
 }
 fn signal() -> io::Result<bool> {
     Identity {
@@ -238,40 +245,53 @@ fn replacement_dead_and_torn_records_never_gain_signal_authority() {
 
 #[test]
 fn budgets_keep_failure_and_teardown_results_separate_and_private() {
-    let mut scope = scope();
-    let error = io::Error::from_raw_os_error(libc::EPERM);
-    result::<()>(Stage::NativeSend, 200, &Err(error), [9, 1, 1]);
-    for _ in 0..2000 {
-        record(Stage::Validate, i32::MAX, 1, None, [u64::MAX as i128; 3]);
+    for census in [false, true] {
+        let mut scope = if census { census_scope() } else { scope() };
+        if census {
+            scope.begin_iteration();
+            phase(Phase::Signal);
+        }
+        let error = io::Error::from_raw_os_error(libc::EPERM);
+        result::<()>(Stage::NativeSend, 200, &Err(error), [9, 1, 1]);
+        for _ in 0..2000 {
+            record(Stage::Validate, i32::MAX, 1, None, [u64::MAX as i128; 3]);
+        }
+        if census {
+            assert!(CAPTURE.with(|slot| slot.borrow().as_ref().unwrap().dropped[0] > 0));
+            scope.begin_iteration();
+            phase(Phase::Signal);
+            assert!(CAPTURE.with(|slot| slot.borrow().as_ref().unwrap().dropped[0] == 0));
+            native_send(200, libc::SIGKILL, 1, libc::EPERM);
+        }
+        phase(Phase::Teardown);
+        for _ in 0..2000 {
+            record(Stage::UniqueFirst, 200, 1, None, [u64::MAX as i128; 3]);
+        }
+        for stage in [
+            Stage::Leader,
+            Stage::Members,
+            Stage::Job,
+            Stage::ChildKill,
+            Stage::ChildWait,
+        ] {
+            begin(stage, 200, [0; 3]);
+            result::<()>(
+                stage,
+                200,
+                &Err(io::Error::other("PRIVATE-ENV-ARGS-FILE-CREDENTIAL")),
+                [0; 3],
+            );
+        }
+        let text = scope.take().unwrap();
+        assert!(text.len() <= 8192);
+        assert!(text.contains("stage=native-send pid=200 result=3 errno=1"));
+        for stage in ["leader", "members", "job", "child-kill", "child-wait"] {
+            assert!(text.contains(&format!("stage={stage} pid=200 result=3 errno=none kind=6")));
+        }
+        assert!(!text.contains("dropped=0,0,0"));
+        assert!(!text.contains("PRIVATE"));
+        assert!(!text.contains("settled"));
     }
-    phase(Phase::Teardown);
-    for _ in 0..2000 {
-        record(Stage::UniqueFirst, 200, 1, None, [u64::MAX as i128; 3]);
-    }
-    for stage in [
-        Stage::Leader,
-        Stage::Members,
-        Stage::Job,
-        Stage::ChildKill,
-        Stage::ChildWait,
-    ] {
-        begin(stage, 200, [0; 3]);
-        result::<()>(
-            stage,
-            200,
-            &Err(io::Error::other("PRIVATE-ENV-ARGS-FILE-CREDENTIAL")),
-            [0; 3],
-        );
-    }
-    let text = scope.take().unwrap();
-    assert!(text.len() <= 8192);
-    assert!(text.contains("stage=native-send pid=200 result=3 errno=1"));
-    for stage in ["leader", "members", "job", "child-kill", "child-wait"] {
-        assert!(text.contains(&format!("stage={stage} pid=200 result=3 errno=none kind=6")));
-    }
-    assert!(!text.contains("dropped=0,0,0"));
-    assert!(!text.contains("PRIVATE"));
-    assert!(!text.contains("settled"));
 }
 
 #[test]
@@ -364,4 +384,117 @@ fn unavailable_inspection_and_resolver_never_become_successful_signal() {
         .take()
         .unwrap()
         .contains("stage=resolve pid=0 result=3 errno=none kind=5"));
+}
+
+#[test]
+fn census_child_label_and_rotation_keep_only_iteration_48() {
+    let mut capture = Scope::census();
+    for iteration in 1..=48 {
+        capture.begin_iteration();
+        phase(Phase::Signal);
+        native_send(iteration, libc::SIGKILL, iteration, 0);
+        phase(Phase::Prune);
+    }
+    let text = capture.take().unwrap();
+    assert!(text.starts_with("NAC_PTY_SIGNAL_DIAGNOSTICS_V1 test=active-census iteration=48 panicking=0 dropped=0,0,0 records=1\n"));
+    assert_eq!(text.matches("stage=native-send").count(), 1);
+    assert!(text.contains("pid=48 result=1 errno=none kind=0 a=9 b=48 c=0"));
+    assert!(!text.contains("pid=47 "));
+    assert!(text.len() <= 8192);
+}
+
+#[test]
+fn late_census_failure_emits_after_fake_teardown_without_converting_errno() {
+    struct Cleanup;
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            phase(Phase::Teardown);
+            begin(Stage::ChildWait, 50, [0; 3]);
+            result::<()>(
+                Stage::ChildWait,
+                50,
+                &Err(io::Error::from_raw_os_error(libc::EIO)),
+                [0; 3],
+            );
+        }
+    }
+    let failure = std::panic::catch_unwind(|| {
+        let mut capture = census_scope();
+        capture.emit = |text| EMITTED.with(|slot| *slot.borrow_mut() = Some(text.to_owned()));
+        let _cleanup = Cleanup;
+        for iteration in 1..48 {
+            capture.begin_iteration();
+            phase(Phase::Signal);
+            native_send(100 + iteration, libc::SIGKILL, iteration, 0);
+        }
+        capture.begin_iteration();
+        phase(Phase::Signal);
+        FAKE.with(|f| f.borrow_mut().sends = vec![libc::EPERM]);
+        let result = signal();
+        assert_eq!(
+            result.as_ref().unwrap_err().raw_os_error(),
+            Some(libc::EPERM)
+        );
+        assert_eq!(
+            calls(),
+            ["unique", "short", "sid", "short", "sid", "unique", "send"]
+        );
+        result.unwrap(); // Preserve the original error and panic.
+    });
+    assert!(failure.is_err());
+    let text = EMITTED.with(|slot| slot.borrow_mut().take().unwrap());
+    assert!(text.starts_with(
+        "NAC_PTY_SIGNAL_DIAGNOSTICS_V1 test=active-census iteration=48 panicking=1 dropped=0,0,0"
+    ));
+    assert!(text.contains("stage=native-send pid=200 result=3 errno=1 kind=1"));
+    assert!(text.contains("stage=child-wait pid=50 result=3 errno=5"));
+    assert_eq!(text.matches("stage=native-send").count(), 1);
+    assert!(text.find("stage=native-send").unwrap() < text.find("stage=child-wait").unwrap());
+    assert!(CAPTURE.with(|slot| slot.borrow().is_none()));
+}
+
+#[test]
+fn prune_header_and_rows_survive_census_rotation_requests_unchanged() {
+    let mut capture = Scope::new();
+    phase(Phase::Signal);
+    begin(Stage::Validate, 200, [7, 7, 1]);
+    capture.begin_iteration(); // A prune scope never becomes a census scope.
+    let mut nested = Scope::census();
+    nested.begin_iteration(); // An inactive nested scope cannot rotate its owner.
+    assert!(nested.take().is_none());
+    let text = capture.take().unwrap();
+    assert_eq!(text, "NAC_PTY_SIGNAL_DIAGNOSTICS_V1 test=active-prune panicking=0 dropped=0,0,0 records=1\nseq=1 phase=2 stage=validate pid=200 result=0 errno=none kind=0 a=7 b=7 c=1\n");
+}
+
+#[test]
+fn census_setup_and_prune_do_not_fill_the_signal_budget() {
+    let mut capture = Scope::census();
+    capture.begin_iteration();
+    begin(Stage::UniqueFirst, 100, [0; 3]);
+    phase(Phase::Signal);
+    begin(Stage::Validate, 200, [7, 7, 1]);
+    phase(Phase::Prune);
+    begin(Stage::UniqueFirst, 300, [0; 3]);
+    let text = capture.take().unwrap();
+    assert!(text.contains("test=active-census iteration=1"));
+    assert!(text.contains("records=1\n"));
+    assert!(!text.contains("stage=unique-first"));
+    assert!(text.contains("stage=validate pid=200"));
+}
+
+#[test]
+fn census_teardown_prevents_rotation_of_the_failure_and_result_budgets() {
+    let mut capture = Scope::census();
+    capture.begin_iteration();
+    phase(Phase::Signal);
+    native_send(200, libc::SIGKILL, 7, libc::EPERM);
+    phase(Phase::Teardown);
+    begin(Stage::ChildWait, 50, [0; 3]);
+    result::<()>(Stage::ChildWait, 50, &Ok(()), [9, 0, 0]);
+    capture.begin_iteration();
+    let text = capture.take().unwrap();
+    assert!(text.contains("test=active-census iteration=1"));
+    assert!(text.contains("stage=native-send pid=200 result=3 errno=1"));
+    assert!(text.contains("stage=child-wait pid=50 result=1 errno=none kind=0 a=9"));
+    assert!(text.contains("records=3\n"));
 }
