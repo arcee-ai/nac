@@ -1,8 +1,21 @@
 import { useSyncExternalStore } from "react";
 import type { NativeRuntimeScope } from "../runtime/nativeRuntime";
 
-/** A caller-owned, tab-scoped adapter, separate from long-lived preferences. */
+/** Caller-owned text storage, separate from long-lived preferences. */
 export type PromptDraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+/** Explicit durable text identity, never a replacement for NativeRuntimeScope.
+ * The desktop caller derives these opaque values from its verified profile/store.
+ * It also owns adapter lifetime, document fencing and durable write ordering.
+ * Other callers retain full-runtime/tab scoping unless they opt in explicitly.
+ */
+export interface PromptDraftPersistenceBinding {
+  readonly owner: string;
+  readonly profile: string;
+  readonly organization: string;
+  readonly host: string;
+  readonly store: string;
+  readonly track: string;
+}
 export interface PromptDraft {
   readonly text: string;
   readonly revision: number;
@@ -25,14 +38,72 @@ const fields = [
   "endpoint",
   "release",
 ] as const;
+const persistenceFields = ["owner", "profile", "organization", "host", "store", "track"] as const;
+const maxIdentityLength = 4096;
+const maxPersistedBytes = 4 * 1024 * 1024;
+const validIdentity = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= maxIdentityLength;
+
+/** Desktop checkpoints are bounded before parsing and before writing. The active
+ * composer remains verbatim in memory even when it exceeds recovery retention.
+ */
+function boundedCheckpoint(drafts: unknown[], recoveries: unknown): boolean {
+  if (recoveries !== undefined && !Array.isArray(recoveries)) return false;
+  const savedRecoveries: unknown[] = recoveries ?? [];
+  if (drafts.length > maxDrafts || savedRecoveries.length > maxDrafts) return false;
+  let characters = 0;
+  const sessions = new Set<string>();
+  const recoveryIds = new Set<string>();
+  for (const entry of drafts) {
+    if (
+      !Array.isArray(entry) ||
+      entry.length !== 2 ||
+      !validIdentity(entry[0]) ||
+      typeof entry[1] !== "string" ||
+      sessions.has(entry[0])
+    )
+      return false;
+    sessions.add(entry[0]);
+    characters += entry[1].length;
+  }
+  for (const entry of savedRecoveries) {
+    if (
+      !Array.isArray(entry) ||
+      entry.length !== 3 ||
+      !validIdentity(entry[0]) ||
+      !validIdentity(entry[1]) ||
+      typeof entry[2] !== "string" ||
+      recoveryIds.has(entry[1])
+    )
+      return false;
+    recoveryIds.add(entry[1]);
+    characters += entry[2].length;
+  }
+  return characters <= maxRetainedCharacters;
+}
 
 /** Text only. Request bridges, shell intents and attachment payloads never enter this owner. */
-export function createPromptDraftStore(scope?: NativeRuntimeScope, storage?: PromptDraftStorage) {
-  const binding =
+export function createPromptDraftStore(
+  scope?: NativeRuntimeScope,
+  storage?: PromptDraftStorage,
+  persistenceBinding?: PromptDraftPersistenceBinding,
+) {
+  const runtimeBinding =
     scope && fields.every((field) => typeof scope[field] === "string")
       ? fields.map((field) => scope[field])
       : null;
-  const key = binding ? `nac:prompt-drafts:v1:${JSON.stringify(binding)}` : null;
+  const stable = persistenceBinding !== undefined;
+  const version = stable ? 2 : 1;
+  const binding = stable
+    ? runtimeBinding &&
+      runtimeBinding.every(validIdentity) &&
+      persistenceBinding &&
+      persistenceFields.every((field) => validIdentity(persistenceBinding[field]))
+      ? persistenceFields.map((field) => persistenceBinding[field])
+      : null
+    : runtimeBinding;
+  // A distinct version/key prevents accidental import from ordinary browser tabs.
+  const key = binding ? `nac:prompt-drafts:v${version}:${JSON.stringify(binding)}` : null;
   const drafts = new Map<string, PromptDraft>();
   // Text checkpoints are recovery evidence, never commands to replay. Only the text/id
   // persist; an interrupted request is always uncertain in the next runtime.
@@ -49,10 +120,15 @@ export function createPromptDraftStore(scope?: NativeRuntimeScope, storage?: Pro
   const persistent = key ? storage : undefined;
   try {
     const raw = key ? persistent?.getItem(key) : null;
-    if (raw) {
+    if (
+      raw &&
+      (!stable ||
+        (raw.length <= maxPersistedBytes &&
+          new TextEncoder().encode(raw).length <= maxPersistedBytes))
+    ) {
       const saved = JSON.parse(raw);
       if (
-        saved?.version === 1 &&
+        saved?.version === version &&
         JSON.stringify(saved.binding) === JSON.stringify(binding) &&
         Array.isArray(saved.drafts) &&
         saved.drafts.length <= maxDrafts &&
@@ -62,7 +138,8 @@ export function createPromptDraftStore(scope?: NativeRuntimeScope, storage?: Pro
             entry.length === 2 &&
             typeof entry[0] === "string" &&
             typeof entry[1] === "string",
-        )
+        ) &&
+        (!stable || boundedCheckpoint(saved.drafts, saved.recoveries))
       ) {
         for (const [id, text] of saved.drafts as [string, string][]) {
           if (text) drafts.set(id, Object.freeze({ text, revision: ++revision }));
@@ -104,22 +181,26 @@ export function createPromptDraftStore(scope?: NativeRuntimeScope, storage?: Pro
     if (!persistent || !key) return;
     try {
       if (!drafts.size && !recoveries.size) persistent.removeItem(key);
-      else
-        persistent.setItem(
-          key,
-          JSON.stringify({
-            version: 1,
-            binding,
-            drafts: [...drafts].map(([id, draft]) => [id, draft.text]),
-            ...(recoveries.size
-              ? {
-                  recoveries: [...recoveries].flatMap(([sessionId, entries]) =>
-                    entries.map(({ id, text }) => [sessionId, id, text]),
-                  ),
-                }
-              : {}),
-          }),
-        );
+      else {
+        const record = {
+          version,
+          binding,
+          drafts: [...drafts].map(([id, draft]) => [id, draft.text]),
+          ...(recoveries.size
+            ? {
+                recoveries: [...recoveries].flatMap(([sessionId, entries]) =>
+                  entries.map(({ id, text }) => [sessionId, id, text]),
+                ),
+              }
+            : {}),
+        };
+        if (stable && !boundedCheckpoint(record.drafts, record.recoveries))
+          throw new Error("Draft checkpoint exceeds its recovery retention bound.");
+        const raw = JSON.stringify(record);
+        if (stable && new TextEncoder().encode(raw).length > maxPersistedBytes)
+          throw new Error("Draft checkpoint exceeds its encoded byte bound.");
+        persistent.setItem(key, raw);
+      }
     } catch {
       // Do not leave an older persisted prompt to resurrect on the next reload.
       try {

@@ -101,6 +101,26 @@ default. Only standalone opts into existing localStorage keys. A consumer that
 supplies storage owns its namespace and must avoid sharing it across bindings.
 Provider API-key values are excluded from query keys.
 
+Text recovery uses the existing runtime-owned `promptDraftStore`. By default its
+optional `draftStorage` is keyed and validated against the complete live runtime
+binding. A caller may explicitly supply `draftPersistenceBinding` to recover
+text across serving lifetimes in its own durable profile: owner, profile,
+organization, host, canonical-store identity and track. This opt-in uses a
+separate versioned record namespace; it does not change `runtime.scope`, request
+admission, query/stream lifetimes or the requirement to replace a closed runtime.
+An invalid durable identity disables persistence rather than falling back to an
+unscoped store. Without an adapter, drafts remain in memory.
+
+Only draft/review text persists. Pending request claims do not, and interrupted
+text checkpoints restore as uncertain evidence requiring human review. Durable
+records are bounded to 100 drafts and 100 recovery entries, one million combined
+UTF-16 code units and 4 MiB encoded JSON. The active in-memory prompt is never
+truncated; an over-budget checkpoint is not retained. The caller must provide
+document/owner fencing and ordered durable writes/clear barriers. These shared
+contracts do not themselves implement desktop storage, native profile isolation
+or cross-Quit restoration; those still require the ALL-349 native adapter and
+actual WKWebView evidence.
+
 ## Streams and operation coverage
 
 The existing SSE adapter receives fresh transport context on every connection.
