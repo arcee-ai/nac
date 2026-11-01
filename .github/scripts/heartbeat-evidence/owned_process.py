@@ -26,7 +26,8 @@ def interrupt(*_):
     raise Interrupted('CANCELLED')
 
 
-def run_owned(argv, cwd, environment, output, label, seconds, *, factory=subprocess.Popen):
+def run_owned(argv, cwd, environment, output, label, seconds, *, factory=subprocess.Popen,
+              on_spawn=None, hash_streams=True):
     """No shell, retries, raw PID/group fallback or stdout/stderr disclosure."""
     output = Path(output)
     receipt = {'label': label, 'argv': [str(arg) for arg in argv], 'pid': None,
@@ -41,6 +42,8 @@ def run_owned(argv, cwd, environment, output, label, seconds, *, factory=subproc
                             start_new_session=True, close_fds=True)
             receipt['pid'] = child.pid
             write_json(output/(label+'.terminal.json'), receipt)
+            if on_spawn is not None:
+                on_spawn(child)
             try:
                 receipt['exit'] = child.wait(timeout=seconds)
             except subprocess.TimeoutExpired:
@@ -74,7 +77,7 @@ def run_owned(argv, cwd, environment, output, label, seconds, *, factory=subproc
         receipt['elapsed_seconds'] = time.monotonic()-start
         for stream in ('stdout', 'stderr'):
             file = output/(label+'.'+stream)
-            if file.exists():
+            if hash_streams and file.exists():
                 receipt[stream+'_bytes'] = file.stat().st_size
                 receipt[stream+'_sha256'] = sha256(file)
         write_json(output/(label+'.terminal.json'), receipt)

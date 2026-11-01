@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import contract as c
@@ -213,7 +213,7 @@ class Contracts(unittest.TestCase):
                         (out/(label+'.stdout')).write_text(output())
 
                 with patch.dict(os.environ, {}, clear=True), \
-                     patch.object(runner, 'bootstrap_namespace', return_value={'pid1': True}), \
+                     patch.object(runner, 'bootstrap_namespace', return_value=({'pid1': True}, Mock())), \
                      patch.object(runner, 'verify_product'), patch.object(runner, 'run_owned', phase), \
                      patch.object(runner, 'verify_pair', return_value=[]), \
                      patch.object(runner, 'resource_sample', return_value={}), \

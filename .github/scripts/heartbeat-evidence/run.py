@@ -13,11 +13,13 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 
 from contract import (ASSETS, BASELINE, HEAD, MODE, TEST, TREE, artifact_manifest,
                       measurement_rows, require, sha256, test_executable,
                       validate_event, validate_request, verify_pair, write_json)
 from owned_process import clean_environment, interrupt, reap_namespace, run_owned
+from namespace_custody import Lifeline, NamespaceCustody, execute_namespace
 
 SOURCE = Path(__file__).resolve().parent
 
@@ -75,9 +77,18 @@ def bootstrap_namespace(context):
     os.setgid(gid)
     os.setuid(uid)
     require(os.geteuid() == uid and os.getegid() == gid, 'PRIVILEGE_DROP')
+    # unshare's inherited parent-death signal is cleared by this UID/GID drop.
+    # No product operation is admitted until a post-drop lifeline is verified.
+    lifeline = Lifeline(context)
+    try:
+        require(lifeline.proof['state'] == 'VERIFIED_POST_DROP', 'LIFELINE_NOT_VERIFIED')
+    except BaseException:
+        lifeline.close()
+        raise
     return {'pid1': True, 'distinct_net_pid': actual, 'interfaces': ['lo'],
             'bootstrap_child_exit': code, 'product_uid': uid, 'product_gid': gid,
-            'egress': 'private network namespace has loopback only; no host interface or default-route fallback'}
+            'lifeline': lifeline.proof,
+            'egress': 'private network namespace has loopback only; no host interface or default-route fallback'}, lifeline
 
 
 def resource_sample():
@@ -90,7 +101,14 @@ def resource_sample():
 
 def inside(context_file, output):
     context = json.loads(context_file.read_text())
-    namespace = bootstrap_namespace(context)
+    namespace, lifeline = bootstrap_namespace(context)
+    try:
+        return workload(context, output, namespace)
+    finally:
+        lifeline.close()
+
+
+def workload(context, output, namespace):
     os.environ.clear()
     os.environ.update(context['tool_environment'])
     product = Path(context['product'])
@@ -175,7 +193,6 @@ def outside(args):
     verify_product(product)
     require(not product.is_relative_to(output) and not output.is_relative_to(product), 'OUTPUT_OWNERSHIP')
     output.mkdir(mode=0o700)
-    first_error = None
     # One evidence lane job owns this VM. Serialize its only child workload;
     # this is not a claim to control unrelated host/hypervisor activity.
     with (output.parent/'heartbeat-evidence.lock').open('x+') as lock:
@@ -183,6 +200,8 @@ def outside(args):
         lock.write(str(os.getpid())+'\n')
         lock.flush()
         context = {'control': args.control, 'product': str(product), 'uid': os.getuid(), 'gid': os.getgid(),
+                   'controller_pid': os.getpid(), 'lifeline_nonce': uuid.uuid4().hex,
+                   'lifeline_socket': str(output/'lifeline.sock'),
                    'host_namespaces': {name: os.stat('/proc/self/ns/'+name).st_ino for name in ('net', 'pid')},
                    'browsers': os.environ['PLAYWRIGHT_BROWSERS_PATH'],
                    'tool_environment': clean_environment(output.parent, output.parent)}
@@ -191,20 +210,38 @@ def outside(args):
         environment = clean_environment(output.parent, output.parent)
         # Setup completed before this controller. No credential-bearing host
         # environment is inherited by sudo, product, capture or model fixtures.
-        try:
-            run_owned(namespace_command(context_file, output), SOURCE, environment, output, 'private-namespace', 1260)
-            result = json.loads((output/'evidence.json').read_text())
-            require(result['state'].startswith('PASS_') and result['namespace']['pid1'], 'NAMESPACE_RESULT')
-            verify_product(product)
-        except BaseException:
-            first_error = 'FINITE_EVIDENCE_FAILED'
-        finally:
-            write_json(output/'terminal.json', {'state': 'FAIL' if first_error else 'PASS_EVIDENCE_RETAINED',
-                'first_error': first_error, 'control': args.control, 'head': HEAD, 'tree': TREE,
-                'baseline': BASELINE, 'attempts': 1, 'lock_owner': os.getpid(),
-                'no_automatic_retry': True, 'review_original_pngs': True})
+        finalize_namespace(namespace_command(context_file, output), environment, output, product, context)
+    return 0
+
+
+def finalize_namespace(argv, environment, output, product, context):
+    """Wrapper receipts never qualify PID1 death or stable artifact contents."""
+    first_error = None
+    retirement = {'state': 'UNRESOLVED', 'first_error': 'CUSTODY_NOT_ESTABLISHED'}
+    custody = None
+    try:
+        custody = NamespaceCustody(context)
+        first_error, retirement = execute_namespace(argv, SOURCE, environment, output, custody, run_owned)
+        require(not first_error, first_error or 'FINITE_EVIDENCE_FAILED')
+        result = json.loads((output/'evidence.json').read_text())
+        require(result['state'].startswith('PASS_') and result['namespace']['pid1'], 'NAMESPACE_RESULT')
+        verify_product(product)
+    except BaseException:
+        first_error = first_error or 'FINITE_EVIDENCE_FAILED'
+    finally:
+        if custody is not None:
+            custody.close()
+        retired = retirement['state'] == 'RETIRED'
+        write_json(output/'terminal.json', {
+            'state': 'UNRESOLVED' if not retired else ('FAIL' if first_error else 'PASS_EVIDENCE_RETAINED'),
+            'namespace_retirement': retirement, 'artifacts_stable': retired,
+            'artifact_hashing': 'after verified PID1 death' if retired else 'WITHHELD: possible live writer',
+            'first_error': first_error, 'control': context['control'], 'head': HEAD, 'tree': TREE,
+            'baseline': BASELINE, 'attempts': 1, 'lock_owner': os.getpid(),
+            'no_automatic_retry': True, 'review_original_pngs': True})
+        if retired:
             write_json(output/'artifact-manifest.json', artifact_manifest(output))
-    return 90 if first_error else 0
+    require(not first_error and retired, first_error or 'NAMESPACE_RETIREMENT_UNRESOLVED')
 
 
 def main():

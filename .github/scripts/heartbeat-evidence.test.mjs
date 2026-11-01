@@ -9,6 +9,21 @@ const read=file=>fs.readFileSync(file,'utf8');
 const stable=YAML.parse(read('.github/workflows/stable-release.yml'));
 const evidence=YAML.parse(read('.github/workflows/heartbeat-evidence.yml'));
 
+test('ordinary workflow checks include only pure evidence controls',()=>{
+ const make=read('Makefile');
+ assert.match(make,/^test-workflow-lint: test-heartbeat-evidence-controls$/m);
+ const target=make.match(/^test-heartbeat-evidence-controls:\n((?:\t[^\n]*\n)+)/m)?.[1];
+ assert.ok(target);
+ assert.deepEqual(target.trim().split('\n').map(s=>s.trim()),[
+  'python3 -B .github/scripts/heartbeat-evidence/contract.test.py',
+  'python3 -B .github/scripts/heartbeat-evidence/custody.test.py',
+  'node --test .github/scripts/heartbeat-evidence.test.mjs',
+  'node --check .github/scripts/heartbeat-evidence/capture.mjs',
+ ]);
+ assert.ok(Object.values(stable.jobs).some(job=>job.steps?.some(step=>
+  step.run?.includes('make lint-workflows test-workflow-lint'))));
+});
+
 function route(expression,event,mode){
  let body=expression.replace(/^\$\{\{\s*|\s*\}\}$/g,'');
  body=body.replaceAll('github.event_name',JSON.stringify(event)).replaceAll('inputs.heartbeat_evidence',JSON.stringify(mode)).replaceAll('always()','true');

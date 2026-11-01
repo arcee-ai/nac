@@ -247,8 +247,16 @@ lint-workflows:
 	node .github/scripts/workflow-lint.mjs
 
 ## Prove workflow/shell enforcement with real pinned tools and invalid fixtures
-test-workflow-lint:
+test-workflow-lint: test-heartbeat-evidence-controls
 	node --test .github/scripts/workflow-lint.test.mjs
+
+## Pure/mock evidence safety controls; no namespace, browser, build or model run
+.PHONY: test-heartbeat-evidence-controls
+test-heartbeat-evidence-controls:
+	python3 -B .github/scripts/heartbeat-evidence/contract.test.py
+	python3 -B .github/scripts/heartbeat-evidence/custody.test.py
+	node --test .github/scripts/heartbeat-evidence.test.mjs
+	node --check .github/scripts/heartbeat-evidence/capture.mjs
 
 ## Lint frontend and production Rust targets
 lint:
