@@ -54,6 +54,7 @@ final class AttentionSmoke {
     private var originalPID: Int32 = 0
     private var passed = false
     private var draft: String?
+    private var chatReadiness: [String: Any] = [:]
     init(app: PreviewApp, delivery: AttentionSmokeDelivery) {
         self.app = app; self.delivery = delivery
         let args = CommandLine.arguments
@@ -110,7 +111,8 @@ final class AttentionSmoke {
                 throw DesktopStartupError.message("Native notification action unavailable")
             }
         case "close": app.window.performClose(nil)
-        case "click": delivery.click()
+        case "click": chatReadiness = [:]; delivery.click()
+        case "inspect-chat": try await inspectChat(command)
         case "hold": delivery.hold = true
         case "release": delivery.release(); delivery.hold = false
         case "draft":
@@ -130,12 +132,132 @@ final class AttentionSmoke {
         default: throw DesktopStartupError.message("Unknown attention fixture action")
         }
     }
-    private func js(_ source: String) async throws -> Any? {
-        try await app.webView.callAsyncJavaScript(source, arguments: [:], in: nil, contentWorld: .page)
+    // Read-only, fixture-local observation. No global registration, requests,
+    // events, focus, scrolling or edits. Desktop Q1 layout only; fail closed
+    // rather than searching title/sidebar text when that layout changes.
+    private static let chatSource = #"""
+    const actual = location.hash.slice(1);
+    const canonical = '/session/'+encodeURIComponent(expected.session)+'/insights';
+    const facts = {ready:false, route:actual, route_ok:actual===canonical && expected.route===canonical,
+      scope_ok:false, loading:false, error:false, user_count:0, assistant_count:0, composer_ok:false};
+    const visible = element => {
+      if (!(element instanceof HTMLElement) || !element.isConnected) return false;
+      let rect = element.getBoundingClientRect();
+      let left=Math.max(0,rect.left), top=Math.max(0,rect.top);
+      let right=Math.min(innerWidth,rect.right), bottom=Math.min(innerHeight,rect.bottom);
+      for (let node=element; node; node=node.parentElement) {
+        const style=getComputedStyle(node);
+        if (node.hidden || node.inert || node.getAttribute('aria-hidden')==='true' ||
+            style.display==='none' || style.visibility!=='visible' || Number(style.opacity)<0.99) return false;
+        if (node!==element && /(auto|scroll|hidden|clip)/.test(style.overflow+style.overflowX+style.overflowY)) {
+          const clip=node.getBoundingClientRect();
+          left=Math.max(left,clip.left); top=Math.max(top,clip.top);
+          right=Math.min(right,clip.right); bottom=Math.min(bottom,clip.bottom);
+        }
+      }
+      if (!(right>left && bottom>top)) return false;
+      const foreground=document.elementFromPoint((left+right)/2,(top+bottom)/2);
+      return !!foreground && (element.contains(foreground) || foreground.contains(element));
+    };
+    const composers=[...document.querySelectorAll('textarea[role="combobox"][aria-label="Message"][data-nac-retained-draft]')];
+    if (!facts.route_ok || composers.length!==1) return facts;
+    const composer=composers[0], scopes=[];
+    // SessionPage's desktop chat column has header, Transcript, composer layer.
+    // Transcript always owns a direct status/loader as its first element.
+    // Only that middle sibling is searched, never header or side-box content.
+    for (let node=composer.parentElement; node; node=node.parentElement) {
+      const children=[...node.children];
+      if (children.length===3 && children[2].contains(composer) &&
+          children[1].firstElementChild?.getAttribute('role')==='status') scopes.push(children[1]);
+    }
+    if (scopes.length!==1) return facts;
+    const transcript=scopes[0]; facts.scope_ok=true;
+    facts.loading=!!transcript.querySelector('[role="status"][aria-label="Loading conversation"]');
+    facts.error=[...document.querySelectorAll('[role="alert"]')].some(visible);
+    facts.user_count=[...transcript.querySelectorAll('div')].filter(node =>
+      node.childNodes.length===1 && node.firstChild.nodeType===Node.TEXT_NODE &&
+      node.textContent===expected.user && visible(node)).length;
+    facts.assistant_count=[...transcript.querySelectorAll('p')].filter(node =>
+      node.textContent===expected.assistant && visible(node)).length;
+    facts.composer_ok=visible(composer) && !composer.disabled && !composer.readOnly && getComputedStyle(composer).pointerEvents!=='none';
+    facts.ready=facts.scope_ok && !facts.loading && !facts.error &&
+      facts.user_count===1 && facts.assistant_count===1 && facts.composer_ok;
+    return facts;
+    """#
+
+    private func chatDocument() -> [String: String]? {
+        guard let snapshot = app.commands?.smokeSnapshot,
+              snapshot["installed"] as? Bool == true, snapshot["ready"] as? Bool == true,
+              let binding = snapshot["binding"] as? [String: String],
+              Set(binding.keys) == ["launch", "view", "document"] else { return nil }
+        return binding
+    }
+
+    private func inspectChat(_ command: [String: String]) async throws {
+        guard app.window.isVisible, app.window.isKeyWindow,
+              let view = app.webView, let document = chatDocument(),
+              let incarnation = app.engine.receipt?.incarnation,
+              let generation = app.attentionSmokeSnapshot["generation"] as? UInt64,
+              let session = command["session"], let route = command["route"],
+              let user = command["user"], let assistant = command["assistant"], let sample = command["sample"],
+              NativeSessionTarget.validID(session), sample.utf8.count <= 64,
+              user.utf8.count <= 4096, assistant.utf8.count <= 4096, route.utf8.count <= 2048 else {
+            throw DesktopStartupError.message("Chat observation owner unavailable")
+        }
+        let pid = app.engine.pid
+        let expected = ["session": session, "route": route, "user": user, "assistant": assistant]
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: expected), as: UTF8.self)
+        guard let expires = command["expires"].flatMap(TimeInterval.init) else {
+            throw DesktopStartupError.message("Chat observation deadline unavailable")
+        }
+        let budget = min(0.75, expires - Date().timeIntervalSince1970)
+        guard budget > 0,
+              var result = try await js("const expected = \(json);\n" + Self.chatSource, timeout: budget) as? [String: Any] else {
+            throw DesktopStartupError.message("Invalid chat observation")
+        }
+        // Re-check custody and the exact live document after the await. A late
+        // read cannot acknowledge a successor document/engine/generation.
+        do {
+            try AttentionFixtureGuard.validate(command, nonce: controlNonce, window: app.window)
+            guard !controlRetired, app.window.isVisible, app.window.isKeyWindow,
+                  app.webView === view, app.engine.pid == pid,
+                  app.engine.receipt?.incarnation == incarnation, chatDocument() == document,
+                  app.attentionSmokeSnapshot["generation"] as? UInt64 == generation else {
+                throw DesktopStartupError.message("Chat observation retired")
+            }
+        } catch { controlRetired = true; throw error }
+        result["sample"] = sample; result["session"] = session
+        result["document"] = document; result["generation"] = generation
+        chatReadiness = result
+    }
+
+    private func js(_ source: String, timeout: TimeInterval? = nil) async throws -> Any? {
+        guard let timeout else {
+            return try await app.webView.callAsyncJavaScript(source, arguments: [:], in: nil, contentWorld: .page)
+        }
+        // Existing once/cancellation owner consumes both the bounded fallback
+        // and any late callback; the returned JSON contains only fixture facts.
+        let deadline = DispatchTime.now() + timeout
+        let encoded: String? = await awaitNativeAttention(fallback: nil) { complete in
+            app.webView.callAsyncJavaScript(source, arguments: [:], in: nil, in: .page) { result in
+                guard DispatchTime.now() < deadline, case .success(let value) = result,
+                      let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]),
+                      data.count <= 8192, DispatchTime.now() < deadline else { complete(nil); return }
+                complete(String(decoding: data, as: UTF8.self))
+            }
+            DispatchQueue.main.asyncAfter(deadline: deadline) { complete(nil) }
+        }
+        guard DispatchTime.now() < deadline, let encoded else { controlRetired = true; throw DesktopStartupError.message("Chat observation timed out") }
+        let result = try JSONSerialization.jsonObject(with: Data(encoded.utf8), options: [.fragmentsAllowed])
+        guard DispatchTime.now() < deadline else {
+            controlRetired = true; throw DesktopStartupError.message("Chat observation timed out")
+        }
+        return result
     }
     func didStop() { timer?.invalidate(); timer = nil; stage = "stopped"; publish(stopped: true) }
     private func publish(stopped: Bool = false) {
         var value: [String: Any] = ["app_pid": getpid(), "stage": stage, "passed": passed && error == nil,
+            "chat_readiness": chatReadiness, "document_binding": chatDocument() ?? [:],
             "control_nonce": controlNonce, "window_number": app.window.windowNumber, "app_active": NSApp.isActive,
             "cleanup_intent": app.quit.attentionFixtureCleanup, "cleanup_timeouts": app.quit.attentionFixtureCleanupTimeouts,
             "quit_sheet_presentations": app.quit.smokeSheetPresentations, "quit_stop_completions": app.quit.smokeStopCompletions,

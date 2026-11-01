@@ -13,14 +13,23 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from urllib.parse import quote
 
 sys.dont_write_bytecode = True
 
 from instance_contract import digest
-from instance_smoke import AppJourney, engine_settled, verify_embedded_assets, wait_for
+from instance_smoke import AppJourney, engine_settled, verify_embedded_assets, wait_for, remaining
 from quit_fixture import QuitProvider, TRANSCRIPT, request
 from attention_fixture_control import AttentionControl, console_facts, require_console
 from attention_feed_build import source_binding
+
+
+def canonical_chat_route(session):
+    # Match routes.session/encodeURIComponent at this reviewed revision. The
+    # future cross-language characterization must compare the REAL route builder.
+    assert isinstance(session, str) and session and len(session.encode('utf-8')) <= 512
+    return '/session/' + quote(session, safe="-_.!~*'()") + '/insights'
 
 
 class AttentionJourney(AppJourney):
@@ -51,10 +60,17 @@ class AttentionJourney(AppJourney):
             wait_for('Exact launched attention owner', bind_owner, timeout=12)
         self.custody.check(self)
 
-    def stage(self, stage):
-        result = super().stage(stage)
+    def stage(self, stage, timeout=None, *, deadline=None):
+        if timeout is None and deadline is None:
+            result = super().stage(stage)
+        else:
+            result = super().stage(stage, timeout=50 if timeout is None else timeout, deadline=deadline)
         self.engine_pid = result.get('engine_pid') or self.engine_pid
-        self.custody.check(self)
+        if deadline is None:
+            self.custody.check(self)
+        else:
+            self.custody.check(self, deadline=deadline)
+            remaining(deadline, 2)
         return result
 
 
@@ -96,20 +112,50 @@ def run_contract(bundle, destination, observer, source_ref):
            ('AttentionFixtureCleanup.swift', 'attention_fixture_control.py', 'attention_feed_build.py')}}
     evidence['cleanup_helper_sha256'] = digest(observer.parent / 'AttentionFixtureCleanup')
     sequence = 0
-    def command(journey, action, **payload):
+    def command(journey, action, deadline=None, **payload):
         nonlocal sequence
         sequence += 1
         name = f'attention-{sequence:04d}'
-        journey.custody.publish(journey, name, action, **payload)
+        command_deadline = None if deadline is None else min(deadline, time.monotonic() + 2)
+        remaining(command_deadline, 2)
+        if action == 'inspect-chat': payload['sample'] = name
+        if command_deadline is None:
+            journey.custody.publish(journey, name, action, **payload)
+        else:
+            journey.custody.publish(journey, name, action, deadline=command_deadline, **payload)
+            remaining(command_deadline, 2)
         if action == 'finish':
             return  # Stop can retire the window before a stage/focus readback.
-        return journey.stage(name)
+        if command_deadline is None:
+            return journey.stage(name)
+        result = journey.stage(name, timeout=remaining(command_deadline, 2), deadline=command_deadline)
+        remaining(command_deadline, 2)
+        return result
     def native(journey, predicate, label):
         def poll():
             journey.custody.check(journey)
             state = journey.read()
             return state if predicate(state) else None
         return wait_for(label, poll, timeout=20)
+    def chat_ready(journey, session, deadline):
+        route = canonical_chat_route(session)
+        last = None
+        while time.monotonic() < deadline:
+            sampled = command(journey, 'inspect-chat', deadline=deadline,
+                session=session, route=route, user=TRANSCRIPT, assistant=TRANSCRIPT)
+            last = sampled.get('chat_readiness', {})
+            assert last.get('sample') == sampled['stage'], 'Stale chat sample'
+            assert not last.get('error'), 'Shared chat reports an error'
+            assert last.get('document') == sampled.get('document_binding'), 'Chat document changed'
+            assert last.get('generation') == sampled['attention']['generation'], 'Chat generation changed'
+            remaining(deadline, 2)
+            if last.get('ready') is True:
+                assert last.get('route') == route and last.get('session') == session
+                assert sampled['same_view'] and sampled['same_engine'] and sampled['window_visible']
+                return sampled
+            time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+        raise TimeoutError('Canonical chat did not render within original20s window: ' + json.dumps(last))
+
     def finish(journey):
         prior = journey.read()['engine_pid']
         command(journey, 'finish')
@@ -143,9 +189,11 @@ def run_contract(bundle, destination, observer, source_ref):
                            'Hidden committed completion accounted once')
         assert accounted['center']['titles'] == ['Request completed'] and accounted['dock'] in ('1', '?')
         assert accounted['center']['foreground_delivery_allowed']
-        first.guard_focus()
-        command(first, 'click')
-        opened = native(first, lambda s: s.get('route') == '/session/' + session, 'Click opens canonical shared chat')
+        first.chat_deadline = time.monotonic() + 20
+        first.guard_focus(deadline=first.chat_deadline)
+        command(first, 'click', deadline=first.chat_deadline)
+        opened = chat_ready(first, session, first.chat_deadline)
+        evidence['rendered_chat'] = opened['chat_readiness']
         assert opened['same_view'] and opened['same_engine'] and opened['window_visible']
         native(first, lambda s: not s['center']['foreground_delivery_allowed'], 'Visible focused workspace suppresses foreground delivery')
         command(first, 'draft', text='retained native response draft')

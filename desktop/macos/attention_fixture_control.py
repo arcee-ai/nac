@@ -12,17 +12,19 @@ import stat
 import subprocess
 import time
 import uuid
+from instance_smoke import remaining
 
 
-def console_facts():
+def console_facts(*, deadline=None):
+    remaining(deadline, 3)
     uid = os.getuid()
     facts = dict(uid=uid, console_uid=None, aqua=False, root_locked=None, cgs_locked=None)
     try:
         facts['console_uid'] = os.stat('/dev/console').st_uid
         facts['aqua'] = subprocess.run(['/bin/launchctl', 'print', f'gui/{uid}'],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3).returncode == 0
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=remaining(deadline, 3)).returncode == 0
         tree = plistlib.loads(subprocess.check_output(
-            ['/usr/sbin/ioreg', '-n', 'Root', '-d1', '-a'], timeout=3))
+            ['/usr/sbin/ioreg', '-n', 'Root', '-d1', '-a'], timeout=remaining(deadline, 3)))
         roots = tree if isinstance(tree, list) else [tree]
         bits = [node['IOConsoleLocked'] for node in roots
                 if isinstance(node, dict) and type(node.get('IOConsoleLocked')) is bool]
@@ -35,6 +37,7 @@ def console_facts():
             facts['cgs_locked'] = any(cgs)
     except (OSError, subprocess.SubprocessError, plistlib.InvalidFileException):
         facts['aqua'] = False
+    remaining(deadline, 3)
     return facts
 
 
@@ -55,10 +58,11 @@ class AttentionControl:
         self.directory = None
         self.directory_fd = None
 
-    def bind(self, journey, record):
+    def bind(self, journey, record, *, deadline=None):
         """Capture an already-launched owner for cleanup, never permission to act."""
         identity = journey.identity
-        assert identity and journey.observe()['apps'] == [identity], 'Owned app incarnation changed'
+        observed = journey.observe() if deadline is None else journey.observe(deadline=deadline)
+        assert identity and observed['apps'] == [identity], 'Owned app incarnation changed'
         assert record['app_pid'] == identity['pid'] and record['workspace_window_count'] == 1
         assert type(record['window_number']) is int and record['window_number'] > 0
         nonce = record['control_nonce']
@@ -72,6 +76,7 @@ class AttentionControl:
             assert self.directory.resolve() == self.directory, 'Control directory symlink'
             self.directory_fd = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         self._validate_directory()
+        remaining(deadline, 2)
 
     def _validate_directory(self):
         held, named = os.fstat(self.directory_fd), self.directory.lstat()
@@ -85,33 +90,40 @@ class AttentionControl:
             os.close(self.directory_fd)
             self.directory_fd = None
 
-    def check(self, journey, *, launch=False):
+    def check(self, journey, *, launch=False, deadline=None):
         assert not self.retired, 'Attention controls retired'
         try:
-            require_console(self.probe())
-            observed = journey.observe()
+            remaining(deadline, 2)
+            require_console(self.probe() if deadline is None else self.probe(deadline=deadline))
+            observed = journey.observe() if deadline is None else journey.observe(deadline=deadline)
             if launch and journey.identity is None:
                 assert not observed['apps'], 'Fixture already running before launch'
                 assert observed.get('frontmost') == journey.prior, 'Prior focus changed before launch'
+                remaining(deadline, 2)
                 return
-            record = journey.read()
+            record = journey.read() if deadline is None else journey.read(deadline=deadline)
             identity = journey.identity
             assert identity and observed['apps'] == [identity], 'Owned app incarnation changed'
             assert observed.get('frontmost') == identity, 'User focus changed'
             assert record['app_active'] is True
-            self.bind(journey, record)
+            self.bind(journey, record, deadline=deadline)
+            remaining(deadline, 2)
             return record
         except BaseException:
             self.retired = True
             raise
 
-    def publish(self, journey, name, action, **payload):
-        record = self.check(journey)
-        envelope = dict(action=action, **payload, control_nonce=self.nonce,
-            app_pid=str(self.identity['pid']), window_number=str(record['window_number']),
-            expires=str(self.clock() + 2))
+    def publish(self, journey, name, action, *, deadline=None, **payload):
         try:
-            self._write(journey.control / (name + '.json'), envelope)
+            record = self.check(journey, deadline=deadline)
+            envelope = dict(action=action, **payload, control_nonce=self.nonce,
+                app_pid=str(self.identity['pid']), window_number=str(record['window_number']),
+                expires=str(self.clock() + remaining(deadline, 2)))
+            if deadline is None:
+                self._write(journey.control / (name + '.json'), envelope)
+            else:
+                self._write(journey.control / (name + '.json'), envelope, deadline=deadline)
+                remaining(deadline, 2)
         except BaseException:
             self.retired = True
             raise
@@ -125,7 +137,7 @@ class AttentionControl:
         self._write(journey.control / (name + '.json'), dict(action='cleanup',
             control_nonce=self.nonce, app_pid=str(self.identity['pid'])))
 
-    def _write(self, path, value):
+    def _write(self, path, value, *, deadline=None):
         # Publish complete JSON atomically. The native poller ignores the hidden
         # staging name; link is exclusive and never replaces/follows a target.
         self._validate_directory()
@@ -136,6 +148,7 @@ class AttentionControl:
             with os.fdopen(descriptor, 'w') as output:
                 json.dump(value, output)
             self._validate_directory()
+            remaining(deadline, 2)  # Last check before atomic publication.
             os.link(temporary, path.name, src_dir_fd=self.directory_fd, dst_dir_fd=self.directory_fd, follow_symlinks=False)
         finally:
             os.unlink(temporary, dir_fd=self.directory_fd)
