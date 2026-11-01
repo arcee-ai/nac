@@ -94,50 +94,76 @@ def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None):
         log.write_bytes(b''.join(chunks))
 
 
+def _recorded_command(pid):
+    """Only a confirmed disappearance turns a failed ps lookup into no target."""
+    if not pid or not alive(pid):
+        return ''
+    try:
+        args = command(['/bin/ps', '-p', str(pid), '-o', 'command='])
+    except subprocess.CalledProcessError as error:
+        # With stderr combined, a diagnostic or any other status is unknown.
+        if error.returncode != 1 or error.output != '' or alive(pid):
+            raise
+        return ''
+    if not args and alive(pid):
+        raise RuntimeError('Recorded fixture observation is empty while still live; refusing signal')
+    return args
+
+
 def settle_apps(raw, cleanup=None, extra_alive=None, workspace=False):
-    """Recover only bundles named in this invocation's app ownership records."""
+    """Recover owned records independently, retaining every cleanup failure."""
     results = []
+    failures = []
     cleaner = cleanup or cleanup_failed_case
     extra_alive = extra_alive or alive
     records = [record for folder in ('evidence', 'workspace') for record in (raw / folder).glob('*.json')]
     app_name = 'NAC Development Preview.app' if workspace else 'NAC Development Preview Smoke.app'
     prefixes = ('nac-mac-relocation-', 'nac-wk-workspace-') if workspace else ('nac-mac-relocation-',)
     for record in sorted(records):
-        data = json.loads(record.read_text())
-        pid = data.get('app_pid')
-        if not pid:
-            continue
-        engine_pid = data.get('engine_pid', 0)
-        target = pid if alive(pid) else engine_pid
-        args = command(['/bin/ps', '-p', str(target), '-o', 'command=']) if target and alive(target) else ''
-        bundle = Path(data.get('relocated_app', '/missing-confirmed-dead-bundle'))
-        if args:
-            member = 'MacOS/NACPreview' if target == pid else 'Resources/nac-web'
-            suffix = '/' + app_name + '/Contents/' + member
-            path, found, _ = args.partition(suffix)
-            prefix = Path(tempfile.gettempdir()).resolve()
-            executable = Path(path + found)
-            if (not found or not executable.is_absolute()
-                    or not executable.resolve().is_relative_to(prefix)
-                    or not any(p.startswith(prefixes) for p in executable.parts)):
-                raise RuntimeError('Owned app executable binding cannot be verified; refusing signal')
-            bundle = Path(path + '/' + app_name)
-        root = data.get('profile')
-        extras = [data[key] for key in ('app_helper_pid', 'descendant_pid') if data.get(key)]
-        if args or (root and Path(root).exists()) or any(extra_alive(pid) for pid in extras):
-            cleaner(record, bundle)
-            results.append({'scenario': data.get('scenario'), 'fallback_cleanup': True})
-        settled_by = time.monotonic() + 3
-        while any(extra_alive(pid) for pid in extras) and time.monotonic() < settled_by:
-            time.sleep(.025)
-        if any(extra_alive(pid) for pid in extras):
-            raise RuntimeError('Recorded owned fixture helper/descendant survived cleanup')
-        if root and Path(root).exists():
-            raise RuntimeError('Fixture profile survived cleanup')
-        if data.get('engine_pid') and alive(data['engine_pid']):
-            raise RuntimeError('Recorded fixture engine survived cleanup')
-        if alive(pid):
-            raise RuntimeError('Recorded fixture app survived cleanup')
+        try:
+            data = json.loads(record.read_text())
+            pid = data.get('app_pid')
+            if not pid:
+                continue
+            engine_pid = data.get('engine_pid', 0)
+            args = ''
+            for target in (pid, engine_pid):
+                args = _recorded_command(target)
+                if args:
+                    break
+            bundle = Path(data.get('relocated_app', '/missing-confirmed-dead-bundle'))
+            if args:
+                member = 'MacOS/NACPreview' if target == pid else 'Resources/nac-web'
+                suffix = '/' + app_name + '/Contents/' + member
+                path, found, _ = args.partition(suffix)
+                prefix = Path(tempfile.gettempdir()).resolve()
+                executable = Path(path + found)
+                if (not found or not executable.is_absolute()
+                        or not executable.resolve().is_relative_to(prefix)
+                        or not any(p.startswith(prefixes) for p in executable.parts)):
+                    raise RuntimeError('Owned app executable binding cannot be verified; refusing signal')
+                bundle = Path(path + '/' + app_name)
+            root = data.get('profile')
+            extras = [data[key] for key in ('app_helper_pid', 'descendant_pid') if data.get(key)]
+            if args or (root and Path(root).exists()) or any(extra_alive(pid) for pid in extras):
+                cleaner(record, bundle)
+                results.append({'scenario': data.get('scenario'), 'fallback_cleanup': True})
+            settled_by = time.monotonic() + 3
+            while any(extra_alive(pid) for pid in extras) and time.monotonic() < settled_by:
+                time.sleep(.025)
+            if any(extra_alive(pid) for pid in extras):
+                raise RuntimeError('Recorded owned fixture helper/descendant survived cleanup')
+            if root and Path(root).exists():
+                raise RuntimeError('Fixture profile survived cleanup')
+            if data.get('engine_pid') and alive(data['engine_pid']):
+                raise RuntimeError('Recorded fixture engine survived cleanup')
+            if alive(pid):
+                raise RuntimeError('Recorded fixture app survived cleanup')
+        except Exception as error:
+            failures.append((record.name, error))
+    if failures:
+        details = '; '.join(f'{name}: {type(error).__name__}: {error}' for name, error in failures)
+        raise RuntimeError(f'Owned fixture cleanup failed: {details}') from failures[0][1]
     return results
 
 
