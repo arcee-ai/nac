@@ -372,3 +372,13 @@ center. It covers default-off, durable opt-in/cold restore, hidden completion,
 click into shared chat, retained draft on close/reopen, Cancel/Stop, reset and
 exact-owned WebKit/profile cleanup. It cannot qualify signed OS banners, trusted
 IME input or hidden CPU/wakeups. Those remain required separate acceptance lanes.
+
+The portable source contracts run with
+`npm --prefix crates/nac-server/web run test:attention-fixtures`, and are included
+in `npm test` (also reached by `make test-web` and the existing frontend CI lane).
+They cover absolute deadlines, custody/publication/capture ordering, default
+callers, the actual route builder, and the verbatim chat-readiness script against
+negative DOM cases and real React component structure with inert providers.
+The passive observer under `test_support/` is a test fixture; its OS calls are
+mocked by these controls. Geometry and hit testing are symbolic JSDOM checks,
+not actual AppKit/WKWebView paint, input or native-delivery qualification.
