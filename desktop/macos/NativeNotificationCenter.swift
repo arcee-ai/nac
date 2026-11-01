@@ -14,6 +14,7 @@ final class NativeNotificationCenter: NSObject, NativeAttentionDelivery, UNUserN
         }
     }
     private var pendingResponse: NativeAttentionDestination?
+    var shouldPresent: ((NativeAttentionDestination) -> Bool)?
     private var mutation: UInt64 = 0
     private var retired = false
     private var deliveryGeneration: UInt64 = 0
@@ -102,12 +103,23 @@ final class NativeNotificationCenter: NSObject, NativeAttentionDelivery, UNUserN
         retired = true
         cancelledAdds.formUnion(pendingAdds)
         response = nil
+        shouldPresent = nil
         pendingResponse = nil
         if center.delegate === self { center.delegate = nil }
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([]) // foreground UI owns attention; never force a banner
+        let request = notification.request
+        let target = NativeAttentionDestination(userInfo: request.content.userInfo, identifier: request.identifier)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.retired, let target, self.shouldPresent?(target) == true else {
+                completionHandler([]); return
+            }
+            // AppKit can stay active with its last workspace closed. The
+            // coordinator rechecks actual window focus/mute/opt-out here.
+            // Standard presentation still belongs to system authorization/Focus.
+            completionHandler([.banner, .list, .sound])
+        }
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                            withCompletionHandler completionHandler: @escaping () -> Void) {

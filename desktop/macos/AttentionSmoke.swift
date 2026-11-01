@@ -6,6 +6,7 @@ import WebKit
 @MainActor
 final class AttentionSmokeDelivery: NativeAttentionDelivery {
     var response: ((NativeAttentionDestination) -> Void)?
+    var shouldPresent: ((NativeAttentionDestination) -> Bool)?
     private(set) var added: [NativeAttentionDestination] = []
     private(set) var titles: [String] = []
     private(set) var requests = 0
@@ -26,12 +27,13 @@ final class AttentionSmokeDelivery: NativeAttentionDelivery {
     func present(_ destination: NativeAttentionDestination, completion: @escaping (Bool) -> Void) { completion(presentIDs.contains(destination.identifier)) }
     func withdraw(_ identifiers: [String]) { presentIDs.subtract(identifiers) }
     func withdrawProfile(_ profile: String) { presentIDs.removeAll() }
-    func retire() { retired = true; response = nil }
+    func retire() { retired = true; response = nil; shouldPresent = nil }
     func release() { let pending = waiting; waiting.removeAll(); pending.forEach { $0(true) } }
     func click() { if let target = added.last { response?(target) } }
     var snapshot: [String: Any] {
         ["adds": added.count, "permission_requests": requests, "titles": titles,
-         "pending_ack": waiting.count, "present": presentIDs.count, "retired": retired]
+         "pending_ack": waiting.count, "present": presentIDs.count, "retired": retired,
+         "foreground_delivery_allowed": added.last.map { shouldPresent?($0) ?? false } ?? false]
     }
 }
 

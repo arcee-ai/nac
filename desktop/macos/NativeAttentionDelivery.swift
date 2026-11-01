@@ -33,6 +33,7 @@ struct NativeNotificationAuthorization: Sendable { let allowed: Bool; let mayReq
 @MainActor
 protocol NativeAttentionDelivery: AnyObject {
     var response: ((NativeAttentionDestination) -> Void)? { get set }
+    var shouldPresent: ((NativeAttentionDestination) -> Bool)? { get set }
     func settings(_ completion: @escaping (NativeNotificationAuthorization) -> Void)
     func authorize(_ completion: @escaping (Bool) -> Void)
     func add(_ destination: NativeAttentionDestination, title: NativeAttentionTitle, completion: @escaping (Bool) -> Void)

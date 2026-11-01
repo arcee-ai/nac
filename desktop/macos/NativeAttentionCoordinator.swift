@@ -96,6 +96,11 @@ final class NativeAttentionCoordinator {
         }
         observer = NativeAttentionObserver(sinks: sinks)
         binding = currentBinding()
+        delivery.shouldPresent = { [weak self] target in
+            guard let self else { return false }
+            return self.operational && self.authorized && !self.saved.muted && !self.focused &&
+                target.profile == self.storage.profile.digest
+        }
         delivery.response = { [weak self] target in self?.respond(target) }
         preferenceTask = Task { [weak self] in await self?.load() }
     }

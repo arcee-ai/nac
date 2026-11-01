@@ -7,6 +7,7 @@ qualify signed delivery, trusted IME input or hidden-renderer CPU performance.
 """
 import json
 import os
+import plistlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -45,6 +46,12 @@ def run_contract(bundle, destination, observer):
     journeys = []
     evidence = dict(build_receipt=build, actual_local_app=True, system_wk=True,
         native_os_delivery=False, trusted_input=False, hidden_cpu_qualified=False, cases=[])
+    evidence['os_version'] = subprocess.check_output(['/usr/bin/sw_vers', '-productVersion'], text=True).strip()
+    with Path('/System/Library/Frameworks/WebKit.framework/Resources/Info.plist').open('rb') as stream:
+        evidence['system_webkit_version'] = plistlib.load(stream)['CFBundleVersion']
+    evidence['fixture_sources'] = {str(Path(__file__).resolve()): digest(__file__),
+        'desktop/macos/AttentionFixtureCleanup.swift': digest('desktop/macos/AttentionFixtureCleanup.swift')}
+    evidence['cleanup_helper_sha256'] = digest(observer.parent / 'AttentionFixtureCleanup')
     sequence = 0
     def command(journey, action, **payload):
         nonlocal sequence
@@ -87,9 +94,12 @@ def run_contract(bundle, destination, observer):
         accounted = native(first, lambda s: s['attention']['unread'] == 1 and s['attention']['receipts'] == 0 and s['center']['adds'] == 1,
                            'Hidden committed completion accounted once')
         assert accounted['center']['titles'] == ['Request completed'] and accounted['dock'] in ('1', '?')
+        assert accounted['center']['foreground_delivery_allowed']
+        first.guard_focus()
         command(first, 'click')
         opened = native(first, lambda s: s.get('route') == '/session/' + session, 'Click opens canonical shared chat')
         assert opened['same_view'] and opened['same_engine'] and opened['window_visible']
+        native(first, lambda s: not s['center']['foreground_delivery_allowed'], 'Visible focused workspace suppresses foreground delivery')
         command(first, 'draft', text='retained native response draft')
         command(first, 'close'); first.launch()
         native(first, lambda s: s['window_visible'], 'Existing window reopened')
