@@ -24,6 +24,12 @@ on:
           - all-351-macos14
           - all-352-macos26
           - all-342-startup-macos26
+          - all-344-lifecycle-macos26
+      lifecycle_custody:
+        description: Root-admitted ALL-344 custody JSON; required only for its fixed three-case qualification
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -1021,11 +1027,13 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       startsWith(github.ref, 'refs/heads/codex/') &&
-      (inputs.native_qualification == 'all-341-macos26' || inputs.native_qualification == 'all-343-macos26' || inputs.native_qualification == 'all-351-macos14' || inputs.native_qualification == 'all-352-macos26' || inputs.native_qualification == 'all-342-startup-macos26')
+      (inputs.native_qualification == 'all-341-macos26' || inputs.native_qualification == 'all-343-macos26' || inputs.native_qualification == 'all-351-macos14' || inputs.native_qualification == 'all-352-macos26' || inputs.native_qualification == 'all-342-startup-macos26' || inputs.native_qualification == 'all-344-lifecycle-macos26')
     uses: ./.github/workflows/macos-qualification.yml
     with:
       harness-sha: ${{ needs.prepare.outputs.sha }}
       target: ${{ inputs.native_qualification }}
+      lifecycle-custody: ${{ inputs.lifecycle_custody || '' }}
+
   managed-image:
     needs: prepare
     if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.managed_applicable == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
