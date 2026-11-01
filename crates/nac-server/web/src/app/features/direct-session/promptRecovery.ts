@@ -12,6 +12,8 @@ export async function withPromptRecovery<T>(
   sessionId: string,
   submitted: PromptDraft | undefined,
   dispatch: () => Promise<T>,
+  /** An in-memory text entry exists; this is not a durable storage acknowledgement. */
+  onRetained?: () => void,
 ): Promise<T> {
   let checkpoint: PromptRecovery | null = null;
   if (submitted) {
@@ -22,6 +24,7 @@ export async function withPromptRecovery<T>(
     }
   }
   try {
+    if (checkpoint) onRetained?.();
     const result = await dispatch();
     if (checkpoint) drafts.settleSubmission(sessionId, checkpoint, "confirmed");
     return result;
