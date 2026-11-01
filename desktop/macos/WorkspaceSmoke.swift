@@ -219,6 +219,17 @@ final class WorkspaceSmoke {
       const owned = request?.id === expected.requestID && request?.session_id === expected.id &&
         request?.tool === 'read' && request?.call_id === 'wk-approval' &&
         request.resources.some(r => r.action === 'read' && r.resource === expected.text && r.display === expected.text);
+      // Diagnostics only: keep the owned conjunction above unchanged.
+      const ownedPredicates = {
+        one_request:requests.length === 1, request_id:request?.id === expected.requestID,
+        session_id:request?.session_id === expected.id, tool:request?.tool === 'read',
+        call_id:request?.call_id === 'wk-approval',
+        exact_read_resource:Array.isArray(request?.resources) && request.resources.some(r =>
+          r?.action === 'read' && r?.resource === expected.text && r?.display === expected.text)
+      };
+      const resourcePredicates = (Array.isArray(request?.resources) ? request.resources : []).slice(0,8).map(r => ({
+        action:r?.action === 'read', resource:r?.resource === expected.text, display:r?.display === expected.text
+      }));
       const dialogs = [...document.querySelectorAll('[data-nac-overlays] [role="dialog"]')];
       const dialog = dialogs.length === 1 ? dialogs[0] : null;
       const heading = dialog && document.getElementById(dialog.getAttribute('aria-labelledby'));
@@ -237,7 +248,16 @@ final class WorkspaceSmoke {
         !selection ? 'approval dialog does not match owned request' : !enabled ? 'approval control unavailable' :
         !visible ? 'approval dialog not fully visible' : document.visibilityState !== 'visible' ? 'document not visible' : 'ready';
       return {ready:reason === 'ready', reason, expected, hash, visibility:document.visibilityState,
-        loadingConversation:loading, permission_request_id:request?.id || null, surfaces};
+        loadingConversation:loading, permission_request_id:request?.id || null, surfaces,
+        approval_predicates:{...ownedPredicates, owned:!!owned, route,
+          one_dialog:dialogs.length === 1, title:heading?.textContent.trim() === 'Permission required',
+          one_selected:!!selected, selected_owner_tool:!!selected?.textContent.includes('(' + expected.id + '): read'),
+          access_owner:!!access?.textContent.includes('(' + expected.id + ')'),
+          access_path:!!access?.textContent.includes(expected.text), selection:!!selection,
+          allow_enabled:!!allow && !allow.disabled, allow_not_inert:!!allow && !allow.closest('[inert]'),
+          selected_enabled:!!selected && !selected.disabled, enabled:!!enabled, visible,
+          document_visible:document.visibilityState === 'visible'},
+        resource_predicates:resourcePredicates};
     }
     if (expected.kind === 'rich') {
       // One freshly created owned fixture, one WK_RICH prompt and one settled
@@ -249,6 +269,20 @@ final class WorkspaceSmoke {
         !sessionState.active_compaction && !sessionState.run_failure && !sessionState.transcript_recovery_warning &&
         messages.length === 2 && index === 1 && messages[0].role === 'user' && messages[0].content === 'WK_RICH' &&
         (!sessionState.message_page || sessionState.message_page.start === 0 && sessionState.message_page.total === 2);
+      // Evaluate every conjunct separately for the retained observation only.
+      // The settled expression, its exact 2/1 expectations, and reason stay unchanged.
+      const settledPredicates = {
+        owner:sessionState?.metadata?.session_id === expected.id,
+        no_active_run:!sessionState?.active_run, no_active_compaction:!sessionState?.active_compaction,
+        no_run_failure:!sessionState?.run_failure, no_recovery_warning:!sessionState?.transcript_recovery_warning,
+        message_count_2:messages.length === 2, answer_index_1:index === 1,
+        first_role_user:messages[0]?.role === 'user', first_content_WK_RICH:messages[0]?.content === 'WK_RICH',
+        page_absent:!sessionState?.message_page, page_start_0:sessionState?.message_page?.start === 0,
+        page_total_2:sessionState?.message_page?.total === 2,
+        page_valid:!sessionState?.message_page ||
+          sessionState.message_page.start === 0 && sessionState.message_page.total === 2,
+        settled:!!settled
+      };
       const candidates = [...document.querySelectorAll('[data-nac-content] .markdown-content')].filter(e =>
         !e.closest('[inert],[role=dialog]') && !e.classList.contains('streaming') && e.textContent.includes('WK_RICH_COMPLETE'));
       const rich = candidates.length === 1 ? candidates[0] : null;
@@ -285,7 +319,7 @@ final class WorkspaceSmoke {
         full_answer:fullAnswer, message_identity:{session_id:expected.id,visible_index:index,
           created_at:sessionState?.message_created_at?.[index] ?? null,message_count:messages.length},
         viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},fonts_ready:!!fonts,surfaces,
-        sentinel_observation:richInspect(sentinel)};
+        sentinel_observation:richInspect(sentinel), settled_predicates:settledPredicates};
     }
     let element = expected.kind === 'project' ? null : findText(expected.text);
     if (expected.kind === 'project') {
@@ -335,11 +369,70 @@ final class WorkspaceSmoke {
         if case let .approval(id, _, _) = target {
             arguments["permissionState"] = try await js("const r=await fetch('/sessions/' + \(quote(id)) + '/permissions',{cache:'no-store'}); if(!r.ok)throw Error('Permission state unavailable'); return await r.json();")
         }
-        guard let value = try await app.webView.callAsyncJavaScript(Self.captureReadinessScript,
+        guard var value = try await app.webView.callAsyncJavaScript(Self.captureReadinessScript,
             arguments: arguments, in: nil, contentWorld: .page) as? [String: Any] else {
             throw PreviewError.message("Capture readiness returned no observation")
         }
+        // Hash only the already-fetched snapshot. No extra request, mutation,
+        // filtering, canonical rewrite, readiness override, or retry is added.
+        if case .rich = target, let state = arguments["sessionState"] as? [String: Any] {
+            let messages = state["messages"] as? [[String: Any]] ?? []
+            let times = state["message_created_at"] as? [Any] ?? []
+            value["message_observations"] = messages.prefix(32).enumerated().map { index, message -> [String: Any] in
+                ["index": index, "role": diagnosticField(message["role"], text: true),
+                 "type": diagnosticField(message["type"], text: true),
+                 "kind": diagnosticField(message["kind"], text: true),
+                 "content": diagnosticField(message["content"]),
+                 "field_names": Array(message.keys.sorted().prefix(16)),
+                 "tool_call_count": (message["tool_calls"] as? [Any])?.count ?? 0,
+                 "created_at": diagnosticField(times.indices.contains(index) ? times[index] : nil, text: true)]
+            }
+            value["message_observations_truncated"] = messages.count > 32
+            value["session_owner_observation"] = diagnosticField((state["metadata"] as? [String: Any])?["session_id"], text: true)
+            value["message_page_observation"] = diagnosticField(state["message_page"])
+        }
+        if case let .approval(id, requestID, path) = target,
+           let state = arguments["permissionState"] as? [String: Any] {
+            let requests = state["requests"] as? [[String: Any]] ?? []
+            value["approval_values"] = [
+                "expected_session_id": diagnosticField(id, text: true),
+                "expected_request_id": diagnosticField(requestID, text: true),
+                "fixture_input_path": diagnosticField(WorkspaceFixture.externalPath, text: true),
+                "expected_resolved_path": diagnosticField(path, text: true),
+                "request_count": requests.count, "requests_truncated": requests.count > 4,
+                "requests": requests.prefix(4).map { request -> [String: Any] in
+                    let resources = request["resources"] as? [[String: Any]] ?? []
+                    return ["id": diagnosticField(request["id"], text: true),
+                            "session_id": diagnosticField(request["session_id"], text: true),
+                            "tool": diagnosticField(request["tool"], text: true),
+                            "call_id": diagnosticField(request["call_id"], text: true),
+                            "resource_count": resources.count, "resources_truncated": resources.count > 8,
+                            "resources": resources.prefix(8).map { resource in
+                                ["action": diagnosticField(resource["action"], text: true),
+                                 "resource": diagnosticField(resource["resource"], text: true),
+                                 "display": diagnosticField(resource["display"], text: true)]
+                            }]
+                }]
+        }
         return value
+    }
+
+    // Bounded fixture diagnostics; message content is hashed, never newly logged.
+    // Strings hash their exact UTF-8; nonstrings hash sorted JSON, not source bytes.
+    func diagnosticField(_ value: Any?, text: Bool = false) -> [String: Any] {
+        guard let value else { return ["kind": "absent"] }
+        if value is NSNull { return ["kind": "null"] }
+        if let string = value as? String {
+            var result: [String: Any] = ["kind": "string", "utf8_bytes": string.utf8.count,
+                "sha256": SHA256.hash(data: Data(string.utf8)).map { String(format: "%02x", $0) }.joined()]
+            if text { result["text"] = String(string.prefix(1024)); result["truncated"] = string.count > 1024 }
+            return result
+        }
+        var result: [String: Any] = ["kind": value is [Any] ? "array" : value is [String: Any] ? "object" : "scalar"]
+        if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed]) {
+            result["json_sha256"] = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        }
+        return result
     }
 
     func snapshot(_ name: String, expecting target: CaptureTarget? = nil) async throws {

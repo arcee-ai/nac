@@ -128,20 +128,28 @@ extension WorkspaceSmoke {
             try await self.idle()
             return "Scripted provider requests read outside workspace; production Allow once, normal Rust authorization"
         }
-        await check("goals") {
-            try await self.send("/goal WK bounded goal fixture")
-            try await self.waitJS("durable goal", "return (await (await fetch('/sessions/' + \(self.quote(self.sessionID)) + '/goal')).json())?.objective === 'WK bounded goal fixture';")
-            // Goal attachment advances its revision. As in embedded.e2e.ts,
-            // reload before versioned controls; background polling can pause
-            // while this console is locked. Never replay an uncertain mutation.
-            _ = try await self.js("window.__wkReloading = true; return true;")
-            self.app.webView.reload()
-            try await self.waitJS("fresh goal controls after attachment", "return !window.__wkReloading && !!document.querySelector('[aria-label=\"Edit goal: Active\"]');")
-            try await self.button("Edit goal: Active")
-            try await self.button("Pause goal")
-            try await self.waitJS("paused durable goal", "return (await (await fetch('/sessions/' + \(self.quote(self.sessionID)) + '/goal')).json())?.status === 'paused';")
-            try await self.button("Close goal editor")
-            return "Literal production /goal creation and versioned Pause; scripted provider, no real vendor schema claim (ALL-422 supplier separate)"
+        if checks["approvals"]?["status"] as? String == "pass" {
+            await check("goals") {
+                try await self.send("/goal WK bounded goal fixture")
+                try await self.waitJS("durable goal", "return (await (await fetch('/sessions/' + \(self.quote(self.sessionID)) + '/goal')).json())?.objective === 'WK bounded goal fixture';")
+                // Goal attachment advances its revision. As in embedded.e2e.ts,
+                // reload before versioned controls; background polling can pause
+                // while this console is locked. Never replay an uncertain mutation.
+                _ = try await self.js("window.__wkReloading = true; return true;")
+                self.app.webView.reload()
+                try await self.waitJS("fresh goal controls after attachment", "return !window.__wkReloading && !!document.querySelector('[aria-label=\"Edit goal: Active\"]');")
+                try await self.button("Edit goal: Active")
+                try await self.button("Pause goal")
+                try await self.waitJS("paused durable goal", "return (await (await fetch('/sessions/' + \(self.quote(self.sessionID)) + '/goal')).json())?.status === 'paused';")
+                try await self.button("Close goal editor")
+                return "Literal production /goal creation and versioned Pause; scripted provider, no real vendor schema claim (ALL-422 supplier separate)"
+            }
+        } else {
+            // Dependency-blocked, not an independently exercised goal failure.
+            // Preserve a failing suite even if the prerequisite record is absent.
+            checks["goals"] = ["status": "fail", "blocked_by": "approvals", "executed": false,
+                "detail": "Goals not exercised: approval check did not pass; no goal input/API operation attempted"]
+            record(["checks": checks])
         }
         await check("projects") {
             guard let projectID = try await self.js("return (await (await fetch('/projects')).json()).projects.find(p => p.name === 'Disposable Mac preview')?.project_id;") as? String else {
