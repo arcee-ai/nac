@@ -132,7 +132,8 @@ final class NativeAttentionCoordinator {
             "saving": preferenceTask != nil || enabling, "suspended": suspended, "unread": saved.unreadCompletions,
             "frontier": saved.frontier ?? "", "cutoff": saved.cutoff ?? "", "receipts": saved.receipts.count,
             "generation": generation, "revision": revision, "retired": retired,
-            "observer_connections": status.tasks, "observer_phase": status.phase, "observer_draining": status.drainingSessions, "message": message]
+            "observer_connections": status.tasks, "observer_phase": status.phase, "observer_draining": status.drainingSessions,
+            "projection_available": status.projectionAvailable, "pending_decisions": status.pending, "message": message]
     }
     #endif
 
@@ -503,10 +504,10 @@ final class NativeAttentionCoordinator {
         var visual = saved
         if intentOff { visual.enabled = false }
         menu.render(saved: visual, loaded: loaded, saving: saving, paused: suspended, mayRequest: mayRequest, message: status)
-        guard saved.enabled, !retired, !intentOff else { NSApp.dockTile.badgeLabel = nil; return }
-        if suspended || binding == nil || latestStatus?.unknownDecisionSessions.isEmpty == false { NSApp.dockTile.badgeLabel = "?"; return }
-        let pending = UInt64(latestStatus?.pending ?? 0)
-        let (count, overflow) = saved.unreadCompletions.addingReportingOverflow(pending)
-        NSApp.dockTile.badgeLabel = overflow || count > 99 ? "99+" : count == 0 ? nil : String(count)
+        let current = !suspended && binding != nil && latestStatus?.projectionAvailable == true &&
+            latestStatus?.unknownDecisionSessions.isEmpty == true
+        NSApp.dockTile.badgeLabel = NativeAttentionIndicator.badge(
+            enabled: saved.enabled && !retired && !intentOff, unread: saved.unreadCompletions,
+            pending: current ? latestStatus?.pending : nil)
     }
 }

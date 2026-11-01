@@ -11,6 +11,11 @@ private final class MockAttentionCenter {
     private var mode = "normal"
     private var delayed: [(NativeAttentionObserver.Notice, (Bool) -> Void)] = []
     private var pendingDelivery: Set<AttentionProjection.Key> = []
+    private var pageMode = "normal"
+    private var pageCount = 0
+    private var acceptedItems = 0
+    private var completionCursor: String?
+    private var pendingPage: (UInt64, String, Int, (Bool) -> Void)?
     func emit(_ object: [String: Any]) {
         lock.lock(); defer { lock.unlock() }
         let bytes = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -45,6 +50,38 @@ private final class MockAttentionCenter {
         lock.unlock()
         for (_, callback) in callbacks { callback(true) } // Even stale acknowledgments are exercised.
     }
+    func configurePages(_ mode: String) {
+        precondition(["normal", "delayed", "fail"].contains(mode))
+        lock.lock(); defer { lock.unlock() }
+        pageMode = mode
+    }
+    func page(_ binding: NativeAttentionObserver.Binding, _ generation: UInt64,
+              _ page: AttentionWire.CompletionPage, _ complete: @escaping (Bool) -> Void) {
+        lock.lock()
+        precondition(pendingPage == nil)
+        pageCount += 1
+        let delayed = pageMode == "delayed", accepted = pageMode == "normal"
+        if delayed { pendingPage = (generation, page.cursorID, page.items.count, complete) }
+        else if accepted { completionCursor = page.cursorID; acceptedItems += page.items.count }
+        lock.unlock()
+        // One immutable page event is logged, not retained as an in-memory
+        // history. This ACK is an explicit mock, never a durable checkpoint.
+        emit(["type": "completion_page", "generation": generation, "engine": binding.engine.uuidString,
+              "cursor": page.cursorID, "baseline": page.baseline, "more": page.more,
+              "mock_ack": delayed ? "pending" : accepted ? "accepted" : "rejected",
+              "items": page.items.map { ["sequence": $0.sequence, "session_id": $0.session_id,
+                "run_id": $0.run_id, "kind": $0.kind.rawValue] as [String: Any] }])
+        if !delayed { complete(accepted) }
+    }
+    func completePage(_ accepted: Bool, generation: UInt64) {
+        lock.lock()
+        let page = pendingPage; pendingPage = nil
+        if let page, accepted, page.0 == generation {
+            completionCursor = page.1; acceptedItems += page.2
+        }
+        lock.unlock()
+        page?.3(accepted) // Late callback still reaches the observer's generation fence.
+    }
     func withdraw(_ keys: [AttentionProjection.Key]) {
         lock.lock(); defer { lock.unlock() }
         for key in keys { active.removeValue(forKey: key); pendingDelivery.remove(key) }
@@ -73,7 +110,10 @@ private final class MockAttentionCenter {
                                          "source_epoch": notice.sourceEpoch.uuidString,
                                          "title": notice.title, "body": notice.body] as [String: Any]
                                      }, "active": active.count, "navigations": navigations, "requests": requests,
-                                     "pending_delivery_callbacks": delayed.count, "pending_delivery_keys": pendingDelivery.count]
+                                     "pending_delivery_callbacks": delayed.count, "pending_delivery_keys": pendingDelivery.count,
+                                     "completion_pages": pageCount, "accepted_completion_items": acceptedItems,
+                                     "completion_cursor": completionCursor.map { $0 as Any } ?? NSNull(),
+                                     "pending_completion_callbacks": pendingPage == nil ? 0 : 1]
         lock.unlock()
         emit(object)
     }
@@ -84,7 +124,7 @@ private final class MockAttentionCenter {
          "bytes": status.bytes, "sequence": status.sequence.map { $0 as Any } ?? NSNull(),
          "projection_epoch": status.projectionEpoch.map { $0.uuidString as Any } ?? NSNull(),
          "delivery_acknowledgments": status.deliveryAcknowledgments, "delivery_failures": status.deliveryFailures,
-         "unknown_decision_sessions": status.unknownDecisionSessions]
+         "unknown_decision_sessions": status.unknownDecisionSessions, "projection_available": status.projectionAvailable]
     }
 }
 
@@ -103,10 +143,13 @@ struct AttentionFeedHTTPFixture {
         let private_content: Bool?
         let index: Int?
         let delivery_mode: String?
+        let completion_cursor: String?
+        let page_mode: String?
+        let accepted: Bool?
     }
     static func main() throws {
         let center = MockAttentionCenter()
-        let observer = NativeAttentionObserver(sinks: .init(notice: center.notice, withdraw: center.withdraw,
+        let observer = NativeAttentionObserver(sinks: .init(completions: center.page, notice: center.notice, withdraw: center.withdraw,
                                                             navigate: center.navigate,
                                                             state: { center.emit(["type": "state", "status": MockAttentionCenter.state($0)]) },
                                                             request: center.request))
@@ -123,6 +166,19 @@ struct AttentionFeedHTTPFixture {
                 let command = try JSONDecoder().decode(Command.self, from: pending)
                 pending = Data()
                 switch command.command {
+                case "completions":
+                    if let cursor = command.completion_cursor {
+                        let parts = cursor.split(separator: ":", omittingEmptySubsequences: false)
+                        guard parts.count == 2, UUID(uuidString: String(parts[0])) != nil,
+                              let sequence = Int64(parts[1]), sequence >= 0 else { throw AttentionFeedError.invalid }
+                    }
+                    let mode = command.page_mode ?? "normal"
+                    guard ["normal", "delayed", "fail"].contains(mode) else { throw AttentionFeedError.invalid }
+                    center.configurePages(mode)
+                    observer.configureCompletions(cursor: command.completion_cursor)
+                case "complete_page":
+                    guard let accepted = command.accepted else { throw AttentionFeedError.invalid }
+                    center.completePage(accepted, generation: observer.status().generation)
                 case "bind":
                     guard let profile = command.profile, let engine = command.engine, let endpoint = command.endpoint else {
                         throw AttentionFeedError.invalid
@@ -146,6 +202,7 @@ struct AttentionFeedHTTPFixture {
                     observer.click(notice)
                 case "retire", "quit":
                     observer.retire()
+                    center.completePage(false, generation: observer.status().generation)
                     let deadline = Date().addingTimeInterval(5)
                     while (observer.status().drainingSessions != 0 || observer.status().retries != 0) && Date() < deadline {
                         Thread.sleep(forTimeInterval: 0.01)

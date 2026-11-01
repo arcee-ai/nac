@@ -47,6 +47,12 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
         let deliveryAcknowledgments: Int
         let deliveryFailures: Int
         let unknownDecisionSessions: [String]
+        // A semantic-page ACK can set observing before the current-state
+        // baseline arrives. Only an accepted boundary establishes zero pending.
+        var projectionAvailable: Bool {
+            sequence != nil && projectionEpoch != nil &&
+                (phase == "observing" || phase == "accounting")
+        }
     }
     struct Sinks {
         var resolved: (Binding, UInt64, [AttentionProjection.Key]) -> Void = { _, _, _ in }

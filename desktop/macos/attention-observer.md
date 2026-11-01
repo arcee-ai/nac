@@ -111,9 +111,9 @@ the repository's gated setup first. Use a new owned output directory per run:
 
 ```sh
 # Inside the shared Rust lease; copies binaries before releasing that lease:
-python3 desktop/macos/attention_feed_contract.py --build-producers --output /tmp/attention-producers-UNIQUE
+python3 desktop/macos/attention_feed_contract.py --source-ref FULL_ADMITTED_COMMIT_SHA --build-producers --output /tmp/attention-producers-UNIQUE
 # Inside the shared browser/Mac lease:
-python3 desktop/macos/attention_feed_contract.py --producer-receipt /tmp/attention-producers-UNIQUE/producer-binaries.json --output /tmp/attention-results-UNIQUE
+python3 desktop/macos/attention_feed_contract.py --source-ref FULL_ADMITTED_COMMIT_SHA --producer-receipt /tmp/attention-producers-UNIQUE/producer-binaries.json --output /tmp/attention-results-UNIQUE
 ```
 
 Only the explicit fixture driver mutates disposable REST state. Real Ask coverage
@@ -126,6 +126,22 @@ labels adversarial loopback transport frames. Compiler target macOS 14 is not
 supported-OS qualification. These fixtures establish no actual app/WKWebView,
 signed OS delivery, trusted input, Focus behavior or measured idle CPU/wakeups.
 Every remaining full ALL-350 native acceptance gate below remains open.
+
+For N1, supply the exact clean committed candidate in both phases. Producer
+receipts bind its HEAD/tree, executable hash and embedded source identity;
+qualification rejects a dirty or different checkout. Builds consume the allocated
+v5 target and jobs2 contract. No Rust equivalence to the historical e9 producer
+is assumed. Named common sources and main files define each Swift program.
+The frame envelope oracle includes the bounded historical completion page.
+
+Legacy queue/decision cases retain their current-state notice semantics. The
+separate `semantic-pages` cases drive the actual Foundation page parser and
+URLSession backpressure with explicit accepted/rejected mock page ACKs. Their
+checkpoint is a test double, with no durable storage, app or system delivery
+claim. The indicator fixture characterizes unknown projection versus real
+resolution, including muted/denied operation and retained completion counts.
+All-three real-producer semantic completion/restart/queued/disconnected replay,
+actual app/WK checkpoint/OS cases and performance remain separately required.
 
 The 1,024 identity union includes silent current pending decisions as well as
 seen identities, candidates and current work. A labelled faulted-stream fixture

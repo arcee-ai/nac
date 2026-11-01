@@ -68,6 +68,7 @@ if [[ "$local_app" == 1 ]]; then
               desktop/macos/AttentionFeedProtocol.swift desktop/macos/AttentionCompletions.swift
               desktop/macos/AttentionProjection.swift
               desktop/macos/NativeAttentionObserver.swift
+              desktop/macos/NativeAttentionIndicator.swift
               desktop/macos/NativeAttentionDelivery.swift desktop/macos/NativeNotificationCenter.swift
               desktop/macos/NativeAttentionMenu.swift desktop/macos/NativeAttentionCoordinator.swift)
     flags+=(-D LOCAL_APP -framework UserNotifications)

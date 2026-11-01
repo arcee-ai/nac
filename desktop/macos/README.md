@@ -355,6 +355,10 @@ settings removes only native notification preferences. A failed save suspends
 delivery and warns that the previous saved setting may return next launch.
 Generic notification content contains no prompt, goal, tool or approval text.
 System scheduling acknowledgement does not establish that a banner was shown.
+While a current decision projection is unavailable or reconnecting, the Dock
+shows `?` (or a retained completion count plus `?`), rather than claiming there
+are no pending decisions. Only a current accepted baseline/resolution can clear
+that uncertainty; muting or system denial does not hide it.
 Clicking opens the existing app's normal shared chat after a canonical session
 lookup. IME composition, a modal or an editor without retained text defers the
 response; it never triggers a later automatic navigation.

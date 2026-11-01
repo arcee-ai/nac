@@ -25,12 +25,10 @@ import urllib.error
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from attention_feed_build import (SOURCES, SWIFT_PROGRAMS, swift_commands, source_binding, build_environment,
+                                  producer_receipts, completion_envelope)
 
 OWNER = Path(__file__).resolve().parent
-SOURCES = ['AttentionFeedProtocol.swift', 'AttentionCompletions.swift',
-           'AttentionProjection.swift', 'NativeAttentionObserver.swift',
-           'AttentionFeedTests.swift', 'AttentionFeedHTTPFixture.swift']
-BASE = 'e9e41ce9c78d01e647db42683d4d42f71645b898'
 
 
 def sha(path):
@@ -265,7 +263,7 @@ class Engine:
 
 class Consumer:
     def __init__(self, binary, destination):
-        self.events, self.error, self.token = queue.Queue(), None, 0
+        self.events, self.pages, self.error, self.token = queue.Queue(), queue.Queue(maxsize=32), None, 0
         self.log = destination.open('w')
         self.process = subprocess.Popen([str(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                          stderr=subprocess.PIPE, text=True, start_new_session=True)
@@ -277,6 +275,8 @@ class Consumer:
                     event = json.loads(line)
                     if event['type'] in ('ready', 'snapshot'):
                         self.events.put(event)
+                    elif event['type'] == 'completion_page':
+                        self.pages.put_nowait(event) # explicit fixture capacity, never silently drop history
             except Exception as error:
                 self.error = repr(error)
         self.thread = threading.Thread(target=reader, daemon=True)
@@ -306,6 +306,7 @@ class Consumer:
                 event = self.events.get(timeout=8)
                 assert event['token'] == 'final' and event['status']['phase'] == 'retired'
                 assert event['pending_delivery_callbacks'] == 0
+                assert event['pending_completion_callbacks'] == 0
                 assert all(event['status'][x] == 0 for x in ('tasks', 'retries', 'draining_sessions', 'sources', 'identities', 'bytes'))
                 assert self.process.wait(5) == 0
         finally:
@@ -326,7 +327,7 @@ def serializer_envelope(destination):
     schemas = api['components']['schemas']
     def kinds(name):
         return {x['properties']['kind']['enum'][0] for x in schemas[name]['oneOf']}
-    assert kinds('AttentionFrame') == {'baseline', 'record', 'reset'}
+    assert kinds('AttentionFrame') == {'baseline', 'completions', 'record', 'reset'}
     assert kinds('AttentionChangeDto') == {'source_replaced', 'work_settled', 'work_cleared', 'decision_pending',
                                          'decision_resolved', 'session_deleted', 'availability', 'checkpoint'}
     assert kinds('AttentionDecisionDto') == {'permission', 'review', 'question'}
@@ -345,7 +346,8 @@ def serializer_envelope(destination):
                  maximum_fixed_bytes=fixed, fixed_envelope_each=640, sources=1024, identities=1024,
                  metadata_bytes=1024*1024, escaping_factor=6, frame_envelope=4096,
                  serialized_upper_bound=bound, consumer_event_cap=8*1024*1024,
-                 actual_swift_maximum_escaped_baseline='Validated by AttentionFeedTests.maximumWriterEnvelope')
+                 actual_swift_maximum_escaped_baseline='Validated by AttentionFeedTests.maximumWriterEnvelope',
+                 completion=completion_envelope(schemas))
     destination.write_text(json.dumps(proof, indent=2) + '\n')
 
 
@@ -539,6 +541,66 @@ def mock_frame(engine, sequence=0, decision=False, silent_review=None):
     return ('event: attention\nid: '+engine+':'+boundary['epoch']+':'+str(sequence)+'\ndata: '+json.dumps(frame)+'\n\n').encode()
 
 
+def completion_frame(store, sequence, *, baseline=False, more=False):
+    page = dict(store_id=store, cursor=sequence, high_water=sequence if not more else sequence+1,
+                baseline=baseline, more=more, items=[] if baseline else [dict(sequence=sequence,
+                session_id='mock-session', run_id='semantic-run-'+str(sequence), behavior='direct',
+                kind='request', goal_id=None, mark_version=None)])
+    return ('event: attention\ndata: '+json.dumps(dict(kind='completions', page=page))+'\n\n').encode()
+
+
+def semantic_page_cases(swift, artifact):
+    """Actual native URLSession/page ACK, explicit mock stream/checkpoint only."""
+    results = []
+    for accept in (True, False):
+        incarnation, store = str(uuid.uuid4()), str(uuid.uuid4())
+        ended, calls, consumer, result = threading.Event(), [], None, None
+        def handler(h):
+            calls.append(dict(method=h.command, path=h.path, cursor=h.headers.get('X-NAC-Completion-Cursor')))
+            assert calls[-1] == dict(method='GET', path='/attention/events', cursor='new')
+            payload = completion_frame(store, 0, baseline=True) + mock_frame(incarnation) + \
+                completion_frame(store, 1, more=True) + completion_frame(store, 2)
+            send(h, 200, payload, 'text/event-stream')
+            assert ended.wait(30), 'Semantic fixture was not retired'
+        server = Server(handler)
+        label = 'semantic-page-'+('accept' if accept else 'reject')
+        try:
+            consumer = Consumer(swift, artifact/(label+'-swift.jsonl'))
+            consumer.command('completions', page_mode='delayed')
+            consumer.command('bind', profile=str(uuid.uuid4()), engine=incarnation, endpoint=server.base)
+            consumer.command('policy', opted_in=True, authorized=True)
+            cutoff = consumer.wait(lambda s: s['pending_completion_callbacks'] == 1)
+            assert cutoff['completion_pages'] == 1 and cutoff['completion_cursor'] is None
+            assert not cutoff['status']['projection_available']
+            consumer.command('complete_page', accepted=True)
+            first = consumer.wait(lambda s: s['completion_pages'] == 2 and s['pending_completion_callbacks'] == 1)
+            assert first['completion_cursor'] == store+':0' and first['accepted_completion_items'] == 0
+            assert first['status']['projection_available'] and first['status']['phase'] == 'accounting'
+            assert first['status']['tasks'] == 1
+            consumer.command('complete_page', accepted=accept)
+            if accept:
+                consumer.wait(lambda s: s['completion_pages'] == 3 and s['pending_completion_callbacks'] == 1)
+                consumer.command('complete_page', accepted=True)
+                final = consumer.wait(lambda s: s['completion_cursor'] == store+':2' and s['pending_completion_callbacks'] == 0)
+                assert final['accepted_completion_items'] == 2
+            else:
+                final = consumer.wait(lambda s: s['status']['phase'] == 'unavailable' and s['pending_completion_callbacks'] == 0)
+                assert final['completion_cursor'] == store+':0' and final['accepted_completion_items'] == 0
+                assert final['status']['tasks'] == 0
+            expected = 3 if accept else 2
+            until(lambda: consumer.pages.qsize() == expected)
+            pages = [consumer.pages.get_nowait() for _ in range(expected)]
+            assert [page['cursor'] for page in pages] == [store+':'+str(n) for n in range(expected)]
+            result = dict(case=label, consumer_mode='semantic_pages', actual_rust_producer=False,
+                          checkpoint_ack='explicit mock; no disk or app', requests=calls, pages=pages, final=final)
+            results.append(result)
+        finally:
+            ended.set()
+            closed = cleanup(*([consumer.stop] if consumer else []), server.close)
+            if result is not None: result['cleanup'] = closed
+    return results
+
+
 def transport_cases(swift, artifact):
     results = []
     for case in ('resolved-click', 'denied', 'muted', 'focused', 'malformed', 'oversized', 'redirect', 'late-owner', 'sink-failure', 'late-center', 'privacy', 'silent-pending-capacity'):
@@ -718,14 +780,12 @@ def source_handoff_cases(swift, artifact, modes=(False, True)):
     return results
 
 
-def build_producers(destination):
+def build_producers(destination, source_ref):
     # This mode must execute INSIDE the caller's shared Rust lease. The runner
     # never installs dependencies or chooses another target directory.
-    target = Path(os.environ['CARGO_TARGET_DIR'])
-    assert os.environ.get('CARGO_BUILD_JOBS') == '4'
+    target = build_environment(os.environ)
     root = OWNER.parent.parent
-    assert not subprocess.check_output(['git', 'diff', BASE, '--', 'crates', 'Cargo.toml', 'Cargo.lock'], cwd=root)
-    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+    binding = source_binding(root, source_ref)
     rows = []
     for mode, features in [('ordinary', []), ('review', ['--features', 'review-fixture'])]:
         command = ['cargo', 'build', '--locked', '-p', 'nac-server', '--bin', 'nac-web'] + features
@@ -737,9 +797,10 @@ def build_producers(destination):
         shutil.copy2(target/'debug/nac-web', binary)
         binary.chmod(0o555)
         identity = json.loads(subprocess.check_output([str(binary), '__desktop-identity']))
-        assert identity['source_revision'] == revision
-        rows.append(dict(mode=mode, command=command, producer_base=BASE, binary=str(binary.resolve()),
-                         sha256=sha(binary), identity=identity))
+        assert identity['source_revision'] == source_ref
+        assert source_binding(root, source_ref) == binding
+        rows.append(dict(mode=mode, command=command, source_binding=binding, binary=str(binary.resolve()),
+                         sha256=sha(binary), identity=identity, build_jobs=2, target_directory=str(target.resolve())))
         (destination/'producer-binaries.json').write_text(json.dumps(rows, indent=2)+'\n')
     print(json.dumps(dict(result='built', producer_receipt=str(destination/'producer-binaries.json'))))
 
@@ -749,52 +810,57 @@ def main():
     parser.add_argument('--producer-receipt', type=Path)
     parser.add_argument('--build-producers', action='store_true')
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--source-ref', required=True, help='Admitted exact full commit SHA; must match clean HEAD and producer receipts')
     parser.add_argument('--cases', default='all')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     assert not any(args.output.iterdir()), 'Use a fresh owned output directory; preserve earlier receipts'
+    binding = source_binding(OWNER.parent.parent, args.source_ref)
     if args.build_producers:
-        build_producers(args.output)
+        build_producers(args.output, args.source_ref)
         return
     assert args.producer_receipt is not None
-    binaries = {x['mode']: x for x in json.loads(args.producer_receipt.read_text())}
-    for entry in binaries.values():
-        assert sha(entry['binary']) == entry['sha256']
-        assert entry['identity'] == json.loads(subprocess.check_output([entry['binary'], '__desktop-identity']))
-        assert entry['identity']['source_revision'] in (BASE, subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=OWNER, text=True).strip())
-    assert not subprocess.check_output(['git', 'diff', BASE, '--', 'crates', 'Cargo.toml', 'Cargo.lock'], cwd=OWNER.parent.parent)
+    binaries = producer_receipts(json.loads(args.producer_receipt.read_text()), binding,
+        lambda binary: json.loads(subprocess.check_output([str(binary), '__desktop-identity'])))
     compiler = subprocess.check_output(['xcrun', '--find', 'swiftc'], text=True).strip()
     sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
-    receipt = dict(source_revision=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=OWNER, text=True).strip(),
-                   sources={x: sha(OWNER/x) for x in SOURCES + ['attention_feed_contract.py']},
+    receipt = dict(**binding,
+                   sources={x: sha(OWNER/x) for x in (*SOURCES, 'attention_feed_contract.py', 'attention_feed_build.py')},
                    producers=binaries, compiler=subprocess.check_output([compiler, '--version'], text=True).strip(),
                    sdk=sdk, target='arm64-apple-macosx14.0', cases=[], app_tested=False, os_delivery_tested=False,
                    performance_measured=False)
     with tempfile.TemporaryDirectory(prefix='nac-attention-feed-') as temp:
         root = Path(temp).resolve()
-        flags = [compiler, '-swift-version', '5', '-target', receipt['target'], '-sdk', sdk, '-warnings-as-errors']
-        common = [str(OWNER/x) for x in SOURCES[:2]]
-        for name, source in [('pure', SOURCES[2]), ('http', SOURCES[3])]:
-            command = flags + common + [str(OWNER/source), '-o', str(root/name)]
+        receipt['programs'] = {}
+        for name, command in swift_commands(compiler, sdk, OWNER, root).items():
             result = subprocess.run(command, capture_output=True, text=True, timeout=90)
             (args.output/(name+'-compile.log')).write_text(result.stdout + result.stderr)
             assert result.returncode == 0, result.stderr
+            assert source_binding(OWNER.parent.parent, args.source_ref) == binding
+            receipt['programs'][name] = dict(sources=SWIFT_PROGRAMS[name], command=command, sha256=sha(root/name))
         result = subprocess.run([str(root/'pure')], capture_output=True, text=True, timeout=60)
         (args.output/'pure.log').write_text(result.stdout + result.stderr)
         assert result.returncode == 0, result.stdout + result.stderr
         receipt['pure'] = json.loads(result.stdout)
+        for name in ('completions', 'indicator'):
+            result = subprocess.run([str(root/name)], capture_output=True, text=True, timeout=60)
+            (args.output/(name+'.log')).write_text(result.stdout + result.stderr)
+            assert result.returncode == 0, result.stdout + result.stderr
+            receipt[name] = dict(result='passed', output=result.stdout)
         receipt['swift_binary_sha256'] = sha(root/'http')
         serializer_envelope(args.output/'serializer-envelope.json')
-        selected = args.cases.split(',') if args.cases != 'all' else ['queue', 'question', 'ask', 'review', 'cancel', 'save-failure', 'quiet', 'replacement', 'transport']
-        allowed = {'queue', 'question', 'ask', 'review', 'cancel', 'save-failure', 'quiet', 'replacement', 'transport'}
+        selected = args.cases.split(',') if args.cases != 'all' else ['queue', 'question', 'ask', 'review', 'cancel', 'save-failure', 'quiet', 'replacement', 'transport', 'semantic-pages']
+        allowed = {'queue', 'question', 'ask', 'review', 'cancel', 'save-failure', 'quiet', 'replacement', 'transport', 'semantic-pages'}
         assert set(selected) <= allowed and len(set(selected)) == len(selected) and selected
         try:
             for case in selected:
                 print('START '+case, flush=True)
-                if case == 'transport':
-                    receipt['cases'].extend(transport_cases(root/'http', args.output))
+                if case == 'semantic-pages':
+                    receipt['cases'].extend(semantic_page_cases(root/'http', args.output))
                 else:
-                    receipt['cases'].append(real_case(case, Path(binaries['review' if case == 'review' else 'ordinary']['binary']), root/'http', root, args.output))
+                    rows = transport_cases(root/'http', args.output) if case == 'transport' else [real_case(case,
+                        Path(binaries['review' if case == 'review' else 'ordinary']['binary']), root/'http', root, args.output)]
+                    receipt['cases'].extend(dict(row, consumer_mode='legacy_current_state') for row in rows)
                 (args.output/'receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
                 print('PASS '+case, flush=True)
         except Exception as error:
@@ -802,6 +868,7 @@ def main():
             (args.output/'receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
             raise
     receipt['temporary_resources_removed'] = True
+    assert source_binding(OWNER.parent.parent, args.source_ref) == binding
     (args.output/'receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
     print(json.dumps(dict(result='passed', cases=len(receipt['cases']), app_tested=False, os_delivery_tested=False)))
 
