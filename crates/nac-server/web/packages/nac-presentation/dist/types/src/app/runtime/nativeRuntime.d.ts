@@ -4,7 +4,7 @@ import { NacClient } from "../services/nacClient";
 import { createNativeApi } from "../services/api";
 import { type SessionStreamHandlers, type SessionStreamOptions } from "../services/eventStream";
 import { createPresentationStores } from "./presentationStores";
-import type { PromptDraftStorage } from "../store/promptDraftStore";
+import type { PromptDraftPersistenceBinding, PromptDraftStorage } from "../store/promptDraftStore";
 import { TerminalInputRecovery } from "../features/terminal/inputRecovery";
 /** Opaque consumer bindings, never credentials or native admission authority. */
 export interface NativeRuntimeScope {
@@ -28,6 +28,8 @@ export interface NativeRuntimeOptions {
     storage?: Pick<Storage, "getItem" | "setItem">;
     /** Text drafts only; caller owns tab lifetime and complete identity scoping. */
     draftStorage?: PromptDraftStorage;
+    /** Optional durable text namespace; never replaces the live request/stream scope. */
+    draftPersistenceBinding?: PromptDraftPersistenceBinding;
     assets?: NativePresentationAssets;
     eventSource?: SessionStreamOptions["eventSource"];
     /** Hosted reads default to no replay; standalone retains its one retry. */
