@@ -3,8 +3,64 @@ import hashlib
 import json
 from pathlib import Path
 
-from ci_lifecycle_contract import FRAMES, digest, canonical
+from ci_lifecycle_contract import CASES, FRAMES, digest, canonical
 from ci_support import MAX_FILE, MAX_TOTAL
+
+PNG_MAX = 2 * 1024 * 1024
+PNG_TOTAL = 30 * 1024 * 1024
+NON_IMAGE_TOTAL = 12 * 1024 * 1024 - 256 * 1024
+INDEX_MAX = 256 * 1024
+EXPORT_TOTAL = 42 * 1024 * 1024
+FINAL_METADATA_BYTES = 256 * 1024  # Inside the non-image budget, never extra capacity.
+
+
+def capacity():
+    """Declare and reconcile the finite envelope before any case reservation."""
+    roster = [str(Path('lifecycle') / case / case / frame) for case in CASES for frame in FRAMES]
+    if (len(set(roster)) != 15 or PNG_MAX * len(roster) != PNG_TOTAL
+            or MAX_TOTAL != 12 * 1024 * 1024 or MAX_FILE != INDEX_MAX
+            or NON_IMAGE_TOTAL + INDEX_MAX != MAX_TOTAL
+            or PNG_TOTAL + NON_IMAGE_TOTAL + INDEX_MAX != EXPORT_TOTAL
+            or FINAL_METADATA_BYTES != INDEX_MAX):
+        raise RuntimeError('Lifecycle declared export capacity differs from its finite envelope')
+    return {'PNG_paths': roster, 'PNG_each': PNG_MAX, 'PNG_total': PNG_TOTAL,
+            'non_image_exported_payload': NON_IMAGE_TOTAL, 'index': INDEX_MAX,
+            'total': EXPORT_TOTAL, 'critical_JSON_raw': MAX_TOTAL,
+            'log_and_JSON_part': MAX_FILE, 'pending_final_metadata_within_non_image': FINAL_METADATA_BYTES}
+
+
+def _budget(image_bytes, non_image_bytes, index_bytes, reserve=0):
+    if min(image_bytes, non_image_bytes, index_bytes, reserve) < 0:
+        raise RuntimeError('Invalid lifecycle export byte accounting')
+    if image_bytes > PNG_TOTAL or non_image_bytes + reserve > NON_IMAGE_TOTAL:
+        raise RuntimeError('Lifecycle image or non-image export budget exceeded')
+    if index_bytes > INDEX_MAX or image_bytes + non_image_bytes + reserve + index_bytes > EXPORT_TOTAL:
+        raise RuntimeError('Lifecycle export index or total budget exceeded')
+
+
+def _excluded(relative):
+    return any(part.endswith(('.app', '.xcresult')) or part.startswith('nac-lifecycle-app-')
+               for part in relative.parts)
+
+
+def _roster(actual, completed=None, final=False):
+    allowed = {Path('lifecycle') / case / case / frame for case in CASES for frame in FRAMES}
+    if actual - allowed:
+        raise RuntimeError('Unexpected or duplicate lifecycle PNG path outside the fixed roster')
+    if completed is None:
+        completed = tuple(case for case in CASES if any(path.parts[1] == case for path in actual))
+    completed = tuple(completed)
+    if completed != CASES[:len(completed)] or (final and completed != CASES):
+        raise RuntimeError('Lifecycle PNG cases are not the required completed prefix')
+    expected = {Path('lifecycle') / case / case / frame for case in completed for frame in FRAMES}
+    if actual != expected:
+        raise RuntimeError('Lifecycle PNG roster has missing required snapshots')
+
+
+def _index(manifest, image_bytes, non_image_bytes, reserve):
+    data = (json.dumps(manifest, indent=2) + '\n').encode()
+    _budget(image_bytes, non_image_bytes, len(data), reserve)
+    return data
 
 
 def images(destination, scenario, helper, native_report, raw):
@@ -16,7 +72,7 @@ def images(destination, scenario, helper, native_report, raw):
     result = []
     for image in sorted(actual):
         canonical(image, parent=destination)
-        if not image.is_file() or image.stat().st_size > 2 * 1024 * 1024:
+        if not image.is_file() or image.stat().st_size > PNG_MAX:
             raise RuntimeError('Lifecycle PNG missing or exceeds the unchanged image cap')
         role = 'sheet' if image.name.endswith('-sheet.png') else 'workspace'
         before = digest(image)
@@ -42,7 +98,7 @@ def _redact(data, replacements):
     return text.encode()
 
 
-def export_plan(raw, replacements):
+def export_plan(raw, replacements, *, completed=None, final=False, reserve=0):
     """JSON is complete or rejected. Oversize JSON has readable text parts.
 
     Redaction precedes splitting, so an exact secret cannot straddle pieces.
@@ -50,11 +106,17 @@ def export_plan(raw, replacements):
     prefix. Binaries, bundles, private profile/store contents and env dumps are
     excluded; the case's native/summary receipts carry store semantics.
     """
-    plan, manifest, total = [], [], 0
+    plan, manifest = [], []
+    image_bytes, non_image_bytes = 0, 0
+    pngs = [path for path in raw.rglob('*') if path.suffix.lower() == '.png'
+            and not _excluded(path.relative_to(raw))]
+    if any(not path.is_file() or path.is_symlink() for path in pngs):
+        raise RuntimeError('Lifecycle PNG roster contains a non-file or symlink')
+    actual = {path.relative_to(raw) for path in pngs}
+    _roster(actual, completed, final)
     for source in sorted(raw.rglob('*')):
         relative = source.relative_to(raw)
-        if any(part.endswith(('.app', '.xcresult')) or part.startswith('nac-lifecycle-app-')
-               for part in relative.parts):
+        if _excluded(relative):
             continue
         if source.is_symlink():
             raise RuntimeError('Unexpected symlink in lifecycle export')
@@ -62,7 +124,7 @@ def export_plan(raw, replacements):
             continue
         size = source.stat().st_size
         critical = source.suffix in ('.json', '.png')
-        if critical and size > (2 * 1024 * 1024 if source.suffix == '.png' else MAX_TOTAL):
+        if critical and size > (PNG_MAX if source.suffix == '.png' else MAX_TOTAL):
             raise RuntimeError('Lifecycle critical receipt exceeds its unchanged bound')
         with source.open('rb') as stream:
             data = stream.read(MAX_TOTAL + 1 if critical else MAX_FILE)
@@ -88,24 +150,30 @@ def export_plan(raw, replacements):
                 entry['parts'].append({'file': str(part_name), 'bytes': len(payload),
                                        'sha256': hashlib.sha256(payload).hexdigest()})
                 plan.append((part_name, payload))
-                total += len(payload)
+                non_image_bytes += len(payload)
+                _budget(image_bytes, non_image_bytes, 0, reserve)
                 text = text[count:]
         else:
             plan.append((relative, data))
-            total += len(data)
+            if source.suffix == '.png':
+                canonical(source, parent=raw)
+                image_bytes += len(data)
+            else:
+                if source.suffix != '.json' and len(data) > MAX_FILE:
+                    raise RuntimeError('Lifecycle redacted log exceeds its unchanged file bound')
+                non_image_bytes += len(data)
         manifest.append(entry)
-        if total > MAX_TOTAL - MAX_FILE:
-            raise RuntimeError('Lifecycle evidence leaves no bounded final-report/upload allowance')
-    index = (json.dumps(manifest, indent=2) + '\n').encode()
-    if len(index) > MAX_FILE or total + len(index) > MAX_TOTAL:
-        raise RuntimeError('Lifecycle export index exceeds the unchanged evidence bound')
-    return plan, index
+        _budget(image_bytes, non_image_bytes, 0, reserve)
+    return plan, _index(manifest, image_bytes, non_image_bytes, reserve)
 
 
 def export_evidence(raw, output, replacements):
     output.mkdir(parents=True, exist_ok=True)
     try:
-        plan, index = export_plan(raw, replacements)
+        ledger = raw / 'lifecycle/ledger.json'
+        final = (ledger.is_file() and not ledger.is_symlink()
+                 and json.loads(ledger.read_text()).get('phase') == 'complete')
+        plan, index = export_plan(raw, replacements, final=final)
     except Exception as error:
         # Preserve bounded admission/result diagnostics even when a critical
         # oversized receipt makes complete evidence impossible. Never call it
