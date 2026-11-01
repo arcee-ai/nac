@@ -653,6 +653,21 @@ impl SessionService {
     pub(super) async fn select_next_direct_inbox_item(
         &self,
     ) -> Result<attention::ContinuationSelection> {
+        self.select_direct_continuation(None).await
+    }
+
+    /// Only successful acknowledged settlement may validate an otherwise empty wake.
+    pub(super) async fn select_direct_continuation_after_settlement(
+        &self,
+        run_id: &SessionRunId,
+    ) -> Result<attention::ContinuationSelection> {
+        self.select_direct_continuation(Some(run_id.clone())).await
+    }
+
+    async fn select_direct_continuation(
+        &self,
+        settled_run: Option<SessionRunId>,
+    ) -> Result<attention::ContinuationSelection> {
         use attention::{
             ContinuationDisposition as Disposition, ContinuationSelection as Selection,
         };
@@ -683,6 +698,8 @@ impl SessionService {
         .await??;
         if !has_durable_work {
             self.cancel_goal_retry_wake();
+        }
+        if !has_durable_work && (settled_run.is_none() || !self.attention_broker_idle()) {
             // This preflight owns no operation lease. It cannot prove idle.
             return Ok(Selection::stopped(Disposition::IdleUnverified));
         }
@@ -699,6 +716,13 @@ impl SessionService {
             }
             Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
         };
+        if let Some(run) = settled_run.filter(|_| !has_durable_work) {
+            let service = self.clone();
+            return crate::store::spawn_blocking_store_caller(move || {
+                service.verify_goal_free_settlement(lease, run)
+            })
+            .await?;
+        }
         self.select_next_direct_inbox_item_with_lease_async(lease)
             .await
     }

@@ -188,7 +188,14 @@ impl SessionService {
             return false;
         }
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            match self.select_next_direct_inbox_item().await {
+            let selection =
+                if attention_success && goal_attention.known && goal_attention.goal.is_none() {
+                    self.select_direct_continuation_after_settlement(&run_id)
+                        .await
+                } else {
+                    self.select_next_direct_inbox_item().await
+                };
+            match selection {
                 Ok(selection) => self.publish_attention_completion(
                     &run_id,
                     attention_success,

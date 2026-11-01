@@ -8,7 +8,9 @@ use crate::events::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ContinuationDisposition {
-    Started,
+    Started {
+        successor: SessionRunId,
+    },
     WaitingForQuestion,
     RetryScheduled,
     Idle {
@@ -34,9 +36,10 @@ impl ContinuationSelection {
         }
     }
     pub fn started(run: SessionRunHandle) -> Self {
+        let successor = run.run_id.clone();
         Self {
             run: Some(run),
-            disposition: ContinuationDisposition::Started,
+            disposition: ContinuationDisposition::Started { successor },
         }
     }
 }
@@ -51,6 +54,9 @@ pub(super) struct ServiceAttention {
     observer: Arc<dyn AttentionServiceObserver>,
     registration: Uuid,
     session_id: String,
+    /// Actual accepted operation identity, retained through its idle publication.
+    /// A delayed older settlement cannot replace a newer run's receipt.
+    last_operation_run: Option<String>,
     broker_registration: Option<(std::sync::Weak<crate::permissions::PermissionBroker>, Uuid)>,
     _broker_observer: Option<Arc<dyn crate::permissions::attention::BrokerAttentionObserver>>,
 }
@@ -132,6 +138,9 @@ pub(super) fn operation_changed(
     if state.snapshot.operation == operation {
         return;
     }
+    if let AttentionOperation::Run(run) = &operation {
+        state.last_operation_run = Some(run.clone());
+    }
     if matches!(&operation, AttentionOperation::Run(id) if state.snapshot.settled.as_ref().is_some_and(|work| &work.run_id != id))
     {
         state.snapshot.settled = None;
@@ -152,6 +161,65 @@ fn publish(state: &mut ServiceAttention, id: &str) {
 }
 
 impl SessionService {
+    /// This finite check belongs only to an acknowledged successful settlement.
+    /// It cannot select, recover or admit work, even if intent arrives after preflight.
+    pub(super) fn verify_goal_free_settlement(
+        &self,
+        lease: sessions::SessionOperationLease,
+        run: SessionRunId,
+    ) -> Result<ContinuationSelection> {
+        let id =
+            self.metadata.session_id.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("goal-free settlement requires a persisted session")
+            })?;
+        lease.validate(&self.metadata.store_path, id)?;
+        let disposition = if self
+            .stopping_admission
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            ContinuationDisposition::Stopping
+        } else if self.has_active_operation() {
+            ContinuationDisposition::Busy
+        } else {
+            let metadata =
+                crate::store::read_attention_metadata(&self.metadata.store_path, Some(id))?
+                    .into_iter()
+                    .next();
+            match metadata {
+                Some(metadata)
+                    if metadata.verifies_goal_free_idle(run.as_str(), self.config_version)
+                        && self.attention_broker_idle() =>
+                {
+                    ContinuationDisposition::Idle {
+                        goal: None,
+                        last_run: Some(run.to_string()),
+                    }
+                }
+                Some(metadata)
+                    if metadata.primary
+                        && metadata.questions_supported
+                        && self.config_version == Some(metadata.config_version)
+                        && metadata.goal.is_none()
+                        && !metadata.inbox_pending
+                        && !metadata.manual_unsettled
+                        && !metadata.recovery_pending
+                        && metadata.question.is_some() =>
+                {
+                    ContinuationDisposition::WaitingForQuestion
+                }
+                _ => ContinuationDisposition::IdleUnverified,
+            }
+        };
+        Ok(ContinuationSelection::stopped(disposition))
+    }
+
+    pub(super) fn attention_broker_idle(&self) -> bool {
+        self.attention.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref().is_some_and(|state| matches!(&state.snapshot.broker,
+                Some(AttentionBrokerSnapshot { state: AttentionBrokerState::Current { permissions, authorizable_reviews }, .. })
+                if permissions.is_empty() && authorizable_reviews.is_empty()))
+    }
+
     /// Existing owners call this before cache publication/wake, or on opt-in.
     /// The operation publication lock precedes the source metadata lock in
     /// exactly the same order as ActiveOperationGuard::drop.
@@ -180,6 +248,13 @@ impl SessionService {
                 broker: None,
             });
         let registration = Uuid::new_v4();
+        let last_operation_run = previous
+            .as_ref()
+            .and_then(|state| state.last_operation_run.clone())
+            .or_else(|| match &snapshot.operation {
+                AttentionOperation::Run(run) => Some(run.clone()),
+                _ => None,
+            });
         let mut broker_registration = None;
         let mut broker_observer = None;
         snapshot.broker = None;
@@ -204,6 +279,7 @@ impl SessionService {
             observer: Arc::clone(&observer),
             registration,
             session_id: id.to_owned(),
+            last_operation_run,
             broker_registration,
             _broker_observer: broker_observer,
         });
@@ -240,7 +316,11 @@ impl SessionService {
             .is_some()
     }
 
-    pub(super) fn publish_settled_attention(&self, work: SettledWork) {
+    pub(super) fn publish_settled_attention(
+        &self,
+        work: SettledWork,
+        selected_successor: Option<&SessionRunId>,
+    ) {
         let Some(id) = self.metadata.session_id.as_deref() else {
             return;
         };
@@ -249,8 +329,38 @@ impl SessionService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(state) = state.as_mut() {
+            let current = match work.disposition {
+                SettledWorkDisposition::Continuing => match selected_successor {
+                    Some(successor) => matches!(&state.snapshot.operation,
+                        AttentionOperation::Run(current) if current == successor.as_str()),
+                    // A scheduled goal retry selects no run. Keep only the
+                    // exact still-idle predecessor, never invent a successor.
+                    None => {
+                        work.goal.is_some()
+                            && state.snapshot.operation == AttentionOperation::Idle
+                            && state.last_operation_run.as_deref() == Some(work.run_id.as_str())
+                    }
+                },
+                SettledWorkDisposition::Completed | SettledWorkDisposition::WaitingForDecision
+                    if work.goal.is_none() =>
+                {
+                    state.last_operation_run.as_deref() == Some(work.run_id.as_str())
+                }
+                _ => true,
+            };
+            if !current {
+                return;
+            }
             if work.disposition == SettledWorkDisposition::Completed
                 && state.snapshot.operation != AttentionOperation::Idle
+            {
+                return;
+            }
+            if work.goal.is_none()
+                && work.disposition == SettledWorkDisposition::Completed
+                && !matches!(&state.snapshot.broker,
+                    Some(AttentionBrokerSnapshot { state: AttentionBrokerState::Current { permissions, authorizable_reviews }, .. })
+                    if permissions.is_empty() && authorizable_reviews.is_empty())
             {
                 return;
             }
@@ -268,31 +378,41 @@ impl SessionService {
         goal: GoalAttentionSettlement,
         selection: ContinuationDisposition,
     ) {
-        if !successful || !goal.known {
+        if !successful
+            || !goal.known
+            || (goal.goal.is_none()
+                && self
+                    .stopping_admission
+                    .load(std::sync::atomic::Ordering::Acquire))
+        {
             return;
         }
-        let disposition = match selection {
-            ContinuationDisposition::Started | ContinuationDisposition::RetryScheduled => {
-                SettledWorkDisposition::Continuing
+        let (disposition, selected_successor) = match selection {
+            ContinuationDisposition::Started { successor } => {
+                (SettledWorkDisposition::Continuing, Some(successor))
+            }
+            ContinuationDisposition::RetryScheduled if goal.goal.is_some() => {
+                (SettledWorkDisposition::Continuing, None)
             }
             ContinuationDisposition::WaitingForQuestion => {
-                SettledWorkDisposition::WaitingForDecision
+                (SettledWorkDisposition::WaitingForDecision, None)
             }
             ContinuationDisposition::Idle {
                 goal: current,
                 last_run,
-            } if current == goal.goal
-                && (current.is_none() || last_run.as_deref() == Some(run_id.as_str())) =>
-            {
-                SettledWorkDisposition::Completed
+            } if current == goal.goal && last_run.as_deref() == Some(run_id.as_str()) => {
+                (SettledWorkDisposition::Completed, None)
             }
             _ => return,
         };
-        self.publish_settled_attention(SettledWork {
-            run_id: run_id.to_string(),
-            goal: goal.goal,
-            disposition,
-        });
+        self.publish_settled_attention(
+            SettledWork {
+                run_id: run_id.to_string(),
+                goal: goal.goal,
+                disposition,
+            },
+            selected_successor.as_ref(),
+        );
     }
 }
 

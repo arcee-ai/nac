@@ -676,6 +676,17 @@ fn run_admission_and_workspace_mutation_are_cross_process_exclusive() {
 async fn cleanup_failure_blocks_run_terminalization_and_remains_retryable() {
     use std::os::unix::fs::PermissionsExt;
 
+    #[derive(Default)]
+    struct AttentionCounter(std::sync::atomic::AtomicUsize);
+    impl crate::events::AttentionServiceObserver for AttentionCounter {
+        fn service_changed(&self, _: &str, snapshot: crate::events::AttentionServiceSnapshot) {
+            if snapshot.settled.as_ref().is_some_and(|work| {
+                work.disposition == crate::events::SettledWorkDisposition::Completed
+            }) {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+    }
     struct RestorePath(Option<std::ffi::OsString>);
     impl Drop for RestorePath {
         fn drop(&mut self) {
@@ -732,6 +743,11 @@ async fn cleanup_failure_blocks_run_terminalization_and_remains_retryable() {
         "session-cleanup-cancel-retry",
         ModelClient::new_for_test(),
     );
+    let cancel_attention = Arc::new(AttentionCounter::default());
+    cancel_parts
+        .service
+        .install_attention_observer(cancel_attention.clone())
+        .unwrap();
     let cancel_run = cancel_parts
         .service
         .try_begin_run(None, "cancel with cleanup")
@@ -798,75 +814,95 @@ async fn cleanup_failure_blocks_run_terminalization_and_remains_retryable() {
         .await
         .is_none());
 
-    std::fs::remove_file(&allow_cleanup).unwrap();
-    let (finish_parts, finish_store) = test_direct_active_service(
-        "cleanup_finish_retry",
-        "session-cleanup-finish-retry",
-        ModelClient::new_for_test(),
-    );
-    let finish_run = finish_parts
-        .service
-        .try_begin_run(None, "finish with cleanup")
-        .unwrap();
-    let finish_terminal = finish_parts.service.terminal_manager.next_session_name();
-    finish_parts
-        .service
-        .terminal_manager
-        .create(
-            finish_terminal.clone(),
-            "sleep 30",
-            None,
-            120,
-            40,
-            &local_backend,
-        )
-        .await
-        .unwrap();
-    finish_parts
-        .service
-        .terminal_manager
-        .set_backend_cleanup_for_test(
-            &finish_terminal,
-            remote_backend,
-            "/tmp/nac-finish.pid".to_string(),
-        )
-        .await
-        .unwrap();
-
-    let finish_service = finish_parts.service.clone();
-    let finish_run_id = finish_run.run_id.clone();
-    let finish_task = tokio::spawn(async move {
-        finish_service
-            .finish_run(
-                &finish_run_id,
-                RunOutcome::Failed(
-                    crate::run_failure::RunFailure::unknown("model failed"),
-                    None,
-                ),
-            )
-            .await;
-    });
-    tokio::time::sleep(Duration::from_millis(250)).await;
     assert_eq!(
-        finish_parts.service.active_run().unwrap().run_id,
-        finish_run.run_id
+        cancel_attention.0.load(std::sync::atomic::Ordering::SeqCst),
+        0
     );
-    assert!(!finish_parts
-        .service
-        .recent_events(None, 32)
-        .1
-        .iter()
-        .any(|event| matches!(event.event, SessionEvent::RunFailed { .. })));
+    for successful in [false, true] {
+        std::fs::remove_file(&allow_cleanup).unwrap();
+        let (finish_parts, finish_store) = test_direct_active_service(
+            "cleanup_finish_retry",
+            "session-cleanup-finish-retry",
+            ModelClient::new_for_test(),
+        );
+        let finish_attention = Arc::new(AttentionCounter::default());
+        finish_parts
+            .service
+            .install_attention_observer(finish_attention.clone())
+            .unwrap();
+        let finish_run = finish_parts
+            .service
+            .try_begin_run(None, "finish with cleanup")
+            .unwrap();
+        let finish_terminal = finish_parts.service.terminal_manager.next_session_name();
+        finish_parts
+            .service
+            .terminal_manager
+            .create(
+                finish_terminal.clone(),
+                "sleep 30",
+                None,
+                120,
+                40,
+                &local_backend,
+            )
+            .await
+            .unwrap();
+        finish_parts
+            .service
+            .terminal_manager
+            .set_backend_cleanup_for_test(
+                &finish_terminal,
+                remote_backend.clone(),
+                "/tmp/nac-finish.pid".to_string(),
+            )
+            .await
+            .unwrap();
 
-    std::fs::write(&allow_cleanup, "allow").unwrap();
-    tokio::time::timeout(Duration::from_secs(2), finish_task)
-        .await
-        .expect("production run settlement did not retry terminal cleanup")
-        .unwrap();
-    assert!(finish_parts.service.active_run().is_none());
+        let finish_service = finish_parts.service.clone();
+        let finish_run_id = finish_run.run_id.clone();
+        let finish_task = tokio::spawn(async move {
+            finish_service
+                .finish_run(
+                    &finish_run_id,
+                    if successful {
+                        RunOutcome::Completed("done".into(), None)
+                    } else {
+                        RunOutcome::Failed(
+                            crate::run_failure::RunFailure::unknown("model failed"),
+                            None,
+                        )
+                    },
+                )
+                .await;
+        });
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert_eq!(
+            finish_parts.service.active_run().unwrap().run_id,
+            finish_run.run_id
+        );
+        assert!(!finish_parts
+            .service
+            .recent_events(None, 32)
+            .1
+            .iter()
+            .any(|event| matches!(event.event, SessionEvent::RunFailed { .. })));
 
+        assert_eq!(
+            finish_attention.0.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "neither typed success nor failure can complete before actual cleanup"
+        );
+        std::fs::write(&allow_cleanup, "allow").unwrap();
+        tokio::time::timeout(Duration::from_secs(2), finish_task)
+            .await
+            .expect("production run settlement did not retry terminal cleanup")
+            .unwrap();
+        assert!(finish_parts.service.active_run().is_none());
+
+        let _ = std::fs::remove_dir_all(finish_store.parent().unwrap());
+    }
     let _ = std::fs::remove_dir_all(cancel_store.parent().unwrap());
-    let _ = std::fs::remove_dir_all(finish_store.parent().unwrap());
     let _ = std::fs::remove_dir_all(root);
 }
 

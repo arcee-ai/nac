@@ -55,16 +55,25 @@ pub(super) fn normalized(id: &str, source: &Source) -> Option<AttentionSourceSna
             if !broker_available {
                 return None;
             }
-            let goal = stored.goal.as_ref()?;
-            if service.operation != AttentionOperation::Idle
-                || work.goal.as_ref() != Some(&goal.identity)
-                || goal.status != nac_core::store::GoalStatus::Complete
-                || goal.accounting_run.is_some()
-                || goal.continuation_run.is_some()
-                || goal.retry_scheduled
-                || goal.last_run.as_deref() != Some(&work.run_id)
-            {
+            if service.operation != AttentionOperation::Idle {
                 return None;
+            }
+            if work.goal.is_none() {
+                let config_version = source.binding.as_ref()?.config_version;
+                if !stored.verifies_goal_free_idle(&work.run_id, config_version) {
+                    return None;
+                }
+            } else {
+                let goal = stored.goal.as_ref()?;
+                if work.goal.as_ref() != Some(&goal.identity)
+                    || goal.status != nac_core::store::GoalStatus::Complete
+                    || goal.accounting_run.is_some()
+                    || goal.continuation_run.is_some()
+                    || goal.retry_scheduled
+                    || goal.last_run.as_deref() != Some(&work.run_id)
+                {
+                    return None;
+                }
             }
         }
         Some(work.clone())

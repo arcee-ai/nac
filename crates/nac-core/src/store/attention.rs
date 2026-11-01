@@ -18,6 +18,12 @@ pub struct AttentionStoredGoal {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionStoredRun {
+    pub run_id: String,
+    pub disposition: RunOutcomeDisposition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttentionStoredSession {
     pub id: String,
     pub primary: bool,
@@ -27,12 +33,35 @@ pub struct AttentionStoredSession {
     pub question: Option<AttentionDecision>,
     pub inbox_pending: bool,
     pub manual_unsettled: bool,
+    pub config_version: i64,
+    pub last_outcome: Option<AttentionStoredRun>,
+    pub recovery_pending: bool,
 }
 
 impl AttentionStoredSession {
+    /// This is necessary durable evidence, never a settlement/idle receipt by itself.
+    pub fn verifies_goal_free_idle(&self, run_id: &str, config_version: Option<i64>) -> bool {
+        self.primary
+            && self.direct
+            && self.questions_supported
+            && config_version == Some(self.config_version)
+            && self.goal.is_none()
+            && self.question.is_none()
+            && !self.inbox_pending
+            && !self.manual_unsettled
+            && !self.recovery_pending
+            && self.last_outcome.as_ref().is_some_and(|outcome| {
+                outcome.run_id == run_id && outcome.disposition == RunOutcomeDisposition::Completed
+            })
+    }
+
     pub fn metadata_bytes(&self) -> usize {
         self.id.len()
-            + 32
+            + 64
+            + self
+                .last_outcome
+                .as_ref()
+                .map_or(0, |run| run.run_id.len() + 16)
             + self.goal.as_ref().map_or(0, |goal| {
                 goal.identity.id.len()
                     + 32
@@ -168,15 +197,16 @@ pub fn read_attention_metadata(path: &Path, session: Option<&str>) -> Result<Vec
     let mut statement = tx.prepare("SELECT substr(s.session_id,1,513),s.behavior,
         NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
         AND NOT EXISTS(SELECT 1 FROM managed_orchestrators m WHERE m.orchestrator_session_id=s.session_id),
-        s.host_id IS NULL AND s.sandbox_json IS NULL
+        s.host_id IS NULL AND s.sandbox_json IS NULL, s.config_version
         FROM sessions s WHERE (?1 IS NULL OR s.session_id=?1) ORDER BY s.session_id LIMIT 1025")?;
-    let rows = statement.query_map([session], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,bool>(2)?,row.get::<_,bool>(3)?)))?
+    let rows = statement.query_map([session], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,bool>(2)?,row.get::<_,bool>(3)?,row.get::<_,i64>(4)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     anyhow::ensure!(rows.len() <= ATTENTION_SOURCE_LIMIT, "attention metadata capacity exceeded");
     let mut output = Vec::with_capacity(rows.len());
     let mut bytes = 0usize;
-    for (id, behavior, primary, local) in rows {
+    for (id, behavior, primary, local, config_version) in rows {
         identifier(&id)?;
+        anyhow::ensure!(config_version >= 0, "attention configuration revision unavailable");
         let direct = behavior == "direct" || behavior == "direct-with-orchestrator";
         let goal = if primary && direct { goal(&tx,&id)? } else { None };
         let questions_supported = primary && local && behavior == "direct";
@@ -189,7 +219,16 @@ pub fn read_attention_metadata(path: &Path, session: Option<&str>) -> Result<Vec
         } else { None };
         let inbox_pending = tx.query_row("SELECT EXISTS(SELECT 1 FROM session_inbox WHERE session_id=?1 AND status='pending')",[&id],|row|row.get(0))?;
         let manual_unsettled = tx.query_row("SELECT EXISTS(SELECT 1 FROM human_shell_operations WHERE session_id=?1 AND phase!='finished')",[&id],|row|row.get(0))?;
-        let metadata = AttentionStoredSession { id,primary,direct,questions_supported,goal,question,inbox_pending,manual_unsettled };
+        let outcome: Option<(String,String)> = tx.query_row(
+            "SELECT substr(run_id,1,513),disposition FROM session_run_outcomes WHERE session_id=?1 ORDER BY id DESC LIMIT 1",
+            [&id], |row| Ok((row.get(0)?,row.get(1)?)),
+        ).optional()?;
+        let last_outcome = outcome.map(|(run_id, disposition)| -> Result<_> {
+            identifier(&run_id)?;
+            Ok(AttentionStoredRun { run_id, disposition: disposition.parse()? })
+        }).transpose()?;
+        let recovery_pending = tx.query_row("SELECT EXISTS(SELECT 1 FROM session_run_recovery WHERE session_id=?1)",[&id],|row|row.get(0))?;
+        let metadata = AttentionStoredSession { id,primary,direct,questions_supported,goal,question,inbox_pending,manual_unsettled,config_version,last_outcome,recovery_pending };
         bytes = bytes.saturating_add(metadata.metadata_bytes());
         anyhow::ensure!(bytes <= ATTENTION_METADATA_BYTES, "attention metadata capacity exceeded");
         output.push(metadata);

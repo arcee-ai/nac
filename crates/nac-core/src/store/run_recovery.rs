@@ -560,6 +560,7 @@ fn record_reconciled_outcome(
         None,
         failure,
     )
+    .map(|_| ())
 }
 
 fn reconcile_failed_goal(

@@ -28,6 +28,9 @@ fn row() -> AttentionStoredSession {
         question: None,
         inbox_pending: false,
         manual_unsettled: false,
+        config_version: 0,
+        last_outcome: None,
+        recovery_pending: false,
     }
 }
 #[test]
@@ -118,6 +121,128 @@ fn completion_requires_exact_current_goal_receipt_and_full_supported_metadata() 
     assert_eq!(snapshot.availability.work, AttentionFacet::Unknown);
     assert_eq!(snapshot.availability.permissions, AttentionFacet::Available);
     assert_eq!(snapshot.availability.reviews, AttentionFacet::Available);
+}
+
+#[test]
+fn attention_goal_free_normalization_requires_current_exact_outcome_and_every_existing_guard() {
+    for invalid in [
+        "valid",
+        "missing",
+        "newer",
+        "failed",
+        "cancelled",
+        "config",
+        "recovery",
+        "manual",
+        "inbox",
+        "goal",
+        "question",
+        "topology",
+        "backend",
+        "broker",
+        "permission",
+        "review",
+        "owner",
+        "active",
+    ] {
+        let mut source = Source::new();
+        let mut stored = row();
+        stored.last_outcome = Some(nac_core::store::AttentionStoredRun {
+            run_id: "run".into(),
+            disposition: nac_core::store::RunOutcomeDisposition::Completed,
+        });
+        source.binding = Some(Binding {
+            service: Weak::new(),
+            token: Uuid::new_v4(),
+            registration: None,
+            config_version: Some(0),
+        });
+        let mut service = AttentionServiceSnapshot {
+            epoch: Uuid::new_v4(),
+            revision: 1,
+            operation: AttentionOperation::Idle,
+            settled: Some(SettledWork {
+                run_id: "run".into(),
+                goal: None,
+                disposition: SettledWorkDisposition::Completed,
+            }),
+            broker: Some(AttentionBrokerSnapshot {
+                owner: Uuid::new_v4(),
+                revision: 0,
+                state: AttentionBrokerState::Current {
+                    permissions: vec![],
+                    authorizable_reviews: vec![],
+                },
+            }),
+        };
+        match invalid {
+            "missing" => stored.last_outcome = None,
+            "newer" => stored.last_outcome.as_mut().unwrap().run_id = "newer".into(),
+            "failed" => {
+                stored.last_outcome.as_mut().unwrap().disposition =
+                    nac_core::store::RunOutcomeDisposition::Failed
+            }
+            "cancelled" => {
+                stored.last_outcome.as_mut().unwrap().disposition =
+                    nac_core::store::RunOutcomeDisposition::Cancelled
+            }
+            "config" => stored.config_version = 1,
+            "recovery" => stored.recovery_pending = true,
+            "manual" => stored.manual_unsettled = true,
+            "inbox" => stored.inbox_pending = true,
+            "goal" => {
+                stored.goal = Some(nac_core::store::AttentionStoredGoal {
+                    identity: AttentionGoal {
+                        id: "goal".into(),
+                        version: 0,
+                    },
+                    status: nac_core::store::GoalStatus::Complete,
+                    accounting_run: None,
+                    continuation_run: None,
+                    retry_scheduled: false,
+                    last_run: Some("run".into()),
+                })
+            }
+            "question" => {
+                stored.question = Some(AttentionDecision::Question {
+                    request_id: "question".into(),
+                    run_id: "run".into(),
+                    generation: "generation".into(),
+                    revision: 1,
+                })
+            }
+            "topology" => stored.primary = false,
+            "backend" => stored.questions_supported = false,
+            "broker" => service.broker = None,
+            "permission" | "review" => {
+                service.broker.as_mut().unwrap().state = AttentionBrokerState::Current {
+                    permissions: if invalid == "permission" {
+                        vec![Uuid::new_v4()]
+                    } else {
+                        vec![]
+                    },
+                    authorizable_reviews: if invalid == "review" {
+                        vec![Uuid::new_v4()]
+                    } else {
+                        vec![]
+                    },
+                }
+            }
+            "owner" => service.settled = None,
+            "active" => service.operation = AttentionOperation::Run("newer".into()),
+            "valid" => {}
+            _ => unreachable!(),
+        }
+        source.stored = Some(stored);
+        source.service = Some(service);
+        let normalized = normalized("session", &source).unwrap();
+        assert_eq!(normalized.work.is_some(), invalid == "valid", "{invalid}");
+        assert_eq!(
+            normalized.availability.work == AttentionFacet::Available,
+            invalid == "valid",
+            "{invalid}"
+        );
+    }
 }
 #[test]
 fn source_count_dirty_set_and_actual_permit_are_bounded() {

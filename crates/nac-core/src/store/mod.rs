@@ -13,7 +13,7 @@ pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 pub(crate) mod coordinated_commands;
 mod attention;
 pub use attention::{
-    read_attention_metadata, AttentionStoreObservation, AttentionStoredGoal,
+    read_attention_metadata, AttentionStoreObservation, AttentionStoredGoal, AttentionStoredRun,
     AttentionStoredSession, ATTENTION_METADATA_BYTES, ATTENTION_SOURCE_LIMIT,
 };
 mod managed_maintenance;
