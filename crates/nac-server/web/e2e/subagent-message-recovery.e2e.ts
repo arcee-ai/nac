@@ -1,4 +1,5 @@
 import { createSession, expect, startForegroundChild, test } from "./harness";
+import { captureCurrentSuppliers } from "./current-suppliers-visual";
 
 for (const mode of ["child", "orchestrator"] as const) {
   for (const [name, viewport] of [
@@ -9,7 +10,7 @@ for (const mode of ["child", "orchestrator"] as const) {
       harness,
       page,
       request,
-    }) => {
+    }, info) => {
       const token = `E2E_RECOVERY_${mode}_${name}`;
       harness.provider.enqueue(token, { token }, { kind: "text", text: "initial run completed" });
       const parentId = await createSession(
@@ -37,9 +38,12 @@ for (const mode of ["child", "orchestrator"] as const) {
       await page.goto(`${harness.baseUrl}/#/session/${targetId}`);
       const field = page.getByRole("textbox", { name: "Send a message" });
       await field.fill("Keep this exact recovery message");
+      if (name === "desktop") await captureCurrentSuppliers(page, field, harness, info, "draft");
       await page.getByRole("button", { name: "Send", exact: true }).click();
       const recovery = page.getByRole("region", { name: "Subagent message delivery" });
       await expect(recovery).toContainText("Message delivery is unconfirmed");
+      if (name === "desktop")
+        await captureCurrentSuppliers(page, field, harness, info, "uncertain");
       for (const label of ["Restore to composer", "Copy message", "Dismiss"]) {
         await expect(recovery.getByRole("button", { name: label })).toHaveCSS(
           "pointer-events",
@@ -60,6 +64,7 @@ for (const mode of ["child", "orchestrator"] as const) {
       await expect(field).toHaveValue("Keep this exact recovery message");
       await expect(recovery).toHaveCount(0);
       expect(attempts).toBe(1);
+      if (name === "desktop") await captureCurrentSuppliers(page, field, harness, info, "restored");
       await page.getByRole("button", { name: "Send", exact: true }).click();
       await expect(recovery).toContainText("Message delivery is unconfirmed");
       await field.fill("Preserve my next draft");
@@ -68,6 +73,8 @@ for (const mode of ["child", "orchestrator"] as const) {
       await expect(recovery).toHaveCount(0);
       await expect(field).toHaveValue("Preserve my next draft");
       expect(attempts).toBe(2);
+      if (name === "desktop")
+        await captureCurrentSuppliers(page, field, harness, info, "newer-draft");
       harness.provider.assertConsumed();
     });
   }

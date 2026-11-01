@@ -32,6 +32,8 @@ export interface PromptRecovery {
 interface DraftRow {
   readonly value: PromptDraft;
   readonly unreviewed: readonly PromptRecovery[];
+  /** Runtime-only outcome token, never retained text or a durable receipt. */
+  readonly unretainedSubmission?: object;
 }
 const noRecoveries: readonly PromptRecovery[] = Object.freeze([]);
 const empty: PromptDraft = Object.freeze({ text: "", revision: 0 });
@@ -119,7 +121,7 @@ export function createPromptDraftStore(
   const recoveries = new Map<string, readonly PromptRecovery[]>();
   const listeners = new Set<() => void>();
   // In-memory request ownership survives view remounts, never a reload or runtime replacement.
-  const submissions = new Map<string, object>();
+  const submissions = new Map<string, Map<object, PromptDraft | undefined>>();
   const cancellations = new Map<string, object>();
   let revision = 0;
   let recoverySequence = 0;
@@ -258,11 +260,13 @@ export function createPromptDraftStore(
   const getUnreviewed = (sessionId: string) => drafts.get(sessionId)?.unreviewed ?? noRecoveries;
   const update = (sessionId: string, text: string, reviewed?: PromptRecovery): PromptDraft => {
     if (closed) return empty;
-    const unreviewed = drafts.get(sessionId)?.unreviewed?.filter((entry) => entry !== reviewed);
+    const previous = drafts.get(sessionId);
+    const unreviewed = previous?.unreviewed.filter((entry) => entry !== reviewed);
     const draft = Object.freeze({ text, revision: ++revision });
     drafts.delete(sessionId);
     // Retain empty revisions in memory: an old acknowledgement must not match a later edit.
     drafts.set(sessionId, {
+      ...previous,
       value: draft,
       unreviewed: unreviewed?.length ? Object.freeze(unreviewed) : noRecoveries,
     });
@@ -276,7 +280,7 @@ export function createPromptDraftStore(
       ) + [...recoveries.values()].flat().reduce((total, item) => total + item.text.length, 0);
     for (const [id, item] of drafts) {
       if (reviewed || (drafts.size <= maxDrafts && characters <= maxRetainedCharacters)) break;
-      if (id === sessionId || item.unreviewed?.length) continue;
+      if (id === sessionId || item.unreviewed.length || submissions.has(id)) continue;
       drafts.delete(id);
       characters -= item.value.text.length;
     }
@@ -303,11 +307,37 @@ export function createPromptDraftStore(
       notify();
     };
   };
+  const getUnretainedSubmission = (sessionId: string) =>
+    drafts.get(sessionId)?.unretainedSubmission;
+  const hasSubmission = (sessionId: string, submitted: PromptDraft) =>
+    !closed && [...(submissions.get(sessionId)?.values() ?? [])].includes(submitted);
+  const claimSubmission = (sessionId: string, submitted?: PromptDraft): (() => void) | null => {
+    if (closed || (submitted && get(sessionId) !== submitted)) return null;
+    const previous = submissions.get(sessionId);
+    // Ordinary primary claims stay exclusive; running subagents can steer a
+    // newer revision without dispatching the same captured revision twice.
+    if (
+      previous &&
+      (!submitted || [...previous.values()].some((value) => !value || value === submitted))
+    )
+      return null;
+    const claims = previous ?? new Map<object, PromptDraft | undefined>();
+    const claim = {};
+    claims.set(claim, submitted);
+    submissions.set(sessionId, claims);
+    notify();
+    return () => {
+      if (closed || submissions.get(sessionId) !== claims || !claims.delete(claim)) return;
+      if (!claims.size) submissions.delete(sessionId);
+      notify();
+    };
+  };
   const removeRecovery = (sessionId: string, recovery: PromptRecovery) => {
     if (closed) return;
     const draft = get(sessionId);
     if (getUnreviewed(sessionId).includes(recovery)) {
       drafts.set(sessionId, {
+        ...drafts.get(sessionId)!,
         value: draft,
         unreviewed: Object.freeze(getUnreviewed(sessionId).filter((entry) => entry !== recovery)),
       });
@@ -348,6 +378,26 @@ export function createPromptDraftStore(
         () => getUnreviewed(sessionId),
         () => getUnreviewed(sessionId),
       ),
+    hasSubmission,
+    getUnretainedSubmission,
+    useUnretainedSubmission: (sessionId: string) =>
+      useSyncExternalStore(
+        subscribe,
+        () => getUnretainedSubmission(sessionId),
+        () => getUnretainedSubmission(sessionId),
+      ),
+    noteUnretainedSubmission: (sessionId: string, submitted: PromptDraft) => {
+      const row = drafts.get(sessionId);
+      if (!row || !hasSubmission(sessionId, submitted)) return;
+      drafts.set(sessionId, { ...row, unretainedSubmission: Object.freeze({}) });
+      notify();
+    },
+    dismissUnretainedSubmission: (sessionId: string, token: object) => {
+      const row = drafts.get(sessionId);
+      if (closed || !row || row.unretainedSubmission !== token) return;
+      drafts.set(sessionId, { ...row, unretainedSubmission: undefined });
+      notify();
+    },
     getRecoveries,
     useRecoveries: (sessionId: string) =>
       useSyncExternalStore(
@@ -442,8 +492,7 @@ export function createPromptDraftStore(
         () => submissions.has(sessionId),
         () => submissions.has(sessionId),
       ),
-    /** One pending primary-composer operation per session, independent of its current view. */
-    claimSubmission: (sessionId: string) => claimRequest(submissions, sessionId),
+    claimSubmission,
     acknowledge: (sessionId: string, submitted: PromptDraft): boolean => {
       if (closed || get(sessionId) !== submitted) return false;
       update(sessionId, "");
@@ -493,6 +542,11 @@ export const {
   useUnreviewed,
   isRetentionLimited,
   useRetentionLimited,
+  hasSubmission,
+  getUnretainedSubmission,
+  useUnretainedSubmission,
+  noteUnretainedSubmission,
+  dismissUnretainedSubmission,
   getRecoveries,
   useRecoveries,
   retainSubmission,

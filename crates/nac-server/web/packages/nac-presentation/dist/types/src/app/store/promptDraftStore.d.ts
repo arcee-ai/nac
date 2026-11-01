@@ -37,6 +37,11 @@ export declare function createPromptDraftStore(scope?: NativeRuntimeScope, stora
     useDraft: (sessionId: string) => PromptDraft;
     getUnreviewed: (sessionId: string) => readonly PromptRecovery[];
     useUnreviewed: (sessionId: string) => readonly PromptRecovery[];
+    hasSubmission: (sessionId: string, submitted: PromptDraft) => boolean;
+    getUnretainedSubmission: (sessionId: string) => object | undefined;
+    useUnretainedSubmission: (sessionId: string) => object | undefined;
+    noteUnretainedSubmission: (sessionId: string, submitted: PromptDraft) => void;
+    dismissUnretainedSubmission: (sessionId: string, token: object) => void;
     getRecoveries: (sessionId: string) => readonly PromptRecovery[];
     useRecoveries: (sessionId: string) => readonly PromptRecovery[];
     retainSubmission: (sessionId: string, submitted: PromptDraft) => PromptRecovery | null;
@@ -47,8 +52,7 @@ export declare function createPromptDraftStore(scope?: NativeRuntimeScope, stora
     useCancelling: (sessionId: string) => boolean;
     claimCancellation: (sessionId: string) => (() => void) | null;
     useSubmitting: (sessionId: string) => boolean;
-    /** One pending primary-composer operation per session, independent of its current view. */
-    claimSubmission: (sessionId: string) => (() => void) | null;
+    claimSubmission: (sessionId: string, submitted?: PromptDraft) => (() => void) | null;
     acknowledge: (sessionId: string, submitted: PromptDraft) => boolean;
     /** Use on confirmed deletion or loss of access, never against a partial session list. */
     purgeSessions: (sessionIds: readonly string[]) => void;
@@ -56,4 +60,4 @@ export declare function createPromptDraftStore(scope?: NativeRuntimeScope, stora
     purgeAll: () => void;
     release: () => void;
 };
-export declare const get: (sessionId: string) => PromptDraft, update: (sessionId: string, text: string) => PromptDraft, subscribe: (listener: () => void) => () => void, useDraft: (sessionId: string) => PromptDraft, getUnreviewed: (sessionId: string) => readonly PromptRecovery[], useUnreviewed: (sessionId: string) => readonly PromptRecovery[], isRetentionLimited: () => boolean, useRetentionLimited: () => boolean, getRecoveries: (sessionId: string) => readonly PromptRecovery[], useRecoveries: (sessionId: string) => readonly PromptRecovery[], retainSubmission: (sessionId: string, submitted: PromptDraft) => PromptRecovery | null, settleSubmission: (sessionId: string, recovery: PromptRecovery, status: "confirmed" | "not-sent" | "uncertain") => void, dismissRecovery: (sessionId: string, recovery: PromptRecovery) => void, restoreRecovery: (sessionId: string, recovery: PromptRecovery) => boolean, isSubmitting: (sessionId: string) => boolean, useCancelling: (sessionId: string) => boolean, claimCancellation: (sessionId: string) => (() => void) | null, useSubmitting: (sessionId: string) => boolean, claimSubmission: (sessionId: string) => (() => void) | null, acknowledge: (sessionId: string, submitted: PromptDraft) => boolean, purgeSessions: (sessionIds: readonly string[]) => void, purgeAll: () => void, release: () => void;
+export declare const get: (sessionId: string) => PromptDraft, update: (sessionId: string, text: string) => PromptDraft, subscribe: (listener: () => void) => () => void, useDraft: (sessionId: string) => PromptDraft, getUnreviewed: (sessionId: string) => readonly PromptRecovery[], useUnreviewed: (sessionId: string) => readonly PromptRecovery[], isRetentionLimited: () => boolean, useRetentionLimited: () => boolean, hasSubmission: (sessionId: string, submitted: PromptDraft) => boolean, getUnretainedSubmission: (sessionId: string) => object | undefined, useUnretainedSubmission: (sessionId: string) => object | undefined, noteUnretainedSubmission: (sessionId: string, submitted: PromptDraft) => void, dismissUnretainedSubmission: (sessionId: string, token: object) => void, getRecoveries: (sessionId: string) => readonly PromptRecovery[], useRecoveries: (sessionId: string) => readonly PromptRecovery[], retainSubmission: (sessionId: string, submitted: PromptDraft) => PromptRecovery | null, settleSubmission: (sessionId: string, recovery: PromptRecovery, status: "confirmed" | "not-sent" | "uncertain") => void, dismissRecovery: (sessionId: string, recovery: PromptRecovery) => void, restoreRecovery: (sessionId: string, recovery: PromptRecovery) => boolean, isSubmitting: (sessionId: string) => boolean, useCancelling: (sessionId: string) => boolean, claimCancellation: (sessionId: string) => (() => void) | null, useSubmitting: (sessionId: string) => boolean, claimSubmission: (sessionId: string, submitted?: PromptDraft) => (() => void) | null, acknowledge: (sessionId: string, submitted: PromptDraft) => boolean, purgeSessions: (sessionIds: readonly string[]) => void, purgeAll: () => void, release: () => void;

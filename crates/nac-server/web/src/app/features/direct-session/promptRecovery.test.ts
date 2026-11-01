@@ -2,6 +2,31 @@ import { expect, it, vi } from "vitest";
 import { createPromptDraftStore } from "../../store/promptDraftStore";
 import { withPromptRecovery } from "./promptRecovery";
 
+it("announces only an obtained in-memory recovery before dispatch", async () => {
+  const drafts = createPromptDraftStore();
+  const submitted = drafts.update("a", "small");
+  const order: string[] = [];
+  await withPromptRecovery(
+    drafts,
+    "a",
+    submitted,
+    async () => {
+      order.push("dispatch");
+    },
+    () => {
+      order.push("retained");
+    },
+  );
+  expect(order).toEqual(["retained", "dispatch"]);
+  const oversized = drafts.update("a", "x".repeat(1_000_001));
+  const retained = vi.fn();
+  const dispatch = vi.fn(async () => "accepted");
+  expect(await withPromptRecovery(drafts, "a", oversized, dispatch, retained)).toBe("accepted");
+  expect(retained).not.toHaveBeenCalled();
+  expect(dispatch).toHaveBeenCalledOnce();
+  expect(drafts.get("a")).toBe(oversized);
+});
+
 it("keeps a newer identical revision after definite acceptance", async () => {
   const drafts = createPromptDraftStore();
   const submitted = drafts.update("a", "same");
