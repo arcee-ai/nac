@@ -38,6 +38,10 @@ def verify_native_quit_completion(stopped):
     assert stopped['quit_cancel_choices'] == stopped['quit_stop_completions'] == 1, stopped
     invocation = stopped['native_duplicate_invocation']
     assert invocation['command'] == 'duplicate-quit' and invocation['id'], stopped
+    assert invocation['issued'] and invocation['outcome'] == 'settled', stopped
+    assert invocation['began_uptime'] <= invocation['returned_uptime'] < invocation['deadline_uptime'], stopped
+    assert invocation['cancel_dispatched_uptime'] >= invocation['returned_uptime'], stopped
+    assert invocation['prefix'] == invocation['before'], stopped
     assert invocation['began'] and invocation['returned'] and stopped['native_duplicate_returned'], stopped
     before, after = invocation['before'], invocation['after']
     assert before['confirmation_id'] and before['confirmation_id'] == after['confirmation_id'], stopped

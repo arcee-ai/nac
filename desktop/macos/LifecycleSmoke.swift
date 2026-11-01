@@ -17,6 +17,7 @@ final class LifecycleSmoke {
     private var originalPID: Int32 = 0
     private var originalReceipt: EngineReceipt?
     private var originalWindow = 0
+    private var duplicateDeadline: TimeInterval?
 
     init(app: PreviewApp) {
         self.app = app
@@ -56,6 +57,13 @@ final class LifecycleSmoke {
             return
         }
         if let failure = app.failure, !app.stopping { fail(failure); return }
+        // A nested poll cannot dispatch Cancel while the public call is in flight.
+        if let deadline = duplicateDeadline {
+            if ProcessInfo.processInfo.systemUptime >= deadline {
+                duplicateUnknown("Public duplicate did not return before its deadline")
+            }
+            return
+        }
         for name in ["work-ready", "reopened", "confirming", "cancelled"] where take("capture-" + name) {
             Task {
                 do { try await capture(name); publish(stage) }
@@ -94,27 +102,15 @@ final class LifecycleSmoke {
             stage = "checking-reopen"
         }
         for command in ["quit", "quit-again", "duplicate-quit"] where take(command) {
-            if command != "duplicate-quit" { publish(command + "-requested") }
-            RunLoop.main.perform(inModes: [.common]) { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    let before = self.app.quit.smokeQuitRequests
-                    var invocation: [String: Any] = [:]
-                    if command == "duplicate-quit" {
-                        invocation = ["command": command, "id": UUID().uuidString,
-                                      "began": true, "before": self.duplicateOwners()]
-                        self.evidence["native_duplicate_invocation"] = invocation
-                        self.publish(self.stage)
-                    }
-                    NSApp.terminate(nil)
-                    if command == "duplicate-quit" {
-                        invocation["returned"] = true
-                        invocation["after"] = self.duplicateOwners()
-                        self.evidence["native_duplicate_invocation"] = invocation
-                        self.evidence["native_duplicate_delegate_before"] = before
-                        self.evidence["native_duplicate_delegate_after"] = self.app.quit.smokeQuitRequests
-                        self.evidence["native_duplicate_returned"] = true
-                        self.publish(self.stage)
+            if command == "duplicate-quit" {
+                invokeDuplicate()
+                guard stage != "failed" else { return }
+            } else {
+                publish(command + "-requested")
+                RunLoop.main.perform(inModes: [.common]) { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        withExtendedLifetime(self) { NSApp.terminate(nil) }
                     }
                 }
             }
@@ -126,9 +122,20 @@ final class LifecycleSmoke {
                 publish(seen.contains("quit-again") ? "reconfirming" : "confirming")
             }
             if seen.contains("duplicate-quit"), !seen.contains("cancel"),
-               evidence["native_duplicate_returned"] as? Bool == true,
+               (evidence["native_duplicate_invocation"] as? [String: Any])?["outcome"] as? String == "settled",
                stage != "duplicate-confirming" { publish("duplicate-confirming") }
-            if take("cancel") { app.window.endSheet(sheet, returnCode: .alertFirstButtonReturn) }
+            if take("cancel") {
+                if seen.contains("duplicate-quit") {
+                    guard var invocation = evidence["native_duplicate_invocation"] as? [String: Any],
+                          invocation["outcome"] as? String == "settled" else {
+                        duplicateUnknown("Cancel stopped before an unsettled duplicate"); return
+                    }
+                    invocation["cancel_dispatched_uptime"] = ProcessInfo.processInfo.systemUptime
+                    evidence["native_duplicate_invocation"] = invocation
+                    publish(stage)
+                }
+                app.window.endSheet(sheet, returnCode: .alertFirstButtonReturn)
+            }
             if take("stop") { app.window.endSheet(sheet, returnCode: .alertSecondButtonReturn) }
         }
         if seen.contains("cancel"), !seen.contains("quit-again"), app.quit.lifecycle.phase == .running,
@@ -137,6 +144,61 @@ final class LifecycleSmoke {
             evidence["cancel_retained_owners"] = true
             publish("cancelled")
         }
+    }
+
+    /// Fixture delivery prefix only. The one public action is synchronous so
+    /// consuming both control files cannot dispatch Cancel ahead of the call.
+    private func invokeDuplicate() {
+        let before = duplicateOwners()
+        let began = ProcessInfo.processInfo.systemUptime
+        let deadline = began + 5
+        var invocation: [String: Any] = ["command": "duplicate-quit", "id": UUID().uuidString,
+            "issued": true, "prefix": before, "outcome": "pending", "deadline_uptime": deadline]
+        evidence["native_duplicate_invocation"] = invocation
+        guard before["owners_intact"] as? Bool == true,
+              before["stop_started"] as? Bool == false,
+              (before["sheet_window"] as? Int ?? -1) > 0,
+              before["confirmation_decisions"] as? Int == 1,
+              before["sheet_presentations"] as? Int == 1,
+              before["cancel_choices"] as? Int == 0,
+              before["stop_completions"] as? Int == 0 else {
+            duplicateUnknown("Duplicate has no pending original confirmation"); return
+        }
+        duplicateDeadline = deadline
+        defer { duplicateDeadline = nil }
+        invocation["began"] = true
+        invocation["began_uptime"] = began
+        invocation["before"] = before
+        evidence["native_duplicate_invocation"] = invocation
+        publish(stage) // Best-effort atomic write attempt, not a durable acknowledgement.
+        NSApp.terminate(nil)
+        let returned = ProcessInfo.processInfo.systemUptime
+        let after = duplicateOwners()
+        invocation["returned"] = true
+        invocation["returned_uptime"] = returned
+        invocation["after"] = after
+        evidence["native_duplicate_invocation"] = invocation
+        evidence["native_duplicate_delegate_before"] = before["delegate_calls"]
+        evidence["native_duplicate_delegate_after"] = after["delegate_calls"]
+        evidence["native_duplicate_returned"] = true
+        var prefixOwners = before, returnedOwners = after
+        prefixOwners.removeValue(forKey: "delegate_calls")
+        returnedOwners.removeValue(forKey: "delegate_calls")
+        guard stage != "failed", returned < deadline,
+              NSDictionary(dictionary: prefixOwners).isEqual(to: returnedOwners) else {
+            duplicateUnknown("Duplicate result is late or its confirmation/owners changed"); return
+        }
+        invocation["outcome"] = "settled"
+        evidence["native_duplicate_invocation"] = invocation
+        publish(stage)
+    }
+
+    private func duplicateUnknown(_ reason: String) {
+        if var invocation = evidence["native_duplicate_invocation"] as? [String: Any] {
+            invocation["outcome"] = "unknown"
+            evidence["native_duplicate_invocation"] = invocation
+        }
+        fail(reason)
     }
 
     private func prepare() async throws {
