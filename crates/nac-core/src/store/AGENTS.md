@@ -84,6 +84,11 @@ Splitting those operations would obscure the atomic no-new-work/safe-to-stop
 invariant. None of these files may acquire network, process, HTTP, or unrelated
 lifecycle logic.
 
+`projects.rs` keeps project registration, location identity, immutable session
+membership, and project deletion in one transactional owner above 800 lines.
+Question invalidation and its postcommit hint share those outer commits; HTTP
+composition and session teardown stay with their application/lifecycle owners.
+
 ## Verification
 
 ```sh

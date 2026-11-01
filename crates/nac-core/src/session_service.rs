@@ -34,6 +34,7 @@ use crate::workspace::GitTarget;
 
 mod admission;
 mod attachment;
+mod attention;
 mod cancellation;
 mod creation;
 mod delegated_input;
@@ -652,6 +653,7 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
+    attention: Arc<StdMutex<Option<attention::ServiceAttention>>>,
     stopping_admission: Arc<std::sync::atomic::AtomicBool>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
     /// The session's skill registry, captured from the agent at construction

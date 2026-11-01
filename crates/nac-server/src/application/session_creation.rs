@@ -547,11 +547,11 @@ impl<'a> SessionCreationApplication<'a> {
         let _lifecycle = gate.lock().await;
         let service = {
             let mut active = self.manager.inner.active_sessions.write().await;
-            Arc::clone(
-                active
-                    .entry(session_id)
-                    .or_insert_with(|| Arc::new(service)),
-            )
+            Arc::clone(active.entry(session_id).or_insert_with(|| {
+                let service = Arc::new(service);
+                self.manager.inner.attention.bind(&service);
+                service
+            }))
         };
         if retained.is_some()
             && self

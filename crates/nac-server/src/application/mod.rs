@@ -1,3 +1,5 @@
+pub(crate) mod attention;
+pub(crate) mod attention_runtime;
 pub(crate) mod credentials;
 pub(crate) mod delegation;
 pub(crate) mod managed;

@@ -1,6 +1,7 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "GET /attention/events": "private:native opt-in metadata attention stream",
   "GET /sessions/{session_id}/questions": "private:standalone exact structured questions",
   "GET /sessions/{session_id}/questions/{request_id}":
     "private:standalone exact structured question read",

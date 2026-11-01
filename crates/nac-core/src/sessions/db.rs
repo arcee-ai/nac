@@ -232,6 +232,16 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
 
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let previous_binding: Option<(Option<String>, Option<String>)> = tx
+        .query_row(
+            "SELECT host_id, sandbox_json FROM sessions WHERE session_id = ?1",
+            params![update.session_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let binding_changed = previous_binding.as_ref().is_some_and(|(host, sandbox)| {
+        *host != stored_ssh_host(update.ssh.as_ref()) || *sandbox != sandbox_json
+    });
     let updated = tx.execute(
         "UPDATE sessions
          SET sandbox_json = ?1,
@@ -263,6 +273,7 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
             update.session_id
         ));
     }
+    let mut questions_changed = false;
     let mut durable_failure = update.failed_run_failure.clone();
     if let Some(run_id) = update.finished_run_id.as_deref() {
         if let Some(goal) = update.goal_settlement.as_ref() {
@@ -279,7 +290,8 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
         let disposition = update
             .finished_run_disposition
             .ok_or_else(|| anyhow!("finished run is missing its validated disposition"))?;
-        crate::store::clear_active_run(&tx, &update.session_id, run_id, disposition)?;
+        questions_changed =
+            crate::store::clear_active_run(&tx, &update.session_id, run_id, disposition)?;
         crate::store::record_run_outcome_with_connection(
             &tx,
             &update.session_id,
@@ -303,7 +315,7 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
                 durable_failure = Some(failure);
             }
         }
-        crate::store::mark_active_run_failed(
+        questions_changed = crate::store::mark_active_run_failed(
             &tx,
             &update.session_id,
             run_id,
@@ -319,6 +331,9 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
         )?;
     }
     tx.commit()?;
+    if binding_changed || questions_changed {
+        crate::store::goal_changes::session_committed(path, &update.session_id);
+    }
     Ok(())
 }
 
@@ -429,6 +444,7 @@ pub fn update_raw_session_config(
     }
     crate::store::task_questions::invalidate_questions(&tx,&config.session_id,None)?;
     tx.commit()?;
+    crate::store::goal_changes::session_committed(path,&config.session_id);
     Ok(next_version)
 }
 command UpdateRawSessionConfigCommand {

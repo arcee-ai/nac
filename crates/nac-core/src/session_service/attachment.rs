@@ -127,6 +127,7 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             published_operation: Arc::new(StdMutex::new(None)),
+            attention: Arc::new(StdMutex::new(None)),
             stopping_admission: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_threads,
             skills,

@@ -647,14 +647,25 @@ impl SessionService {
     /// still happens under the operation lease, preventing two server
     /// processes from promoting the same durable item.
     pub async fn start_next_direct_inbox_item(&self) -> Result<Option<SessionRunHandle>> {
+        Ok(self.select_next_direct_inbox_item().await?.run)
+    }
+
+    pub(super) async fn select_next_direct_inbox_item(
+        &self,
+    ) -> Result<attention::ContinuationSelection> {
+        use attention::{
+            ContinuationDisposition as Disposition, ContinuationSelection as Selection,
+        };
         self.require_direct_behavior()?;
         let _wake = self.inbox_wake.lock().await;
         if self
             .stopping_admission
             .load(std::sync::atomic::Ordering::Acquire)
-            || self.has_active_operation()
         {
-            return Ok(None);
+            return Ok(Selection::stopped(Disposition::Stopping));
+        }
+        if self.has_active_operation() {
+            return Ok(Selection::stopped(Disposition::Busy));
         }
         let session_id = self
             .metadata
@@ -672,7 +683,8 @@ impl SessionService {
         .await??;
         if !has_durable_work {
             self.cancel_goal_retry_wake();
-            return Ok(None);
+            // This preflight owns no operation lease. It cannot prove idle.
+            return Ok(Selection::stopped(Disposition::IdleUnverified));
         }
         // This is only a hint: re-read and reconcile under the lease below.
         // Any goal, including a paused one, may retain stale run accounting.
@@ -682,10 +694,12 @@ impl SessionService {
             session_id,
         ) {
             Ok(lease) => lease,
-            Err(sessions::SessionOperationLeaseError::Busy(_)) => return Ok(None),
+            Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                return Ok(Selection::stopped(Disposition::ForeignOwner))
+            }
             Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
         };
-        self.start_next_direct_inbox_item_with_lease_async(lease)
+        self.select_next_direct_inbox_item_with_lease_async(lease)
             .await
     }
 
@@ -693,8 +707,20 @@ impl SessionService {
         &self,
         lease: sessions::SessionOperationLease,
     ) -> Result<Option<SessionRunHandle>> {
+        Ok(self
+            .select_next_direct_inbox_item_with_lease_async(lease)
+            .await?
+            .run)
+    }
+
+    async fn select_next_direct_inbox_item_with_lease_async(
+        &self,
+        lease: sessions::SessionOperationLease,
+    ) -> Result<attention::ContinuationSelection> {
         if self.has_active_operation() {
-            return Ok(None);
+            return Ok(attention::ContinuationSelection::stopped(
+                attention::ContinuationDisposition::Busy,
+            ));
         }
         let service = self.clone();
         let abandoned_child =
@@ -718,17 +744,20 @@ impl SessionService {
         }
         let service = self.clone();
         crate::store::spawn_blocking_store_caller(move || {
-            service.start_next_direct_inbox_item_with_lease(lease)
+            service.select_next_direct_inbox_item_with_lease(lease)
         })
         .await?
     }
 
-    fn start_next_direct_inbox_item_with_lease(
+    fn select_next_direct_inbox_item_with_lease(
         &self,
         lease: sessions::SessionOperationLease,
-    ) -> Result<Option<SessionRunHandle>> {
+    ) -> Result<attention::ContinuationSelection> {
+        use attention::{
+            ContinuationDisposition as Disposition, ContinuationSelection as Selection,
+        };
         if self.has_active_operation() {
-            return Ok(None);
+            return Ok(Selection::stopped(Disposition::Busy));
         }
         let session_id = self
             .metadata
@@ -771,18 +800,53 @@ impl SessionService {
                         ..RunAdmissionKind::default()
                     },
                 )
-                .map(Some)
+                .map(Selection::started)
                 .map_err(anyhow::Error::new);
         }
         if crate::store::pending_task_question(&self.metadata.store_path, session_id)?.is_some() {
             self.cancel_goal_retry_wake();
-            return Ok(None);
+            return Ok(Selection::stopped(Disposition::WaitingForQuestion));
         }
         let Some(goal) = crate::store::load_session_goal(&self.metadata.store_path, session_id)?
             .filter(|goal| goal.status == crate::store::GoalStatus::Active)
         else {
             self.cancel_goal_retry_wake();
-            return Ok(None);
+            let disposition = if self.attention_enabled() {
+                let metadata = crate::store::read_attention_metadata(
+                    &self.metadata.store_path,
+                    Some(session_id),
+                )
+                .ok()
+                .and_then(|rows| rows.into_iter().next());
+                match metadata.as_ref() {
+                    Some(metadata)
+                        if !metadata.manual_unsettled
+                            && !metadata.inbox_pending
+                            && metadata.question.is_none() =>
+                    {
+                        match &metadata.goal {
+                            None => Disposition::Idle {
+                                goal: None,
+                                last_run: None,
+                            },
+                            Some(goal)
+                                if goal.status == crate::store::GoalStatus::Complete
+                                    && goal.accounting_run.is_none() =>
+                            {
+                                Disposition::Idle {
+                                    goal: Some(goal.identity.clone()),
+                                    last_run: goal.last_run.clone(),
+                                }
+                            }
+                            _ => Disposition::IdleUnverified,
+                        }
+                    }
+                    _ => Disposition::IdleUnverified,
+                }
+            } else {
+                Disposition::IdleUnverified
+            };
+            return Ok(Selection::stopped(disposition));
         };
         if goal
             .next_attempt_at_epoch_ms
@@ -790,7 +854,7 @@ impl SessionService {
         {
             drop(lease);
             self.schedule_goal_retry_wake(&goal);
-            return Ok(None);
+            return Ok(Selection::stopped(Disposition::RetryScheduled));
         }
         self.cancel_goal_retry_wake();
         self.try_submit_prompt_inner(
@@ -802,7 +866,7 @@ impl SessionService {
                 ..RunAdmissionKind::default()
             },
         )
-        .map(Some)
+        .map(Selection::started)
         .map_err(anyhow::Error::new)
     }
 

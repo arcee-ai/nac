@@ -174,15 +174,16 @@ pub(crate) fn cancel_question_inbox(conn: &Connection, session: &str, item: i64)
 
 /// Caller already owns the surrounding lifecycle transaction. Exact answer
 /// receipts remain retained while undelivered inbox obligations are cancelled.
+/// Returns whether a question row changed; only the outer commit may publish it.
 pub(crate) fn invalidate_questions(
     conn: &Connection,
     session: &str,
     source_run: Option<&str>,
-) -> Result<()> {
+) -> Result<bool> {
     let now = now_utc();
     conn.execute("UPDATE session_inbox SET status='cancelled',cancelled_at=?3,updated_at=?3,version=version+1 WHERE session_id=?1 AND status='pending' AND id IN(SELECT inbox_item_id FROM task_questions WHERE session_id=?1 AND continuation_state='pending' AND (?2 IS NULL OR json_extract(request_json,'$.run_id')=?2))",params![session,source_run,now])?;
-    conn.execute("UPDATE task_questions SET status=CASE WHEN status='pending' THEN 'cancelled' ELSE status END,continuation_state=CASE WHEN continuation_state='pending' THEN 'cancelled' ELSE continuation_state END,revision=revision+1 WHERE session_id=?1 AND (status='pending' OR continuation_state='pending') AND (?2 IS NULL OR json_extract(request_json,'$.run_id')=?2)",params![session,source_run])?;
-    Ok(())
+    let changed = conn.execute("UPDATE task_questions SET status=CASE WHEN status='pending' THEN 'cancelled' ELSE status END,continuation_state=CASE WHEN continuation_state='pending' THEN 'cancelled' ELSE continuation_state END,revision=revision+1 WHERE session_id=?1 AND (status='pending' OR continuation_state='pending') AND (?2 IS NULL OR json_extract(request_json,'$.run_id')=?2)",params![session,source_run])?;
+    Ok(changed > 0)
 }
 
 coordinated_command! {

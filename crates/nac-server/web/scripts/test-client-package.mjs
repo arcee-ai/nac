@@ -101,8 +101,9 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 158);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 159);
 for (const resource of [
+  "GET /attention/events",
   "GET /sessions/{session_id}/questions",
   "GET /sessions/{session_id}/questions/{request_id}",
   "POST /sessions/{session_id}/questions/{request_id}/answer",

@@ -134,23 +134,23 @@ pub(crate) fn replace_with_active_run(
     Ok(())
 }
 
+/// Returns the question invalidation effect for publication after outer commit.
 pub(crate) fn clear_active_run(
     transaction: &Transaction<'_>,
     session_id: &str,
     run_id: &str,
     disposition: RunTerminalDisposition,
-) -> Result<()> {
+) -> Result<bool> {
     let Some(record) = load_run_recovery_with_connection(transaction, session_id)? else {
-        return Ok(());
+        return Ok(false);
     };
     if record.run_id != run_id || record.status != RunRecoveryStatus::Active {
-        return Ok(());
+        return Ok(false);
     }
-    if disposition == RunTerminalDisposition::Cancelled {
-        super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
-    }
+    let questions_changed = disposition == RunTerminalDisposition::Cancelled
+        && super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
     retain_or_clear_terminal_obligation(transaction, session_id, run_id, disposition)?;
-    Ok(())
+    Ok(questions_changed)
 }
 
 fn has_running_relationship(
@@ -221,12 +221,13 @@ port public;
 /// expected when the prompt transaction itself failed; it must not roll back
 /// the otherwise independent timing and token bookkeeping in the caller's
 /// run-state transaction. An older failed/interrupted row is left untouched.
+/// Returns the question invalidation effect for publication after outer commit.
 pub(crate) fn mark_active_run_failed(
     transaction: &Transaction<'_>,
     session_id: &str,
     run_id: &str,
     failure: Option<&crate::run_failure::RunFailure>,
-) -> Result<()> {
+) -> Result<bool> {
     let sanitized_failure = failure
         .cloned()
         .map(crate::run_failure::RunFailure::sanitized);
@@ -241,12 +242,10 @@ pub(crate) fn mark_active_run_failed(
          WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
         params![session_id, run_id, failure_json],
     )?;
-    if changed == 1
+    let questions_changed = changed == 1
         && !failure.is_some_and(|f| f.kind == crate::run_failure::RunFailureKind::Interrupted)
-    {
-        super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
-    }
-    Ok(())
+        && super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
+    Ok(questions_changed)
 }
 
 coordinated_command! {
@@ -465,7 +464,12 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
             }
             RecoveredRunTerminal::Failed => {
                 let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
-                mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
+                let questions_changed = mark_active_run_failed(
+                    &transaction,
+                    session_id,
+                    &record.run_id,
+                    failure.as_ref(),
+                )?;
                 record_reconciled_outcome(
                     &transaction,
                     session_id,
@@ -474,6 +478,9 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
                     failure.as_ref(),
                 )?;
                 transaction.commit()?;
+                if questions_changed {
+                    super::goal_changes::session_committed(path, session_id);
+                }
                 return Ok(ActiveRunReconciliation::Failed {
                     run_id: record.run_id,
                     failure,
@@ -488,7 +495,8 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
     // bound goal with the same retry policy as the ordinary run-end path.
     if record.failure.is_some() {
         let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
-        mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
+        let questions_changed =
+            mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
         record_reconciled_outcome(
             &transaction,
             session_id,
@@ -497,6 +505,9 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
             failure.as_ref(),
         )?;
         transaction.commit()?;
+        if questions_changed {
+            super::goal_changes::session_committed(path, session_id);
+        }
         return Ok(ActiveRunReconciliation::Failed {
             run_id: record.run_id,
             failure,

@@ -1,4 +1,5 @@
 export declare const NAC_API_SURFACE: {
+    readonly "GET /attention/events": "private:native opt-in metadata attention stream";
     readonly "GET /sessions/{session_id}/questions": "private:standalone exact structured questions";
     readonly "GET /sessions/{session_id}/questions/{request_id}": "private:standalone exact structured question read";
     readonly "POST /sessions/{session_id}/questions/{request_id}/answer": "private:authenticated human question answer";
