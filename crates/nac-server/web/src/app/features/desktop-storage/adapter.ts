@@ -228,6 +228,7 @@ export async function openDesktopStorage(
     const valid = (key: string) =>
       namespace === "drafts" ? key === draftKey : isDesktopPreferenceKey(key);
     return {
+      ...(namespace === "drafts" ? { coldImports: true as const } : {}),
       getItem: (key) => groups[namespace].get(key) ?? null,
       setItem: (key, value) => {
         if (closed) return;

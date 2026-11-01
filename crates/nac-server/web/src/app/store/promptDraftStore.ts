@@ -2,7 +2,10 @@ import { useSyncExternalStore } from "react";
 import type { NativeRuntimeScope } from "../runtime/nativeRuntime";
 
 /** Caller-owned text storage, separate from long-lived preferences. */
-export type PromptDraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+export type PromptDraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem"> & {
+  /** Cold desktop bytes have no durable proof that an earlier clear succeeded. */
+  readonly coldImports?: true;
+};
 /** Explicit durable text identity, never a replacement for NativeRuntimeScope.
  * The desktop caller derives these opaque values from its verified profile/store.
  * It also owns adapter lifetime, document fencing and durable write ordering.
@@ -24,6 +27,11 @@ export interface PromptRecovery {
   readonly id: string;
   readonly text: string;
   readonly status: "pending" | "not-sent" | "uncertain";
+  readonly source?: "checkpoint";
+}
+interface DraftRow {
+  readonly value: PromptDraft;
+  readonly unreviewed: readonly PromptRecovery[];
 }
 const noRecoveries: readonly PromptRecovery[] = Object.freeze([]);
 const empty: PromptDraft = Object.freeze({ text: "", revision: 0 });
@@ -57,13 +65,13 @@ function boundedCheckpoint(drafts: unknown[], recoveries: unknown): boolean {
   for (const entry of drafts) {
     if (
       !Array.isArray(entry) ||
-      entry.length !== 2 ||
+      (entry.length !== 2 && !(entry.length === 3 && entry[2] === "unreviewed")) ||
       !validIdentity(entry[0]) ||
       typeof entry[1] !== "string" ||
-      sessions.has(entry[0])
+      (entry.length === 2 && sessions.has(entry[0]))
     )
       return false;
-    sessions.add(entry[0]);
+    if (entry.length === 2) sessions.add(entry[0]);
     characters += entry[1].length;
   }
   for (const entry of savedRecoveries) {
@@ -94,6 +102,7 @@ export function createPromptDraftStore(
       : null;
   const stable = persistenceBinding !== undefined;
   const version = stable ? 2 : 1;
+  const coldImports = stable && storage?.coldImports === true;
   const binding = stable
     ? runtimeBinding &&
       runtimeBinding.every(validIdentity) &&
@@ -104,7 +113,7 @@ export function createPromptDraftStore(
     : runtimeBinding;
   // A distinct version/key prevents accidental import from ordinary browser tabs.
   const key = binding ? `nac:prompt-drafts:v${version}:${JSON.stringify(binding)}` : null;
-  const drafts = new Map<string, PromptDraft>();
+  const drafts = new Map<string, DraftRow>();
   // Text checkpoints are recovery evidence, never commands to replay. Only the text/id
   // persist; an interrupted request is always uncertain in the next runtime.
   const recoveries = new Map<string, readonly PromptRecovery[]>();
@@ -115,6 +124,7 @@ export function createPromptDraftStore(
   let revision = 0;
   let recoverySequence = 0;
   let closed = false;
+  let retentionLimited = false;
 
   // An invalid/partial consumer binding must never enable persistence.
   const persistent = key ? storage : undefined;
@@ -135,14 +145,32 @@ export function createPromptDraftStore(
         saved.drafts.every(
           (entry: unknown) =>
             Array.isArray(entry) &&
-            entry.length === 2 &&
+            (entry.length === 2 || (stable && entry.length === 3 && entry[2] === "unreviewed")) &&
             typeof entry[0] === "string" &&
             typeof entry[1] === "string",
         ) &&
         (!stable || boundedCheckpoint(saved.drafts, saved.recoveries))
       ) {
-        for (const [id, text] of saved.drafts as [string, string][]) {
-          if (text) drafts.set(id, Object.freeze({ text, revision: ++revision }));
+        for (const [id, text, trust] of saved.drafts as [string, string, string?][]) {
+          if (!text) continue;
+          const current = drafts.get(id);
+          if (coldImports || trust === "unreviewed") {
+            const review = Object.freeze({
+              id: `checkpoint-${++recoverySequence}`,
+              text,
+              status: "uncertain" as const,
+              source: "checkpoint" as const,
+            });
+            drafts.set(id, {
+              value: current?.value ?? Object.freeze({ text: "", revision: ++revision }),
+              unreviewed: Object.freeze([...(current?.unreviewed ?? []), review]),
+            });
+          } else {
+            drafts.set(id, {
+              value: Object.freeze({ text, revision: ++revision }),
+              unreviewed: current?.unreviewed ?? noRecoveries,
+            });
+          }
         }
         if (Array.isArray(saved.recoveries)) {
           let retained = 0;
@@ -179,13 +207,19 @@ export function createPromptDraftStore(
   const notify = () => listeners.forEach((listener) => listener());
   const persist = () => {
     if (!persistent || !key) return;
+    retentionLimited = false;
     try {
       if (!drafts.size && !recoveries.size) persistent.removeItem(key);
       else {
         const record = {
           version,
           binding,
-          drafts: [...drafts].map(([id, draft]) => [id, draft.text]),
+          drafts: [...drafts].flatMap(([id, draft]) => [
+            ...(draft.value.text || (!coldImports && !draft.unreviewed.length)
+              ? [[id, draft.value.text]]
+              : []),
+            ...(draft.unreviewed ?? []).map((review) => [id, review.text, "unreviewed"]),
+          ]),
           ...(recoveries.size
             ? {
                 recoveries: [...recoveries].flatMap(([sessionId, entries]) =>
@@ -194,14 +228,24 @@ export function createPromptDraftStore(
               }
             : {}),
         };
-        if (stable && !boundedCheckpoint(record.drafts, record.recoveries))
-          throw new Error("Draft checkpoint exceeds its recovery retention bound.");
         const raw = JSON.stringify(record);
-        if (stable && new TextEncoder().encode(raw).length > maxPersistedBytes)
-          throw new Error("Draft checkpoint exceeds its encoded byte bound.");
+        if (
+          stable &&
+          (!boundedCheckpoint(record.drafts, record.recoveries) ||
+            new TextEncoder().encode(raw).length > maxPersistedBytes)
+        ) {
+          if (coldImports || [...drafts.values()].some((draft) => draft.unreviewed?.length)) {
+            // Keep protected old evidence intact. New typing stays verbatim in
+            // memory and the composer reports that it cannot yet be retained.
+            retentionLimited = true;
+            return;
+          }
+          throw new Error("Draft checkpoint exceeds its recovery retention bound.");
+        }
         persistent.setItem(key, raw);
       }
     } catch {
+      retentionLimited = true;
       // Do not leave an older persisted prompt to resurrect on the next reload.
       try {
         persistent.removeItem(key);
@@ -210,21 +254,31 @@ export function createPromptDraftStore(
       }
     }
   };
-  const get = (sessionId: string): PromptDraft => drafts.get(sessionId) ?? empty;
-  const update = (sessionId: string, text: string): PromptDraft => {
+  const get = (sessionId: string): PromptDraft => drafts.get(sessionId)?.value ?? empty;
+  const getUnreviewed = (sessionId: string) => drafts.get(sessionId)?.unreviewed ?? noRecoveries;
+  const update = (sessionId: string, text: string, reviewed?: PromptRecovery): PromptDraft => {
     if (closed) return empty;
+    const unreviewed = drafts.get(sessionId)?.unreviewed?.filter((entry) => entry !== reviewed);
     const draft = Object.freeze({ text, revision: ++revision });
     drafts.delete(sessionId);
     // Retain empty revisions in memory: an old acknowledgement must not match a later edit.
-    drafts.set(sessionId, draft);
+    drafts.set(sessionId, {
+      value: draft,
+      unreviewed: unreviewed?.length ? Object.freeze(unreviewed) : noRecoveries,
+    });
     let characters =
-      [...drafts.values()].reduce((total, item) => total + item.text.length, 0) +
-      [...recoveries.values()].flat().reduce((total, item) => total + item.text.length, 0);
+      [...drafts.values()].reduce(
+        (total, item) =>
+          total +
+          item.value.text.length +
+          (item.unreviewed ?? []).reduce((sum, review) => sum + review.text.length, 0),
+        0,
+      ) + [...recoveries.values()].flat().reduce((total, item) => total + item.text.length, 0);
     for (const [id, item] of drafts) {
-      if (drafts.size <= maxDrafts && characters <= maxRetainedCharacters) break;
-      if (id === sessionId) continue;
+      if (reviewed || (drafts.size <= maxDrafts && characters <= maxRetainedCharacters)) break;
+      if (id === sessionId || item.unreviewed?.length) continue;
       drafts.delete(id);
-      characters -= item.text.length;
+      characters -= item.value.text.length;
     }
     // The current prompt is never truncated, even when it alone exceeds the retention budget.
     persist();
@@ -251,6 +305,16 @@ export function createPromptDraftStore(
   };
   const removeRecovery = (sessionId: string, recovery: PromptRecovery) => {
     if (closed) return;
+    const draft = get(sessionId);
+    if (getUnreviewed(sessionId).includes(recovery)) {
+      drafts.set(sessionId, {
+        value: draft,
+        unreviewed: Object.freeze(getUnreviewed(sessionId).filter((entry) => entry !== recovery)),
+      });
+      persist();
+      notify();
+      return;
+    }
     const entries = getRecoveries(sessionId);
     // IDs survive persistence; object identity fences settlements against a replaced record.
     if (!entries.includes(recovery)) return;
@@ -262,13 +326,27 @@ export function createPromptDraftStore(
   };
   return {
     get,
-    update,
+    update: (sessionId: string, text: string) => update(sessionId, text),
     subscribe,
+    isRetentionLimited: () => retentionLimited,
+    useRetentionLimited: () =>
+      useSyncExternalStore(
+        subscribe,
+        () => retentionLimited,
+        () => retentionLimited,
+      ),
     useDraft: (sessionId: string) =>
       useSyncExternalStore(
         subscribe,
         () => get(sessionId),
         () => get(sessionId),
+      ),
+    getUnreviewed,
+    useUnreviewed: (sessionId: string) =>
+      useSyncExternalStore(
+        subscribe,
+        () => getUnreviewed(sessionId),
+        () => getUnreviewed(sessionId),
       ),
     getRecoveries,
     useRecoveries: (sessionId: string) =>
@@ -281,7 +359,10 @@ export function createPromptDraftStore(
       if (closed || get(sessionId) !== submitted) return null;
       const entries = [...recoveries.values()].flat();
       const otherDraftCharacters = [...drafts].reduce(
-        (sum, [id, draft]) => sum + (id === sessionId ? 0 : draft.text.length),
+        (sum, [id, draft]) =>
+          sum +
+          (id === sessionId ? 0 : draft.value.text.length) +
+          (draft.unreviewed ?? []).reduce((total, review) => total + review.text.length, 0),
         0,
       );
       if (
@@ -335,11 +416,16 @@ export function createPromptDraftStore(
         closed ||
         recovery.status === "pending" ||
         get(sessionId).text ||
-        !getRecoveries(sessionId).includes(recovery)
+        (!getRecoveries(sessionId).includes(recovery) &&
+          !getUnreviewed(sessionId).includes(recovery))
       )
         return false;
-      update(sessionId, recovery.text);
-      removeRecovery(sessionId, recovery);
+      if (getUnreviewed(sessionId).includes(recovery)) {
+        update(sessionId, recovery.text, recovery);
+      } else {
+        update(sessionId, recovery.text);
+        removeRecovery(sessionId, recovery);
+      }
       return true;
     },
     isSubmitting: (sessionId: string) => submissions.has(sessionId),
@@ -403,6 +489,10 @@ export const {
   update,
   subscribe,
   useDraft,
+  getUnreviewed,
+  useUnreviewed,
+  isRetentionLimited,
+  useRetentionLimited,
   getRecoveries,
   useRecoveries,
   retainSubmission,

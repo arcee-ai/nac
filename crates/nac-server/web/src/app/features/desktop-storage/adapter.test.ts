@@ -101,7 +101,9 @@ describe("desktop presentation storage adapter", () => {
       storage.drafts,
       storage.binding,
     );
-    expect(next.get("a").text).toBe("  !inert 雪\n/plan 🙂 ");
+    expect(next.get("a").text).toBe("");
+    expect(next.getUnreviewed("a")[0].text).toBe("  !inert 雪\n/plan 🙂 ");
+    expect(storage.preferences.coldImports).toBeUndefined();
     expect(next.isSubmitting("a")).toBe(false);
     expect(storage.preferences.getItem("nac.sidebar.open")).toBe("1");
     expect(port.write).not.toHaveBeenCalled();

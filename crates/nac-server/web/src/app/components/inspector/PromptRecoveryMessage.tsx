@@ -17,11 +17,13 @@ export function PromptRecoveryMessage({
   return (
     <div className="rounded-[4px] bg-elevation-level-2 p-3 text-small">
       <p role="status">
-        {recovery.status === "pending"
-          ? "Sending message…"
-          : recovery.status === "not-sent"
-            ? "Message was not sent."
-            : "Message delivery is unconfirmed. Check the transcript before sending it again."}
+        {recovery.source === "checkpoint"
+          ? "Recovered text may be stale or already sent. Check the transcript before restoring it."
+          : recovery.status === "pending"
+            ? "Sending message…"
+            : recovery.status === "not-sent"
+              ? "Message was not sent."
+              : "Message delivery is unconfirmed. Check the transcript before sending it again."}
       </p>
       <p className="max-h-32 overflow-auto whitespace-pre-wrap break-words">{recovery.text}</p>
       {recovery.status !== "pending" ? (

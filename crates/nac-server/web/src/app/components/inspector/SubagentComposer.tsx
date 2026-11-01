@@ -57,7 +57,8 @@ export function SubagentComposer({
   // Stored by durable target so status remounts and transcript trips keep the draft.
   const drafts = useNativeRuntime().stores.promptDraftStore;
   const draft = drafts.useDraft(target.id);
-  const recoveries = drafts.useRecoveries(target.id);
+  const recoveries = [...drafts.useUnreviewed(target.id), ...drafts.useRecoveries(target.id)];
+  const retentionLimited = drafts.useRetentionLimited();
   // Held in the runtime store, so a remount cannot start the same target twice.
   const starting = drafts.useSubmitting(target.id);
   const [selectedBackground, setBackground] = useState<boolean | null>(null);
@@ -163,6 +164,12 @@ export function SubagentComposer({
           ) : null
         }
       />
+      {retentionLimited ? (
+        <p role="status" className="text-small text-basic-secondary">
+          Text recovery storage is full or unavailable. You can keep typing and sending; new edits
+          may not restore. Review or dismiss older text to free space.
+        </p>
+      ) : null}
       {recoveries.length ? (
         <div
           role="region"

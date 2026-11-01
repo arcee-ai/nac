@@ -200,9 +200,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   perfRender("ChatInputBox");
   const drafts = runtime.stores.promptDraftStore;
-  const { text: value } = drafts.useDraft(sessionId);
+  const draft = drafts.useDraft(sessionId);
+  const { text: value } = draft;
+  const retentionLimited = drafts.useRetentionLimited();
   const submissionPending = drafts.useSubmitting(sessionId);
-  const recoveries = drafts.useRecoveries(sessionId);
+  const recoveries = [...drafts.useUnreviewed(sessionId), ...drafts.useRecoveries(sessionId)];
   const setValue = useCallback(
     (text: string) => {
       drafts.update(sessionId, text);
@@ -1149,6 +1151,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         compact={isMobile}
         surface={inlineGoal ? "goal" : focused ? "focus" : undefined}
       >
+        {retentionLimited ? (
+          <p role="status" className="px-2 text-small text-basic-secondary">
+            Text recovery storage is full or unavailable. You can keep typing and sending; new edits
+            may not restore. Review or dismiss older text to free space.
+          </p>
+        ) : null}
         {recoveries.length ? (
           <div
             role="region"

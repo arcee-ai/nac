@@ -6,7 +6,10 @@ and launch home. This does not copy Rust session/query/credential ownership into
 Swift. Ports and launch nonces remain live runtime fences; only nonsecret
 preferences and existing ALL-336 draft/review text use a stable persistence
 binding. The UI never restores an approval, shell intent, terminal bytes or a
-pending send request. Unknown submission outcomes remain text for review.
+pending send request. Unknown submission outcomes remain text for review. Cold
+checkpoint drafts also require explicit review/Restore because a valid old file
+cannot prove that a later accepted send or clear reached disk. Fresh typing and
+sending remain usable while that text awaits review; preferences are separate.
 
 Presentation files use private no-follow descriptors, an exclusive profile
 lease and ordered atomic replacements. An acknowledged native write is separate
@@ -15,7 +18,10 @@ memory, reports unavailable recovery and cannot prove durable clear or the last
 unacknowledged keystroke. Cross-Quit, new-port/profile isolation, file failures
 and replacement require actual system WKWebView evidence. Source and pure
 JavaScript tests alone do not qualify these native behaviors. Disposable preview
-keeps its ephemeral website store and existing owned cleanup.
+keeps its ephemeral website store and existing owned cleanup. The non-GUI
+`WorkspaceStorageRecoveryTests.swift` fixture characterizes actual dual write/
+unlink failure and fresh owner snapshots using an externally owned private root;
+it does not establish app/WK window, cross-Quit or trusted-input acceptance.
 
 ALL-340 wraps NAC's existing production workspace in AppKit and system
 WKWebView. It is a disposable development fixture, with a deterministic local
