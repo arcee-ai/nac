@@ -343,9 +343,14 @@ harness records this capacity in its build manifest and checks existing payload
 with 256 KiB reserved inside the non-image budget for final metadata. It rechecks
 the same allowance after every case. Completed image cases must form the fixed
 run/approval/terminal prefix; final success requires all fifteen original images.
-Extra paths, missing final images or any byte overflow stop remaining cases with
+Extra paths, missing successful final images or any byte overflow stop remaining cases with
 unknown export acceptance and no retry. This capacity declaration is source
 evidence; synthetic export-byte controls do not establish PNG validity or OCR.
+Stopped failed/unknown runs export their available original expected-path images
+from dispatched cases, including earlier successful cases, with complete bounded
+redacted JSON/logs. A separate failure-evidence receipt lists missing captures
+and explicitly denies native acceptance. This failure export never satisfies a
+successful case's exact-five or the final exact-fifteen capture requirement.
 
 Ordinary PR/push/release guards, permissions and the other named qualifications
 are preserved. A manual stable workflow also starts its existing ordinary CI jobs
