@@ -190,6 +190,7 @@ test("ALL473-E1 peer controls compose with quiet waits and exact human question 
   const evidence: Evidence = { case: "e1", calls: {} };
   const begin = new ScriptGate();
   const interactive = new AbortController();
+  let callerEvents: Response | undefined;
   try {
     evidence.identity = await identity(request, harness);
     const project = await createProject(request, harness);
@@ -199,13 +200,10 @@ test("ALL473-E1 peer controls compose with quiet waits and exact human question 
     evidence.actors = { project, peer, caller, observer };
     const config = await configuration(request, harness, caller);
     expect(await get(request, harness, `/sessions/${peer}/goal`)).toBeNull();
-    expect(
-      (
-        await fetch(`${harness.baseUrl}/sessions/${caller}/events/stream`, {
-          signal: interactive.signal,
-        })
-      ).ok,
-    ).toBe(true);
+    callerEvents = await fetch(`${harness.baseUrl}/sessions/${caller}/events/stream`, {
+      signal: interactive.signal,
+    });
+    expect(callerEvents.ok).toBe(true);
     harness.provider.enqueue(
       "e1-initial",
       { token: "E1_BEGIN" },
@@ -421,6 +419,7 @@ test("ALL473-E1 peer controls compose with quiet waits and exact human question 
   } finally {
     begin.release();
     interactive.abort();
+    await Promise.allSettled([callerEvents?.body?.cancel()]);
     await retain(info, harness, evidence);
   }
 });
@@ -434,6 +433,7 @@ test("ALL473-E2 restart reconciles original peer receipts and preserves exact re
   const evidence: Evidence = { case: "e2", calls: {} };
   const begin = new ScriptGate();
   let interactive = new AbortController();
+  let callerEvents: Response | undefined;
   try {
     evidence.identity = await identity(request, harness);
     const project = await createProject(request, harness);
@@ -443,13 +443,10 @@ test("ALL473-E2 restart reconciles original peer receipts and preserves exact re
     const config = await configuration(request, harness, caller);
     const file = path.join(harness.runRoot, "workspace", "e2-marker.txt");
     await fs.writeFile(file, "exact E2 target marker\n");
-    expect(
-      (
-        await fetch(`${harness.baseUrl}/sessions/${caller}/events/stream`, {
-          signal: interactive.signal,
-        })
-      ).ok,
-    ).toBe(true);
+    callerEvents = await fetch(`${harness.baseUrl}/sessions/${caller}/events/stream`, {
+      signal: interactive.signal,
+    });
+    expect(callerEvents.ok).toBe(true);
     harness.provider.enqueue(
       "e2-read",
       { token: "E2_BEGIN", requiredTools: ["read", "update_goal"] },
@@ -518,6 +515,8 @@ test("ALL473-E2 restart reconciles original peer receipts and preserves exact re
       "pid=,lstart=,command=",
     ]);
     interactive.abort();
+    await Promise.allSettled([callerEvents?.body?.cancel()]);
+    callerEvents = undefined;
     await harness.restart("1", undefined, true);
     const restarted = await identity(request, harness);
     expect(restarted.binary_sha256).toBe(firstIdentity.binary_sha256);
@@ -532,13 +531,10 @@ test("ALL473-E2 restart reconciles original peer receipts and preserves exact re
       stop: "existing harness.stopServer completed; old exit code is not exposed by restart",
     };
     interactive = new AbortController();
-    expect(
-      (
-        await fetch(`${harness.baseUrl}/sessions/${caller}/events/stream`, {
-          signal: interactive.signal,
-        })
-      ).ok,
-    ).toBe(true);
+    callerEvents = await fetch(`${harness.baseUrl}/sessions/${caller}/events/stream`, {
+      signal: interactive.signal,
+    });
+    expect(callerEvents.ok).toBe(true);
     const beforeReplay = await native<TaskRead>(
       request,
       harness,
@@ -697,6 +693,7 @@ test("ALL473-E2 restart reconciles original peer receipts and preserves exact re
   } finally {
     begin.release();
     interactive.abort();
+    await Promise.allSettled([callerEvents?.body?.cancel()]);
     await retain(info, harness, evidence);
   }
 });
