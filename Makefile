@@ -254,6 +254,8 @@ test-workflow-lint: test-heartbeat-evidence-controls
 .PHONY: test-heartbeat-evidence-controls
 test-heartbeat-evidence-controls:
 	python3 -B .github/scripts/heartbeat-evidence/contract.test.py
+	python3 -B .github/scripts/heartbeat-evidence/runner.test.py
+	python3 -B .github/scripts/heartbeat-evidence/artifact_upload.test.py
 	python3 -B .github/scripts/heartbeat-evidence/custody.test.py
 	python3 -B .github/scripts/heartbeat-evidence/custody_check.test.py
 	node --test .github/scripts/heartbeat-evidence.test.mjs

@@ -19,6 +19,8 @@ test('ordinary workflow checks include only pure evidence controls',()=>{
  assert.ok(target);
  assert.deepEqual(target.trim().split('\n').map(s=>s.trim()),[
   'python3 -B .github/scripts/heartbeat-evidence/contract.test.py',
+  'python3 -B .github/scripts/heartbeat-evidence/runner.test.py',
+  'python3 -B .github/scripts/heartbeat-evidence/artifact_upload.test.py',
   'python3 -B .github/scripts/heartbeat-evidence/custody.test.py',
   'python3 -B .github/scripts/heartbeat-evidence/custody_check.test.py',
   'node --test .github/scripts/heartbeat-evidence.test.mjs',
@@ -75,7 +77,16 @@ test('control is event SHA, product is independently pinned, and artifacts survi
  assert.match(steps[bind].run,/finally:[\s\S]*dispatch.json/);
  assert.match(steps[setup].run,/setup-terminal.json/);
  const upload=steps.find(s=>s.uses?.startsWith('actions/upload-artifact@'));
- assert.equal(upload.if,'always()');
+ assert.equal(upload.if,"${{ always() && steps.evidence-guard.outcome == 'success' }}");
+ const guard=steps.find(s=>s.id==='evidence-guard');
+ assert.equal(guard.if,'always()');
+ assert.equal(guard.run,'python3 -B control/.github/scripts/heartbeat-evidence/artifact_upload.py');
+ assert.ok(steps.indexOf(guard)<steps.indexOf(upload));
+ assert.equal(upload.with['include-hidden-files'],true);
+ assert.deepEqual(upload.with.path.trim().split('\n'),[
+  '${{ runner.temp }}/heartbeat-evidence/',
+  '!${{ runner.temp }}/heartbeat-evidence/run-build/**',
+ ]);
  assert.equal(upload.with['if-no-files-found'],'error');
  assert.match(upload.with.name,/github.run_attempt/);
  assert.equal(steps.some(s=>/workflow run|rerun|dispatches|gh api/.test(s.run??'')),false);
@@ -102,11 +113,12 @@ test('custody-only proves real cancellation before costly setup and cannot run p
  assert.equal(product.length,6);
  assert.ok(product.every(s=>s.if==="${{ inputs.mode == 'matched-and-measure' }}"));
  assert.match(steps[gate-1].run,/require\(mode in \(MODE, CUSTODY_MODE\)/);
- assert.equal(steps.at(-1).if,'always()');
+ assert.equal(steps.find(s=>s.id==='evidence-guard').if,'always()');
+ assert.equal(steps.at(-1).if,"${{ always() && steps.evidence-guard.outcome == 'success' }}");
 });
 
 test('workflow import policy reaches named cases from a clean tracked control tree',t=>{
- const directory=fs.mkdtempSync(path.join(os.tmpdir(),'nac-import-policy-'));
+ const directory=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'nac-import-policy-')));
  const steps=evidence.jobs.evidence.steps;
  const binding=steps.find(s=>s.name?.startsWith('Bind explicit')).run;
  const bindingLines=binding.trim().split('\n');
@@ -151,7 +163,7 @@ with patch.object(fixture.platform,'system',return_value='Linux'), \
   fs.mkdirSync(scripts,{recursive:true});
   fs.mkdirSync(temporary);
   fs.copyFileSync('.gitignore',path.join(control,'.gitignore'));
-  for(const file of ['contract.py','owned_process.py','namespace_custody.py','run.py','custody_check.py'])
+  for(const file of ['contract.py','artifact_upload.py','owned_process.py','namespace_custody.py','run.py','custody_check.py'])
    fs.copyFileSync('.github/scripts/heartbeat-evidence/'+file,path.join(scripts,file));
   // Child-local configuration excludes host ignore/cache/signing settings.
   const environment={PATH:process.env.PATH,HOME:work,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'};
@@ -168,6 +180,7 @@ with patch.object(fixture.platform,'system',return_value='Linux'), \
   const event=path.join(work,'event.json');
   fs.writeFileSync(event,JSON.stringify({inputs:{heartbeat_evidence:'custody-check',heartbeat_control_sha:head}}));
   const common={...environment,EXPECTED_CONTROL:head,GITHUB_SHA:head,GITHUB_ACTIONS:'true',
+   GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',
    GITHUB_REF:'refs/heads/codex/all-480-linux-evidence',GITHUB_EVENT_NAME:'workflow_dispatch',
    EVIDENCE_MODE:'custody-check',GITHUB_EVENT_PATH:event,RUNNER_TEMP:temporary};
   const policy=value=>value===undefined?{}:{PYTHONDONTWRITEBYTECODE:String(value)};

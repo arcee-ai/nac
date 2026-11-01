@@ -37,8 +37,14 @@ Replace the last value with W's full forty-character commit. A moved branch
 fails the W/event/checkout comparison. Do not dispatch as a test of the API: it
 starts real work. [GitHub documents branch selection and declared inputs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow?tool=cli),
 and the [REST contract binds ref and configured inputs](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event).
-Prior registered-lane branch dispatches establish that capability; acceptance
-of these new inputs and this runtime remains unexecuted until an allocated run.
+The original full attempt [41307523898](https://github.com/arcee-ai/nac/actions/runs/41307523898)
+at control `dabe739b48c0c45fc85f714ee623b8e7a23c29e4` failed the support parser's
+hardcoded filtered count: the exact test passed with351 filtered, versus352
+expected. Its two fresh-host custody cases and original matched captures passed;
+the overall run remains failed. Twenty manifested font-cache originals were
+absent from its upload, and postmeasurement checks were not reached. Those raw
+outputs remain immutable. This candidate corrects the support harness only;
+its changed runtime and upload path have not been executed or qualified.
 
 ## Execution and custody
 
@@ -67,12 +73,20 @@ child wait, with bounded signal retirement and the job's45-minute hard limit:
    generic state versus H's visible error, settled layout/fonts and unclipped
    text. Preserve original PNGs/traces/network logs without masking or editing.
 3. Require capture/browser namespace members to settle before measurement.
-4. Run the exact existing ignored1/10/100 test once, single-threaded, with its
+4. List the full registered test inventory using `--list` on the same retained
+   measurement executable; require unique names, an exact inventory summary and
+   exactly one registration of the complete measurement name. Bind its hash.
+   Then run the exact existing ignored1/10/100 test once, single-threaded, with its
    original two owners and1cold+24warm scans. Require one selected pass, three
    complete finite metric rows and original1/4/4 admitted plus0/6/96 pending.
+   Require the filtered count to equal the actual full inventory minus that
+   one selected test, rather than a count copied from another platform.
    No timing threshold, repeat, automatic repair or heavy concurrent work is added.
 5. Retain raw stdout/stderr, first safe error, typed child exits/signals, fixture
    removal checks, memory/load samples, namespace settlement and artifact hashes.
+   After a measurement attempt, record postmeasurement resources, fixture checks
+   and final product verification even if parsing fails. Attempt each final check
+   and retain its errors without replacing the original failure or retrying work.
 
 Only retained child handles are signaled. No host PID/process inventory or old
 PGID fallback exists. The namespace PID1 reaps orphans and fails on remaining
@@ -81,7 +95,18 @@ is a Linux namespace boundary, not universal host cleanup or Darwin qualificatio
 See [unshare](https://man7.org/linux/man-pages/man1/unshare.1.html) and
 [PID namespace lifetime](https://man7.org/linux/man-pages/man7/pid_namespaces.7.html).
 
-Artifacts upload on success and failure, including the original matched PNGs,
+Artifact retention first validates the exclusively created0700 evidence root,
+bound to control/run/attempt and current UID before setup. A no-follow descriptor
+walk rejects symlinks, hard links, foreign ownership, unexpected top-level or
+hidden paths, sensitive file names and missing/changed producer-manifest entries.
+The only allowed hidden subtree is the owned run's fontconfig cache. The upload
+includes hidden originals only after this guard passes, scoped to that evidence
+root; it explicitly excludes the separate unmanifested `run-build/**` compiler
+cache. Original binaries remain in `run/bin`, with original logs and manifests.
+A validation failure fails closed and leaves its diagnostic in the job log.
+No global home, credential cache, product checkout or workspace is an upload input.
+
+Validated artifacts upload on success and failure, including the original matched PNGs,
 both retained executables, manifests and full logs. Header/dimension/hash checks
 do not replace individual visual inspection: that remains pending after capture.
 Hosted VM background/hypervisor competition is not controlled; samples are not
@@ -95,6 +120,8 @@ Source/mocked checks only:
 
 ```sh
 python3 -B .github/scripts/heartbeat-evidence/contract.test.py
+python3 -B .github/scripts/heartbeat-evidence/runner.test.py
+python3 -B .github/scripts/heartbeat-evidence/artifact_upload.test.py
 node --test .github/scripts/heartbeat-evidence.test.mjs
 node --check .github/scripts/heartbeat-evidence/capture.mjs
 make lint-workflows

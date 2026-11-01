@@ -39,9 +39,10 @@ jobs:
           import os, sys
           from pathlib import Path
           sys.path.insert(0, 'control/.github/scripts/heartbeat-evidence')
+          from artifact_upload import initialize_output
           from contract import BASELINE, HEAD, TREE, MODE, CUSTODY_MODE, require, validate_request, write_json
           output = Path(os.environ['RUNNER_TEMP'])/'heartbeat-evidence'
-          output.mkdir(mode=0o700)
+          initialize_output(output, os.environ['EXPECTED_CONTROL'])
           proof = {'state': 'FAIL_DISPATCH_BINDING', 'runtime_started': False}
           try:
               mode = os.environ['EVIDENCE_MODE']
@@ -94,11 +95,18 @@ jobs:
           python3 control/.github/scripts/heartbeat-evidence/run.py \
             --product "$GITHUB_WORKSPACE/product" --control "$EXPECTED_CONTROL" \
             --mode "$EVIDENCE_MODE" --output "$RUNNER_TEMP/heartbeat-evidence/run"
-      - name: Retain original PNGs, binaries, logs and provenance on every outcome
+      - name: Validate the fresh owned evidence tree before retaining hidden originals
+        id: evidence-guard
         if: always()
+        run: python3 -B control/.github/scripts/heartbeat-evidence/artifact_upload.py
+      - name: Retain validated original PNGs, binaries, logs and provenance on every outcome
+        if: ${{ always() && steps.evidence-guard.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: heartbeat-evidence-${{ inputs.control-sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/heartbeat-evidence
+          path: |
+            ${{ runner.temp }}/heartbeat-evidence/
+            !${{ runner.temp }}/heartbeat-evidence/run-build/**
+          include-hidden-files: true
           retention-days: 14
           if-no-files-found: error

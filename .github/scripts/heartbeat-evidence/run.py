@@ -16,7 +16,7 @@ import time
 import uuid
 
 from contract import (ASSETS, BASELINE, HEAD, MODE, TEST, TREE, artifact_manifest,
-                      measurement_rows, require, sha256, test_executable,
+                      measurement_inventory, measurement_rows, require, sha256, test_executable,
                       validate_event, validate_request, verify_pair, write_json)
 from owned_process import clean_environment, interrupt, reap_namespace, run_owned
 from namespace_custody import Lifeline, NamespaceCustody, execute_namespace
@@ -99,6 +99,39 @@ def resource_sample():
             'interpretation': 'Hosted VM observations; background/physical-neighbor competition unknown'}
 
 
+def safe_error(error):
+    code = str(error)
+    return code if isinstance(error, RuntimeError) and re.fullmatch('[A-Z][A-Z0-9_]{0,63}', code) else 'EVIDENCE_PHASE_FAILED'
+
+
+def final_checks(result, product, output, measurement_started):
+    """Attempt every final check; preserve the original failure and each cleanup error."""
+    errors = []
+    labels = (['post-measurement-resources', 'performance-fixture-cleanup'] if measurement_started else [])
+    for label in labels+['final-product-verification']:
+        proof = {'state': 'FAIL', 'first_error': None}
+        try:
+            if label == 'post-measurement-resources':
+                proof['resources'] = resource_sample()
+                result['resources_after_measurement'] = proof['resources']
+            elif label == 'performance-fixture-cleanup':
+                proof.update(remaining=sorted(file.name for file in (output/'perf-tmp').iterdir()),
+                             automatic_delete=False)
+                require(not proof['remaining'], 'PERFORMANCE_FIXTURE_RETAINED')
+            else:
+                verify_product(product)
+                proof.update(head=HEAD, tree=TREE, assets=ASSETS)
+            proof['state'] = 'PASS'
+        except BaseException as error:
+            proof['first_error'] = safe_error(error)
+            errors.append({'check': label, 'code': proof['first_error']})
+        try:
+            write_json(output/(label+'.json'), proof)
+        except BaseException:
+            errors.append({'check': label, 'code': 'FINAL_CHECK_RECEIPT_FAILED'})
+    return errors
+
+
 def inside(context_file, output):
     context = json.loads(context_file.read_text())
     namespace, lifeline = bootstrap_namespace(context)
@@ -114,6 +147,7 @@ def workload(context, output, namespace):
     product = Path(context['product'])
     deadline = time.monotonic()+1200
     first_error = None
+    measurement_started = False
     result = {'state': 'FAIL', 'control': context['control'], 'head': HEAD, 'tree': TREE,
               'baseline': BASELINE, 'namespace': namespace, 'runtime_attempts': 1,
               'live_vendor': False, 'functional_six': 'Consumed existing CI, not rerun',
@@ -152,26 +186,34 @@ def workload(context, output, namespace):
         write_json(output/'capture-namespace-settlement.json', settled)
         require(not settled['remaining'], 'CAPTURE_CHILDREN_REMAIN')
         require(not list((output/'perf-tmp').iterdir()), 'PERF_TMP_NOT_EMPTY')
+        phase('measurement-inventory', [measurement, '--list'], 20)
+        require(sha256(measurement) == result['measurement_binary']['sha256'], 'MEASUREMENT_BINARY_CHANGED')
+        inventory = measurement_inventory((output/'measurement-inventory.stdout').read_text())
+        result['measurement_inventory'] = {**inventory, 'binary_sha256': sha256(measurement)}
+        write_json(output/'measurement-inventory.json', result['measurement_inventory'])
         result['resources_before_measurement'] = resource_sample()
         # No compile, browser, other NAC process or parallel invocation survives
         # into this single measurement, under the outer exclusive lock.
+        measurement_started = True
         phase('measurement', [measurement, TEST, '--ignored', '--exact', '--nocapture', '--test-threads=1'], 180,
               {**environment, 'TMPDIR': str(output/'perf-tmp')})
-        result['measurement'] = measurement_rows((output/'measurement.stdout').read_text())
-        result['resources_after_measurement'] = resource_sample()
-        leftovers = sorted(file.name for file in (output/'perf-tmp').iterdir())
-        write_json(output/'performance-fixture-cleanup.json', {'remaining': leftovers, 'automatic_delete': False})
-        require(not leftovers, 'PERFORMANCE_FIXTURE_RETAINED')
-        verify_product(product)
+        result['measurement'] = measurement_rows((output/'measurement.stdout').read_text(), inventory)
         result['state'] = 'PASS_SOURCE_BOUND_PAIR_AND_MEASUREMENT; PIXEL_REVIEW_PENDING'
     except BaseException as error:
-        code = str(error)
-        first_error = code if isinstance(error, RuntimeError) and re.fullmatch('[A-Z][A-Z0-9_]{0,63}', code) else 'EVIDENCE_PHASE_FAILED'
+        first_error = safe_error(error)
     finally:
-        settlement = reap_namespace()
+        errors = final_checks(result, product, output, measurement_started)
+        try:
+            settlement = reap_namespace()
+        except BaseException:
+            settlement = {'remaining': 'UNKNOWN'}
+            errors.append({'check': 'namespace-settlement', 'code': 'NAMESPACE_SETTLEMENT_FAILED'})
         result['namespace_settlement'] = settlement
         if settlement['remaining']:
-            first_error = first_error or 'NAMESPACE_CHILDREN_REMAIN'
+            errors.append({'check': 'namespace-settlement', 'code': 'NAMESPACE_CHILDREN_REMAIN'})
+        result['cleanup_errors'] = errors
+        result['measurement_attempted'] = measurement_started
+        first_error = first_error or (errors[0]['code'] if errors else None)
         if first_error:
             result['state'] = 'FAIL'
         result['first_error'] = first_error

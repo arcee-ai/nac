@@ -18,8 +18,9 @@ from namespace_custody import Kernel, NamespaceCustody, receive_fd, send_fd
 from owned_process import clean_environment, interrupt
 
 SOURCE = Path(__file__).resolve().parent
-# Exact production owners reviewed at 88a3ed813; fixture copies no implementation.
-OWNER_HASHES = {'run.py': 'c7cca122b5f96ac505c5fd46b54c87cf3f5b41abe91f3ef39e3f44f3ed36759a', 'namespace_custody.py': '0fc67f4332480afa1e90fe3107bccf9c41cbab284029d4b4833b391c665a9ce8', 'owned_process.py': '7e747e4d051e3b13a510f46968d028f7c24a89b853297e306f6f213c4e256757'}
+# Exact production owners; changed owner hashes require affected source review.
+# The fixture copies no implementation and does not alter production custody.
+OWNER_HASHES = {'run.py': 'af654f9cb797ac7e39d5bcd9e4ed1ed6f20d169566af83b32649e51e5c308c9b', 'namespace_custody.py': '0fc67f4332480afa1e90fe3107bccf9c41cbab284029d4b4833b391c665a9ce8', 'owned_process.py': '7e747e4d051e3b13a510f46968d028f7c24a89b853297e306f6f213c4e256757'}
 spec = importlib.util.spec_from_file_location('evidence_owner', SOURCE/'run.py')
 owner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(owner)

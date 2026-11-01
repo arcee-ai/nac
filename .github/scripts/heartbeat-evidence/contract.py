@@ -62,11 +62,32 @@ def write_json(path, value):
     temporary.replace(path)
 
 
-def measurement_rows(stdout):
-    selected = re.findall(r'^test result: ok\. (\d+) passed; (\d+) failed; (\d+) ignored;', stdout, re.M)
-    require(selected == [('1', '0', '0')], 'EXACT_ONE_MEASUREMENT_TEST')
-    require(re.search(r'^test ' + re.escape(TEST) + r' \.\.\.', stdout, re.M), 'MEASUREMENT_TEST_NAME')
-    require(re.search(r'0 measured; 352 filtered out;', stdout), 'MEASUREMENT_FILTER_COUNT')
+def measurement_inventory(stdout):
+    lines = [line for line in stdout.splitlines() if line]
+    require(bool(lines), 'MEASUREMENT_INVENTORY_EMPTY')
+    summary = re.fullmatch(r'(\d+) tests?, (\d+) benchmarks?', lines[-1])
+    require(summary is not None and summary[2] == '0', 'MEASUREMENT_INVENTORY_SUMMARY')
+    entries = [re.fullmatch(r'(\S+): test', line) for line in lines[:-1]]
+    require(all(entries), 'MEASUREMENT_INVENTORY_ENTRY')
+    names = [entry[1] for entry in entries]
+    require(len(names) == int(summary[1]) and len(set(names)) == len(names),
+            'MEASUREMENT_INVENTORY_COUNT')
+    require(names.count(TEST) == 1, 'MEASUREMENT_INVENTORY_SELECTION')
+    return {'registered_tests': names, 'total': len(names), 'measurement_test': TEST}
+
+
+def measurement_rows(stdout, inventory):
+    names = inventory['registered_tests']
+    require(inventory['total'] == len(names) == len(set(names)) and names.count(TEST) == 1
+            and inventory['measurement_test'] == TEST, 'MEASUREMENT_INVENTORY_BINDING')
+    require(re.findall(r'^running (\d+) tests?$', stdout, re.M) == ['1'], 'EXACT_ONE_MEASUREMENT_TEST')
+    selected = re.findall(r'^test (\S+) \.\.\.', stdout, re.M)
+    require(selected == [TEST], 'MEASUREMENT_TEST_NAME')
+    summaries = re.findall(r'^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; '
+                           r'(\d+) measured; (\d+) filtered out; finished in [^\n]+$', stdout, re.M)
+    require(len(summaries) == 1 and summaries[0][:5] == ('ok', '1', '0', '0', '0'),
+            'EXACT_ONE_MEASUREMENT_TEST')
+    require(int(summaries[0][5]) == inventory['total']-1, 'MEASUREMENT_FILTER_COUNT')
     # libtest prints the test prefix before the first println with --nocapture.
     rows = [json.loads(value) for value in re.findall(
         r'(?:^|\s)HEARTBEAT_MEASUREMENT (\{[^\n]*\})', stdout, re.M)]

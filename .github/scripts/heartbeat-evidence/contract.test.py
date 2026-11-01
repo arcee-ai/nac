@@ -1,5 +1,6 @@
 """Pure/mocked controls; never compile, launch a browser, query helpers or namespaces."""
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -8,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import contract as c
@@ -32,11 +33,16 @@ def rows():
             for n, active in [(1, 1), (10, 4), (100, 4)]]
 
 
+def inventory(count=3):
+    names = [c.TEST]+[f"synthetic::test_{i}" for i in range(count-1)]
+    return c.measurement_inventory("\n".join(name+": test" for name in names)+f"\n\n{count} tests, 0 benchmarks\n")
+
+
 def output(values=None):
     # Actual libtest's prefix can precede the first println on the same line.
     return ('running 1 test\ntest '+c.TEST+' ... '+
             '\n'.join('HEARTBEAT_MEASUREMENT '+json.dumps(row) for row in (values or rows()))+
-            '\nok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 352 filtered out; finished in 1s\n')
+            '\nok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 1s\n')
 
 
 class Child:
@@ -88,12 +94,12 @@ class Contracts(unittest.TestCase):
                 c.validate_event(value, c.MODE, control)
 
     def test_measurement_actual_prefix_and_nonzero_selection(self):
-        self.assertEqual(c.measurement_rows(output()), rows())
+        self.assertEqual(c.measurement_rows(output(), inventory()), rows())
         for bad in [output().replace('1 passed;', '0 passed;'), output().replace('0 ignored;', '1 ignored;'),
-                    output().replace('352 filtered', '0 filtered'), output().replace(c.TEST, 'other'),
+                    output().replace('2 filtered', '0 filtered'), output().replace(c.TEST, 'other'),
                     output(rows()[:2]), output(rows()+[rows()[0]])]:
             with self.assertRaises(RuntimeError):
-                c.measurement_rows(bad)
+                c.measurement_rows(bad, inventory())
 
     def test_measurement_retains_assertions_and_finite_complete_values(self):
         for key, value in [('owners', 1), ('admitted', 2), ('pending', True), ('warm_p95_ms', float('nan')),
@@ -101,11 +107,11 @@ class Contracts(unittest.TestCase):
             values = rows()
             values[0][key] = value
             with self.assertRaises(RuntimeError):
-                c.measurement_rows(output(values))
+                c.measurement_rows(output(values), inventory())
         values = rows()
         values[1]['warm_p50_ms'] = 2
         with self.assertRaisesRegex(RuntimeError, 'MEASUREMENT_ORDER'):
-            c.measurement_rows(output(values))
+            c.measurement_rows(output(values), inventory())
 
     def test_one_compiled_library_executable(self):
         item = {'reason': 'compiler-artifact', 'target': {'name': 'nac_server'},
@@ -114,6 +120,40 @@ class Contracts(unittest.TestCase):
         for text in ('', json.dumps(item)+'\n'+json.dumps(item), json.dumps({**item, 'executable': None})):
             with self.assertRaisesRegex(RuntimeError, 'EXACT_TEST_EXECUTABLE'):
                 c.test_executable(text)
+
+    def test_original_linux_stdout_uses_registered_inventory_not_host_constant(self):
+        # Byte-for-byte original from run41307523898; original qualifier failed352 vs351.
+        file = Path(__file__).parent/'fixtures/linux-41307523898-measurement.json'
+        fixture = json.loads(file.read_text())
+        raw = fixture['stdout']
+        self.assertEqual(hashlib.sha256(raw.encode()).hexdigest(), '5d54f8c96aa08f31113fb86406ec4984621839ee9bfd0ad7ed02431a1ad41f24')
+        self.assertEqual(fixture['stdout_sha256'], hashlib.sha256(raw.encode()).hexdigest())
+        self.assertEqual([r['schedules'] for r in c.measurement_rows(raw, inventory(352))], [1, 10, 100])
+        with self.assertRaisesRegex(RuntimeError, 'MEASUREMENT_FILTER_COUNT'):
+            c.measurement_rows(raw, inventory(353))
+
+    def test_inventory_rejects_missing_duplicate_wrong_selection_or_summary(self):
+        good = c.TEST+': test\nother: test\n\n2 tests, 0 benchmarks\n'
+        self.assertEqual(c.measurement_inventory(good)['total'], 2)
+        for bad in ['', good.replace(c.TEST, 'wrong'), good.replace('other', c.TEST),
+                    good.replace('2 tests', '3 tests'), good.replace(': test', ': benchmark', 1),
+                    good.replace('0 benchmarks', '1 benchmark'), good+'unexpected\n']:
+            with self.assertRaises(RuntimeError):
+                c.measurement_inventory(bad)
+
+    def test_measurement_cannot_hide_duplicate_selection_summaries_failure_or_ignored(self):
+        raw = output()
+        for bad in [raw+raw, raw.replace('running 1 test', 'running 0 tests'),
+                    raw.replace('1 passed; 0 failed', '0 passed; 1 failed'),
+                    raw.replace('test result: ok.', 'test result: FAILED.'),
+                    raw.replace('0 measured', '1 measured'),
+                    raw.replace('test '+c.TEST+' ...', 'test other ...\ntest '+c.TEST+' ...')]:
+            with self.assertRaises(RuntimeError):
+                c.measurement_rows(bad, inventory())
+        forged = inventory()
+        forged['total'] += 1
+        with self.assertRaisesRegex(RuntimeError, 'MEASUREMENT_INVENTORY_BINDING'):
+            c.measurement_rows(raw, forged)
 
     def test_environment_drops_vendor_credentials_and_preserves_tools(self):
         with patch.dict(os.environ, {'PATH': '/tools', 'OPENAI_API_KEY': 'synthetic',
@@ -185,46 +225,5 @@ class Contracts(unittest.TestCase):
             (Path(directory)/'foreign').symlink_to('/does-not-exist')
             with self.assertRaisesRegex(RuntimeError, 'ARTIFACT_SYMLINK'):
                 c.artifact_manifest(directory)
-
-    def test_inside_orders_build_capture_settle_measure_and_stops_on_orphans(self):
-        for orphan in (False, True):
-            with tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                product, out = root/'product', root/'out'
-                product.mkdir()
-                out.mkdir()
-                context = root/'context.json'
-                c.write_json(context, {'control': 'a'*40, 'product': str(product),
-                                      'browsers': '/synthetic', 'tool_environment': {'PATH': '/synthetic'}})
-                calls = []
-
-                def phase(argv, cwd, env, output_dir, label, seconds):
-                    calls.append(label)
-                    build = root/'out-build'
-                    if label == 'build-product':
-                        (build/'debug').mkdir()
-                        (build/'debug/nac-web').write_bytes(b'synthetic executable')
-                    if label == 'build-measurement':
-                        executable = build/'test'
-                        executable.write_bytes(b'synthetic test')
-                        (out/(label+'.stdout')).write_text(json.dumps({'reason': 'compiler-artifact',
-                            'target': {'name': 'nac_server'}, 'profile': {'test': True}, 'executable': str(executable)}))
-                    if label == 'measurement':
-                        (out/(label+'.stdout')).write_text(output())
-
-                with patch.dict(os.environ, {}, clear=True), \
-                     patch.object(runner, 'bootstrap_namespace', return_value=({'pid1': True}, Mock())), \
-                     patch.object(runner, 'verify_product'), patch.object(runner, 'run_owned', phase), \
-                     patch.object(runner, 'verify_pair', return_value=[]), \
-                     patch.object(runner, 'resource_sample', return_value={}), \
-                     patch.object(runner, 'reap_namespace', return_value={'remaining': [303] if orphan else []}):
-                    code = runner.inside(context, out)
-                self.assertEqual(calls[:3], ['build-product', 'build-measurement', 'capture-pair'])
-                self.assertEqual('measurement' in calls, not orphan)
-                self.assertEqual(code, 90 if orphan else 0)
-                result = json.loads((out/'evidence.json').read_text())
-                self.assertEqual(result['first_error'], 'CAPTURE_CHILDREN_REMAIN' if orphan else None)
-
-
 if __name__ == '__main__':
     unittest.main()
