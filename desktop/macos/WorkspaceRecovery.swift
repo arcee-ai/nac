@@ -21,6 +21,7 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
     private var restart: NSButton?
     private var notice: NSTextField?
     private var restartConfirmation: NSAlert?
+    private var restartRendererFailure: (() -> Void)?
     private(set) var engineStateLost = false
     var noticeHeight: CGFloat { engineStateLost ? 52 : 0 }
     var restoredFragment: String? { routeFragment }
@@ -94,7 +95,19 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
     }
 
     func rendererFailed(_ message: String) {
-        guard !closed, !busy, app.failure == nil else { return }
+        guard !closed, !app.stopping, !sleeping, !Task.isCancelled, app.failure == nil else { return }
+        if restartConfirmation != nil {
+            // Retain only this observed loss, never an input or operation. The
+            // weak view and pinned generation/engine fence its eventual drain.
+            let expected = generation, pinned = app.engine.receipt
+            restartRendererFailure = { [weak self, weak view = app.webView] in
+                guard let self, let view, self.app.webView === view, self.current(expected),
+                      let pinned, self.sameEngine(pinned) else { return }
+                self.rendererFailed(message)
+            }
+            return
+        }
+        guard !busy else { return }
         reconnect(message, automatic: true)
     }
 
@@ -143,6 +156,7 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
     }
 
     func documentLoaded() {
+        restartRendererFailure = nil
         needsRecovery = false
         hideActions()
     }
@@ -177,6 +191,12 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
             guard let self, self.restartConfirmation === alert else { return }
             self.restartConfirmation = nil
             self.busy = false
+            let rendererFailure = self.restartRendererFailure
+            self.restartRendererFailure = nil
+            if answer == .alertFirstButtonReturn {
+                rendererFailure?()
+                return
+            }
             guard answer == .alertSecondButtonReturn, !self.closed,
                   self.app.canRecoverWorkspace, self.restartAttempts < 2 else { return }
             self.performRestart()
@@ -266,9 +286,14 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
 
     /// Yield only this owner's sheet before AppQuit owns its asynchronous Quit
     /// episode. A late Restart answer cannot race that newer human request.
-    func applicationQuitRequested() { cancelConfirmation() }
+    func applicationQuitRequested() {
+        let rendererFailure = restartRendererFailure
+        cancelConfirmation()
+        rendererFailure?()
+    }
 
     private func cancelConfirmation() {
+        restartRendererFailure = nil
         guard let alert = restartConfirmation else { return }
         restartConfirmation = nil
         app.window.endSheet(alert.window, returnCode: .alertFirstButtonReturn)
