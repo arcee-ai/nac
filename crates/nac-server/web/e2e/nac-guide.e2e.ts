@@ -123,7 +123,9 @@ for (const journey of [
     if (journey.document === "skills") {
       await page.setViewportSize({ width: 390, height: 844 });
       await expect(page.getByText(journey.answer, { exact: true })).toBeVisible();
-      await expect(page.getByText(journey.question, { exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("main").getByText(journey.question, { exact: true }),
+      ).toBeVisible();
       await expect(page.getByText("Skill expanded: $nac-help", { exact: true })).toBeVisible();
     }
     // A help read never launches workers, adds sessions or edits MCP settings.
