@@ -281,3 +281,61 @@ always-retained failure evidence and existing positive cleanup. Reusing the
 four-case driver would request unauthorized XCTest/input; changing that driver
 or inventing a launch path is outside this source unit. Q057, all guards and
 inputs, XCTest entitlements/sandbox, P10/R and the four-case matrix stay intact.
+## Fixed hosted lifecycle qualification (ALL-344)
+
+`all-344-lifecycle-macos26` adds one closed adapter to the existing exact-supplier
+lane. It pins supplier `7d8322f1d8cad25cc1aa79dc5a7a025a6719065b` and tree
+`89a58b792f4b181a6d64af5dfcb5bc4d6bb24053`; the supplier must be published by its
+owner before GitHub can check it out. Its normal fifteen Swift inputs, production
+blobs, fixture, builder and observer are unchanged. Historical local bundle hashes
+are custody evidence; fresh hosted binary hashes are checked against fresh build
+receipts, rather than assumed equal across toolchains.
+
+The root coordinator is the cross-host authority for allocation
+`nac344-ordering-7e-one`. Its original three cases were blocked before dispatch
+and remain unspent until separately admitted. Before the one workflow dispatch,
+root must atomically reserve its durable transfer/custody record, bind the exact
+published harness and supplier, and supply `lifecycle_custody` JSON. The capsule
+must contain exactly the fields checked by `require_capsule`: version, allocation,
+supplier/tree, harness, repository/workflow/branch, attempt 1, ordered scenarios,
+all-zero prior counts, zero retry/production-repair budgets, the eight pinned
+historical custody digests, and a root-reserved 64-hex admission nonce. Missing,
+altered or extra fields fail closed. A lost dispatch response is reconciled by
+root against the existing run, never resubmitted. This contents-read runner is
+not a global replay database: root must reject reuse of a capsule on another host.
+
+The existing macOS 26 toolchain envelope and positive hosted console guards
+remain required. Setup, a private exact Rust engine, all five build-only bundle
+modes and the image reader complete before any case reservation. Each case
+rechecks source/build/console identity, then fsyncs its command and custody hashes
+before spawn. The fixed order is `run`, `approval`, `terminal`; no case repeats,
+and the first failure, interruption, unknown cleanup or incomplete critical
+evidence stops all remaining cases. The case envelope is six minutes, including
+the four-minute driver bound; the supervisor reserves an additional 150 seconds
+for the target's cleanup and 120 seconds for upload. Budget shortage stops
+before reserving the next case.
+
+The external child installs interruption handling before executing the unchanged
+supplier entry point. The supplier owns native/engine/descendant settlement.
+The harness retains the supplier's bounded fixture receipt before private teardown,
+binds it to the selected store, then observes exact private fixture applications,
+matching private process paths and the recorded terminal descendant afterward.
+A live or reused descendant PID leaves cleanup unknown. The harness never signals
+native PIDs from JSON or searches by application name. Passing cases require store reacquisition, preserved transcript,
+goal, approval mode and inbox identities, no grants/replay, completed duplicate
+Quit/Cancel ordering and settled descendants.
+
+Four WK workspace snapshots and one AppKit sheet snapshot per case are required.
+Each original PNG is bounded, hashed before/after decoding and checked for
+readability; sheets require their Cancel/Stop-and-Quit controls. Root still
+inspects actual originals. These snapshots do not prove composited OS paint,
+trusted keyboard/IME input or accessibility. Complete redacted critical JSON is
+retained, splitting oversized receipts into indexed readable text parts with
+raw/reassembled-export hashes. Database, bundle and private profile data are not
+uploaded. A critical export failure is an explicit failure, not a capped pass.
+
+Ordinary PR/push/release guards, permissions and the other named qualifications
+are preserved. A manual stable workflow also starts its existing ordinary CI jobs
+on their isolated standard hosts; this adapter does not reroute them. Publication
+and the actual hosted admission require separate root decisions. Source controls
+and compilation alone do not qualify any lifecycle case or complete ALL-344/354.

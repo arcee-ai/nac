@@ -54,5 +54,19 @@
       "crates/nac-server/Cargo.toml": "b909a14e90ef379a3335a8fec6b9c0408ff6f1a2be6b56b3b22644d31e1f10c3",
       "crates/nac-server/tests/desktop_schema_contract.rs": "0eb70e49c7aba12bdb8c8c350246e892e2a5418403ca14a55674f2419a0aab1e"
     }
+  },
+  "all-344-lifecycle-macos26": {
+    "source_sha": "7d8322f1d8cad25cc1aa79dc5a7a025a6719065b",
+    "source_tree": "89a58b792f4b181a6d64af5dfcb5bc4d6bb24053",
+    "profile": "macos26",
+    "suite": "lifecycle",
+    "scenario_count": 3,
+    "scenarios": [
+      "run",
+      "approval",
+      "terminal"
+    ],
+    "allocation_id": "nac344-ordering-7e-one",
+    "retry_budget": 0
   }
 }
