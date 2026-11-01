@@ -329,35 +329,78 @@ impl SessionService {
     ) -> Result<QuestionRecord> {
         self.require_question_session().await?;
         self.authorize_human_question_response("task_question_cancel", &request_id)?;
-        self.coordinate_local(move |service| {
-            let _active = service.lock_active_operation();
-            let session = service
-                .metadata
-                .session_id
-                .as_deref()
-                .ok_or(crate::store::QuestionError::Unavailable)?;
-            let _lease = if _active.is_none() {
-                Some(
-                    sessions::SessionOperationLease::try_acquire(
-                        &service.metadata.store_path,
-                        session,
-                    )
-                    .map_err(|_| crate::store::QuestionError::Conflict)?,
-                )
-            } else {
-                None
-            };
-            crate::store::cancel_task_question(
-                &service.metadata.store_path,
-                session,
-                &request_id,
-                expected_revision,
-            )
+        // As for an accepted answer, cancellation's committed lifecycle change
+        // must retain its wake even when the external waiter disappears.
+        let service = self.clone();
+        tokio::spawn(async move {
+            service
+                .cancel_question_owned(request_id, expected_revision)
+                .await
         })
-        .await?
+        .await
+        .map_err(|error| anyhow::anyhow!("question cancellation task failed: {error}"))?
+    }
+
+    async fn cancel_question_owned(
+        &self,
+        request_id: String,
+        expected_revision: i64,
+    ) -> Result<QuestionRecord> {
+        let (question, lease) = self
+            .coordinate_local(move |service| -> Result<_> {
+                let active = service.lock_active_operation();
+                anyhow::ensure!(
+                    !service
+                        .stopping_admission
+                        .load(std::sync::atomic::Ordering::Acquire),
+                    crate::store::QuestionError::Unavailable
+                );
+                let session = service
+                    .metadata
+                    .session_id
+                    .as_deref()
+                    .ok_or(crate::store::QuestionError::Unavailable)?;
+                let lease = if active.is_none() {
+                    Some(
+                        sessions::SessionOperationLease::try_acquire(
+                            &service.metadata.store_path,
+                            session,
+                        )
+                        .map_err(|_| crate::store::QuestionError::Conflict)?,
+                    )
+                } else {
+                    None
+                };
+                let question = crate::store::cancel_task_question(
+                    &service.metadata.store_path,
+                    session,
+                    &request_id,
+                    expected_revision,
+                )?;
+                Ok((question, lease))
+            })
+            .await??;
+        // Removing the pending gate lets the ordinary runner decide whether
+        // inbox work or an active goal is eligible. An active run keeps its
+        // settlement wake; paused goals and shutdown still reject admission.
+        let wake = match lease {
+            Some(lease) => {
+                self.start_next_direct_inbox_item_with_lease_async(lease)
+                    .await
+            }
+            None => self.start_next_direct_inbox_item().await,
+        };
+        if wake.is_err() {
+            eprintln!("nac: cancelled question committed but direct wake failed");
+        }
+        Ok(question)
     }
 }
 
 #[cfg(test)]
 #[path = "questions_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "question_cancellation_tests.rs"]
+mod cancellation_tests;
