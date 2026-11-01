@@ -19783,6 +19783,14 @@ function Lx({ sessionId: e }) {
 						w.active_occurrence ? " An admitted check is still active; its final result will appear below." : ""
 					]
 				}) : null,
+				a && h.inspection.isPending ? /* @__PURE__ */ Y("p", {
+					role: "status",
+					children: "Loading heartbeat…"
+				}) : null,
+				h.inspection.error ? /* @__PURE__ */ Y("p", {
+					role: "alert",
+					children: h.inspection.error.message
+				}) : null,
 				f ? /* @__PURE__ */ Y(Mx, {
 					initial: f === "edit" ? g?.spec : void 0,
 					disabled: v,
@@ -19900,12 +19908,8 @@ function Lx({ sessionId: e }) {
 								children: t.tokens_used === null ? "Usage pending or unknown" : `${t.tokens_used} tokens`
 							})
 						]
-					}, t.occurrence_id)),
-					h.inspection.error ? /* @__PURE__ */ Y("p", {
-						role: "alert",
-						children: h.inspection.error.message
-					}) : null
-				] }) : /* @__PURE__ */ Y("p", {
+					}, t.occurrence_id))
+				] }) : a && (h.inspection.isPending || h.inspection.error) ? null : /* @__PURE__ */ Y("p", {
 					className: "text-basic-muted",
 					children: "Choose a heartbeat or create a recurring check for this chat. Checks run while the server is running, including after you close this page."
 				})

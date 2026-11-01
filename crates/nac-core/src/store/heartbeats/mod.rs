@@ -5,9 +5,11 @@ use serde::{de::DeserializeOwned, Serialize};
 use sha2::{Digest, Sha256};
 
 mod attention;
+mod cancellation;
 mod control;
 pub(crate) use attention::heartbeat_attention_with_connection;
 pub use attention::*;
+pub use cancellation::heartbeat_stop_requested;
 pub use control::control_heartbeat;
 mod execution;
 mod materialize;
@@ -136,7 +138,20 @@ port public;
 }
 
 fn prune_history(conn: &Connection, schedule_id: &str) -> Result<()> {
-    conn.execute("DELETE FROM heartbeat_occurrences WHERE schedule_id=?1 AND state IN ('settled','withdrawn') AND occurrence_id NOT IN (SELECT occurrence_id FROM heartbeat_occurrences WHERE schedule_id=?1 AND state IN ('settled','withdrawn') ORDER BY settlement_sequence DESC LIMIT ?2)",params![schedule_id,HEARTBEAT_HISTORY_LIMIT])?;
+    // Only an admission advances the rate-accounting window. Later controls
+    // cannot expire admission facts that a subsequent clock rollback needs.
+    let admission_watermark: Option<i64> = conn.query_row(
+        "SELECT max(started_at_ms) FROM heartbeat_occurrences",
+        [],
+        |row| row.get(0),
+    )?;
+    let cutoff = admission_watermark
+        .unwrap_or(i64::MIN)
+        .saturating_sub(60_000);
+    // Preserve admission facts independently of newer withdrawn requests. The
+    // most recent start also fences clock regression; normal spacing bounds
+    // all recent starts within the same 32-row history allowance.
+    conn.execute("DELETE FROM heartbeat_occurrences WHERE schedule_id=?1 AND state IN ('settled','withdrawn') AND occurrence_id NOT IN (SELECT occurrence_id FROM heartbeat_occurrences WHERE schedule_id=?1 AND state IN ('settled','withdrawn') ORDER BY CASE WHEN started_at_ms IS NOT NULL AND (started_at_ms>?3 OR started_at_ms=(SELECT max(started_at_ms) FROM heartbeat_occurrences WHERE schedule_id=?1)) THEN 0 ELSE 1 END,settlement_sequence DESC LIMIT ?2)",params![schedule_id,HEARTBEAT_HISTORY_LIMIT,cutoff])?;
     Ok(())
 }
 

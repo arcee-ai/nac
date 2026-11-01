@@ -49,6 +49,18 @@ The initial finite operating limits are:
 | Deadline per check | 300 seconds by default; 1 second to 1 hour |
 | Command receipts | 4,096, plus a bounded reserve for remaining pause/stop/delete transitions |
 
+Within the same history allowance, recent admitted starts take precedence over
+newer withdrawn requests so trimming cannot erase the start-rate fences.
+Only a later admitted start advances that retention window; control and
+settlement timestamps cannot expire starts needed after a clock rollback.
+If the wall clock falls behind the latest retained host start, heartbeat admission
+waits until it catches up. Pending receipt identity and retry allowance stay intact.
+
+An accepted Stop retains its exact-run cancellation request through later edits
+or deletion until that occurrence settles. Delete alone does not cancel a run.
+Withdrawing unstarted checks does not turn an earlier unchanged result into unread
+activity; later ordinary runs and actionable results still remain visible.
+
 Deleting a schedule retains its tombstone and original command responses so a
 lost acknowledgement can be retried safely. Capacity exhaustion requires human
 review; deletion does not erase those identities. The panel freezes an uncertain
@@ -70,6 +82,17 @@ under the shared exclusive Rust/browser lease:
 | 1 | 1 | 1 / 0 | 48.25 | 7.60 | 52 | 564 | 22,896 / 46,640 |
 | 10 | 4 | 4 / 6 | 153.56 | 12.14 | 179 | 624 | 49,600 / 54,304 |
 | 100 | 4 | 4 / 96 | 163.63 | 13.69 | 440 | 900 | 54,320 / 55,264 |
+
+Repeated on October 31, 2026 at the admission-watermark repair `b49ed3cc`,
+using the same fixture and Apple M5 Max (arm64), with all Rust, browser and
+setup leases held exclusively. The copied test binary was built from that
+exact revision; the measurement passed and left no fixture roots.
+
+| Stored schedules | Runnable chats | Admitted / pending | Cold scan, ms | Warm p95, ms | Maximum initial admission lateness, ms | DB + WAL + SHM, KiB | Process RSS before / active, KiB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1 | 1 / 0 | 49.80 | 9.76 | 57 | 564 | 22,816 / 46,752 |
+| 10 | 4 | 4 / 6 | 157.42 | 13.89 | 182 | 620 | 49,568 / 54,064 |
+| 100 | 4 | 4 / 96 | 155.15 | 12.20 | 409 | 900 | 54,080 / 54,960 |
 
 The ignored test
 `heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention`

@@ -161,6 +161,12 @@ function SessionHeartbeats({ sessionId }: { sessionId: string }) {
               : ""}
           </p>
         ) : null}
+        {selected && heartbeat.inspection.isPending ? (
+          <p role="status">Loading heartbeat…</p>
+        ) : null}
+        {heartbeat.inspection.error ? (
+          <p role="alert">{heartbeat.inspection.error.message}</p>
+        ) : null}
         {form ? (
           <HeartbeatForm
             key={`${form}:${selected}`}
@@ -277,11 +283,8 @@ function SessionHeartbeats({ sessionId }: { sessionId: string }) {
                 </p>
               </article>
             ))}
-            {heartbeat.inspection.error ? (
-              <p role="alert">{heartbeat.inspection.error.message}</p>
-            ) : null}
           </>
-        ) : (
+        ) : selected && (heartbeat.inspection.isPending || heartbeat.inspection.error) ? null : (
           <p className="text-basic-muted">
             Choose a heartbeat or create a recurring check for this chat. Checks run while the
             server is running, including after you close this page.

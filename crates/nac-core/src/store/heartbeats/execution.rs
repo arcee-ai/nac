@@ -24,7 +24,7 @@ pub fn heartbeat_admission_unavailable(path:&Path,session_id:&str,occurrence_id:
     if needs_human_action || attempts>=3 {
         suspend(&tx,&pending.schedule_id,reason,now_ms)?;
         tx.execute("UPDATE heartbeat_occurrences SET outcome=?2 WHERE occurrence_id=?1",params![occurrence_id,if needs_human_action{"needs_human_action"}else{"failed"}])?;
-        prune_history(&tx,&pending.schedule_id)?;
+        prune_history(&tx, &pending.schedule_id)?;
     }
     tx.commit()?;
     Ok(())
@@ -78,6 +78,10 @@ pub(crate) fn admit_heartbeat(path:&Path,session_id:&str,occurrence_id:&str,expe
     if active>=MAX_HEARTBEAT_CONCURRENCY || active_occurrence(&tx,&schedule.schedule_id)?.is_some() {return Ok(None);}
     // Includes manual Run now. No route can turn an active schedule into a
     // high-frequency executor, and stored clock regression cannot reset rate.
+    // Defer the whole host on a backward clock rather than counting truncated
+    // future history. Pruning retains each schedule's latest admitted start.
+    let host_latest:Option<i64>=tx.query_row("SELECT max(started_at_ms) FROM heartbeat_occurrences",[],|row|row.get(0))?;
+    if host_latest.is_some_and(|last|now_ms<last) {return Ok(None);}
     let recent:i64=tx.query_row("SELECT count(*) FROM heartbeat_occurrences WHERE started_at_ms>?1",[now_ms.saturating_sub(60_000)],|row|row.get(0))?;
     let last:Option<i64>=tx.query_row("SELECT max(started_at_ms) FROM heartbeat_occurrences WHERE schedule_id=?1",[&schedule.schedule_id],|row|row.get(0))?;
     if recent>=60 || last.is_some_and(|last|now_ms.saturating_sub(last)<15_000) {return Ok(None);}
@@ -178,6 +182,7 @@ pub(crate) fn settle_heartbeat_with_connection(
             .unwrap_or(HeartbeatOutcome::Unknown)
     };
     conn.execute("UPDATE heartbeat_occurrences SET state='settled',outcome=?2,tokens_used=?3,settled_at_ms=?4,expected_revision=expected_revision+1,settlement_sequence=?5 WHERE occurrence_id=?1",params![active.occurrence_id,vocabulary(&outcome)?,tokens,now,next_settlement_sequence(conn)?])?;
+    cancellation::consume_stop_request(conn, &active)?;
     conn.execute("UPDATE heartbeat_schedules SET tokens_used=min(9223372036854775807-tokens_used,?2)+tokens_used,time_used_ms=min(9223372036854775807-time_used_ms,?3)+time_used_ms,usage_unknown=max(usage_unknown,?4),updated_at_ms=?5 WHERE schedule_id=?1",params![active.schedule_id,tokens.unwrap_or(0).max(0),duration_ms.max(0),tokens.is_none(),now])?;
     if outcome == HeartbeatOutcome::Unchanged {
         conn.execute("UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,'$._attention_through_updated_at',(SELECT updated_at FROM sessions WHERE session_id=?2),'$._attention_through_run_revision',(SELECT coalesce(max(id),0) FROM session_run_outcomes WHERE session_id=?2)) WHERE schedule_id=?1",params![active.schedule_id,session])?;

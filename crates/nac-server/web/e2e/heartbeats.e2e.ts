@@ -40,8 +40,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   const session = await createSession(request, harness, "direct", project);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
-  // The live UI can subscribe between model requests; after closing it the
-  // scheduler runs headless. Match each request's legitimate transport.
+  // UI subscriptions can change between requests; honor each request transport.
   harness.provider.enqueue(
     "native-schedule",
     { token: "SAME_CHAT_CONTEXT_TOKEN", requiredTools: ["heartbeat_control"] },
@@ -64,11 +63,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   harness.provider.enqueue(
     "schedule-ended",
     { functionOutputCallId: "schedule" },
-    {
-      kind: "text",
-      stream: "request",
-      text: "The recurring job check is scheduled in this chat.",
-    },
+    { kind: "text", stream: "request", text: "The recurring job check is scheduled in this chat." },
   );
   await page.goto(`${harness.baseUrl}/#/session/${session}/heartbeats`);
   const run = await request.post(`${harness.baseUrl}/sessions/${session}/runs`, {
@@ -79,9 +74,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   });
   expect(run.status()).toBe(202);
   await expect(
-    page.getByText("The recurring job check is scheduled in this chat.", {
-      exact: true,
-    }),
+    page.getByText("The recurring job check is scheduled in this chat.", { exact: true }),
   ).toBeVisible();
   let schedules: HeartbeatSchedule[] = [];
   await expect
@@ -106,10 +99,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   const gate = new ScriptGate();
   harness.provider.enqueue(
     "automatic-job-read",
-    {
-      token: "Durable heartbeat occurrence",
-      requiredTools: ["read", "report_heartbeat"],
-    },
+    { token: "Durable heartbeat occurrence", requiredTools: ["read", "report_heartbeat"] },
     {
       kind: "function_call",
       stream: "request",
@@ -151,11 +141,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   harness.provider.enqueue(
     "automatic-ended",
     { functionOutputCallId: "job-report" },
-    {
-      kind: "text",
-      stream: "request",
-      text: "JOB_READY verified; this heartbeat is finished.",
-    },
+    { kind: "text", stream: "request", text: "JOB_READY verified; this heartbeat is finished." },
   );
   gate.release();
   await expect
@@ -187,11 +173,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
     after.map((entry: { summary: { session_id: string } }) => entry.summary.session_id),
   ).toEqual(initialIds);
   expect(after[0].heartbeat_results).toEqual([
-    expect.objectContaining({
-      run_id: active.run_id,
-      outcome: "finished",
-      seen: false,
-    }),
+    expect.objectContaining({ run_id: active.run_id, outcome: "finished", seen: false }),
   ]);
   const reopened = await context.newPage();
   await reopened.goto(`${harness.baseUrl}/#/session/${session}/heartbeats`);
@@ -199,14 +181,9 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   await reopened.getByRole("button", { name: "Local job check finished", exact: true }).click();
   await expect(reopened.getByRole("link", { name: `Run ${active.run_id}` })).toBeVisible();
   await expect(
-    reopened.getByText("Local job-result.txt contains JOB_READY.", {
-      exact: true,
-    }),
+    reopened.getByText("Local job-result.txt contains JOB_READY.", { exact: true }),
   ).toBeVisible();
-  await reopened.screenshot({
-    path: info.outputPath("heartbeat-history.png"),
-    fullPage: true,
-  });
+  await reopened.screenshot({ path: info.outputPath("heartbeat-history.png"), fullPage: true });
   await info.attach("heartbeat-history", {
     body: JSON.stringify(finished, null, 2),
     contentType: "application/json",
@@ -256,7 +233,7 @@ test("human heartbeat UI reconciles lost create acknowledgement and controls an 
   harness.provider.enqueue(
     "human-now",
     { token: "Durable heartbeat occurrence" },
-    { kind: "text", text: "Held heartbeat result." },
+    { kind: "text", stream: "request", text: "Held heartbeat result." },
     gate,
   );
   await page.getByRole("button", { name: "Run now", exact: true }).click();
@@ -269,7 +246,6 @@ test("human heartbeat UI reconciles lost create acknowledgement and controls an 
   await page.getByRole("button", { name: "Save heartbeat", exact: true }).click();
   await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Stop", exact: true }).click();
-  gate.release();
   await expect
     .poll(async () => {
       const inspection = await (
@@ -280,6 +256,7 @@ test("human heartbeat UI reconciles lost create acknowledgement and controls an 
       return inspection.history[0]?.outcome;
     })
     .toBe("interrupted");
+  gate.release();
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByRole("button", { name: "Delete", exact: true })).toBeDisabled();
   await expect
