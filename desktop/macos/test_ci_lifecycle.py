@@ -24,7 +24,8 @@ def fixture_receipt(destination, scenario='run'):
 
 
 class CompositionControls(unittest.TestCase):
-    def exercise(self, *, fail=None, locked=False, build_fail=False, cleanup_unknown=False, budget=False):
+    def exercise(self, *, fail=None, locked=False, build_fail=False, cleanup_unknown=False, budget=False,
+                 image_bytes=48, overflow=None, capacity_bad=False):
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
             root = Path(tmp).resolve()
             raw, source, harness = root / 'raw', root / 'source', root / 'harness'
@@ -45,6 +46,8 @@ class CompositionControls(unittest.TestCase):
             stack.enter_context(mock.patch.object(adapter, '_require_builds'))
             stack.enter_context(mock.patch.object(adapter.time, 'monotonic', return_value=0))
             stack.enter_context(mock.patch.object(adapter, 'images', return_value=[{'mock': name} for name in c.FRAMES]))
+            if capacity_bad:
+                stack.enter_context(mock.patch('ci_lifecycle_evidence.EXPORT_TOTAL', 1))
             if cleanup_unknown:
                 stack.enter_context(mock.patch.object(adapter, 'audit_cleanup', return_value={
                     'complete': False, 'private_fixture_processes': [{'pid': 111}], 'retained_failure_roots': []}))
@@ -78,6 +81,8 @@ class CompositionControls(unittest.TestCase):
                 self.assertEqual(durable['active_case'], name)
                 self.assertEqual(durable['cases'][name]['state'], 'dispatched')
                 self.assertEqual(durable['cases'][name]['dispatches'], 1)
+                self.assertEqual(json.loads((destination.parent / 'builds.json').read_text())
+                                 ['export_capacity']['total'], 44040192)
                 called.append(name)
                 if fail == name:
                     raise KeyboardInterrupt('mock interruption; no OS signal')
@@ -86,6 +91,13 @@ class CompositionControls(unittest.TestCase):
                 source_receipt = fixture_receipt(destination, name)
                 adapter.ownership.retain(destination, name)
                 shutil.rmtree(source_receipt.parents[2])
+                folder = destination / name
+                folder.mkdir()
+                for frame in c.FRAMES:
+                    # Export capacity bytes only; never valid PNG/native/OCR evidence.
+                    (folder / frame).write_bytes(b'SYNTHETIC EXPORT ONLY'.ljust(image_bytes, b'x'))
+                if overflow == name:
+                    (destination / 'oversized.json').write_bytes(b'x' * (12 * 1024 * 1024 + 1))
             stack.enter_context(mock.patch.object(adapter, 'run_case', side_effect=driver))
             result, error = None, None
             try:
@@ -94,6 +106,21 @@ class CompositionControls(unittest.TestCase):
             except BaseException as caught:
                 error = caught
             ledger = json.loads((raw / 'lifecycle/ledger.json').read_text())
+            if overflow:
+                receipt = raw / 'lifecycle' / overflow / 'external-result.json'
+                outcome = json.loads(receipt.read_text())
+                self.assertEqual(outcome['status'], 'unknown')
+                self.assertLessEqual(len(outcome['export_error']), 4096)
+                self.assertEqual(ledger['cases'][overflow]['receipt']['external_result_sha256'], c.digest(receipt))
+            if result is not None:
+                from ci_lifecycle_evidence import export_evidence
+                output = root / 'export'
+                export_evidence(raw, output, [])
+                pngs = list(raw.rglob('*.png'))
+                self.assertEqual(len(pngs), 15)
+                for path in pngs:
+                    self.assertEqual(path.read_bytes(), (output / path.relative_to(raw)).read_bytes())
+                result['synthetic_exported_PNGs'] = len(pngs)
             return result, error, ledger, called
 
     def test_order_and_durable_reservation_before_every_mock_driver(self):
@@ -105,7 +132,7 @@ class CompositionControls(unittest.TestCase):
         self.assertEqual([ledger['cases'][x]['dispatches'] for x in c.CASES], [1, 1, 1])
 
     def test_guard_build_and_budget_failures_reserve_zero_cases(self):
-        for arguments in ({'locked': True}, {'build_fail': True}, {'budget': True}):
+        for arguments in ({'locked': True}, {'build_fail': True}, {'budget': True}, {'capacity_bad': True}):
             with self.subTest(arguments=arguments):
                 result, error, ledger, called = self.exercise(**arguments)
                 self.assertIsNone(result)
@@ -123,6 +150,24 @@ class CompositionControls(unittest.TestCase):
                 self.assertEqual(called, expected)
                 self.assertEqual(ledger['cases']['terminal']['dispatches'], 0)
                 self.assertTrue(ledger['phase'].startswith('stopped_'))
+
+    def test_three_mock_cases_export_fifteen_ceiling_images_without_extra_reservations(self):
+        result, error, ledger, called = self.exercise(image_bytes=2 * 1024 * 1024)
+        self.assertIsNone(error)
+        self.assertEqual(called, list(c.CASES))
+        self.assertEqual(result['synthetic_exported_PNGs'], 15)
+        self.assertEqual([ledger['cases'][n]['dispatches'] for n in c.CASES], [1, 1, 1])
+
+    def test_real_export_overflow_after_run_or_approval_persists_unknown_and_stops(self):
+        for name in ('run', 'approval'):
+            with self.subTest(name=name):
+                result, error, ledger, called = self.exercise(overflow=name)
+                self.assertIsNone(result)
+                self.assertIsInstance(error, RuntimeError)
+                self.assertEqual(called, list(c.CASES[:c.CASES.index(name) + 1]))
+                self.assertEqual(ledger['cases'][name]['state'], 'unknown')
+                self.assertEqual(ledger['phase'], 'stopped_unknown')
+                self.assertEqual(ledger['cases']['terminal']['dispatches'], 0)
 
 
 class DriverAndAuditControls(unittest.TestCase):
