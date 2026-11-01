@@ -14,7 +14,8 @@ def seed(raw, attempted=('run',), count=1, phase='stopped_unknown'):
     (raw / 'lifecycle').mkdir(parents=True)
     cases = {case: {'state': 'not_dispatched', 'dispatches': 0} for case in CASES}
     for i, case in enumerate(attempted):
-        cases[case] = {'state': 'passed' if i < len(attempted) - 1 else 'unknown', 'dispatches': 1}
+        final_state = 'dispatched' if phase == 'case_dispatched' else phase.removeprefix('stopped_')
+        cases[case] = {'state': 'passed' if i < len(attempted) - 1 else final_state, 'dispatches': 1}
         destination = raw / 'lifecycle' / case
         folder = destination / case
         folder.mkdir(parents=True)
@@ -26,7 +27,8 @@ def seed(raw, attempted=('run',), count=1, phase='stopped_unknown'):
         (folder / 'native.json').write_text(json.dumps({'passed': passed,
             'diagnostic': '"' * 180000 + 'FIXTURE-SECRET' + 'z' * 180000}))
         (destination / 'runner.log').write_text('owned driver failed FIXTURE-SECRET; MOCK ONLY\n')
-    (raw / 'lifecycle/ledger.json').write_text(json.dumps({'phase': phase, 'cases': cases}))
+    (raw / 'lifecycle/ledger.json').write_text(json.dumps({'phase': phase, 'cases': cases,
+        'active_case': attempted[-1] if phase == 'case_dispatched' else None}))
     (raw / 'ci-report.json').write_text('{"result":"failed"}')
 
 
@@ -72,6 +74,33 @@ class FailureExportControls(unittest.TestCase):
 
     def test_complete_run_prefix_and_partial_approval_all_survive_unknown_export(self):
         self.retained(('run', 'approval'))
+
+    def test_unfinished_dispatched_prefix_retains_artifacts_without_ledger_mutation(self):
+        self.retained(('run',), phase='case_dispatched')
+        self.retained(('run', 'approval'), phase='case_dispatched')
+
+    def test_invalid_dispatched_ledgers_cannot_broaden_failure_export(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp).resolve() / 'raw'
+            seed(raw, ('run', 'approval'), phase='case_dispatched')
+            path = raw / 'lifecycle/ledger.json'
+            original = json.loads(path.read_text())
+            changes = [lambda x: x.update(active_case='run'),
+                       lambda x: x['cases']['run'].update(state='unknown'),
+                       lambda x: x['cases']['approval'].update(state='passed'),
+                       lambda x: x['cases']['approval'].update(dispatches=True),
+                       lambda x: x['cases']['approval'].update(dispatches=2),
+                       lambda x: x['cases']['terminal'].update(dispatches=1, state='dispatched'),
+                       lambda x: x['cases']['terminal'].update(extra='mutation'),
+                       lambda x: x['cases'].pop('terminal')]
+            for i, change in enumerate(changes):
+                state = json.loads(json.dumps(original))
+                change(state)
+                path.write_text(json.dumps(state))
+                before = path.read_bytes()
+                with self.subTest(index=i), self.assertRaises(RuntimeError):
+                    e.export_evidence(raw, raw.parent / ('invalid-' + str(i)), [])
+                self.assertEqual(path.read_bytes(), before)
 
     def test_failed_before_first_capture_still_retains_detailed_JSON_and_logs(self):
         self.retained(('run',), count=0)

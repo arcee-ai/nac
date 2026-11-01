@@ -26,7 +26,7 @@ from ci_terminal import qualify as qualify_terminal
 from ci_startup import qualify as qualify_startup
 from ci_lifecycle import qualify as qualify_lifecycle, image_report as lifecycle_image_report
 from ci_lifecycle_contract import require_capsule as require_lifecycle_capsule
-from ci_lifecycle_evidence import export_evidence as export_lifecycle
+from ci_lifecycle_finalization import finalize as finalize_lifecycle, gui_guard as lifecycle_gui_guard
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DEADLINE = time.monotonic() + 30 * 60  # Leave ten job minutes for cleanup/upload.
@@ -380,7 +380,7 @@ def main():
                 sys.path.pop(0)
         if lifecycle:
             report.update(qualify_lifecycle(raw, source_root, target, args.expected_sha,
-                                           run, command, lifecycle_image_report, RUN_DEADLINE))
+                                           run, command, lifecycle_image_report, RUN_DEADLINE, report=report))
         elif startup:
             report.update(qualify_startup(raw, source_root, args.test_source_root, args.protocol_source_root,
                                          args.expected_sha, run, command, native_report))
@@ -453,6 +453,8 @@ def main():
                 report['terminal_image'] = native_report([str(helper), '--terminal', str(raw / 'evidence/trusted-terminal.png')],
                                                           raw / 'terminal-image-reader.log')
         report['quartz_end'] = native_report([str(gui_helper)], raw / 'gui-reader-end.log')
+        if lifecycle:
+            lifecycle_gui_guard(report['quartz_end'], [(str(source_root), '<target-checkout>'), *redact_values()])
         console_end = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'], timeout=15)
         report['console_end'] = require_console(console_end, os.getuid(), report['quartz_end'])
         require_checkout(source_root, report['source_sha'])
@@ -486,20 +488,20 @@ def main():
             raise
         finally:
             crashes = Path.home() / 'Library/Logs/DiagnosticReports'
-            count = 0
-            for crash in sorted(crashes.glob('NACPreview*')):
-                if crash.is_file() and not crash.is_symlink() and crash.stat().st_mtime >= started and count < 3:
-                    with crash.open('rb') as stream:
-                        (raw / f'crash-{count}{crash.suffix}').write_bytes(stream.read(65536))
-                    count += 1
-            report['crash_reports'] = count
-            report['elapsed_seconds'] = round(time.time() - started, 3)
-            (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
-            # Bundle resources and binaries are not uploaded. Export only bounded
-            # evidence, logs and our report, with exact-value redaction.
             if lifecycle:
-                export_lifecycle(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()])
+                report['elapsed_seconds'] = round(time.time() - started, 3)
+                finalize_lifecycle(raw, output, report, [(str(source_root), '<target-checkout>'), *redact_values()],
+                                   crashes=crashes, started=started)
             else:
+                count = 0
+                for crash in sorted(crashes.glob('NACPreview*')):
+                    if crash.is_file() and not crash.is_symlink() and crash.stat().st_mtime >= started and count < 3:
+                        with crash.open('rb') as stream:
+                            (raw / f'crash-{count}{crash.suffix}').write_bytes(stream.read(65536))
+                        count += 1
+                report['crash_reports'] = count
+                report['elapsed_seconds'] = round(time.time() - started, 3)
+                (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
                 export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup)
 
 

@@ -340,17 +340,30 @@ including JSON split wrappers, remains bounded to 11.75 MiB; its index remains
 256 KiB. The whole lifecycle envelope is 42 MiB (44,040,192 bytes). Shared export
 caps and other qualifications are unchanged. Before the first reservation, the
 harness records this capacity in its build manifest and checks existing payload
-with 256 KiB reserved inside the non-image budget for final metadata. It rechecks
-the same allowance after every case. Completed image cases must form the fixed
+with 4 MiB reserved inside the non-image budget for the complete finalization
+tail. Its exported slots cover the final result and ledger (256 KiB each), GUI
+log and three crash snippets (256 KiB each), report (2 MiB), finalization receipt
+and failure receipt (256 KiB each). The known report/build baseline must fit
+128 KiB before admission; final GUI JSON is limited to 32 KiB. These lifecycle
+producer bounds do not increase any shared or per-kind export cap. Every slot
+charges actual UTF8/redacted bytes and JSON split wrappers. It rechecks the
+reserved allowance after every case. Completed image cases must form the fixed
 run/approval/terminal prefix; final success requires all fifteen original images.
 Extra paths, missing successful final images or any byte overflow stop remaining cases with
 unknown export acceptance and no retry. This capacity declaration is source
 evidence; synthetic export-byte controls do not establish PNG validity or OCR.
-Stopped failed/unknown runs export their available original expected-path images
+Stopped failed/unknown runs and consistent unfinished dispatched prefixes export
+their available original expected-path images
 from dispatched cases, including earlier successful cases, with complete bounded
 redacted JSON/logs. A separate failure-evidence receipt lists missing captures
 and explicitly denies native acceptance. This failure export never satisfies a
 successful case's exact-five or the final exact-fifteen capture requirement.
+Unfinished export validates prior/active/later states and exact one-dispatch
+counts without mutating or finalizing the ledger. All late writers are staged
+and checked together before atomic export publication. A late producer violation
+forces a failed report and retains complete bounded originals where the actual
+envelope fits, or explicit incomplete failure metadata when it cannot; it never
+publishes a passing report from a failed export.
 
 Ordinary PR/push/release guards, permissions and the other named qualifications
 are preserved. A manual stable workflow also starts its existing ordinary CI jobs

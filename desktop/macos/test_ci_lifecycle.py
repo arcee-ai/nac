@@ -25,7 +25,8 @@ def fixture_receipt(destination, scenario='run'):
 
 class CompositionControls(unittest.TestCase):
     def exercise(self, *, fail=None, locked=False, build_fail=False, cleanup_unknown=False, budget=False,
-                 image_bytes=48, overflow=None, capacity_bad=False, partial_failure=None):
+                 image_bytes=48, overflow=None, capacity_bad=False, partial_failure=None,
+                 publication_fault=None, observation=None, report_oversize=False):
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
             root = Path(tmp).resolve()
             raw, source, harness = root / 'raw', root / 'source', root / 'harness'
@@ -106,13 +107,32 @@ class CompositionControls(unittest.TestCase):
                 if overflow == name:
                     (destination / 'oversized.json').write_bytes(b'x' * (12 * 1024 * 1024 + 1))
             stack.enter_context(mock.patch.object(adapter, 'run_case', side_effect=driver))
+            original_persist = adapter.persist
+            original_replace = c.os.replace
+            def persist(path, value):
+                if publication_fault == 'result' and Path(path).name == 'external-result.json' \
+                        and Path(path).parent.name == partial_failure:
+                    raise OSError('MOCK result persistence interrupted before Ledger.finish')
+                return original_persist(path, value)
+            def replace(source_path, destination_path):
+                if publication_fault == 'ledger' and Path(destination_path).name == 'ledger.json':
+                    pending = json.loads(Path(source_path).read_text())
+                    if pending['cases'][partial_failure]['state'] in ('failed', 'unknown'):
+                        raise OSError('MOCK ledger save interrupted before atomic replacement')
+                return original_replace(source_path, destination_path)
+            stack.enter_context(mock.patch.object(adapter, 'persist', side_effect=persist))
+            stack.enter_context(mock.patch.object(c.os, 'replace', side_effect=replace))
             result, error = None, None
             try:
                 result = adapter.qualify(raw, source, c.TARGET, HEAD, run, command, mock.Mock(),
-                                         1 if budget else 10000, audit_command=command)
+                                         1 if budget else 10000, audit_command=command,
+                                         report={'oversize': 'x' * 131072} if report_oversize else {})
             except BaseException as caught:
                 error = caught
             ledger = json.loads((raw / 'lifecycle/ledger.json').read_text())
+            ledger_before_export = (raw / 'lifecycle/ledger.json').read_bytes()
+            if observation is not None:
+                observation.update(ledger=ledger, primary=type(error).__name__, PNGs=len(list(raw.rglob('*.png'))))
             if overflow:
                 receipt = raw / 'lifecycle' / overflow / 'external-result.json'
                 outcome = json.loads(receipt.read_text())
@@ -123,6 +143,7 @@ class CompositionControls(unittest.TestCase):
                 from ci_lifecycle_evidence import export_evidence
                 output = root / 'export'
                 export_evidence(raw, output, [('SECRET', '<redacted>')])
+                self.assertEqual((raw / 'lifecycle/ledger.json').read_bytes(), ledger_before_export)
                 pngs = list(raw.rglob('*.png'))
                 self.assertEqual(len(pngs), 5 * c.CASES.index(partial_failure) + 1 if partial_failure else 15)
                 for path in pngs:
@@ -148,7 +169,8 @@ class CompositionControls(unittest.TestCase):
         self.assertEqual([ledger['cases'][x]['dispatches'] for x in c.CASES], [1, 1, 1])
 
     def test_guard_build_and_budget_failures_reserve_zero_cases(self):
-        for arguments in ({'locked': True}, {'build_fail': True}, {'budget': True}, {'capacity_bad': True}):
+        for arguments in ({'locked': True}, {'build_fail': True}, {'budget': True},
+                          {'capacity_bad': True}, {'report_oversize': True}):
             with self.subTest(arguments=arguments):
                 result, error, ledger, called = self.exercise(**arguments)
                 self.assertIsNone(result)
@@ -196,6 +218,20 @@ class CompositionControls(unittest.TestCase):
                 self.assertEqual(ledger['cases'][name]['state'], 'unknown')
                 self.assertEqual([ledger['cases'][n]['dispatches'] for n in c.CASES],
                                  [1, 0, 0] if name == 'run' else [1, 1, 0])
+
+    def test_result_or_atomic_ledger_publication_failure_retains_dispatched_prefix_read_only(self):
+        for name in ('run', 'approval'):
+            for fault in ('result', 'ledger'):
+                with self.subTest(name=name, fault=fault):
+                    result, error, ledger, called = self.exercise(partial_failure=name, publication_fault=fault)
+                    self.assertIsNone(result)
+                    self.assertIsInstance(error, adapter.DriverFailure)
+                    self.assertEqual(ledger['phase'], 'case_dispatched')
+                    self.assertEqual(ledger['active_case'], name)
+                    self.assertEqual(ledger['cases'][name]['state'], 'dispatched')
+                    self.assertEqual(called, list(c.CASES[:c.CASES.index(name) + 1]))
+                    self.assertEqual([ledger['cases'][n]['dispatches'] for n in c.CASES],
+                                     [1, 0, 0] if name == 'run' else [1, 1, 0])
 
 
 class DriverAndAuditControls(unittest.TestCase):

@@ -50,15 +50,16 @@ class CapacityControls(unittest.TestCase):
             replacements = [('SECRET', '<redacted>')]
             plan, _ = e.export_plan(raw, replacements, final=True)
             charged = sum(len(data) for path, data in plan if path.suffix != '.png')
-            remaining = e.NON_IMAGE_TOTAL - e.FINAL_METADATA_BYTES - charged
+            remaining = e.NON_IMAGE_TOTAL - e.MAX_FILE - charged
             for i in range((remaining + e.MAX_FILE - 1) // e.MAX_FILE):
                 amount = min(e.MAX_FILE, remaining)
                 (raw / ('bounded-' + str(i) + '.log')).write_bytes(b'x' * amount)
                 remaining -= amount
             self.assertEqual(remaining, 0)
-            e.export_plan(raw, replacements, final=True, reserve=e.FINAL_METADATA_BYTES)
-            # Final metadata consumes its reserved bytes inside the same cap.
-            (raw / 'final-metadata.log').write_bytes(b'x' * e.FINAL_METADATA_BYTES)
+            e.export_plan(raw, replacements, final=True, reserve=e.MAX_FILE)
+            # Generic payload boundary only; the complete real finalization
+            # writers have their own dedicated contract/shape controls.
+            (raw / 'final-metadata.log').write_bytes(b'x' * e.MAX_FILE)
             with self.assertRaises(RuntimeError):
                 e.export_plan(raw, replacements, final=True, reserve=1)
             plan, index = e.export_plan(raw, replacements, final=True)
