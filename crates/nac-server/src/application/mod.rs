@@ -40,4 +40,6 @@ pub(crate) mod task_launches;
 pub(crate) mod task_preparations;
 
 pub(crate) mod peer_goals;
+pub(crate) mod task_followup_delegations;
+pub(crate) mod task_followups;
 pub(crate) mod task_questions;

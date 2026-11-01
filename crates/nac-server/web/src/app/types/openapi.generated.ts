@@ -1460,6 +1460,24 @@ export interface components {
       terminal_selection?: components["schemas"]["TerminalSelectionEvidence"] | null;
     };
     SwitchBranchRequest: { create?: boolean; name: string };
+    TaskFollowupAction: "queue" | "steer" | "auto";
+    TaskFollowupDelegation: {
+      action: components["schemas"]["TaskFollowupAction"];
+      caller_session_id: string;
+      created_at: string;
+      human_request_id: string;
+      id: string;
+      issued_config_version: number;
+      origin: string;
+      revoked_at?: string | null;
+      target_session_id: string;
+    };
+    TaskFollowupDelegationRequest: {
+      action: components["schemas"]["TaskFollowupAction"];
+      project_id?: string | null;
+      request_id: string;
+      target_session_id: string;
+    };
     TaskLaunchPhase:
       | "pinned"
       | "preparing_workspace"

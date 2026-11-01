@@ -27,6 +27,15 @@ fn openapi_31_responses_keep_required_descriptions_after_dependency_upgrades() {
 
 const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/attention/events"),
+    ("POST", "/sessions/{session_id}/task-followup-delegations"),
+    (
+        "GET",
+        "/sessions/{session_id}/task-followup-delegations/{delegation_id}",
+    ),
+    (
+        "DELETE",
+        "/sessions/{session_id}/task-followup-delegations/{delegation_id}",
+    ),
     ("POST", "/task-launches"),
     ("GET", "/task-launches/{request_id}"),
     ("POST", "/task-launches/{request_id}/cancel"),

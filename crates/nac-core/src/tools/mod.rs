@@ -35,6 +35,7 @@ pub mod read;
 mod runtime_context;
 pub(crate) mod subagent;
 mod task_discovery;
+mod task_followups;
 mod task_questions;
 pub(crate) use task_discovery::url_component;
 mod task_wait;
@@ -167,8 +168,10 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
     "read_command_output",
 ];
 
+pub(crate) const TASK_FOLLOWUP_TOOL_NAMES: [&str; 2] = ["send_task_followup", "read_task_followup"];
+
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 22] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 24] = [
     "read",
     "write",
     "edit",
@@ -180,6 +183,8 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 22] = [
     "list_executions",
     "find_tasks",
     "read_task",
+    "send_task_followup",
+    "read_task_followup",
     "wait_tasks",
     "request_question",
     "read_question",
@@ -244,6 +249,8 @@ fn worker_tool_registry(
         .register(execution_observation::ListExecutionsTool)
         .register(task_discovery::FindTasksTool)
         .register(task_discovery::ReadTaskTool)
+        .register(task_followups::SendTaskFollowupTool)
+        .register(task_followups::ReadTaskFollowupTool)
         .register(task_wait::WaitTasksTool)
         .register(task_questions::CreateQuestionTool)
         .register(task_questions::ReadQuestionTool)

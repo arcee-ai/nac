@@ -542,6 +542,43 @@ fn codex_request_preserves_nullable_new_delegation_contracts() {
 }
 
 #[test]
+fn codex_task_followup_wire_schema_keeps_idle_bindings_nullable_and_optional() {
+    let definitions = crate::tools::direct_tool_definitions(false);
+    let native = definitions
+        .iter()
+        .find(|tool| tool.function.name == "send_task_followup")
+        .unwrap();
+    let required = json!(["session_id", "request_id", "action", "prompt"]);
+    assert_eq!(native.function.parameters["required"], required);
+    let levels =
+        catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol").thinking_level_map;
+    let request = codex_responses_request(
+        "gpt-5.6-sol",
+        None,
+        &[Message::User {
+            content: "follow up on the idle task".into(),
+        }],
+        &definitions,
+        &levels,
+        Some("caller"),
+    );
+    let tool = request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "send_task_followup")
+        .unwrap();
+    assert_eq!(tool["parameters"]["required"], required);
+    for field in ["project_id", "run_id"] {
+        assert_eq!(
+            tool["parameters"]["properties"][field]["type"],
+            json!(["string", "null"])
+        );
+    }
+    assert!(tool.get("strict").is_none());
+}
+
+#[test]
 fn codex_session_headers_share_the_prompt_cache_key() {
     let request = apply_codex_session_headers(
         Client::new().post("https://chatgpt.com/backend-api/codex/responses"),
