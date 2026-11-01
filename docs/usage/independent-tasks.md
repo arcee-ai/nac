@@ -297,9 +297,12 @@ headless fail-closed. Human delivery cannot be selected by an agent input field.
 Neither answer is permission approval, a remembered grant, review intent or
 authority to change the execution backend.
 
-Identical creation and answer retries return stable receipts. Changed answers,
-stale revisions/generations, incompatible owner/configuration/project or goal
-bindings, and cancelled requests conflict. An answer reserves one durable inbox
+Identical creation and answer retries return stable historical receipts, not a
+new admission or a current-status read. Use `read_question` for the current
+status: replaying creation after cancellation keeps that request cancelled and
+creates no new question or continuation. Changed answers, stale first-response
+revisions/generations, incompatible owner/configuration/project or goal bindings,
+and first answers to cancelled requests conflict. An answer reserves one durable inbox
 item and one continuation run UUID. Even when guidance runs first, only that
 reserved run can consume the answer at the transcript commit boundary. It
 cannot be converted to Steer. Cancelling undelivered input cancels its delivery
