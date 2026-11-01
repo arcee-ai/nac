@@ -7,6 +7,23 @@ use nac_core::store::{HeartbeatAction, HeartbeatSpec, HeartbeatState};
 use std::{collections::BTreeMap, path::PathBuf, time::Instant};
 
 mod cancellation;
+mod shutdown;
+mod submission_shutdown;
+pub(super) use shutdown::hold_store_call;
+pub(super) use submission_shutdown::{hold_submission, observe_submission_stop};
+
+// Manual tick fixtures retain their complete future; serving scans use the
+// shared lifetime that can close while an already-admitted phase is pending.
+async fn tick(manager: &SessionManager) -> Result<()> {
+    super::tick(manager, &SchedulerLifetime::default()).await
+}
+
+async fn reconcile_or_stop(
+    manager: &SessionManager,
+    occurrence: &HeartbeatOccurrence,
+) -> Result<()> {
+    super::reconcile_or_stop(manager, occurrence, &SchedulerLifetime::default()).await
+}
 
 #[derive(Debug, serde::Serialize)]
 struct Measurement {
