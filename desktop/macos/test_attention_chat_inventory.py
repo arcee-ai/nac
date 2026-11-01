@@ -14,6 +14,10 @@ class AttentionInventoryTests(unittest.TestCase):
         self.assertIn('npm run test:attention-fixtures', scripts['test'].split(' && '))
         command = scripts['test:attention-fixtures']
         self.assertIn("-p 'test_attention_chat_*.py'", command)
+        self.assertIn(
+            "python3 -B -m unittest discover -s ../../../desktop/macos -p 'test_attention_semantic_*.py' -v",
+            command.split(' && '),
+        )
         self.assertIn('node --test ../../../desktop/macos/test_attention_chat_dom.cjs', command)
         workflow = (ROOT / '.github/workflows/stable-release.yml').read_text()
         self.assertIn('working-directory: crates/nac-server/web\n        run: npm test', workflow)
@@ -39,6 +43,23 @@ class AttentionInventoryTests(unittest.TestCase):
             'test_capture_only_after_ready_with_current_custody_within_deadline',
         }
         self.assertTrue(required <= selected, sorted(required - selected))
+        semantic = unittest.TestLoader().discover(
+            str(Path(__file__).parent), 'test_attention_semantic_*.py'
+        )
+        self.assertGreater(semantic.countTestCases(), 0)
+        semantic_selected = set(identities(semantic))
+        semantic_required = {
+            'test_planned_matrix_is_fourteen_real_model_steps_without_extra_goal_calls',
+            'test_read_error_missing_or_duplicate_call_cannot_mark_goal',
+            'test_exact_goal_accounting_run_status_version_and_result_call_are_required',
+            'test_unknown_repeated_wrong_queue_and_missing_tools_fail_closed',
+            'test_exact_mark_not_later_goal_version_and_distinct_B',
+            'test_duplicate_foreign_store_frontier_or_generation_is_not_count_success',
+            'test_content_free_schema_rejects_payload_extension',
+            'test_mock_delivery_is_exact_target_title_and_distinct_identifier_not_just_count',
+            'test_shipping_owner_contains_no_unconditional_fixture_audit_or_pause',
+        }
+        self.assertTrue(semantic_required <= semantic_selected, sorted(semantic_required - semantic_selected))
 
 
 if __name__ == '__main__':
