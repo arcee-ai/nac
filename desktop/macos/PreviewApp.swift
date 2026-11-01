@@ -514,7 +514,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         workspaceIncarnation = nil
         navigationIncarnations.removeAll()
         activeNavigation = nil
+        #if ATTENTION_SMOKE
+        if !quit.attentionFixtureCleanup { window.makeFirstResponder(nil) }
+        #else
         window.makeFirstResponder(nil)
+        #endif
         webView?.navigationDelegate = nil
         webView?.uiDelegate = nil
         webView?.stopLoading()
@@ -593,6 +597,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             self.webView = nil
             self.commands = nil
         }
+        #if ATTENTION_SMOKE
+        // An earlier recovery retirement may complete after cleanup custody
+        // was lost. Read the current flag, not a captured eligibility value.
+        retirement.attentionFixtureCleanup = { [weak self] in self?.quit.attentionFixtureCleanup ?? true }
+        #endif
         workspaceRetirement = retirement
         return retirement
     }

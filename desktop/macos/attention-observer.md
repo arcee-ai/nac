@@ -330,3 +330,17 @@ Only an exact receipt permits descriptor-relative filesystem cleanup. A live
 child, replacement root, unexpected temp entry, symlink or cleanup failure
 retains evidence and fails the episode. No native runtime qualification is
 implied by the accompanying inert directory tests.
+
+Cleanup after custody loss uses the ATTENTION_SMOKE-only
+`cleanupAttentionFixture` entry in the existing AppQuit/AppLifecycle owner.
+It pins the same launch/stop, retires through PreviewApp and waits for the real
+engine owner to reap; it does not call the interactive `stopFixture` helper.
+An existing Quit or recovery sheet stays in place without answering/dismissing
+it. Old answers and queued presentations cannot undo cleanup or restart work.
+Responder changes (including a late recovery retirement), window fronting and
+timeout UI are suppressed for this intent. The 20/23-second engine policy and
+26-second lifecycle timeout remain; timeout retains the original callback and
+does not claim reap. Only actual completion permits normal termination, even
+when it arrives after that timeout. Ordinary finish and product Quit retain
+their previous confirmation/Cancel/Stop behavior. Source fences and lifecycle
+typechecks are not actual AppKit cleanup evidence.

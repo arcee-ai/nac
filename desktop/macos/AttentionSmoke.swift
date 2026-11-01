@@ -126,7 +126,7 @@ final class AttentionSmoke {
             guard let sheet = app.window.attachedSheet else { throw DesktopStartupError.message("No owned Quit sheet") }
             app.window.endSheet(sheet, returnCode: .alertFirstButtonReturn)
         case "finish": passed = true; app.quit.stopFixture()
-        case "cleanup": controlRetired = true; passed = false; app.quit.stopFixture()
+        case "cleanup": controlRetired = true; passed = false; app.quit.cleanupAttentionFixture()
         default: throw DesktopStartupError.message("Unknown attention fixture action")
         }
     }
@@ -137,6 +137,9 @@ final class AttentionSmoke {
     private func publish(stopped: Bool = false) {
         var value: [String: Any] = ["app_pid": getpid(), "stage": stage, "passed": passed && error == nil,
             "control_nonce": controlNonce, "window_number": app.window.windowNumber, "app_active": NSApp.isActive,
+            "cleanup_intent": app.quit.attentionFixtureCleanup, "cleanup_timeouts": app.quit.attentionFixtureCleanupTimeouts,
+            "quit_sheet_presentations": app.quit.smokeSheetPresentations, "quit_stop_completions": app.quit.smokeStopCompletions,
+            "quit_phase": String(describing: app.quit.lifecycle.phase),
             "stopped": stopped, "workspace_window_count": 1, "engine_pid": app.engine.pid,
             "window_visible": app.window.isVisible, "same_view": originalView === app.webView,
             "route": app.webView?.url?.fragment ?? "",

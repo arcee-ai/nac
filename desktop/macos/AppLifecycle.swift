@@ -145,6 +145,17 @@ final class AppLifecycle {
         }
     }
 
+    #if ATTENTION_SMOKE
+    /// Explicit cleanup of the already-owned fixture, not an idle observation
+    /// or a product Quit decision. Reuse the original stop if one is pending.
+    func beginAttentionFixtureCleanup() -> Wait? {
+        switch phase {
+        case .running, .confirming: return beginStop()
+        case .stopping, .shutdownFailed, .finished: return nil
+        }
+    }
+    #endif
+
     private func beginStop() -> Wait {
         let stop = Stop(launch: launch)
         let wait = Wait(stop: stop)

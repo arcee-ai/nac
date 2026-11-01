@@ -128,6 +128,14 @@ changes retire controls. AttentionFixtureGuard repeats the check when consuming
 each short-lived, nonce-bound control. Its separate exact-owner cleanup verb
 only stops the fixture and cannot activate a window or restore focus. This is
 fixture custody, not a change to product authorization or OS privacy settings.
+After custody retirement the ATTENTION_SMOKE cleanup verb enters the same
+AppLifecycle/AppQuit stop/reap owner directly, without fabricated idle activity
+or interactive Quit. Existing Quit/recovery sheets stay attached in place;
+their late answers cannot cancel cleanup or restart a closed recovery owner.
+Queued presentation, responder changes and timeout fronting are fenced for
+this cleanup intent only. A late original engine reap may finish cleanup after
+the unchanged 26-second UI deadline; it never sends another engine stop. The
+ordinary finish/Cancel/Stop and non-ATTENTION_SMOKE source stay unchanged.
 WorkspaceNotificationPortTests accepts only an externally owned private root
 and inherited directory descriptor. notification_port_fixture.py reaps that
 exact child before NotificationPortCleanup recomputes the production profile's

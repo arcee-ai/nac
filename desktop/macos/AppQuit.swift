@@ -19,6 +19,9 @@ final class AppQuit {
     /// Legacy startup/instance fixtures explicitly finish by choosing the real
     /// owned Quit sheet. This never ships or answers an agent permission ask.
     func stopFixture() {
+        #if ATTENTION_SMOKE
+        guard !attentionFixtureCleanup else { return }
+        #endif
         guard fixtureStopTimer == nil else { return }
         let deadline = Date().addingTimeInterval(5)
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] timer in
@@ -42,6 +45,28 @@ final class AppQuit {
     }
     #endif
 
+    #if ATTENTION_SMOKE
+    private(set) var attentionFixtureCleanup = false
+    private(set) var attentionFixtureCleanupTimeouts = 0
+
+    /// Called only by AttentionSmoke's nonce/PID-bound cleanup verb. It takes
+    /// over the same stop/reap owner without requesting interactive Quit.
+    func cleanupAttentionFixture() {
+        guard !attentionFixtureCleanup else { return }
+        attentionFixtureCleanup = true
+        fixtureStopTimer?.invalidate()
+        fixtureStopTimer = nil
+        // Preserve an already-attached sheet in place. Do not dismiss/answer
+        // it, rekey its window or restore focus. The lifecycle transition makes
+        // any old sheet completion inert; queued present callbacks are fenced.
+        if let wait = lifecycle.beginAttentionFixtureCleanup() {
+            beginStop(wait)
+        } else if case .finished = lifecycle.phase {
+            RunLoop.main.perform(inModes: [.common]) { NSApp.terminate(nil) }
+        }
+    }
+    #endif
+
     init(app: PreviewApp) { self.app = app }
 
     var launch: UUID? { lifecycle.launch }
@@ -50,6 +75,13 @@ final class AppQuit {
     func childExited(_ launch: UUID) { lifecycle.childExited(launch) }
 
     func shouldTerminate() -> NSApplication.TerminateReply {
+        #if ATTENTION_SMOKE
+        if attentionFixtureCleanup {
+            // No new confirmation/wait episode, including after the UI deadline.
+            if case .finished = lifecycle.phase { return .terminateNow }
+            return .terminateCancel
+        }
+        #endif
         #if PREVIEW_SMOKE
         smokeQuitRequests += 1
         #endif
@@ -75,6 +107,9 @@ final class AppQuit {
     }
 
     private func present(_ episode: AppLifecycle.Confirmation) {
+        #if ATTENTION_SMOKE
+        guard !attentionFixtureCleanup else { return }
+        #endif
         guard lifecycle.phase == .confirming(episode), confirmation == nil else { return }
         guard let window = app.window else {
             _ = lifecycle.answer(episode, stop: false)
@@ -121,6 +156,14 @@ final class AppQuit {
                 RunLoop.main.perform(inModes: [.common]) { NSApp.terminate(nil) }
             case .settledAfterTimeout:
                 self.scheduledWait = nil
+                #if ATTENTION_SMOKE
+                if self.attentionFixtureCleanup {
+                    // The original callback has now established real reap;
+                    // cleanup intent was never cancelled by a UI wait timeout.
+                    RunLoop.main.perform(inModes: [.common]) { NSApp.terminate(nil) }
+                    return
+                }
+                #endif
                 self.app.showShutdownStatus("NAC has stopped. Quit again to exit the application.")
             case .ignored: break
             }
@@ -135,6 +178,13 @@ final class AppQuit {
         // or resends control and cannot establish cleanup/store release.
         DispatchQueue.main.asyncAfter(deadline: .now() + 26) { [weak self] in
             guard let self, self.lifecycle.shutdownTimedOut(wait) else { return }
+            #if ATTENTION_SMOKE
+            if self.attentionFixtureCleanup {
+                self.attentionFixtureCleanupTimeouts += 1
+                fputs("Attention fixture cleanup is still waiting for its original engine owner.\n", stderr)
+                return
+            }
+            #endif
             self.app.showShutdownStatus("NAC could not finish stopping within the shutdown wait. The workspace has been closed and cannot accept commands. The original engine shutdown is still pending. Quit again to continue waiting.")
             self.app.window.makeKeyAndOrderFront(nil)
         }
