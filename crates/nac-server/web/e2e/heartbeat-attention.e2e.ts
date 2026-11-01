@@ -9,7 +9,7 @@ import type { HeartbeatInspection, ManagedSessionSummary } from "../src/app/type
 
 test.use({ managedNativeWeb: false });
 
-test("pending withdrawal keeps an unchanged check quiet in the production session list", async ({
+test("pending withdrawal preserves quiet list projection and production project attention", async ({
   harness,
   request,
   page,
@@ -30,11 +30,11 @@ test("pending withdrawal keeps an unchanged check quiet in the production sessio
     title: "Quiet withdrawal target",
     pinned: false,
   });
-  await page.goto(`${harness.baseUrl}/#/session/${target}/insights`);
-  await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-  await page.goto(`${harness.baseUrl}/#/session/${holder}/sessions`);
-  const row = page.getByRole("button", { name: /^Quiet withdrawal target/ });
-  await expect(row).toBeVisible();
+  await page.goto(`${harness.baseUrl}/#/`);
+  const card = page.locator(`[data-item-id="${project}"][data-item-kind="project"]`);
+  const finishedDot = card.locator("span.bg-brand-450");
+  await expect(card).toBeVisible();
+  await expect(finishedDot).toHaveCount(0);
   const control = async (operation: object) => {
     const response = await request.post(
       `${harness.baseUrl}/sessions/${target}/heartbeats/control`,
@@ -81,6 +81,7 @@ test("pending withdrawal keeps an unchanged check quiet in the production sessio
   await control({ action: "run_now", schedule_id: schedule, expected_version: 1 });
   await gate.accepted;
   const active = (await inspect()).history.find((item) => item.state === "admitted")!;
+  await expect(card.getByText("running", { exact: true })).toHaveCount(1);
   harness.provider.enqueue(
     "quiet-report",
     { functionOutputCallId: "quiet-read" },
@@ -114,12 +115,8 @@ test("pending withdrawal keeps an unchanged check quiet in the production sessio
   const before = await listing();
   expect(before.heartbeat_results?.[0].outcome).toBe("unchanged");
   expect(before.attention_updated_at).toBeTruthy();
-  await page.reload();
-  await expect(row).toBeVisible();
-  await expect(row).not.toHaveAttribute(
-    "aria-label",
-    /Updated|updated since last viewed|Run finished/,
-  );
+  await expect(card.getByText("running", { exact: true })).toHaveCount(0);
+  await expect(finishedDot).toHaveCount(0);
   // A real retained terminal in the same workspace holds its activity lease.
   // This makes pending work deterministic across scheduler ticks, without
   // changing the target chat's timestamp or ordinary-run revision.
@@ -147,29 +144,41 @@ test("pending withdrawal keeps an unchanged check quiet in the production sessio
   )!;
   expect(withdrawn.state).toBe("withdrawn");
   expect(withdrawn.outcome).toBeNull();
-  await page.reload();
-  await expect(row).toBeVisible();
-  await expect(row).not.toHaveAttribute(
-    "aria-label",
-    /Updated|updated since last viewed|Run finished/,
-  );
+  await expect(finishedDot).toHaveCount(0);
   await page.screenshot({ path: info.outputPath("quiet-after-withdrawal.png"), fullPage: true });
-  const viewedNavigation = await page.evaluate(() => localStorage.getItem("nac.sessionNavigation"));
-  expect(viewedNavigation).toBeTruthy();
   await harness.restart("1"); // Normal shutdown also cleans the owned terminal.
-  // Restart binds a different ephemeral origin. Preserve this user's actual
-  // viewed history rather than treating the new port as a first-time viewer.
-  await page.addInitScript(
-    (saved) => localStorage.setItem("nac.sessionNavigation", saved!),
-    viewedNavigation,
+  await page.goto(`${harness.baseUrl}/#/`);
+  await expect(card).toBeVisible();
+  await expect(finishedDot).toHaveCount(0);
+  const restarted = await listing();
+  expect(restarted.heartbeat_results).toEqual(after.heartbeat_results);
+  expect(restarted.attention_updated_at).toBe(after.attention_updated_at);
+  // Positive control: the actual production project-list consumer still
+  // announces a later ordinary run, despite this chat's older quiet result.
+  const ordinary = new ScriptGate();
+  harness.provider.enqueue(
+    "ordinary-visible",
+    { token: "ORDINARY_LIST_ATTENTION" },
+    { kind: "text", stream: "request", text: "Ordinary human follow-up finished." },
+    ordinary,
   );
-  await page.goto(`${harness.baseUrl}/#/session/${holder}/sessions`);
-  await expect(row).toBeVisible();
-  await expect(row).not.toHaveAttribute(
-    "aria-label",
-    /Updated|updated since last viewed|Run finished/,
-  );
-  expect((await listing()).heartbeat_results).toEqual(after.heartbeat_results);
+  expect(
+    (
+      await request.post(`${harness.baseUrl}/sessions/${target}/runs`, {
+        data: { prompt: "ORDINARY_LIST_ATTENTION: answer this fresh human follow-up." },
+      })
+    ).status(),
+  ).toBe(202);
+  await ordinary.accepted;
+  await expect(card.getByText("running", { exact: true })).toHaveCount(1);
+  ordinary.release();
+  await expect(card.getByText("running", { exact: true })).toHaveCount(0);
+  await expect(finishedDot).toHaveCount(1);
+  await finishedDot.hover();
+  await expect(page.getByRole("tooltip").filter({ hasText: "Run finished" })).toBeVisible();
+  const later = await listing();
+  expect(later.attention_revision).toBeGreaterThan(before.attention_revision ?? 0);
+  expect(later.attention_updated_at ?? null).toBeNull();
 });
 
 test("a missing heartbeat deep link shows its inspection error", async ({
