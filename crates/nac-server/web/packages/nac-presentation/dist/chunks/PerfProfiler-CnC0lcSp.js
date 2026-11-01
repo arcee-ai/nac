@@ -1466,8 +1466,7 @@ function wn(e) {
 			return n();
 		}
 	}
-	let a = $e(i(), "chatTabs"), o = a.getState(), { getState: s, setState: c, subscribe: l, useStore: u } = a;
-	l(() => {
+	let a = $e(i(), "chatTabs"), o = a.getState(), { getState: s, setState: c, subscribe: l, useStore: u } = a, d = l(() => {
 		let { dismissed: n, order: r } = s();
 		try {
 			e?.setItem(t, JSON.stringify({
@@ -1476,27 +1475,27 @@ function wn(e) {
 			}));
 		} catch {}
 	});
-	function d(e) {
+	function f(e) {
 		c((t) => {
 			if (t.dismissed.has(e)) return null;
 			let n = new Set(t.dismissed);
 			return n.add(e), { dismissed: n };
 		});
 	}
-	function f(e) {
+	function p(e) {
 		c((t) => {
 			if (!t.dismissed.has(e)) return null;
 			let n = new Set(t.dismissed);
 			return n.delete(e), { dismissed: n };
 		});
 	}
-	function p(e, t) {
+	function m(e, t) {
 		c((n) => ({ order: {
 			...n.order,
 			[e]: t
 		} }));
 	}
-	function m(e, t) {
+	function h(e, t) {
 		let n = new Set(e), r = new Set(t);
 		c((e) => {
 			let t = new Set([...e.dismissed].filter((e) => n.has(e))), i = {};
@@ -1507,18 +1506,18 @@ function wn(e) {
 			};
 		});
 	}
-	let h = () => u((e) => e.dismissed), g = [];
+	let g = () => u((e) => e.dismissed), _ = [];
 	return {
 		release: () => {
-			a.setState(o);
+			d(), a.setState(o);
 		},
 		chatTabsStore: a,
-		dismissChatTab: d,
-		restoreChatTab: f,
-		setChatTabOrder: p,
-		pruneChatTabs: m,
-		useDismissedChatTabs: h,
-		useChatTabOrder: (e) => u((t) => e ? t.order[e] ?? g : g)
+		dismissChatTab: f,
+		restoreChatTab: p,
+		setChatTabOrder: m,
+		pruneChatTabs: h,
+		useDismissedChatTabs: g,
+		useChatTabOrder: (e) => u((t) => e ? t.order[e] ?? _ : _)
 	};
 }
 var { release: Tn, chatTabsStore: En, dismissChatTab: Dn, restoreChatTab: On, setChatTabOrder: kn, pruneChatTabs: An, useDismissedChatTabs: jn, useChatTabOrder: Mn } = wn(et), Nn = /* @__PURE__ */ e({
@@ -3041,19 +3040,18 @@ function Ra(e) {
 			return n();
 		}
 	}
-	let s = $e(o(), "sessionNavigation"), c = s.getState(), { getState: l, setState: u, subscribe: d, useStore: f } = s;
-	d(() => {
+	let s = $e(o(), "sessionNavigation"), c = s.getState(), { getState: l, setState: u, subscribe: d, useStore: f } = s, p = d(() => {
 		try {
 			e?.setItem(t, a(l()));
 		} catch {}
 	});
-	function p(e) {
+	function m(e) {
 		u((t) => {
 			let n = new Set(t.pinned);
 			return n.delete(e) || n.add(e), { pinned: n };
 		});
 	}
-	function m(e, t) {
+	function h(e, t) {
 		let n = en(t);
 		Number.isFinite(n) && u((r) => {
 			let i = r.lastViewedAt[e];
@@ -3063,7 +3061,7 @@ function Ra(e) {
 			} };
 		});
 	}
-	function h(e) {
+	function g(e) {
 		let t = new Set(e);
 		u((e) => {
 			let n = new Set([...e.pinned].filter((e) => t.has(e))), r = Object.fromEntries(Object.entries(e.lastViewedAt).filter(([e]) => t.has(e)));
@@ -3075,14 +3073,14 @@ function Ra(e) {
 	}
 	return {
 		release: () => {
-			s.setState(c);
+			p(), s.setState(c);
 		},
 		restoreSessionNavigation: i,
 		serializeSessionNavigation: a,
 		sessionNavigationStore: s,
-		toggleSessionNavigationPin: p,
-		markSessionViewed: m,
-		pruneSessionNavigation: h,
+		toggleSessionNavigationPin: m,
+		markSessionViewed: h,
+		pruneSessionNavigation: g,
 		useSessionNavigationPins: () => f((e) => e.pinned),
 		useSessionViewedAt: (e) => f((t) => t.lastViewedAt[e])
 	};
