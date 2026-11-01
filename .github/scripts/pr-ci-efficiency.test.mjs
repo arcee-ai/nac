@@ -84,7 +84,7 @@ test("exact native supplier qualification is explicit, bounded and separate from
   assert.equal(catalog["all-341-macos26"].profile, "macos26");
   assert.equal(catalog["all-343-macos26"].source_sha, "f4832ed44f948a88170f5d3bc25322852dbce347");
   assert.equal(catalog["all-343-macos26"].scenario_count, 8);
-  assert.equal(catalog["all-351-macos14"].source_sha, "24d757734480a56eeeb772d33de8f23a8549719a");
+  assert.equal(catalog["all-351-macos14"].source_sha, "8e8f18d7f479b3514d19b2754fee53ea47c6115c");
   assert.equal(catalog["all-351-macos14"].profile, "macos14");
   assert.equal(catalog["all-352-macos26"].source_sha, "a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1");
   assert.equal(catalog["all-352-macos26"].phase_count, 6);
