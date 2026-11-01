@@ -202,6 +202,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
 
     private func load(_ url: URL, incarnation: String) async {
         do {
+            var firstProfileDocument = false
             #if LOCAL_APP
             let route = "#/"
             #else
@@ -229,6 +230,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
                       engine.receipt?.incarnation == receipt.incarnation else { return }
                 workspaceStorage = selected
                 if selected != nil {
+                    firstProfileDocument = true
                     // This is the still-blank bootstrap view, before any product
                     // document/bridge was loaded. Product recovery uses retirement.
                     commands?.retire()
@@ -244,7 +246,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             recovery.engineReady(receipt)
             guard !recovery.isSuspended, !recovery.busy else { return }
             if webView == nil {
-                replaceWorkspace(receipt: receipt, fragment: recovery.restoredFragment ?? String(route.dropFirst()))
+                replaceWorkspace(receipt: receipt, fragment: recovery.restoredFragment ?? String(route.dropFirst()),
+                                 initial: firstProfileDocument)
                 return
             }
             workspaceIncarnation = incarnation
@@ -516,8 +519,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         return retirement
     }
 
-    func replaceWorkspace(receipt: EngineReceipt, fragment: String?) {
-        guard canRecoverWorkspace, let endpoint = receipt.endpoint, let base = URL(string: endpoint),
+    func replaceWorkspace(receipt: EngineReceipt, fragment: String?, initial: Bool = false) {
+        // Initial verified loading continues behind a Cancel-Quit confirmation,
+        // as it did before profile selection. Recovery keeps its stricter gate.
+        guard !stopping, failure == nil, initial || canRecoverWorkspace,
+              let endpoint = receipt.endpoint, let base = URL(string: endpoint),
               engine.receipt?.incarnation == receipt.incarnation,
               engine.receipt?.endpoint == receipt.endpoint else { return }
         workspaceRetirement = nil
