@@ -334,6 +334,19 @@ retained, splitting oversized receipts into indexed readable text parts with
 raw/reassembled-export hashes. Database, bundle and private profile data are not
 uploaded. A critical export failure is an explicit failure, not a capped pass.
 
+Lifecycle export reserves a separate finite allowance for the exact fifteen PNG
+paths: at most 2 MiB each and 30 MiB together. Actual redacted non-image payload,
+including JSON split wrappers, remains bounded to 11.75 MiB; its index remains
+256 KiB. The whole lifecycle envelope is 42 MiB (44,040,192 bytes). Shared export
+caps and other qualifications are unchanged. Before the first reservation, the
+harness records this capacity in its build manifest and checks existing payload
+with 256 KiB reserved inside the non-image budget for final metadata. It rechecks
+the same allowance after every case. Completed image cases must form the fixed
+run/approval/terminal prefix; final success requires all fifteen original images.
+Extra paths, missing final images or any byte overflow stop remaining cases with
+unknown export acceptance and no retry. This capacity declaration is source
+evidence; synthetic export-byte controls do not establish PNG validity or OCR.
+
 Ordinary PR/push/release guards, permissions and the other named qualifications
 are preserved. A manual stable workflow also starts its existing ordinary CI jobs
 on their isolated standard hosts; this adapter does not reroute them. Publication
