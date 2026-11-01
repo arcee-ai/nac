@@ -97,6 +97,26 @@ fn exact_creation_retries_conflict_on_changed_arguments_and_survive_restart() {
 }
 
 #[test]
+fn cancelled_creation_replay_returns_historical_receipt_without_new_admission() {
+    let (path, original) = fixture(QuestionResponder::HumanDecision);
+    let receipt = original.creation_receipt();
+    let cancelled = cancel_task_question(&path, "target", &original.request.request_id, 1).unwrap();
+    let replay = create_task_question(&path, &original.request, 0).unwrap();
+    assert_eq!(replay.creation_receipt(), receipt);
+    assert_eq!(replay, cancelled);
+    assert_eq!(
+        load_task_question(&path, "target", &original.request.request_id).unwrap(),
+        Some(cancelled)
+    );
+    assert_eq!(list_task_questions(&path, "target").unwrap().len(), 1);
+    assert!(pending_task_question(&path, "target").unwrap().is_none());
+    assert!(list_session_inbox(&path, "target").unwrap().is_empty());
+    assert!(replay.answer.is_none());
+    assert!(replay.continuation_state.is_none());
+    cleanup(&path);
+}
+
+#[test]
 fn answer_receipt_is_stable_and_never_replaces_an_accepted_answer() {
     let (path, q) = fixture(QuestionResponder::Information);
     let input = answer(&q, "CSV");
