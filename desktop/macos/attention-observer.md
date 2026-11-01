@@ -303,3 +303,30 @@ idle CPU/wakeup/observer measurements with/without notifications; and signed
 build OS-delivery evidence separate from a mock center. Click handling must
 never answer, execute, grant, or replay a command. No signing identity or
 notification delivery evidence is supplied by these fixtures.
+
+### Attention fixture execution custody
+
+The app driver now requires `APP OUTPUT INSTANCE_OBSERVER FULL_SOURCE_REF`.
+Its clean exact-HEAD/tree guard and app receipt must agree with that full commit.
+Each launch/control checks the active console UID, Aqua domain and observed
+Root-unlocked bit. An available CGS lock wins. App identity includes its launch
+time; the first owned window and control nonce stay pinned. A two-second control
+envelope is published atomically; the fixture app repeats lock, UID, focus,
+window and nonce checks at consumption. Unknown/locked state or focus loss
+retires controls. Cleanup uses a separate nonce-bound stop-only verb without
+activation or focus restoration. These controls require actual Aqua execution
+before acceptance; Python fakes and Swift typechecks are preparation evidence.
+
+The standalone port test is run only through `notification_port_fixture.py
+PORT_PROGRAM CLEANUP_HELPER FRESH_OUTPUT FULL_SOURCE_REF`. Compile its existing
+source group with `NotificationPortFixture.swift`; compile the same group with
+`NotificationPortCleanup.swift` replacing the test main for the companion.
+Both receive the controller-created canonical root and inherited directory fd;
+neither discovers a profile or accepts an arbitrary WebKit UUID. The controller
+owns a unique 0700 TMPDIR and reaps its exact child before calling the companion,
+including after assertion failure. The companion uses WorkspaceStorageProfile,
+removes that UUID only, and revalidates the root after the asynchronous callback.
+Only an exact receipt permits descriptor-relative filesystem cleanup. A live
+child, replacement root, unexpected temp entry, symlink or cleanup failure
+retains evidence and fails the episode. No native runtime qualification is
+implied by the accompanying inert directory tests.

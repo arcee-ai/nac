@@ -121,3 +121,17 @@ it carries no command, approval, goal, inbox, path or backend intent. Keep menu
 guards separate and defer IME/modal/unretained editors without a later auto-retry.
 Actual-app fixture source lives in AttentionSmoke/attention_app_smoke.py; its
 injected center cannot establish signed system delivery or hidden CPU acceptance.
+The attention fixture controller requires an owned active Aqua console and an
+observed unlocked Root.IOConsoleLocked bit before each actuation. An observed
+CGS lock overrides that fallback; missing Root state or focus/window/incarnation
+changes retire controls. AttentionFixtureGuard repeats the check when consuming
+each short-lived, nonce-bound control. Its separate exact-owner cleanup verb
+only stops the fixture and cannot activate a window or restore focus. This is
+fixture custody, not a change to product authorization or OS privacy settings.
+WorkspaceNotificationPortTests accepts only an externally owned private root
+and inherited directory descriptor. notification_port_fixture.py reaps that
+exact child before NotificationPortCleanup recomputes the production profile's
+WebKit UUID. The controller retains descriptors through failure/late callbacks,
+rejects replaced/symlink/foreign roots, and removes only its original tree after
+an exact cleanup receipt. Never run the port executable directly or use the
+app-shaped AttentionFixtureCleanup for its fixture.db profile.

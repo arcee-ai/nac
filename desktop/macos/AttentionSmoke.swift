@@ -48,6 +48,8 @@ final class AttentionSmoke {
     private var stage = "starting"
     private var error: String?
     private var commandBusy = false
+    private var controlRetired = false
+    private let controlNonce = UUID().uuidString
     private weak var originalView: WKWebView?
     private var originalPID: Int32 = 0
     private var passed = false
@@ -94,6 +96,10 @@ final class AttentionSmoke {
         publish()
     }
     private func perform(_ command: [String: String]) async throws {
+        do {
+            guard !controlRetired || command["action"] == "cleanup" else { throw DesktopStartupError.message("Fixture controls retired") }
+            try AttentionFixtureGuard.validate(command, nonce: controlNonce, window: app.window)
+        } catch { controlRetired = true; throw error }
         switch command["action"] {
         case "enable", "mute", "reset", "clear":
             let label = ["enable": "Enable notifications", "mute": "Mute notifications",
@@ -120,6 +126,7 @@ final class AttentionSmoke {
             guard let sheet = app.window.attachedSheet else { throw DesktopStartupError.message("No owned Quit sheet") }
             app.window.endSheet(sheet, returnCode: .alertFirstButtonReturn)
         case "finish": passed = true; app.quit.stopFixture()
+        case "cleanup": controlRetired = true; passed = false; app.quit.stopFixture()
         default: throw DesktopStartupError.message("Unknown attention fixture action")
         }
     }
@@ -129,6 +136,7 @@ final class AttentionSmoke {
     func didStop() { timer?.invalidate(); timer = nil; stage = "stopped"; publish(stopped: true) }
     private func publish(stopped: Bool = false) {
         var value: [String: Any] = ["app_pid": getpid(), "stage": stage, "passed": passed && error == nil,
+            "control_nonce": controlNonce, "window_number": app.window.windowNumber, "app_active": NSApp.isActive,
             "stopped": stopped, "workspace_window_count": 1, "engine_pid": app.engine.pid,
             "window_visible": app.window.isVisible, "same_view": originalView === app.webView,
             "route": app.webView?.url?.fragment ?? "",

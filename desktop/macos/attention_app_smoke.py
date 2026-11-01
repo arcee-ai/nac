@@ -11,19 +11,61 @@ import plistlib
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
+
+sys.dont_write_bytecode = True
 
 from instance_contract import digest
 from instance_smoke import AppJourney, engine_settled, verify_embedded_assets, wait_for
 from quit_fixture import QuitProvider, TRANSCRIPT, request
+from attention_fixture_control import AttentionControl, console_facts, require_console
+from attention_feed_build import source_binding
 
 
-def run_contract(bundle, destination, observer):
+class AttentionJourney(AppJourney):
+    def __init__(self, *args):
+        self.custody = AttentionControl()
+        self.engine_pid = None
+        require_console(console_facts())
+        super().__init__(*args)
+
+    def launch(self):
+        self.custody.check(self, launch=True)
+        super().launch()
+        if self.identity is None:
+            def bind_owner():
+                try:
+                    record = json.loads(self.output.read_text())
+                except (FileNotFoundError, json.JSONDecodeError):
+                    return False
+                apps = self.observe()['apps']
+                if len(apps) != 1 or record.get('app_pid') != apps[0]['pid']:
+                    return False
+                if type(record.get('window_number')) is not int or record['window_number'] <= 0:
+                    return False
+                self.identity = apps[0]
+                self.custody.bind(self, record)
+                self.engine_pid = record.get('engine_pid') or None
+                return True
+            wait_for('Exact launched attention owner', bind_owner, timeout=12)
+        self.custody.check(self)
+
+    def stage(self, stage):
+        result = super().stage(stage)
+        self.engine_pid = result.get('engine_pid') or self.engine_pid
+        self.custody.check(self)
+        return result
+
+
+def run_contract(bundle, destination, observer, source_ref):
+    binding = source_binding(Path(__file__).resolve().parents[2], source_ref)
+    require_console(console_facts())
     bundle, destination, observer = (Path(value).resolve() for value in (bundle, destination, observer))
-    destination.mkdir(parents=True, exist_ok=True)
+    destination.mkdir(mode=0o700, parents=False, exist_ok=False)
     build = json.loads((bundle / 'Contents/Resources/build-receipt.json').read_text())
     head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-    assert build['source_head'] == head == build['engine_identity']['source_revision']
+    assert build['source_head'] == head == source_ref == build['engine_identity']['source_revision']
     assert build['attention_smoke_instrumentation'] and build['normal_startup']
     assert build['native_sha256'] == digest(bundle / 'Contents/MacOS/NACPreview')
     assert build['engine_sha256'] == digest(bundle / 'Contents/Resources/nac-web')
@@ -44,23 +86,30 @@ def run_contract(bundle, destination, observer):
                    env=environment, check=True, timeout=5)
     store = profile / 'selected store.db'
     journeys = []
-    evidence = dict(build_receipt=build, actual_local_app=True, system_wk=True,
+    evidence = dict(build_receipt=build, source_binding=binding, actual_local_app=True, system_wk=True,
         native_os_delivery=False, trusted_input=False, hidden_cpu_qualified=False, cases=[])
     evidence['os_version'] = subprocess.check_output(['/usr/bin/sw_vers', '-productVersion'], text=True).strip()
     with Path('/System/Library/Frameworks/WebKit.framework/Resources/Info.plist').open('rb') as stream:
         evidence['system_webkit_version'] = plistlib.load(stream)['CFBundleVersion']
     evidence['fixture_sources'] = {str(Path(__file__).resolve()): digest(__file__),
-        'desktop/macos/AttentionFixtureCleanup.swift': digest('desktop/macos/AttentionFixtureCleanup.swift')}
+        **{str(Path('desktop/macos') / name): digest(Path('desktop/macos') / name) for name in
+           ('AttentionFixtureCleanup.swift', 'attention_fixture_control.py', 'attention_feed_build.py')}}
     evidence['cleanup_helper_sha256'] = digest(observer.parent / 'AttentionFixtureCleanup')
     sequence = 0
     def command(journey, action, **payload):
         nonlocal sequence
         sequence += 1
         name = f'attention-{sequence:04d}'
-        (journey.control / (name + '.json')).write_text(json.dumps(dict(action=action, **payload)))
+        journey.custody.publish(journey, name, action, **payload)
+        if action == 'finish':
+            return  # Stop can retire the window before a stage/focus readback.
         return journey.stage(name)
     def native(journey, predicate, label):
-        return wait_for(label, lambda: (state if predicate(state := journey.read()) else None), timeout=20)
+        def poll():
+            journey.custody.check(journey)
+            state = journey.read()
+            return state if predicate(state) else None
+        return wait_for(label, poll, timeout=20)
     def finish(journey):
         prior = journey.read()['engine_pid']
         command(journey, 'finish')
@@ -69,12 +118,11 @@ def run_contract(bundle, destination, observer):
         assert stopped['attention']['observer_connections'] == stopped['attention']['observer_draining'] == 0
         wait_for('App exited', lambda: not journey.observe()['apps'], timeout=10)
         wait_for('Exact engine stopped', lambda: engine_settled(moved, prior), timeout=25)
-        journey.restore_prior()
         return stopped
     try:
         (destination / 'first').mkdir(exist_ok=True)
         (destination / 'second').mkdir(exist_ok=True)
-        first = AppJourney(moved, destination / 'first/native.json', profile, environment, store, observer)
+        first = AttentionJourney(moved, destination / 'first/native.json', profile, environment, store, observer)
         journeys.append(first); first.launch(); ready = first.stage('ready')
         (root / 'cleanup-input.json').write_text(json.dumps(dict(receipt=ready['ready_receipt'], home=str(profile))))
         assert not ready['attention']['enabled'] and ready['attention']['observer_connections'] == 0
@@ -112,7 +160,7 @@ def run_contract(bundle, destination, observer):
         evidence['cases'].append(dict(name='close-click-shared-chat-draft-cancel', state=cancelled))
         saved_frontier = cancelled['attention']['frontier']
         evidence['cases'].append(dict(name='first-stop', state=finish(first)))
-        second = AppJourney(moved, destination / 'second/native.json', profile, environment, store, observer)
+        second = AttentionJourney(moved, destination / 'second/native.json', profile, environment, store, observer)
         journeys.append(second); second.launch(); second.stage('ready')
         restored = native(second, lambda s: s['attention']['enabled'] and not s['attention']['saving'], 'Cold saved opt-in')
         assert restored['center']['permission_requests'] == 0 and restored['center']['adds'] == 0
@@ -132,17 +180,23 @@ def run_contract(bundle, destination, observer):
         for journey in reversed(journeys):
             try:
                 if journey.observe()['apps']:
-                    command(journey, 'finish')
+                    sequence += 1
+                    journey.custody.cleanup(journey, f'attention-{sequence:04d}')
                     wait_for('Failure cleanup app exit', lambda: not journey.observe()['apps'], timeout=28)
+                assert journey.engine_pid is not None, 'No exact engine cleanup observation'
+                wait_for('Failure cleanup exact engine exit', lambda: engine_settled(moved, journey.engine_pid), timeout=25)
                 journey.log.close()
             except Exception as error:
                 errors.append(str(error))
+            finally:
+                journey.custody.close()
+                journey.log.close()
         provider.close()
         evidence['cleanup_errors'] = errors
         if not errors and (root / 'cleanup-input.json').exists():
             try:
                 cleanup = observer.parent / 'AttentionFixtureCleanup'
-                subprocess.run([str(cleanup), str(root)], check=True, timeout=15)
+                subprocess.run([str(cleanup), str(root)], env=environment, check=True, timeout=15)
                 evidence['website_cleanup'] = json.loads((root / 'cleanup-result.json').read_text())
                 assert evidence['website_cleanup']['root'] == str(root)
                 shutil.rmtree(root)
@@ -151,11 +205,15 @@ def run_contract(bundle, destination, observer):
                 errors.append('Owned website/profile cleanup: ' + str(error))
         if errors:
             evidence['passed'] = False
+        try:
+            assert source_binding(Path(__file__).resolve().parents[2], source_ref) == binding
+        except Exception as error:
+            evidence['passed'] = False
+            errors.append('Final source binding: ' + str(error))
         (destination / 'summary.json').write_text(json.dumps(evidence, indent=2) + '\n')
         assert not errors, errors
 
 
 if __name__ == '__main__':
-    import sys
-    assert len(sys.argv) == 4, 'attention_app_smoke.py APP OUTPUT INSTANCE_OBSERVER'
+    assert len(sys.argv) == 5, 'attention_app_smoke.py APP OUTPUT INSTANCE_OBSERVER FULL_SOURCE_REF'
     run_contract(*sys.argv[1:])

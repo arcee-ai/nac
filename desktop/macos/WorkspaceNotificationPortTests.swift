@@ -8,13 +8,8 @@ import Darwin
 enum WorkspaceNotificationPortTests {
     @MainActor
     static func main() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("nac-notification-port-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        let configuration = EngineLaunchConfiguration(cwd: root, store: root.appendingPathComponent("fixture.db"), environment: ["HOME": root.path])
-        let receipt = EngineReceipt(kind: "ready", version: 1, incarnation: UUID().uuidString,
-            endpoint: "http://127.0.0.1:41001", identity: EngineIdentity(product_version: "fixture", build_id: "fixture", source_revision: "fixture", track: "dev"),
-            store: configuration.store.path, schema: 1, stage: nil, code: nil, message: nil)
-        let storage = await WorkspaceStorage.open(receipt: receipt, configuration: configuration)!
+        let fixture = try NotificationPortFixture()
+        let storage = await WorkspaceStorage.open(receipt: fixture.receipt, configuration: fixture.configuration)!
         let profile = storage.profile
         let token = storage.beginNotifications(generation: 1)!
         guard case .available(let initial, let state, _) = await storage.readNotifications(token) else { fatalError("Fresh native state unavailable") }
@@ -50,8 +45,9 @@ enum WorkspaceNotificationPortTests {
         precondition(after["version"] as? Int == 1 && after["native"] == nil)
         precondition((after["values"] as? [String: [String: String]])?["preferences"]?["nac.sidebar.open"] == "true")
         _ = await withCheckedContinuation { continuation in storage.retireNotifications(successor) { _, durable in continuation.resume(returning: durable) } }
-        try await WKWebsiteDataStore.remove(forIdentifier: profile.identifier)
-        try FileManager.default.removeItem(at: root)
+        try fixture.validate()
+        // The external controller reaps this process before the dedicated
+        // cleanup companion removes the exact WK store, on success or failure.
         print("Exact native ACK, same checkpoint preservation, revision/generation fencing and native-only reset passed.")
     }
 }

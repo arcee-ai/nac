@@ -93,8 +93,8 @@ if [[ "$mode" == lifecycle-* ]]; then
     flags+=(-D PREVIEW_SMOKE -D LIFECYCLE_SMOKE)
 fi
 if [[ "$mode" == attention-* ]]; then
-    sources+=(desktop/macos/AttentionSmoke.swift)
-    flags+=(-D PREVIEW_SMOKE -D ATTENTION_SMOKE)
+    sources+=(desktop/macos/AttentionSmoke.swift desktop/macos/AttentionFixtureGuard.swift)
+    flags+=(-D PREVIEW_SMOKE -D ATTENTION_SMOKE -framework IOKit)
 fi
 receipt_inputs="$output/build-inputs-$mode.json"
 python3 -B desktop/macos/build_receipt.py capture "$receipt_inputs" "$app" "$mode" "${flags[@]}" -- "${sources[@]}"
