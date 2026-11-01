@@ -193,12 +193,14 @@ class Ledger:
         self.value.update(phase='case_dispatched', active_case=name)
         self.save()  # Must return, including directory fsync, before Popen.
 
-    def finish(self, name, state, receipt):
+    def finish(self, name, state, receipt, *, before_save=None):
         if (state not in ('passed', 'failed', 'unknown') or self.value['active_case'] != name
                 or self.value['cases'][name]['state'] != 'dispatched'):
             raise RuntimeError('Unexpected lifecycle result transition')
         self.value['cases'][name].update(state=state, receipt=receipt)
         self.value.update(phase='case_passed' if state == 'passed' else 'stopped_' + state, active_case=None)
+        if before_save is not None:
+            before_save(self.value)
         self.save()
 
     def close(self):
