@@ -22,7 +22,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private var navigationIncarnations: [WKNavigation: String] = [:]
     private var activeNavigation: WKNavigation?
     private var workspaceRetirement: WorkspaceRetirement?
-    private let workspaceDataStore = WKWebsiteDataStore.nonPersistent()
+    private let ephemeralDataStore = WKWebsiteDataStore.nonPersistent()
+    private var workspaceStorage: WorkspaceStorage?
+    private var workspaceDataStore: WKWebsiteDataStore { workspaceStorage?.websiteDataStore ?? ephemeralDataStore }
     private(set) lazy var recovery = WorkspaceRecovery(app: self)
     private var status: NSTextField!
     #if LOCAL_APP
@@ -220,6 +222,24 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
                   engine.receipt?.incarnation == incarnation else { return }
             baseURL = url
             guard let receipt = engine.receipt else { return }
+            #if LOCAL_APP
+            if workspaceStorage == nil, let configuration = launchConfiguration {
+                let selected = await WorkspaceStorage.open(receipt: receipt, configuration: configuration)
+                guard !stopping, !Task.isCancelled, failure == nil,
+                      engine.receipt?.incarnation == receipt.incarnation else { return }
+                workspaceStorage = selected
+                if selected != nil {
+                    // This is the still-blank bootstrap view, before any product
+                    // document/bridge was loaded. Product recovery uses retirement.
+                    commands?.retire()
+                    webView?.navigationDelegate = nil
+                    webView?.uiDelegate = nil
+                    webView?.removeFromSuperview()
+                    webView = nil
+                    commands = nil
+                }
+            }
+            #endif
             recovery.seedRoute(String(route.dropFirst()))
             recovery.engineReady(receipt)
             guard !recovery.isSuspended, !recovery.busy else { return }
@@ -458,7 +478,12 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             else { self.smoke?.didCleanUp() }
             #endif
             #endif
-            completion()
+            if let storage = self.workspaceStorage {
+                storage.flush { durable in
+                    if !durable { fputs("NAC workspace storage did not confirm a durable checkpoint before Quit.\n", stderr) }
+                    completion()
+                }
+            } else { completion() }
         }
     }
 
@@ -516,7 +541,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         webView = replacement
         window.contentView!.addSubview(replacement, positioned: .below, relativeTo: status)
         commands = NativeCommands(webView: replacement, receipt: { [weak self] in self?.engine.receipt },
-            connectionLost: { [weak self] in self?.recovery.connectionLost() })
+            connectionLost: { [weak self] in self?.recovery.connectionLost() }, workspaceStorage: workspaceStorage)
         commands.installMenus(applicationName: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "NAC")
         recovery.installMenus()
         recovery.showLossNotice()

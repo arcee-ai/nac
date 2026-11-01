@@ -303,7 +303,7 @@ describe("native storage integration still required after U1", () => {
   it.todo(
     "orders native queued writes, clear tombstones and successor hydration across retirement",
   );
-  it.todo("keeps primary-composer rejected/uncertain delivery in the correct review presentation");
+  it.todo("qualifies primary recovery presentation in production-built browser and actual WK");
   it.todo(
     "qualifies actual renderer/engine replacement, dev/stable profiles and cross-Quit recovery",
   );

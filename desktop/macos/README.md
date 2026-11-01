@@ -1,5 +1,22 @@
 # NAC Mac development preview
 
+Normal `LOCAL_APP` storage uses a persistent WebKit profile and a private
+presentation checkpoint selected from the verified track, canonical Rust store
+and launch home. This does not copy Rust session/query/credential ownership into
+Swift. Ports and launch nonces remain live runtime fences; only nonsecret
+preferences and existing ALL-336 draft/review text use a stable persistence
+binding. The UI never restores an approval, shell intent, terminal bytes or a
+pending send request. Unknown submission outcomes remain text for review.
+
+Presentation files use private no-follow descriptors, an exclusive profile
+lease and ordered atomic replacements. An acknowledged native write is separate
+from merely posting a WebKit message. Failed or timed-out persistence uses
+memory, reports unavailable recovery and cannot prove durable clear or the last
+unacknowledged keystroke. Cross-Quit, new-port/profile isolation, file failures
+and replacement require actual system WKWebView evidence. Source and pure
+JavaScript tests alone do not qualify these native behaviors. Disposable preview
+keeps its ephemeral website store and existing owned cleanup.
+
 ALL-340 wraps NAC's existing production workspace in AppKit and system
 WKWebView. It is a disposable development fixture, with a deterministic local
 Responses provider. Each launch starts empty; closing the window quits the

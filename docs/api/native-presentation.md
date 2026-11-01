@@ -117,9 +117,14 @@ records are bounded to 100 drafts and 100 recovery entries, one million combined
 UTF-16 code units and 4 MiB encoded JSON. The active in-memory prompt is never
 truncated; an over-budget checkpoint is not retained. The caller must provide
 document/owner fencing and ordered durable writes/clear barriers. These shared
-contracts do not themselves implement desktop storage, native profile isolation
-or cross-Quit restoration; those still require the ALL-349 native adapter and
-actual WKWebView evidence.
+contracts alone do not establish native profile isolation or cross-Quit
+restoration. The standalone desktop entry consumes its injected storage
+capability before mounting the shared runtime; without that capability ordinary
+browser storage policy remains unchanged. Denied ambient storage acquisition
+falls back to memory. Native bootstrap/write failure also keeps typing/sending
+usable in isolated memory and reports unavailable recovery rather than using a
+different origin/profile. The desktop adapter still requires actual WKWebView,
+file-fault and separate-process Quit/relaunch qualification.
 
 ## Streams and operation coverage
 
