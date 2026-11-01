@@ -43,10 +43,22 @@ def _excluded(relative):
                for part in relative.parts)
 
 
-def _roster(actual, completed=None, final=False):
+def _roster(actual, completed=None, final=False, failed_cases=None):
     allowed = {Path('lifecycle') / case / case / frame for case in CASES for frame in FRAMES}
     if actual - allowed:
         raise RuntimeError('Unexpected or duplicate lifecycle PNG path outside the fixed roster')
+    if failed_cases is not None:
+        attempted = tuple(failed_cases)
+        if (final or completed is not None or not attempted or attempted != CASES[:len(attempted)]):
+            raise RuntimeError('Partial lifecycle evidence requires a failed attempted-case prefix')
+        expected = {Path('lifecycle') / case / case / frame for case in attempted for frame in FRAMES}
+        if actual - expected:
+            raise RuntimeError('Lifecycle failure PNG belongs to a case never dispatched')
+        missing = sorted(str(path) for path in expected - actual)
+        return {'result': 'failed_or_unknown', 'native_acceptance': False,
+                'attempted_cases': list(attempted), 'capture_roster_complete': not missing,
+                'incomplete': bool(missing), 'available_pngs': sorted(str(path) for path in actual),
+                'missing_pngs': missing}
     if completed is None:
         completed = tuple(case for case in CASES if any(path.parts[1] == case for path in actual))
     completed = tuple(completed)
@@ -98,13 +110,15 @@ def _redact(data, replacements):
     return text.encode()
 
 
-def export_plan(raw, replacements, *, completed=None, final=False, reserve=0):
+def export_plan(raw, replacements, *, completed=None, final=False, reserve=0, failed_cases=None):
     """JSON is complete or rejected. Oversize JSON has readable text parts.
 
     Redaction precedes splitting, so an exact secret cannot straddle pieces.
     Reassembling parts reproduces the full redacted JSON bytes, not a capped
     prefix. Binaries, bundles, private profile/store contents and env dumps are
     excluded; the case's native/summary receipts carry store semantics.
+    A stopped ledger may request an incomplete attempted-case subset for
+    failure evidence. This mode cannot satisfy completed/final success checks.
     """
     plan, manifest = [], []
     image_bytes, non_image_bytes = 0, 0
@@ -113,7 +127,7 @@ def export_plan(raw, replacements, *, completed=None, final=False, reserve=0):
     if any(not path.is_file() or path.is_symlink() for path in pngs):
         raise RuntimeError('Lifecycle PNG roster contains a non-file or symlink')
     actual = {path.relative_to(raw) for path in pngs}
-    _roster(actual, completed, final)
+    failure_status = _roster(actual, completed, final, failed_cases)
     for source in sorted(raw.rglob('*')):
         relative = source.relative_to(raw)
         if _excluded(relative):
@@ -164,6 +178,17 @@ def export_plan(raw, replacements, *, completed=None, final=False, reserve=0):
                 non_image_bytes += len(data)
         manifest.append(entry)
         _budget(image_bytes, non_image_bytes, 0, reserve)
+    if failure_status is not None:
+        relative = Path('failure-evidence.json')
+        if any(entry['file'] == str(relative) for entry in manifest):
+            raise RuntimeError('Lifecycle generated failure status collides with a source receipt')
+        data = (json.dumps(failure_status, indent=2) + '\n').encode()
+        if len(data) > MAX_FILE:
+            raise RuntimeError('Lifecycle failure status exceeds its metadata file bound')
+        plan.append((relative, data))
+        non_image_bytes += len(data)
+        manifest.append({'file': str(relative), 'generated': True, 'critical': True, 'truncated': False,
+                         'exported_sha256': hashlib.sha256(data).hexdigest(), 'exported_bytes': len(data)})
     return plan, _index(manifest, image_bytes, non_image_bytes, reserve)
 
 
@@ -171,9 +196,14 @@ def export_evidence(raw, output, replacements):
     output.mkdir(parents=True, exist_ok=True)
     try:
         ledger = raw / 'lifecycle/ledger.json'
-        final = (ledger.is_file() and not ledger.is_symlink()
-                 and json.loads(ledger.read_text()).get('phase') == 'complete')
-        plan, index = export_plan(raw, replacements, final=final)
+        state = json.loads(ledger.read_text()) if ledger.is_file() and not ledger.is_symlink() else {}
+        final = state.get('phase') == 'complete'
+        failed_cases = None
+        if state.get('phase') in ('stopped_failed', 'stopped_unknown'):
+            failed_cases = tuple(case for case in CASES
+                                 if type(state.get('cases', {}).get(case, {}).get('dispatches')) is int
+                                 and state['cases'][case]['dispatches'] == 1)
+        plan, index = export_plan(raw, replacements, final=final, failed_cases=failed_cases)
     except Exception as error:
         # Preserve bounded admission/result diagnostics even when a critical
         # oversized receipt makes complete evidence impossible. Never call it
