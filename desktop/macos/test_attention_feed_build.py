@@ -4,7 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -17,6 +19,17 @@ ROOT = OWNER.parent.parent
 
 
 class ProgramContracts(unittest.TestCase):
+    def test_cli_imports_do_not_create_untracked_cache_before_source_guard(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for file in ('attention_feed_contract.py', 'attention_feed_build.py'):
+                shutil.copyfile(OWNER / file, root / file)
+            result = subprocess.run([sys.executable, str(root / 'attention_feed_contract.py'), '--help'],
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('--source-ref', result.stdout)
+            self.assertFalse((root / '__pycache__').exists())
+
     def test_named_main_and_dependencies_match_both_compile_and_typecheck_paths(self):
         commands = swift_commands('swiftc', '/SDK', OWNER, Path('/private/fixture'))
         checks = swift_commands('swiftc', '/SDK', OWNER, Path('/private/fixture'), typecheck=True)

@@ -18,6 +18,7 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -25,6 +26,9 @@ import urllib.error
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+# Local controller imports must not dirty the exact source checkout before its
+# qualification guard, including callers that did not pass python -B.
+sys.dont_write_bytecode = True
 from attention_feed_build import (SOURCES, SWIFT_PROGRAMS, swift_commands, source_binding, build_environment,
                                   producer_receipts, completion_envelope)
 
