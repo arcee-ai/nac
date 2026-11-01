@@ -11,7 +11,7 @@ on:
       heartbeat_evidence:
         description: 'Explicit finite Linux heartbeat evidence; none keeps ordinary CI'
         type: choice
-        options: [none, matched-and-measure]
+        options: [none, matched-and-measure, custody-check]
         default: none
       heartbeat_control_sha:
         description: 'Exact published control commit for the selected branch (required for evidence)'

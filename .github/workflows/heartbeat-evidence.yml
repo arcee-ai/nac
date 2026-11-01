@@ -20,7 +20,7 @@ concurrency:
 jobs:
   evidence:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ inputs.mode == 'custody-check' && 5 || 45 }}
     env:
       EXPECTED_CONTROL: ${{ inputs.control-sha }}
       EVIDENCE_MODE: ${{ inputs.mode }}
@@ -38,31 +38,41 @@ jobs:
           import os, sys
           from pathlib import Path
           sys.path.insert(0, 'control/.github/scripts/heartbeat-evidence')
-          from contract import BASELINE, HEAD, TREE, validate_request, write_json
+          from contract import BASELINE, HEAD, TREE, MODE, CUSTODY_MODE, require, validate_request, write_json
           output = Path(os.environ['RUNNER_TEMP'])/'heartbeat-evidence'
           output.mkdir(mode=0o700)
           proof = {'state': 'FAIL_DISPATCH_BINDING', 'runtime_started': False}
           try:
+              mode = os.environ['EVIDENCE_MODE']
+              require(mode in (MODE, CUSTODY_MODE), 'EXPLICIT_EVIDENCE_MODE')
               validate_request(os.environ['EXPECTED_CONTROL'], os.environ['GITHUB_EVENT_NAME'],
-                               os.environ['GITHUB_REF'], os.environ['EVIDENCE_MODE'], HEAD, TREE, BASELINE)
+                               os.environ['GITHUB_REF'], mode, HEAD, TREE, BASELINE, expected_mode=mode)
               assert os.environ['EXPECTED_CONTROL'] == os.environ['GITHUB_SHA'], 'control revision changed'
               proof.update(state='BOUND', control=os.environ['EXPECTED_CONTROL'], head=HEAD, tree=TREE, baseline=BASELINE)
           finally:
               write_json(output/'dispatch.json', proof)
           PY
+      - name: Prove real post-drop namespace cancellation before any product setup
+        run: |
+          python3 control/.github/scripts/heartbeat-evidence/custody_check.py \
+            --output "$RUNNER_TEMP/heartbeat-evidence/custody"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: ${{ inputs.mode == 'matched-and-measure' }}
         with:
           ref: 48b9769453c7cb0b245d9f9b1f955ef4a880a431
           fetch-depth: 0
           persist-credentials: false
           path: product
       - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        if: ${{ inputs.mode == 'matched-and-measure' }}
         with:
           toolchain: 1.98.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: ${{ inputs.mode == 'matched-and-measure' }}
         with:
           node-version: 24.22.1
       - name: Prepare locked product dependencies before the isolated workload
+        if: ${{ inputs.mode == 'matched-and-measure' }}
         working-directory: product
         run: |
           setup_status=0
@@ -70,6 +80,7 @@ jobs:
           printf '{"exit":%s}\n' "$setup_status" > "$RUNNER_TEMP/heartbeat-evidence/setup-terminal.json"
           exit "$setup_status"
       - name: Install Chromium system dependencies
+        if: ${{ inputs.mode == 'matched-and-measure' }}
         working-directory: product/crates/nac-server/web
         run: |
           chromium_status=0
@@ -77,6 +88,7 @@ jobs:
           printf '{"exit":%s}\n' "$chromium_status" > "$RUNNER_TEMP/heartbeat-evidence/chromium-terminal.json"
           exit "$chromium_status"
       - name: Compile, capture and measure once in serial under private namespaces
+        if: ${{ inputs.mode == 'matched-and-measure' }}
         run: |
           python3 control/.github/scripts/heartbeat-evidence/run.py \
             --product "$GITHUB_WORKSPACE/product" --control "$EXPECTED_CONTROL" \

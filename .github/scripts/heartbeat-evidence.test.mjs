@@ -17,6 +17,7 @@ test('ordinary workflow checks include only pure evidence controls',()=>{
  assert.deepEqual(target.trim().split('\n').map(s=>s.trim()),[
   'python3 -B .github/scripts/heartbeat-evidence/contract.test.py',
   'python3 -B .github/scripts/heartbeat-evidence/custody.test.py',
+  'python3 -B .github/scripts/heartbeat-evidence/custody_check.test.py',
   'node --test .github/scripts/heartbeat-evidence.test.mjs',
   'node --check .github/scripts/heartbeat-evidence/capture.mjs',
  ]);
@@ -33,7 +34,7 @@ function route(expression,event,mode){
 
 test('ordinary events and default none retain ordinary required CI; evidence is explicit',()=>{
  assert.equal(stable.on.workflow_dispatch.inputs.heartbeat_evidence.default,'none');
- assert.deepEqual(stable.on.workflow_dispatch.inputs.heartbeat_evidence.options,['none','matched-and-measure']);
+ assert.deepEqual(stable.on.workflow_dispatch.inputs.heartbeat_evidence.options,['none','matched-and-measure','custody-check']);
  for(const [event,mode,selected] of [['push','',false],['pull_request','',false],['workflow_dispatch','',false],['workflow_dispatch','none',false],['workflow_dispatch','matched-and-measure',true],['workflow_dispatch','invalid',true]]){
   assert.equal(route(stable.jobs['heartbeat-evidence'].if,event,mode),selected);
   assert.equal(route(stable.jobs.prepare.if,event,mode),!selected);
@@ -50,7 +51,7 @@ test('reusable evidence is not a new manual registration, PR lane, timer or rele
  assert.equal(evidence.concurrency['cancel-in-progress'],false);
  assert.deepEqual(Object.keys(evidence.jobs),['evidence']);
  assert.equal(evidence.jobs.evidence['runs-on'],'ubuntu-latest');
- assert.equal(evidence.jobs.evidence['timeout-minutes'],45);
+ assert.equal(evidence.jobs.evidence['timeout-minutes'],"${{ inputs.mode == 'custody-check' && 5 || 45 }}");
  assert.equal(evidence.jobs.evidence.strategy,undefined);
  assert.equal(evidence.jobs.evidence.services,undefined);
  assert.equal(stable.jobs['heartbeat-evidence'].secrets,undefined);
@@ -86,4 +87,17 @@ test('capture retains settled matched-state and no-work assertions, with no scre
  assert.equal(/page\.route|addStyleTag|mask:|animations:'disabled'/.test(source),false);
  assert.equal(source.includes('process.kill('),false);
  assert.ok(source.includes("child.kill('SIGTERM')"));
+});
+
+
+test('custody-only proves real cancellation before costly setup and cannot run product steps',()=>{
+ const steps=evidence.jobs.evidence.steps;
+ const gate=steps.findIndex(s=>s.run?.includes('custody_check.py'));
+ const setup=steps.findIndex(s=>s.run?.includes('make setup >'));
+ assert.ok(gate>0&&gate<setup);
+ const product=steps.filter(s=>s.with?.path==='product'||s.uses?.startsWith('dtolnay/rust-toolchain@')||s.uses?.startsWith('actions/setup-node@')||s.working_directory||s['working-directory']||s.run?.includes('heartbeat-evidence/run.py'));
+ assert.equal(product.length,6);
+ assert.ok(product.every(s=>s.if==="${{ inputs.mode == 'matched-and-measure' }}"));
+ assert.match(steps[gate-1].run,/require\(mode in \(MODE, CUSTODY_MODE\)/);
+ assert.equal(steps.at(-1).if,'always()');
 });
