@@ -35,6 +35,8 @@ type Observation = {
 };
 type WaitResult = { status: string; targets: Observation[] };
 type TaskRead = {
+  session_id: string;
+  project_id: string;
   durable: {
     goal: Goal | null;
     goal_last_run_id: string | null;
@@ -116,6 +118,17 @@ async function finishNative<T>(call: NativeCall): Promise<T> {
   } finally {
     call.end.release();
   }
+}
+
+async function finishTaskRead(
+  call: NativeCall,
+  session: string,
+  project: string,
+): Promise<TaskRead> {
+  const result = await finishNative<{ status: string; task: TaskRead }>(call);
+  expect(result.status).toBe("found");
+  expect(result.task).toMatchObject({ session_id: session, project_id: project });
+  return result.task;
 }
 
 function goalArgs(session: string, project: string, goal: string, cursor: string | null, ms = 0) {
@@ -371,7 +384,7 @@ test("ALL471-G1 exact completed goal stays quiet through settlement, clear and r
         goalArgs(target, project, goal, null),
       ),
     );
-    expect(fresh.status).toBe("snapshot");
+    expect(fresh.status).toBe("target_changed");
     expect(observed(fresh, target, goal)).toMatchObject({
       status: "goal_complete",
       proof: { goal_id: goal, last_run_id: run, retained: true },
@@ -437,11 +450,13 @@ test("ALL471-G2 input interruption and human pause preserve exact goal and indep
     const run = initial.accounting_run_id!;
     const goal = initial.goal_id;
     evidence.initial = { target, caller, project, goal: initial };
-    const before = await finishNative<TaskRead>(
+    const before = await finishTaskRead(
       await startNative(request, harness, caller, evidence, "g2-passive-before", "read_task", {
         session_id: target,
         project_id: project,
       }),
+      target,
+      project,
     );
     const snapshot = await finishNative<WaitResult>(
       await startNative(
@@ -480,11 +495,13 @@ test("ALL471-G2 input interruption and human pause preserve exact goal and indep
     expect(input.status).toBe("coordinator_input");
     expect(observed(input, target, goal).status).toBe("active");
     expect(JSON.stringify(interrupted.followup)).toContain(guidance);
-    const after = await finishNative<TaskRead>(
+    const after = await finishTaskRead(
       await startNative(request, harness, caller, evidence, "g2-passive-after-input", "read_task", {
         session_id: target,
         project_id: project,
       }),
+      target,
+      project,
     );
     expect(after.durable.goal).toEqual(before.durable.goal);
     expect(after.durable.pending_inbox_items).toBe(before.durable.pending_inbox_items);
@@ -555,16 +572,18 @@ test("ALL471-G2 input interruption and human pause preserve exact goal and indep
         goalArgs(target, project, goal, null),
       ),
     );
-    expect(fresh.status).toBe("snapshot");
+    expect(fresh.status).toBe("target_changed");
     expect(observed(fresh, target, goal)).toMatchObject({
       status: "goal_paused",
       proof: { goal_id: goal, last_run_id: run, version: settled.version },
     });
-    const retained = await finishNative<TaskRead>(
+    const retained = await finishTaskRead(
       await startNative(request, harness, caller, evidence, "g2-passive-final", "read_task", {
         session_id: target,
         project_id: project,
       }),
+      target,
+      project,
     );
     expect(retained.durable.goal).toEqual(settled);
     expect(retained.durable.goal_last_run_id).toBe(run);
