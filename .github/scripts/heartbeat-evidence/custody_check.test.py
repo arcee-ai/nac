@@ -93,19 +93,36 @@ class ProposalControls(unittest.TestCase):
                 def stat(path, *args, **kwargs):
                     return Mock(st_ino=10) if str(path).startswith('/proc/self/ns/') else actual_stat(path, *args, **kwargs)
 
-                with patch.dict(os.environ, {'EXPECTED_CONTROL': 'a'*40}), \
+                with patch.dict(os.environ, {'EXPECTED_CONTROL': 'a'*40, 'PYTHONDONTWRITEBYTECODE': '1'}), \
                      patch.object(fixture.os, 'stat', side_effect=stat), \
                      patch.object(fixture.os, 'close') as close, \
                      patch.object(fixture.socket, 'socketpair', return_value=(driver, peer)), \
-                     patch.object(fixture.subprocess, 'Popen', return_value=child), \
+                     patch.object(fixture.subprocess, 'Popen', return_value=child) as launch, \
                      patch.object(fixture, 'Kernel', return_value=kernel), \
                      patch.object(fixture, 'receive_fd', side_effect=packet):
                     result = fixture.one_case(case, output)
+                self.assertEqual(launch.call_args.args[0][:2], [sys.executable, '-B'])
+                self.assertNotIn('PYTHONDONTWRITEBYTECODE', launch.call_args.kwargs['env'])
                 self.assertEqual(result['state'], 'UNRESOLVED' if forged else 'PASS_REAL_CUSTODY_ONLY')
                 kernel.kill.assert_not_called()  # Forged descriptor was closed, never signaled.
                 if forged:
                     close.assert_called_once_with(40)
                     self.assertFalse((output/'artifact-manifest.json').exists())
+
+    def test_namespace_payload_policy_survives_filtered_environment_and_sudo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            context = output/'context.json'
+            c.write_json(context, {'controller_pid': None})
+            with patch.dict(os.environ, {'PYTHONDONTWRITEBYTECODE': '1'}), \
+                 patch.object(fixture.socket, 'socket', return_value=Mock()), \
+                 patch.object(fixture.owner, 'NamespaceCustody'), \
+                 patch.object(fixture.owner, 'finalize_namespace', side_effect=RuntimeError('MOCK_RUNTIME')) as run:
+                fixture.controller(context, output, 999)
+            argv, environment, *_ = run.call_args.args
+            entry = argv.index(str(Path(fixture.__file__).resolve()))
+            self.assertEqual(argv[entry-2:entry], [sys.executable, '-B'])
+            self.assertNotIn('PYTHONDONTWRITEBYTECODE', environment)
 
 
 if __name__ == '__main__':

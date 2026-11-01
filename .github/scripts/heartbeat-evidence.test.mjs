@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import test from 'node:test';
 
@@ -100,4 +103,112 @@ test('custody-only proves real cancellation before costly setup and cannot run p
  assert.ok(product.every(s=>s.if==="${{ inputs.mode == 'matched-and-measure' }}"));
  assert.match(steps[gate-1].run,/require\(mode in \(MODE, CUSTODY_MODE\)/);
  assert.equal(steps.at(-1).if,'always()');
+});
+
+test('workflow import policy reaches named cases from a clean tracked control tree',t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'nac-import-policy-'));
+ const steps=evidence.jobs.evidence.steps;
+ const binding=steps.find(s=>s.name?.startsWith('Bind explicit')).run;
+ const bindingLines=binding.trim().split('\n');
+ const bindingLaunch=bindingLines[0].match(/^python3\s+(-B\s+)?- <<'PY'$/);
+ assert.ok(bindingLaunch,'Inspect the actual inline Python launch policy');
+ assert.equal(bindingLines.at(-1),'PY');
+ const driver=steps.find(s=>s.run?.includes('custody_check.py')).run;
+ const driverLaunch=driver.match(/^python3\s+(-B\s+)?(control\/\.github\/scripts\/heartbeat-evidence\/custody_check.py)\s+\\/);
+ assert.ok(driverLaunch,'Inspect the actual driver Python launch policy');
+ const harness=String.raw`
+import importlib.util,json,pathlib,sys
+from unittest.mock import patch
+entry=pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0,str(entry.parent))
+def audit(event,args):
+    if event=='subprocess.Popen':
+        argv=args[1]
+        allowed=[['git','--no-optional-locks','-C',str(entry.parent),*tail]
+                 for tail in (['rev-parse','HEAD'],['status','--porcelain'])]
+        if argv not in allowed:raise AssertionError('ONLY_CONTROL_GIT_READS_ALLOWED')
+    if event.startswith(('socket.','ctypes.')) or event in ('os.kill','os.killpg','os.fork'):
+        raise AssertionError('REAL_RUNTIME_FORBIDDEN')
+sys.addaudithook(audit)
+spec=importlib.util.spec_from_file_location('fixture_entrypoint',entry)
+fixture=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixture)
+calls=[]
+def fake_case(case,output):
+    calls.append(case)
+    return {'state':'PASS_REAL_CUSTODY_ONLY','case':case,'runtime':'MOCKED'}
+sys.argv=[str(entry),'--output',sys.argv[2]]
+with patch.object(fixture.platform,'system',return_value='Linux'), \
+     patch.object(fixture.signal,'signal'),patch.object(fixture,'one_case',side_effect=fake_case), \
+     patch.object(fixture,'Kernel',side_effect=AssertionError('REAL_KERNEL_FORBIDDEN')):
+    try:fixture.main()
+    finally:print(json.dumps({'cases':calls,'dont_write_bytecode':sys.dont_write_bytecode}))
+`;
+ function probe(name,preflightPolicy,driverPolicy,dirty=false){
+  const work=path.join(directory,name),control=path.join(work,'control');
+  const scripts=path.join(control,'.github/scripts/heartbeat-evidence');
+  const temporary=path.join(work,'runner-temp');
+  fs.mkdirSync(scripts,{recursive:true});
+  fs.mkdirSync(temporary);
+  fs.copyFileSync('.gitignore',path.join(control,'.gitignore'));
+  for(const file of ['contract.py','owned_process.py','namespace_custody.py','run.py','custody_check.py'])
+   fs.copyFileSync('.github/scripts/heartbeat-evidence/'+file,path.join(scripts,file));
+  // Child-local configuration excludes host ignore/cache/signing settings.
+  const environment={PATH:process.env.PATH,HOME:work,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'};
+  const git=(...args)=>{
+   const result=spawnSync('git',['-c','core.excludesFile=/dev/null','-C',control,...args],{env:environment,encoding:'utf8',timeout:10000});
+   assert.equal(result.status,0,result.stderr);
+   return result.stdout.trim();
+  };
+  git('init','--quiet');git('add','.');
+  git('-c','user.name=Source control fixture','-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false','commit','--quiet','-m','Tracked source fixture');
+  const head=git('rev-parse','HEAD');
+  assert.equal(git('status','--porcelain'),'');
+  if(dirty)fs.writeFileSync(path.join(control,'substantive-untracked.txt'),'must still fail closed');
+  const event=path.join(work,'event.json');
+  fs.writeFileSync(event,JSON.stringify({inputs:{heartbeat_evidence:'custody-check',heartbeat_control_sha:head}}));
+  const common={...environment,EXPECTED_CONTROL:head,GITHUB_SHA:head,GITHUB_ACTIONS:'true',
+   GITHUB_REF:'refs/heads/codex/all-480-linux-evidence',GITHUB_EVENT_NAME:'workflow_dispatch',
+   EVIDENCE_MODE:'custody-check',GITHUB_EVENT_PATH:event,RUNNER_TEMP:temporary};
+  const policy=value=>value===undefined?{}:{PYTHONDONTWRITEBYTECODE:String(value)};
+  const preflight=spawnSync('python3',[...(bindingLaunch[1]?['-B']:[]),'-'],{
+   cwd:work,env:{...common,...policy(preflightPolicy)},input:bindingLines.slice(1,-1).join('\n')+'\n',encoding:'utf8',timeout:10000});
+  assert.equal(preflight.status,0,preflight.stderr);
+  const afterPreflight=git('status','--porcelain');
+  const result=spawnSync('python3',[...(driverLaunch[1]?['-B']:[]),'-c',harness,
+   path.join(work,driverLaunch[2]),path.join(temporary,'heartbeat-evidence/custody')],{
+   cwd:work,env:{...common,...policy(driverPolicy)},encoding:'utf8',timeout:10000});
+  return {status:result.status,stdout:result.stdout,stderr:result.stderr,afterPreflight,
+   afterDriver:git('status','--porcelain')};
+ }
+ try{
+  const negative=probe('default-imports',undefined,undefined);
+  assert.match(negative.afterPreflight,/__pycache__/);
+  assert.notEqual(negative.status,0);
+  assert.match(negative.stderr,/CONTROL_REVISION/);
+  assert.deepEqual(JSON.parse(negative.stdout.trim()).cases,[]);
+  const partial=probe('preflight-only',1,undefined);
+  assert.equal(partial.afterPreflight,'');
+  assert.match(partial.afterDriver,/__pycache__/);
+  assert.notEqual(partial.status,0);
+  assert.match(partial.stderr,/CONTROL_REVISION/);
+  const jobPolicy=evidence.jobs.evidence.env.PYTHONDONTWRITEBYTECODE;
+  const actual=probe('actual-workflow',jobPolicy,jobPolicy);
+  assert.equal(actual.status,0,JSON.stringify(actual,null,2));
+  assert.equal(String(jobPolicy),'1');
+  assert.equal(actual.afterPreflight,'');
+  assert.equal(actual.afterDriver,'');
+  assert.deepEqual(JSON.parse(actual.stdout.trim()),{cases:['controller','wrapper'],dont_write_bytecode:true});
+  const substantive=probe('untracked-source',jobPolicy,jobPolicy,true);
+  assert.notEqual(substantive.status,0);
+  assert.match(substantive.stderr,/CONTROL_REVISION/);
+  assert.match(substantive.afterDriver,/substantive-untracked.txt/);
+  assert.doesNotMatch(substantive.afterDriver,/__pycache__/);
+  assert.deepEqual(JSON.parse(substantive.stdout.trim()).cases,[]);
+  const summary=result=>({status:result.status,afterPreflight:result.afterPreflight,
+   afterDriver:result.afterDriver,report:JSON.parse(result.stdout.trim()),
+   controlRevision:/CONTROL_REVISION/.test(result.stderr)});
+  t.diagnostic(JSON.stringify({runtime:'MOCKED',jobPolicy,negative:summary(negative),
+   preflightOnly:summary(partial),actual:summary(actual),substantive:summary(substantive)}));
+ }finally{fs.rmSync(directory,{recursive:true,force:true});}
 });

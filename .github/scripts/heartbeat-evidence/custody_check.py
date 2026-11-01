@@ -99,6 +99,7 @@ def controller(context_path, output, driver_fd):
     argv = owner.namespace_command(context_path, output)
     index = argv.index(str(SOURCE/'run.py'))
     argv[index] = str(Path(__file__).resolve())
+    argv.insert(index, '-B')  # sudo may reset the job environment.
     try:
         owner.finalize_namespace(argv, clean_environment(output, output), output, SOURCE, context)
     except RuntimeError:
@@ -143,7 +144,7 @@ def one_case(case, output):
     write_json(output/'intent.json', {'case': case, 'workload': 'one Python sleep; no NAC', 'attempts': 1})
     try:
         with (output/'controller.stdout').open('xb') as stdout, (output/'controller.stderr').open('xb') as stderr:
-            child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--controller',
+            child = subprocess.Popen([sys.executable, '-B', str(Path(__file__).resolve()), '--controller',
                 str(context_path), '--output', str(output), '--driver-fd', str(peer.fileno())],
                 env=clean_environment(output, output, {'EXPECTED_CONTROL': context['control']}),
                 pass_fds=(peer.fileno(),), close_fds=True, start_new_session=True,
