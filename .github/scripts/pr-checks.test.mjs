@@ -132,7 +132,7 @@ test("workflow wiring preserves the aggregate, exact jobs, coverage and unprivil
   assert.doesNotMatch(triggers, /paths(?:-ignore)?:/);
   assert.doesNotMatch(workflow, /pull_request_target:|workflow_run:/);
   const aggregate = workflow.split("\n  required-pr-checks:\n")[1].split("\n  publish:")[0];
-  assert.match(aggregate, /name: Required PR checks\n    if: \$\{\{ always\(\) \}\}/);
+  assert.match(aggregate, /name: Required PR checks\n    if: \$\{\{ always\(\) && \(github.event_name != 'workflow_dispatch' \|\| inputs.heartbeat_evidence == '' \|\| inputs.heartbeat_evidence == 'none'\) \}\}/);
   const dependencies = aggregate.match(/needs: \[(.*)\]/)[1].split(", ");
   assert.deepEqual(dependencies.sort(), [...requiredJobs, "managed"].sort());
   assert.match(aggregate, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
