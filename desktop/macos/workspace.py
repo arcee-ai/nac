@@ -79,7 +79,7 @@ def run_case(app, output, scenario, *, slow_start=False):
             *(['--workspace-console-locked'] if console['screen_locked'] else []),
         ], cwd='/', stdout=log, stderr=log, start_new_session=True)
         try:
-            code = process.wait(timeout=930 if scenario == 'workspace-manual' else 300)
+            code = process.wait(timeout=930 if scenario in ('workspace-manual', 'terminal-manual') else 300)
             record = json.loads(evidence.read_text())
             if not record.get('engine_reaped') or not record.get('profile_removed'):
                 cleanup_failed_case(evidence, relocated)
