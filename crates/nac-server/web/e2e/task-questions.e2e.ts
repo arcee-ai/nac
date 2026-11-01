@@ -252,7 +252,7 @@ test("exact human question survives restart, gates a goal, and resumes its reser
     info.outputPath("question-visual-context.json"),
     JSON.stringify(
       {
-        base: "e86e3bc2aae112185dce6a41e0a4051641899c35",
+        base: process.env.NAC_QUESTION_BASE_SHA ?? "6df5e4b5a58541d6ad41e50f24bfcb07011684fe",
         head: process.env.NAC_QUESTION_HEAD_SHA ?? null,
         desktop,
         mobile: { width: 390, height: 844 },
