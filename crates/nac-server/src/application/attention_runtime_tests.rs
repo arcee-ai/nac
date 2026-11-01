@@ -77,6 +77,14 @@ fn completion_requires_exact_current_goal_receipt_and_full_supported_metadata() 
         last_run: Some("run".into()),
     });
     source.service = Some(AttentionServiceSnapshot {
+        broker: Some(AttentionBrokerSnapshot {
+            owner: Uuid::new_v4(),
+            revision: 0,
+            state: AttentionBrokerState::Current {
+                permissions: vec![],
+                authorizable_reviews: vec![],
+            },
+        }),
         epoch: Uuid::new_v4(),
         revision: 2,
         operation: AttentionOperation::Idle,
@@ -88,6 +96,14 @@ fn completion_requires_exact_current_goal_receipt_and_full_supported_metadata() 
     });
     source.stored = Some(stored);
     assert!(normalized("session", &source).unwrap().work.is_some());
+    let broker = source.service.as_mut().unwrap().broker.take();
+    let absent = normalized("session", &source).unwrap();
+    assert!(
+        absent.work.is_none(),
+        "missing decision evidence cannot strengthen completion"
+    );
+    assert_eq!(absent.availability.permissions, AttentionFacet::Unknown);
+    source.service.as_mut().unwrap().broker = broker;
     source
         .stored
         .as_mut()
@@ -100,11 +116,8 @@ fn completion_requires_exact_current_goal_receipt_and_full_supported_metadata() 
     let snapshot = normalized("session", &source).unwrap();
     assert!(snapshot.work.is_none());
     assert_eq!(snapshot.availability.work, AttentionFacet::Unknown);
-    assert_eq!(
-        snapshot.availability.permissions,
-        AttentionFacet::Unsupported
-    );
-    assert_eq!(snapshot.availability.reviews, AttentionFacet::Unsupported);
+    assert_eq!(snapshot.availability.permissions, AttentionFacet::Available);
+    assert_eq!(snapshot.availability.reviews, AttentionFacet::Available);
 }
 #[test]
 fn source_count_dirty_set_and_actual_permit_are_bounded() {
@@ -312,3 +325,6 @@ async fn cancelled_owned_read_keeps_its_physical_seat_until_the_accepted_caller_
 
 #[path = "attention_scope_tests.rs"]
 mod scope;
+
+#[path = "attention_decision_tests.rs"]
+mod decisions;

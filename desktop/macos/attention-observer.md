@@ -27,15 +27,15 @@ inert. Request guards precede observer reservation and bootstrap. Observation
 uses existing cached services and canonical metadata reads without attaching
 or recovering idle sessions, creating work, or becoming an interactive approver.
 
-The feed currently projects canonical pending structured questions for supported
-primary direct local sessions, including resolution after actual configuration,
+At that revision, the feed projects canonical pending structured questions for
+supported primary direct local sessions, including resolution after configuration,
 project, cancellation and failure/recovery commits. Completed work requires an
 exact current completed goal/version/last-run receipt, successful known
 settlement and verified idle continuation disposition, with no conflicting
 accounting, continuation, retry, inbox, question or manual operation. A raw
 `RunCompleted` event is insufficient. Ordinary goal-free completion remains
-`Unknown`; live permissions, actionable reviews and unsupported topology
-coverage remain explicit gaps rather than authoritative empty lists.
+`Unknown`; live permissions and actionable reviews were gaps, addressed by the
+producer addendum below. Unsupported topology coverage remains an explicit gap.
 
 Initial baselines are silent. Engine/source epochs, revisions and binding tokens
 fence stale reads and callbacks; replay gaps, lag and capacity exhaustion require
@@ -51,6 +51,31 @@ has no notification-center, preferences, activation or app-lifecycle integration
 Its `runCompleted` input must not be connected directly to raw `RunCompleted`
 events or treated as the current goal-backed completion contract. Full ALL-350
 native acceptance remains unmet.
+
+## Current broker producer addendum
+
+The child source candidate at `4ad13e5c` adds bounded observation of actual
+pending permission requests and current authorizable blocked reviews in the
+existing cached direct-session broker. Atomic registration supplies a current
+baseline; subsequent membership changes publish only exact session/request or
+review UUIDs, fenced by a process-local broker owner UUID and revision. Broker
+identity is not run identity. No request content, resources, grant authority or
+new session attachment is introduced. The weak service bridge does not retain
+the service or broker.
+
+Owner loss silently replaces live broker evidence with `Unknown`, without
+claiming that outstanding decisions resolved. Replacement owners require a
+fresh baseline. If retry enqueue rolls back and restores the same review UUID,
+its authoritative pending state reopens with `new_attention=false`; committed
+enqueue with a failed wake leaves it removed. Permission/question terminal
+tombstones remain unchanged. Broker snapshots are bounded to 256 decisions and
+16 KiB of metadata; invalid identity, overflow or exhausted revision makes
+observation unavailable and requires feed reset, without changing real decisions.
+
+Completion additionally requires current available broker evidence with no
+pending decisions. Exact goal-backed completion, goal-free `Unknown`, unsupported
+topologies and every native consumer/OS acceptance gap below remain unchanged.
+The isolated Swift fixture is still not a consumer of this feed.
 
 ## Historical fixture evidence
 
@@ -148,7 +173,8 @@ asks, keeping their distinct identities and resolution rules. Only current
 establish an outstanding review decision.
 This fixture currently characterizes permission requests and successful runs;
 it does not characterize questions or review decisions. The current Rust feed
-has real question coverage; live permission/review producers remain unimplemented.
+has real question coverage; live permission/review producers were unimplemented
+through `f3896096` and are covered by the current broker producer addendum above.
 No supplier store/API implementation is copied, no dependency is added here,
 and this milestone does not declare narrower full-ticket acceptance.
 

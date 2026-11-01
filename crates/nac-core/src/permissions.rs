@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use crate::sandbox::ExecutionBackend;
 use crate::tools::kernel::PermissionResource;
 
+pub(crate) mod attention;
 mod broker;
 mod broker_review;
 mod command_classification;
@@ -246,6 +247,7 @@ pub struct PermissionBroker {
     session_config_version: i64,
     event_bus: StdMutex<Option<crate::events::SessionEventBus>>,
     state: StdMutex<PermissionBrokerState>,
+    attention: StdMutex<attention::BrokerAttention>,
     approval_observer: tokio::sync::Mutex<PermissionApprovalObserver>,
     reviewer: StdMutex<Option<Arc<dyn PermissionReviewer>>>,
     review: StdMutex<ReviewMemory>,

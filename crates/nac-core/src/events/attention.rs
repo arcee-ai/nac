@@ -101,18 +101,50 @@ pub enum AttentionOperation {
     Unknown,
 }
 
+/// Current process-local broker membership, never run or action authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttentionBrokerState {
+    Current {
+        permissions: Vec<Uuid>,
+        authorizable_reviews: Vec<Uuid>,
+    },
+    Unavailable(AttentionUnavailable),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionBrokerSnapshot {
+    pub owner: Uuid,
+    pub revision: u64,
+    pub state: AttentionBrokerState,
+}
+
+impl AttentionBrokerSnapshot {
+    pub fn metadata_bytes(&self) -> usize {
+        128 + match &self.state {
+            AttentionBrokerState::Current {
+                permissions,
+                authorizable_reviews,
+            } => (permissions.len() + authorizable_reviews.len()) * 48,
+            AttentionBrokerState::Unavailable(_) => 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttentionServiceSnapshot {
     pub epoch: Uuid,
     pub revision: u64,
     pub operation: AttentionOperation,
     pub settled: Option<SettledWork>,
+    pub broker: Option<AttentionBrokerSnapshot>,
 }
 
 /// Optional local producer sink. Implementations only copy bounded metadata;
 /// they cannot call the service/store back while a source guard is held.
 pub trait AttentionServiceObserver: Send + Sync {
     fn service_changed(&self, session_id: &str, snapshot: AttentionServiceSnapshot);
+    /// The actual registration lifetime ended. Unknown is not resolution.
+    fn service_retired(&self, _session_id: &str, _epoch: Uuid) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

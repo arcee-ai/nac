@@ -106,6 +106,7 @@ impl PermissionBroker {
             session_config_version,
             event_bus: StdMutex::new(None),
             state: StdMutex::new(PermissionBrokerState::default()),
+            attention: StdMutex::new(attention::BrokerAttention::new()),
             approval_observer: tokio::sync::Mutex::new(PermissionApprovalObserver::default()),
             reviewer: StdMutex::new(None),
             review: StdMutex::new(ReviewMemory::default()),
@@ -255,12 +256,12 @@ impl PermissionBroker {
         self.emit_async(crate::events::SessionEvent::PermissionApprovalModeChanged { mode })
             .await;
         after_commit().await;
-        let replies = if mode == PermissionApprovalMode::AutoApprove {
+        let (replies, publication) = if mode == PermissionApprovalMode::AutoApprove {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            auto_approval_candidates
+            let replies = auto_approval_candidates
                 .into_iter()
                 .filter_map(|request_id| {
                     state
@@ -268,10 +269,15 @@ impl PermissionBroker {
                         .remove(&request_id)
                         .map(|pending| (request_id, pending))
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let publication = (!replies.is_empty())
+                .then(|| self.attention_changed())
+                .flatten();
+            (replies, publication)
         } else {
-            Vec::new()
+            (Vec::new(), None)
         };
+        self.publish_attention(publication);
 
         for (request_id, pending) in replies {
             if pending.reply.send(PermissionReply::Once).is_ok() {
@@ -302,17 +308,22 @@ impl PermissionBroker {
     }
 
     fn deliver_reply(&self, request_id: &str, reply: PermissionReply) -> anyhow::Result<()> {
-        let pending = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pending
-            .remove(request_id)
-            .ok_or_else(|| anyhow::anyhow!("permission request '{request_id}' was not found"))?;
-        pending.reply.send(reply).map_err(|_| {
-            anyhow::anyhow!("permission request '{request_id}' is no longer active")
-        })?;
-        Ok(())
+        let (pending, publication) = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let pending = state.pending.remove(request_id).ok_or_else(|| {
+                anyhow::anyhow!("permission request '{request_id}' was not found")
+            })?;
+            (pending, self.attention_changed())
+        };
+        let result = pending
+            .reply
+            .send(reply)
+            .map_err(|_| anyhow::anyhow!("permission request '{request_id}' is no longer active"));
+        self.publish_attention(publication);
+        result
     }
 
     pub fn reply(&self, request_id: &str, reply: PermissionReply) -> anyhow::Result<()> {
@@ -626,15 +637,16 @@ impl PermissionBroker {
                             reply: sender,
                         },
                     );
-                    Ok(())
+                    Ok(self.attention_changed())
                 })())
             }
         };
-        match admitted {
+        let publication = match admitted {
             None => return Self::review_stopped_outcome(&review_stop).await,
             Some(Err(reason)) => return AuthorizationOutcome::Denied(reason),
-            Some(Ok(())) => {}
-        }
+            Some(Ok(publication)) => publication,
+        };
+        self.publish_attention(publication);
         let _pending_guard = PendingPermissionGuard {
             broker: Arc::downgrade(self),
             request_id: request.id.clone(),
@@ -779,12 +791,17 @@ impl PermissionBroker {
     }
 
     fn remove_pending(&self, request_id: &str) -> bool {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pending
-            .remove(request_id)
-            .is_some()
+        let (removed, publication) = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let removed = state.pending.remove(request_id).is_some();
+            let publication = removed.then(|| self.attention_changed()).flatten();
+            (removed, publication)
+        };
+        self.publish_attention(publication);
+        removed
     }
 
     async fn dismiss_pending_async(&self, request_id: &str, reason: String) -> bool {
