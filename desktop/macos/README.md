@@ -1,5 +1,28 @@
 # NAC Mac development preview
 
+Normal `LOCAL_APP` storage uses a persistent WebKit profile and a private
+presentation checkpoint selected from the verified track, canonical Rust store
+and launch home. This does not copy Rust session/query/credential ownership into
+Swift. Ports and launch nonces remain live runtime fences; only nonsecret
+preferences and existing ALL-336 draft/review text use a stable persistence
+binding. The UI never restores an approval, shell intent, terminal bytes or a
+pending send request. Unknown submission outcomes remain text for review. Cold
+checkpoint drafts also require explicit review/Restore because a valid old file
+cannot prove that a later accepted send or clear reached disk. Fresh typing and
+sending remain usable while that text awaits review; preferences are separate.
+
+Presentation files use private no-follow descriptors, an exclusive profile
+lease and ordered atomic replacements. An acknowledged native write is separate
+from merely posting a WebKit message. Failed or timed-out persistence uses
+memory, reports unavailable recovery and cannot prove durable clear or the last
+unacknowledged keystroke. Cross-Quit, new-port/profile isolation, file failures
+and replacement require actual system WKWebView evidence. Source and pure
+JavaScript tests alone do not qualify these native behaviors. Disposable preview
+keeps its ephemeral website store and existing owned cleanup. The non-GUI
+`WorkspaceStorageRecoveryTests.swift` fixture characterizes actual dual write/
+unlink failure and fresh owner snapshots using an externally owned private root;
+it does not establish app/WK window, cross-Quit or trusted-input acceptance.
+
 ALL-340 wraps NAC's existing production workspace in AppKit and system
 WKWebView. It is a disposable development fixture, with a deterministic local
 Responses provider. Each launch starts empty; closing the window quits the
@@ -40,8 +63,10 @@ product/build/source/track identity, canonical selected store and opened schema
 before seeding or loading the workspace. Stdout/stderr are asynchronously drained
 into a separate bounded 64 KiB diagnostic buffer; logs never establish identity.
 The shell never probes or adopts port 3210.
-Main-frame navigation is confined to that origin. There is no web-to-native
-message bridge.
+Main-frame navigation is confined to that origin. The bounded native UI bridge
+accepts only ready/retirement/settlement receipts from the current main frame;
+workspace actions remain with the shared React owners. Native Edit uses the
+AppKit/WK responder chain. See [NativeCommands.md](NativeCommands.md).
 
 Missing/unlaunchable engine, startup exit, readiness timeout and WebKit load or
 renderer failure display a native status message. Close or Cmd-Q initiates Rust
@@ -115,7 +140,7 @@ for the entire build/test journey, including use of a shared binary.
 The compiler target is macOS 14, the parent's candidate minimum. Actual smoke
 evidence records the host OS/SDK separately; this preview makes no claim of
 macOS 14 qualification, signing/notarization, consumer installation, background
-window lifecycle, native menus/bridge, or performance.
+window lifecycle, trusted native input or performance beyond the explicitly recorded command fixtures.
 Those have separate owners in the ALL-339 work map.
 
 ## Private launch contract (ALL-341)
@@ -142,7 +167,7 @@ No channel is inherited by ordinary CLI invocations, whose existing lifetime
 and worker/helper dispatch remain independent.
 
 The native consumer seam is `PreviewEngine.receipt` and the existing
-`onReady(URL)`, `onFailure(String)`, `onExit(Int32)` and `stop(completion)`
+`onReady(URL)`, `onFailure(EngineFailure)`, `onExit(Int32)` and `stop(completion)`
 callbacks. The receipt is available only for the current verified live launch;
 stop, channel failure and exit retire it before notifying consumers. Its launch
 UUID is distinct from the server's `NativeRuntimeScope.incarnation` and any
@@ -158,3 +183,166 @@ watchdog. The checked-in runner records source/engine/native binary identities,
 exact receipts, OS/SDK, native failure snapshots and cleanup. `engine_contract.py`
 adds direct binary/channel controls using the same bundled executable. These
 fixtures add no production bridge and make no trusted OS input qualification.
+
+## Normal local startup (ALL-342)
+
+`./desktop/macos/preview.sh app-build` produces the ordinary `NAC.app` with
+`LOCAL_APP`; `app-run` opens it. It starts in HOME by default, independently of
+the app's location or LaunchServices cwd. `--directory` selects another existing
+bootstrap directory; relative arguments resolve from HOME. `--store-path`
+overrides the normal Rust configuration/track store choice. Repeated
+`--command-path directory` arguments prepend explicit command locations before
+the inherited PATH and standard Apple Silicon/Intel Homebrew directories.
+No shell, dotfiles, global preferences or installer runs during discovery.
+
+The exact bundled Rust engine performs bounded `__desktop-configuration`
+discovery using the ordinary NAC_HOME/XDG_CONFIG_HOME/HOME and immutable build
+track owners, including stable legacy-store fallback. It recovers pending
+configuration publications and prepares store parents through their existing
+Rust owners; it opens neither a database nor a serving lease. The subsequent
+identified engine opens that exact selected store and launches workers using
+its own bundled executable. Credentials remain in the existing hardened Rust
+stores or inherited environment; the native app never copies or persists them.
+Missing Git prevents launch with recovery guidance. Optional SSH, Podman and
+MCP discovery retain their normal shared settings and chosen execution backend.
+
+Ordinary and startup-smoke builds exclude PreviewProfile, FixtureProvider and
+FixtureBootstrap definitions from their compiler inputs. The ordinary binary
+also rejects disposable fixture markers during provenance verification.
+`smoke-build` builds the existing disposable preview instrumentation without
+launching it, allowing separate build and native/browser leases.
+
+`startup-build` compiles `LOCAL_APP` plus `PREVIEW_SMOKE` into the separate
+`NAC Startup Smoke.app`. Run `python3 -B desktop/macos/startup_smoke.py APP OUTPUT`
+under the host's native/browser lease. `startup-smoke` combines those steps for
+hosts without a separate lease requirement. The runner relocates the real app,
+uses disposable profiles, drives the production UI in system WKWebView, and
+records startup, configured Local runs, failures and bounded cleanup. Optional
+command cases are selected with `NAC_STARTUP_SCENARIOS` (comma-separated
+`startup-missing-ssh`, `startup-missing-podman`, `startup-missing-mcp`,
+`startup-custom-mcp`). The test-only missing-command switch excludes fallback
+directories only in that smoke bundle. Dummy provider results do not establish
+real-vendor authentication; locked-session DOM results do not establish visible
+paint or trusted OS input.
+
+Every builder mode emits `Contents/Resources/build-receipt.json` with source,
+compiler flags, native source hashes, engine identity and both executable
+hashes. It rejects an engine from another source revision or source changes
+during compilation. This is unsigned compiler provenance for the packaging
+owner; signing requires a separate final artifact manifest. This receipt also
+records the selected bundle ID/name, build-support hashes and whether instance
+instrumentation was compiled. Distribution/signing policy remains separately owned.
+
+## App instances and store conflicts (ALL-343)
+
+`app-run` uses ordinary LaunchServices opening, without `-n`. Finder/Dock reopen
+events focus or restore the existing window; they never start another engine
+or replay a command. The current close-to-quit policy remains unchanged.
+
+Normal app identities come only from the exact bundled engine's compiled track:
+
+| Track | Bundle ID | Display name |
+| --- | --- | --- |
+| stable | `ai.arcee.nac` | NAC |
+| beta | `ai.arcee.nac.beta` | NAC Beta |
+| dev | `ai.arcee.nac.dev` | NAC Development |
+
+The read-only `BundleIdentity.sh` metadata helper is the mapping owner. Inherited
+`NAC_BUILD_TRACK` cannot select a different bundle identity. The preview retains
+its separate development identity. This partition adds no beta publication policy.
+
+Rust's ordinary serving lease still decides ownership. A typed busy error uses
+the existing private version-1 failure envelope with `stage: startup` and
+`code: store_owned`. Swift validates version/incarnation before recognizing it;
+unknown codes and peer text never become native diagnostic text. A conflict
+shows the selected canonical store and track, explains deliberate owner shutdown
+or an explicit different `--store-path`, and enables **Retry** only after the
+failed bundled child is reaped. Retry keeps the selected configuration and asks
+the ordinary engine to start again. It cannot signal an existing CLI, delete a
+lock, select another store, attach to a server or grant execution authority.
+No custom app discovery/PID records are introduced; a retained lock file is
+not proof of a live owner.
+
+`instance-build` produces the separate `NAC Instance Smoke.app` with
+`LOCAL_APP`, `PREVIEW_SMOKE` and `INSTANCE_SMOKE`, plus `InstanceObservation`.
+Its bundle ID has an `.instance-smoke` suffix. Use separate output directories
+and exact same-source private dev/stable engines to build the two track fixtures.
+Then run under the native/browser lease:
+
+```sh
+python3 -B desktop/macos/instance_smoke.py DEV_APP OUTPUT OBSERVER STABLE_APP
+```
+
+`instance-smoke` combines build/run; supply the stable fixture through
+`NAC_MAC_STABLE_APP`. `NAC_INSTANCE_SCENARIOS` selects bounded cases and records
+whether the full set ran. The eight cases cover simultaneous ordinary opens,
+same-window reopen, real CLI conflicts through canonical/file/directory aliases,
+retry while the CLI remains live, graceful/crash/draining-owner exit, app-crash
+relaunch and dev/stable coexistence. The runner verifies served assets, native
+window/engine/store identities, screenshots and bounded fixture cleanup. It
+fails before app launch on a locked console. Only its own live app incarnation
+and fixture-owned CLI handles can receive cleanup controls; focus restoration
+is conditional on the fixture still being frontmost. These checks require
+actual AppKit/system WKWebView evidence, with screenshots reviewed separately.
+
+## Native command qualification (ALL-346)
+
+The `commands` smoke scenario opens Settings and New Session through native
+menus once, checks shared focus return and Projects routing, rejects a foreign
+key window, exercises malformed/stale/duplicate/iframe/foreign-WebView receipts,
+blocks navigation/popups, and verifies document replacement and retirement.
+The `commands-input` scenario additionally uses paired OS events targeted only
+to the fixture process for Cmd-N, Settings and native Edit. It requires existing
+event-post access and fresh unlocked console/window/DOM ownership; it never
+requests privacy changes. Prior clipboard representations stay only in memory
+and are restored only if the change count is still owned by the fixture.
+
+Select either with `NAC_MAC_SMOKE_SCENARIOS=commands` or
+`NAC_MAC_SMOKE_SCENARIOS=commands-input` before `preview.sh smoke`.
+Programmatic NSMenu results do not qualify OS keyboard/Edit provenance. A locked
+console, missing event-post access or unqualified paint is incomplete acceptance,
+even when compilation, parser tests or scripted DOM journeys pass. Normal app
+compiler inputs and binaries exclude all command fixture instrumentation.
+
+## Normal app close and Quit (ALL-344)
+
+Closing a normal NAC workspace keeps its document, streams, native command
+bridge and owned engine running. Reopening the same app from the Dock restores
+that window. The disposable development preview still quits on close.
+
+Explicit Quit presents **Cancel** and **Stop and Quit**. Activity is conservative:
+the shell does not infer idle from one run while approvals, terminal shells or
+commands with uncertain outcomes may remain. Cancel preserves the workspace.
+Stop retires the bridge, cancels pending startup/navigation and releases the
+WebView before requesting the existing private engine shutdown. Rust owns run,
+descendant and store cleanup under its existing 20-second watchdog. The existing
+owned-engine fallback remains 23 seconds. A later 26-second UI wait can report
+pending cleanup, but cannot claim cleanup, restart the retired
+workspace or send another stop. Quit again waits on that original shutdown.
+Unsettled AppKit termination requests return Cancel immediately while one
+asynchronous confirmation/cleanup episode stays owned by the app. Reentrant
+native and OS requests share that episode. Only settled Stop requests ordinary
+termination again; no terminateLater modal handshake or public-entry guard spans
+the confirmation or engine drain.
+
+`preview.sh lifecycle-build` builds separate test instrumentation around the
+normal app owner. Run `python3 -B desktop/macos/lifecycle_smoke.py APP OUTPUT
+OBSERVER` under the coordinated Mac/browser lease, using that exact bundle and
+its compiled `InstanceObservation` helper. The fixture exercises real model,
+approval and terminal activity; native window close and LaunchServices reopen;
+Cancel, duplicate Quit and Stop; document/bridge release; durable transcript and
+goal retention; descendant cleanup and ordinary same-store reacquisition.
+The terminal case starts Quit through the exact-owned OS application helper and
+observes the real delegate confirmation before issuing a reentrant OS request.
+Repeated OS requests can coalesce; the fixture records actual delegate decisions
+and the native duplicate's delegate entry and return. Evidence binds the actual
+OS and system WebKit versions.
+Sheet completion is programmatic AppKit, with no OS input events. Evidence
+records locked-console provenance and keeps visible paint and trusted input
+acceptance false. This is not a substitute for full native acceptance.
+
+The separate `QuitWebViewFixture.swift` / `quit_webview_fixture.py` probe records
+real system WK document/SSE lifetime. Hiding a retained document can keep a live
+observer through graceful shutdown. `stopLoading()` behavior is recorded per OS;
+it does not release ownership of the WebView. Neither helper nor any provider or
+lifecycle fixture is included in the ordinary app's compiler inputs or binary.

@@ -14,13 +14,22 @@ final class PreviewEngine {
     var receipt: EngineReceipt? { run?.receipt }
     var onReady: ((URL) -> Void)?
     var onExit: ((Int32) -> Void)?
-    var onFailure: ((String) -> Void)?
+    var onFailure: ((EngineFailure) -> Void)?
 
+    #if !LOCAL_APP
     func launch(executable: URL, profile: PreviewProfile, provider: FixtureProvider) throws {
+        var environment = profile.environment
+        environment["MODELS_DEV_URL"] = provider.baseURL.appendingPathComponent("models-dev").absoluteString
+        try launch(executable: executable, configuration: EngineLaunchConfiguration(
+            cwd: profile.workspace, store: profile.store, environment: environment))
+    }
+    #endif
+
+    func launch(executable: URL, configuration: EngineLaunchConfiguration) throws {
         guard run == nil || run?.pid == 0 else { throw PreviewError.message("The previous engine is still stopping.") }
         let identityURL = executable.deletingLastPathComponent().appendingPathComponent("engine-identity.json")
         let identity = try JSONDecoder().decode(EngineIdentity.self, from: Data(contentsOf: identityURL))
-        let next = try EngineRun(identity: identity, profile: profile)
+        let next = try EngineRun(identity: identity, store: configuration.store)
         #if PREVIEW_SMOKE
         next.holdHello = holdHello
         #endif
@@ -37,7 +46,7 @@ final class PreviewEngine {
             guard let self, self.run === next else { return }
             self.onFailure?(message)
         }
-        try next.launch(executable: executable, profile: profile, provider: provider)
+        try next.launch(executable: executable, configuration: configuration)
     }
 
     func stop(completion: @escaping () -> Void) {
@@ -67,13 +76,13 @@ private final class EngineRun {
     private var failed = false
     var onReady: ((URL) -> Void)?
     var onExit: ((Int32) -> Void)?
-    var onFailure: ((String) -> Void)?
+    var onFailure: ((EngineFailure) -> Void)?
 
-    init(identity: EngineIdentity, profile: PreviewProfile) throws {
-        protocolState = try EngineProtocol(identity: identity, store: profile.store)
+    init(identity: EngineIdentity, store: URL) throws {
+        protocolState = try EngineProtocol(identity: identity, store: store)
     }
 
-    func launch(executable: URL, profile: PreviewProfile, provider: FixtureProvider) throws {
+    func launch(executable: URL, configuration: EngineLaunchConfiguration) throws {
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw PreviewError.message("Bundled nac-web is missing or not executable. Rebuild the preview app.")
         }
@@ -108,14 +117,13 @@ private final class EngineRun {
         for fd in logs + [sockets[0]] { posix_spawn_file_actions_addclose(&actions, fd) }
         posix_spawn_file_actions_adddup2(&actions, sockets[1], 3)
         if sockets[1] != 3 { posix_spawn_file_actions_addclose(&actions, sockets[1]) }
-        posix_spawn_file_actions_addchdir_np(&actions, profile.workspace.path)
+        posix_spawn_file_actions_addchdir_np(&actions, configuration.cwd.path)
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
         posix_spawnattr_setpgroup(&attributes, 0)
-        var environment = profile.environment
+        var environment = configuration.environment
         environment["NAC_DESKTOP_CHANNEL_FD"] = "3"
-        environment["MODELS_DEV_URL"] = provider.baseURL.appendingPathComponent("models-dev").absoluteString
-        let arguments = [executable.path, "--bind", "127.0.0.1:0", "--directory", profile.workspace.path,
-                         "--store-path", profile.store.path, "--worker-executable", executable.path, "--no-open"]
+        let arguments = [executable.path, "--bind", "127.0.0.1:0", "--directory", configuration.cwd.path,
+                         "--store-path", configuration.store.path, "--worker-executable", executable.path, "--no-open"]
         let argv = arguments.map { strdup($0) } + [nil]
         let envp = environment.sorted(by: { $0.key < $1.key }).map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { argv.forEach { free($0) }; envp.forEach { free($0) } }
@@ -221,6 +229,7 @@ private final class EngineRun {
             let data = Data(bytes[..<count])
             if protocolInput {
                 do { if let ready = try protocolState.receive(data) { endpoint = ready } }
+                catch let failure as EngineFailure { fail(failure); return }
                 catch { fail(error.localizedDescription); return }
             } else {
                 log += String(decoding: data, as: UTF8.self)
@@ -234,9 +243,13 @@ private final class EngineRun {
     }
 
     private func fail(_ message: String) {
+        fail(EngineFailure.message(message))
+    }
+
+    private func fail(_ failure: EngineFailure) {
         guard !failed, !stopping else { return }
         failed = true
-        onFailure?(message)
+        onFailure?(failure)
         stop {}
     }
 

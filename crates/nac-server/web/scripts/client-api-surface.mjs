@@ -15,6 +15,8 @@ export const clientApiSurface = {
     "private:authenticated human question answer",
   "POST /sessions/{session_id}/questions/{request_id}/cancel":
     "private:authenticated human question cancellation",
+  "GET /product-context": "api.getProductContext",
+  "POST /product-destinations/resolve": "api.resolveProductDestination",
   "POST /task-launches": "private:standalone Local retained task launch",
   "GET /task-launches/{request_id}": "private:standalone passive launch status",
   "POST /task-launches/{request_id}/cancel": "private:standalone launch cancellation",

@@ -1,3 +1,7 @@
+pub use application::product_context::{
+    ProductContext, ProductContextApplication, ProductDestination, ProductNavigationRequest,
+    ProductNavigationResolution,
+};
 #[cfg(test)]
 use nac_core::{store::ManagedOrchestratorRecord, types::Message};
 mod application;
@@ -8,6 +12,9 @@ mod delivery;
 #[cfg(unix)]
 #[doc(hidden)]
 pub mod desktop_launch;
+#[cfg(unix)]
+#[doc(hidden)]
+pub mod desktop_startup;
 mod executable;
 mod filesystem;
 mod fork;

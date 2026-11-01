@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-/// Compiled only for `preview.sh smoke`. There is no script message bridge.
+/// Instrumentation compiled only for `preview.sh smoke`; UI commands use the production bridge.
 @MainActor
 final class PreviewSmoke {
     private unowned let app: PreviewApp
@@ -46,7 +46,10 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if ["normal", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
+                if ["commands", "commands-input"].contains(scenario) {
+                    evidence["commands"] = try await NativeCommandSmoke(app: app, commands: app.commands).run(
+                        trustedInput: scenario == "commands-input", captures: destination.deletingLastPathComponent())
+                } else if ["normal", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
                     if scenario == "stale-launch" {
                         try await wait("first launch load barrier") { self.pausedFirstLoad }
                         let previous = app.engine.receipt!.incarnation
@@ -110,8 +113,10 @@ final class PreviewSmoke {
                         try await waitJS("loaded production workspace", "return !!document.querySelector('[role=dialog]');")
                         kill(app.engine.pid, SIGTERM)
                     }
-                    try await wait("native failure state", timeout: 65) { self.app.failure != nil }
-                    let message = app.failure!
+                    try await wait("native failure/recovery state", timeout: 65) {
+                        self.app.failure != nil || (scenario == "engine-exit" && self.app.recovery.needsRecovery && !self.app.recovery.busy)
+                    }
+                    let message = app.failure ?? "The bundled engine stopped; explicit recovery is required."
                     let expected: String
                     switch scenario {
                     case "missing": expected = "missing or not executable"
@@ -123,6 +128,9 @@ final class PreviewSmoke {
                     }
                     guard message.contains(expected) else { throw PreviewError.message("Unexpected failure: \(message)") }
                     guard app.engine.receipt == nil else { throw PreviewError.message("Failed launch retained active identity") }
+                    guard (app.commands?.smokeSnapshot["installed"] as? Bool ?? false) == false else {
+                        throw PreviewError.message("Failure retained the native command bridge")
+                    }
                     guard app.baseURL == nil || scenario == "engine-exit" else {
                         throw PreviewError.message("Unverified engine activated the workspace")
                     }
@@ -261,7 +269,7 @@ final class PreviewSmoke {
             try await wait("runner kills owning app", timeout: 70) { false }
         } else if scenario == "channel-loss-active" {
             app.engine.loseChannel()
-            try await wait("runtime channel loss") { self.app.failure != nil }
+            try await wait("runtime channel loss") { self.app.failure != nil || self.app.recovery.needsRecovery }
             guard app.engine.receipt == nil else { throw PreviewError.message("Channel loss retained active identity") }
             try captureNative()
         } else {
@@ -391,8 +399,10 @@ final class PreviewSmoke {
         evidence["profile_removed"] = app.profile.map { !FileManager.default.fileExists(atPath: $0.root.path) } ?? true
         evidence["engine_reaped"] = app.engine.pid == 0
         evidence["identity_retired"] = app.engine.receipt == nil
+        evidence["commands_retired"] = (app.commands?.smokeSnapshot["installed"] as? Bool ?? false) == false
         evidence["cleanup_error"] = cleanupError
         evidence["passed"] = passed && cleanupError == nil && evidence["profile_removed"] as? Bool == true
+            && evidence["commands_retired"] as? Bool == true
         write()
     }
     private func write() {

@@ -1,9 +1,10 @@
+import { ProductNavigation } from "../features/product-context/navigation";
 import { QueryClient } from "@tanstack/react-query";
 import { NacClient } from "../services/nacClient";
 import { createNativeApi } from "../services/api";
 import { type SessionStreamHandlers, type SessionStreamOptions } from "../services/eventStream";
 import { createPresentationStores } from "./presentationStores";
-import type { PromptDraftStorage } from "../store/promptDraftStore";
+import type { PromptDraftPersistenceBinding, PromptDraftStorage } from "../store/promptDraftStore";
 import { TerminalInputRecovery } from "../features/terminal/inputRecovery";
 /** Opaque consumer bindings, never credentials or native admission authority. */
 export interface NativeRuntimeScope {
@@ -21,10 +22,14 @@ export interface NativePresentationAssets {
 }
 export interface NativeRuntimeOptions {
     scope: NativeRuntimeScope;
+    /** Parsed embedded-server bootstrap only; an optional rejection fence, never authentication. */
+    standaloneServingIncarnation?: string;
     client: Pick<NacClient, "transport">;
     storage?: Pick<Storage, "getItem" | "setItem">;
     /** Text drafts only; caller owns tab lifetime and complete identity scoping. */
     draftStorage?: PromptDraftStorage;
+    /** Optional durable text namespace; never replaces the live request/stream scope. */
+    draftPersistenceBinding?: PromptDraftPersistenceBinding;
     assets?: NativePresentationAssets;
     eventSource?: SessionStreamOptions["eventSource"];
     /** Hosted reads default to no replay; standalone retains its one retry. */
@@ -36,6 +41,7 @@ export declare class NativeRuntime {
     readonly client: NacClient;
     readonly assets: Readonly<NativePresentationAssets> | undefined;
     readonly api: ReturnType<typeof createNativeApi>;
+    readonly productNavigation: ProductNavigation;
     readonly stores: ReturnType<typeof createPresentationStores>;
     readonly queryClient: QueryClient;
     readonly terminalInputRecovery: TerminalInputRecovery;
@@ -56,5 +62,5 @@ export declare class NativeRuntime {
 }
 export declare function createNativeRuntime(options: NativeRuntimeOptions): NativeRuntime;
 export declare const standaloneRuntime: RuntimeDependencies;
-export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery">>;
+export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "productNavigation">>;
 export declare function runtimeForQueryClient(client: QueryClient): RuntimeDependencies;

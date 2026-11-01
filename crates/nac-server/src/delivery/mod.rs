@@ -35,3 +35,4 @@ pub(crate) mod task_questions;
 
 pub(crate) mod attention;
 mod attention_contracts;
+pub(crate) mod product_context;

@@ -9,6 +9,14 @@ import { routes } from "@/app/lib/routes";
 import type { ManagedSessionSummary, SessionBehavior } from "@/app/types/api";
 import { useSidebarCommands } from "./useSidebarCommands";
 
+vi.mock("@/app/features/product-context/context", () => ({
+  useProductNavigationOwner: () => ({
+    openMcp: vi.fn(),
+    openSsh: vi.fn(),
+    openConfigurations: vi.fn(),
+    inspect: vi.fn(),
+  }),
+}));
 const state = vi.hoisted(() => ({
   sessions: undefined as ManagedSessionSummary[] | undefined,
   newChat: vi.fn(),
@@ -59,7 +67,7 @@ it.each(["orchestrator", "direct-with-orchestrator"] as const)(
 
 it("waits for canonical route identity before choosing a creation destination", () => {
   const { result, rerender } = renderHook(useSidebarCommands, { wrapper });
-  act(() => result.current.newSession());
+  act(() => expect(result.current.newSession()).toBe(false));
   expect(state.create).not.toHaveBeenCalled();
   expect(state.newChat).not.toHaveBeenCalled();
   state.sessions = [legacy("orchestrator")];

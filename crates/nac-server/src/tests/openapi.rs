@@ -36,6 +36,8 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
         "DELETE",
         "/sessions/{session_id}/task-followup-delegations/{delegation_id}",
     ),
+    ("GET", "/product-context"),
+    ("POST", "/product-destinations/resolve"),
     ("POST", "/task-launches"),
     ("GET", "/task-launches/{request_id}"),
     ("POST", "/task-launches/{request_id}/cancel"),

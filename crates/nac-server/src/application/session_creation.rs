@@ -473,6 +473,7 @@ impl<'a> SessionCreationApplication<'a> {
         let (mut run_config, resources) = prepared.into_parts();
         super::task_questions::bind_native(self.manager, &mut run_config);
         let creation = async {
+            self.manager.bind_product_context(&mut run_config)?;
             let mut service = SessionService::from_orchestrator_run_config(run_config).service;
             if self.manager.managed_host().is_some() {
                 service.enable_managed_admission(self.manager.managed_identity().cloned());
