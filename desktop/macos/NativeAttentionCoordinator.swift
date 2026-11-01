@@ -55,6 +55,37 @@ final class NativeAttentionCoordinator {
     private var notices: [NoticeJob] = []
     private var pendingTarget: NativeAttentionDestination?
     private var latestStatus: NativeAttentionObserver.Status?
+    #if ATTENTION_SMOKE
+    private var observationPaused = false
+    private var acceptedItems: [[String: Any]] = []
+    private var auditOverflow = false
+    /// Transport-only fixture retirement. Never writes preferences or ACKs.
+    func smokeObservation(paused: Bool) throws {
+        guard operational, preferenceTask == nil, workTask == nil, page == nil,
+              notices.isEmpty, saved.receipts.isEmpty, !enabling,
+              paused != observationPaused else {
+            throw DesktopStartupError.message("Attention observation is not quiescent")
+        }
+        if !paused {
+            let status = observer.status()
+            guard status.tasks == 0, status.drainingSessions == 0 else {
+                throw DesktopStartupError.message("Prior attention observation still draining")
+            }
+        }
+        observationPaused = paused
+        if paused { observer.setPolicy(.init(optedIn: false)) }
+        else { startObserver() }
+    }
+    private func audit(_ item: AttentionWire.CompletionPage.Item, page: PageJob, native: UInt64) {
+        guard acceptedItems.count < 16 else { auditOverflow = true; return }
+        acceptedItems.append(["store": page.page.store_id.uuidString.lowercased(), "sequence": item.sequence,
+            "session": item.session_id, "run": item.run_id, "behavior": item.behavior,
+            "kind": item.kind.rawValue, "goal": item.goal_id.map { $0 as Any } ?? NSNull(),
+            "mark_version": item.mark_version.map { $0 as Any } ?? NSNull(),
+            "native_generation": native, "transport_generation": page.transport,
+            "accepted_frontier": saved.frontier ?? "", "unread": saved.unreadCompletions])
+    }
+    #endif
     private lazy var menu = NativeAttentionMenu(actions: .init(
         enable: { [weak self] in self?.toggleEnabled() }, mute: { [weak self] in self?.toggleMuted() },
         permission: { [weak self] in self?.requestPermission() }, clear: { [weak self] in self?.clearIndicator() },
@@ -128,12 +159,18 @@ final class NativeAttentionCoordinator {
     #if PREVIEW_SMOKE
     var smokeSnapshot: [String: Any] {
         let status = observer.status()
-        return ["loaded": loaded, "enabled": saved.enabled && !intentOff, "muted": saved.muted,
+        let value: [String: Any] = ["loaded": loaded, "enabled": saved.enabled && !intentOff, "muted": saved.muted,
             "saving": preferenceTask != nil || enabling, "suspended": suspended, "unread": saved.unreadCompletions,
             "frontier": saved.frontier ?? "", "cutoff": saved.cutoff ?? "", "receipts": saved.receipts.count,
             "generation": generation, "revision": revision, "retired": retired,
             "observer_connections": status.tasks, "observer_phase": status.phase, "observer_draining": status.drainingSessions,
             "projection_available": status.projectionAvailable, "pending_decisions": status.pending, "message": message]
+        #if ATTENTION_SMOKE
+        return value.merging(["observation_paused": observationPaused, "accepted_items": acceptedItems,
+            "audit_overflow": auditOverflow, "work_pending": workTask != nil || page != nil || !notices.isEmpty]) { _, next in next }
+        #else
+        return value
+        #endif
     }
     #endif
 
@@ -206,10 +243,16 @@ final class NativeAttentionCoordinator {
         policy(); render()
     }
     private func policy() {
+        #if ATTENTION_SMOKE
+        if observationPaused { observer.setPolicy(.init(optedIn: false)); return }
+        #endif
         observer.setPolicy(.init(optedIn: operational, authorized: authorized, muted: saved.muted,
                                  focused: focused, privateContent: true))
     }
     private func startObserver() {
+        #if ATTENTION_SMOKE
+        guard !observationPaused else { return }
+        #endif
         guard operational, let binding, binding == currentBinding() else { return }
         observer.configureCompletions(cursor: saved.frontier)
         observer.bind(binding)
@@ -276,6 +319,9 @@ final class NativeAttentionCoordinator {
                                                     occurrence: job.page.occurrenceID(item))
             guard await account(target, title: item.kind == .goal ? .goal : .request, cursor: cursor,
                                 decisionHash: nil, expected: expected) else { return false }
+            #if ATTENTION_SMOKE
+            audit(item, page: job, native: expected)
+            #endif
         }
         guard current(expected), operational, job.transport == observer.status().generation else { return false }
         if job.page.cursor > (sequence(saved.frontier, store: job.page.store_id) ?? -1) {

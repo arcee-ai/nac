@@ -35,6 +35,10 @@ use crate::workspace::GitTarget;
 mod admission;
 mod attachment;
 mod attention;
+#[cfg(any(test, feature = "test-support"))]
+mod attention_test_support;
+#[cfg(any(test, feature = "test-support"))]
+pub use attention_test_support::AttentionPublicationBarrier;
 mod cancellation;
 mod creation;
 mod delegated_input;

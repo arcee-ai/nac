@@ -43,6 +43,10 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     #if ATTENTION_SMOKE
     private var attentionSmoke: AttentionSmoke?
     var attentionSmokeSnapshot: [String: Any] { attention?.smokeSnapshot ?? [:] }
+    func attentionSmokeObservation(paused: Bool) throws {
+        guard let attention else { throw DesktopStartupError.message("Attention owner unavailable") }
+        try attention.smokeObservation(paused: paused)
+    }
     #elseif LIFECYCLE_SMOKE
     private var lifecycleSmoke: LifecycleSmoke?
     #elseif INSTANCE_SMOKE

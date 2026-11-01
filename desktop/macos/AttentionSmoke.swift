@@ -32,6 +32,10 @@ final class AttentionSmokeDelivery: NativeAttentionDelivery {
     func click() { if let target = added.last { response?(target) } }
     var snapshot: [String: Any] {
         ["adds": added.count, "permission_requests": requests, "titles": titles,
+         "deliveries": zip(added, titles).prefix(16).map { target, title in
+             ["session": target.session, "occurrence": target.occurrence,
+              "identifier": target.identifier, "title": title]
+         },
          "pending_ack": waiting.count, "present": presentIDs.count, "retired": retired,
          "foreground_delivery_allowed": added.last.map { shouldPresent?($0) ?? false } ?? false]
     }
@@ -113,6 +117,8 @@ final class AttentionSmoke {
         case "close": app.window.performClose(nil)
         case "click": chatReadiness = [:]; delivery.click()
         case "inspect-chat": try await inspectChat(command)
+        case "pause-observation": try app.attentionSmokeObservation(paused: true)
+        case "resume-observation": try app.attentionSmokeObservation(paused: false)
         case "hold": delivery.hold = true
         case "release": delivery.release(); delivery.hold = false
         case "draft":

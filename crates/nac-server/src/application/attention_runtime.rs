@@ -825,3 +825,7 @@ async fn run(weak: Weak<Live>, manager: SessionManager, mut reader: Reader) {
 #[cfg(test)]
 #[path = "attention_runtime_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "attention_semantic_tests.rs"]
+mod semantic_tests;
