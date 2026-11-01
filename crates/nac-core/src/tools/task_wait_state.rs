@@ -223,7 +223,7 @@ impl Target {
         let stopped_goal = self.mode == Mode::Goal
             && matches!(
                 observation["status"].as_str(),
-                Some("goal_paused" | "goal_blocked" | "goal_budget_limited")
+                Some("goal_paused" | "goal_blocked" | "goal_budget_limited" | "goal_usage_limited")
             );
         let full_fingerprint =
             || format!("{:x}", Sha256::digest(observation.to_string().as_bytes()));
