@@ -2,7 +2,7 @@
 use anyhow::Result;
 use nac_core::{
     sessions,
-    store::{self, HeartbeatOccurrence, HeartbeatState},
+    store::{self, HeartbeatOccurrence},
 };
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -170,12 +170,21 @@ async fn reconcile_or_stop(
         if service.has_active_operation() {
             let path = manager.inner.store_path.clone();
             let session = occurrence.session_id.clone();
-            let schedule = occurrence.schedule_id.clone();
-            let schedule = store::spawn_blocking_store_caller(move || {
-                store::read_heartbeat(&path, &session, &schedule)
+            let active = occurrence.clone();
+            let stopping = store::spawn_blocking_store_caller(move || {
+                match (active.run_id.as_deref(), active.generation.as_deref()) {
+                    (Some(run), Some(generation)) => store::heartbeat_stop_requested(
+                        &path,
+                        &session,
+                        &active.occurrence_id,
+                        run,
+                        generation,
+                    ),
+                    _ => Ok(false),
+                }
             })
             .await??;
-            if schedule.state == HeartbeatState::Stopped {
+            if stopping {
                 if let Some(run) = &occurrence.run_id {
                     // The exact saved run identity makes delayed cancellation
                     // inert when a later human run owns this chat.

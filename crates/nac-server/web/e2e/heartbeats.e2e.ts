@@ -233,7 +233,7 @@ test("human heartbeat UI reconciles lost create acknowledgement and controls an 
   harness.provider.enqueue(
     "human-now",
     { token: "Durable heartbeat occurrence" },
-    { kind: "text", text: "Held heartbeat result." },
+    { kind: "text", stream: "request", text: "Held heartbeat result." },
     gate,
   );
   await page.getByRole("button", { name: "Run now", exact: true }).click();
@@ -246,7 +246,6 @@ test("human heartbeat UI reconciles lost create acknowledgement and controls an 
   await page.getByRole("button", { name: "Save heartbeat", exact: true }).click();
   await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Stop", exact: true }).click();
-  gate.release();
   await expect
     .poll(async () => {
       const inspection = await (
@@ -257,6 +256,7 @@ test("human heartbeat UI reconciles lost create acknowledgement and controls an 
       return inspection.history[0]?.outcome;
     })
     .toBe("interrupted");
+  gate.release();
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByRole("button", { name: "Delete", exact: true })).toBeDisabled();
   await expect

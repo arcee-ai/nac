@@ -102,10 +102,15 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
             }
             if !matches!(action,HeartbeatAction::RunNow{..}) {
                 withdraw_pending(&tx,id,now_ms)?;
-                // Typed target binding does not carry private presentation keys.
-                // Preserve them across controls while canonical run revision fences reuse.
+                // Capture Stop in this transaction, including a legacy stopped
+                // active run before a later control can overwrite its state.
+                if matches!(action,HeartbeatAction::Stop{..}) || schedule.state==HeartbeatState::Stopped {
+                    cancellation::retain_stop_request(&tx,id)?;
+                }
+                // Typed bindings omit private attention and cancellation facts.
+                // Controls must preserve both across re-encoding, including Delete.
                 let version=schedule.version.checked_add(1).context("heartbeat revision exhausted")?;
-                tx.execute("UPDATE heartbeat_schedules SET version=?2,state=?3,binding_json=json_set(?4,'$._attention_base_updated_at',json_extract(binding_json,'$._attention_base_updated_at'),'$._attention_through_updated_at',json_extract(binding_json,'$._attention_through_updated_at'),'$._attention_through_run_revision',json_extract(binding_json,'$._attention_through_run_revision')),specification_json=?5,anchor_ms=?6,next_due_ms=?7,reason=NULL,updated_at_ms=?8 WHERE schedule_id=?1",params![id,version,vocabulary(&state)?,encode(&binding)?,encode(&spec)?,anchor,due,now_ms])?;
+                tx.execute("UPDATE heartbeat_schedules SET version=?2,state=?3,binding_json=json_set(?4,'$._attention_base_updated_at',json_extract(binding_json,'$._attention_base_updated_at'),'$._attention_through_updated_at',json_extract(binding_json,'$._attention_through_updated_at'),'$._attention_through_run_revision',json_extract(binding_json,'$._attention_through_run_revision'),'$._stop_request',json_extract(binding_json,'$._stop_request')),specification_json=?5,anchor_ms=?6,next_due_ms=?7,reason=NULL,updated_at_ms=?8 WHERE schedule_id=?1",params![id,version,vocabulary(&state)?,encode(&binding)?,encode(&spec)?,anchor,due,now_ms])?;
             }
             id.to_owned()
         }

@@ -5,9 +5,11 @@ use serde::{de::DeserializeOwned, Serialize};
 use sha2::{Digest, Sha256};
 
 mod attention;
+mod cancellation;
 mod control;
 pub(crate) use attention::heartbeat_attention_with_connection;
 pub use attention::*;
+pub use cancellation::heartbeat_stop_requested;
 pub use control::control_heartbeat;
 mod execution;
 mod materialize;

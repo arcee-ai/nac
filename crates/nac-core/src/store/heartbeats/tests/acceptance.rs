@@ -842,6 +842,309 @@ fn heartbeat_controls_preserve_quiet_metadata_before_and_after_active_settlement
     }
 }
 
+#[test]
+fn heartbeat_withdrawing_unexecuted_work_preserves_quiet_result_and_ack() {
+    for action in ["pause", "edit", "stop", "delete"] {
+        let f = Fixture::new();
+        let schedule = f.create();
+        let conn = open_runtime_connection(&f.path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET updated_at='2026-10-30 12:00:00' WHERE session_id='direct'",
+            [],
+        )
+        .unwrap();
+        let pending = materialize_heartbeats(&f.path, 61_000).unwrap().remove(0);
+        let active = f.admit(&pending, 61_000);
+        committed(&f, &active);
+        report(&f, &active, HeartbeatOutcome::Unchanged);
+        conn.execute(
+            "UPDATE sessions SET updated_at='2026-10-30 12:01:00' WHERE session_id='direct'",
+            [],
+        )
+        .unwrap();
+        f.settle(&active, HeartbeatOutcome::Unknown, Some(1));
+        let before = heartbeat_attention_snapshot(&f.path).unwrap();
+        let result = before.results["direct"][0].clone();
+        let pending = f
+            .control(
+                HeartbeatAction::RunNow {
+                    schedule_id: schedule.schedule_id.clone(),
+                    expected_version: 1,
+                },
+                70_000,
+            )
+            .occurrence
+            .unwrap();
+        let operation = match action {
+            "pause" => HeartbeatAction::Pause {
+                schedule_id: schedule.schedule_id.clone(),
+                expected_version: 1,
+            },
+            "edit" => HeartbeatAction::Edit {
+                schedule_id: schedule.schedule_id.clone(),
+                expected_version: 1,
+                spec: spec(),
+            },
+            "stop" => HeartbeatAction::Stop {
+                schedule_id: schedule.schedule_id.clone(),
+                expected_version: 1,
+            },
+            _ => HeartbeatAction::Delete {
+                schedule_id: schedule.schedule_id.clone(),
+                expected_version: 1,
+            },
+        };
+        f.control(operation, 71_000);
+        let after = heartbeat_attention_snapshot(&f.path).unwrap();
+        assert_eq!(after.quiet_updated_at, before.quiet_updated_at, "{action}");
+        assert_eq!(after.run_revisions, before.run_revisions);
+        assert_eq!(after.results["direct"], before.results["direct"]);
+        let history = heartbeat_history(&f.path, "direct", &schedule.schedule_id).unwrap();
+        let withdrawn = history
+            .iter()
+            .find(|o| o.occurrence_id == pending.occurrence_id)
+            .unwrap();
+        assert_eq!(
+            (withdrawn.state, withdrawn.outcome),
+            (HeartbeatOccurrenceState::Withdrawn, None)
+        );
+        acknowledge_heartbeat_attention(&f.path, "direct", result.sequence).unwrap();
+        initialize(&f.path).unwrap();
+        let reopened = heartbeat_attention_snapshot(&f.path).unwrap();
+        assert_eq!(reopened.quiet_updated_at, before.quiet_updated_at);
+        assert!(reopened.results["direct"][0].seen);
+        // Same-second ordinary completion must still invalidate the quiet mask.
+        conn.execute("INSERT INTO session_run_outcomes(session_id,run_id,disposition,finished_at) VALUES('direct','later-human','completed','2026-10-30 12:01:00')", []).unwrap();
+        assert!(!heartbeat_attention_snapshot(&f.path)
+            .unwrap()
+            .quiet_updated_at
+            .contains_key("direct"));
+    }
+}
+
+#[test]
+fn heartbeat_stop_intent_survives_controls_replay_and_restart_until_exact_settlement() {
+    for recover in [false, true] {
+        let f = Fixture::new();
+        let schedule = f.create();
+        let pending = materialize_heartbeats(&f.path, 61_000).unwrap().remove(0);
+        let active = f.admit(&pending, 61_000);
+        committed(&f, &active);
+        let requested = |session: &str, occurrence: &str, run: &str, generation: &str| {
+            heartbeat_stop_requested(&f.path, session, occurrence, run, generation).unwrap()
+        };
+        let own = || {
+            requested(
+                "direct",
+                &active.occurrence_id,
+                active.run_id.as_ref().unwrap(),
+                active.generation.as_ref().unwrap(),
+            )
+        };
+        assert!(!own());
+        let key = uuid::Uuid::new_v4().to_string();
+        let stop = HeartbeatAction::Stop {
+            schedule_id: schedule.schedule_id.clone(),
+            expected_version: 1,
+        };
+        let original = control_heartbeat(
+            &f.path,
+            "direct",
+            &key,
+            &stop,
+            "Stop this heartbeat.",
+            f.binding(),
+            62_000,
+        )
+        .unwrap();
+        assert!(own());
+        if recover {
+            // Legacy stopped records have no marker. The scoped fallback works
+            // and a later control captures its intent before changing state.
+            open_runtime_connection(&f.path).unwrap().execute("UPDATE heartbeat_schedules SET binding_json=json_remove(binding_json,'$._stop_request') WHERE schedule_id=?1",[&schedule.schedule_id]).unwrap();
+            assert!(own());
+        }
+        f.control(
+            HeartbeatAction::Edit {
+                schedule_id: schedule.schedule_id.clone(),
+                expected_version: 2,
+                spec: spec(),
+            },
+            63_000,
+        );
+        f.control(
+            HeartbeatAction::Delete {
+                schedule_id: schedule.schedule_id.clone(),
+                expected_version: 3,
+            },
+            64_000,
+        );
+        initialize(&f.path).unwrap();
+        assert!(own());
+        let other = uuid::Uuid::new_v4().to_string();
+        assert!(!requested(
+            "other",
+            &active.occurrence_id,
+            active.run_id.as_ref().unwrap(),
+            active.generation.as_ref().unwrap()
+        ));
+        assert!(!requested(
+            "direct",
+            &other,
+            active.run_id.as_ref().unwrap(),
+            active.generation.as_ref().unwrap()
+        ));
+        assert!(!requested(
+            "direct",
+            &active.occurrence_id,
+            &other,
+            active.generation.as_ref().unwrap()
+        ));
+        assert!(!requested(
+            "direct",
+            &active.occurrence_id,
+            active.run_id.as_ref().unwrap(),
+            &other
+        ));
+        assert_eq!(
+            control_heartbeat(
+                &f.path,
+                "direct",
+                &key,
+                &stop,
+                "Stop this heartbeat.",
+                f.binding(),
+                65_000
+            )
+            .unwrap(),
+            original
+        );
+        assert!(serde_json::to_value(
+            read_heartbeat(&f.path, "direct", &schedule.schedule_id)
+                .unwrap()
+                .binding
+        )
+        .unwrap()
+        .get("_stop_request")
+        .is_none());
+        if recover {
+            reconcile_heartbeat_occurrences(&f.path, "direct", 66_000).unwrap();
+        } else {
+            f.settle(&active, HeartbeatOutcome::Interrupted, Some(1));
+        }
+        assert!(!own());
+        let marker:Option<String>=open_runtime_connection(&f.path).unwrap().query_row("SELECT json_extract(binding_json,'$._stop_request') FROM heartbeat_schedules WHERE schedule_id=?1",[&schedule.schedule_id],|r|r.get(0)).unwrap();
+        assert!(marker.is_none());
+        assert_eq!(
+            heartbeat_history(&f.path, "direct", &schedule.schedule_id).unwrap()[0].outcome,
+            Some(HeartbeatOutcome::Interrupted)
+        );
+        assert_eq!(
+            control_heartbeat(
+                &f.path,
+                "direct",
+                &key,
+                &stop,
+                "Stop this heartbeat.",
+                f.binding(),
+                67_000
+            )
+            .unwrap(),
+            original
+        );
+        assert!(
+            !own(),
+            "old receipt replay cannot recreate cancellation authority"
+        );
+    }
+}
+
+#[test]
+fn heartbeat_quiet_mask_never_hides_another_schedules_actionable_result() {
+    for denied in [false, true] {
+        let f = Fixture::new();
+        let quiet = f.create();
+        let conn = open_runtime_connection(&f.path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET updated_at='2026-10-30 12:00:00' WHERE session_id='direct'",
+            [],
+        )
+        .unwrap();
+        let pending = materialize_heartbeats(&f.path, 61_000).unwrap().remove(0);
+        let active = f.admit(&pending, 61_000);
+        committed(&f, &active);
+        report(&f, &active, HeartbeatOutcome::Unchanged);
+        conn.execute(
+            "UPDATE sessions SET updated_at='2026-10-30 12:01:00' WHERE session_id='direct'",
+            [],
+        )
+        .unwrap();
+        f.settle(&active, HeartbeatOutcome::Unknown, Some(1));
+        assert!(heartbeat_attention_snapshot(&f.path)
+            .unwrap()
+            .quiet_updated_at
+            .contains_key("direct"));
+        let actionable = f.create();
+        let next = f
+            .control(
+                HeartbeatAction::RunNow {
+                    schedule_id: actionable.schedule_id,
+                    expected_version: 1,
+                },
+                80_000,
+            )
+            .occurrence
+            .unwrap();
+        if denied {
+            heartbeat_admission_unavailable(
+                &f.path,
+                "direct",
+                &next.occurrence_id,
+                next.revision,
+                true,
+                "Human review required",
+                80_000,
+            )
+            .unwrap();
+        } else {
+            let active = f.admit(&next, 80_000);
+            committed(&f, &active);
+            report(&f, &active, HeartbeatOutcome::Meaningful);
+            f.settle(&active, HeartbeatOutcome::Unknown, Some(1));
+        }
+        f.control(
+            HeartbeatAction::RunNow {
+                schedule_id: quiet.schedule_id.clone(),
+                expected_version: 1,
+            },
+            81_000,
+        );
+        f.control(
+            HeartbeatAction::Pause {
+                schedule_id: quiet.schedule_id,
+                expected_version: 1,
+            },
+            82_000,
+        );
+        let snapshot = heartbeat_attention_snapshot(&f.path).unwrap();
+        assert!(!snapshot.quiet_updated_at.contains_key("direct"));
+        assert_eq!(
+            snapshot.results["direct"][0].outcome,
+            if denied {
+                HeartbeatOutcome::NeedsHumanAction
+            } else {
+                HeartbeatOutcome::Meaningful
+            }
+        );
+        assert!(!snapshot.results["direct"][0].seen);
+        acknowledge_heartbeat_attention(&f.path, "direct", snapshot.results["direct"][0].sequence)
+            .unwrap();
+        let acknowledged = heartbeat_attention_snapshot(&f.path).unwrap();
+        assert!(acknowledged.results["direct"][0].seen);
+        assert!(!acknowledged.quiet_updated_at.contains_key("direct"));
+    }
+}
+
 fn heartbeat_withdraw_many_unadmitted_requests(
     f: &Fixture,
     mut current: HeartbeatSchedule,

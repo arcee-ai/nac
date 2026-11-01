@@ -182,6 +182,7 @@ pub(crate) fn settle_heartbeat_with_connection(
             .unwrap_or(HeartbeatOutcome::Unknown)
     };
     conn.execute("UPDATE heartbeat_occurrences SET state='settled',outcome=?2,tokens_used=?3,settled_at_ms=?4,expected_revision=expected_revision+1,settlement_sequence=?5 WHERE occurrence_id=?1",params![active.occurrence_id,vocabulary(&outcome)?,tokens,now,next_settlement_sequence(conn)?])?;
+    cancellation::consume_stop_request(conn, &active)?;
     conn.execute("UPDATE heartbeat_schedules SET tokens_used=min(9223372036854775807-tokens_used,?2)+tokens_used,time_used_ms=min(9223372036854775807-time_used_ms,?3)+time_used_ms,usage_unknown=max(usage_unknown,?4),updated_at_ms=?5 WHERE schedule_id=?1",params![active.schedule_id,tokens.unwrap_or(0).max(0),duration_ms.max(0),tokens.is_none(),now])?;
     if outcome == HeartbeatOutcome::Unchanged {
         conn.execute("UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,'$._attention_through_updated_at',(SELECT updated_at FROM sessions WHERE session_id=?2),'$._attention_through_run_revision',(SELECT coalesce(max(id),0) FROM session_run_outcomes WHERE session_id=?2)) WHERE schedule_id=?1",params![active.schedule_id,session])?;

@@ -3,8 +3,10 @@ use super::*;
 use crate::tests::{ScopedModelEnv, SERVER_MODEL_ENV_LOCK};
 use crate::ServerOptions;
 use nac_core::model::BackendKind;
-use nac_core::store::{HeartbeatAction, HeartbeatSpec};
+use nac_core::store::{HeartbeatAction, HeartbeatSpec, HeartbeatState};
 use std::{collections::BTreeMap, path::PathBuf, time::Instant};
+
+mod cancellation;
 
 #[derive(Debug, serde::Serialize)]
 struct Measurement {

@@ -56,6 +56,11 @@ settlement timestamps cannot expire starts needed after a clock rollback.
 If the wall clock falls behind the latest retained host start, heartbeat admission
 waits until it catches up. Pending receipt identity and retry allowance stay intact.
 
+An accepted Stop retains its exact-run cancellation request through later edits
+or deletion until that occurrence settles. Delete alone does not cancel a run.
+Withdrawing unstarted checks does not turn an earlier unchanged result into unread
+activity; later ordinary runs and actionable results still remain visible.
+
 Deleting a schedule retains its tombstone and original command responses so a
 lost acknowledgement can be retried safely. Capacity exhaustion requires human
 review; deletion does not erase those identities. The panel freezes an uncertain
