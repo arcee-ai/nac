@@ -18,9 +18,13 @@ def select_target(key):
         raise RuntimeError('Unknown/unapproved qualification target')
     target = catalog[key]
     if (not re.fullmatch('[0-9a-f]{40}', target.get('source_sha', ''))
-            or target.get('profile') not in PROFILES or target.get('suite') not in ('preview', 'workspace', 'instances', 'terminal', 'startup')
+            or target.get('profile') not in PROFILES or target.get('suite') not in ('preview', 'workspace', 'instances', 'terminal', 'startup', 'lifecycle')
             or not isinstance(target.get('scenario_count'), int) or target['scenario_count'] < 1):
         raise RuntimeError('Invalid immutable qualification contract')
+    if target['suite'] == 'lifecycle' or key == 'all-344-lifecycle-macos26':
+        from ci_lifecycle_contract import TARGET, exact
+        if key != 'all-344-lifecycle-macos26' or not exact(target, TARGET):
+            raise RuntimeError('Lifecycle fixed source/allocation/order contract differs')
     if target['suite'] == 'startup':
         from ci_startup_fixture import CASES, PRODUCT, TEST_SOURCE, TEST_FILES
         from ci_startup_protocol import FILES, REVISION

@@ -9,6 +9,10 @@ on:
       target:
         required: true
         type: string
+      lifecycle-custody:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -87,6 +91,7 @@ jobs:
           QUALIFICATION: ${{ inputs.target }}
           STARTUP_TEST_SHA: ${{ needs.resolve.outputs.test_source_sha }}
           STARTUP_PROTOCOL_SHA: ${{ needs.resolve.outputs.protocol_source_sha }}
+          NAC_LIFECYCLE_CUSTODY: ${{ inputs.lifecycle-custody }}
         run: |
           startup_sources=()
           if [[ -n "$STARTUP_TEST_SHA" && -n "$STARTUP_PROTOCOL_SHA" ]]; then
