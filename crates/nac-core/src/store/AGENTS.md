@@ -72,6 +72,12 @@ connection-scoped create/update helpers let a peer admission receipt commit
 atomically with the existing mutation. Notification effects belong after the
 outer commit; receipt storage does not own another goal history.
 
+`completion_occurrences.rs` owns schema49's content-free historical completion
+and exact pending-run attribution; current idle/decision eligibility remains a
+separate attention projection. Schema48's `fresh_task_tables.rs` and migration
+tests are consumed unchanged from ALL-483 e63104294ee445ee2bc4abf85db25a21c689ceb8;
+this imports its physical schema only, without a runtime or ancestry claim.
+
 `schema.rs` is intentionally above 800 lines because it is the ordered,
 transactional migration ledger for every supported database revision; splitting
 the sequence would obscure upgrade order and rollback. `transcript.rs` is the

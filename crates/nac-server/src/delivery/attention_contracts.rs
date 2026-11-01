@@ -225,11 +225,14 @@ impl From<AttentionReset> for AttentionResetDto {
         }
     }
 }
-/// Baselines and source replacements are silent. Only a record carrying
-/// new_attention=true represents a new semantic attention transition.
+/// Current-state baselines are silent. Historical completion pages use their
+/// own stable store frontier and never infer that a whole session is idle.
 #[derive(Serialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum AttentionFrame {
+    Completions {
+        page: CompletionPageDto,
+    },
     Baseline {
         boundary: AttentionCursor,
         sources: Vec<AttentionSnapshotDto>,
@@ -246,6 +249,61 @@ pub(crate) enum AttentionFrame {
     Reset {
         reason: AttentionResetDto,
     },
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CompletionKindDto {
+    Request,
+    Goal,
+}
+#[derive(Serialize, ToSchema)]
+pub(crate) struct CompletionOccurrenceDto {
+    sequence: i64,
+    session_id: String,
+    run_id: String,
+    behavior: String,
+    kind: CompletionKindDto,
+    #[schema(required)]
+    goal_id: Option<String>,
+    #[schema(required)]
+    mark_version: Option<i64>,
+}
+#[derive(Serialize, ToSchema)]
+pub(crate) struct CompletionPageDto {
+    store_id: String,
+    cursor: i64,
+    high_water: i64,
+    baseline: bool,
+    more: bool,
+    items: Vec<CompletionOccurrenceDto>,
+}
+impl From<nac_core::store::CompletionPage> for CompletionPageDto {
+    fn from(page: nac_core::store::CompletionPage) -> Self {
+        Self {
+            store_id: page.cursor.store,
+            cursor: page.cursor.sequence,
+            high_water: page.high_water,
+            baseline: page.baseline,
+            more: page.more,
+            items: page
+                .items
+                .into_iter()
+                .map(|item| CompletionOccurrenceDto {
+                    sequence: item.sequence,
+                    session_id: item.session_id,
+                    run_id: item.run_id,
+                    behavior: item.behavior,
+                    kind: match item.kind {
+                        nac_core::store::CompletionKind::Request => CompletionKindDto::Request,
+                        nac_core::store::CompletionKind::Goal => CompletionKindDto::Goal,
+                    },
+                    goal_id: item.goal_id,
+                    mark_version: item.mark_version,
+                })
+                .collect(),
+        }
+    }
 }
 impl AttentionFrame {
     pub fn baseline(initial: &AttentionInitial) -> Self {

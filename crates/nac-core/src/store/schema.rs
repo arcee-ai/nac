@@ -3,7 +3,12 @@ use std::ops::Deref;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod completion_migration_tests;
 mod delegation_receipts;
+#[cfg(test)]
+mod fresh_task_migration_tests;
+mod fresh_task_tables;
 #[cfg(test)]
 mod heartbeat_migration_tests;
 pub(super) mod heartbeat_tables;
@@ -76,6 +81,8 @@ mod permission_reviewer_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 49 retains content-free semantic completions with exact pending run/goal binding.
+// 48 is ALL-483's schema-only fresh-task supplier, retained without its runtime.
 // 47 binds new task follow-ups to retained service-issued human delegation.
 // 46 retains exact structured questions and identified answer continuations.
 // 45 adds session-scoped, revision-checked MCP mount refresh intent.
@@ -117,7 +124,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 47;
+const STORE_SCHEMA_VERSION: i64 = 49;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -811,7 +818,7 @@ fn open_connection_with_hooks(
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
         | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-        | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | STORE_SCHEMA_VERSION => {}
+        | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47 | 48 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -1041,6 +1048,8 @@ fn open_connection_with_hooks(
     heartbeat_tables::create_heartbeat_tables(&transaction)?;
     super::session_mcp_refresh::create_table(&transaction)?;
     super::task_questions::create_table(&transaction)?;
+    fresh_task_tables::migrate(&transaction)?;
+    super::completion_occurrences::create_tables(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
@@ -1899,6 +1908,9 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "orchestrator_compaction_checkpoints",
         "workspace_revisions",
         "session_run_recovery",
+        "session_completion_bindings",
+        "session_completion_marks",
+        "session_completion_occurrences",
         "session_inbox",
         "task_followups",
         "session_mcp_refresh",

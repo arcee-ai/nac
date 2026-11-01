@@ -1,142 +1,5 @@
 import Foundation
 
-/// Current state and semantic deduplication, independent of transport/OS UI.
-struct AttentionProjection {
-    struct Key: Hashable { let session: String; let identity: String }
-    struct Candidate { let key: Key; let kind: String; let decision: AttentionWire.Decision? }
-    private(set) var boundary: AttentionWire.Cursor?
-    private(set) var sources: [String: AttentionWire.Snapshot] = [:]
-    private var seen: Set<Key> = []
-    private var candidates: [Key: Candidate] = [:]
-    var identities: Int {
-        seen.union(candidates.keys).union(sources.values.compactMap { snapshot in
-            snapshot.work.map { workKey(snapshot.source.session_id, $0) }
-        }).union(sources.values.flatMap { snapshot in
-            snapshot.pending.map { Key(session: snapshot.source.session_id, identity: $0.key) }
-        }).count
-    }
-    var metadataBytes: Int { sources.values.reduce(0) { $0 + $1.bytes } }
-    var dedupBytes: Int { seen.reduce(0) { $0 + $1.identity.utf8.count + 24 } }
-    var pending: Int { sources.values.reduce(0) { $0 + $1.pending.count } }
-
-    func isCurrent(_ key: Key, kind: String) -> Bool {
-        guard let source = sources[key.session], source.availability.topology == .available else { return false }
-        if kind == "completed" {
-            return source.availability.work == .available && source.pending.isEmpty && source.work.map {
-                $0.disposition == .completed && workKey(key.session, $0) == key
-            } == true
-        }
-        return source.pending.contains { $0.key == key.identity && source.availability.facet(for: $0) == .available }
-    }
-
-    mutating func accept(_ frame: AttentionWire.Frame, engine: UUID) throws -> [Candidate] {
-        try AttentionWire.validate(frame)
-        guard frame.boundary?.engine == engine else { throw AttentionFeedError.invalid }
-        switch frame {
-        case .baseline(let cursor, let snapshots, _):
-            guard boundary == nil else { throw AttentionFeedError.invalid }
-            boundary = cursor
-            for snapshot in snapshots { install(snapshot) }
-        case .record(let cursor, let source, let revision, let change, let fresh):
-            guard let previous = boundary, cursor.engine == previous.engine, cursor.epoch == previous.epoch else {
-                throw AttentionFeedError.invalid
-            }
-            if cursor.sequence <= previous.sequence { return [] } // Baseline-first history/replay stays silent.
-            guard previous.sequence < UInt64.max, cursor.sequence == previous.sequence + 1 else { throw AttentionFeedError.invalid }
-            if case .sourceReplaced(let snapshot) = change {
-                guard !fresh, revision == snapshot.revision,
-                      sources[source.session_id]?.source.epoch != source.epoch else { throw AttentionFeedError.invalid }
-                candidates = candidates.filter { $0.key.session != source.session_id }
-                install(snapshot)
-            } else {
-                guard var current = sources[source.session_id], current.source == source,
-                      current.revision < UInt64.max, revision == current.revision + 1 else { throw AttentionFeedError.invalid }
-                current.revision = revision
-                switch change {
-                case .workSettled(let work):
-                    candidates = candidates.filter { $0.key.session != source.session_id || $0.value.kind != "completed" }
-                    current.work = work
-                    if work.disposition == .completed, fresh {
-                        guard current.pending.isEmpty else { throw AttentionFeedError.invalid }
-                        let key = workKey(source.session_id, work)
-                        if !seen.contains(key) { candidates[key] = Candidate(key: key, kind: "completed", decision: nil) }
-                    } else if fresh { throw AttentionFeedError.invalid }
-                case .workCleared:
-                    guard !fresh else { throw AttentionFeedError.invalid }
-                    current.work = nil
-                    candidates = candidates.filter { $0.key.session != source.session_id || $0.value.kind != "completed" }
-                case .decisionPending(let decision):
-                    if let previous = current.pending.first(where: { $0.key == decision.key })?.questionRevision,
-                       let next = decision.questionRevision, next < previous { throw AttentionFeedError.invalid }
-                    current.pending.removeAll { $0.key == decision.key }
-                    current.pending.append(decision)
-                    let key = Key(session: source.session_id, identity: decision.key)
-                    if fresh, !seen.contains(key) {
-                        let kind: String
-                        switch decision { case .permission: kind = "permission"; case .review: kind = "review"; case .question: kind = "question" }
-                        candidates[key] = Candidate(key: key, kind: kind, decision: decision)
-                    }
-                case .decisionResolved(let decision):
-                    guard !fresh else { throw AttentionFeedError.invalid }
-                    if let previous = current.pending.first(where: { $0.key == decision.key })?.questionRevision,
-                       let next = decision.questionRevision, next < previous { throw AttentionFeedError.invalid }
-                    current.pending.removeAll { $0.key == decision.key }
-                    let key = Key(session: source.session_id, identity: decision.key)
-                    candidates.removeValue(forKey: key)
-                    seen.insert(key)
-                case .sessionDeleted:
-                    guard !fresh else { throw AttentionFeedError.invalid }
-                    sources.removeValue(forKey: source.session_id)
-                    candidates = candidates.filter { $0.key.session != source.session_id }
-                    boundary = cursor
-                    try checkLimits()
-                    return []
-                case .availability(let availability):
-                    guard !fresh else { throw AttentionFeedError.invalid }
-                    current.availability = availability
-                case .checkpoint:
-                    guard !fresh else { throw AttentionFeedError.invalid }
-                case .sourceReplaced: break
-                }
-                sources[source.session_id] = current
-            }
-            boundary = cursor
-        case .reset: throw AttentionFeedError.invalid
-        }
-        // The writer emits WorkSettled BEFORE its Availability update. Keep a
-        // typed new-attention candidate until that exact current facet becomes
-        // available; never infer availability from an old snapshot or lose it.
-        var effects: [Candidate] = []
-        for (key, candidate) in candidates {
-            guard let current = sources[key.session] else { continue }
-            let facet = candidate.decision.map { current.availability.facet(for: $0) } ?? current.availability.work
-            if facet == .available, current.availability.topology == .available {
-                seen.insert(key)
-                effects.append(candidate)
-                candidates.removeValue(forKey: key)
-            } else if facet == .unsupported || current.availability.topology == .unsupported {
-                candidates.removeValue(forKey: key)
-            }
-        }
-        try checkLimits()
-        return effects
-    }
-    private func workKey(_ session: String, _ work: AttentionWire.Work) -> Key {
-        Key(session: session, identity: "w" + AttentionWire.Decision.part(work.run_id))
-    }
-    private mutating func install(_ snapshot: AttentionWire.Snapshot) {
-        sources[snapshot.source.session_id] = snapshot
-        for decision in snapshot.pending { seen.insert(Key(session: snapshot.source.session_id, identity: decision.key)) }
-        if let work = snapshot.work, work.disposition == .completed { seen.insert(workKey(snapshot.source.session_id, work)) }
-    }
-    private func checkLimits() throws {
-        guard sources.count <= AttentionWire.sources, identities <= AttentionWire.identities,
-              metadataBytes <= AttentionWire.metadataBytes, dedupBytes <= 2 * AttentionWire.metadataBytes else {
-            throw AttentionFeedError.capacity
-        }
-    }
-}
-
 /// One app-owned profile/engine binding, one GET and one cancellable retry. The
 /// caller supplies a verified private readiness binding; this owns no engine,
 /// session attachment, renderer, authorization, credentials or system center.
@@ -186,6 +49,8 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
         let unknownDecisionSessions: [String]
     }
     struct Sinks {
+        var resolved: (Binding, UInt64, [AttentionProjection.Key]) -> Void = { _, _, _ in }
+        var completions: (Binding, UInt64, AttentionWire.CompletionPage, @escaping (Bool) -> Void) -> Void = { _, _, _, complete in complete(false) }
         var notice: (Notice, @escaping (Bool) -> Void) -> Void = { _, complete in complete(true) }
         var withdraw: ([AttentionProjection.Key]) -> Void = { _ in }
         var navigate: (Notice) -> Void = { _ in }
@@ -214,6 +79,11 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
     private var delivered: [AttentionProjection.Key: Notice] = [:]
     private var deliveryAcknowledgments = 0
     private var deliveryFailures = 0
+    private var completionMode = false
+    private var completionCursor: String?
+    private var waitingForCompletion: UUID?
+    private var heldData = Data()
+    private var retirement: (() -> Void)?
 
     init(sinks: Sinks = Sinks()) {
         self.sinks = sinks
@@ -232,6 +102,11 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
             if self.policy.optedIn && next.valid { self.schedule(delay: 0) }
             self.publish()
         }
+    }
+    /// Configure before enabling/binding. Transport epochs never replace this
+    /// stable semantic frontier; only the native owner's durable ACK advances it.
+    func configureCompletions(cursor: String?) {
+        queue.async { self.completionMode = true; self.completionCursor = cursor }
     }
     func setPolicy(_ next: Policy) {
         queue.async {
@@ -260,13 +135,25 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
             self.sinks.navigate(notice)
         }
     }
-    func retire() {
+    func isCurrent(_ notice: Notice, completion: @escaping (Bool) -> Void) {
         queue.async {
-            guard !self.retired else { return }
-            self.retired = true
-            self.cancelConnection()
-            self.binding = nil
-            self.phase = "retired"
+            completion(!self.retired && self.policy.optedIn && notice.binding == self.binding &&
+                notice.generation == self.generation && self.projection.sources[notice.key.session]?.source.epoch == notice.sourceEpoch &&
+                self.projection.isCurrent(notice.key, kind: notice.kind))
+        }
+    }
+    func retire(completion: (() -> Void)? = nil) {
+        queue.async {
+            if let completion {
+                let previous = self.retirement
+                self.retirement = { previous?(); completion() }
+            }
+            if !self.retired {
+                self.retired = true
+                self.cancelConnection()
+                self.binding = nil
+                self.phase = "retired"
+            }
             self.publish()
         }
     }
@@ -280,16 +167,26 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
         }.map { $0.source.session_id }.sorted()
         return Status(phase: phase, generation: generation, tasks: task == nil ? 0 : 1, retries: (retry == nil ? 0 : 1) + drainingRetries,
                drainingSessions: draining.count, sources: projection.sources.count, identities: projection.identities,
-               pending: projection.pending, bytes: parser.retainedBytes + projection.metadataBytes + projection.dedupBytes,
+               pending: projection.pending, bytes: parser.retainedBytes + projection.metadataBytes + projection.dedupBytes + heldData.count,
                sequence: projection.boundary?.sequence, projectionEpoch: projection.boundary?.epoch,
                deliveryAcknowledgments: deliveryAcknowledgments,
                deliveryFailures: deliveryFailures, unknownDecisionSessions: unknown)
     }
-    private func publish() { sinks.state(statusOnQueue()) }
+    private func publish() {
+        sinks.state(statusOnQueue())
+        if retired, task == nil, retry == nil, draining.isEmpty, drainingRetries == 0 {
+            let completion = retirement
+            retirement = nil
+            completion?()
+        }
+    }
     private func cancelConnection() {
         if generation < UInt64.max { generation += 1 } else { retired = true }
         wantedRetry = nil
         cancelRetry()
+        if waitingForCompletion != nil { task?.resume() }
+        waitingForCompletion = nil
+        heldData = Data()
         task?.cancel(); task = nil
         if let current = session {
             draining.insert(ObjectIdentifier(current))
@@ -355,8 +252,9 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
         request.timeoutInterval = 24 * 60 * 60
         request.httpMethod = "GET"
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        // Each HTTP open is a fresh producer lifetime. Do not claim retained
-        // hub replay or reconstruct missed notifications via Last-Event-ID.
+        // Current-state projection opens fresh; semantic completion replay has
+        // its own durable store cursor, independent of the in-memory SSE ring.
+        if completionMode { request.setValue(completionCursor ?? "new", forHTTPHeaderField: "X-NAC-Completion-Cursor") }
         let nextTask = next.dataTask(with: request)
         session = next; task = nextTask
         phase = "connecting"
@@ -388,14 +286,27 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard dataTask === task, session === self.session, let binding else { return }
+        if waitingForCompletion != nil {
+            guard heldData.count + data.count <= AttentionWire.eventBytes else { unavailable(retry: false); return }
+            heldData.append(data)
+            return
+        }
         do {
             // Local parser ownership permits processing each frame directly;
             // neither a callback nor an SSE record acquires a payload queue.
             var nextParser = parser
             parser = AttentionSSEParser()
-            try nextParser.append(data) { frame in
+            let tail = try nextParser.consume(data) { frame in
                 if case .reset = frame { throw AttentionFeedError.rebaseline }
-                let effects = try self.projection.accept(frame, engine: binding.engine)
+                if case .completions(let page) = frame {
+                    try self.receiveCompletions(page, binding: binding, dataTask: dataTask)
+                    return false
+                }
+                let effects = try self.projection.accept(frame, engine: binding.engine,
+                    noticeWork: !self.completionMode, resumeDecisions: self.completionMode)
+                if case .record(_, let source, _, .decisionResolved(let decision), _) = frame {
+                    self.sinks.resolved(binding, self.generation, [.init(session: source.session_id, identity: decision.key)])
+                }
                 self.phase = "observing"; self.retryAttempt = 0
                 let obsolete = self.delivered.filter {
                     self.projection.sources[$0.key.session]?.source.epoch != $0.value.sourceEpoch ||
@@ -403,7 +314,7 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
                 }.map { $0.key }
                 for key in obsolete { self.delivered.removeValue(forKey: key) }
                 if !obsolete.isEmpty { self.sinks.withdraw(obsolete) }
-                if self.policy.delivers {
+                if self.policy.delivers || self.completionMode {
                     for candidate in effects {
                         guard let epoch = self.projection.sources[candidate.key.session]?.source.epoch else { throw AttentionFeedError.invalid }
                         let notice = Notice(binding: binding, generation: self.generation, sourceEpoch: epoch,
@@ -428,10 +339,48 @@ final class NativeAttentionObserver: NSObject, URLSessionDataDelegate {
                     }
                 }
                 self.publish()
+                return true
             }
             parser = nextParser
+            guard tail.count <= AttentionWire.eventBytes else { throw AttentionFeedError.capacity }
+            heldData = tail
         } catch AttentionFeedError.rebaseline { unavailable(retry: true) }
         catch { unavailable(retry: false) }
+    }
+
+    private func receiveCompletions(_ page: AttentionWire.CompletionPage, binding: Binding,
+                                    dataTask: URLSessionDataTask) throws {
+        guard completionMode, waitingForCompletion == nil else { throw AttentionFeedError.invalid }
+        if let cursor = completionCursor {
+            let parts = cursor.split(separator: ":", omittingEmptySubsequences: false)
+            guard parts.count == 2, let store = UUID(uuidString: String(parts[0])), let sequence = Int64(parts[1]),
+                  store == page.store_id, !page.baseline, page.cursor >= sequence,
+                  page.items.allSatisfy({ $0.sequence > sequence }) else { throw AttentionFeedError.invalid }
+        } else if !page.baseline { throw AttentionFeedError.invalid }
+        let token = UUID(), expected = generation
+        waitingForCompletion = token
+        dataTask.suspend()
+        phase = "accounting"
+        sinks.completions(binding, expected, page) { [weak self, weak dataTask] accepted in
+            self?.queue.async { [weak self, weak dataTask] in
+                guard let self, let dataTask, !self.retired, self.task === dataTask,
+                      self.binding == binding, self.generation == expected, self.waitingForCompletion == token else { return }
+                self.waitingForCompletion = nil
+                if !accepted {
+                    dataTask.resume()
+                    self.unavailable(retry: false)
+                    return
+                }
+                self.completionCursor = page.cursorID
+                let tail = self.heldData
+                self.heldData = Data()
+                self.phase = "observing"
+                dataTask.resume()
+                if !tail.isEmpty, let session = self.session { self.urlSession(session, dataTask: dataTask, didReceive: tail) }
+                self.publish()
+            }
+        }
+        publish()
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard task === self.task, session === self.session else { return }

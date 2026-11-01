@@ -27,6 +27,18 @@
                 "null"
               ]
             }
+          },
+          {
+            "name": "X-NAC-Completion-Cursor",
+            "in": "header",
+            "description": "Native semantic replay: new cutoff or stable store UUID:sequence; independent from current-state baseline",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -11724,6 +11736,24 @@
           {
             "type": "object",
             "required": [
+              "page",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "completions"
+                ]
+              },
+              "page": {
+                "$ref": "#/components/schemas/CompletionPageDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
               "boundary",
               "sources",
               "reset",
@@ -11812,7 +11842,7 @@
             }
           }
         ],
-        "description": "Baselines and source replacements are silent. Only a record carrying\nnew_attention=true represents a new semantic attention transition."
+        "description": "Current-state baselines are silent. Historical completion pages use their\nown stable store frontier and never infer that a whole session is idle."
       },
       "AttentionGoalDto": {
         "type": "object",
@@ -12260,6 +12290,92 @@
           "no_eligible_boundary",
           "already_compacted"
         ]
+      },
+      "CompletionKindDto": {
+        "type": "string",
+        "enum": [
+          "request",
+          "goal"
+        ]
+      },
+      "CompletionOccurrenceDto": {
+        "type": "object",
+        "required": [
+          "sequence",
+          "session_id",
+          "run_id",
+          "behavior",
+          "kind",
+          "goal_id",
+          "mark_version"
+        ],
+        "properties": {
+          "behavior": {
+            "type": "string"
+          },
+          "goal_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CompletionKindDto"
+          },
+          "mark_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CompletionPageDto": {
+        "type": "object",
+        "required": [
+          "store_id",
+          "cursor",
+          "high_water",
+          "baseline",
+          "more",
+          "items"
+        ],
+        "properties": {
+          "baseline": {
+            "type": "boolean"
+          },
+          "cursor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "high_water": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionOccurrenceDto"
+            }
+          },
+          "more": {
+            "type": "boolean"
+          },
+          "store_id": {
+            "type": "string"
+          }
+        }
       },
       "ConfigureMcpOAuthRequest": {
         "type": "object",

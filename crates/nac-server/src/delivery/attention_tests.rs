@@ -33,6 +33,94 @@ fn data(bytes: &[u8]) -> serde_json::Value {
     serde_json::from_str(json).unwrap()
 }
 #[tokio::test]
+async fn semantic_completion_replay_is_bounded_and_independent_of_current_baseline() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = root();
+    let _env = ScopedModelEnv::isolated(&root.join("home"), Some("test-key"));
+    let manager = test_manager(&root);
+    seed_direct_session(&root, "session");
+    manager
+        .inner
+        .attention
+        .configure_native(uuid::Uuid::new_v4(), "127.0.0.1:12345".into());
+    let app = crate::router(manager.clone());
+    for headers in [
+        vec![("x-nac-completion-cursor", "invalid")],
+        vec![
+            ("x-nac-completion-cursor", "new"),
+            ("x-nac-completion-cursor", "new"),
+        ],
+        vec![(
+            "x-nac-completion-cursor",
+            "10000000-0000-0000-0000-000000000001:-1",
+        )],
+    ] {
+        assert!(app
+            .clone()
+            .oneshot(request(&headers))
+            .await
+            .unwrap()
+            .status()
+            .is_client_error());
+    }
+    let path = root.join("store.db");
+    let cutoff = store::read_completion_page(&path, None).unwrap();
+    assert!(cutoff.baseline && cutoff.items.is_empty());
+    // Core settlement tests own the atomic writer. This transport fixture fills
+    // its content-free table to exceed both old receipt and stream windows.
+    let mut conn = rusqlite::Connection::open(&path).unwrap();
+    let tx = conn.transaction().unwrap();
+    for n in 0..300 {
+        tx.execute("INSERT INTO session_completion_occurrences(session_id,run_id,behavior,kind,committed_at) VALUES('session',?1,'direct','request','now')", [format!("run-{n}")]).unwrap();
+    }
+    tx.commit().unwrap();
+    drop(conn);
+    let cursor = format!("{}:{}", cutoff.cursor.store, cutoff.cursor.sequence);
+    let response = app
+        .oneshot(request(&[("x-nac-completion-cursor", &cursor)]))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body().into_data_stream();
+    let first = next(&mut body).await.unwrap().unwrap();
+    assert!(!std::str::from_utf8(&first).unwrap().contains("\nid:"));
+    let first = data(&first);
+    assert_eq!(first["kind"], "completions");
+    assert_eq!(first["page"]["items"].as_array().unwrap().len(), 128);
+    assert_eq!(first["page"]["baseline"], false);
+    let baseline = data(&next(&mut body).await.unwrap().unwrap());
+    assert_eq!(baseline["kind"], "baseline");
+    let mut sequences = first["page"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["sequence"].as_i64().unwrap())
+        .collect::<Vec<_>>();
+    for expected in [128, 44] {
+        let bytes = tokio::time::timeout(Duration::from_secs(2), next(&mut body))
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(bytes.len() <= store::COMPLETION_PAGE_BYTES + 1024);
+        let page = data(&bytes);
+        assert_eq!(page["kind"], "completions");
+        let items = page["page"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), expected);
+        sequences.extend(items.iter().map(|item| item["sequence"].as_i64().unwrap()));
+    }
+    assert_eq!(sequences, (1..=300).collect::<Vec<_>>());
+    assert!(manager.inner.active_sessions.read().await.is_empty());
+    drop(body);
+    manager.inner.attention.stop();
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    manager.drain_persistence().await.unwrap();
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[tokio::test]
 async fn assembled_get_guards_precede_observer_and_bootstrap() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = root();

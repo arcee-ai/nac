@@ -105,3 +105,19 @@ authority; the production React UI and HTTP/SSE client remain shared.
 
 Shared-host execution instructions supplied by the user take precedence over
 local defaults. Keep all builds and use of a shared binary inside its lease.
+
+ALL-350's NativeAttentionCoordinator is an app/profile owner, independent of
+renderer lifetime. Its passive metadata stream never obtains Ask presence or
+execution authority. Historical completions use Rust's committed semantic ledger;
+the current projection still owns pending decisions and current idle eligibility.
+Native notification state is a typed native-only section of WorkspaceStorage's
+same checkpoint/queue, with exact revision ACKs and generation-scoped capabilities.
+Absent/v1 state defaults off; saved opt-in survives normal cold launches without
+prompting again. Known storage failure suspends delivery. Opt-out/reset fences
+delivery synchronously; a failed save must explain that the old setting may return.
+Scheduling ACK, observed pending/delivered state and visible banners are distinct.
+The bounded session-target response opens the normal shared full-chat lifecycle;
+it carries no command, approval, goal, inbox, path or backend intent. Keep menu
+guards separate and defer IME/modal/unretained editors without a later auto-retry.
+Actual-app fixture source lives in AttentionSmoke/attention_app_smoke.py; its
+injected center cannot establish signed system delivery or hidden CPU acceptance.

@@ -131,6 +131,7 @@ pub(crate) fn replace_with_active_run(
             "session '{session_id}' already has an active durable run"
         ));
     }
+    super::completion_occurrences::begin(transaction, session_id, run_id, submitted_message_id)?;
     Ok(())
 }
 
@@ -177,6 +178,12 @@ fn retain_or_clear_terminal_obligation(
     run_id: &str,
     disposition: RunTerminalDisposition,
 ) -> Result<()> {
+    super::completion_occurrences::settle(
+        transaction,
+        session_id,
+        run_id,
+        disposition == RunTerminalDisposition::Completed,
+    )?;
     if has_running_relationship(transaction, session_id, run_id)? {
         transaction.execute(
             "UPDATE session_run_recovery
@@ -245,6 +252,9 @@ pub(crate) fn mark_active_run_failed(
     let questions_changed = changed == 1
         && !failure.is_some_and(|f| f.kind == crate::run_failure::RunFailureKind::Interrupted)
         && super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
+    if changed == 1 {
+        super::completion_occurrences::settle(transaction, session_id, run_id, false)?;
+    }
     Ok(questions_changed)
 }
 
@@ -552,6 +562,9 @@ fn record_reconciled_outcome(
     disposition: RunOutcomeDisposition,
     failure: Option<&crate::run_failure::RunFailure>,
 ) -> Result<()> {
+    if disposition != RunOutcomeDisposition::Completed {
+        super::completion_occurrences::settle(transaction, session_id, run_id, false)?;
+    }
     super::task_evidence::record_run_outcome_with_connection(
         transaction,
         session_id,

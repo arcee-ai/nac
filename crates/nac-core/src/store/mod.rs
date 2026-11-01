@@ -12,9 +12,14 @@ pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 #[macro_use]
 pub(crate) mod coordinated_commands;
 mod attention;
+mod completion_occurrences;
 pub use attention::{
     read_attention_metadata, AttentionStoreObservation, AttentionStoredGoal, AttentionStoredRun,
     AttentionStoredSession, ATTENTION_METADATA_BYTES, ATTENTION_SOURCE_LIMIT,
+};
+pub use completion_occurrences::{
+    read_completion_page, CompletionCursor, CompletionKind, CompletionOccurrence, CompletionPage,
+    COMPLETION_PAGE_BYTES, COMPLETION_PAGE_ROWS,
 };
 mod managed_maintenance;
 mod managed_orchestrators;

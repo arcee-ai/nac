@@ -27,7 +27,8 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 OWNER = Path(__file__).resolve().parent
-SOURCES = ['AttentionFeedProtocol.swift', 'NativeAttentionObserver.swift',
+SOURCES = ['AttentionFeedProtocol.swift', 'AttentionCompletions.swift',
+           'AttentionProjection.swift', 'NativeAttentionObserver.swift',
            'AttentionFeedTests.swift', 'AttentionFeedHTTPFixture.swift']
 BASE = 'e9e41ce9c78d01e647db42683d4d42f71645b898'
 

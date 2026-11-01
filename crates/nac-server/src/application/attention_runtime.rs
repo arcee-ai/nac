@@ -218,6 +218,29 @@ impl NativeAttentionSubscription {
     pub fn subscription(&mut self) -> &mut AttentionSubscription {
         &mut self.subscription
     }
+
+    /// Same physical native seat, passive bounded metadata read. Retain the
+    /// permit until an accepted read actually returns even if HTTP is cancelled.
+    pub async fn completions(
+        &self,
+        manager: &SessionManager,
+        after: Option<nac_core::store::CompletionCursor>,
+    ) -> Result<nac_core::store::CompletionPage> {
+        let permit = Arc::clone(&self._lease.0._permit);
+        let path = manager.inner.store_path.clone();
+        manager
+            .inner
+            ._store_ownership
+            .call_legacy(move || {
+                let _permit = permit;
+                nac_core::store::read_completion_page(&path, after.as_ref())
+            })
+            .await
+            .and_then(|result| result)
+            .map_err(|_| {
+                AttentionSubscribeError::Unavailable(AttentionUnavailable::InvalidMetadata)
+            })
+    }
 }
 struct ObservationLease(Arc<Live>);
 impl Drop for ObservationLease {

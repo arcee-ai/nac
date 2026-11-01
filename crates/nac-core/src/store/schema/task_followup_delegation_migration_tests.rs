@@ -13,6 +13,24 @@ const ALLOCATIONS: &[(i64, &[&str])] = &[
     ),
     (45, &["session_mcp_refresh"]),
     (46, &["task_questions"]),
+    (
+        48,
+        &[
+            "heartbeat_fresh_destinations",
+            "heartbeat_task_launches",
+            "heartbeat_retained_commands",
+            "heartbeat_retained_allowance",
+        ],
+    ),
+    (
+        49,
+        &[
+            "session_completion_marks",
+            "session_completion_bindings",
+            "session_completion_occurrences",
+            "session_completion_feed",
+        ],
+    ),
 ];
 
 fn rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
@@ -104,6 +122,12 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                 }
             }
         }
+        if version >= 44 {
+            // Reconstruct the historical session-bound tables, rather than
+            // stamping an old version onto the new nullable v48 layout.
+            conn.execute_batch("DROP TABLE heartbeat_commands; DROP TABLE heartbeat_occurrences; DROP TABLE heartbeat_schedules;").unwrap();
+            heartbeat_tables::create_heartbeat_tables(&conn).unwrap();
+        }
         seed(&conn, version);
         conn.pragma_update(None, "user_version", version).unwrap();
         let mut preserved = vec!["sessions", "session_inbox", "task_followups"];
@@ -119,6 +143,12 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
         let definitions = preserved
             .iter()
             .filter(|t| **t != "task_followups")
+            .filter(|table| {
+                !matches!(
+                    **table,
+                    "heartbeat_schedules" | "heartbeat_occurrences" | "heartbeat_commands"
+                )
+            })
             .map(|table| {
                 (
                     *table,
@@ -159,7 +189,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            47
+            STORE_SCHEMA_VERSION
         );
         for (table, old) in before {
             assert_eq!(rows(&conn, table), old, "schema {version}: {table}");
