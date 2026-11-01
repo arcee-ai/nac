@@ -109,6 +109,11 @@ def main():
             raise RuntimeError(f'Artifact/source changed at {key}; rebuild before running')
     if provenance['runner_sources'] != sources():
         raise RuntimeError('Terminal runner changed after build capture')
+    # Keep sealed build facts; the current OS axis describes this execution,
+    # as in workspace.py. Missing observations never inherit the build host.
+    provenance.update(build_os=provenance.get('os'), build_os_build=provenance.get('os_build'),
+                      execution_os=current.get('os'), execution_os_build=current.get('os_build'),
+                      os=current.get('os'), os_build=current.get('os_build'))
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     episodes = {}
