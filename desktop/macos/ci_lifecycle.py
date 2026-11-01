@@ -13,6 +13,7 @@ from ci_lifecycle_contract import (ALLOCATION, CASES, MODES, SOURCE, TARGET, Led
                                    persist, require_build, require_capsule, require_case,
                                    require_console, require_source)
 from ci_lifecycle_evidence import FINAL_METADATA_BYTES, capacity, export_plan, images
+from ci_lifecycle_finalization import prepare as prepare_finalization, ledger_guard, result_guard
 import ci_lifecycle_ownership as ownership
 from ci_qualifications import require_checkout
 from ci_support import redact_values
@@ -204,7 +205,8 @@ def _require_builds(folder, source, engine_sha):
     return {mode: require_build(mode, folder / app, source, engine_sha) for mode, app in MODES.items()}
 
 
-def qualify(raw, source, target, harness_sha, run, command, native_report, deadline, *, audit_command=read_residual):
+def qualify(raw, source, target, harness_sha, run, command, native_report, deadline, *,
+            audit_command=read_residual, report=None):
     if any(target.get(k) != v for k, v in TARGET.items()):
         raise RuntimeError('Unexpected lifecycle target contract')
     capsule = require_capsule(os.environ.get('NAC_LIFECYCLE_CUSTODY', ''), harness_sha, os.environ)
@@ -263,6 +265,7 @@ def qualify(raw, source, target, harness_sha, run, command, native_report, deadl
         if not assets:
             raise RuntimeError('No exact lifecycle production assets')
         replacements = [(str(source), '<target-checkout>'), *redact_values()]
+        persist(control / 'finalization-contract.json', prepare_finalization(report, builds, replacements))
         export_plan(raw, replacements, completed=(), reserve=FINAL_METADATA_BYTES)
         results = []
         for name in CASES:
@@ -318,6 +321,15 @@ def qualify(raw, source, target, harness_sha, run, command, native_report, deadl
                     if primary is None:
                         primary = error
             try:
+                persist(destination / 'external-result.json', outcome)
+            except BaseException as error:
+                if primary is not None:
+                    if hasattr(primary, 'add_note'):
+                        primary.add_note('Result publication failed: ' + type(error).__name__)
+                    raise primary
+                raise
+            try:
+                result_guard(raw, destination / 'external-result.json', replacements)
                 # Stop before another reservation if critical evidence cannot
                 # fit the separate image/non-image envelopes and final metadata.
                 export_plan(raw, replacements, completed=CASES[:CASES.index(name) + 1],
@@ -328,7 +340,9 @@ def qualify(raw, source, target, harness_sha, run, command, native_report, deadl
                     primary = error
             try:
                 persist(destination / 'external-result.json', outcome)
-                ledger.finish(name, outcome['status'], {'external_result_sha256': digest(destination / 'external-result.json')})
+                result_guard(raw, destination / 'external-result.json', replacements)
+                ledger.finish(name, outcome['status'], {'external_result_sha256': digest(destination / 'external-result.json')},
+                              before_save=lambda value: ledger_guard(value, replacements))
             except BaseException as error:
                 if primary is not None:
                     if hasattr(primary, 'add_note'):
