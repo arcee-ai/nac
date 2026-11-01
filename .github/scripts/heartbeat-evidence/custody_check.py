@@ -7,6 +7,7 @@ from pathlib import Path
 import platform
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -24,6 +25,69 @@ OWNER_HASHES = {'run.py': 'af654f9cb797ac7e39d5bcd9e4ed1ed6f20d169566af83b32649e
 spec = importlib.util.spec_from_file_location('evidence_owner', SOURCE/'run.py')
 owner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(owner)
+
+
+def endpoint_identity(value):
+    return {key: getattr(value, 'st_'+key) for key in ('dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'ctime_ns')}
+
+
+class OwnedEndpoint:
+    """Retain the bound pathname identity; remove it only after all owned tasks die."""
+    def __init__(self, output, uid, gid, expected):
+        self.output, self.uid, self.gid = output, uid, gid
+        self.fd = os.open(output, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            self.directory = self.parent_identity(os.fstat(self.fd))
+            require(uid == os.getuid() and uid > 0 and gid == os.getgid(), 'ENDPOINT_OWNER')
+            self.check_parent()
+            value = os.stat('lifeline.sock', dir_fd=self.fd, follow_symlinks=False)
+            self.check_socket(value)
+            require(endpoint_identity(value) == expected, 'ENDPOINT_BINDING_CHANGED')
+            self.identity = dict(expected)
+        except BaseException:
+            self.close()
+            raise
+
+    @staticmethod
+    def parent_identity(value):
+        return tuple(getattr(value, 'st_'+key) for key in ('dev', 'ino', 'uid', 'gid', 'mode'))
+
+    def check_parent(self):
+        held = os.fstat(self.fd)
+        current = os.stat(self.output, follow_symlinks=False)
+        require(stat.S_ISDIR(held.st_mode) and stat.S_IMODE(held.st_mode) == 0o700 and
+                (held.st_uid, held.st_gid) == (self.uid, self.gid) and
+                self.parent_identity(current) == self.parent_identity(held) == self.directory,
+                'ENDPOINT_PARENT_CHANGED')
+
+    def check_socket(self, value):
+        require(stat.S_ISSOCK(value.st_mode) and value.st_nlink == 1 and
+                (value.st_uid, value.st_gid) == (self.uid, self.gid), 'ENDPOINT_TYPE_OR_OWNER')
+
+    def retire(self, controller_dead, pid1_dead, wrapper_dead):
+        require(all(value is True for value in (controller_dead, pid1_dead, wrapper_dead)),
+                'ENDPOINT_DEATHS_UNPROVEN')
+        self.check_parent()
+        try:
+            value = os.stat('lifeline.sock', dir_fd=self.fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return {'state': 'ALREADY_ABSENT_AFTER_VERIFIED_DEATH', 'identity': self.identity}
+        self.check_socket(value)
+        require(endpoint_identity(value) == self.identity, 'ENDPOINT_REPLACED')
+        # All three retained task identities are dead; no owned writer remains.
+        # Recheck both the private directory and exact no-follow entry before unlink.
+        self.check_parent()
+        require(endpoint_identity(os.stat('lifeline.sock', dir_fd=self.fd, follow_symlinks=False))
+                == self.identity, 'ENDPOINT_REPLACED')
+        os.unlink('lifeline.sock', dir_fd=self.fd)
+        try:
+            os.stat('lifeline.sock', dir_fd=self.fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return {'state': 'REMOVED_OWNED_STALE_ENDPOINT', 'identity': self.identity}
+        raise RuntimeError('ENDPOINT_REAPPEARED')  # Never delete a replacement.
+
+    def close(self):
+        os.close(self.fd)
 
 
 def wait_admitted(output, kernel, pidfd):
@@ -80,8 +144,11 @@ def controller(context_path, output, driver_fd):
         def bind(self, wrapper):
             super().bind(wrapper)  # Actual production handshake and identity proof.
             admitted = wait_admitted(output, self.kernel, self.pidfd)
+            require(self.server.getsockname() == context['lifeline_socket'], 'ENDPOINT_BOUND_PATH')
+            endpoint = endpoint_identity(os.stat(context['lifeline_socket'], follow_symlinks=False))
             send_fd(channel, {'kind': 'PID1', 'nonce': context['lifeline_nonce'],
-                'controller': os.getpid(), 'proof': self.proof, 'admitted': admitted}, self.pidfd)
+                'controller': os.getpid(), 'proof': self.proof, 'admitted': admitted,
+                'endpoint': endpoint}, self.pidfd)
             require(wrapper.poll() is None, 'WRAPPER_DIED_BEFORE_OBSERVATION')
             wrapper_fd = os.pidfd_open(wrapper.pid)  # Retained unreaped Popen anchor.
             try:
@@ -140,6 +207,7 @@ def one_case(case, output):
     driver.settimeout(20)
     kernel, child, handles = Kernel(), None, []
     candidate = None
+    endpoint = None
     admitted, forced, first = False, False, None
     pid1_dead, wrapper_dead, controller_dead = False, False, False
     write_json(output/'intent.json', {'case': case, 'workload': 'one Python sleep; no NAC', 'attempts': 1})
@@ -165,6 +233,7 @@ def one_case(case, output):
             candidate = None
             require(child.poll() is None and not any(kernel.ready(fd) for fd in handles),
                     'OWNED_WORK_DIED_BEFORE_CANCELLATION')
+            endpoint = OwnedEndpoint(output, context['uid'], context['gid'], report['endpoint'])
             write_json(output/'observed-admission.json', report)
             driver.sendall(case.encode())
             if case == 'controller':
@@ -194,6 +263,18 @@ def one_case(case, output):
                     first = first or 'RETAINED_HANDLE_KILL_FAILED'
         if len(handles) == 2:
             pid1_dead, wrapper_dead = (kernel.ready(fd, 3000) for fd in handles)
+        endpoint_retirement = {'state': 'UNBOUND', 'first_error': 'ENDPOINT_BINDING_UNPROVEN'}
+        try:
+            require(endpoint is not None, 'ENDPOINT_BINDING_UNPROVEN')
+            endpoint_retirement = endpoint.retire(controller_dead, pid1_dead, wrapper_dead)
+        except BaseException as error:
+            code = str(error) if isinstance(error, RuntimeError) else 'ENDPOINT_FILESYSTEM_ERROR'
+            endpoint_retirement = {'state': 'UNRESOLVED', 'first_error': code}
+            first = first or 'OWNED_ENDPOINT_RETIREMENT_FAILED'
+        finally:
+            if endpoint is not None:
+                endpoint.close()
+        write_json(output/'endpoint-retirement.json', endpoint_retirement)
         terminal_path = output/'terminal.json'
         terminal = json.loads(terminal_path.read_text()) if terminal_path.exists() else None
         manifest = (output/'artifact-manifest.json').exists()
@@ -203,6 +284,7 @@ def one_case(case, output):
         result = {'state': state, 'case': case, 'first_error': first, 'admitted': admitted,
             'controller_dead': controller_dead, 'controller_exit': controller_exit, 'pid1_dead': pid1_dead, 'wrapper_dead': wrapper_dead,
             'forced_driver_cleanup': forced, 'owner_terminal': terminal, 'owner_manifest': manifest,
+            'endpoint_retirement': endpoint_retirement,
             'no_driver_artifact_hashing': True, 'attempts': 1}
         write_json(output/'case-result.json', result)
         for fd in handles:

@@ -83,6 +83,7 @@ def validate_upload(root, control, run_id, attempt):
         for name in sorted(os.listdir(fd)):
             relative = prefix+name
             allowed_path(relative)
+            require(name != 'lifeline.sock', 'UPLOAD_UNRETIRED_ENDPOINT')
             if name == 'artifact-manifest.json':
                 require(relative in MANIFESTS, 'UPLOAD_UNEXPECTED_PRODUCER_MANIFEST')
             value = os.stat(name, dir_fd=fd, follow_symlinks=False)
@@ -97,6 +98,7 @@ def validate_upload(root, control, run_id, attempt):
                 finally:
                     os.close(child)
             else:
+                checked_stat(value)  # Reject special entries before attempting an open.
                 record, small = read_file(fd, name)
                 files[relative] = record
                 if relative == 'ownership.json' or relative in MANIFESTS:

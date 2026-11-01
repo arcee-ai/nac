@@ -84,7 +84,7 @@ class ProposalControls(unittest.TestCase):
                     if not getattr(packet, 'sent', False):
                         packet.sent = True
                         return {'kind': 'PID1', 'controller': 123, 'nonce': context['lifeline_nonce'],
-                                'proof': {'peer_host_pid': 301}, 'admitted': {
+                                'proof': {'peer_host_pid': 301}, 'endpoint': {}, 'admitted': {
                                     'lifeline': {'state': 'VERIFIED_POST_DROP'}}}, 40
                     return {'kind': 'wrapper', 'pid': 200}, 50
 
@@ -99,6 +99,7 @@ class ProposalControls(unittest.TestCase):
                      patch.object(fixture.socket, 'socketpair', return_value=(driver, peer)), \
                      patch.object(fixture.subprocess, 'Popen', return_value=child) as launch, \
                      patch.object(fixture, 'Kernel', return_value=kernel), \
+                     patch.object(fixture, 'OwnedEndpoint', return_value=Mock(retire=Mock(return_value={'state': 'MOCKED_RETIRED'}))), \
                      patch.object(fixture, 'receive_fd', side_effect=packet):
                     result = fixture.one_case(case, output)
                 self.assertEqual(launch.call_args.args[0][:2], [sys.executable, '-B'])

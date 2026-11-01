@@ -258,6 +258,7 @@ test-heartbeat-evidence-controls:
 	python3 -B .github/scripts/heartbeat-evidence/artifact_upload.test.py
 	python3 -B .github/scripts/heartbeat-evidence/custody.test.py
 	python3 -B .github/scripts/heartbeat-evidence/custody_check.test.py
+	python3 -B .github/scripts/heartbeat-evidence/endpoint.test.py
 	node --test .github/scripts/heartbeat-evidence.test.mjs
 	node --check .github/scripts/heartbeat-evidence/capture.mjs
 

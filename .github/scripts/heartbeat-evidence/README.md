@@ -106,6 +106,20 @@ cache. Original binaries remain in `run/bin`, with original logs and manifests.
 A validation failure fails closed and leaves its diagnostic in the job log.
 No global home, credential cache, product checkout or workspace is an upload input.
 
+The controller-SIGKILL fixture can leave its bound socket pathname after process
+death. Before cancellation, the driver retains that endpoint's device/inode,
+type, ownership, link count and change time, checked against the controller's
+observed bound endpoint and an open private directory descriptor. Only after
+the existing retained controller/wrapper/PID1 death checks succeed does it
+recheck the directory and exact no-follow entry and unlink the stale socket.
+Unbound, foreign, replaced or symlink entries remain untouched and fail the
+case. An already absent endpoint is recorded without another deletion. The
+upload guard rejects any remaining `lifeline.sock` and all other special files;
+it does not export or silently skip them. Symbolic lifecycle controls exercise
+the actual driver through that upload boundary using regular placeholders,
+without creating a socket, namespace or pidfd. Actual repaired runtime remains
+unexecuted.
+
 Validated artifacts upload on success and failure, including the original matched PNGs,
 both retained executables, manifests and full logs. Header/dimension/hash checks
 do not replace individual visual inspection: that remains pending after capture.
@@ -122,6 +136,7 @@ Source/mocked checks only:
 python3 -B .github/scripts/heartbeat-evidence/contract.test.py
 python3 -B .github/scripts/heartbeat-evidence/runner.test.py
 python3 -B .github/scripts/heartbeat-evidence/artifact_upload.test.py
+python3 -B .github/scripts/heartbeat-evidence/endpoint.test.py
 node --test .github/scripts/heartbeat-evidence.test.mjs
 node --check .github/scripts/heartbeat-evidence/capture.mjs
 make lint-workflows
