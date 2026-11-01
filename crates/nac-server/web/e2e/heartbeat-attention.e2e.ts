@@ -31,7 +31,7 @@ test("pending withdrawal preserves quiet list projection and production project 
     pinned: false,
   });
   await page.goto(`${harness.baseUrl}/#/`);
-  const card = page.locator(`[data-item-id="${project}"][data-item-kind="project"]`);
+  const card = page.locator(`[role="button"][data-item-id="${project}"][data-item-kind="project"]`);
   const finishedDot = card.locator("span.bg-brand-450");
   await expect(card).toBeVisible();
   await expect(finishedDot).toHaveCount(0);
