@@ -209,10 +209,15 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
         assert!(status.success(), "isolated FD stress failed: {status}");
         return;
     }
+    // The exec'd child owns its capture; Root teardown precedes scope emission.
+    #[cfg(target_os = "macos")]
+    let mut _diagnostic = diagnostics::Scope::census();
     let mut root = Root::new().unwrap();
     #[cfg(target_os = "linux")]
     let fd_baseline = std::fs::read_dir("/proc/self/fd").unwrap().count();
     for _ in 0..48 {
+        #[cfg(target_os = "macos")]
+        _diagnostic.begin_iteration();
         let pid = root.job().unwrap();
         root.until(|authority| authority.members.keys().any(|key| key.0 == pid));
         assert!(!root.authority.leader_exited().unwrap());
@@ -225,7 +230,11 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
                 .1,
         );
         let weak = Arc::downgrade(&identity);
+        #[cfg(target_os = "macos")]
+        diagnostics::phase(Phase::Signal);
         identity.signal(libc::SIGKILL).unwrap();
+        #[cfg(target_os = "macos")]
+        diagnostics::phase(Phase::Prune);
         drop(identity);
         root.until(|authority| {
             authority.members.is_empty() && authority.pending_capture.is_empty()
