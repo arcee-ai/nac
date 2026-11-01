@@ -131,7 +131,10 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
                     throw PreviewError.message("The engine is still starting. Its initial workspace will open after readiness.")
                 }
                 try await WorkspaceReadiness.check(pinned)
-                guard self.current(expected), self.app.canRecoverWorkspace, self.sameEngine(pinned) else { return }
+                guard self.current(expected), self.sameEngine(pinned) else { return }
+                guard self.app.canRecoverWorkspace else {
+                    throw PreviewError.message("Finish the Quit confirmation, then choose Reload Workspace.")
+                }
                 self.app.replaceWorkspace(receipt: pinned, fragment: self.routeFragment)
             } catch {
                 if self.current(expected) { self.unavailable(error.localizedDescription) }
