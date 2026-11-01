@@ -29,7 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 OWNER = Path(__file__).resolve().parent
 SOURCES = ['AttentionFeedProtocol.swift', 'NativeAttentionObserver.swift',
            'AttentionFeedTests.swift', 'AttentionFeedHTTPFixture.swift']
-BASE = '2ea596fa0ba89d2025bf0f2fb7c761c37fed42d5'
+BASE = 'e9e41ce9c78d01e647db42683d4d42f71645b898'
 
 
 def sha(path):
