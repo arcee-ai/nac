@@ -12,7 +12,7 @@ import time
 from ci_lifecycle_contract import (ALLOCATION, CASES, MODES, SOURCE, TARGET, Ledger, canonical, digest,
                                    persist, require_build, require_capsule, require_case,
                                    require_console, require_source)
-from ci_lifecycle_evidence import export_plan, images
+from ci_lifecycle_evidence import FINAL_METADATA_BYTES, capacity, export_plan, images
 import ci_lifecycle_ownership as ownership
 from ci_qualifications import require_checkout
 from ci_support import redact_values
@@ -249,6 +249,7 @@ def qualify(raw, source, target, harness_sha, run, command, native_report, deadl
                                                 'PreviewSmoke', 'StartupSmoke', 'InstanceSmoke', 'NativeCommandInput')):
             raise RuntimeError('Ordinary lifecycle bundle contains fixture instrumentation')
         manifest = {'source': SOURCE, 'engine_sha256': engine_sha, 'identity': identity,
+                    'export_capacity': capacity(),
                     'observer_sha256': digest(observer), 'builds': builds}
         persist(control / 'builds.json', manifest)
         helper = raw / 'lifecycle-image-reader'
@@ -261,6 +262,8 @@ def qualify(raw, source, target, harness_sha, run, command, native_report, deadl
                   for p in (source / 'crates/nac-server/assets/dist').rglob('*') if p.is_file()}
         if not assets:
             raise RuntimeError('No exact lifecycle production assets')
+        replacements = [(str(source), '<target-checkout>'), *redact_values()]
+        export_plan(raw, replacements, completed=(), reserve=FINAL_METADATA_BYTES)
         results = []
         for name in CASES:
             require_budget(deadline, name)
@@ -316,8 +319,9 @@ def qualify(raw, source, target, harness_sha, run, command, native_report, deadl
                         primary = error
             try:
                 # Stop before another reservation if critical evidence cannot
-                # be exported completely under the unchanged caps.
-                export_plan(raw, [(str(source), '<target-checkout>'), *redact_values()])
+                # fit the separate image/non-image envelopes and final metadata.
+                export_plan(raw, replacements, completed=CASES[:CASES.index(name) + 1],
+                            final=name == CASES[-1], reserve=FINAL_METADATA_BYTES)
             except BaseException as error:
                 outcome.update(status='unknown', export_error=str(error)[:4096])
                 if primary is None:
