@@ -2592,6 +2592,109 @@
         }
       }
     },
+    "/product-context": {
+      "get": {
+        "operationId": "get_product_context",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-NAC-Presentation-Incarnation",
+            "in": "header",
+            "description": "Optional standalone presentation lifetime fence; grants no authority",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sanitized passive product facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductContext"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Context unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product-destinations/resolve": {
+      "post": {
+        "operationId": "resolve_product_destination",
+        "parameters": [
+          {
+            "name": "X-NAC-Presentation-Incarnation",
+            "in": "header",
+            "description": "Optional standalone presentation lifetime fence; grants no authority",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductNavigationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Validated logical destination; no browser action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductNavigationResolution"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Destination unavailable or stale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/projects": {
       "get": {
         "tags": [
@@ -14938,6 +15041,264 @@
               "$ref": "#/components/schemas/PermissionReview"
             },
             "description": "Recent automatic reviews in every state, newest first: in progress\n(no outcome), approved, blocked or unavailable. Empty outside Approve\nfor me."
+          }
+        }
+      },
+      "ProductAvailability": {
+        "type": "string",
+        "enum": [
+          "available",
+          "disabled",
+          "unavailable",
+          "unknown"
+        ]
+      },
+      "ProductBuild": {
+        "type": "object",
+        "required": [
+          "product_version",
+          "build_id",
+          "track",
+          "source_revision"
+        ],
+        "properties": {
+          "build_id": {
+            "type": "string"
+          },
+          "product_version": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "track": {
+            "type": "string"
+          }
+        }
+      },
+      "ProductCapability": {
+        "type": "object",
+        "required": [
+          "availability",
+          "count"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ProductAvailability"
+          },
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "A count is present only when observed in this bound runtime.",
+            "minimum": 0
+          }
+        }
+      },
+      "ProductContext": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "build",
+          "source",
+          "managed",
+          "features",
+          "session",
+          "mcp",
+          "destinations"
+        ],
+        "properties": {
+          "build": {
+            "$ref": "#/components/schemas/ProductBuild"
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductDestinationInfo"
+            }
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductFeature"
+            }
+          },
+          "managed": {
+            "type": "boolean"
+          },
+          "mcp": {
+            "$ref": "#/components/schemas/ProductCapability",
+            "description": "Host dashboard readiness, not session tool authorization or connectivity."
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "session": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductSessionContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "Source identity for facts, distinct from a future Guide document reference."
+          }
+        }
+      },
+      "ProductDestination": {
+        "type": "string",
+        "enum": [
+          "projects",
+          "mcp-settings",
+          "configurations",
+          "model-authentication",
+          "ssh-configurations",
+          "session-subagents",
+          "session-files",
+          "session-terminal",
+          "session-history"
+        ]
+      },
+      "ProductDestinationInfo": {
+        "type": "object",
+        "required": [
+          "destination",
+          "label",
+          "availability",
+          "steps"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ProductAvailability"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ProductDestination"
+          },
+          "label": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "string"
+          }
+        }
+      },
+      "ProductExecutionBackend": {
+        "type": "string",
+        "enum": [
+          "local",
+          "ssh",
+          "podman"
+        ]
+      },
+      "ProductFeature": {
+        "type": "object",
+        "required": [
+          "feature",
+          "label",
+          "availability"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ProductAvailability"
+          },
+          "feature": {
+            "$ref": "#/components/schemas/ProductFeatureKind"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "ProductFeatureKind": {
+        "type": "string",
+        "enum": [
+          "traditional_subagents",
+          "managed_orchestrators",
+          "managed_host",
+          "product_navigation"
+        ]
+      },
+      "ProductNavigationRequest": {
+        "type": "object",
+        "required": [
+          "destination",
+          "expected_build_id"
+        ],
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/ProductDestination"
+          },
+          "expected_build_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProductNavigationResolution": {
+        "type": "object",
+        "required": [
+          "build",
+          "session_id",
+          "target",
+          "opened"
+        ],
+        "properties": {
+          "build": {
+            "$ref": "#/components/schemas/ProductBuild"
+          },
+          "opened": {
+            "type": "boolean",
+            "description": "Resolution never claims that a browser opened anything."
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/ProductDestinationInfo"
+          }
+        }
+      },
+      "ProductSessionContext": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "behavior",
+          "execution_backend",
+          "skills",
+          "tools"
+        ],
+        "properties": {
+          "behavior": {
+            "$ref": "#/components/schemas/SessionBehavior"
+          },
+          "execution_backend": {
+            "$ref": "#/components/schemas/ProductExecutionBackend",
+            "description": "Construction-time execution backend, never the model provider."
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "skills": {
+            "$ref": "#/components/schemas/ProductCapability"
+          },
+          "tools": {
+            "$ref": "#/components/schemas/ProductCapability"
           }
         }
       },

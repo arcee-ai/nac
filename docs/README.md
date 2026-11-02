@@ -3,6 +3,8 @@
 Detailed documentation for nac. The [root README](../README.md) has install, authentication, and contributing notes.
 
 - [Usage](usage/README.md)
+  - [NAC Guide](usage/nac-guide.md)
+  - [MCP in NAC](usage/mcp.md)
   - [AGENTS.md Files](usage/agents-md.md)
   - [Skills](usage/skills.md)
   - [Sandbox](usage/sandbox.md)

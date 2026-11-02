@@ -66,6 +66,9 @@ export function LeftSidebarRail({
       <RailButton label="Managed host" onClick={commands.openManaged}>
         <Icon iconName={IconName.Controls} />
       </RailButton>
+      <RailButton label="NAC capabilities" onClick={commands.inspectProduct}>
+        <Icon iconName={IconName.Info} />
+      </RailButton>
       <RailButton label="Configurations" onClick={commands.openConfigurations}>
         <Icon iconName={IconName.Gear} />
       </RailButton>
