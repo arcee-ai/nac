@@ -65,6 +65,9 @@ enum RootCommand {
         #[arg(long)]
         store_path: Option<PathBuf>,
     },
+    /// Read the bundled release-local NAC Guide without a server or network
+    #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
+    Guide(GuideCli),
     #[cfg(unix)]
     #[command(name = "__desktop-identity", hide = true)]
     DesktopIdentity,
@@ -85,6 +88,40 @@ enum RootCommand {
 
     #[command(name = "__github-credential", hide = true)]
     GitHubCredential(GitHubCredentialCli),
+}
+
+#[derive(Args)]
+struct GuideCli {
+    /// Stable document ID; omit to list the installed topic index
+    document_id: Option<String>,
+    /// Stable section ID; omit to list this document's sections
+    #[arg(requires = "document_id")]
+    section_id: Option<String>,
+    /// Search the installed pack
+    #[arg(long, conflicts_with = "document_id")]
+    query: Option<String>,
+    /// UTF-8 byte offset within a section
+    #[arg(long, default_value_t = 0, requires = "section_id")]
+    offset: usize,
+}
+
+fn read_guide(cli: GuideCli) -> Result<()> {
+    let guide = nac_core::guide::bundled()?;
+    let result = match (cli.document_id.as_deref(), cli.section_id.as_deref()) {
+        (Some(document), Some(section)) => {
+            serde_json::to_value(guide.read(document, section, cli.offset, 6000)?)?
+        }
+        (Some(document), None) => {
+            let document = guide.document(document)?;
+            serde_json::json!({"document_id":document.document_id,"sections":document.sections.iter().map(|section| serde_json::json!({"section_id":section.section_id,"title":section.title})).collect::<Vec<_>>()})
+        }
+        _ => serde_json::to_value(guide.search(cli.query.as_deref().unwrap_or(""), 20)?)?,
+    };
+    println!(
+        "{}",
+        serde_json::json!({"provenance":"first-party bundled NAC Guide","schema_version":guide.schema_version,"fingerprint":guide.fingerprint,"build_identity":nac_contracts::build_identity(),"result":result})
+    );
+    Ok(())
 }
 
 #[derive(Args)]
@@ -548,6 +585,7 @@ async fn run() -> Result<()> {
             println!("{}", nac_server::desktop_launch::identity_json()?);
             Ok(())
         }
+        Some(RootCommand::Guide(guide)) => read_guide(guide),
         Some(RootCommand::ManagedWorker(worker)) => run_managed_worker(worker).await,
         Some(RootCommand::GitHubCredential(helper)) => run_github_credential(helper).await,
         Some(RootCommand::CodexAuth(auth)) => run_codex_auth_cli(auth, &invocation_name).await,

@@ -138,6 +138,10 @@ container infrastructure as an explicit coverage gap, not a passing result.
 
 ## Generated files and single writers
 
+- `make generate-nac-guide` is the sole writer for
+  `crates/nac-core/src/guide/pack.json`. Update canonical docs and stable refs in
+  `scripts/nac-guide/sources.json`, then run `make test-nac-guide` for drift.
+
 - The verified owner roster in `.github/scripts/pr-ruleset.mjs` drives
   `.github/CODEOWNERS` and the embedded reviewer roster in `pr-reviewers.yml`.
   Run `make generate-codeowners` after roster changes; CI rejects stale output.

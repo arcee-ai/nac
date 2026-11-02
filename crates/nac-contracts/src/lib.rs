@@ -21,6 +21,35 @@ pub const PRODUCT_VERSION: &str = env!("NAC_PRODUCT_VERSION");
 pub const NAC_USER_AGENT: &str = concat!("nac/", env!("NAC_PRODUCT_VERSION"));
 pub const NAC_WEB_USER_AGENT: &str = concat!("nac-web/", env!("NAC_PRODUCT_VERSION"));
 
+/// Immutable identity of this installed build, shared with release-local help.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BuildIdentity {
+    pub product_version: &'static str,
+    pub build_id: &'static str,
+    pub track: &'static str,
+    pub source_revision: &'static str,
+}
+
+pub const fn build_identity() -> BuildIdentity {
+    BuildIdentity {
+        product_version: env!("NAC_PRODUCT_VERSION"),
+        build_id: env!("NAC_BUILD_ID"),
+        track: env!("NAC_BUILD_TRACK"),
+        source_revision: env!("NAC_SOURCE_REVISION"),
+    }
+}
+
+/// Stable logical citation into a release-local documentation pack.
+/// Resolution never interprets these identifiers as paths or URLs.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DocumentRef {
+    pub document_id: String,
+    pub section_id: Option<String>,
+}
+
 /// Compare two bounded Semantic Version 2.0.0 product versions by precedence.
 /// Build metadata is validated but deliberately ignored for ordering.
 pub fn compare_product_versions(left: &str, right: &str) -> Option<Ordering> {

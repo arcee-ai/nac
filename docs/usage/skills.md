@@ -2,6 +2,13 @@
 
 Skills are directories that contain a `SKILL.md` file. nac discovers them from project and user skill trees, shows the orchestrator a compact catalog, preloads selected skills into worker threads, and expands `$skillname` references in top-level direct and orchestrator prompts. Workers cannot activate skills themselves: there is no `activate_skill` tool, and workers do not receive an available-skills listing.
 
+NAC also bundles the first-party [NAC Guide](nac-guide.md) as `nac-help`, including
+its immutable release-local references. That name is reserved: a filesystem
+definition with the same name (or a space/punctuation suffix that could capture
+the same invocation) is skipped with a warning. All other skill names
+keep the precedence below. The catalog and expanded body identify official
+provenance. The bundled guide uses `nac_guide` rather than host paths.
+
 ## Discovery
 
 Skill trees are scanned in this order. The first definition of a given skill name wins; later copies are skipped with a shadow warning.
@@ -41,7 +48,7 @@ Optional files under `scripts/`, `references/`, and `assets/` (at most 64 total)
 
 ## Local direct sessions
 
-A direct session retains its discovered registry at construction. `$skillname` in a submitted prompt expands the selected skill body before the model call. Ordinary prose does not automatically select a skill, and the direct system prompt does not include an available-skills catalog. There is no `activate_skill` tool.
+A direct session retains its discovered registry at construction. `$skillname` in a submitted prompt expands the selected skill body before the model call. Ordinary prose does not automatically select arbitrary custom skills, and the direct system prompt does not include a general available-skills catalog. There is no `activate_skill` tool. Primary agents receive a compact first-party NAC self-help route and can retrieve the installed guide for ordinary product questions. Generic coding tasks merely mentioning NAC do not request unrelated guidance.
 
 Local discovery follows skill-directory symlinks and renders the discovery path as the skill directory. Native resource reads resolve their canonical targets through the normal permission pipeline. A linked package outside the workspace can be discovered and expanded while its resources still require external-directory approval; a link inside the workspace does not grant access to its external target. Hard and configured denials remain effective.
 
@@ -53,7 +60,7 @@ The orchestrator never calls `activate_skill`. When a registry is present, the `
 
 Unknown names fail the dispatch. Duplicates are ignored. Selected skills are preloaded as worker system messages (`The orchestrator preloaded this skill for this worker dispatch.`) that include the skill body, optional compatibility, the skill directory, and any resource file list.
 
-On a local unsandboxed session the skill directory is the real host path. Under sandbox or SSH it is the placeholder `[filepath-not-visible]`, because the model cannot use host paths on those backends. Relative paths in the skill are relative to that directory.
+On a local unsandboxed session a filesystem skill directory is the real host path. Under sandbox or SSH it is the placeholder `[filepath-not-visible]`, because the model cannot use host paths on those backends. Relative paths in filesystem skills are relative to that directory. A selected `nac-help` worker preload instead enables bounded `nac_guide` retrieval of embedded references; unselected workers receive neither the guide route nor this tool.
 
 ## Referencing skills in a prompt
 
