@@ -75,11 +75,15 @@ test("delivers background child results once without editable pending-message co
     { kind: "text", text: "E2E_ALL557_PARENT_WAITING", stream: true },
     busy,
   );
+  // Each child answers only once the parent is parked in its held step, so
+  // both results settle against that run instead of racing an earlier boundary.
+  const childGates = { a: new ScriptGate(), b: new ScriptGate() };
   for (const child of ["a", "b"] as const) {
     provider.enqueue(
       `child-${child}`,
       { token: `E2E_ALL557_CHILD_${child.toUpperCase()}_TASK`, forbiddenTools: parentTools },
       { kind: "text", text: DONE[child], stream: "request" },
+      childGates[child],
     );
   }
   // Both results arrive at the run's next model boundary, before the person's
@@ -106,6 +110,8 @@ test("delivers background child results once without editable pending-message co
     .getByRole("button", { name: "Send", exact: true })
     .click();
   await busy.accepted;
+  childGates.a.release();
+  childGates.b.release();
 
   await expect
     .poll(
