@@ -1557,6 +1557,45 @@ async fn managed_monitor_and_queued_parent_delete_keep_lifecycle_gate_order() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// Settlement releases the orchestrator gate before waking the parent, so the
+/// parent can be deleted while still cached, after the wake has already seen
+/// its pending work. That parent took the completion with it, so waking it is
+/// not a monitor failure.
+#[tokio::test]
+async fn waking_a_parent_deleted_after_settlement_is_nothing_to_do() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("wake_deleted_cached_parent");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("wake-deleted-parent-key"));
+    seed_direct_session(&root, "parent");
+    let manager = test_manager(&root);
+    let path = root.join("store.db");
+    let _cached = manager.attach_session("parent").await.unwrap();
+    // Work the wake will see, then the session row gone underneath the cache.
+    nac_core::store::create_session_inbox_item(
+        &path,
+        "parent",
+        InboxDelivery::Queue,
+        "completion",
+        None,
+        None,
+    )
+    .unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "PRAGMA foreign_keys = OFF; DELETE FROM sessions WHERE session_id = 'parent';",
+        )
+        .unwrap();
+
+    manager
+        .wake_managed_orchestrator_parent("parent")
+        .await
+        .expect("a parent deleted after settlement has nothing left to wake");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test]
 async fn deleting_project_skips_descendants_already_removed_by_parent_cascade() {
     let root = temp_root("project_parent_cascade_delete")

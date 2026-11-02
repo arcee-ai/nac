@@ -535,30 +535,41 @@ impl SessionManager {
 
     /// Starts the parent's next inbox item after a settled orchestrator
     /// delivered its completion. A parent deleted in the meantime took that
-    /// durable completion with it, so there is nothing left to wake.
-    async fn wake_managed_orchestrator_parent(&self, parent_session_id: &str) -> Result<()> {
+    /// durable completion with it, so there is nothing left to wake. With the
+    /// orchestrator's gate already released, the deletion can land anywhere in
+    /// here: before the parent is attached, or after a cached or freshly
+    /// attached parent has already seen its pending work.
+    pub(crate) async fn wake_managed_orchestrator_parent(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<()> {
         let cached = {
             let active = self.inner.active_sessions.read().await;
             active.get(parent_session_id).cloned()
         };
         let parent = match cached {
-            Some(service) => service,
-            None => match self.attach_session(parent_session_id).await {
-                Ok(service) => service,
-                Err(error) => {
-                    let path = self.inner.store_path.clone();
-                    let session_id = parent_session_id.to_owned();
-                    let exists = self
-                        .inner
-                        ._store_ownership
-                        .call_legacy(move || sessions::session_exists(&path, &session_id))
-                        .await??;
-                    return if exists { Err(error) } else { Ok(()) };
-                }
-            },
+            Some(service) => Ok(service),
+            None => self.attach_session(parent_session_id).await,
         };
-        parent.start_next_direct_inbox_item().await?;
-        Ok(())
+        let woken = match parent {
+            Ok(parent) => parent.start_next_direct_inbox_item().await.map(drop),
+            Err(error) => Err(error),
+        };
+        let Err(error) = woken else {
+            return Ok(());
+        };
+        let path = self.inner.store_path.clone();
+        let session_id = parent_session_id.to_owned();
+        let exists = self
+            .inner
+            ._store_ownership
+            .call_legacy(move || sessions::session_exists(&path, &session_id))
+            .await??;
+        if exists {
+            Err(error)
+        } else {
+            Ok(())
+        }
     }
 
     pub(crate) fn spawn_managed_orchestrator_monitor(
