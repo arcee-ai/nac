@@ -87,10 +87,13 @@ infrastructure is present.
 
 ## Generated artifacts and placement mistakes
 
-This crate owns no checked-in generated source. Keep workspace `Cargo.lock`
-changes tied to manifest changes and use root generation targets for OpenAPI or
-web assets. The model catalog JSON included by core is generated only by
-`nac-catalog-gen` under its nested guide.
+Keep workspace `Cargo.lock` changes tied to manifest changes and use root
+generation targets for OpenAPI or web assets. The model catalog JSON included
+by core is generated only by `nac-catalog-gen` under its nested guide. The
+immutable guide data at `src/guide/pack.json` is generated only by
+`make generate-nac-guide` from canonical docs and the stable source/section
+registry in `scripts/nac-guide/sources.json`; `make test-nac-guide` checks drift.
+See `docs/usage/nac-guide.md` for content ownership and maintenance.
 
 - Do not add Axum DTOs, React concerns, managed GitHub/clone policy, or image
   readiness here.

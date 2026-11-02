@@ -19,6 +19,7 @@ is_machine_written() {
             crates/nac-server/assets/dist/* | \
             crates/nac-core/src/model/catalog/data/catalog.json | \
             crates/nac-core/src/model/catalog/data/catalog.manifest.json | \
+            crates/nac-core/src/guide/pack.json | \
             crates/nac-catalog-gen/fixtures/*)
             return 0
             ;;
