@@ -4,7 +4,7 @@ import CryptoKit
 import Darwin
 import Foundation
 
-enum OwnershipError: Error { case invalid }
+enum OwnershipError: Error { case invalid, argumentsUnavailable }
 
 // BEGIN STARTUP PROCESS PROBES (compiled unchanged by Foundation-only controls)
 struct StartupProbeFailure: Error {
@@ -192,7 +192,15 @@ enum StartupObserver {
         var mib = [CTL_KERN, KERN_PROCARGS2, pid]
         var size = 256 * 1024
         var bytes = [UInt8](repeating: 0, count: size)
-        try need(sysctl(&mib, 3, &bytes, &size, nil, 0) == 0 && size > 4 && size <= bytes.count)
+        errno = 0
+        let result = sysctl(&mib, 3, &bytes, &size, nil, 0), error = errno
+        if result != 0 {
+            // A denied read is not an exit and must retain failure even if
+            // the process disappears before another observation.
+            try need(error != EPERM && error != EACCES)
+            throw OwnershipError.argumentsUnavailable
+        }
+        try need(size > 4 && size <= bytes.count)
         let count = bytes.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
         try need(count > 0 && count <= 128)
         var offset = 4
@@ -285,7 +293,18 @@ enum StartupObserver {
         var observed: [Int32: StartupProcessIdentity] = [:]
         for (pid, identity) in identities {
             let actual = identity.executable
-            let (argv, environment) = try arguments(pid)
+            let details: ([String], [String: String])
+            do {
+                details = try arguments(pid)
+            } catch OwnershipError.argumentsUnavailable {
+                // Only independent positive absence can recover a failed
+                // lookup. Parsing/environment validation is never caught.
+                guard try StartupProcessProbe.absent(pid) else { throw OwnershipError.argumentsUnavailable }
+                if let old = known[pid] { retired.append(old.retirement) }
+                else { enumeratedExits.append(["pid": Int(pid), "parent": Int(identity.parent), "proof": "kill_zero_ESRCH"]) }
+                continue
+            }
+            let (argv, environment) = details
             let environmentRecord = try StartupEnvironmentCheck.record(executable: actual,
                 nativePath: nativePath, enginePath: enginePath, argv: argv, environment: environment,
                 launcher: launcherEnvironment, child: childEnvironment)
