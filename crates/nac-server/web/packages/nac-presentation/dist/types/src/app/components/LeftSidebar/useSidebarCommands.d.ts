@@ -15,7 +15,7 @@ export declare function useSidebarCommands(): {
     openMcp: () => void;
     openSsh: () => void;
     openConfigurations: () => void;
+    inspectProduct: () => void;
     openManaged: () => void;
-    modals: import("react").JSX.Element;
 };
 export type SidebarCommands = ReturnType<typeof useSidebarCommands>;
