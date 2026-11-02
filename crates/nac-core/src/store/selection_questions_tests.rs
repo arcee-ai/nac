@@ -57,31 +57,40 @@ fn answered(text: &str) -> SelectionQuestionSettlement {
     }
 }
 
-#[test]
-fn v40_store_gains_the_question_table_without_touching_existing_rows() {
-    let path = temp_store("migration");
-    insert_test_session(&path, "session");
-    let inbox =
-        create_session_inbox_item(&path, "session", InboxDelivery::Queue, "kept", None, None)
-            .unwrap();
-    {
-        // Exactly the dev (schema 40) shape: no question table or indexes.
-        let connection = Connection::open(&path).unwrap();
-        connection
-            .execute_batch(
-                "DROP TABLE selection_questions;
-                 PRAGMA user_version = 40;",
-            )
-            .unwrap();
-    }
-    initialize(&path).unwrap();
-    let connection = Connection::open(&path).unwrap();
-    assert_eq!(
-        connection
-            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-            .unwrap(),
-        41
-    );
+fn user_version(connection: &Connection) -> i64 {
+    connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap()
+}
+
+/// Every object in the store, so re-opening can be proven to change nothing.
+fn schema_objects(connection: &Connection) -> Vec<(String, String, Option<String>)> {
+    connection
+        .prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+}
+
+fn table_rows(connection: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
+    let mut statement = connection
+        .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+        .unwrap();
+    let width = statement.column_count();
+    statement
+        .query_map([], |row| {
+            (0..width)
+                .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                .collect()
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+}
+
+fn assert_question_table(connection: &Connection) {
     let indexes: Vec<String> = connection
         .prepare("SELECT name FROM sqlite_master WHERE tbl_name = 'selection_questions' AND type = 'index' AND name LIKE 'idx_%' ORDER BY name")
         .unwrap()
@@ -96,19 +105,222 @@ fn v40_store_gains_the_question_table_without_touching_existing_rows() {
             "idx_selection_questions_session"
         ]
     );
+}
+
+fn inbox_has_completion_columns(connection: &Connection) -> bool {
+    let columns: Vec<String> = connection
+        .prepare("SELECT name FROM pragma_table_info('session_inbox')")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    [
+        "completion_source",
+        "completion_session_id",
+        "completion_generation",
+    ]
+    .iter()
+    .all(|column| columns.iter().any(|name| name == column))
+}
+
+/// A direct parent with background children whose settled runs leave pending
+/// internal completions (ALL-557, schema 41) in the parent's inbox.
+fn seed_child_completions(path: &Path, children: &[&str]) -> Vec<i64> {
+    insert_test_session(path, "parent");
+    for child in children {
+        insert_test_session(path, child);
+    }
+    open_runtime_connection(path)
+        .unwrap()
+        .execute("UPDATE sessions SET behavior = 'direct'", [])
+        .unwrap();
+    children
+        .iter()
+        .map(|child| {
+            create_traditional_child_relationship(
+                path,
+                "parent",
+                child,
+                GENERAL_CHILD_PROFILE,
+                child,
+            )
+            .unwrap();
+            begin_traditional_child_run(
+                path,
+                child,
+                "run",
+                TraditionalChildExecutionMode::Background,
+            )
+            .unwrap();
+            let terminal = TraditionalChildTerminal {
+                status: TraditionalChildStatus::Completed,
+                report: Some(format!("{child} report")),
+                failure: None,
+                change_summary: None,
+                verification_summary: None,
+            };
+            settle_traditional_child_run(path, child, "run", terminal)
+                .unwrap()
+                .child
+                .completion_inbox_id
+                .unwrap()
+        })
+        .collect()
+}
+
+fn child_origin(child: &str) -> Option<InternalCompletionOrigin> {
+    Some(InternalCompletionOrigin {
+        source: InternalCompletionSource::TraditionalChild,
+        relationship_session_id: child.to_owned(),
+        generation: 1,
+    })
+}
+
+#[test]
+fn fresh_store_is_created_at_42_with_completion_origins_and_questions() {
+    let path = temp_store("fresh");
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(user_version(&connection), 42);
+    assert!(inbox_has_completion_columns(&connection));
+    assert_question_table(&connection);
+    let schema = schema_objects(&connection);
     drop(connection);
+    initialize(&path).unwrap();
+    assert_eq!(schema_objects(&Connection::open(&path).unwrap()), schema);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// Schema 40 is dev before both ALL-557 (41) and ALL-559 (42): no completion
+/// provenance columns and no question table. One open walks both steps.
+#[test]
+fn dev_v40_store_walks_41_then_42_without_touching_existing_rows() {
+    let path = temp_store("from-40");
+    let [completion] = seed_child_completions(&path, &["child"])[..] else {
+        unreachable!()
+    };
+    let ordinary =
+        create_session_inbox_item(&path, "parent", InboxDelivery::Queue, "kept", None, None)
+            .unwrap();
+    let native = load_session_inbox_item(&path, "parent", completion).unwrap();
+    assert_eq!(native.internal_completion, child_origin("child"));
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "UPDATE session_inbox SET completion_source = NULL, completion_session_id = NULL,
+                     completion_generation = NULL;
+                 ALTER TABLE session_inbox DROP COLUMN completion_generation;
+                 ALTER TABLE session_inbox DROP COLUMN completion_session_id;
+                 ALTER TABLE session_inbox DROP COLUMN completion_source;
+                 DROP TABLE selection_questions;
+                 PRAGMA user_version = 40;",
+            )
+            .unwrap();
+        assert!(!inbox_has_completion_columns(&connection));
+    }
+    let before = table_rows(&Connection::open(&path).unwrap(), "traditional_children");
+
+    initialize(&path).unwrap();
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(user_version(&connection), 42);
+    assert!(inbox_has_completion_columns(&connection));
+    assert_question_table(&connection);
+    assert_eq!(table_rows(&connection, "traditional_children"), before);
+    let schema = schema_objects(&connection);
+    let inbox = table_rows(&connection, "session_inbox");
+    drop(connection);
+    // The 41 step classified the pending completion from durable evidence and
+    // changed nothing else; ordinary input is untouched.
     assert_eq!(
-        load_session_inbox_item(&path, "session", inbox.id).unwrap(),
-        inbox
+        load_session_inbox_item(&path, "parent", completion).unwrap(),
+        native
     );
-    assert!(list_selection_questions(&path, "session")
+    assert_eq!(
+        load_session_inbox_item(&path, "parent", ordinary.id).unwrap(),
+        ordinary
+    );
+    assert!(list_selection_questions(&path, "parent")
         .unwrap()
         .is_empty());
-    // Restarting an already migrated store is idempotent.
+
+    // Re-opening the migrated store is idempotent.
     initialize(&path).unwrap();
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(user_version(&connection), 42);
+    assert_eq!(schema_objects(&connection), schema);
+    assert_eq!(table_rows(&connection, "session_inbox"), inbox);
+    drop(connection);
     let admitted =
-        admit_selection_question(&path, &admission("session", &key(1), 'b', "q")).unwrap();
+        admit_selection_question(&path, &admission("parent", &key(1), 'b', "q")).unwrap();
     assert!(!admitted.replayed);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// A store already opened by ALL-557 at schema 41 must still gain the question
+/// table: 42 is a distinct step, so the stored-version early return cannot
+/// skip it. The 41 data, including its one-time legacy classification, is
+/// final and is not revisited.
+#[test]
+fn schema_41_store_gains_the_question_table_and_keeps_completion_rows() {
+    let path = temp_store("from-41");
+    let ids = seed_child_completions(&path, &["child-a", "child-b"]);
+    {
+        let connection = Connection::open(&path).unwrap();
+        // child-b's row stands for one the 41 classification left ordinary
+        // (for example, conflicting evidence); reaching 42 must not re-run it.
+        connection
+            .execute(
+                "UPDATE session_inbox SET completion_source = NULL,
+                     completion_session_id = NULL, completion_generation = NULL
+                 WHERE id = ?1",
+                params![ids[1]],
+            )
+            .unwrap();
+        connection
+            .execute_batch(
+                "DROP TABLE selection_questions;
+                 PRAGMA user_version = 41;",
+            )
+            .unwrap();
+    }
+    let tables = [
+        "sessions",
+        "session_inbox",
+        "traditional_children",
+        "traditional_child_terminal_receipts",
+        "sqlite_sequence",
+    ];
+    let legacy = Connection::open(&path).unwrap();
+    let before = tables.map(|table| table_rows(&legacy, table));
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(user_version(&connection), 42);
+    assert_question_table(&connection);
+    assert_eq!(tables.map(|table| table_rows(&connection, table)), before);
+    let schema = schema_objects(&connection);
+    drop(connection);
+    let origin = |id| {
+        load_session_inbox_item(&path, "parent", id)
+            .unwrap()
+            .internal_completion
+    };
+    assert_eq!(origin(ids[0]), child_origin("child-a"));
+    assert_eq!(origin(ids[1]), None);
+
+    initialize(&path).unwrap();
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(user_version(&connection), 42);
+    assert_eq!(schema_objects(&connection), schema);
+    assert_eq!(tables.map(|table| table_rows(&connection, table)), before);
+    drop(connection);
+    let admitted =
+        admit_selection_question(&path, &admission("parent", &key(1), 'b', "q")).unwrap();
+    assert!(!admitted.replayed);
+    assert_eq!(list_selection_questions(&path, "parent").unwrap().len(), 1);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 fn key(n: u8) -> String {
