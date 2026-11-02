@@ -6,7 +6,9 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -15,7 +17,7 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-from attention_reset_ack import ResetOracle, observe_release, run_contract
+from attention_reset_ack import ResetOracle, observe_release, prepare_store, run_contract
 from attention_reset_readout import ResetReadout, canonical_matches
 
 
@@ -291,8 +293,8 @@ class ResetReadoutTests(unittest.TestCase):
         with self.assertRaises(AssertionError): self.owner.checkpoint('/foreign', 'dev', digest)
 
     def database(self):
-        path = self.root / 'profile/selected store.db'
-        path.parent.mkdir()
+        (self.root / 'profile').mkdir(mode=0o700)
+        path = prepare_store(self.owner)
         with closing(sqlite3.connect(path)) as db, db:
             db.executescript('''CREATE TABLE sessions(session_id TEXT); CREATE TABLE session_goals(goal_id TEXT);
                 CREATE TABLE session_run_outcomes(session_id TEXT,run_id TEXT,disposition TEXT);
@@ -303,7 +305,6 @@ class ResetReadoutTests(unittest.TestCase):
                 INSERT INTO session_run_outcomes VALUES('session-1','run-1','completed');
                 INSERT INTO session_completion_occurrences VALUES(1,'session-1','run-1','direct','request',NULL,NULL);''')
             db.execute('INSERT INTO session_completion_feed VALUES(1,?)', [STORE])
-        path.chmod(0o600)
         return path
 
     def test_case_specific_backup_reads_only_artifact_copy_and_exact_single_outcome(self):
@@ -357,6 +358,78 @@ class ResetReadoutTests(unittest.TestCase):
                 canonical_matches([dict(row, **{key: value})], [outcome], [STORE], counts, expected)
         with self.assertRaises(AssertionError): canonical_matches([row, row], [outcome], [STORE], counts, expected)
 
+    def test_prepare_store_is_empty_private_and_closes_descriptors(self):
+        (self.root / 'profile').mkdir(mode=0o700)
+        opened = []; original = os.open
+        def capture(*args, **kwargs):
+            fd = original(*args, **kwargs); opened.append(fd); return fd
+        with patch('attention_reset_ack.os.open', side_effect=capture):
+            store = prepare_store(self.owner)
+        self.assertEqual(store.read_bytes(), b'')
+        self.assertEqual(stat.S_IMODE(store.stat().st_mode), 0o600)
+        self.assertEqual(len(opened), 2)
+        for fd in opened:
+            with self.assertRaises(OSError): os.fstat(fd)
+        self.owner.validate()
+
+    def test_prepare_store_refuses_existing_and_symlink_without_modification(self):
+        (self.root / 'profile').mkdir(mode=0o700)
+        path = self.file('profile/selected store.db', b'existing')
+        path.chmod(0o640)
+        before = path.stat()
+        opened = []; original = os.open
+        def capture(*args, **kwargs):
+            fd = original(*args, **kwargs); opened.append(fd); return fd
+        with patch('attention_reset_ack.os.open', side_effect=capture):
+            with self.assertRaises(FileExistsError): prepare_store(self.owner)
+        for fd in opened:
+            with self.assertRaises(OSError): os.fstat(fd)
+        self.assertEqual(path.read_bytes(), b'existing')
+        self.assertEqual((path.stat().st_ino, path.stat().st_mode), (before.st_ino, before.st_mode))
+        path.unlink()
+        target = self.file('foreign', b'untouched'); target.chmod(0o640)
+        path.symlink_to(target)
+        with self.assertRaises(FileExistsError): prepare_store(self.owner)
+        self.assertTrue(path.is_symlink()); self.assertEqual(target.read_bytes(), b'untouched')
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+
+    def test_prepare_store_refuses_symlink_nonprivate_and_replaced_profile(self):
+        profile = self.root / 'profile'; foreign = self.root / 'foreign'
+        foreign.mkdir(mode=0o700); profile.symlink_to(foreign)
+        with self.assertRaises(OSError): prepare_store(self.owner)
+        self.assertEqual(list(foreign.iterdir()), [])
+        profile.unlink(); profile.mkdir(mode=0o755)
+        with self.assertRaisesRegex(AssertionError, 'not private'): prepare_store(self.owner)
+        self.assertEqual(list(profile.iterdir()), [])
+        profile.chmod(0o700)
+        original = self.owner.validate; calls = [0]; retained = self.root / 'retained-profile'
+        def replace():
+            original(); calls[0] += 1
+            if calls[0] == 2:
+                profile.rename(retained); profile.mkdir(mode=0o700)
+        try:
+            with patch.object(self.owner, 'validate', side_effect=replace):
+                with self.assertRaisesRegex(AssertionError, 'profile replaced'): prepare_store(self.owner)
+            self.assertEqual(list(profile.iterdir()), []); self.assertEqual(list(retained.iterdir()), [])
+        finally:
+            profile.rmdir(); retained.rename(profile)
+
+    def test_prepare_store_postcreate_failure_closes_all_descriptors(self):
+        (self.root / 'profile').mkdir(mode=0o700)
+        opened = []; original_open = os.open; original_validate = self.owner.validate; calls = [0]
+        def capture(*args, **kwargs):
+            fd = original_open(*args, **kwargs); opened.append(fd); return fd
+        def fail():
+            original_validate(); calls[0] += 1
+            if calls[0] == 3: raise OSError('injected post-create failure')
+        with patch('attention_reset_ack.os.open', side_effect=capture), patch.object(self.owner, 'validate', side_effect=fail):
+            with self.assertRaisesRegex(OSError, 'post-create'): prepare_store(self.owner)
+        self.assertEqual(len(opened), 2)
+        for fd in opened:
+            with self.assertRaises(OSError): os.fstat(fd)
+        self.assertEqual((self.root / 'profile/selected store.db').read_bytes(), b'')
+        self.owner.validate()
+
 
 class MaintainedDriverTests(unittest.TestCase):
     def drive(self, failure=None):
@@ -372,7 +445,7 @@ class MaintainedDriverTests(unittest.TestCase):
             engine_identity=build_identity, normal_startup=True, attention_smoke_instrumentation=True,
             native_sha256='hash', engine_sha256='hash', native_source_files={'dummy-source': 'hash'},
             compiler_flags=['LOCAL_APP', 'PREVIEW_SMOKE', 'ATTENTION_SMOKE'])))
-        actions = []; actors = []; providers = []; helpers = []
+        actions = []; actors = []; providers = []; helpers = []; preparers = []; sqlite_modes = []
         test = self
         class Provider:
             def __init__(self, profile, evidence):
@@ -385,6 +458,9 @@ class MaintainedDriverTests(unittest.TestCase):
             def close(self): self.closed = True
         class Journey:
             def __init__(self, moved, output, profile, environment, store, observer):
+                info = store.lstat()
+                test.assertTrue(stat.S_ISREG(info.st_mode)); test.assertEqual(info.st_size, 0)
+                test.assertEqual(stat.S_IMODE(info.st_mode), 0o600)
                 self.profile = profile; self.output = output
                 self.log = output.with_suffix('.log').open('w'); self.exited = False; self.engine_pid = 22
                 self.current = initial(); self.current['ready_receipt'].update(store=str(store), endpoint='http://127.0.0.1:12346', identity=build_identity)
@@ -434,6 +510,7 @@ class MaintainedDriverTests(unittest.TestCase):
             actor.checkpoint(True)
             # Build a standalone private DB, never NAC or an original user store.
             with closing(sqlite3.connect(actor.profile / 'selected store.db')) as db, db:
+                db.execute('PRAGMA journal_mode=WAL')
                 db.executescript('''CREATE TABLE sessions(session_id TEXT); INSERT INTO sessions VALUES('session-1');
                     CREATE TABLE session_goals(goal_id TEXT);
                     CREATE TABLE session_run_outcomes(session_id TEXT,run_id TEXT,disposition TEXT);
@@ -442,7 +519,10 @@ class MaintainedDriverTests(unittest.TestCase):
                     CREATE TABLE session_completion_occurrences(sequence INTEGER,session_id TEXT,run_id TEXT,behavior TEXT,kind TEXT,goal_id TEXT,mark_version INTEGER);
                     INSERT INTO session_completion_occurrences VALUES(1,'session-1','run-1','direct','request',NULL,NULL);''')
                 db.execute('INSERT INTO session_completion_feed VALUES(1,?)', [STORE])
-            (actor.profile / 'selected store.db').chmod(0o600)
+                db.commit()
+                modes = [stat.S_IMODE((actor.profile / ('selected store.db' + suffix)).stat().st_mode)
+                         for suffix in ('', '-wal', '-shm')]
+                test.assertEqual(modes, [0o600] * 3); sqlite_modes.append(modes)
             providers[0].requests.append(dict(token='SEMANTIC_RESET_ACK_DIRECT'))
             providers[0].evidence.write_text('\n'.join(json.dumps(dict(operation=op, token='SEMANTIC_RESET_ACK_DIRECT'))
                 for op in ('model-request', 'model-response')) + '\n')
@@ -473,10 +553,15 @@ class MaintainedDriverTests(unittest.TestCase):
             if failure == 'receipt' and path.name.endswith('-release.json'): raise OSError('injected receipt failure')
             return original_write(path, *args, **kwargs)
         output = base / 'output'
+        def prepare(owned):
+            preparers.append(owned)
+            if failure == 'store-collision':
+                (owned.root / 'profile/selected store.db').write_bytes(b'collision retained')
+            return prepare_store(owned)
         with ExitStack() as stack:
             for name, replacement in dict(source_binding=lambda *a: dict(source_revision=SOURCE), console_facts=lambda **k: {},
                 require_console=lambda _: None, digest=lambda p: 'hash', AttentionJourney=Journey, SemanticProvider=Provider,
-                request=http, wait_for=wait, engine_settled=lambda *a: True, observe_release=observe).items():
+                request=http, wait_for=wait, engine_settled=lambda *a: True, observe_release=observe, prepare_store=prepare).items():
                 stack.enter_context(patch('attention_reset_ack.' + name, replacement))
             stack.enter_context(patch('attention_reset_ack.subprocess.run', return_value=SimpleNamespace(returncode=0)))
             stack.enter_context(patch('attention_reset_ack.subprocess.Popen', Helper))
@@ -486,7 +571,13 @@ class MaintainedDriverTests(unittest.TestCase):
             else:
                 run_contract(bundle, output, base / 'InstanceObservation', SOURCE, time.monotonic() + 1000)
         summary = json.loads((output / 'summary.json').read_text())
+        self.assertIsNone(preparers[0].fd); self.assertIsNone(preparers[0].parent_fd)
+        if failure == 'store-collision':
+            self.assertEqual(actors + providers + helpers, [])
+            self.assertEqual((Path(summary['fixture_root']) / 'profile/selected store.db').read_bytes(), b'collision retained')
+            return actions, summary
         self.assertTrue(providers[0].closed); self.assertTrue(actors[0].log.closed)
+        self.assertEqual(sqlite_modes, [[0o600] * 3])
         self.assertTrue(summary['native_settled']); self.assertEqual(helpers[0].returncode, 0)
         if failure == 'incarnation': self.assertTrue((output / 'invalid-native.json').exists())
         return actions, summary
@@ -516,6 +607,26 @@ class MaintainedDriverTests(unittest.TestCase):
         actions, result = self.drive('incarnation')
         self.assertEqual(actions, ['enable', 'hold', 'close', 'reset', 'cleanup'])
         self.assertFalse(result['passed']); self.assertIn('ready_receipt', result['error'])
+
+    def test_store_collision_refuses_before_provider_or_app_and_closes_root(self):
+        actions, result = self.drive('store-collision')
+        self.assertEqual(actions, []); self.assertFalse(result['passed'])
+        self.assertIn('FileExistsError', result['error'])
+
+    def test_ordinary_sqlite_022_in_isolated_child_without_test_chmod(self):
+        script = '''import os,unittest
+from test_attention_semantic_reset_ack import MaintainedDriverTests
+previous=os.umask(0o022)
+try:
+    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([
+        MaintainedDriverTests('test_maintained_sequence_with_private_readouts_and_inert_native_ports')]))
+finally:
+    os.umask(previous)
+raise SystemExit(not result.wasSuccessful())
+'''
+        result = subprocess.run([sys.executable, '-B', '-W', 'error::ResourceWarning', '-c', script],
+                                cwd=Path(__file__).resolve().parent, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == '__main__':

@@ -7,7 +7,12 @@ It uses the existing `AttentionJourney`, native menu/control custody and
 semantic journey. Importing the modules does not start an app or listener.
 
 The case creates one isolated profile, direct session, goal-free request and
-canonical occurrence. It observes the exact reserved notification/checkpoint,
+canonical occurrence. Before launch it exclusively creates its new empty store
+with 0600 permissions through the validated private profile descriptor. Existing
+files, symlinks and replaced/nonprivate profiles are refused without adoption,
+truncation or chmod; the fixture does not change its process permission mask.
+Ordinary SQLite opening then preserves private DB/WAL/SHM permissions.
+It observes the exact reserved notification/checkpoint,
 resets while the callback is still held, then releases that original callback.
 Pending callbacks must transition **1 → 1 → 0**, present identifiers **1 → 0 → 0**;
 historical adds/deliveries stay **1 → 1 → 1**. Generation advances once and the

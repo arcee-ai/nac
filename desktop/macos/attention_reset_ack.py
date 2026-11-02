@@ -8,9 +8,11 @@ This is not a crash/checkpoint-ACK, signed banner, IME or performance fixture.
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import shutil
 import subprocess
+import stat
 import sys
 import tempfile
 import time
@@ -36,6 +38,40 @@ def require_fields(actual, expected):
 
 def profile_digest(home, track, store):
     return hashlib.sha256(('nac-presentation-v1\0' + str(home) + '\0' + track + '\0' + str(store)).encode()).hexdigest()
+
+
+def prepare_store(owned):
+    """Create only this new fixture's empty DB; never adopt or repair a store."""
+    owned.validate()
+    directory = os.open('profile', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                        dir_fd=owned.fd)
+    descriptor = None
+    try:
+        expected = os.fstat(directory)
+        def validate():
+            owned.validate()
+            held = os.fstat(directory)
+            named = os.stat('profile', dir_fd=owned.fd, follow_symlinks=False)
+            assert (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino) == (expected.st_dev, expected.st_ino), 'Fixture profile replaced'
+            assert stat.S_ISDIR(held.st_mode) and held.st_uid == os.getuid()
+            assert stat.S_IMODE(held.st_mode) == stat.S_IMODE(named.st_mode) == 0o700, 'Fixture profile not private'
+        validate()
+        descriptor = os.open('selected store.db', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                             0o600, dir_fd=directory)
+        info = os.fstat(descriptor)
+        assert stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+        assert info.st_size == 0 and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600
+        validate()
+        named = os.stat('selected store.db', dir_fd=directory, follow_symlinks=False)
+        assert (named.st_dev, named.st_ino) == (info.st_dev, info.st_ino), 'Fixture store replaced'
+        assert named.st_uid == info.st_uid and named.st_mode == info.st_mode and named.st_nlink == 1 and named.st_size == 0
+        return owned.root / 'profile/selected store.db'
+    finally:
+        try:
+            if descriptor is not None:
+                os.close(descriptor)
+        finally:
+            os.close(directory)
 
 
 class ResetOracle:
@@ -252,7 +288,7 @@ def run_contract(bundle, destination, observer, source_ref, deadline):
     try:
         profile = root / 'profile'
         profile.mkdir(mode=0o700)
-        store = profile / 'selected store.db'
+        store = prepare_store(owned)
         moved = root / 'Relocated app with spaces' / bundle.name
         shutil.copytree(bundle, moved)
         provider = SemanticProvider(profile, destination / 'provider.jsonl')
