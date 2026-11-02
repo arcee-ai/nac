@@ -305,10 +305,15 @@ jobs:
           prefix-key: nac-ci-v1
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - name: Check startup fixture root custody without native processes
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 11), "Startup fixture controls require Python >= 3.11"; print(sys.version)'
+          python3 -B -m unittest discover -s desktop/macos -p test_startup_custody.py -v
       - name: Test the other four workspace crates
         run: cargo test --locked -p nac-contracts -p nac-credential-store -p nac-managed -p nac-process
       - name: Preserve source, size, and lifecycle contracts on every PR
         run: |
+          make test-nac-guide
           make test-source-size test-source-workflow test-source-binary
           make test-durability test-managed-load test-managed-image-contract
 

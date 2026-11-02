@@ -194,17 +194,19 @@ def artifact_tree(path, destination=None):
                     raise ValueError('Artifact entry replaced')
                 if copied is not None:
                     if is_dir:
-                        os.mkdir(name, stat.S_IMODE(info.st_mode), dir_fd=copied)
+                        os.mkdir(name, 0o700, dir_fd=copied)
                         output = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=copied)
                     else:
                         output = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-                                         stat.S_IMODE(info.st_mode), dir_fd=copied)
+                                         0o600, dir_fd=copied)
                 if is_dir:
                     entries[relative] = dict(kind='directory', identity=file_identity(info))
                     walk(child, output, relative + '/')
                 else:
                     record, _ = artifact_file(child, source, name, output)
                     entries[relative] = dict(kind='file', **record)
+                if output is not None:
+                    os.fchmod(output, stat.S_IMODE(info.st_mode))
                 if file_identity(info) != file_identity(os.stat(name, dir_fd=source, follow_symlinks=False)):
                     raise ValueError('Artifact entry changed')
             except BaseException as error:
@@ -220,6 +222,8 @@ def artifact_tree(path, destination=None):
             target = artifact_open(destination, directory=True)
         identity = file_identity(os.fstat(fd))
         walk(fd, target, '')
+        if target is not None:
+            os.fchmod(target, int(identity['mode']))
         if identity != file_identity(Path(path).lstat()):
             raise ValueError('Artifact root replaced')
         return dict(root=identity, entries=entries)
@@ -544,10 +548,12 @@ class CaptureRun:
                         os.mkdir(folder.name, 0o700, dir_fd=parent.fd)
                     moved = folder / original.name
                     with prepared_directory(folder) as parent:
-                        os.mkdir(moved.name, int(source['tree']['root']['mode']), dir_fd=parent.fd)
+                        os.mkdir(moved.name, 0o700, dir_fd=parent.fd)
                     copied_source = artifact_tree(original, moved)
                     copied = bundle_snapshot(moved, track, self.manifest['target_sha'], sources)
-                    if copied_source != source['tree'] or content_inventory(copied['tree']) != content_inventory(source['tree']):
+                    if (copied_source != source['tree']
+                            or copied['tree']['root']['mode'] != source['tree']['root']['mode']
+                            or content_inventory(copied['tree']) != content_inventory(source['tree'])):
                         raise ValueError('Copied artifact content differs')
                     apps.append(dict(track=track, source=source, moved=copied))
                 # Directory mtimes are recorded after the final copy, not before.

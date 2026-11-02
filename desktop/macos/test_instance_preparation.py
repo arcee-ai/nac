@@ -161,6 +161,45 @@ class PreparationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.prepare()
 
+    def test_prebuilt_ordinary_modes_survive_restrictive_preparation_umask(self):
+        # Create ordinary artifacts before changing the caller's preparation mask.
+        for app in self.apps:
+            for path in (app, *app.rglob('*')):
+                path.chmod(0o755 if path.is_dir() or path.name in ('NACPreview', 'nac-web') else 0o644)
+        before = [capture.artifact_tree(app) for app in self.apps]
+        previous = os.umask(0o077)
+        try:
+            ready = self.prepare()  # Real filesystem copy and receipt publication.
+            self.assertEqual(self.consume(ready), ready['receipt'])
+            self.assertEqual(before, [capture.artifact_tree(app) for app in self.apps])
+            for original, row in zip(before, ready['receipt']['apps']):
+                self.assertEqual(capture.content_inventory(original), capture.content_inventory(row['moved']['tree']))
+                self.assertEqual(original['root']['mode'], row['moved']['tree']['root']['mode'])
+            root = Path(ready['receipt']['root']['path'])
+            for path in (self.destination, root, *root.iterdir()):
+                self.assertEqual(path.stat().st_mode & 0o777, 0o700)
+            for path in self.metadata.iterdir():
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            with self.assertRaises(OSError):
+                self.consume(ready)
+        finally:
+            os.umask(previous)
+
+    def test_copy_mode_restore_failure_preserves_primary_and_quarantines(self):
+        before = [capture.artifact_tree(app) for app in self.apps]
+        primary = OSError('copied artifact mode restoration failed')
+        with patch.object(capture.os, 'fchmod', side_effect=primary):
+            with self.assertRaises(OSError) as caught:
+                self.prepare()
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(before, [capture.artifact_tree(app) for app in self.apps])
+        self.assertEqual(primary.instance_preparation_status['registration'], 'registered')
+        self.assertTrue(primary.instance_preparation_status['retention_required'])
+        self.assertFalse((self.metadata / 'prepared-fixture.json').exists())
+        self.assertTrue((self.metadata / 'preparation-failure.json').exists())
+        with self.assertRaises(ValueError):
+            self.run.require_inline()
+
     def test_concurrent_preparations_and_consumers_have_one_winner(self):
         def attempt(function):
             try:

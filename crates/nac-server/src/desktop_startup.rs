@@ -65,22 +65,37 @@ pub fn configuration_json(root: &Path, store_path: Option<PathBuf>) -> anyhow::R
 
 fn select(root: &Path, store_path: Option<PathBuf>) -> Selection {
     if std::env::var_os("NAC_MANAGED_CONFIG").is_some() {
-        return failed("managed_configuration", "The local Mac app cannot launch a managed host. Remove NAC_MANAGED_CONFIG from this app's launch environment and relaunch; use the managed-host entry point for managed deployments.");
+        return failed(
+            "managed_configuration",
+            "The local Mac app cannot launch a managed host. Remove NAC_MANAGED_CONFIG from this app's launch environment and relaunch; use the managed-host entry point for managed deployments.",
+        );
     }
     let Ok(root_cwd) = root.canonicalize() else {
-        return failed("bootstrap_directory", "The bootstrap directory is unavailable. Choose an existing readable directory with --directory, then relaunch NAC.");
+        return failed(
+            "bootstrap_directory",
+            "The bootstrap directory is unavailable. Choose an existing readable directory with --directory, then relaunch NAC.",
+        );
     };
     if !root_cwd.is_dir() {
-        return failed("bootstrap_directory", "The bootstrap path is not a directory. Choose an existing directory with --directory, then relaunch NAC.");
+        return failed(
+            "bootstrap_directory",
+            "The bootstrap path is not a directory. Choose an existing directory with --directory, then relaunch NAC.",
+        );
     }
     // Both the preflight and serving child must use this same process cwd:
     // legacy relative store detection and credential owners also consult cwd.
     if std::env::current_dir().ok().as_ref() != Some(&root_cwd) {
-        return failed("bootstrap_directory", "The engine bootstrap directory does not match its configuration directory. Relaunch NAC with a consistent --directory.");
+        return failed(
+            "bootstrap_directory",
+            "The engine bootstrap directory does not match its configuration directory. Relaunch NAC with a consistent --directory.",
+        );
     }
     let Ok(config) = NacConfig::load_without_model_from_cwd(&root_cwd) else {
         // TOML errors may quote credentials or command environment values.
-        return failed("invalid_configuration", "NAC could not read its selected config.toml. Check NAC_HOME, XDG_CONFIG_HOME or HOME, repair the configuration (including any pending MCP publication), and relaunch. The selected store has not been opened.");
+        return failed(
+            "invalid_configuration",
+            "NAC could not read its selected config.toml. Check NAC_HOME, XDG_CONFIG_HOME or HOME, repair the configuration (including any pending MCP publication), and relaunch. The selected store has not been opened.",
+        );
     };
     let store = resolve_store_path_for_track(
         &root_cwd,
@@ -89,7 +104,10 @@ fn select(root: &Path, store_path: Option<PathBuf>) -> Selection {
         crate::build_identity::store_track(),
     );
     let Ok(store) = nac_core::sessions::StoreProcessLease::prepare_path(&store) else {
-        return failed("store_directory", "NAC could not prepare the selected store directory. Check the configured storage.store_path or --store-path and directory access, then relaunch. The database was not opened and no alternative store was selected.");
+        return failed(
+            "store_directory",
+            "NAC could not prepare the selected store directory. Check the configured storage.store_path or --store-path and directory access, then relaunch. The database was not opened and no alternative store was selected.",
+        );
     };
     Selection::Selected {
         version: 1,
