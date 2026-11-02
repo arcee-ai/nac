@@ -61,9 +61,72 @@ impl std::str::FromStr for InboxStatus {
     }
 }
 
+/// The owned relationship whose settled background generation admitted an
+/// inbox row. Only the settlement/restore transactions record it, from the
+/// relationship row they hold; prompt text and public routes never set it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InternalCompletionSource {
+    TraditionalChild,
+    ManagedOrchestrator,
+}
+
+impl InternalCompletionSource {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TraditionalChild => "traditional_child",
+            Self::ManagedOrchestrator => "managed_orchestrator",
+        }
+    }
+}
+
+impl std::str::FromStr for InternalCompletionSource {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "traditional_child" => Ok(Self::TraditionalChild),
+            "managed_orchestrator" => Ok(Self::ManagedOrchestrator),
+            _ => Err(anyhow!("unsupported stored completion source '{value}'")),
+        }
+    }
+}
+
+/// Durable provenance of an internal completion: the relationship session and
+/// the exact settled generation, which together key its terminal receipt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InternalCompletionOrigin {
+    pub source: InternalCompletionSource,
+    pub relationship_session_id: String,
+    pub generation: u64,
+}
+
+/// A public inbox mutation addressed an internal completion. People may see
+/// that a delegated result is pending, but only delivery consumes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InternalInboxItemError {
+    pub item_id: i64,
+}
+
+impl std::fmt::Display for InternalInboxItemError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "inbox item {} is a delegated result and cannot be changed or cancelled",
+            self.item_id
+        )
+    }
+}
+
+impl std::error::Error for InternalInboxItemError {}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionInboxRecord {
+    /// Set only for an owned child/managed-orchestrator completion. Keep the
+    /// established serialized durable record shape unchanged.
+    #[serde(skip)]
+    #[cfg_attr(feature = "openapi", schema(ignore))]
+    pub internal_completion: Option<InternalCompletionOrigin>,
     #[serde(skip)]
     #[cfg_attr(feature = "openapi", schema(ignore))]
     pub child_wait_id: Option<String>,
@@ -93,7 +156,8 @@ pub struct SessionInboxRecord {
 
 pub(crate) const INBOX_RECORD_COLUMNS: &str =
     "id, session_id, delivery, status, content, target_run_id, client_id, \
-     delivered_run_id, created_at, updated_at, delivered_at, cancelled_at, version, admission_id, admission_digest, child_execution_mode, child_wait_id";
+     delivered_run_id, created_at, updated_at, delivered_at, cancelled_at, version, admission_id, admission_digest, child_execution_mode, child_wait_id, \
+     completion_source, completion_session_id, completion_generation";
 
 pub(crate) fn row_to_inbox_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionInboxRecord> {
     let delivery: String = row.get(2)?;
@@ -111,7 +175,23 @@ pub(crate) fn row_to_inbox_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<S
     .map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, error.into())
     })?;
+    let completion_source: Option<String> = row.get(17)?;
+    let internal_completion = match completion_source {
+        None => None,
+        Some(source) => Some(InternalCompletionOrigin {
+            source: source.parse().map_err(|error: anyhow::Error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    17,
+                    rusqlite::types::Type::Text,
+                    error.into(),
+                )
+            })?,
+            relationship_session_id: row.get(18)?,
+            generation: row.get(19)?,
+        }),
+    };
     Ok(SessionInboxRecord {
+        internal_completion,
         child_wait_id: row.get(16)?,
         child_execution_mode: row
             .get::<_, Option<String>>(15)?
@@ -304,6 +384,56 @@ fn create_inbox_item(
     load_session_inbox_item_with_connection(&connection, session_id, connection.last_insert_rowid())
 }
 
+/// Admit one settled background completion for its parent inside the
+/// settlement or restore transaction that holds the relationship row.
+/// Provenance comes from that relationship and generation, never `content`.
+///
+/// A parent with a durable active run receives the completion as a steer
+/// pinned to that run, offered at its next model boundary without
+/// interrupting it. A steer that misses its run is promoted to a successor
+/// like any late direct steer. An idle parent gets one queued successor.
+pub(crate) fn insert_internal_completion(
+    connection: &Connection,
+    parent_session_id: &str,
+    origin: &InternalCompletionOrigin,
+    content: &str,
+) -> Result<i64> {
+    if origin.generation == 0 || origin.relationship_session_id == parent_session_id {
+        return Err(anyhow!("internal completion provenance is invalid"));
+    }
+    let active_run: Option<String> = connection
+        .query_row(
+            "SELECT run_id FROM session_run_recovery
+             WHERE session_id = ?1 AND status = 'active'",
+            params![parent_session_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let delivery = if active_run.is_some() {
+        InboxDelivery::Steer
+    } else {
+        InboxDelivery::Queue
+    };
+    let now = now_utc();
+    connection.execute(
+        "INSERT INTO session_inbox
+         (session_id, delivery, status, content, target_run_id, created_at, updated_at,
+          completion_source, completion_session_id, completion_generation)
+         VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?5, ?6, ?7, ?8)",
+        params![
+            parent_session_id,
+            delivery.as_str(),
+            content,
+            active_run,
+            now,
+            origin.source.as_str(),
+            origin.relationship_session_id,
+            origin.generation,
+        ],
+    )?;
+    Ok(connection.last_insert_rowid())
+}
+
 coordinated_command! {
 pub fn load_session_inbox_item(
     path: &Path,
@@ -405,7 +535,7 @@ pub fn update_pending_session_inbox_item(
          SET delivery = ?1, target_run_id = ?2, updated_at = ?3,
              version = version + 1
          WHERE session_id = ?4 AND id = ?5 AND status = 'pending'
-           AND version = ?6",
+           AND version = ?6 AND completion_source IS NULL",
         params![
             delivery.as_str(),
             target_run_id,
@@ -454,7 +584,7 @@ pub fn cancel_pending_session_inbox_item(
          SET status = 'cancelled', cancelled_at = ?1, updated_at = ?1,
              target_run_id = NULL, version = version + 1
          WHERE session_id = ?2 AND id = ?3 AND status = 'pending'
-           AND version = ?4",
+           AND version = ?4 AND completion_source IS NULL",
         params![now, session_id, item_id, expected_version],
     )?;
     if changed != 1 {
@@ -485,6 +615,8 @@ fn pending_update_error(
 ) -> anyhow::Error {
     match load_session_inbox_item_with_connection(connection, session_id, item_id) {
         Err(error) => error,
+        // Visible to the owning session's list, so this reveals nothing new.
+        Ok(item) if item.internal_completion.is_some() => InternalInboxItemError { item_id }.into(),
         Ok(item) if item.status != InboxStatus::Pending => {
             anyhow!("inbox item {item_id} is no longer pending")
         }
@@ -494,6 +626,10 @@ fn pending_update_error(
         ),
     }
 }
+
+#[cfg(test)]
+#[path = "session_inbox_completion_tests.rs"]
+mod completion_tests;
 
 #[cfg(test)]
 mod tests {

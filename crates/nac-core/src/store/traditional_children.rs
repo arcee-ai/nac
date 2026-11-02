@@ -561,15 +561,7 @@ pub fn restore_traditional_child_completion(
         && current.execution_mode == Some(TraditionalChildExecutionMode::Background)
         && completion_inbox_id.is_none()
     {
-        let content = completion_prompt(&current)?;
-        let now = now_utc();
-        transaction.execute(
-            "INSERT INTO session_inbox
-             (session_id, delivery, status, content, created_at, updated_at)
-             VALUES (?1, 'queue', 'pending', ?2, ?3, ?3)",
-            params![current.parent_session_id, content, now],
-        )?;
-        completion_inbox_id = Some(transaction.last_insert_rowid());
+        completion_inbox_id = Some(insert_completion(&transaction, &current)?);
     }
     let changed = transaction.execute(
         "UPDATE traditional_children
@@ -663,14 +655,7 @@ pub fn settle_traditional_child_run(
     if settled.execution_mode == Some(TraditionalChildExecutionMode::Background)
         && !completion_suppressed
     {
-        let content = completion_prompt(&settled)?;
-        transaction.execute(
-            "INSERT INTO session_inbox
-             (session_id, delivery, status, content, created_at, updated_at)
-             VALUES (?1, 'queue', 'pending', ?2, ?3, ?3)",
-            params![settled.parent_session_id, content, now],
-        )?;
-        let inbox_id = transaction.last_insert_rowid();
+        let inbox_id = insert_completion(&transaction, &settled)?;
         transaction.execute(
             "UPDATE traditional_children
              SET completion_inbox_id = ?2
@@ -705,6 +690,19 @@ fn truncate_optional(value: Option<String>) -> Option<String> {
         }
         Some(value.chars().take(MAX_OUTCOME_CHARS).collect())
     })
+}
+
+fn insert_completion(connection: &Connection, child: &TraditionalChildRecord) -> Result<i64> {
+    super::session_inbox::insert_internal_completion(
+        connection,
+        &child.parent_session_id,
+        &InternalCompletionOrigin {
+            source: InternalCompletionSource::TraditionalChild,
+            relationship_session_id: child.child_session_id.clone(),
+            generation: child.generation,
+        },
+        &completion_prompt(child)?,
+    )
 }
 
 fn completion_prompt(child: &TraditionalChildRecord) -> Result<String> {

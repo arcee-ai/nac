@@ -519,10 +519,37 @@ pub struct PermissionStateResponse {
     pub authorizable_review_ids: Vec<String>,
 }
 
+/// Who admitted an inbox item. `input` is anything a person, MCP client or
+/// NAC automation submitted; the other values are owned delegated results,
+/// recorded durably when their generation settled. Only `input` items accept
+/// the public update and cancel operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InboxItemOrigin {
+    Input,
+    TraditionalChild,
+    ManagedOrchestrator,
+}
+
+impl From<Option<&nac_core::store::InternalCompletionOrigin>> for InboxItemOrigin {
+    fn from(origin: Option<&nac_core::store::InternalCompletionOrigin>) -> Self {
+        match origin.map(|origin| origin.source) {
+            None => Self::Input,
+            Some(nac_core::store::InternalCompletionSource::TraditionalChild) => {
+                Self::TraditionalChild
+            }
+            Some(nac_core::store::InternalCompletionSource::ManagedOrchestrator) => {
+                Self::ManagedOrchestrator
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct InboxItemResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_selection: Option<nac_core::store::TerminalSelectionEvidence>,
+    pub origin: InboxItemOrigin,
     pub id: i64,
     pub session_id: String,
     pub delivery: InboxDelivery,
@@ -541,6 +568,7 @@ pub struct InboxItemResponse {
 impl From<SessionInboxRecord> for InboxItemResponse {
     fn from(record: SessionInboxRecord) -> Self {
         Self {
+            origin: record.internal_completion.as_ref().into(),
             terminal_selection: record.terminal_selection,
             id: record.id,
             session_id: record.session_id,

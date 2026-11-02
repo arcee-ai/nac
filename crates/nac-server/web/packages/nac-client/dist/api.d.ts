@@ -820,6 +820,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         delivered_run_id?: string | null;
         delivery: import("./openapi.generated.js").components["schemas"]["InboxDelivery"];
         id: number;
+        origin: import("./openapi.generated.js").components["schemas"]["InboxItemOrigin"];
         prompt: string;
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
@@ -836,6 +837,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         delivered_run_id?: string | null;
         delivery: import("./openapi.generated.js").components["schemas"]["InboxDelivery"];
         id: number;
+        origin: import("./openapi.generated.js").components["schemas"]["InboxItemOrigin"];
         prompt: string;
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
@@ -852,6 +854,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         delivered_run_id?: string | null;
         delivery: import("./openapi.generated.js").components["schemas"]["InboxDelivery"];
         id: number;
+        origin: import("./openapi.generated.js").components["schemas"]["InboxItemOrigin"];
         prompt: string;
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
@@ -868,6 +871,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         delivered_run_id?: string | null;
         delivery: import("./openapi.generated.js").components["schemas"]["InboxDelivery"];
         id: number;
+        origin: import("./openapi.generated.js").components["schemas"]["InboxItemOrigin"];
         prompt: string;
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];

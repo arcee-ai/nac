@@ -305,7 +305,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     clearGoal.isPending;
   const busy = mutationPending || stopping || (running && !runningInteractive);
   const canSend = Boolean(value.trim()) && !busy;
-  const pendingInbox = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
+  const pendingItems = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
+  // Only submitted input is editable here. Delegated results are consumed by
+  // delivery and the server refuses to change them, so only a count is shown.
+  const pendingInbox = pendingItems.filter((item) => item.origin === "input");
+  const pendingDelegatedResults = pendingItems.length - pendingInbox.length;
   const changeInboxDelivery = async (
     itemId: number,
     expectedVersion: number,
@@ -1199,6 +1203,17 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                 </Button>
               </div>
             ))}
+          </div>
+        ) : null}
+        {pendingDelegatedResults ? (
+          <div
+            role="status"
+            aria-label="Pending subagent results"
+            className="relative px-2 text-small text-basic-secondary"
+          >
+            {pendingDelegatedResults === 1
+              ? "1 subagent result pending"
+              : `${pendingDelegatedResults} subagent results pending`}
           </div>
         ) : null}
 

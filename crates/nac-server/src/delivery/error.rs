@@ -322,6 +322,11 @@ impl From<anyhow::Error> for ApiError {
                 } => StatusCode::CONFLICT,
                 SessionSubmitError::Coordination { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             }
+        } else if error
+            .downcast_ref::<nac_core::store::InternalInboxItemError>()
+            .is_some()
+        {
+            StatusCode::CONFLICT
         } else if let Some(error) = error.downcast_ref::<sessions::SessionOperationLeaseError>() {
             match error {
                 sessions::SessionOperationLeaseError::Busy(_) => StatusCode::CONFLICT,

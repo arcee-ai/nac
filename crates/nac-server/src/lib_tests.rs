@@ -1028,6 +1028,8 @@ mod configuration;
 mod contract;
 #[path = "tests/direct_qa.rs"]
 mod direct_qa;
+#[path = "tests/internal_completions.rs"]
+mod internal_completions;
 #[path = "tests/lifecycle.rs"]
 mod lifecycle;
 #[path = "tests/managed_delivery.rs"]

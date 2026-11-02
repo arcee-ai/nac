@@ -4,6 +4,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 mod delegation_receipts;
+mod internal_completions;
 
 #[cfg(test)]
 #[path = "schema/child_input_migration_tests.rs"]
@@ -56,6 +57,7 @@ mod permission_reviewer_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 41 records internal completion provenance on parent inbox rows.
 // 40 composes automatic permission review with the retained-task/child-input schema.
 // 39 adds retained task launch receipts and saved Git source bindings.
 // 38 retains bounded run and replaced/cleared goal outcomes for task reads.
@@ -91,7 +93,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 40;
+const STORE_SCHEMA_VERSION: i64 = 41;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -109,6 +111,11 @@ const RUN_COUNT_BACKFILL_VERSION: i64 = 5;
 /// Later versions add columns without touching them, so a store at or past this
 /// one does not need its whole message history walked again.
 const SESSION_SUMMARY_BACKFILL_VERSION: i64 = 8;
+
+/// Schema version that records internal completion provenance. Older stores
+/// classify still-pending legacy completions once, from durable evidence only.
+const INTERNAL_COMPLETION_ORIGIN_VERSION: i64 = 41;
+
 /// Hard SQLite checkout limits for one NAC process.
 ///
 /// Connections are operation-scoped, but concurrent opens still need a
@@ -785,7 +792,7 @@ fn open_connection_with_hooks(
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
         | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-        | 38 | 39 | STORE_SCHEMA_VERSION => {}
+        | 38 | 39 | 40 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -950,6 +957,7 @@ fn open_connection_with_hooks(
     // input from agents, MCP clients and NAC itself.
     ensure_column(&transaction, "session_inbox", "review_intent", "TEXT")?;
     ensure_column(&transaction, "thread_steering", "review_intent", "TEXT")?;
+    internal_completions::ensure_columns(&transaction)?;
     create_permission_grants_table(&transaction)?;
     create_session_goals_table(&transaction)?;
     ensure_column(
@@ -968,6 +976,9 @@ fn open_connection_with_hooks(
     create_traditional_children_table(&transaction)?;
     create_managed_orchestrators_table(&transaction)?;
     delegation_receipts::create_and_seed(&transaction)?;
+    if schema_version < INTERNAL_COMPLETION_ORIGIN_VERSION {
+        internal_completions::classify_pending_legacy_completions(&transaction)?;
+    }
     // Execution mode records how a generation was admitted and must remain
     // immutable. Deletion suppresses completion delivery independently.
     ensure_column(
